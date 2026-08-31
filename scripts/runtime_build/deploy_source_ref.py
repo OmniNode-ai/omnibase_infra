@@ -27,6 +27,15 @@ This module fixes both halves at the root:
     failure where a behind/dirty clone leaked a stale SHA -- FAILS the build
     (non-zero exit), never a silent pass.
 
+  * ``reconcile`` (OMN-17291) -- the standing reconciler for the deploy-source
+    clones themselves (``/data/omninode/omni_home`` on ``.201``), which no
+    reconciler covered: fetch, fast-forward the tracked branch, refuse loudly
+    (naming the repo) on a dirty or non-fast-forwardable clone, and VERIFY HEAD
+    actually landed on the fetched tip. Emits a receipt naming each repo and its
+    old -> new SHA. Unlike ``checkout`` it never runs ``reset --hard`` /
+    ``clean -ffdx``: this runs against long-lived host clones, so it refuses
+    rather than destroys.
+
 ``--hotpatch`` deploys a deliberately-dirty tree: the checkout does NOT reset/clean
 (that would destroy the patch); the manifest records the base SHA plus a
 ``hotpatch: true`` / ``dirty: true`` label. A hot-patch is labelled, never
@@ -39,6 +48,8 @@ Exit codes:
      checkout left the tree dirty -- an unverifiable build)
   4  manifest assertion failed (vendored SHA != intended ref, or an unlabelled
      dirty tree)
+  5  sync did not converge -- a fetch succeeded but HEAD is not at the fetched
+     tip afterwards (OMN-17291: a clean fetch is NOT evidence of sync)
 
 This script is stdlib-only so it can run standalone on the ``.201`` host and
 inside the build context without the project venv.
@@ -57,6 +68,18 @@ from pathlib import Path
 USAGE_ERROR = 2
 CHECKOUT_FAILED = 3
 ASSERT_FAILED = 4
+SYNC_NOT_CONVERGED = 5
+
+# Paths the BUILD ITSELF writes into its own build context on every run, and
+# which the reconciler therefore must not read as operator work (OMN-17291).
+# Measured on .201 2026-08-31: `git status --porcelain` on the omnibase_infra
+# deploy clone reported ` M workspace/sibling-pin-comparison.json`,
+# ` M workspace/sibling-vcs-provenance.json`, `?? workspace/deploy-source-refs.json`
+# -- outputs of check_sibling_lock_pins.py / stage_workspace.sh / this very
+# script, two of which are TRACKED committed placeholders the build overwrites
+# by design. A reconciler that refuses on those refuses forever on the one clone
+# it most needs to cover. Everything OUTSIDE this prefix still blocks.
+BUILD_SCRATCH_PREFIXES: tuple[str, ...] = ("workspace/",)
 
 
 class DeploySourceRefError(RuntimeError):
@@ -79,6 +102,25 @@ class RepoRefResult:
     head_sha: str  # actual HEAD after the operation
     dirty: bool  # working tree dirty after the operation
     hotpatch: bool  # deliberately-dirty deploy, labelled not laundered
+    before_sha: str = ""  # HEAD before the operation (OMN-17291: old -> new receipt)
+
+
+@dataclass(frozen=True)
+class RepoSyncResult:
+    """Per-clone result of a fast-forward reconcile (one row of the receipt).
+
+    ``before_sha`` -> ``after_sha`` is the durable old -> new evidence AC1 asks
+    for; ``target_sha`` is the fetched tip both are checked against, so a receipt
+    can never claim a sync that did not land.
+    """
+
+    repo: str
+    path: str
+    branch: str
+    before_sha: str
+    after_sha: str
+    target_sha: str
+    moved: bool
 
 
 def _git(repo_path: Path, *args: str) -> str:
@@ -109,13 +151,72 @@ def _git(repo_path: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _git_raw(repo_path: Path, *args: str) -> str:
+    """Like :func:`_git` but returns stdout UNSTRIPPED.
+
+    ``git status --porcelain`` encodes state in the first two columns, so an
+    unstaged modification arrives as ``" M path"``. :func:`_git` strips stdout,
+    which eats that leading space on the first line and shifts every subsequent
+    path parse by one character. Anything that reads porcelain columns must use
+    this variant.
+    """
+    result = subprocess.run(
+        ["git", "-c", f"safe.directory={repo_path}", "-C", str(repo_path), *args],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        check=False,
+    )
+    if result.returncode != 0:
+        raise DeploySourceRefError(
+            f"git {' '.join(args)} failed in {repo_path} (rc={result.returncode}): "
+            f"{result.stderr.strip()}",
+            CHECKOUT_FAILED,
+        )
+    return result.stdout
+
+
 def _assert_git_repo(repo_path: Path) -> None:
+    """Assert ``repo_path`` is a git clone this tool can actually CHECK OUT into.
+
+    OMN-17291: ``git rev-parse --is-inside-work-tree`` exits 0 and prints
+    ``false`` on a ``core.bare=true`` clone -- so a check that only reads the
+    exit status waves through exactly the corruption found on ``.201``: a clone
+    with a full working tree on disk whose ``core.bare`` is ``true``. In that
+    shape ``git fetch`` exits 0 forever while every ``checkout``/``status``
+    exits 128, so a sync loop reading the fetch status reports success while
+    HEAD never moves. Diagnose it here, by name, with the one-command repair --
+    never leave it as git's generic "must be run in a work tree" fatal three
+    calls later.
+    """
     if not repo_path.exists():
         raise DeploySourceRefError(
             f"{repo_path}: sibling clone path does not exist", CHECKOUT_FAILED
         )
-    # rev-parse raises (CHECKOUT_FAILED) if this is not a work tree.
-    _git(repo_path, "rev-parse", "--is-inside-work-tree")
+    # rev-parse raises (CHECKOUT_FAILED) if this is not a git repository at all.
+    inside_work_tree = _git(repo_path, "rev-parse", "--is-inside-work-tree")
+    if inside_work_tree == "true":
+        return
+
+    # Not a work tree. A GENUINE bare repo has no nested `.git`; it IS the git
+    # directory. A `.git` entry beside the tracked files means this is a normal
+    # clone whose core.bare flag is wrong -- repairable, and never a reason to
+    # report a no-op sync as success.
+    if (repo_path / ".git").exists():
+        raise DeploySourceRefError(
+            f"{repo_path.name}: clone at {repo_path} has core.bare=true but a "
+            f"working tree on disk -- git fetch will keep exiting 0 while every "
+            f"checkout fails, so this clone can NEVER advance and any sync that "
+            f"reports success is lying. Repair with: "
+            f"git -C {repo_path} config core.bare false && "
+            f"git -C {repo_path} reset --hard HEAD",
+            CHECKOUT_FAILED,
+        )
+    raise DeploySourceRefError(
+        f"{repo_path.name}: {repo_path} is a bare repository (no working tree); "
+        f"a deploy-source clone must be a normal checkout",
+        CHECKOUT_FAILED,
+    )
 
 
 def _resolve_commit(repo_path: Path, ref: str) -> str:
@@ -147,6 +248,53 @@ def _resolve_commit(repo_path: Path, ref: str) -> str:
     return sha
 
 
+def _head_or_empty(repo_path: Path) -> str:
+    """HEAD's SHA, or ``""`` when HEAD is unborn (a clone with no commits yet).
+
+    Used only to record the *before* side of the old -> new receipt, so an
+    unborn HEAD must not abort an otherwise valid reconcile.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_path}",
+            "-C",
+            str(repo_path),
+            "rev-parse",
+            "HEAD",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _is_ancestor(repo_path: Path, ancestor: str, descendant: str) -> bool:
+    """True when ``ancestor`` is reachable from ``descendant`` (i.e. moving from
+    ``ancestor`` to ``descendant`` is a fast-forward)."""
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_path}",
+            "-C",
+            str(repo_path),
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def clean_checkout(
     repo_path: Path,
     ref: str | None,
@@ -168,6 +316,7 @@ def clean_checkout(
     """
     repo_path = Path(repo_path)
     _assert_git_repo(repo_path)
+    before_sha = _head_or_empty(repo_path)
 
     if hotpatch:
         head = _git(repo_path, "rev-parse", "HEAD")
@@ -182,6 +331,7 @@ def clean_checkout(
             head_sha=head,
             dirty=dirty,
             hotpatch=True,
+            before_sha=before_sha,
         )
 
     if not ref:
@@ -223,6 +373,162 @@ def clean_checkout(
         head_sha=head,
         dirty=False,
         hotpatch=False,
+        before_sha=before_sha,
+    )
+
+
+def _partition_dirt(status_porcelain: str) -> tuple[list[str], list[str]]:
+    """Split ``git status --porcelain`` output into (blocking, tolerated).
+
+    Tolerated, because neither can destroy operator work:
+
+      * UNTRACKED entries (``??``) anywhere -- a long-lived host clone always
+        carries some (``.venv``, stray ``origin/`` dirs, build leftovers), and
+        the checkout leaves them untouched.
+      * anything under :data:`BUILD_SCRATCH_PREFIXES` -- the build's own outputs
+        in its own build context. A TRACKED one here IS reset to the branch's
+        content by the checkout; that is correct, because the next build
+        regenerates it. Nothing an operator authored lives there.
+
+    Everything else -- a tracked modification, a staged change, a deletion --
+    BLOCKS. Those are exactly what a fast-forward checkout would clobber.
+    """
+    blocking: list[str] = []
+    tolerated: list[str] = []
+    for line in status_porcelain.splitlines():
+        if not line.strip():
+            continue
+        # Porcelain v1: two status columns, a space, then the path.
+        path = line[3:].strip().strip('"')
+        # Rename/copy entries read "old -> new"; judge the destination path.
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        untracked = line.startswith("??")
+        build_scratch = any(
+            path.startswith(prefix) for prefix in BUILD_SCRATCH_PREFIXES
+        )
+        (tolerated if untracked or build_scratch else blocking).append(line)
+    return blocking, tolerated
+
+
+def reconcile_clone(
+    repo_path: Path,
+    branch: str,
+    *,
+    fetch: bool = True,
+) -> RepoSyncResult:
+    """Fast-forward one long-lived deploy-source clone onto ``origin/<branch>``.
+
+    OMN-17291. This is the standing reconciler for the clones every lane image
+    is built from (``/data/omninode/omni_home`` on ``.201``), which nothing
+    covered. It differs from :func:`clean_checkout` on purpose:
+
+      * it REFUSES on a dirty or non-fast-forwardable clone instead of
+        ``reset --hard`` + ``clean -ffdx``. These are host clones an operator may
+        be mid-edit in; destroying that work to make a sync "succeed" is the
+        wrong trade for a loop that runs unattended.
+      * it VERIFIES HEAD landed on the fetched tip afterwards. A clean ``fetch``
+        is not evidence of sync -- on the ``core.bare=true`` clone found on
+        ``.201`` the fetch exited 0 forever while HEAD never moved. That
+        post-condition, not the fetch's exit status, is what proves progress.
+
+    A detached clone (the state omnimarket and omnibase_core were actually in)
+    is recovered onto ``branch``, not merely left behind on a detached tip.
+    """
+    repo_path = Path(repo_path)
+    _assert_git_repo(repo_path)
+
+    blocking, tolerated = _partition_dirt(_git_raw(repo_path, "status", "--porcelain"))
+    if blocking:
+        raise DeploySourceRefError(
+            f"{repo_path.name}: clone at {repo_path} carries uncommitted tracked "
+            f"changes -- refusing to reconcile it (a fast-forward checkout would "
+            f"discard them). Commit, stash, or discard the DIRTY paths below, "
+            f"then re-run:\n" + "\n".join(blocking),
+            CHECKOUT_FAILED,
+        )
+    if tolerated:
+        print(
+            f"reconcile: {repo_path.name}: tolerating {len(tolerated)} untracked / "
+            f"build-scratch path(s) -- untracked files are left untouched; tracked "
+            f"build outputs under {', '.join(BUILD_SCRATCH_PREFIXES)} are reset to "
+            f"branch content and regenerated by the next build",
+            file=sys.stderr,
+        )
+
+    if fetch and "origin" in _git(repo_path, "remote").split():
+        _git(repo_path, "fetch", "--prune", "--tags", "origin", branch)
+
+    target_sha = _resolve_commit(repo_path, f"origin/{branch}")
+    before_sha = _head_or_empty(repo_path)
+
+    if (
+        before_sha
+        and before_sha != target_sha
+        and not _is_ancestor(repo_path, before_sha, target_sha)
+    ):
+        raise DeploySourceRefError(
+            f"{repo_path.name}: HEAD {before_sha[:12]} is not an ancestor of "
+            f"origin/{branch} ({target_sha[:12]}) -- the clone carries local or "
+            f"diverged commits and cannot be fast-forward reconciled. Resolve it "
+            f"on the host (the reconciler will not discard commits).",
+            CHECKOUT_FAILED,
+        )
+
+    # Idempotent: also re-attaches a DETACHED clone that already sits at the tip.
+    _git(repo_path, "checkout", "--force", "-B", branch, target_sha)
+
+    after_sha = _git(repo_path, "rev-parse", "HEAD")
+    if after_sha != target_sha:
+        raise DeploySourceRefError(
+            f"{repo_path.name}: checkout reported success but HEAD is "
+            f"{after_sha[:12]}, not the fetched tip origin/{branch} "
+            f"({target_sha[:12]}) -- the clone did NOT advance. A clean fetch is "
+            f"not evidence of sync; refusing to report this repo as synced.",
+            SYNC_NOT_CONVERGED,
+        )
+    after_branch = _git(repo_path, "rev-parse", "--abbrev-ref", "HEAD")
+    if after_branch != branch:
+        raise DeploySourceRefError(
+            f"{repo_path.name}: expected to land on branch {branch!r} but HEAD "
+            f"reports {after_branch!r} -- refusing to report this repo as synced.",
+            SYNC_NOT_CONVERGED,
+        )
+
+    return RepoSyncResult(
+        repo=repo_path.name,
+        path=str(repo_path),
+        branch=branch,
+        before_sha=before_sha,
+        after_sha=after_sha,
+        target_sha=target_sha,
+        moved=bool(before_sha) and before_sha != after_sha,
+    )
+
+
+def write_sync_receipt(
+    results: list[RepoSyncResult],
+    problems: list[str],
+    branch: str,
+    output: Path,
+) -> None:
+    """Write the reconcile receipt: repo, old -> new SHA, and every refusal.
+
+    Written on the failure path too -- an operator needs to see which clones DID
+    advance and which refused. ``ok`` carries the verdict; the process exit code
+    carries it as well, so the receipt can never be read as a success claim on
+    its own.
+    """
+    manifest = {
+        "generated_by": "deploy_source_ref.py reconcile",
+        "branch": branch,
+        "ok": not problems,
+        "problems": problems,
+        "repos": {r.repo: asdict(r) for r in results},
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
 
@@ -370,6 +676,50 @@ def _cmd_checkout(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_reconcile(args: argparse.Namespace) -> int:
+    repos = _parse_name_value(args.repo, "--repo")
+
+    results: list[RepoSyncResult] = []
+    problems: list[str] = []
+    worst_code = 0
+    for name, path in repos.items():
+        try:
+            result = reconcile_clone(Path(path), args.branch, fetch=not args.no_fetch)
+        except DeploySourceRefError as exc:
+            # Every clone is attempted: one corrupt repo must not hide the state
+            # of the other five. All refusals are reported together at the end.
+            problems.append(f"{name}: {exc}")
+            worst_code = max(worst_code, exc.exit_code)
+            print(f"reconcile: {name} REFUSED -- {exc}", file=sys.stderr)
+            continue
+        movement = (
+            f"{result.before_sha[:12]} -> {result.after_sha[:12]}"
+            if result.moved
+            else f"already at {result.after_sha[:12]}"
+        )
+        print(f"reconcile: {name} @ origin/{args.branch} {movement}", file=sys.stderr)
+        results.append(result)
+
+    write_sync_receipt(results, problems, args.branch, Path(args.output))
+
+    if problems:
+        print(
+            f"ERROR: {len(problems)} of {len(repos)} deploy-source clone(s) did not "
+            f"reconcile to origin/{args.branch} (OMN-17291):",
+            file=sys.stderr,
+        )
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        return worst_code or CHECKOUT_FAILED
+
+    print(
+        f"reconcile: all {len(results)} deploy-source clone(s) at "
+        f"origin/{args.branch}; receipt written to {args.output}",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _cmd_assert(args: argparse.Namespace) -> int:
     assert_manifest_matches_refs(Path(args.vcs_provenance), Path(args.expected_refs))
     print("RT-1 assert: every sibling vendored at its intended ref.", file=sys.stderr)
@@ -425,6 +775,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to write the expected-refs manifest",
     )
     p_checkout.set_defaults(func=_cmd_checkout)
+
+    p_reconcile = sub.add_parser(
+        "reconcile",
+        help="fast-forward the deploy-source clones onto origin/<branch>, "
+        "verifying HEAD actually landed on the fetched tip (OMN-17291)",
+    )
+    p_reconcile.add_argument(
+        "--repo",
+        action="append",
+        required=True,
+        metavar="NAME=PATH",
+        help="a deploy-source clone to reconcile (repeatable)",
+    )
+    p_reconcile.add_argument(
+        "--branch",
+        default="dev",
+        help="tracked branch to reconcile onto (default: dev)",
+    )
+    p_reconcile.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="skip git fetch (offline / already-fetched clones)",
+    )
+    p_reconcile.add_argument(
+        "--output",
+        required=True,
+        help="path to write the reconcile receipt (repo, old -> new SHA)",
+    )
+    p_reconcile.set_defaults(func=_cmd_reconcile)
 
     p_assert = sub.add_parser(
         "assert",

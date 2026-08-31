@@ -37,7 +37,11 @@
 #   deploy_source_ref.py, and AFTER staging the vendored-SHA manifest is
 #   HARD-ASSERTED to equal that ref for every sibling. This kills the
 #   unreliable-narrator build (rsync of an ambient detached/behind/dirty tree).
-#   Unset DEPLOY_REF => the legacy ambient-tree build, loudly stamped unpinned.
+#   Unset DEPLOY_REF => REFUSED (OMN-17291). It used to print a warning and build
+#   the ambient tree anyway; a warning in a 4000-line deploy log is not a gate,
+#   and that path is one of the two routes that let a stale .201 clone bake a
+#   stale lane image with nothing failing. Set DEPLOY_REF, or opt in explicitly
+#   with ALLOW_UNPINNED_DEPLOY_SOURCE=1 (loud, named, never the default).
 #   DEPLOY_HOTPATCH=1 deploys the dirty tree deliberately (labelled, not laundered).
 #
 # Exit codes:
@@ -47,6 +51,7 @@
 #   3  sibling pin drift from the consuming lock (preflight abort)
 #   4  RT-1 clean-ref checkout failed, or the vendored-SHA manifest did not equal
 #      the intended ref for every sibling (deploy-source assertion abort)
+#   5  DEPLOY_REF unset and no explicit opt-in -- refusing an unasserted build
 set -euo pipefail
 
 # OMN-13405: omnibase_core is staged FIRST so the Dockerfile workspace branch can
@@ -83,8 +88,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 # DEPLOY_HOTPATCH=1 deploys the current (possibly dirty) tree deliberately: no
 # reset/clean (that would destroy the patch), labelled hotpatch in the manifest.
-# Unset DEPLOY_REF => legacy ambient-tree build, loudly stamped unpinned (the
-# vendored SHA is NOT asserted -- callers wanting a pinned build set DEPLOY_REF).
+#
+# OMN-17291: unset DEPLOY_REF is now a REFUSAL, not a warning. The warn-and-build
+# path was proven live on 2026-08-31 -- the dev lane baked an omnimarket 11
+# commits behind origin/dev from an ambient .201 clone, and nothing failed. A
+# build whose source ref is unasserted must not be able to produce a "deployed"
+# claim, so the ambient-tree build now requires ALLOW_UNPINNED_DEPLOY_SOURCE=1:
+# still reachable, never silent, and recorded in the log by name.
 # ---------------------------------------------------------------------------
 DEPLOY_SOURCE_REF_SCRIPT="${SCRIPT_DIR}/deploy_source_ref.py"
 EXPECTED_REFS_OUT="workspace/deploy-source-refs.json"
@@ -112,10 +122,20 @@ if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
         echo "ERROR: RT-1 clean-ref checkout failed; refusing to build from an unpinned tree (OMN-14438)" >&2
         exit 4
     fi
-else
-    echo "WARNING: DEPLOY_REF unset -- staging the AMBIENT host tree (unreliable narrator)." >&2
+elif [[ "${ALLOW_UNPINNED_DEPLOY_SOURCE:-0}" == "1" ]]; then
+    echo "WARNING: ALLOW_UNPINNED_DEPLOY_SOURCE=1 -- staging the AMBIENT host tree." >&2
     echo "         The vendored SHA is NOT asserted against any intended ref (OMN-14438)." >&2
-    echo "         Set DEPLOY_REF=<branch|tag|sha> (or use cut-lab-ref) for a pinned, asserted build." >&2
+    echo "         This build cannot support a verified 'deployed' claim (OMN-17291)." >&2
+else
+    echo "ERROR: DEPLOY_REF unset -- refusing to stage the AMBIENT host tree (OMN-17291)." >&2
+    echo "       The .201 deploy-source clones are routinely detached, behind, or dirty," >&2
+    echo "       so an unpinned build's vendored SHA is asserted against nothing and its" >&2
+    echo "       'deployed' claim is unfalsifiable. This exact path baked an omnimarket" >&2
+    echo "       11 commits behind origin/dev into the dev lane on 2026-08-31." >&2
+    echo "       Fix: set DEPLOY_REF=<branch|tag|sha> (e.g. DEPLOY_REF=origin/dev), or use" >&2
+    echo "            scripts/runtime_build/cut-lab-ref.sh, for a pinned, asserted build." >&2
+    echo "       Deliberate ambient build: re-run with ALLOW_UNPINNED_DEPLOY_SOURCE=1." >&2
+    exit 5
 fi
 
 # ---------------------------------------------------------------------------
