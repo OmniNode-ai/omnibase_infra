@@ -364,16 +364,65 @@ EOF
   return 0
 }
 
-# prepush_probe_ratio LABEL TARGET -- prints the load ratio or returns 1.
+# prepush_probe_ratio LABEL TARGET -- 0 on a successful read, 1 otherwise,
+# setting BOTH PREPUSH_PROBE_RATIO and PREPUSH_PROBE_MEM_MB (OMN-17392) from the
+# SAME reading. The memory dimension therefore costs zero extra ssh round trips
+# on the pre-push critical path: the probe already crosses the network once per
+# candidate and now returns both numbers from that one crossing.
+#
+# IT SETS GLOBALS INSTEAD OF PRINTING, and that is load-bearing rather than
+# stylistic. The caller used to capture this with `ratio="$(prepush_probe_ratio
+# ...)"`, and a command substitution runs in a SUBSHELL -- so a second value
+# assigned to a global in here would be discarded at the closing paren, silently,
+# with the picker then reading an empty memory value for every host and skipping
+# the entire lab as `mem-unknown`. Caught by
+# test_a_memory_starved_host_is_unfit_even_at_zero_load, which picked the
+# memory-starved host anyway on the first implementation.
 prepush_probe_ratio() {
-  local v
+  local v reading
+  PREPUSH_PROBE_RATIO=""
+  PREPUSH_PROBE_MEM_MB=""
   if [ -n "${PREPUSH_LOAD_OVERRIDE_MAP:-}" ]; then
     v="$(prepush_map_lookup "$PREPUSH_LOAD_OVERRIDE_MAP" "$1")"
     [ -n "$v" ] || return 1
-    printf '%s' "$v"
+    PREPUSH_PROBE_RATIO="$v"
+    PREPUSH_PROBE_MEM_MB="$(prepush_map_lookup "${PREPUSH_MEM_OVERRIDE_MAP:-}" "$1")"
     return 0
   fi
-  host_load_ratio "$2" | awk '{print $3}'
+  reading="$(host_load_ratio "$2")" || return 1
+  [ -n "$reading" ] || return 1
+  PREPUSH_PROBE_RATIO="$(printf '%s' "$reading" | awk '{print $3}')"
+  PREPUSH_PROBE_MEM_MB="$(printf '%s' "$reading" | awk '{print $4}')"
+  [ -n "$PREPUSH_PROBE_RATIO" ] || return 1
+  return 0
+}
+
+# prepush_probe_mem_ok LABEL -- 0 fit / 1 below the floor / 2 unreadable, using
+# the memory reading prepush_probe_ratio just took for LABEL.
+#
+# WHY THE PICKER NEEDS THIS AND load1 IS NOT ENOUGH (OMN-17392): measured live
+# one second apart on 2026-08-31, the `.201` HOST and the gate-runner CONTAINER
+# running on it both report load 3.27/32 = 0.10x -- the fittest ratio in the
+# lab -- while their available memory differs 19-fold (49771 MiB vs 2562 MiB,
+# the container sitting at 5.9 GiB of an 8 GiB cgroup cap). The CPU-only picker
+# ranked that saturated target FIRST, which is how an OMN-17316 landing lost
+# hours to OOM kills (OMN-17247). Load ranks; memory ADMITS.
+#
+# An unreadable reading is rc=2 and the caller SKIPS the host. That is the same
+# fail-closed rule `unreachable` and `slot-unknown` already carry, and it is
+# deliberately not "assume ample": assumed headroom is the failure class this
+# whole guard exists to prevent.
+prepush_probe_mem_ok() {
+  local m="${PREPUSH_PROBE_MEM_MB:-}"
+  # An override map that names no memory for this label leaves the dimension
+  # unexercised by that test; the historical fixtures predate this probe and
+  # drive fitness through load/slot/uv alone.
+  if [ -n "${PREPUSH_LOAD_OVERRIDE_MAP:-}" ] && [ -z "$m" ]; then
+    return 0
+  fi
+  case "$m" in '' | *[!0-9-]* | -1) return 2 ;; esac
+  [ "$m" -ge "${PREPUSH_MIN_FREE_MEM_MB:-4096}" ] 2> /dev/null || return 1
+  return 0
 }
 
 # prepush_probe_slot LABEL TARGET WORKROOT SELF [SLOT_INDEX] -- 0 free /
@@ -566,7 +615,8 @@ pick_capacity_host() {
           ;;
       esac
 
-      ratio="$(prepush_probe_ratio "$slot_label" "$ssh_t")" || ratio=""
+      ratio=""
+      prepush_probe_ratio "$slot_label" "$ssh_t" && ratio="$PREPUSH_PROBE_RATIO"
       if [ -z "$ratio" ]; then
         PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=unreachable "
         k=$((k + 1))
@@ -578,6 +628,24 @@ pick_capacity_host() {
         continue
       fi
 
+      # Memory admission (OMN-17392), read from the SAME probe as the ratio.
+      # Placed after load so the probe-log records the cheaper refusal first,
+      # and BEFORE uv so a saturated host is never charged a second round trip.
+      rc=0
+      prepush_probe_mem_ok "$slot_label" || rc=$?
+      case "$rc" in
+        1)
+          PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=mem-over(${PREPUSH_PROBE_MEM_MB}MiB<${PREPUSH_MIN_FREE_MEM_MB:-4096}) "
+          k=$((k + 1))
+          continue
+          ;;
+        2)
+          PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=mem-unknown "
+          k=$((k + 1))
+          continue
+          ;;
+      esac
+
       rc=0
       prepush_probe_uv "$slot_label" "$ssh_t" "$uv" "$floor" || rc=$?
       if [ "$rc" -ne 0 ]; then
@@ -586,7 +654,10 @@ pick_capacity_host() {
         continue
       fi
 
-      PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=fit(${ratio},${mode}) "
+      # The fit record carries the MEASUREMENT, not just the verdict, so the
+      # receipt and the refusal message both show what the placement was
+      # decided on (OMN-17271 item 4: evidence-carrying routing).
+      PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=fit(${ratio},${mode},${PREPUSH_PROBE_MEM_MB:-na}MiB) "
       recs="${recs}${ratio}|${slot_label}|${name}|${ssh_t}|${uv}|${workroot}|${slotmode}|${mode}|${k}
 "
       k=$((k + 1))
@@ -598,6 +669,44 @@ pick_capacity_host() {
   # available as fallbacks.
   PREPUSH_FIT_RECORDS="$(printf '%s' "$recs" | sed '/^[[:space:]]*$/d' | sort -t'|' -k1,1g)"
   prepush_select_candidate 1
+}
+
+# prepush_heavy_local_policy LC_HOST -- the `heavy_local` policy (column 13) of
+# the capacity row that IS this host: `prefer_remote`, `allowed`, or empty when
+# this host is not a capacity row at all.
+#
+# OMN-17392, operator directive 2026-08-31 ("we should move prepush off this
+# box if possible"). `prefer_remote` does NOT de-designate a host: the row stays
+# a full identity and a full placement target for OTHER hosts' escalations. It
+# changes exactly one thing -- when this row is the LOCAL host, a heavy
+# escalation must attempt lab placement BEFORE running here, instead of
+# short-circuiting to a local run the moment the local load probe reads under
+# threshold.
+#
+# Read from the COMMITTED table like every other column, so a working-tree edit
+# cannot flip a host's policy without review (the same forgeable-artifact
+# reasoning that put identity in the committed table in the first place).
+#
+# An unset/`-` value reads as `allowed`, which is the pre-OMN-17392 behavior --
+# a row that says nothing about this policy keeps the old one.
+prepush_heavy_local_policy() {
+  local lc_host row v
+  lc_host="$1"
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    [ "$(prepush_field "$row" 2)" = "capacity" ] || continue
+    if [ "$(prepush_row_hostname "$row")" = "$lc_host" ]; then
+      v="$(prepush_field "$row" 13)"
+      case "$v" in
+        prefer_remote) printf 'prefer_remote' ;;
+        *) printf 'allowed' ;;
+      esac
+      return 0
+    fi
+  done <<EOF
+$(prepush_table_rows)
+EOF
+  return 1
 }
 
 # prepush_local_workroot LC_HOST -- the workroot of the capacity row that IS

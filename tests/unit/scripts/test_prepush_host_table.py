@@ -64,10 +64,10 @@ def test_table_exists_and_every_row_has_the_full_column_set() -> None:
     rows = _rows()
     assert rows, "expected at least one data row"
     for row in rows:
-        assert len(row) == 13, (
-            f"row {row[0] if row else row!r} has {len(row)} columns, expected 13 "
+        assert len(row) == 14, (
+            f"row {row[0] if row else row!r} has {len(row)} columns, expected 14 "
             "(label role hostname ssh_target cores uv_abs_path uv_min_version "
-            "workroot slot_mode slots repos_denied mode note)"
+            "workroot slot_mode slots repos_denied mode heavy_local note)"
         )
 
 
@@ -86,6 +86,47 @@ def test_table_contents_are_pinned() -> None:
         "h101": ("capacity", "stickybeatz", "authorizing"),
         "h105": ("capacity", "omnibook", "authorizing"),
     }
+
+
+def test_the_shipped_heavy_local_policy_is_pinned() -> None:
+    """`h200` -- the box the operator directed pre-push OFF of on 2026-08-31 --
+    is the ONLY `prefer_remote` row, and it is still `authorizing`.
+
+    Both halves matter and they pull in opposite directions, which is why this
+    is pinned rather than left to the note column. Flipping a lab host to
+    `prefer_remote` would quietly shrink the pool that `prefer_remote` exists to
+    route work INTO, and every host preferring remote is a lab that routes to
+    nobody. Conversely, de-designating `h200` (mode != authorizing) would be a
+    much larger change wearing this ticket's clothes: it would stop `h200`
+    satisfying anyone's escalation, not just its own.
+    """
+    policy = {r[0]: r[12] for r in _rows()}
+    assert policy == {
+        "h200": "prefer_remote",
+        "h201": "allowed",
+        "h201c": "-",
+        "h101": "allowed",
+        "h105": "allowed",
+    }
+    modes = {r[0]: r[11] for r in _rows()}
+    assert modes["h200"] == "authorizing", (
+        "prefer_remote must not be a back-door de-designation: h200 still has to "
+        "be able to authorize an escalation for every OTHER host in the table"
+    )
+
+
+def test_exactly_one_row_prefers_remote_so_the_lab_still_has_targets() -> None:
+    """A structural invariant, not a restatement of the pin above: whatever the
+    table grows to, the set of rows that route work away from themselves must
+    stay a strict subset of the capacity rows, or an escalation has nowhere to
+    go and every push falls back to the box it was routed off."""
+    capacity = [r for r in _rows() if r[1] == "capacity"]
+    prefer_remote = [r for r in capacity if r[12] == "prefer_remote"]
+    assert prefer_remote, "expected at least one prefer_remote row (h200)"
+    assert len(prefer_remote) < len(capacity), (
+        "every capacity row is prefer_remote -- there is no host left to route "
+        "an escalation TO, so the bounded off-box wait can only ever time out"
+    )
 
 
 def test_201_host_is_designated_by_its_real_hostname() -> None:
@@ -218,6 +259,7 @@ host_load_ratio() {{ return 1; }}
             **os.environ,
             "PREPUSH_LOAD_OVERRIDE_MAP": "",
             "PREPUSH_SLOT_OVERRIDE_MAP": "",
+            "PREPUSH_MEM_OVERRIDE_MAP": "",
         },
     )
 
@@ -237,10 +279,10 @@ def _driver_both(repo_root: Path, body: str) -> str:
 #: idlest, so a load-only picker chooses it and then throws its verdict away.
 _SYNTHETIC_TABLE = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
-    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
-    "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\tauthorizing\tbusier\n"
-    "hb\tcapacity\thostb\tjonah@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t1\t-\tauthorizing\tidler\n"
-    "hs\tcapacity\thosts\tjonah@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t1\t-\tshadow\tidlest of all\n"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local\tnote\n"
+    "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\tauthorizing\tallowed\tbusier\n"
+    "hb\tcapacity\thostb\tjonah@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t1\t-\tauthorizing\tallowed\tidler\n"
+    "hs\tcapacity\thosts\tjonah@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t1\t-\tshadow\tallowed\tidlest of all\n"
 )
 
 #: A single disabled row, so the shipped table's promotion of h101 (its last
@@ -248,8 +290,8 @@ _SYNTHETIC_TABLE = (
 #: probed" rule without a fixture to exercise it.
 _SYNTHETIC_TABLE_DISABLED_ONLY = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
-    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
-    "hd\tcapacity\thostd\tjonah@hostd\t24\t/bin/uv\t0.1.0\t/tmp/wd\tlockdir\t1\t-\tdisabled\tstill unfit\n"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local\tnote\n"
+    "hd\tcapacity\thostd\tjonah@hostd\t24\t/bin/uv\t0.1.0\t/tmp/wd\tlockdir\t1\t-\tdisabled\tallowed\tstill unfit\n"
 )
 
 
@@ -352,7 +394,7 @@ def test_an_uncommitted_table_edit_cannot_designate_a_host(table_repo: Path) -> 
     tsv = table_repo / "scripts" / "hooks" / "prepush_hosts.tsv"
     tsv.write_text(
         tsv.read_text(encoding="utf-8")
-        + "hevil\tcapacity\tmy-laptop\t-\t8\t/bin/uv\t0.1.0\t/tmp/w\tlockdir\t1\t-\tauthorizing\tforged\n",
+        + "hevil\tcapacity\tmy-laptop\t-\t8\t/bin/uv\t0.1.0\t/tmp/w\tlockdir\t1\t-\tauthorizing\tallowed\tforged\n",
         encoding="utf-8",
     )
     out = _driver(table_repo, "prepush_identity_label my-laptop || echo NONE")
@@ -366,12 +408,54 @@ def test_an_uncommitted_table_edit_cannot_designate_a_host(table_repo: Path) -> 
 _ALL_FREE = "h200=free,h201=free,h101=free,h105=free"
 
 
+def _hook_func(name: str) -> str:
+    """The named function's REAL source, lifted out of the hook.
+
+    The driver deliberately stubs `host_load_ratio` (it must not ssh anywhere),
+    so a test that wants to exercise the shipped fitness logic has to
+    re-materialize it over that stub. Extracting it beats copying it: a copy
+    would keep passing after the hook's own version changed.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index(f"\n{name}() {{\n")
+    end = text.index("\n}\n", start)
+    return text[start + 1 : end + 3]
+
+
+def _with_real_load() -> str:
+    """Prelude that restores the hook's real load/fitness implementation (and
+    the memory floor it reads) on top of the driver's network-free stub.
+
+    Built lazily rather than at import: a module-level build turns any missing
+    piece into a collection ERROR that takes the whole file down with one
+    unreadable traceback, instead of failing the handful of tests that actually
+    depend on it.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    floor = re.search(r"^PREPUSH_MIN_FREE_MEM_MB=\d+$", text, re.M)
+    assert floor is not None, "the hook no longer declares a memory floor constant"
+    return (
+        "reap_spin_loop_orphans() { return 0; }\n"
+        + _hook_func("host_load_ratio")
+        + floor.group(0)
+        + "\n"
+        + _hook_func("host_is_fit")
+    )
+
+
 def _pick(
-    repo: Path, *, load: str, slot: str, uv: str, repo_name: str = "omnibase_core"
+    repo: Path,
+    *,
+    load: str,
+    slot: str,
+    uv: str,
+    mem: str = "",
+    repo_name: str = "omnibase_core",
 ) -> str:
     body = (
         f'export PREPUSH_LOAD_OVERRIDE_MAP="{load}"\n'
         f'export PREPUSH_SLOT_OVERRIDE_MAP="{slot}"\n'
+        f'export PREPUSH_MEM_OVERRIDE_MAP="{mem}"\n'
         f'export PREPUSH_UV_OVERRIDE_MAP="{uv}"\n'
         f"if pick_capacity_host stickybeatz-studio {repo_name}; then\n"
         '  echo "PICK=$PREPUSH_PICK_LABEL"\n'
@@ -539,8 +623,8 @@ def test_every_probed_host_is_recorded_for_the_receipt(table_repo: Path) -> None
 
 _SYNTHETIC_TABLE_MULTISLOT = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
-    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
-    "hm\tcapacity\thostm\tjonah@hostm\t10\t/bin/uv\t0.1.0\t/tmp/wm\tlockdir\t2\t-\tauthorizing\ttwo-slot test host\n"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local\tnote\n"
+    "hm\tcapacity\thostm\tjonah@hostm\t10\t/bin/uv\t0.1.0\t/tmp/wm\tlockdir\t2\t-\tauthorizing\tallowed\ttwo-slot test host\n"
 )
 
 
@@ -853,13 +937,21 @@ def test_the_remote_wrapper_is_visible_to_the_201_queue_gate() -> None:
 def test_the_local_heavy_path_takes_the_host_lock() -> None:
     """OMN-16174: the local path took no lock of any kind, which is why five
     concurrent full suites once ran on one host with one taking 97+ minutes. It
-    was the busiest path in the hook and the only unserialized one."""
+    was the busiest path in the hook and the only unserialized one.
+
+    OMN-17392 moved this block into `prepush_try_local_heavy_slot` so the
+    `allowed` path and the post-off-box-wait fallback share ONE definition of
+    "may run here". That is exactly why the assertion follows it rather than
+    being relaxed: two call sites now depend on this lock, so losing it would
+    be twice as bad as when the test was written.
+    """
     text = HOOK.read_text(encoding="utf-8")
-    start = text.index("guard_full_suite_host() {")
-    guard = text[start:]
-    fit = guard[guard.index('if host_is_fit ""; then') :][:900]
-    assert "prepush_lock_acquire" in fit
-    assert "prepush_local_workroot" in fit
+    start = text.index("prepush_try_local_heavy_slot() {")
+    body = text[start:]
+    body = body[: body.index("\n}\n")]
+    assert 'host_is_fit ""' in body
+    assert "prepush_lock_acquire" in body
+    assert "prepush_local_workroot" in body
 
 
 def test_the_escalation_argv_stays_a_superset_of_the_narrow_selection() -> None:
@@ -909,9 +1001,9 @@ def test_the_local_fit_path_proceeds_when_the_workroot_is_unusable() -> None:
     """An unusable workroot says nothing about capacity, so the hook must fall
     back to its pre-OMN-16991 behavior rather than refuse."""
     text = HOOK.read_text(encoding="utf-8")
-    start = text.index("guard_full_suite_host() {")
+    start = text.index("prepush_try_local_heavy_slot() {")
     fit = text[start:]
-    fit = fit[fit.index('if host_is_fit ""; then') :][:1600]
+    fit = fit[: fit.index("\n}\n")]
     assert '[ "$lock_rc" -eq 2 ]' in fit
     assert "running unserialized on this host" in fit
 
@@ -1639,3 +1731,352 @@ def test_the_wrapper_runs_normally_when_no_base_ref_is_supplied(
     result = _run_wrapper(remote_run_env, extra_argv=["origin/dev", "0" * 40])
     assert result.returncode == 0, result.stderr
     assert (remote_run_env["rundir"] / "MARKER").is_file()
+
+
+# =============================================================================
+# Off-box by default (OMN-17392)
+# =============================================================================
+#
+# Operator directive 2026-08-31, verbatim: "we should move prepush off this box
+# if possible". "This box" is `h200`. Before this change the guard ran the heavy
+# suite LOCALLY the moment the local host was a designated capacity row whose
+# load probe read under threshold, so the lab was consulted only once this
+# machine was already too loaded to be worth consulting it about -- measured
+# that day at load1 96.58/24 = 4.02x while h105 sat at 0.12x and h201 at 0.10x.
+
+_TABLE_PREFER_REMOTE = (
+    "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
+    "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local\tnote\n"
+    "hp\tcapacity\thostp\tjonah@hostp\t24\t/bin/uv\t0.1.0\t/tmp/wp\tlockdir\t1\t-"
+    "\tauthorizing\tprefer_remote\tthe box we route off\n"
+    "hl\tcapacity\thostl\tjonah@hostl\t24\t/bin/uv\t0.1.0\t/tmp/wl\tlockdir\t1\t-"
+    "\tauthorizing\tallowed\ta lab host\n"
+)
+
+
+def test_the_local_box_reports_prefer_remote(tmp_path: Path) -> None:
+    repo = _repo_with_table(tmp_path, _TABLE_PREFER_REMOTE, name="pr1")
+    assert _driver(repo, "prepush_heavy_local_policy hostp").strip() == "prefer_remote"
+
+
+def test_a_lab_host_reports_allowed(tmp_path: Path) -> None:
+    repo = _repo_with_table(tmp_path, _TABLE_PREFER_REMOTE, name="pr2")
+    assert _driver(repo, "prepush_heavy_local_policy hostl").strip() == "allowed"
+
+
+def test_an_unknown_host_has_no_policy_at_all(tmp_path: Path) -> None:
+    """Absence must be distinguishable from `allowed`: a host that is not a
+    capacity row at all is not "allowed to run heavy work here", it is not a
+    designated host, and the caller's own not-a-designated-host branch owns it."""
+    repo = _repo_with_table(tmp_path, _TABLE_PREFER_REMOTE, name="pr3")
+    out = _driver(repo, "prepush_heavy_local_policy nosuchhost || echo NONE")
+    assert out.strip() == "NONE"
+
+
+def test_a_row_predating_the_column_reads_as_allowed(tmp_path: Path) -> None:
+    """The column is additive. A 13-column row (the pre-OMN-17392 schema, whose
+    field 13 is the free-text note) must read as `allowed` -- the old behavior --
+    and must never be parsed into `prefer_remote` by accident."""
+    legacy = (
+        "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
+        "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
+        "hz\tcapacity\thostz\tjonah@hostz\t24\t/bin/uv\t0.1.0\t/tmp/wz\tlockdir\t1\t-"
+        "\tauthorizing\tsome free text that is not a policy\n"
+    )
+    repo = _repo_with_table(tmp_path, legacy, name="pr4")
+    assert _driver(repo, "prepush_heavy_local_policy hostz").strip() == "allowed"
+
+
+def test_prefer_remote_host_is_still_a_placement_target_for_others(
+    tmp_path: Path,
+) -> None:
+    """The half of this change that is easiest to get wrong. `prefer_remote`
+    governs only what happens when the row IS the pushing host; it must not
+    remove the row from anyone else's candidate list, or flipping the busiest,
+    beefiest machine in the lab to prefer_remote would delete it as capacity."""
+    repo = _repo_with_table(tmp_path, _TABLE_PREFER_REMOTE, name="pr5")
+    body = (
+        'export PREPUSH_LOAD_OVERRIDE_MAP="hp=0.10,hl=0.90"\n'
+        'export PREPUSH_SLOT_OVERRIDE_MAP="hp=free,hl=free"\n'
+        'export PREPUSH_UV_OVERRIDE_MAP="hp=0.9.9,hl=0.9.9"\n'
+        "if pick_capacity_host hostl synth; then\n"
+        '  echo "PICK=$PREPUSH_PICK_LABEL"\n'
+        "else\n"
+        '  echo "PICK=none"\n'
+        "fi\n"
+    )
+    assert "PICK=hp" in _driver(repo, body)
+
+
+def test_the_guard_consults_the_policy_before_running_locally() -> None:
+    """The behavioral core, asserted against the hook's real control flow: the
+    designated-host branch must read the policy and, on `prefer_remote`, reach
+    the lab legs BEFORE `prepush_try_local_heavy_slot`.
+
+    Ordering is the whole ticket. A version that consulted the policy but still
+    tried the local slot first would pass a naive "is prefer_remote mentioned"
+    check while changing nothing at all.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    guard = text[text.index("guard_full_suite_host() {") :]
+    guard = guard[: guard.index("\n  # Not a designated host.")]
+    assert "prepush_heavy_local_policy" in guard
+    branch = guard[guard.index('if [ "$policy" = "prefer_remote" ]; then') :]
+    branch = branch[: branch.index("\n    else\n")]
+    for expected in (
+        "remote_full_suite_verified",
+        "prepush_wait_for_lab_capacity",
+        "prepush_try_local_heavy_slot",
+    ):
+        assert expected in branch, f"prefer_remote branch never reaches {expected}"
+    assert branch.index("prepush_wait_for_lab_capacity") < branch.index(
+        "prepush_try_local_heavy_slot"
+    ), "the off-box wait must be spent BEFORE the local slot is even attempted"
+
+
+def test_the_off_box_budget_is_a_constant_not_an_env_override() -> None:
+    """The directive is explicit that PREPUSH_* overrides stay forbidden, and a
+    `${PREPUSH_OFFBOX_WAIT_BUDGET_SECONDS:-900}` would be a one-word bypass of
+    this entire policy: setting it to 0 collapses the wait and lands every push
+    straight on the local fallback."""
+    text = HOOK.read_text(encoding="utf-8")
+    for name in (
+        "PREPUSH_OFFBOX_WAIT_BUDGET_SECONDS",
+        "PREPUSH_OFFBOX_WAIT_INTERVAL_SECONDS",
+        "PREPUSH_MIN_FREE_MEM_MB",
+    ):
+        assert f"{name}=${{{name}:-" not in text, (
+            f"{name} is env-overridable, which makes the gate it guards optional"
+        )
+        assert re.search(rf"^{name}=[0-9]+$", text, re.M), (
+            f"{name} must be a literal constant assignment"
+        )
+
+
+def test_the_local_fallback_still_requires_measured_capacity() -> None:
+    """The fallback must not be a way to run a heavy suite on a box that is over
+    threshold. It calls the SAME `prepush_try_local_heavy_slot` the `allowed`
+    path calls, so an unfit host refuses exactly as it did before this change --
+    the new path is strictly narrower than the one it replaces, never wider."""
+    text = HOOK.read_text(encoding="utf-8")
+    guard = text[text.index("guard_full_suite_host() {") :]
+    branch = guard[guard.index('if [ "$policy" = "prefer_remote" ]; then') :]
+    branch = branch[: branch.index("\n    else\n")]
+    assert "if prepush_try_local_heavy_slot; then" in branch
+    assert "PREPUSH_ALLOW_LOCAL_FULL_SUITE" not in branch
+    assert "consume_override_grant" not in branch, (
+        "the prefer_remote branch must fall through to the shared refusal ladder "
+        "rather than minting its own grant"
+    )
+
+
+def test_the_local_fallback_is_loud() -> None:
+    """'never silently' is the operator's word. The fallback has to say it is
+    running on the box, that off-box was tried first, and what it probed."""
+    text = HOOK.read_text(encoding="utf-8")
+    guard = text[text.index("guard_full_suite_host() {") :]
+    branch = guard[guard.index('if [ "$policy" = "prefer_remote" ]; then') :]
+    branch = branch[: branch.index("\n    else\n")]
+    assert "LOCAL FALLBACK IN EFFECT" in branch
+    assert "PREPUSH_PROBE_LOG" in branch
+    assert "NOT a bypass" in branch
+
+
+def test_the_bounded_wait_retries_then_gives_up(table_repo: Path) -> None:
+    """Executed, not grepped: the wait loop must re-attempt placement and then
+    return non-zero when the budget is spent, rather than looping forever (a
+    hung pre-push is indistinguishable from a broken one)."""
+    body = (
+        "attempts=0\n"
+        "dispatch_to_lab_host() { attempts=$((attempts + 1)); return 1; }\n"
+        "sleep() { :; }\n"
+        "rc=0\n"
+        'prepush_wait_for_lab_capacity "heavy thing" 3 1 || rc=$?\n'
+        'echo "RC=$rc ATTEMPTS=$attempts"\n'
+    )
+    out = _driver_both(table_repo, _hook_func("prepush_wait_for_lab_capacity") + body)
+    assert "RC=1" in out, out
+    # budget 3 / interval 1 -> attempts at waited=0,1,2,3 then break.
+    assert "ATTEMPTS=4" in out, out
+    assert "OFF-BOX QUEUE-AND-WAIT" in out
+    assert "budget exhausted" in out
+
+
+def test_the_bounded_wait_returns_the_moment_a_host_takes_it(
+    table_repo: Path,
+) -> None:
+    """A lab host freeing up mid-wait must end the wait immediately -- the point
+    of re-probing is to catch exactly that."""
+    body = (
+        "attempts=0\n"
+        "dispatch_to_lab_host() { attempts=$((attempts + 1));"
+        ' [ "$attempts" -ge 2 ] && return 0; return 1; }\n'
+        "sleep() { :; }\n"
+        "rc=0\n"
+        'prepush_wait_for_lab_capacity "heavy thing" 600 1 || rc=$?\n'
+        'echo "RC=$rc ATTEMPTS=$attempts"\n'
+    )
+    out = _driver_both(table_repo, _hook_func("prepush_wait_for_lab_capacity") + body)
+    assert "RC=0 ATTEMPTS=2" in out, out
+
+
+# =============================================================================
+# Memory-aware placement (OMN-17392 / the OMN-17271 memory dimension)
+# =============================================================================
+#
+# Measured live on 2026-08-31, one second apart, and the reason this dimension
+# exists: the `.201` HOST and the gate-runner CONTAINER running on it both
+# reported load 3.27/32 = 0.10x -- the fittest ratio in the lab -- while their
+# available memory differed 19-fold (49771 MiB vs 2562 MiB, the container
+# sitting at 5.9 GiB of an 8 GiB cgroup cap). A CPU-only picker cannot tell
+# those apart, which is how it kept ranking a saturated, OOM-killing target
+# first (OMN-17247, OMN-17316).
+
+
+def test_a_memory_starved_host_is_unfit_even_at_zero_load(table_repo: Path) -> None:
+    """The exact shape of the measured defect: idlest box in the lab, no memory."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.10,h105=0.80",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        mem="h200=40000,h201=2562,h105=14664",
+    )
+    assert "PICK=h105" in out, out
+    assert "h201=mem-over(2562MiB<4096)" in out, out
+
+
+def test_a_host_whose_memory_cannot_be_read_is_skipped_not_assumed_ample(
+    table_repo: Path,
+) -> None:
+    """Silence is not headroom -- the same fail-closed rule `unreachable` and
+    `slot-unknown` already carry. `-1` is what the probe emits when neither
+    /proc/meminfo nor vm_stat could be read."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.10,h105=0.80",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        mem="h200=40000,h201=-1,h105=14664",
+    )
+    assert "PICK=h105" in out, out
+    assert "h201=mem-unknown" in out, out
+
+
+def test_memory_is_ranked_after_load_but_admits_independently(
+    table_repo: Path,
+) -> None:
+    """load1 RANKS; memory ADMITS. The least-loaded host still wins -- unless it
+    cannot prove memory, in which case the next one does, rather than the pick
+    failing outright."""
+    out = _pick(
+        table_repo,
+        load="h200=0.20,h201=0.10,h105=0.30",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        mem="h200=1000,h201=1000,h105=14664",
+    )
+    assert "PICK=h105" in out, out
+
+
+def test_every_candidate_failing_memory_yields_no_pick(table_repo: Path) -> None:
+    """Fail closed: if nothing in the lab can prove headroom, the picker returns
+    nothing and the caller refuses -- it never falls back to the least-bad."""
+    out = _pick(
+        table_repo,
+        load="h200=0.10,h201=0.10,h101=0.10,h105=0.10",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        mem="h200=100,h201=100,h101=100,h105=100",
+    )
+    assert "PICK=none" in out, out
+
+
+def test_the_fit_record_carries_the_memory_it_decided_on(table_repo: Path) -> None:
+    """OMN-17271 item 4, evidence-carrying routing: the probe trail that lands in
+    the receipt and the refusal message records the MEASUREMENT, not just the
+    verdict, so a placement can be audited rather than believed."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        mem="h200=40000,h201=49771,h105=14664",
+    )
+    assert "h105=fit(0.21,authorizing,14664MiB)" in out, out
+
+
+def test_the_probe_snippet_reads_cgroup_limits_not_just_machine_memory() -> None:
+    """The gate-runner OOM (OMN-17247) is invisible to a MemAvailable read: the
+    HOST had 49 GiB free while the capped container it would have run in had
+    2.5 GiB of its 8 GiB cap. Both cgroup generations are read."""
+    text = HOOK.read_text(encoding="utf-8")
+    probe = text[text.index("_PREPUSH_LOAD_PROBE_SH='") :]
+    probe = probe[: probe.index("'\n")]
+    assert "/sys/fs/cgroup/memory.max" in probe
+    assert "/sys/fs/cgroup/memory.current" in probe
+    assert "/sys/fs/cgroup/memory/memory.limit_in_bytes" in probe
+    assert "MemAvailable" in probe
+    assert "vm_stat" in probe, "the macOS lab hosts need a memory path too"
+
+
+def test_the_probe_snippet_carries_no_single_quotes() -> None:
+    """Load-bearing, not style: the snippet is itself a single-quoted assignment
+    and is handed to ssh(1) for a remote login shell to execute. One single
+    quote inside it truncates the assignment and every remote probe silently
+    stops working."""
+    text = HOOK.read_text(encoding="utf-8")
+    probe = text[
+        text.index("_PREPUSH_LOAD_PROBE_SH='") + len("_PREPUSH_LOAD_PROBE_SH='") :
+    ]
+    probe = probe[: probe.index("'")]
+    assert "MemAvailable" in probe, "sanity: the whole snippet must be in view"
+    assert "'" not in probe
+
+
+def test_host_is_fit_refuses_a_host_that_is_idle_but_out_of_memory(
+    table_repo: Path,
+) -> None:
+    """host_is_fit is what the LOCAL branch calls, so the memory floor has to
+    apply to this box too -- otherwise the machine we are routing work off is
+    the one machine exempt from the check."""
+    body = (
+        'export PREPUSH_LOAD_OVERRIDE_LOCAL="0.10 24 1000"\n'
+        "rc=0\n"
+        'host_is_fit "" || rc=$?\n'
+        'echo "RC=$rc DETAIL=$PREPUSH_LAST_FIT_DETAIL"\n'
+    )
+    out = _driver_both(table_repo, _with_real_load() + body)
+    assert "RC=1" in out, out
+    assert "mem 1000MiB < 4096MiB" in out, out
+
+
+def test_host_is_fit_accepts_a_host_that_proves_both_dimensions(
+    table_repo: Path,
+) -> None:
+    body = (
+        'export PREPUSH_LOAD_OVERRIDE_LOCAL="0.10 24 40000"\n'
+        "rc=0\n"
+        'host_is_fit "" || rc=$?\n'
+        'echo "RC=$rc DETAIL=$PREPUSH_LAST_FIT_DETAIL"\n'
+    )
+    out = _driver_both(table_repo, _with_real_load() + body)
+    assert "RC=0" in out, out
+    assert "mem 40000MiB" in out, out
+
+
+def test_host_is_fit_reports_unreadable_memory_as_could_not_check(
+    table_repo: Path,
+) -> None:
+    """rc 2 must stay distinguishable from rc 1: "could not check" and "over
+    capacity" lead to different operator actions, and the callers are documented
+    as never conflating them."""
+    body = (
+        'export PREPUSH_LOAD_OVERRIDE_LOCAL="0.10 24 -1"\n'
+        "rc=0\n"
+        'host_is_fit "" || rc=$?\n'
+        'echo "RC=$rc DETAIL=$PREPUSH_LAST_FIT_DETAIL"\n'
+    )
+    out = _driver_both(table_repo, _with_real_load() + body)
+    assert "RC=2" in out, out
+    assert "memory unreadable" in out, out
