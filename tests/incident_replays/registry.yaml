@@ -156,6 +156,21 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn17307-reconciler-judged-by-exit-code
+    guard: scripts/check_reconciler_movement_proof.py
+    incident: OMN-17307
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn17307/reconcile-workspace-venvs.no-movement-proof.sh.captured
+      sha256: 0804b196a851180fe5d14a7306fdd41b63d28f1404f5e2f5e75632a5a93a9dd8
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@196cdaef91b58aecf9c31495c14ef9cf4db9e777:scripts/reconcile-workspace-venvs.sh
+      captured_at: '2026-08-31T10:55:00Z'
+      captured_by: lane replay (OMN-17307)
+    test: tests/scripts/test_check_reconciler_movement_proof_omn17307.py::test_the_shipped_reconciler_that_judged_by_exit_code_is_rejected
+    why: 'The artifact is the verbatim workspace venv reconciler as it shipped on dev at 196cdaef, the wired repair path for every local venv. Read its repair function: it runs install-node-skill-package.sh and `uv sync --frozen --inexact` and then `exit 0` on their exit STATUS. It never re-reads the venv. That is not a theoretical gap -- the provider co-install carries a hardcoded COMPAT_PIN that downgrades omnibase-compat 0.5.6 to 0.5.5 (OMN-16262) and broke the `occ` CLI extension badly enough that the `onex` binary would not start, and no exit code can see a content change like that. The same shape on the clone surface is what let a `.201` clone with core.bare=true report as synced forever, because `git fetch` exits 0 while `git checkout` exits 128 (OMN-17291). Nothing in the repo flagged this file: it was reviewed, merged and scheduled. The case drives the real gate over a tree containing these exact bytes and requires it to say no, which is the verdict that did not exist when they shipped.'
   - id: omn15525-health-body-truncation
     guard: deploy/maintenance/omninode-system-slack-report.sh
     incident: OMN-15525

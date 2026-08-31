@@ -1035,6 +1035,24 @@ repos:
         pass_filenames: false
         types_or: [markdown, yaml]
         stages: [pre-commit]
+      # OMN-17307: Reconciler movement-proof gate.
+      # A workspace reconciler may not report success from the exit status of the
+      # command that was supposed to move the surface -- that makes a repair and a
+      # no-op the same observation, which is how a `.201` clone with core.bare=true
+      # read as "synced" while `git checkout` failed with exit 128 forever, and how
+      # a venv whose provider co-install silently downgraded omnibase-compat read as
+      # reconciled. Structural half: reconcile-host.sh must invoke the verifier, and
+      # verdict() must take no exit status. Ratchet half: any scripts/reconcile*.sh
+      # must invoke the verifier or declare `# movement-proof:` /
+      # `# movement-proof-delegated-to:`. Whole-repo by design (a reconciler can be
+      # made non-compliant by deleting a line elsewhere).
+      - id: check-reconciler-movement-proof
+        name: Reconcilers must prove movement by readback (OMN-17307)
+        entry: python3 scripts/check_reconciler_movement_proof.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-13030: Evidence provenance-probe gate.
       # Rejects any staged markdown handoff/OCC/evidence doc that asserts a
       # "deployed sha / running digest / promoted revision" claim WITHOUT an
