@@ -202,6 +202,39 @@ def check(repo_root: Path) -> list[str]:
                 "(OMN-17335)."
             )
 
+    # -- Part 3: the resolved uv reaches the delegates too ------------------ #
+    #
+    # OMN-17383. Parts 1 and 2 govern the reconciler's OWN uv calls. They said
+    # nothing about the script it shells out to, and `install-node-skill-package.sh`
+    # calls bare `uv` -- so on `.201` the co-install died with "uv: command not
+    # found" after resolve_uv() had already located the binary one process up.
+    #
+    # The discovery rule is the real lesson: Part 2 finds scripts by the glob
+    # `scripts/reconcile*.sh`, and the co-install does not match it, so the file
+    # that still had the defect was the one file never scanned. A gate whose
+    # scope stops at a filename pattern gives false assurance (the OMN-15525
+    # shape). This part follows the INVOCATION instead: wherever the reconciler
+    # executes the co-install, that line must hand the child the resolved uv.
+    if venv_reconciler.is_file():
+        source = venv_reconciler.read_text(encoding="utf-8")
+        for number, line in logical_lines(source):
+            executable = _code(line)
+            if (
+                not _INSTALL_INVOCATION.search(executable)
+                or "--execute" not in executable
+            ):
+                continue
+            if "PATH=" in executable and "UV_BIN" in executable:
+                continue
+            failures.append(
+                f"{VENV_RECONCILER}:{number}: invokes the provider co-install "
+                "without putting the resolved uv on the child's PATH. That "
+                "child calls bare `uv` and inherits the caller's PATH, which "
+                "under cron cannot reach a user-local install -- so the parent "
+                "resolves uv successfully and the child still fails "
+                '(OMN-17383). Pass PATH="$(dirname "$UV_BIN"):$PATH".'
+            )
+
         if OWNER_HELPER in text and f"{OWNER_HELPER}()" not in text:
             # Used but not defined here: only acceptable if this script IS the
             # definer. Nothing sources across these scripts today, so a use
