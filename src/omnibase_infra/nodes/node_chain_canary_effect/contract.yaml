@@ -23,8 +23,13 @@
 #     ingress HTTP response, and the receipt carries a status per
 #     OMN-16025 chain link
 #   - OMN-16025: the five-link delegation gate this canary reports against
-#   - OMN-16963 / OMN-16964: the links (2 and 5) this canary still has NO
-#     leg for; they report `no_leg` and name their owning ticket
+#   - OMN-16963: paid link 2's debt. Link 2 now has a real leg — a
+#     correlation-scoped readback of delegation_workflow_state — and a
+#     non-passing link 2 fails the SCALAR verdict, not only
+#     `chain_proof_complete`. Before that, an unconfigured or stranded
+#     projection still produced GREEN with success=True.
+#   - OMN-16964: the one link (5) this canary still has NO leg for; it
+#     reports `no_leg` and names its owning ticket
 #
 name: "node_chain_canary_effect"
 node_type: "EFFECT_GENERIC"
@@ -131,6 +136,22 @@ error_handling:
       retry_strategy: "none"
     - name: "TERMINAL_READBACK_NOT_CONFIGURED"
       description: "No broker was configured for the terminal readback, so the run has no evidence about the terminal. Deliberately NOT a fallback to the ingress response — that fallback is the OMN-16931 defect."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_STRANDED"
+      description: "The terminal IS on the bus for this correlation id and delegation_workflow_state holds a non-terminal FSM state for it. The chain carried the event and the FSM did not finish with it — the OMN-14843 shape, invisible to every other leg."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_ROW_ABSENT"
+      description: "The terminal IS on the bus and the projection carries NO row for this correlation id. Kept distinct from PROJECTION_STRANDED because a row that stopped mid-FSM is a projection defect while an absent row may equally be a publish that never happened — they send you to different layers."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_READBACK_FAILED"
+      description: "The projection readback was configured but could not run. Fails closed on the same terms as TERMINAL_READBACK_FAILED — an unrunnable check is never reported as a passing one."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_READBACK_NOT_CONFIGURED"
+      description: "No DSN was configured for the projection readback, so the run has no evidence about link 2. Deliberately NOT green-with-a-caveat the way an unconfigured quarantine leg is: quarantine is a supplementary check, link 2 is one of the five OMN-16025 chain links, and a run that cannot see it is the three-links-rendered-as-five defect itself (OMN-16963)."
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_CHAIN_INCOMPLETE"

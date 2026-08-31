@@ -455,21 +455,45 @@ async def _readback_projection_via_asyncpg(
     except ImportError as exc:  # pragma: no cover - asyncpg is a hard dep
         return None, f"asyncpg unavailable: {exc}"
 
+    # ONE deadline across connect AND query, not timeout_s applied to each.
+    # Applied per-call, this leg could hold asyncio.gather() for ~2x the
+    # window it was budgeted, which defeats the "costs no extra wall-clock"
+    # property that justifies running it as a concurrent leg at all.
+    deadline = time.monotonic() + timeout_s
+
+    def _remaining() -> float:
+        return deadline - time.monotonic()
+
     connection = None
     try:
-        connection = await asyncio.wait_for(asyncpg.connect(dsn), timeout=timeout_s)
+        if _remaining() <= 0:
+            return None, "projection readback budget exhausted before connect"
+        connection = await asyncio.wait_for(asyncpg.connect(dsn), timeout=_remaining())
+        if _remaining() <= 0:
+            return None, "projection readback budget exhausted after connect"
         row = await asyncio.wait_for(
             connection.fetchrow(
                 "SELECT state FROM delegation_workflow_state WHERE correlation_id = $1",
                 correlation_id,
             ),
-            timeout=timeout_s,
+            timeout=_remaining(),
         )
     except Exception as exc:  # noqa: BLE001 - fails closed, never to a verdict
         return None, sanitize_error_message(exc)
     finally:
+        # cleanup-resilience-ok: a failure to close must not replace the
+        # unreadable-projection tuple this function returns, nor propagate
+        # out of asyncio.gather() and abort the sibling legs. The connection
+        # is discarded either way; the read outcome is the only fact worth
+        # reporting.
         if connection is not None:
-            await connection.close()
+            try:
+                await connection.close()
+            except Exception as close_exc:  # noqa: BLE001
+                logger.debug(
+                    "chain canary: projection connection close failed: %s",
+                    sanitize_error_message(close_exc),
+                )
 
     if row is None:
         return "", ""
@@ -741,6 +765,9 @@ class HandlerChainCanary:
             elapsed_ms=elapsed_ms,
             quarantine_status=quarantine_status,
             quarantine_error=quarantine_error,
+            projection_readback_status=projection_readback_status,
+            projection_state=projection_state,
+            projection_error=projection_error,
         )
 
         link_verdicts = _build_link_verdicts(
@@ -971,6 +998,9 @@ class HandlerChainCanary:
         elapsed_ms: int,
         quarantine_status: EnumQuarantineCheckStatus,
         quarantine_error: str,
+        projection_readback_status: EnumProjectionReadbackStatus,
+        projection_state: str,
+        projection_error: str,
     ) -> tuple[EnumChainCanaryVerdict, str]:
         """Rank the verdicts. Most specific diagnosis wins.
 
@@ -980,11 +1010,25 @@ class HandlerChainCanary:
         someone looking at latency instead of at the dispatch seam.
 
         Below that, the ranking is: can we read the bus at all (fail closed
-        if not) → is the terminal on the bus → and only then does the
-        ingress response matter, and only to distinguish "the chain worked
-        and the request path reported an error" from "the chain worked
-        cleanly". The ingress response is never allowed to decide whether a
-        terminal exists (OMN-16931).
+        if not) → is the terminal on the bus → what does the PROJECTION say
+        the FSM did with it → and only then does the ingress response
+        matter, and only to distinguish "the chain worked and the request
+        path reported an error" from "the chain worked cleanly". The ingress
+        response is never allowed to decide whether a terminal exists
+        (OMN-16931).
+
+        Link 2 is ranked below the terminal checks and above the ingress
+        ones. Below, because a terminal that never landed is the larger fact
+        and the projection has nothing to disagree with. Above, because when
+        the terminal IS on the bus and the FSM is still stranded, that
+        disagreement is the diagnosis — it is what OMN-14843 measured, and
+        it is invisible to every other leg.
+
+        OMN-16963: before this ticket ``_decide`` never saw the projection at
+        all, so an unconfigured or stranded link 2 still returned GREEN with
+        ``success=True``. The per-link status was honest and the scalar was
+        not, which is the same over-reading as a three-link probe rendering
+        as a five-link proof — one level up.
         """
         if quarantine_status is EnumQuarantineCheckStatus.FOUND:
             return (
@@ -1050,8 +1094,60 @@ class HandlerChainCanary:
                 ),
             )
 
-        # Terminal IS on the bus. The only remaining question is whether the
-        # request path also reported success.
+        # Terminal IS on the bus. Before asking what the request path
+        # claimed, ask what the FSM actually did with the event — those two
+        # disagree in exactly the condition this ticket exists to catch.
+        if projection_readback_status is EnumProjectionReadbackStatus.STRANDED:
+            return (
+                EnumChainCanaryVerdict.PROJECTION_STRANDED,
+                (
+                    f"the terminal IS on the bus ({terminal_topic}) for this "
+                    "correlation id, but delegation_workflow_state holds "
+                    f"{projection_state!r} — not a terminal FSM state. The "
+                    "chain carried the event and the FSM did not finish with "
+                    "it (OMN-14843). Link 4 passing while link 2 fails is the "
+                    "disagreement, not a contradiction."
+                ),
+            )
+        if projection_readback_status is EnumProjectionReadbackStatus.ROW_ABSENT:
+            return (
+                EnumChainCanaryVerdict.PROJECTION_ROW_ABSENT,
+                (
+                    f"the terminal IS on the bus ({terminal_topic}) for this "
+                    "correlation id, but delegation_workflow_state carries NO "
+                    "row for it. Either the projection never consumed the "
+                    "event or it never wrote — a different layer from a row "
+                    "that stopped mid-FSM, which is why this is not reported "
+                    "as stranded."
+                ),
+            )
+        if projection_readback_status is EnumProjectionReadbackStatus.ERROR:
+            return (
+                EnumChainCanaryVerdict.PROJECTION_READBACK_FAILED,
+                (
+                    "the projection readback was configured but could not "
+                    f"run: {projection_error}. Failing closed — an unrunnable "
+                    "check is not a passing one."
+                ),
+            )
+        if (
+            projection_readback_status
+            is EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED
+        ):
+            return (
+                EnumChainCanaryVerdict.PROJECTION_READBACK_NOT_CONFIGURED,
+                (
+                    "no DSN was configured for the projection readback, so "
+                    "this run has NO evidence about link 2. Reporting red "
+                    "rather than green-with-a-caveat: link 2 is one of the "
+                    "five OMN-16025 chain links, and a run that cannot see it "
+                    "is the three-links-rendered-as-five defect itself."
+                ),
+            )
+
+        # Terminal on the bus AND the projection agrees it terminalized. The
+        # only remaining question is whether the request path also reported
+        # success.
         quarantine_suffix = (
             " (quarantine check not configured — no claim made about the "
             "quarantine sink)"

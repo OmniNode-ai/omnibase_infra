@@ -71,6 +71,21 @@ _BOOTSTRAP = "broker.invalid:19092"
 # fixtures asserting a topic nothing publishes to.
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _FAILURE_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value
+_PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+
+
+class _ProjectionReadback:
+    """Stubbed link-2 readback. Terminal by default, so these fixtures isolate
+    the leg under test rather than tripping over an unconfigured link 2."""
+
+    def __init__(self, state: str | None = "COMPLETED", error: str = "") -> None:
+        self.state = state
+        self.error = error
+
+    async def __call__(
+        self, dsn: str, correlation_id: str, timeout_s: float
+    ) -> tuple[str | None, str]:
+        return self.state, self.error
 
 
 def _request(**overrides: object) -> ModelChainCanaryRequest:
@@ -80,6 +95,12 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "budget_ms": 5_000,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
+        # OMN-16963: link 2 is now a claim too, so a run with no projection
+        # configured makes no claim about it and cannot be green — the same
+        # rule OMN-16931 established for link 4 one link over. These fixtures
+        # are about the OTHER legs, so the projection is configured
+        # throughout and stubbed terminal by default.
+        "projection_dsn": _PROJECTION_DSN,
         "settle_seconds": 0,
     }
     fields.update(overrides)
@@ -159,6 +180,7 @@ def _handler(
         ingress=ingress,
         quarantine_scan=quarantine or _Quarantine(found=False),
         terminal_readback=terminal_readback or _TerminalReadback(found=_SUCCESS_TOPIC),
+        projection_readback=_ProjectionReadback(),
         kill_switch_disabled=False,
     )
 
@@ -407,10 +429,15 @@ async def test_receipt_carries_a_verdict_for_all_five_links() -> None:
 async def test_best_possible_run_is_still_not_a_five_link_proof() -> None:
     """The load-bearing honesty test.
 
-    Everything this probe CAN assert passes. It is still 3 of 5, and the
+    Everything this probe CAN assert passes. It is still not five, and the
     receipt must say so — otherwise the 2h schedule keeps reporting a
-    five-link gate as green off a three-link probe, which is exactly what
+    five-link gate as green off a partial probe, which is exactly what
     happened on run 33215999994.
+
+    OMN-16963 moved this from 3 of 5 to 4 of 5 by paying link 2's debt. The
+    number moving is the point: it is derived from the legs that actually
+    ran, not asserted as a constant, so link 5 remaining unpaid still keeps
+    ``chain_proof_complete`` False.
     """
     handler = _handler(
         _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
@@ -420,7 +447,7 @@ async def test_best_possible_run_is_still_not_a_five_link_proof() -> None:
     result = await handler.handle(_request())
 
     assert result.verdict is EnumChainCanaryVerdict.GREEN
-    assert result.links_proven == 3
+    assert result.links_proven == 4
     assert result.chain_proof_complete is False
 
 
@@ -441,13 +468,18 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
     keeping them distinct is the point — see
     ``test_handler_chain_canary_projection.py`` and
     ``test_handler_chain_canary_ledger.py`` for their own coverage.
+
+    ``projection_dsn`` is cleared explicitly here rather than relying on the
+    shared fixture's default. The default configures it, precisely because a
+    run that cannot see link 2 can no longer be green; this test is the one
+    case that wants the unpointed instrument, so it says so.
     """
     handler = _handler(
         _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
-    result = await handler.handle(_request())
+    result = await handler.handle(_request(projection_dsn=""))
 
     assert all(
         verdict.status is not EnumChainLinkStatus.NO_LEG
