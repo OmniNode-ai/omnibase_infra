@@ -314,6 +314,16 @@ migration_declares_unclassified_force_rls() {
 # as the proving ground that generates the evidence the staging un-fence is
 # waiting on.
 #
+# SCOPE NARROWED (OMN-17150, 2026-08-31): only 0002 (the ENABLE/FORCE RLS half)
+# is released HERE now, because 0000 (CREATE) and 0001 (heartbeat columns) are
+# no longer in the baseline fence at all. The dev lane's effective outcome is
+# byte-identical to before — all three still apply. What changed is which lanes
+# get the CREATE: every lane does now, because fencing the sole CREATE of a
+# table scripts/check_migrations_complete.sh REQUIRES deadlocked every cold boot
+# outside this lane (proven live on omnibase-infra-lakshman, 2026-08-31). The
+# full argument, including why 0002 could NOT come with them, is in
+# docker/migrations/forward/fenced-node-migrations.yaml's own header.
+#
 # CORRECTION (OMN-15349, 2026-08-05): this comment previously claimed "the
 # staging k8s fence is UNCHANGED and stays at all seven ids." That was true
 # when ruling 15 landed (2026-07-29) and stale within two days: operator
@@ -329,7 +339,8 @@ migration_declares_unclassified_force_rls() {
 # FAIL-CLOSED BY CONSTRUCTION. Three independent properties, each tested:
 #
 #   1. DEFAULT IS FULLY FENCED. ${ONEX_MIGRATION_LANE} unset -> empty release set
-#      -> every one of the seven ids is skipped, exactly as before this change.
+#      -> every id in the baseline manifest is skipped, exactly as before this
+#      change.
 #      An UNKNOWN value is treated the same as unset (and warns). There is no
 #      value that widens the fence relative to today; a lane can only ever
 #      release a SUBSET of it.
@@ -363,9 +374,15 @@ ONEX_MIGRATION_LANE="${ONEX_MIGRATION_LANE:-}"
 case "${ONEX_MIGRATION_LANE}" in
   dev)
     # The lab/dev compose lane. Ruling 15 proving ground.
+    #
+    # OMN-17150 (2026-08-31) narrowed this from the trio to 0002 alone. Nothing
+    # about ruling 15 changed: 0000 and 0001 left the BASELINE fence entirely,
+    # so the dev lane still applies all three — two because they are no longer
+    # fenced anywhere, and 0002 because this release un-gates it here. Keeping
+    # the released set a strict subset of the fence is the property that makes
+    # is_lane_released_node_migration meaningful; naming an id the fence no
+    # longer covers would be inert but would misdescribe the policy.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
-node:node_projection_registration:0000_create_node_service_registry.sql
-node:node_projection_registration:0001_add_heartbeat_columns.sql
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
     ;;
   "")

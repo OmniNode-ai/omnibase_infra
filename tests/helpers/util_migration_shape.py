@@ -34,6 +34,18 @@ FORWARD_RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 FENCE_MANIFEST = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "fenced-node-migrations.yaml"
 )
+# OMN-17150: the frozen-bytes record. Separate file, separate reader, for the
+# same reason grandfathered-force-rls-migrations.yaml is separate from the
+# fence — an exemption from a STATIC gate and an operator HOLD on applying a
+# migration are different facts, and one file for both lets a future editor
+# claim the wrong one.
+SHAPE_EXEMPTION_MANIFEST = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "shape-reconciliation-exemptions.yaml"
+)
 
 _CREATE_TABLE_GUARDED = re.compile(
     r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_.\"]+)\s*\(", re.I
@@ -292,6 +304,33 @@ def fenced_migration_ids() -> frozenset[str]:
             "restate the list here."
         )
     return frozenset(ids)
+
+
+def shape_reconciliation_exempt_ids() -> frozenset[str]:
+    """Ids whose bytes are FROZEN, so the OMN-15376 gate may not demand an edit.
+
+    Distinct from the operator fence (OMN-17150): a fenced id is never applied,
+    while an id here IS applied on every lane and is un-editable precisely
+    because of that — its content sha256 is bound by the ledger, so a byte
+    change makes the next forward-migration run FATAL with "conflicting
+    migration checksum". Reading the two from separate manifests keeps the two
+    facts from being used interchangeably.
+
+    An EMPTY list is legitimate (every entry eventually resolved), so this does
+    not raise on empty — unlike the fence reader above, where empty is
+    indistinguishable from a broken parse. The pin test
+    (test_shape_exemptions_are_the_known_frozen_set) is what catches an
+    accidentally-emptied or quietly-extended manifest.
+    """
+    if not SHAPE_EXEMPTION_MANIFEST.is_file():
+        raise AssertionError(
+            f"{SHAPE_EXEMPTION_MANIFEST} is missing. It is a committed record, "
+            "not an optional file; a reader that silently treats absence as "
+            "'no exemptions' would turn a deleted record into a green gate."
+        )
+    return frozenset(
+        _MANIFEST_ID_LINE.findall(SHAPE_EXEMPTION_MANIFEST.read_text(encoding="utf-8"))
+    )
 
 
 def node_migration_files() -> list[tuple[str, Path]]:

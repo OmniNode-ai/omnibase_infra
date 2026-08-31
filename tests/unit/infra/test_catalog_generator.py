@@ -26,14 +26,24 @@ def test_generated_compose_preserves_container_names() -> None:
 
 @pytest.mark.unit
 def test_generated_compose_preserves_healthcheck_timing() -> None:
+    """The generator must carry the catalog's timing through verbatim.
+
+    Values updated by OMN-17150: postgres went from ``30s/10s/3/10s`` to
+    ``10s/10s/5/180s`` when its healthcheck was right-sized for a cold initdb
+    (the old 10s ``start_period`` covered none of the init-script phase, during
+    which the whole forward-migration tree runs). This test asserts the
+    GENERATOR is faithful, so it tracks the catalog rather than pinning a
+    policy; the policy itself — TCP probe, and a floor under ``start_period`` —
+    is asserted by ``tests/scripts/test_migration_one_shot_initdb_race.py``.
+    """
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["core"])
     compose = generate_compose(resolved)
     pg_hc = compose["services"]["postgres"]["healthcheck"]
-    assert pg_hc["interval"] == "30s"
+    assert pg_hc["interval"] == "10s"
     assert pg_hc["timeout"] == "10s"
-    assert pg_hc["retries"] == 3
-    assert pg_hc["start_period"] == "10s"
+    assert pg_hc["retries"] == 5
+    assert pg_hc["start_period"] == "180s"
 
 
 @pytest.mark.unit

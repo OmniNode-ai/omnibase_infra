@@ -33,17 +33,33 @@ half — RED against the drifted shape, GREEN after, and schema equality between
 the two paths — is
 ``tests/integration/migrations/test_node_migration_shape_drift_omn15376.py``.
 
-## Fenced ids
+## Out of scope: two kinds of un-editable file
 
-The operator-fenced ids (OMN-14974 / OMN-15313 / OMN-15335) are exempt: they are
-never applied and MUST NOT be edited to satisfy a gate. The exemption list is
-READ FROM ``scripts/run-forward-migrations.sh`` rather than restated, so this
-gate cannot drift from the runner it is protecting. Note that the runner in this
-repo fences SIX ids while omninode_infra's k8s Job runner fences SEVEN — that
-parity gap is a separate finding (see the execution suite's ``_K8S_ONLY_FENCED``
-note), not something this gate papers over.
+Both exemptions exist for the same underlying reason — this gate can only be
+satisfied by EDITING a file, so it must not be pointed at a file nobody may
+edit — but they are different facts and are read from different manifests
+(OMN-17150), so neither can be claimed in place of the other.
 
-Ticket: OMN-15376
+1. **Operator-fenced ids** (``fenced-node-migrations.yaml``). Never applied, and
+   held for a ruling. Read from the single-sourced manifest rather than
+   restated, so this gate cannot drift from the runners it protects.
+
+2. **Frozen bytes** (``shape-reconciliation-exemptions.yaml``). APPLIED on every
+   lane, and un-editable for exactly that reason: the file's content sha256 is
+   bound both by ``_ledger/application-migrations.tsv`` and by each lane's
+   ``platform_catalog.schema_migrations`` row, so a byte change makes the next
+   forward-migration run FATAL with ``conflicting migration checksum``.
+
+Category 2 was created by OMN-17150 and is worth understanding, because before
+it the two were conflated. ``node_projection_registration/0000`` had always
+carried this gate's hazard and had always been un-editable; it was simply
+invisible here because it happened to be fenced. When OMN-17150 released it from
+the fence — so that a cold lane could create ``node_service_registry`` at all,
+which the migration gate REQUIRES — the file did not change but the gate went
+red on an id nobody may edit. Re-fencing it to quiet the gate is what
+``node_pr_review_bot 001`` did, and is precisely the deadlock OMN-17150 closed.
+
+Ticket: OMN-15376 (gate), OMN-17150 (frozen-bytes exemption)
 """
 
 from __future__ import annotations
@@ -58,6 +74,7 @@ from tests.helpers.util_migration_shape import (
     mask_literals,
     node_migration_files,
     reconciled_columns,
+    shape_reconciliation_exempt_ids,
 )
 
 pytestmark = [pytest.mark.unit]
@@ -66,10 +83,12 @@ _BEGIN = "-- ---- BEGIN OMN-15376 shape reconciliation:"
 _END = "-- ---- END OMN-15376 shape reconciliation:"
 
 _FENCED = fenced_migration_ids()
+_FROZEN = shape_reconciliation_exempt_ids()
+_OUT_OF_SCOPE = _FENCED | _FROZEN
 _UNFENCED = [
     (migration_id, path)
     for migration_id, path in node_migration_files()
-    if migration_id not in _FENCED
+    if migration_id not in _OUT_OF_SCOPE
 ]
 # Only files that actually declare a guarded CREATE TABLE carry the obligation.
 # Parametrising over these (rather than skipping the rest) keeps every emitted
@@ -93,6 +112,57 @@ def test_the_corpus_is_non_empty_and_the_fence_resolved() -> None:
     assert len(_CASES) >= 40, len(_CASES)
     assert _FENCED, "operator fence parsed as empty — the reader is broken"
     assert all(fenced.startswith("node:") for fenced in _FENCED), sorted(_FENCED)
+    # The frozen-bytes record MAY legitimately be empty (see the reader's own
+    # docstring), so emptiness is not asserted here — only well-formedness, so
+    # a malformed manifest cannot quietly exempt a garbage id.
+    assert all(frozen.startswith("node:") for frozen in _FROZEN), sorted(_FROZEN)
+
+
+# The exact frozen-bytes exemptions, pinned. Same discipline as the fence
+# baseline's own pin: this hatch removes files from a real gate, so growing it
+# must require editing a test, in a diff a reviewer reads, with the manifest's
+# stated `frozen_by` reason next to it. An entry whose bytes are NOT actually
+# bound by a live ledger row is an unfixed bug being relabelled.
+_EXPECTED_FROZEN = frozenset(
+    {"node:node_projection_registration:0000_create_node_service_registry.sql"}
+)
+
+
+def test_shape_exemptions_are_the_known_frozen_set() -> None:
+    """The frozen-bytes list may not grow without a reviewer seeing it."""
+    assert _FROZEN == _EXPECTED_FROZEN, (
+        "docker/migrations/forward/shape-reconciliation-exemptions.yaml changed.\n"
+        f"  found:    {sorted(_FROZEN)}\n"
+        f"  expected: {sorted(_EXPECTED_FROZEN)}\n"
+        "An exemption is only legitimate for a migration whose content sha256 "
+        "is ALREADY bound by live ledger rows, so that editing it would make "
+        "the next forward-migration run FATAL. A migration that has not applied "
+        "anywhere yet must be FIXED, not exempted — its bytes are still free."
+    )
+
+
+def test_no_id_is_both_fenced_and_frozen() -> None:
+    """The two manifests answer different questions and must stay disjoint.
+
+    An id in both is a category error: a fenced migration is never applied, so
+    its bytes cannot be bound by a ledger row, so 'frozen by the ledger' cannot
+    be true of it. Overlap means one of the two records is wrong.
+    """
+    overlap = sorted(_FENCED & _FROZEN)
+    assert not overlap, (
+        "these ids claim BOTH an operator fence (never applied) and frozen "
+        f"bytes (applied and checksum-bound), which cannot both hold: {overlap}"
+    )
+
+
+def test_every_frozen_id_names_a_real_vendored_migration() -> None:
+    """Anti-typo: an exemption for a path that does not exist silences nothing
+    visibly and would hide a genuine gap the day that file appears."""
+    known = {migration_id for migration_id, _ in node_migration_files()}
+    unknown = sorted(_FROZEN - known)
+    assert not unknown, (
+        f"these frozen-bytes exemptions name no vendored node migration: {unknown}"
+    )
 
 
 @pytest.mark.parametrize(
