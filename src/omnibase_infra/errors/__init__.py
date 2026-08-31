@@ -41,6 +41,7 @@ Exports:
     EventRegistryFingerprintMismatchError: Live event registry fingerprint != expected
     EventRegistryFingerprintMissingError: Event registry artifact file not found
     ProjectionError: Raised by NodeProjectionEffect when a synchronous projection write fails
+    ProjectionNotMaterializedError: Projection write-path failure — offset must not advance (OMN-17379)
     ProjectionTenantContextError: Projection write refused — no tenant resolved under enforcement
 
 Correlation ID Assignment:
@@ -152,6 +153,7 @@ from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.error_projection import (
     ProjectionError,
+    ProjectionNotMaterializedError,
     ProjectionTenantContextError,
 )
 from omnibase_infra.errors.error_schema_fingerprint import (
@@ -180,6 +182,7 @@ __all__: list[str] = [
     "ArchitectureViolationError",
     # Projection errors (OMN-2510)
     "ProjectionError",
+    "ProjectionNotMaterializedError",
     "ProjectionTenantContextError",
     # Binding resolution errors
     "BindingResolutionError",

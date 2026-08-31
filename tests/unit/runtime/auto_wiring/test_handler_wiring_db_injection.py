@@ -15,6 +15,7 @@ import pytest
 from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
     ModelDbTableDeclaration,
 )
+from omnibase_infra.errors import ProjectionNotMaterializedError
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _DB_URL_ENV_MAP,
     ProjectionDispatchSinks,
@@ -457,10 +458,19 @@ def test_projection_callback_rejects_missing_db_url_at_wiring(
 
 
 @pytest.mark.unit
-def test_projection_callback_logs_type_error_not_raises(
+def test_projection_callback_logs_and_raises_on_type_error(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """TypeError from handler is logged (not propagated), and log entry is emitted."""
+    """TypeError is logged AND propagated so the offset is withheld (OMN-17379).
+
+    This test previously asserted ``result is None`` — that returning normally
+    was the correct answer. It is not: a callback that returns normally IS an
+    ACK, so the boundary committed past an event the handler never wrote. A
+    ``TypeError`` here means the runtime denied the handler its own injected
+    ``_db``/``_event_type`` contract, which is a wiring defect and never the
+    event's, so the record is still owed a row. The log line is kept; the
+    silent ACK is not.
+    """
 
     class BrokenHandler:
         def handle(self, input_data: dict) -> dict:
@@ -485,9 +495,9 @@ def test_projection_callback_logs_type_error_not_raises(
             return_value="postgresql://user:pass@host:5432/omnidash_analytics",
         ):
             with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
-                result = asyncio.run(callback(envelope))
+                with pytest.raises(ProjectionNotMaterializedError):
+                    asyncio.run(callback(envelope))
 
-    assert result is None
     assert any("TypeError" in r.message for r in caplog.records)
 
 
@@ -946,16 +956,21 @@ def test_projection_callback_emits_terminal_event_from_materialized_dict() -> No
 
 @pytest.mark.unit
 def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> None:
-    """When handler raises, no terminal event is emitted.
+    """When the handler raises, no terminal event is emitted.
 
-    OMN-14492: with no contract ``dlq_topics`` declared, the offending event
-    is no longer silently dropped (that was the OMN-14487-class quiet-death
-    bug) — it is routed to the platform quarantine sink instead. This test
-    now asserts the NEGATIVE half (no publish to the terminal topic) plus the
-    POSITIVE half (exactly one quarantine publish, not zero).
+    OMN-14492 made a handler error reach the platform quarantine sink instead of
+    dying quietly, and this test asserted exactly one quarantine publish.
+
+    OMN-17379 supersedes that answer for a WRITE-PATH failure (``RuntimeError:
+    db failure`` is one). Quarantining a well-formed event and returning is an
+    ACK, and the record then exists only in a sink holding 8.9M messages that
+    nothing consumes, while the projection it was owed silently stays stale —
+    live-proven on ``pr_merged_events``, 24 days behind at TOTAL-LAG 0. The
+    record's home is its own topic, uncommitted, so the callback raises and the
+    offset is withheld. The DLQ leg is preserved for CONTENT failures, which
+    redelivery can never repair (see
+    ``test_projection_callback_routes_validation_error_to_dlq``).
     """
-    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
-
     published: list[tuple] = []
 
     class FailingHandler:
@@ -991,14 +1006,13 @@ def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> 
         return_value="postgresql://user:pass@host:5432/omnidash_analytics",
     ):
         with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
-            asyncio.run(callback(envelope))
+            with pytest.raises(ProjectionNotMaterializedError):
+                asyncio.run(callback(envelope))
 
-    # No terminal (success) event — the handler errored.
+    # No terminal (success) event — the handler errored and wrote nothing.
     assert not any(topic == terminal_topic for topic, _key, _value in published)
-    # The error is durably captured on the quarantine sink, not dropped.
-    assert len(published) == 1
-    dlq_topic, _key, _value = published[0]
-    assert dlq_topic == build_dlq_topic("quarantine")
+    # And no dead-letter copy either: the offset is what preserves this record.
+    assert published == []
 
 
 @pytest.mark.unit
