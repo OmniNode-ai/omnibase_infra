@@ -3312,9 +3312,38 @@ async def bootstrap() -> int:
         #   maintains consistency with multi-node deployments where they would differ
         runtime_create_start_time = time.time()
         runtime_config_dict = cast("dict[str, object]", config.model_dump(mode="json"))
-        if config.name:
-            runtime_config_dict["service_name"] = config.name
-            runtime_config_dict["node_name"] = config.name
+        if not config.name:
+            # OMN-17287: fail here, naming the ACTUAL cause. Without this the
+            # boot dies two frames later in RuntimeHostProcess.__init__ with
+            # "requires 'service_name' in config", which points at the runtime
+            # constructor and sends the reader hunting for caller drift. The
+            # real cause is always upstream: `name` is unset on the loaded
+            # runtime config, which in a container means the contracts
+            # bind-mount resolved to a directory with no runtime_config.yaml
+            # in it (an empty or wrongly-targeted ONEX_CONTRACTS_DIR). That is
+            # what happened on the .201 dev lane when a failed deploy's
+            # rollback removed the deployed tree out from under the running
+            # containers and Docker re-created the bind source empty.
+            #
+            # This is a diagnostic, not a default: `service_name` is still
+            # required and is still never inferred (no-defensive-defaults).
+            _runtime_config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
+            raise ProtocolConfigurationError(
+                f"Runtime config has no 'name', so service_name/node_name cannot "
+                f"be resolved. Expected config at {_runtime_config_path} "
+                f"(exists={_runtime_config_path.is_file()}); contracts_dir="
+                f"{contracts_dir} (exists={contracts_dir.is_dir()}). If the "
+                f"contracts directory is empty, the ONEX_CONTRACTS_DIR mount is "
+                f"not resolving to the deployed contracts tree.",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    operation="resolve_service_name",
+                    target_name=str(_runtime_config_path),
+                ),
+                config_path=str(_runtime_config_path),
+            )
+        runtime_config_dict["service_name"] = config.name
+        runtime_config_dict["node_name"] = config.name
 
         # 6.1 Create introspection service (OMN-5609)
         # Wire contract data into introspection so published events include
