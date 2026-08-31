@@ -80,6 +80,11 @@ _EXPECTED_PROFILE_INSTANCE_MAP = {
     "stability-test": "local",
     "judge": "local",
     "prod": "local",
+    # OMN-17150: the collaborator lane's database topology is the same `local`
+    # instance every other compose lane resolves. The lane is dev-class and
+    # mutable; its DATA is its own (its own Postgres container and its own
+    # namespaced volume), but the typed topology it renders is not lane-special.
+    "lakshman": "local",
     "onex-dev": "onex-dev",
     "onex-prod": "onex-prod",
 }
@@ -92,6 +97,10 @@ _EXPECTED_PROFILE_INJECTION_SURFACES = {
     ),
     "judge": ("OmniNode-ai/omnibase_infra", "docker/docker-compose.judge.yml"),
     "prod": ("OmniNode-ai/omnibase_infra", "docker/docker-compose.prod.yml"),
+    "lakshman": (
+        "OmniNode-ai/omnibase_infra",
+        "docker/docker-compose.lakshman.yml",
+    ),
     "onex-dev": (
         "OmniNode-ai/omninode_infra",
         "k8s/onex-dev/runtime/configmap.yaml",
@@ -106,6 +115,12 @@ _EXPECTED_RUNTIME_POLICY_PROFILE_MAP = {
     "stability-test": "stability-test",
     "judge": "judge",
     "prod": "prod",
+    # OMN-17150. validate_docker_topology_profile_injections() asserts this map
+    # covers the runtime-policy contract's profile set EXACTLY, so a lane added
+    # to the contract without a topology profile here fails CI with
+    # "runtime-policy profile coverage drift" rather than crashing a live
+    # container at boot on an unresolvable ONEX_DATABASE_TOPOLOGY_PROFILE.
+    "lakshman": "lakshman",
 }
 SUPPORTED_TOPOLOGY_PROFILES = frozenset(_EXPECTED_PROFILE_INSTANCE_MAP)
 TOPOLOGY_PROFILE_INSTANCE_MAP = MappingProxyType(_EXPECTED_PROFILE_INSTANCE_MAP)

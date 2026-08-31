@@ -873,6 +873,53 @@ jobs:
             --check-placeholders \
             --scan-dir src/omnibase_infra
 
+  # OMN-17320: exposed-identifier gate. Blocks any denylisted customer identifier
+  # from re-entering this PUBLIC repo. Provenance: OMN-17288 scrubbed a live tenant
+  # slug out of five files here (omnibase_infra#3062, 3f10ee5e); three hours later
+  # omnimarket#2239 reintroduced the same slug there with every enforced gate green,
+  # on the very PR whose acceptance criterion was "zero grep hits". Nothing
+  # mechanically enforced the convention -- this job is that mechanism.
+  #
+  # Registered in scripts/ci/ci_summary_gate.py::STRICT_GATE_JOBS. THAT LINE IS HALF
+  # THE MECHANISM: the default-deny sweep already fails CI Summary when this job
+  # FAILS, but an unregistered job that is `skipped` or deleted yields SUCCESS -- so
+  # without the registration, removing this job would silently restore the
+  # unenforced state that produced the recurrence.
+  exposed-identifier-gate:
+    needs: occ-preflight
+    if: always()
+    name: Exposed Identifier Gate (OMN-17320)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Full tree, not the diff: a denylisted identifier reaching dev by ANY route
+      # (a rebase carrying it in, as happened on omnimarket#2241) must red the PR,
+      # not just one that edits the offending line. Stdlib-only, so no uv setup.
+      - name: Scan the working tree for denylisted identifiers
+        run: |
+          echo "================================================================"
+          echo "Exposed Identifier Gate (OMN-17320)"
+          echo "================================================================"
+          python3 scripts/validation/check_exposed_identifiers.py \
+            --mode blocking --scope all
+
+      - name: Report the cross-repo parity fingerprint
+        if: always()
+        run: |
+          echo "omnibase_infra copy:"
+          python3 scripts/validation/check_exposed_identifiers.py --print-fingerprint
+
   # Pin reachability -- every cross-repo pin (workflow `uses:`/`with:` refs,
   # pyproject [tool.uv.sources] revs, uv.lock git revs) must name a commit
   # reachable from a PROTECTED branch of the target repo (OMN-15538).
@@ -2592,6 +2639,34 @@ jobs:
   # Migrated from validate-validator-requirements.yml (OMN-15108, OMN-14877
   # pattern). Enforces architecture-handshakes/validator-requirements.yaml
   # (OMN-13291 fleet gate) against this repo's own baseline.
+  # OMN-17307: the reconciler movement-proof gate.
+  #
+  # Required by construction rather than by a branch-protection entry: this repo's
+  # `dev` requires exactly one context (`CI Summary`), whose default-deny sweep
+  # fails on ANY job in this run that completes non-success. A new job in this
+  # file is therefore enforcing the moment it lands -- which is the point of
+  # CLAUDE.md rule 5, and why this ships in the same PR as the rule it enforces.
+  #
+  # No sibling checkout, no `uv sync`: the checker is stdlib-only on purpose,
+  # because the surface it guards is the one that runs when the venv is broken.
+  reconciler-movement-proof:
+    name: Reconcilers prove movement by readback (OMN-17307)
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Every reconciler proves movement by reading the surface back
+        run: python3 scripts/check_reconciler_movement_proof.py
+
   validate-validator-requirements:
     name: Enforce validator-requirements.yaml (OMN-13291)
     # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.

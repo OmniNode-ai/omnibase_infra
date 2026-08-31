@@ -72,31 +72,6 @@
 # ============================================================================
 # INTERIM BY DESIGN -- the node-based successor
 # ============================================================================
-# movement-proof-delegated-to: scripts/reconcile-host.sh
-#
-# ============================================================================
-# THIS SCRIPT DOES NOT PROVE ITS OWN WORK (OMN-17307)
-# ============================================================================
-# Read the repair path below and note what it does NOT do: after
-# `install-node-skill-package.sh` and `uv sync --frozen --inexact` return, it
-# exits 0 on their exit STATUS. It never re-reads the venv to confirm the pins
-# actually landed. That is not a small gap -- the provider co-install is known
-# to move pins nobody asked it to move (OMN-16262: a hardcoded COMPAT_PIN
-# downgrading omnibase-compat 0.5.6 -> 0.5.5, which broke the `occ` CLI
-# extension badly enough that the `onex` binary would not start), and no exit
-# code can see a content change like that.
-#
-# The readback lives one layer up, in `scripts/reconcile-host.sh`, which
-# observes every governed distribution BEFORE and AFTER this script runs and
-# compares the result against the lock and the canonical clone HEAD. That is
-# deliberate rather than incidental: this script owns REPAIR, the orchestrator
-# owns PROOF, and keeping them separate is what stops the repair from being its
-# own witness.
-#
-# So: do not add a success claim here. Call this through reconcile-host.sh.
-# The `check_reconciler_movement_proof.py` gate holds the marker above to that
-# arrangement.
-#
 # This is a script-level stopgap, authorized for beta. The successor is a
 # NodeCompute drift-detect handler -- a pure function of (clone SHA, installed
 # SHA, lock hash) -> typed verdict -- behind a NodeEffect reconcile publisher,
@@ -161,7 +136,7 @@ while [[ $# -gt 0 ]]; do
       OMNI_HOME_ARG="$1"
       ;;
     --omni-home=*) OMNI_HOME_ARG="${1#--omni-home=}" ;;
-    -h|--help) sed -n '1,131p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
+    -h|--help) sed -n '1,105p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
     *) echo "reconcile-workspace-venvs.sh: unknown argument: $1" >&2; exit "$EXIT_INDETERMINATE" ;;
   esac
   shift

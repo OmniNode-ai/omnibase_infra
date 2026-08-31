@@ -8,6 +8,13 @@
 # verified: 2026-07-03 via LANE_MANIFEST=deploy/lane-census/lane-manifest.yaml python3 scripts/lane_census_plan.py fed the live .201 docker inventory (docker ps -a / docker network ls over ssh, read-only) — migration-gate keepalive reclassification clears the oneshot_stuck false-positive on the healthy stability-test and judge lanes (OMN-13772).
 # verified: 2026-08-30 via read-only ssh jonah@192.168.86.201 `ss -ltn` + `docker ps --format '{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Ports}}'` (OMN-17143): confirms the four governed lanes' live port bindings AND that the newly reserved collaborator block 58085/58086/45436/46379/55092/55644/53002/58080 has no listener. The reserved
 #   `lakshman` lane below is declared-but-not-built: zero containers, no compose file, optional: true.
+# verified: 2026-08-31 via read-only ssh jonah@192.168.86.201 `ss -ltn` (no listener on any of
+#   58085/58086/45436/46379/55092/55644/53002/58080), `docker ps -a --filter
+#   label=com.docker.compose.project=omnibase-infra-lakshman` (zero containers) and
+#   `docker network ls | grep lakshman` (no network) — OMN-17150. The reserved block is STILL
+#   free and the lane is STILL unbuilt at the moment this PR declares its services. This PR is
+#   the REPO-side enablement only (compose file, lane Literal, topology profile, renderer);
+#   bring-up remains the lane owner's Task 0 and was deliberately not performed.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -282,18 +289,59 @@ lanes:
   # for the no-raw-prod-bypass gate, because it is not stability-class — adding
   # it there would wrongly imply grants can resolve against it.
   #
-  # WHEN THE COMPOSE FILE LANDS: docker/docker-compose.lakshman.yml must add
-  # concrete `services:` entries here AND add "lakshman" to _COMPOSE_LANES in
-  # tests/unit/scripts/test_lane_census_manifest_parity.py in the SAME PR, so
-  # the parity ratchet starts policing it. Until then the empty service list is
-  # the honest statement: nothing is declared to be running.
+  # OMN-17150 (2026-08-31): the compose file landed, so this entry graduates from
+  # a bare reservation to a declared lane. Both halves of the reservation's own
+  # instruction were done in that PR: the concrete `services:` list below is
+  # sourced from docker/docker-compose.lakshman.yml's `container_name` fields,
+  # and "lakshman" was added to _COMPOSE_LANES in
+  # tests/unit/scripts/test_lane_census_manifest_parity.py so the parity ratchet
+  # now polices this lane exactly as it polices stability-test/prod/judge.
+  #
+  # STILL `optional: true`, and that is not a leftover. The lane is declared but
+  # NOT built — repo-side enablement and bring-up were deliberately separated
+  # (bring-up is the lane owner's own task). An optional lane that is entirely
+  # down is not drift (scripts/lane_census_plan.py), so a declared-but-unbuilt
+  # collaborator lane cannot emit a census ticket every tick. The moment ANY of
+  # the services below is running, the lane reconciles normally and a partial
+  # bring-up IS drift — which is the behaviour we want the day it comes up.
+  #
+  # No worker service, matching the judge lane's shape: the compose file runs
+  # main + effects + projection-api only. The runtime-policy contract still pins
+  # a worker replica count for contract completeness; that is a contract-shape
+  # requirement, not a declaration that a worker container exists here.
   lakshman:
     compose_file: docker/docker-compose.lakshman.yml
     compose_project: omnibase-infra-lakshman
     network: omnibase-infra-lakshman-network
     image_tag_pattern: '.+'
     optional: true
-    services: []
+    services:
+      - name: omnibase-infra-lakshman-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-lakshman-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-lakshman-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-lakshman-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-lakshman-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-lakshman-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-lakshman-intelligence-migration
+        kind: oneshot
+      - name: omninode-lakshman-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-lakshman-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-lakshman-projection-api
+        kind: service
+        replicas: 1
 # ---------------------------------------------------------------------------
 # hook_edge — which lane the Claude Code hook edge publishes to (OMN-17204)
 # ---------------------------------------------------------------------------

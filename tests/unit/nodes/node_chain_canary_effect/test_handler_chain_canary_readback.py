@@ -426,16 +426,21 @@ async def test_best_possible_run_is_still_not_a_five_link_proof() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_links_without_a_leg_name_the_ticket_that_owes_them() -> None:
-    """``no_leg`` is not ``pass`` and not ``fail`` — it is an unpaid debt.
+async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
+    """Both debts are paid: no link reports ``NO_LEG`` any more.
 
-    OMN-16963 paid link 2's debt, so only link 5 is still owed. Link 2 now
-    reports a real status; with no projection configured on this fixture that
-    status is ``NOT_CONFIGURED``, which is a different fact from ``NO_LEG``:
-    the instrument exists and was not pointed at anything, rather than not
-    existing at all. Both are non-passing, and keeping them distinct is the
-    point — see ``test_handler_chain_canary_projection.py`` for link 2's own
-    coverage.
+    This test used to assert the opposite — links 2 and 5 named the tickets
+    that owed them a leg. OMN-16963 paid link 2's and OMN-16964 paid link 5's,
+    so the assertion inverts into a regression guard: if a future change ever
+    drops a leg back to ``NO_LEG``, the probe has silently shrunk and this
+    catches it.
+
+    Both now report ``NOT_CONFIGURED`` on this fixture, which is a different
+    fact from ``NO_LEG``: the instrument exists and was not pointed at
+    anything, rather than not existing at all. Both are non-passing, and
+    keeping them distinct is the point — see
+    ``test_handler_chain_canary_projection.py`` and
+    ``test_handler_chain_canary_ledger.py`` for their own coverage.
     """
     handler = _handler(
         _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
@@ -444,13 +449,21 @@ async def test_links_without_a_leg_name_the_ticket_that_owes_them() -> None:
 
     result = await handler.handle(_request())
 
+    assert all(
+        verdict.status is not EnumChainLinkStatus.NO_LEG
+        for verdict in result.link_verdicts
+    )
+    assert all(verdict.owning_ticket == "" for verdict in result.link_verdicts)
+
     by_link = {v.link: v for v in result.link_verdicts}
-    routing = by_link[EnumChainLink.ROUTING_PROJECTED]
-    ledger = by_link[EnumChainLink.LEDGER_REPLAY]
-    assert routing.status is EnumChainLinkStatus.NOT_CONFIGURED
-    assert routing.owning_ticket == ""
-    assert ledger.status is EnumChainLinkStatus.NO_LEG
-    assert ledger.owning_ticket == "OMN-16964"
+    assert (
+        by_link[EnumChainLink.ROUTING_PROJECTED].status
+        is EnumChainLinkStatus.NOT_CONFIGURED
+    )
+    assert (
+        by_link[EnumChainLink.LEDGER_REPLAY].status
+        is EnumChainLinkStatus.NOT_CONFIGURED
+    )
 
 
 @pytest.mark.unit

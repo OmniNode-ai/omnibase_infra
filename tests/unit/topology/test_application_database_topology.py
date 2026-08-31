@@ -39,6 +39,11 @@ EXPECTED_PROFILE_INSTANCE_MAP = {
     "stability-test": "local",
     "judge": "local",
     "prod": "local",
+    # OMN-17150: the collaborator lane resolves the same `local` instance every
+    # other compose lane does. Its data is its own (its own Postgres container,
+    # its own namespaced volume); the typed topology it renders is not
+    # lane-special, so nothing about the instance changes.
+    "lakshman": "local",
     "onex-dev": "onex-dev",
     "onex-prod": "onex-prod",
 }

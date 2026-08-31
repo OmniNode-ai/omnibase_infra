@@ -32,7 +32,14 @@ _MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
 # Lanes whose compose files have concrete container_name values we can diff.
 # dev uses generated/non-prefixed names and is intentionally optional/loose, so
 # it is parity-checked against its own service list only, not a compose scrape.
-_COMPOSE_LANES = ("stability-test", "prod", "judge")
+# OMN-17150: `lakshman` joins the ratchet the moment its compose file exists.
+# The lane-manifest reservation that predated the file said so explicitly, and
+# the two landed in the same PR. It qualifies for the same reason judge does:
+# concrete, lane-prefixed container_name values that can be diffed. Being an
+# ungoverned, fully-mutable collaborator lane changes nothing here — parity is
+# about the manifest describing the compose file truthfully, not about who may
+# deploy the lane.
+_COMPOSE_LANES = ("stability-test", "prod", "judge", "lakshman")
 
 
 def _load_manifest() -> dict:

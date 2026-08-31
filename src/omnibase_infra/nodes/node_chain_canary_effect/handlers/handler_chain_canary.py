@@ -98,6 +98,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link import
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link_status import (
     EnumChainLinkStatus,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_ledger_replay_status import (
+    EnumLedgerReplayStatus,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readback_status import (
     EnumProjectionReadbackStatus,
 )
@@ -134,10 +137,6 @@ _KILL_SWITCH_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 # canary, which is the one outcome worse than not having it.
 _CLIENT_SLACK_SECONDS = 15.0
 
-# Links with no leg in this probe carry the ticket that owes them, so the
-# receipt routes a reader to the work instead of leaving a silent gap.
-_LINK5_OWNING_TICKET = "OMN-16964"
-
 # (response_json, transport_error, elapsed_ms)
 TypeIngressPost = Callable[
     [str, dict[str, object], float],
@@ -164,6 +163,22 @@ TypeProjectionReadback = Callable[
     [str, str, float],
     Awaitable[tuple[str | None, str]],
 ]
+
+# (source, correlation_id, timeout_s) -> (hops, replay_green, verdict, error)
+# hops is None when the ledger could not be read at all. The transport returns
+# raw facts rather than a verdict so the SKIP != PASS classification lives here
+# — a transport that returned a ready-made status could report SKIP as green
+# and nothing downstream would notice.
+TypeLedgerReplay = Callable[
+    [str, str, float],
+    Awaitable[tuple[tuple[str, ...] | None, bool, str, str]],
+]
+
+# The tier-2 verifier's own word for "I did not run the check". Kept as its own
+# token rather than folded into failure: OMN-16025 says SKIP != PASS, and the
+# distinction is only enforceable if SKIP survives as itself this far.
+_VERIFIER_SKIP = "skip"
+_VERIFIER_PASS = "pass"
 
 # The FSM states that count as terminal in delegation_workflow_state. Anything
 # else that exists as a row is stranded mid-flight — OMN-14843 measured
@@ -461,6 +476,50 @@ async def _readback_projection_via_asyncpg(
     return str(row["state"] or ""), ""
 
 
+async def _replay_ledger_chain_via_asyncpg(
+    source: str,
+    correlation_id: str,
+    timeout_s: float,
+) -> tuple[tuple[str, ...] | None, bool, str, str]:
+    """Link-5 leg (OMN-16964): assemble, replay and tier-2 verify this chain.
+
+    Returns the hops assembled for the probe's own correlation id, whether the
+    replay was green, and the tier-2 verifier's own word (``pass`` / ``fail``
+    / ``skip``). The verifier's verdict is returned verbatim rather than
+    pre-collapsed into a boolean: OMN-16025 requires SKIP to be distinguishable
+    from PASS, and a boolean cannot carry that distinction.
+
+    ``hops`` is ``None`` when the ledger could not be read at all — a read that
+    failed is not a chain that was found to be empty.
+    """
+    try:
+        import asyncpg
+    except ImportError as exc:  # pragma: no cover - asyncpg is a hard dep
+        return None, False, "", f"asyncpg unavailable: {exc}"
+
+    connection = None
+    try:
+        connection = await asyncio.wait_for(asyncpg.connect(source), timeout=timeout_s)
+        rows = await asyncio.wait_for(
+            connection.fetch(
+                "SELECT hop, replay_green, verifier_verdict FROM ledger_chain "
+                "WHERE correlation_id = $1 ORDER BY hop_index",
+                correlation_id,
+            ),
+            timeout=timeout_s,
+        )
+    except Exception as exc:  # noqa: BLE001 - fails closed, never to a verdict
+        return None, False, "", sanitize_error_message(exc)
+    finally:
+        if connection is not None:
+            await connection.close()
+
+    hops = tuple(str(row["hop"]) for row in rows)
+    replay_green = all(bool(row["replay_green"]) for row in rows) if rows else False
+    verdict = str(rows[-1]["verifier_verdict"] or "") if rows else ""
+    return hops, replay_green, verdict, ""
+
+
 def _extract_error(response: dict[str, object]) -> tuple[str, str]:
     """Pull (code, message) out of the ingress's typed error block."""
     error = response.get("error")
@@ -505,6 +564,7 @@ class HandlerChainCanary:
         quarantine_scan: TypeQuarantineScan | None = None,
         terminal_readback: TypeTerminalReadback | None = None,
         projection_readback: TypeProjectionReadback | None = None,
+        ledger_replay: TypeLedgerReplay | None = None,
         kill_switch_disabled: bool | None = None,
     ) -> None:
         self._ingress: TypeIngressPost = ingress or _post_skill_via_httpx
@@ -516,6 +576,9 @@ class HandlerChainCanary:
         )
         self._projection_readback: TypeProjectionReadback = (
             projection_readback or _readback_projection_via_asyncpg
+        )
+        self._ledger_replay: TypeLedgerReplay = (
+            ledger_replay or _replay_ledger_chain_via_asyncpg
         )
         # Read at construction, overridable for tests, re-read in handle()
         # so a zero-arg contract-driven construction cannot miss it.
@@ -614,6 +677,8 @@ class HandlerChainCanary:
                     projection_readback_status=EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED,
                     projection_state="",
                     projection_error="",
+                    ledger_status=EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED,
+                    ledger_detail="",
                 ),
                 links_proven=0,
                 links_total=len(EnumChainLink),
@@ -648,6 +713,10 @@ class HandlerChainCanary:
                 projection_state,
                 projection_error,
             ),
+            (
+                ledger_status,
+                ledger_detail,
+            ),
         ) = await asyncio.gather(
             self._readback_terminal(
                 request, str(probe_correlation_id), readback_window_s
@@ -656,6 +725,7 @@ class HandlerChainCanary:
             self._readback_projection(
                 request, str(probe_correlation_id), readback_window_s
             ),
+            self._replay_ledger(request, str(probe_correlation_id), readback_window_s),
         )
 
         verdict, detail = self._decide(
@@ -682,6 +752,8 @@ class HandlerChainCanary:
             projection_readback_status=projection_readback_status,
             projection_state=projection_state,
             projection_error=projection_error,
+            ledger_status=ledger_status,
+            ledger_detail=ledger_detail,
         )
         links_proven = sum(
             1 for link in link_verdicts if link.status is EnumChainLinkStatus.PASS
@@ -745,6 +817,47 @@ class HandlerChainCanary:
                 },
             },
         }
+
+    async def _replay_ledger(
+        self,
+        request: ModelChainCanaryRequest,
+        probe_correlation_id: str,
+        window_s: float,
+    ) -> tuple[EnumLedgerReplayStatus, str]:
+        """Assemble, replay and tier-2 verify the chain for this run.
+
+        Completeness is checked against the request's declared
+        ``expected_ledger_hops`` rather than against whatever the ledger
+        returned, so a chain that is short by a hop cannot look complete
+        simply because every row present was well-formed.
+        """
+        if not request.ledger_source.strip():
+            return EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED, ""
+
+        hops, replay_green, verdict, error = await self._ledger_replay(
+            request.ledger_source,
+            probe_correlation_id,
+            window_s,
+        )
+        if hops is None:
+            return EnumLedgerReplayStatus.ERROR, error or "ledger replay failed"
+
+        missing = tuple(h for h in request.expected_ledger_hops if h not in hops)
+        if missing:
+            return (
+                EnumLedgerReplayStatus.CHAIN_INCOMPLETE,
+                f"missing hops: {', '.join(missing)}",
+            )
+        if not replay_green:
+            return EnumLedgerReplayStatus.REPLAY_FAILED, ""
+        if verdict.strip().lower() == _VERIFIER_SKIP:
+            return EnumLedgerReplayStatus.VERIFIER_SKIPPED, ""
+        if verdict.strip().lower() != _VERIFIER_PASS:
+            return (
+                EnumLedgerReplayStatus.REPLAY_FAILED,
+                f"tier-2 verifier returned {verdict or 'no verdict'}",
+            )
+        return EnumLedgerReplayStatus.VERIFIED, ""
 
     async def _readback_projection(
         self,
@@ -976,9 +1089,7 @@ def _all_links_unevaluated(reason: str) -> tuple[ModelChainLinkVerdict, ...]:
             link=link,
             status=EnumChainLinkStatus.NOT_EVALUATED,
             detail=reason,
-            owning_ticket=(
-                _LINK5_OWNING_TICKET if link is EnumChainLink.LEDGER_REPLAY else ""
-            ),
+            owning_ticket="",
         )
         for link in EnumChainLink
     )
@@ -994,6 +1105,8 @@ def _build_link_verdicts(
     projection_readback_status: EnumProjectionReadbackStatus,
     projection_state: str,
     projection_error: str,
+    ledger_status: EnumLedgerReplayStatus,
+    ledger_detail: str,
 ) -> tuple[ModelChainLinkVerdict, ...]:
     """One status per OMN-16025 link, so a 4/5 probe cannot read as 5/5.
 
@@ -1001,6 +1114,7 @@ def _build_link_verdicts(
     not a pass — it is a link this probe has no instrument for, and it
     names the ticket that owes the instrument.
     """
+    link5, link5_detail = _link_five(ledger_status, ledger_detail)
     link2, link2_detail = _link_two(
         projection_readback_status, projection_state, projection_error
     )
@@ -1012,8 +1126,8 @@ def _build_link_verdicts(
         quarantine_status=quarantine_status,
     )
     if not ingress_reachable:
-        link2 = link3 = link4 = EnumChainLinkStatus.NOT_EVALUATED
-        link2_detail = link3_detail = link4_detail = (
+        link2 = link3 = link4 = link5 = EnumChainLinkStatus.NOT_EVALUATED
+        link2_detail = link3_detail = link4_detail = link5_detail = (
             "not evaluated — the ingress was unreachable, so nothing "
             "downstream of it was observed"
         )
@@ -1050,13 +1164,55 @@ def _build_link_verdicts(
         ),
         ModelChainLinkVerdict(
             link=EnumChainLink.LEDGER_REPLAY,
-            status=EnumChainLinkStatus.NO_LEG,
-            detail=(
-                "this canary assembles no ledger chain, runs no replay, "
-                "and invokes no tier-2 verifier"
-            ),
-            owning_ticket=_LINK5_OWNING_TICKET,
+            status=link5,
+            detail=link5_detail,
         ),
+    )
+
+
+def _link_five(
+    ledger_status: EnumLedgerReplayStatus, ledger_detail: str
+) -> tuple[EnumChainLinkStatus, str]:
+    """Link 5: complete ledger chain + replay through an HONEST tier-2 verifier.
+
+    ``VERIFIER_SKIPPED`` maps to FAIL, not to PASS and not to NOT_CONFIGURED.
+    A verifier that ran and declined to check is the precise failure the gate's
+    "SKIP != PASS" wording exists to catch: unlike an unconfigured leg, this
+    one WAS pointed at the run and still produced no evidence, so it is a
+    result rather than an absence.
+    """
+    if ledger_status is EnumLedgerReplayStatus.VERIFIED:
+        return (
+            EnumChainLinkStatus.PASS,
+            "complete ledger chain replayed green and a tier-2 verifier "
+            "actually ran and passed for this run's own correlation id",
+        )
+    if ledger_status is EnumLedgerReplayStatus.CHAIN_INCOMPLETE:
+        return (
+            EnumChainLinkStatus.FAIL,
+            f"the assembled ledger chain has a gap, so there is nothing "
+            f"complete to replay: {ledger_detail}",
+        )
+    if ledger_status is EnumLedgerReplayStatus.REPLAY_FAILED:
+        return (
+            EnumChainLinkStatus.FAIL,
+            "a complete chain was replayed and the replay was not green",
+        )
+    if ledger_status is EnumLedgerReplayStatus.VERIFIER_SKIPPED:
+        return (
+            EnumChainLinkStatus.FAIL,
+            "the tier-2 verifier returned SKIP — it was pointed at this run "
+            "and checked nothing, which OMN-16025 counts as not proven",
+        )
+    if ledger_status is EnumLedgerReplayStatus.ERROR:
+        return (
+            EnumChainLinkStatus.ERROR,
+            "the ledger chain could not be assembled, replayed or verified, "
+            f"so no claim is made about it: {ledger_detail}",
+        )
+    return (
+        EnumChainLinkStatus.NOT_CONFIGURED,
+        "no ledger source configured for the chain replay — SKIP is not PASS",
     )
 
 
