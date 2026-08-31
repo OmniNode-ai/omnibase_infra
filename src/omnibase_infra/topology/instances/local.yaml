@@ -67,6 +67,7 @@ databases:
               - consumer_flow_windows
               - live_events
               - log_entries
+              - open_obligations
               - projection_watermarks
               - topic_produce_windows
               - work_events
