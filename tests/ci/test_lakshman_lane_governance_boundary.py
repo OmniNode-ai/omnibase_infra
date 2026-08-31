@@ -265,3 +265,58 @@ def test_collaborator_lane_runtime_addresses_are_distinct_from_every_lane() -> N
             f"runtime address {address!r} does not name its own lane, so a "
             "message routed by address could land on the wrong lane"
         )
+
+
+#: The four infrastructure credentials the lane owner must generate themselves.
+#: They ship EMPTY in the template so compose's `:?` guards fail closed.
+LANE_CREDENTIAL_VARS = (
+    "POSTGRES_PASSWORD",
+    "VALKEY_PASSWORD",
+    "OMNINODE_RUNTIME_PASSWORD",
+    "TENANT_PROJECTION_WRITER_PASSWORD",
+)
+ENV_EXAMPLE_PATH = ROOT / "docker" / "lakshman.env.example"
+
+
+@pytest.mark.ci
+def test_shipped_template_credentials_are_empty() -> None:
+    """The shipped template must never carry a usable credential.
+
+    OMN-17150 review finding, and a fail-OPEN that described itself as
+    fail-closed. The template shipped four NON-EMPTY placeholder passwords, and
+    compose's ``:?`` guard only rejects an EMPTY value — so those placeholders
+    SATISFIED the guard. The documented bring-up command would have started
+    Postgres and Valkey on a credential committed to a public template, while the
+    file's own header asserted the lane "refuses to start rather than booting
+    with a blank password".
+
+    Empty is the entire mechanism, so it is worth a test of its own.
+
+    This lives here, in the static CI module, rather than beside the render
+    tests: that module is skipped wherever ``docker compose`` is unavailable,
+    which is exactly the host where a leaked credential would go unnoticed. This
+    check needs nothing but a text read.
+    """
+    lines = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines()
+    declared = {
+        key: value
+        for key, _, value in (line.partition("=") for line in lines)
+        if key in LANE_CREDENTIAL_VARS
+    }
+
+    missing = set(LANE_CREDENTIAL_VARS) - declared.keys()
+    assert not missing, (
+        f"docker/lakshman.env.example no longer declares {sorted(missing)}. The "
+        "lane owner still needs every credential NAMED in the template, even "
+        "though the value must be blank — deleting the line hides the "
+        "requirement instead of enforcing it."
+    )
+    non_empty = sorted(key for key, value in declared.items() if value.strip())
+    assert not non_empty, (
+        f"These credentials carry a value in docker/lakshman.env.example: "
+        f"{non_empty}. A non-empty value here is a WORKING credential in a "
+        "committed template: it satisfies the compose `:?` guard, so the lane "
+        "boots instead of refusing to start. Leave them empty; render-only "
+        "values belong in RENDER_ONLY_SECRETS in "
+        "tests/integration/infra/test_lakshman_compose_render.py."
+    )

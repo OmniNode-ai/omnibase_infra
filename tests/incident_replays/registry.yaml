@@ -168,9 +168,25 @@ cases:
       method: git-object
       source: git-object:OmniNode-ai/omnibase_infra@1b66d58f920c1b75de23fab085c55252540f0b7f:scripts/reconcile-workspace-venvs.sh
       captured_at: '2026-08-31T15:40:00Z'
-      captured_by: lane replay (OMN-17335)
+    captured_by: lane replay (OMN-17335)
     test: tests/scripts/test_reconcile_uv_privilege_omn17335.py::test_the_shipped_reconciler_that_resolved_uv_from_path_only_is_rejected
     why: 'The artifact is the verbatim venv reconciler as it shipped on dev at 1b66d58f -- the code the `.201` maintenance cron actually ran. Line 210 is the whole defect: `UV_BIN="$(command -v uv 2>/dev/null || true)"`, then INDETERMINATE on an empty result. The cron.d unit pins PATH to /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, which cannot reach a user-local install by construction, so the reconciler refused every hour on a host where uv 0.11.5 was installed the whole time at ~/.local/bin/uv (verified live: `sudo /home/<owner>/.local/bin/uv --version` -> uv 0.11.5, and the venv''s own pyvenv.cfg records `uv = 0.11.5`). The ticket filed against the refusal then re-ran the same PATH-shaped probe over ssh, got the same empty answer, and concluded the tool was not installed on the machine at all -- an empty result promoted to evidence of absence, twice, inside the family of scripts built to stop exactly that. This file was reviewed, merged and scheduled with nothing objecting. The case drives the real gate over these exact bytes and requires it to say no.'
+  - id: omn17320-slug-reintroduced-with-every-gate-green
+    guard: scripts/validation/check_exposed_identifiers.py
+    incident: OMN-17288
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn17320/migration-supersessions.tsv.captured
+      sha256: b4ec90804b1de237eaa60fca16975616006139d24780c4c0c32b48b181506579
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@6527db3f966c03b3ead809425b5381fd71c12d74:docker/migrations/forward/_ledger/migration-supersessions.tsv
+      captured_at: "2026-08-31T12:05:00Z"
+      captured_by: lane replay (OMN-17320)
+    test: tests/ci/test_incident_replay_omn17320.py::test_the_real_guard_rejects_the_captured_artifact
+    why: >-
+      This guard is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green being replaced is the ABSENCE of any guard at all: OMN-17288 scrubbed a live tenant slug out of five files in this repo (#3062, 3f10ee5e), and three hours later omnimarket#2239 reintroduced the same slug there, with the rebase carrying it onto omnimarket#2241 -- the PR whose own acceptance criterion was "zero grep hits" -- while every enforced gate reported green. Nothing in either repo was looking. The artifact is docker/migrations/forward/_ledger/migration-supersessions.tsv exactly as it stood on dev at 6527db3f (= 3f10ee5e^), immediately before the scrub, one of the five files the OMN-17288 census enumerated. ONE REDACTION, recorded here because it is load-bearing: the 11-byte slug on line 7 is replaced by an 11-byte stand-in; every other byte of the 8455 is verbatim and the length is preserved, so every offset in the file is unchanged and the replay still asserts the finding at the slug's real position (line 7, column 379). The pre-redaction sha256 is 9673ad7099caae45d4b3e120bc4d78142321147388cfc6ffba259cb9f2d736ca, so anyone re-fetching the git object can verify byte-for-byte what changed. The redaction is unavoidable rather than convenient: this repo is PUBLIC, and committing the real value as a fixture is precisely the disclosure the guard under test exists to prevent -- an unredacted fixture would fail the very gate it is proving. OMN-17288 set this same precedent in this same registry, redacting a byte range out of tests/fixtures/omn16906/commit-7090f386f.gh-api.json.captured and moving its sha256 pin with the original hash documented. What is genuinely replayed is the part that matters: the guard runs over the REAL TSV field structure, the REAL prose and the REAL token boundaries at the REAL byte offset, not over a line an author imagined -- which is the exact complaint OMN-15547 exists to answer. Direction is false_green, so guard_verdict_on_artifact is reject; an accept control in the same module (test_the_shipped_denylist_does_not_fire_on_this_artifact) requires the SHIPPED denylist to pass the same bytes, so a guard that simply rejects everything cannot satisfy this case.
   - id: omn17307-reconciler-judged-by-exit-code
     guard: scripts/check_reconciler_movement_proof.py
     incident: OMN-17307
@@ -539,3 +555,38 @@ cases:
     test: tests/ci/test_incident_replay_omn16906.py::TestDeliveryLivenessGuard::test_the_real_startup_failure_run_is_reported_not_passed_over
     why: >-
       This guard is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green being replaced is the ABSENCE of any watcher: nothing in either repo looked at this workflow's run history, and `startup_failure` is the one conclusion that surfaces nowhere else -- no job is created, so there is no failing step, no annotation, and no check to go red. The staging deploy downstream kept reporting green throughout because from its side nothing was wrong: it faithfully re-applied the digests it had been given. The gap surfaced a full day later only when a migration fence that had already merged failed to apply on onex-dev (deploy run 33207733444), and recovery took a manual build dispatch plus a hand-sent repository_dispatch (deploy run 33210591963). The artifact is GitHub's own record of the last such run, fetched verbatim from the runs API, carrying `conclusion: startup_failure` for head_sha 25a24fae on dev. The replay drives the guard's real normalize_run() projection over those bytes before evaluating, so it also proves the guard can read the shape GitHub actually returns rather than only the shape a test author imagined. Its sibling in the same module, commit-7090f386f.gh-api.json.captured (the OMN-16493 migration-fence merge, PR #2974, independently sha256-pinned there), pins the second and harder shape: that merge produced ZERO delivery runs of any conclusion, so a guard reading run history alone would have reported clean straight through the exact merge whose non-delivery broke the deploy -- which is why the guard reasons from the delivery workflow's own on.push.paths filter over real commits, and reads that filter out of the workflow file rather than restating it. An accept control in the same module supplies a successful run for the same commit and requires a clean verdict, so a guard that simply always reports a gap cannot pass.
+  - id: omn15701-stale-pin-backwards-move
+    guard: scripts/ci/check_omnimarket_contract_pin_advance.py
+    incident: OMN-15701
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn17292/omnimarket-compare-54356a83-4637e625.gh-api.json.captured
+      sha256: d63e211c0d3fc386e34a08a78a3a06ec4de1d2ced12d77da3a64bfb87f8fa041
+    capture:
+      method: live-fetch
+      source: gh-api:repos/OmniNode-ai/omnimarket/compare/54356a831e3d8876c69373cac884a3df2a5653f7...4637e625c99ef17c190aa471a5e51b7f646c6dfd
+      captured_at: '2026-08-31T10:42:00Z'
+      captured_by: lane replay (OMN-17292)
+    test: tests/ci/test_omnimarket_contract_pin.py::test_the_omn15701_stale_pin_is_refused_by_the_real_guard
+    why: >-
+      omnibase_infra ci.yml pinned the grants derivation at omnimarket 4637e625 while omnimarket dev had moved on. generate_application_database_table_grants.py owns the TABLE-grant subset outright -- it drops every existing TABLE grant and re-emits from the contract set it is handed -- so #2632's regeneration from that stale pin silently deleted #2634's tenant_projection_writer grants for 8 house-tenant relations, on a green build. Nothing asked whether the pin was still reachable forward from what it replaced. The captured artifact is GitHub answering exactly that question for the real pair: status diverged, 61 commits behind. OMN-17292 reintroduces a pin deliberately (a live foreign branch tip as derivation input reddened every open infra PR three times in 21 hours), which is only safe because this guard makes the pin forward-only; the case drives the real predicate over the real response so the guard cannot be a shape check that any 40-hex string satisfies. Its accept sibling (omnimarket-compare-2f123b4c-fd3e66c7, status ahead) is the control that stops a blanket-reject implementation looking correct -- a guard that refused every advance would wedge the refresh bot and silently restore the staleness OMN-15703 removed.
+  - id: omn17290-upstream-merge-reds-every-unrelated-pr
+    guard: scripts/resolve_omnimarket_contract_pin.py
+    incident: OMN-17290
+    regression_class: false_red
+    guard_verdict_on_artifact: accept
+    artifact:
+      fixture: tests/fixtures/omn17292/omnimarket-compare-2f123b4c-fd3e66c7.gh-api.json.captured
+      sha256: 364af3872b14d693296d8aa9946c5837dbf46aad103a8d7c65376bfa920fa211
+    capture:
+      method: live-fetch-sanitized
+      sanitization: >-
+        A tenant slug denylisted by the OMN-17320 Exposed Identifier Gate (denylist entry omn17288-tenant-slug, from the OMN-17288 live-customer-slug-in-a-public-repo incident) appeared in commit-message text inside this compare payload. It is replaced by the synthetic stand-in `acme-tenant` of identical length, which is the first remedy the gate itself prescribes. The replay is NOT weakened: check_omnimarket_contract_pin_advance.py reads exactly four fields -- url, status, ahead_by, behind_by -- and the slug occurs in none of them, so the verdict this capture proves is identical to GitHub's own answer.
+      source: gh-api:repos/OmniNode-ai/omnimarket/compare/2f123b4c01eabd2c51f7d703491e9cdf36f89bcd...fd3e66c71ccfd4f7383904baa19e5bd700993a05
+      captured_at: '2026-08-31T10:42:00Z'
+      captured_by: lane replay (OMN-17292)
+    test: tests/ci/test_omnimarket_contract_pin.py::test_omnimarket_dev_moving_past_the_pin_does_not_move_the_derivation_input
+    discriminator: tests/ci/test_omnimarket_contract_pin.py::test_the_resolver_refuses_a_mutable_ref
+    why: >-
+      OMN-15703 made the Application Database Domain Enforcement gate resolve omnimarket's live dev HEAD at CI-run time, so the grants derivation input was a foreign repository's moving branch tip. Because omnibase_infra dev enforces through the single required CI Summary umbrella (OMN-4497), an omnimarket merge that added a db_io.db_tables declaration turned that required check red on every open infra PR simultaneously -- none of which changed anything related, and none of which could fix it. Three times in 21 hours: OMN-17141, OMN-16930, OMN-17290, each costing a separate lane a full investigate-fix-merge cycle while every other infra PR sat blocked. The captured artifact is GitHub's own answer that dev moved 2 commits past 2f123b4c -- the exact commit omnibase_infra#3061 regenerated the open_obligations grant against -- which is the precondition of that red. The case drives the real resolver and requires it to be unmoved by that movement: the input is committed state, so an unrelated PR's verdict is a function of this repo alone. Direction is false_red, so the discriminator is required and is the fail-closed proof that a mutable ref (a branch name) is refused rather than resolved -- without it a resolver stuck open on whatever it was handed would satisfy the accept proof while quietly restoring the coupling.

@@ -23,16 +23,29 @@
 #     ingress HTTP response, and the receipt carries a status per
 #     OMN-16025 chain link
 #   - OMN-16025: the five-link delegation gate this canary reports against
-#   - OMN-16963 / OMN-16964: the links (2 and 5) this canary still has NO
-#     leg for; they report `no_leg` and name their owning ticket
+#   - OMN-16963: paid link 2's debt. Link 2 now has a real leg — a
+#     correlation-scoped readback of delegation_workflow_state — and a
+#     non-passing link 2 fails the SCALAR verdict, not only
+#     `chain_proof_complete`. Before that, an unconfigured or stranded
+#     projection still produced GREEN with success=True.
+#   - OMN-16964: paid link 5's debt. Link 5 now has a real leg — ledger
+#     chain assembly, replay, and an HONEST tier-2 verifier whose SKIP is a
+#     distinct non-passing status — and a non-passing link 5 fails the
+#     SCALAR verdict too. No link reports `no_leg` any more: with links 2
+#     and 5 both paid, this node can claim a five-link proof honestly, and
+#     `chain_proof_complete` means what it says.
 #
 name: "node_chain_canary_effect"
 node_type: "EFFECT_GENERIC"
+# 1.1.0 -> 1.2.0: additive. The node gains declared capability rather than a
+# fix — every non-passing projection and ledger outcome is now a verdict the
+# handler can actually emit, and LEDGER_REPLAY_UNREADABLE closes the last
+# EnumLedgerReplayStatus member (ERROR) that had no declared page.
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
-node_version: "1.1.0"
+node_version: "1.2.0"
 description: >
   Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, and checks the platform quarantine sink for the same id. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof.
 
@@ -133,16 +146,44 @@ error_handling:
       description: "No broker was configured for the terminal readback, so the run has no evidence about the terminal. Deliberately NOT a fallback to the ingress response — that fallback is the OMN-16931 defect."
       recoverable: true
       retry_strategy: "none"
+    - name: "PROJECTION_STRANDED"
+      description: "The terminal IS on the bus for this correlation id and delegation_workflow_state holds a non-terminal FSM state for it. The chain carried the event and the FSM did not finish with it — the OMN-14843 shape, invisible to every other leg."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_ROW_ABSENT"
+      description: "The terminal IS on the bus and the projection carries NO row for this correlation id. Kept distinct from PROJECTION_STRANDED because a row that stopped mid-FSM is a projection defect while an absent row may equally be a publish that never happened — they send you to different layers."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_READBACK_FAILED"
+      description: "The projection readback was configured but could not run. Fails closed on the same terms as TERMINAL_READBACK_FAILED — an unrunnable check is never reported as a passing one."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_READBACK_NOT_CONFIGURED"
+      description: "No DSN was configured for the projection readback, so the run has no evidence about link 2. Deliberately NOT green-with-a-caveat the way an unconfigured quarantine leg is: quarantine is a supplementary check, link 2 is one of the five OMN-16025 chain links, and a run that cannot see it is the three-links-rendered-as-five defect itself (OMN-16963)."
+      recoverable: true
+      retry_strategy: "none"
     - name: "LEDGER_CHAIN_INCOMPLETE"
       description: "The ledger chain was assembled but a declared hop is missing, so there is nothing complete to replay (OMN-16964). Distinct from LEDGER_REPLAY_FAILED: the evidence was never there, rather than present and failing to reproduce."
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_REPLAY_FAILED"
-      description: "A complete ledger chain was replayed and the replay was not green (OMN-16964)."
+      description: "A complete ledger chain was replayed and the replay was not green (OMN-16964). The replay ran and disagreed, rather than having nothing to run on."
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_VERIFIER_SKIPPED"
       description: "The tier-2 verifier ran and returned SKIP. Never counted as a pass — this is the member the word HONEST in the OMN-16025 link-5 gate text exists for, and folding it into PASS would re-create the defect the gate was written to catch."
+      recoverable: true
+      retry_strategy: "none"
+    # OMN-16964 follow-up. EnumLedgerReplayStatus has SIX members, five of
+    # them non-passing, and ERROR — the ledger store itself not answering —
+    # had no declared page here. Distinct failure layers get distinct
+    # diagnoses, the same doctrine that keeps PROJECTION_STRANDED and
+    # PROJECTION_ROW_ABSENT apart one link over: CHAIN_INCOMPLETE is evidence
+    # that was never there, LEDGER_REPLAY_FAILED is evidence present that did
+    # not reproduce, and this is an infrastructure page rather than a chain
+    # page — the store did not answer at all.
+    - name: "LEDGER_REPLAY_UNREADABLE"
+      description: "The ledger chain was configured but could not be assembled, replayed or verified — the store itself did not answer. Fails closed on the same terms as the other unrunnable checks. An infrastructure page, not a chain page: distinct from LEDGER_CHAIN_INCOMPLETE (read, and found short a hop) and from LEDGER_REPLAY_FAILED (read, replayed, and disagreed)."
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_REPLAY_NOT_CONFIGURED"

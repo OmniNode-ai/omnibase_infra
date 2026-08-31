@@ -313,7 +313,31 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # node history'); 0004 restates the policy and the OMN-14894 GRANT inside
     # one block. It was found by scripts/validation/
     # check_migration_rls_policy_atomicity.py on its first run, not by review.
-    assert len(result.declarations) == 126
+    #
+    # +1 again for OMN-17316's node_projection_delegation/
+    # 0034_delegation_events_uuid_via_registry_role_set_guard.sql, which
+    # supersedes 0033. 0033 guarded its role switch with
+    # `pg_has_role(current_user, v_owner, 'USAGE')` and then performed the
+    # switch two statements later via `set_config('role', ...)`. Since
+    # PostgreSQL 16 INHERIT and SET are INDEPENDENT membership options, so a
+    # membership granted `WITH INHERIT TRUE, SET FALSE` passes that guard and
+    # aborts on a bare `permission denied to set role` -- the opaque refusal
+    # the guard exists to replace. 0034 tests BOTH predicates before the
+    # switch, naming which one failed; 0033's body is carried over verbatim.
+    # Proven by execution against the real vendored bytes in
+    # tests/integration/migrations/test_omn17316_role_set_membership_guard.py.
+    #
+    # 0033's own declaration does NOT move: unlike 0032 in the change above, it
+    # is retired in place and its bytes are untouched. Probed read-only
+    # 2026-08-31 against platform_catalog.schema_migrations in
+    # omnidash_analytics on all four .201 lanes, 0033 is applied on none --
+    # dev CLEAN (0030, 0031), stability-test CLEAN (0030), prod and judge
+    # NO_LEDGER. Neither fact is what admits the change: the append-only gate
+    # keys on manifest DECLARATION rather than lane application, and it is
+    # satisfied here by 0034 being an ADD next to an untouched 0033. What the
+    # lane probe and the gate jointly settled is that the repair could not be
+    # an in-place edit to 0033.
+    assert len(result.declarations) == 127
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

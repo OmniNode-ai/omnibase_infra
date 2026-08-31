@@ -60,10 +60,22 @@ _SUPERSEDED_0032 = (
     / "node_projection_delegation"
     / ("0032_delegation_events_tenant_id_uuid_via_registry.sql")
 )
-_CONVERSION = (
+# OMN-17316 superseded 0033 with 0034 in turn: 0033 guarded its role switch
+# with pg_has_role(..., 'USAGE') and then performed the switch, but since
+# PostgreSQL 16 INHERIT and SET are independent membership options, so a
+# `WITH INHERIT TRUE, SET FALSE` membership passed the guard and aborted
+# opaquely just past it. _CONVERSION follows the OPERATIVE file for the same
+# reason it moved from 0032 to 0033: a future edit re-introducing a literal map
+# would land in the live file, not in a retired one.
+_SUPERSEDED_0033 = (
     _NODES
     / "node_projection_delegation"
     / ("0033_delegation_events_uuid_via_registry_single_transaction.sql")
+)
+_CONVERSION = (
+    _NODES
+    / "node_projection_delegation"
+    / ("0034_delegation_events_uuid_via_registry_role_set_guard.sql")
 )
 _MIRROR = (
     _NODES
@@ -180,6 +192,31 @@ class TestSupersededMigrationIsImmutable:
             "OMN-17288; found " + str(len(matching))
         )
 
+    def test_the_third_supersession_is_recorded(self) -> None:
+        """OMN-17316: 0033 -> 0034.
+
+        The row records 0033's RETIREMENT; it is not what admits this change
+        (0033's bytes are untouched, so the append-only gate passes on the ADD
+        alone). What the gate DID decide is that the repair could not be an
+        in-place edit: it keys on MANIFEST DECLARATION, not on lane
+        application, and 0033 was declared at dev tip the moment #3062 merged.
+        Verified by falsification 2026-08-31 -- a staged one-comment-line edit
+        to 0033 returns "FAIL: applied migration history was rewritten
+        (OMN-16705) ... no supersession row", exit 1.
+        """
+        rows = (_LEDGER / "migration-supersessions.tsv").read_text().splitlines()
+        matching = [
+            row
+            for row in rows
+            if row.startswith("nodes/node_projection_delegation/0033_")
+            and "0034_delegation_events_uuid_via_registry_role_set_guard.sql" in row
+            and "OMN-17316" in row
+        ]
+        assert len(matching) == 1, (
+            "0033 -> 0034 must carry exactly one supersession row citing "
+            "OMN-17316; found " + str(len(matching))
+        )
+
 
 class TestReplacementResolvesFromTheRegistry:
     def test_no_slug_literal_appears_in_the_conversion(self) -> None:
@@ -286,13 +323,13 @@ class TestReplacementResolvesFromTheRegistry:
 
 
 class TestBothMigrationsStayFenced:
-    def test_the_fence_holds_0031_and_0032_and_0033(self) -> None:
+    def test_the_fence_holds_0031_and_0032_and_0033_and_0034(self) -> None:
         """The un-gate is an operator action gated on TWO independent things.
 
-        0033 releasing itself the moment it merges would abort every deploy
-        until the projection caught up -- correctly, and uselessly. 0031 and
-        0032 stay fenced because leaving a retired id fenced is what keeps it
-        retired: when the operator un-gates, it is 0033 and only 0033.
+        0034 releasing itself the moment it merges would abort every deploy
+        until the projection caught up -- correctly, and uselessly. 0031, 0032
+        and 0033 stay fenced because leaving a retired id fenced is what keeps
+        it retired: when the operator un-gates, it is 0034 and only 0034.
         """
         fence = (
             Path(__file__).resolve().parents[2]
@@ -314,9 +351,16 @@ class TestBothMigrationsStayFenced:
             "node:node_projection_delegation:"
             "0033_delegation_events_uuid_via_registry_single_transaction.sql" in ids
         ), (
-            "0033 is the OPERATIVE conversion (OMN-17288) and must arrive "
-            "fenced on the same interlock 0032 carried -- the mirror has to be "
-            "caught up before it can resolve anything"
+            "0033 is RETIRED (OMN-17316 superseded it) and stays fenced -- "
+            "leaving a retired id fenced is what keeps it retired"
+        )
+        assert (
+            "node:node_projection_delegation:"
+            "0034_delegation_events_uuid_via_registry_role_set_guard.sql" in ids
+        ), (
+            "0034 is the OPERATIVE conversion (OMN-17316) and must arrive "
+            "fenced on the same interlock 0032 and 0033 carried -- the mirror "
+            "has to be caught up before it can resolve anything"
         )
         # The mirror's create is deliberately NOT fenced: it is 0032's
         # precondition, so fencing it would guarantee the ordering violation

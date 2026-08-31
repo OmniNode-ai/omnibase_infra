@@ -182,6 +182,23 @@ repos:
         exclude: ^(tests/|archived/).*\.py$
         pass_filenames: true # Only check changed files, not entire codebase
         stages: [pre-push] # Moved to pre-push: ~1-5s for changed files only
+      # OMN-17320: exposed-identifier gate. Salted-SHA256 denylist of customer
+      # identifiers that must never re-enter this PUBLIC repo. OMN-17288 scrubbed a
+      # live tenant slug from five files here; three hours later an unrelated lane
+      # reintroduced it in omnimarket with every gate green. The denylist holds
+      # digests, never plaintext -- writing the literal into a pattern list in a
+      # public repo would be the very occurrence the gate prevents.
+      # Same script + same denylist as omnimarket (byte-identical; parity pinned by
+      # tests/ci/test_exposed_identifier_gate.py::test_cross_repo_fingerprint_pin).
+      # Escape hatch, per line only, ticket + reason required:
+      #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
+      - id: exposed-identifier-gate
+        name: Exposed identifier gate (OMN-17320)
+        entry: python3 scripts/validation/check_exposed_identifiers.py --mode blocking
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
+        exclude: ^(archived/|workspace/sibling-repos/).*$
       # Cleanup: Clear tmp/ directory before commits
       - id: clean-tmp-directory
         name: Clean tmp directory
@@ -345,6 +362,20 @@ repos:
         language: system
         files: (^|/)contract\.yaml$
         pass_filenames: true
+        stages: [pre-commit]
+      # OMN-17317: gate-runner entry-point gate. The 2026-08-31 wedge came from
+      # a governed pre-push whose liveness depended on a live `docker exec`
+      # attach: pre-commit buffers a hook's whole output, the exec stdout is a
+      # 64 KiB kernel pipe nothing drains once the client detaches, and the
+      # write blocks forever AFTER the suite has already passed. The behavioral
+      # + policy proofs live in one file, and it runs BOTH here and in CI (it
+      # is under `testpaths`) so local and merge enforcement cannot drift.
+      - id: gate-runner-entrypoint-gate
+        name: gate-runner detached entry point (OMN-17317)
+        entry: uv run --frozen pytest tests/ci/test_gate_runner_detached_entrypoint.py -q
+        language: system
+        files: ^(scripts/ci/(run_on_gate_runner|gate_runner_supervisor)\.sh|scripts/hooks/prepush_smart_tests\.sh|tests/ci/test_gate_runner_detached_entrypoint\.py)$
+        pass_filenames: false
         stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
