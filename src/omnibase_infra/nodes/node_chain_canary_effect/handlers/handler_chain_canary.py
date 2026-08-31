@@ -521,22 +521,48 @@ async def _replay_ledger_chain_via_asyncpg(
     except ImportError as exc:  # pragma: no cover - asyncpg is a hard dep
         return None, False, "", f"asyncpg unavailable: {exc}"
 
+    # ONE deadline across connect AND query, not timeout_s applied to each.
+    # Applied per-call, this leg could hold asyncio.gather() for ~2x the window
+    # it was budgeted, which defeats the "costs no extra wall-clock" property
+    # that justifies running it as a concurrent leg at all.
+    deadline = time.monotonic() + timeout_s
+
+    def _remaining() -> float:
+        return deadline - time.monotonic()
+
     connection = None
     try:
-        connection = await asyncio.wait_for(asyncpg.connect(source), timeout=timeout_s)
+        if _remaining() <= 0:
+            return None, False, "", "ledger replay budget exhausted before connect"
+        connection = await asyncio.wait_for(
+            asyncpg.connect(source), timeout=_remaining()
+        )
+        if _remaining() <= 0:
+            return None, False, "", "ledger replay budget exhausted after connect"
         rows = await asyncio.wait_for(
             connection.fetch(
                 "SELECT hop, replay_green, verifier_verdict FROM ledger_chain "
                 "WHERE correlation_id = $1 ORDER BY hop_index",
                 correlation_id,
             ),
-            timeout=timeout_s,
+            timeout=_remaining(),
         )
     except Exception as exc:  # noqa: BLE001 - fails closed, never to a verdict
         return None, False, "", sanitize_error_message(exc)
     finally:
+        # cleanup-resilience-ok: a failure to close must not replace the
+        # unreadable-ledger tuple this function returns, nor propagate out of
+        # asyncio.gather() and abort the sibling legs. The connection is
+        # discarded either way; the read outcome is the only fact worth
+        # reporting.
         if connection is not None:
-            await connection.close()
+            try:
+                await connection.close()
+            except Exception as close_exc:  # noqa: BLE001
+                logger.debug(
+                    "chain canary: ledger connection close failed: %s",
+                    sanitize_error_message(close_exc),
+                )
 
     hops = tuple(str(row["hop"]) for row in rows)
     replay_green = all(bool(row["replay_green"]) for row in rows) if rows else False
@@ -768,6 +794,8 @@ class HandlerChainCanary:
             projection_readback_status=projection_readback_status,
             projection_state=projection_state,
             projection_error=projection_error,
+            ledger_status=ledger_status,
+            ledger_detail=ledger_detail,
         )
 
         link_verdicts = _build_link_verdicts(
@@ -1001,6 +1029,8 @@ class HandlerChainCanary:
         projection_readback_status: EnumProjectionReadbackStatus,
         projection_state: str,
         projection_error: str,
+        ledger_status: EnumLedgerReplayStatus,
+        ledger_detail: str,
     ) -> tuple[EnumChainCanaryVerdict, str]:
         """Rank the verdicts. Most specific diagnosis wins.
 
@@ -1145,9 +1175,61 @@ class HandlerChainCanary:
                 ),
             )
 
-        # Terminal on the bus AND the projection agrees it terminalized. The
-        # only remaining question is whether the request path also reported
-        # success.
+        # Links 2 and 4 have both passed. The ledger is the last thing left
+        # that can disprove the run, and it is ranked here for the same reason
+        # link 2 sits above the ingress checks: it is evidence about the chain,
+        # and the ingress response is only ever a claim about the request path.
+        if ledger_status is EnumLedgerReplayStatus.CHAIN_INCOMPLETE:
+            return (
+                EnumChainCanaryVerdict.LEDGER_CHAIN_INCOMPLETE,
+                (
+                    "the terminal is on the bus and the projection "
+                    "terminalized, but the assembled ledger chain has a gap — "
+                    f"there is nothing complete to replay: {ledger_detail}"
+                ),
+            )
+        if ledger_status is EnumLedgerReplayStatus.REPLAY_FAILED:
+            return (
+                EnumChainCanaryVerdict.LEDGER_REPLAY_NOT_GREEN,
+                (
+                    "a COMPLETE ledger chain was assembled and replayed for "
+                    "this correlation id, and the replay was not green. "
+                    "Distinct from an incomplete chain: the replay ran and "
+                    "disagreed, rather than having nothing to run on."
+                ),
+            )
+        if ledger_status is EnumLedgerReplayStatus.VERIFIER_SKIPPED:
+            return (
+                EnumChainCanaryVerdict.LEDGER_VERIFIER_SKIPPED,
+                (
+                    "the tier-2 verifier returned SKIP — it was pointed at "
+                    "this run and checked nothing. OMN-16025 counts that as "
+                    "not proven, and reporting it as green is the SKIP-reads-"
+                    "as-PASS defect this ticket exists to end."
+                ),
+            )
+        if ledger_status is EnumLedgerReplayStatus.ERROR:
+            return (
+                EnumChainCanaryVerdict.LEDGER_REPLAY_UNREADABLE,
+                (
+                    "the ledger chain was configured but could not be "
+                    f"assembled, replayed or verified: {ledger_detail}. "
+                    "Failing closed — an unrunnable check is not a passing one."
+                ),
+            )
+        if ledger_status is EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED:
+            return (
+                EnumChainCanaryVerdict.LEDGER_REPLAY_NOT_CONFIGURED,
+                (
+                    "no source was configured for the ledger replay, so this "
+                    "run has NO evidence about link 5. Red on the same terms "
+                    "as link 2: link 5 is one of the five OMN-16025 chain "
+                    "links, not a supplementary check."
+                ),
+            )
+
+        # Every leg agrees. The only remaining question is whether the request
+        # path also reported success.
         quarantine_suffix = (
             " (quarantine check not configured — no claim made about the "
             "quarantine sink)"

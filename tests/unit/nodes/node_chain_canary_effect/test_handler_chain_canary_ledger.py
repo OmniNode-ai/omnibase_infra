@@ -30,12 +30,20 @@ ledger store, no replay engine.
 
 from __future__ import annotations
 
+import asyncio
+import sys
+import time
 from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary import (
     HandlerChainCanary,
+    _replay_ledger_chain_via_asyncpg,
+)
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_canary_verdict import (
+    EnumChainCanaryVerdict,
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link import (
     EnumChainLink,
@@ -50,10 +58,16 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_res
     ModelChainCanaryResult,
 )
 
-_PROBE_URL = "http://127.0.0.1:8085"
-_BOOTSTRAP = "127.0.0.1:19092"
-_SUCCESS_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"
-_LEDGER_SOURCE = "postgresql://probe@127.0.0.1:5436/omnibase_infra"
+# Endpoints use the RFC 2606 reserved `.invalid` TLD, matching the sibling
+# canary suites. This is isolation, not cosmetics: every leg here is stubbed,
+# so a loopback literal would silently reach a real local Redpanda or Postgres
+# if one happened to be up, and the suite would stop being hermetic without
+# ever failing. `.invalid` cannot resolve, so it cannot reach anything.
+_PROBE_URL = "http://runtime.invalid:8085"
+_BOOTSTRAP = "broker.invalid:19092"
+_SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
+_LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
+_PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
 
 # The hops a complete chain must carry, end to end. A run missing any one of
 # these is CHAIN_INCOMPLETE — "no gaps tolerated silently" is the scope's own
@@ -70,6 +84,11 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "quarantine_bootstrap_servers": _BOOTSTRAP,
         "ledger_source": _LEDGER_SOURCE,
         "expected_ledger_hops": _FULL_CHAIN,
+        # OMN-16963: link 2 must be configured here too. A non-passing link 2
+        # outranks every ledger verdict in `_decide`, so without this these
+        # fixtures would all stop at PROJECTION_READBACK_NOT_CONFIGURED and
+        # never reach the link-5 branch they exist to exercise.
+        "projection_dsn": _PROJECTION_DSN,
         "settle_seconds": 0,
     }
     fields.update(overrides)
@@ -305,3 +324,211 @@ async def test_link_five_no_longer_reports_no_leg() -> None:
     )
     assert verdict.status is not EnumChainLinkStatus.NO_LEG
     assert verdict.owning_ticket == ""
+
+
+# -- the SCALAR verdict, not just the link (OMN-16964) --------------------
+#
+# Link 5 gets the same treatment link 2 got: `_decide()` receives the ledger
+# status, so a non-passing link 5 can no longer coexist with GREEN. Before
+# this, the per-link status was honest -- `_link_five` has always mapped
+# VERIFIER_SKIPPED to FAIL -- while the scalar verdict still said green, which
+# is the over-reading one level up.
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ledger", "source", "expected"),
+    [
+        (
+            _LedgerReplay(hops=("received", "terminal")),
+            _LEDGER_SOURCE,
+            EnumChainCanaryVerdict.LEDGER_CHAIN_INCOMPLETE,
+        ),
+        (
+            _LedgerReplay(replay_green=False),
+            _LEDGER_SOURCE,
+            EnumChainCanaryVerdict.LEDGER_REPLAY_NOT_GREEN,
+        ),
+        (
+            _LedgerReplay(verifier_verdict="skip"),
+            _LEDGER_SOURCE,
+            EnumChainCanaryVerdict.LEDGER_VERIFIER_SKIPPED,
+        ),
+        (
+            _LedgerReplay(hops=None, error="connection refused"),
+            _LEDGER_SOURCE,
+            EnumChainCanaryVerdict.LEDGER_REPLAY_UNREADABLE,
+        ),
+        (
+            _LedgerReplay(),
+            "",
+            EnumChainCanaryVerdict.LEDGER_REPLAY_NOT_CONFIGURED,
+        ),
+    ],
+    ids=["incomplete", "replay_red", "verifier_skip", "unreadable", "not_configured"],
+)
+async def test_non_passing_link_five_is_never_green(
+    ledger: _LedgerReplay,
+    source: str,
+    expected: EnumChainCanaryVerdict,
+) -> None:
+    """Each non-passing ledger outcome gets its own scalar verdict.
+
+    Every case here has a healthy ingress, a real terminal on the bus AND a
+    terminalized projection -- so links 1, 2 and 4 all pass and the ledger is
+    the only thing left that can disprove the run. That is exactly the shape
+    that used to return GREEN.
+    """
+    result = await _handler(ledger).handle(_request(ledger_source=source))
+
+    assert result.verdict is expected
+    assert result.success is False
+    assert result.chain_proof_complete is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_verifier_skip_reaches_the_scalar_verdict_not_just_the_link() -> None:
+    """The SKIP != PASS property, asserted where a reader actually looks.
+
+    ``test_verifier_skip_is_never_green`` above holds the line at the link.
+    This holds it at the field people quote. A receipt whose link 5 says FAIL
+    while its verdict says GREEN is still a receipt that gets read as green.
+    """
+    result = await _handler(_LedgerReplay(verifier_verdict="skip")).handle(_request())
+
+    assert _link(result, EnumChainLink.LEDGER_REPLAY) is EnumChainLinkStatus.FAIL
+    assert result.verdict is EnumChainCanaryVerdict.LEDGER_VERIFIER_SKIPPED
+    assert result.success is False
+    assert "checked nothing" in result.detail
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ledger", "source"),
+    [
+        (_LedgerReplay(hops=("received",)), _LEDGER_SOURCE),
+        (_LedgerReplay(replay_green=False), _LEDGER_SOURCE),
+        (_LedgerReplay(verifier_verdict="skip"), _LEDGER_SOURCE),
+        (_LedgerReplay(verifier_verdict="fail"), _LEDGER_SOURCE),
+        (_LedgerReplay(hops=None, error="boom"), _LEDGER_SOURCE),
+        (_LedgerReplay(), ""),
+    ],
+)
+async def test_success_and_link_five_can_never_disagree(
+    ledger: _LedgerReplay, source: str
+) -> None:
+    """The invariant, stated directly rather than per-case.
+
+    If link 5 is anything other than PASS, ``success`` must be False. Guards
+    the direction the per-case tests cannot: a new ledger status, or a new
+    branch in ``_decide``, that quietly reintroduces the defect.
+    """
+    result = await _handler(ledger).handle(_request(ledger_source=source))
+
+    link_five_passed = (
+        _link(result, EnumChainLink.LEDGER_REPLAY) is EnumChainLinkStatus.PASS
+    )
+    assert link_five_passed is False
+    assert result.success is False
+
+
+# -- the replay's own resilience (same two defects as link 2's readback) --
+
+
+class _FakeConnection:
+    """Minimal asyncpg connection stand-in."""
+
+    def __init__(
+        self,
+        *,
+        rows: list[dict[str, object]] | None = None,
+        fetch_delay_s: float = 0.0,
+        close_raises: bool = False,
+    ) -> None:
+        self._rows = rows if rows is not None else []
+        self._fetch_delay_s = fetch_delay_s
+        self._close_raises = close_raises
+        self.closed = False
+
+    async def fetch(self, query: str, correlation_id: str) -> list[dict[str, object]]:
+        if self._fetch_delay_s:
+            await asyncio.sleep(self._fetch_delay_s)
+        return self._rows
+
+    async def close(self) -> None:
+        self.closed = True
+        if self._close_raises:
+            raise OSError("connection reset while closing")
+
+
+class _FakeAsyncpg:
+    """Stands in for the lazily-imported ``asyncpg`` module."""
+
+    def __init__(
+        self, connection: _FakeConnection, *, connect_delay_s: float = 0.0
+    ) -> None:
+        self._connection = connection
+        self._connect_delay_s = connect_delay_s
+
+    async def connect(self, source: str) -> _FakeConnection:
+        if self._connect_delay_s:
+            await asyncio.sleep(self._connect_delay_s)
+        return self._connection
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_close_failure_does_not_replace_the_replay_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure to close must not escape and abort the sibling legs.
+
+    ``close()`` ran in a bare ``finally`` outside the ``except``, so an error
+    there propagated past the fail-closed return, out of ``asyncio.gather()``,
+    and took the terminal, quarantine and projection legs down with it.
+    """
+    rows: list[dict[str, object]] = [
+        {"hop": hop, "replay_green": True, "verifier_verdict": "pass"}
+        for hop in _FULL_CHAIN
+    ]
+    connection = _FakeConnection(rows=rows, close_raises=True)
+    monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
+
+    hops, replay_green, verdict, error = await _replay_ledger_chain_via_asyncpg(
+        _LEDGER_SOURCE, str(uuid4()), 5.0
+    )
+
+    assert hops == _FULL_CHAIN
+    assert replay_green is True
+    assert verdict == "pass"
+    assert error == ""
+    assert connection.closed is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_connect_and_query_share_one_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``timeout_s`` is the budget for the leg, not for each call in it.
+
+    Connect and fetch each fit inside the window individually and do not fit
+    together, so this passes only if one deadline spans both.
+    """
+    connection = _FakeConnection(rows=[], fetch_delay_s=0.25)
+    monkeypatch.setitem(
+        sys.modules, "asyncpg", _FakeAsyncpg(connection, connect_delay_s=0.25)
+    )
+
+    started = time.monotonic()
+    hops, _replay_green, _verdict, error = await _replay_ledger_chain_via_asyncpg(
+        _LEDGER_SOURCE, str(uuid4()), 0.3
+    )
+    elapsed = time.monotonic() - started
+
+    assert hops is None
+    assert error
+    assert elapsed < 0.6

@@ -159,11 +159,23 @@ error_handling:
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_REPLAY_FAILED"
-      description: "A complete ledger chain was replayed and the replay was not green (OMN-16964)."
+      description: "A complete ledger chain was replayed and the replay was not green (OMN-16964). The replay ran and disagreed, rather than having nothing to run on."
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_VERIFIER_SKIPPED"
       description: "The tier-2 verifier ran and returned SKIP. Never counted as a pass — this is the member the word HONEST in the OMN-16025 link-5 gate text exists for, and folding it into PASS would re-create the defect the gate was written to catch."
+      recoverable: true
+      retry_strategy: "none"
+    # OMN-16964 follow-up. EnumLedgerReplayStatus has SIX members, five of
+    # them non-passing, and ERROR — the ledger store itself not answering —
+    # had no declared page here. Distinct failure layers get distinct
+    # diagnoses, the same doctrine that keeps PROJECTION_STRANDED and
+    # PROJECTION_ROW_ABSENT apart one link over: CHAIN_INCOMPLETE is evidence
+    # that was never there, LEDGER_REPLAY_FAILED is evidence present that did
+    # not reproduce, and this is an infrastructure page rather than a chain
+    # page — the store did not answer at all.
+    - name: "LEDGER_REPLAY_UNREADABLE"
+      description: "The ledger chain was configured but could not be assembled, replayed or verified — the store itself did not answer. Fails closed on the same terms as the other unrunnable checks. An infrastructure page, not a chain page: distinct from LEDGER_CHAIN_INCOMPLETE (read, and found short a hop) and from LEDGER_REPLAY_FAILED (read, replayed, and disagreed)."
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_REPLAY_NOT_CONFIGURED"

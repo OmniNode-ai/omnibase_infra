@@ -46,6 +46,22 @@ _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+_LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
+_FULL_CHAIN = ("received", "routed", "inference_completed", "terminal")
+
+
+class _RecordingLedgerReplay:
+    """Stubbed link-5 replay. Verified by default, so these fixtures isolate
+    the leg under test rather than tripping over an unconfigured link 5."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def __call__(
+        self, source: str, correlation_id: str, timeout_s: float
+    ) -> tuple[tuple[str, ...] | None, bool, str, str]:
+        self.calls.append(correlation_id)
+        return _FULL_CHAIN, True, "pass", ""
 
 
 class _RecordingProjectionReadback:
@@ -76,6 +92,9 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         # OMN-16963: link 2 is now a claim on exactly the same terms, so it is
         # configured throughout for the same reason, and stubbed terminal.
         "projection_dsn": _PROJECTION_DSN,
+        # OMN-16964: and link 5 on identical terms, stubbed verified.
+        "ledger_source": _LEDGER_SOURCE,
+        "expected_ledger_hops": _FULL_CHAIN,
     }
     fields.update(overrides)
     return ModelChainCanaryRequest(**fields)  # type: ignore[arg-type]
@@ -172,6 +191,7 @@ async def test_mints_a_fresh_correlation_id_per_run() -> None:
         quarantine_scan=_RecordingQuarantine(),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -199,6 +219,7 @@ async def test_posts_the_recorded_delegation_recipe() -> None:
         quarantine_scan=_RecordingQuarantine(),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -231,6 +252,7 @@ async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
         quarantine_scan=quarantine,
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -272,6 +294,7 @@ async def test_reproduces_omn_16767_signature() -> None:
         ),
         quarantine_scan=_RecordingQuarantine(found=True),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -304,6 +327,7 @@ async def test_terminal_missing_when_ingress_times_out_and_the_bus_is_empty() ->
         quarantine_scan=_RecordingQuarantine(found=False),
         terminal_readback=_RecordingTerminalReadback(found=""),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -327,6 +351,7 @@ async def test_terminal_missing_when_ok_true_but_the_bus_carried_nothing() -> No
         quarantine_scan=_RecordingQuarantine(found=False),
         terminal_readback=_RecordingTerminalReadback(found=""),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -344,6 +369,7 @@ async def test_ingress_unreachable_is_its_own_verdict() -> None:
         quarantine_scan=_RecordingQuarantine(found=False),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -365,6 +391,7 @@ async def test_unconfigured_quarantine_reports_skipped_not_clean() -> None:
         quarantine_scan=quarantine,
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -387,6 +414,7 @@ async def test_quarantine_probe_failure_fails_closed() -> None:
         quarantine_scan=_RecordingQuarantine(found=None, error="broker unreachable"),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -432,6 +460,7 @@ async def test_kill_switch_read_from_env_at_handle_time(
         quarantine_scan=_RecordingQuarantine(),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
         kill_switch_disabled=False,
     )
     monkeypatch.setenv("ONEX_CHAIN_CANARY_DISABLED", "1")
@@ -457,6 +486,7 @@ async def test_kill_switch_env_falsey_values_do_not_disable_canary(
         quarantine_scan=quarantine,
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
+        ledger_replay=_RecordingLedgerReplay(),
     )
 
     result = await handler.handle(_request(quarantine_bootstrap_servers=_BOOTSTRAP))

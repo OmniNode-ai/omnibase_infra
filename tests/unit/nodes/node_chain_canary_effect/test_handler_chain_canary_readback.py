@@ -72,6 +72,8 @@ _BOOTSTRAP = "broker.invalid:19092"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _FAILURE_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+_LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
+_FULL_CHAIN = ("received", "routed", "inference_completed", "terminal")
 
 
 class _ProjectionReadback:
@@ -88,6 +90,15 @@ class _ProjectionReadback:
         return self.state, self.error
 
 
+class _LedgerReplay:
+    """Stubbed link-5 replay. Verified by default, for the same reason."""
+
+    async def __call__(
+        self, source: str, correlation_id: str, timeout_s: float
+    ) -> tuple[tuple[str, ...] | None, bool, str, str]:
+        return _FULL_CHAIN, True, "pass", ""
+
+
 def _request(**overrides: object) -> ModelChainCanaryRequest:
     fields: dict[str, object] = {
         "correlation_id": uuid4(),
@@ -101,6 +112,9 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         # are about the OTHER legs, so the projection is configured
         # throughout and stubbed terminal by default.
         "projection_dsn": _PROJECTION_DSN,
+        # OMN-16964: and link 5 on identical terms, stubbed verified.
+        "ledger_source": _LEDGER_SOURCE,
+        "expected_ledger_hops": _FULL_CHAIN,
         "settle_seconds": 0,
     }
     fields.update(overrides)
@@ -181,6 +195,7 @@ def _handler(
         quarantine_scan=quarantine or _Quarantine(found=False),
         terminal_readback=terminal_readback or _TerminalReadback(found=_SUCCESS_TOPIC),
         projection_readback=_ProjectionReadback(),
+        ledger_replay=_LedgerReplay(),
         kill_switch_disabled=False,
     )
 
@@ -426,18 +441,23 @@ async def test_receipt_carries_a_verdict_for_all_five_links() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_best_possible_run_is_still_not_a_five_link_proof() -> None:
-    """The load-bearing honesty test.
+async def test_a_fully_configured_run_is_now_a_five_link_proof() -> None:
+    """The honesty test, inverted — this is what the two tickets were for.
 
-    Everything this probe CAN assert passes. It is still not five, and the
-    receipt must say so — otherwise the 2h schedule keeps reporting a
-    five-link gate as green off a partial probe, which is exactly what
-    happened on run 33215999994.
+    This assertion used to read ``links_proven == 3`` and
+    ``chain_proof_complete is False``, and its name said the best possible
+    run was still not a five-link proof. That was true while links 2 and 5
+    had no legs: the 2h schedule kept reporting a five-link gate as green off
+    a three-link probe, which is what happened on run 33215999994.
 
-    OMN-16963 moved this from 3 of 5 to 4 of 5 by paying link 2's debt. The
-    number moving is the point: it is derived from the legs that actually
-    ran, not asserted as a constant, so link 5 remaining unpaid still keeps
-    ``chain_proof_complete`` False.
+    OMN-16963 paid link 2's debt and OMN-16964 paid link 5's, so with every
+    leg configured and every leg agreeing, the probe now proves all five. The
+    number is derived from the legs that actually ran rather than asserted as
+    a constant, which is why it moved on its own as each debt was paid.
+
+    ``chain_proof_complete`` being True here is the first time this node can
+    honestly claim it. ``test_a_partially_configured_run_is_never_a_proof``
+    below is the other half: it must stay False the moment any leg is unset.
     """
     handler = _handler(
         _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
@@ -447,8 +467,35 @@ async def test_best_possible_run_is_still_not_a_five_link_proof() -> None:
     result = await handler.handle(_request())
 
     assert result.verdict is EnumChainCanaryVerdict.GREEN
-    assert result.links_proven == 4
+    assert result.links_proven == 5
+    assert result.links_total == 5
+    assert result.chain_proof_complete is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unset",
+    ["projection_dsn", "ledger_source", "terminal_bootstrap_servers"],
+)
+async def test_a_partially_configured_run_is_never_a_proof(unset: str) -> None:
+    """Unset ANY chain-link leg and the run stops being a proof.
+
+    The guard the previous test used to carry, kept now that a full proof is
+    reachable. A five-link claim must require five legs that actually ran --
+    otherwise the probe shrinks silently and the receipt keeps saying five.
+    """
+    handler = _handler(
+        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
+        terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
+    )
+
+    result = await handler.handle(_request(**{unset: ""}))
+
     assert result.chain_proof_complete is False
+    assert result.links_proven < 5
+    assert result.verdict is not EnumChainCanaryVerdict.GREEN
+    assert result.success is False
 
 
 @pytest.mark.unit
@@ -469,17 +516,18 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
     ``test_handler_chain_canary_projection.py`` and
     ``test_handler_chain_canary_ledger.py`` for their own coverage.
 
-    ``projection_dsn`` is cleared explicitly here rather than relying on the
-    shared fixture's default. The default configures it, precisely because a
-    run that cannot see link 2 can no longer be green; this test is the one
-    case that wants the unpointed instrument, so it says so.
+    ``projection_dsn`` and ``ledger_source`` are cleared explicitly rather
+    than relying on the shared fixture's defaults. Those defaults configure
+    both, precisely because a run that cannot see links 2 and 5 can no longer
+    be green; this test is the one case that wants the unpointed instruments,
+    so it says so.
     """
     handler = _handler(
         _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
-    result = await handler.handle(_request(projection_dsn=""))
+    result = await handler.handle(_request(projection_dsn="", ledger_source=""))
 
     assert all(
         verdict.status is not EnumChainLinkStatus.NO_LEG

@@ -100,6 +100,27 @@ class EnumChainCanaryVerdict(StrEnum):
     # cannot see it is the three-links-rendered-as-five defect this ticket
     # exists to end.
     PROJECTION_READBACK_NOT_CONFIGURED = "projection_readback_not_configured"
+    # -- link 5, the ledger chain replay (OMN-16964) --------------------
+    # Mirrors link 2's treatment for the same reason: the per-link status was
+    # honest while the scalar verdict was not. Reported only when links 2 and
+    # 4 have both passed, so the ledger is the last thing left to disprove.
+    #
+    # The assembled chain has a gap, so there is no complete chain to replay.
+    LEDGER_CHAIN_INCOMPLETE = "ledger_chain_incomplete"
+    # A COMPLETE chain was replayed and the replay was not green. Distinct
+    # from CHAIN_INCOMPLETE: there the replay never had material to run on.
+    LEDGER_REPLAY_NOT_GREEN = "ledger_replay_not_green"
+    # The tier-2 verifier returned SKIP. It was pointed at this run and
+    # checked nothing. This is the verdict OMN-16025's "SKIP != PASS" wording
+    # exists to make expressible: unlike an unconfigured leg, this one ran.
+    LEDGER_VERIFIER_SKIPPED = "ledger_verifier_skipped"
+    # The chain could not be assembled, replayed or verified at all. Fails
+    # closed on the same terms as the other unrunnable checks.
+    LEDGER_REPLAY_UNREADABLE = "ledger_replay_unreadable"
+    # No source was configured for the ledger replay, so the run has no
+    # evidence about link 5. Red for the same reason link 2's is: link 5 is
+    # one of the five OMN-16025 chain links, not a supplementary check.
+    LEDGER_REPLAY_NOT_CONFIGURED = "ledger_replay_not_configured"
     # ONEX_CHAIN_CANARY_DISABLED was set. Zero I/O was performed.
     SKIPPED_DISABLED = "skipped_disabled"
 
