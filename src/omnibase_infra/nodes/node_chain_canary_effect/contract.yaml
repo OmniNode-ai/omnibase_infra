@@ -31,8 +31,8 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
   Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, and checks the platform quarantine sink for the same id. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof.
 
@@ -61,7 +61,7 @@ handler_routing:
       handler:
         name: "HandlerChainCanary"
         module: "omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary"
-        # The handler speaks TWO transports and both must be declared, or the
+        # The handler speaks multiple transports and all must be declared, or the
         # handler-contract-compliance scanner reports the undeclared one.
         # metadata.transport_type below carries HTTP (the /skill ingress POST);
         # this carries KAFKA (the correlation-scoped quarantine tail scan).
@@ -85,6 +85,15 @@ handler_routing:
         - link_verdicts
         - links_proven
         - chain_proof_complete
+    - operation: "probe_event_chain_projection_readback"
+      handler:
+        name: "HandlerChainCanary"
+        module: "omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary"
+        # OMN-16963 adds the correlation-scoped delegation_workflow_state
+        # readback leg. It is deliberately direct asyncpg I/O because link 2
+        # asks for projection evidence from the materialized projection.
+        handler_type: "DATABASE"
+      description: "Declares the OMN-16963 projection readback transport used by the live canary handler."
 error_handling:
   retry_policy:
     # Zero retries on purpose. A retry would let an intermittently dead
