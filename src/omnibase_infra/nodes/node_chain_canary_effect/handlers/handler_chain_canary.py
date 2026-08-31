@@ -1190,7 +1190,7 @@ class HandlerChainCanary:
             )
         if ledger_status is EnumLedgerReplayStatus.REPLAY_FAILED:
             return (
-                EnumChainCanaryVerdict.LEDGER_REPLAY_NOT_GREEN,
+                EnumChainCanaryVerdict.LEDGER_REPLAY_FAILED,
                 (
                     "a COMPLETE ledger chain was assembled and replayed for "
                     "this correlation id, and the replay was not green. "

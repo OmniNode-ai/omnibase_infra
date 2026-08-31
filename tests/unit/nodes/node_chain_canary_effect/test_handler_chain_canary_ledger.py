@@ -348,7 +348,7 @@ async def test_link_five_no_longer_reports_no_leg() -> None:
         (
             _LedgerReplay(replay_green=False),
             _LEDGER_SOURCE,
-            EnumChainCanaryVerdict.LEDGER_REPLAY_NOT_GREEN,
+            EnumChainCanaryVerdict.LEDGER_REPLAY_FAILED,
         ),
         (
             _LedgerReplay(verifier_verdict="skip"),

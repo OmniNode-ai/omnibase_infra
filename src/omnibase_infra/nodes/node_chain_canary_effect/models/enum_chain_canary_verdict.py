@@ -109,7 +109,11 @@ class EnumChainCanaryVerdict(StrEnum):
     LEDGER_CHAIN_INCOMPLETE = "ledger_chain_incomplete"
     # A COMPLETE chain was replayed and the replay was not green. Distinct
     # from CHAIN_INCOMPLETE: there the replay never had material to run on.
-    LEDGER_REPLAY_NOT_GREEN = "ledger_replay_not_green"
+    # Named FAILED rather than NOT_GREEN to match the contract member that
+    # landed in #3072 and EnumLedgerReplayStatus.REPLAY_FAILED one level
+    # down — one vocabulary across the status enum, the verdict enum and the
+    # contract, rather than three synonyms for the same fact.
+    LEDGER_REPLAY_FAILED = "ledger_replay_failed"
     # The tier-2 verifier returned SKIP. It was pointed at this run and
     # checked nothing. This is the verdict OMN-16025's "SKIP != PASS" wording
     # exists to make expressible: unlike an unconfigured leg, this one ran.

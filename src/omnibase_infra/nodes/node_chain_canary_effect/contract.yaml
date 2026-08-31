@@ -28,16 +28,24 @@
 #     non-passing link 2 fails the SCALAR verdict, not only
 #     `chain_proof_complete`. Before that, an unconfigured or stranded
 #     projection still produced GREEN with success=True.
-#   - OMN-16964: the one link (5) this canary still has NO leg for; it
-#     reports `no_leg` and names its owning ticket
+#   - OMN-16964: paid link 5's debt. Link 5 now has a real leg — ledger
+#     chain assembly, replay, and an HONEST tier-2 verifier whose SKIP is a
+#     distinct non-passing status — and a non-passing link 5 fails the
+#     SCALAR verdict too. No link reports `no_leg` any more: with links 2
+#     and 5 both paid, this node can claim a five-link proof honestly, and
+#     `chain_proof_complete` means what it says.
 #
 name: "node_chain_canary_effect"
 node_type: "EFFECT_GENERIC"
+# 1.1.0 -> 1.2.0: additive. The node gains declared capability rather than a
+# fix — every non-passing projection and ledger outcome is now a verdict the
+# handler can actually emit, and LEDGER_REPLAY_UNREADABLE closes the last
+# EnumLedgerReplayStatus member (ERROR) that had no declared page.
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
-node_version: "1.1.0"
+node_version: "1.2.0"
 description: >
   Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, and checks the platform quarantine sink for the same id. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof.
 
