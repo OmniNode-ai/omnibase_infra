@@ -1061,6 +1061,40 @@ def _do_block_body(statement: str) -> str | None:
     return body
 
 
+def _plpgsql_declared_variables(body: str) -> frozenset[str]:
+    """Collect the variable names a PL/pgSQL block body DECLAREs (OMN-17301).
+
+    PL/pgSQL has no ``SELECT INTO <table>`` form -- the create-table-as spelling
+    is plain-SQL only -- so inside a block ``INTO`` is always assignment to a
+    declared variable, never a relation target. Those names are collected here
+    so the SELECT-INTO relation check can exempt them without weakening for any
+    name the block does not declare.
+
+    Every ``DECLARE`` section in the body is read, including those opening
+    nested ``BEGIN``/``END`` sub-blocks, because a declared name is a variable
+    at whatever depth it is introduced.
+    """
+    masked = _mask_sql_string_bodies(body, mask_quoted_identifiers=True)
+    names: set[str] = set()
+    # `[\s\S]` rather than the DOTALL flag, matching this module's existing
+    # cross-line patterns and keeping the expression free of a flag BinOp.
+    for section in re.finditer(
+        r"\bdeclare\b(?P<section>[\s\S]*?)\bbegin\b", masked, re.IGNORECASE
+    ):
+        start, end = section.span("section")
+        for declaration in body[start:end].split(";"):
+            stripped = declaration.strip()
+            if not stripped:
+                continue
+            identifier = re.match(rf"^(?P<name>{_SQL_IDENTIFIER})", stripped)
+            if identifier is None:
+                continue
+            # `CONSTANT`/`ALIAS` lead some declarations; the declared name is
+            # still the first token, so nothing further is needed here.
+            names.add(_unquote_identifier(identifier.group("name")))
+    return frozenset(names)
+
+
 def _static_plpgsql_sql_statements(body: str) -> tuple[str, ...]:
     """Extract direct SQL statements from a non-dynamic PL/pgSQL block body."""
     statements: list[str] = []
@@ -2043,6 +2077,7 @@ def _analyze_sql_fragment(
     application_schemas: set[str],
     violations: list[str],
     target_locations: list[tuple[str, str]],
+    plpgsql_variables: frozenset[str] = frozenset(),
 ) -> None:
     """Analyze one SQL scope, recursively checking each data-modifying CTE body."""
     lexical_violations = _postgresql_lexical_violations(fragment)
@@ -2057,6 +2092,7 @@ def _analyze_sql_fragment(
         return
     do_body = _do_block_body(fragment)
     if do_body is not None:
+        declared = _plpgsql_declared_variables(do_body)
         for statement in _static_plpgsql_sql_statements(do_body):
             _analyze_sql_fragment(
                 statement,
@@ -2064,6 +2100,7 @@ def _analyze_sql_fragment(
                 application_schemas=application_schemas,
                 violations=violations,
                 target_locations=target_locations,
+                plpgsql_variables=declared,
             )
         return
     if _routine_body_is_uninspectable(fragment):
@@ -2229,7 +2266,14 @@ def _analyze_sql_fragment(
                     target_locations=target_locations,
                 )
         select_into = _select_into_target_match(variant)
-        if select_into is not None:
+        if select_into is not None and not (
+            # OMN-17301: inside a PL/pgSQL block `SELECT ... INTO <var>` assigns
+            # to a declared variable; PL/pgSQL has no create-table-as INTO form.
+            # Scoped to names the block actually DECLAREs, so an undeclared name
+            # still fails closed as an unqualified relation target.
+            select_into.group("schema") is None
+            and _unquote_identifier(select_into.group("name")) in plpgsql_variables
+        ):
             _record_sql_target(
                 schema_token=select_into.group("schema"),
                 name_token=select_into.group("name"),

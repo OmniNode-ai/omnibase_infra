@@ -340,6 +340,18 @@ def test_094_still_refuses_when_the_role_is_absent_and_cannot_be_created(
     """Fail-closed: "no-op when already correct" must not become "succeed when
     the role is missing". A migration that did not achieve its effect must not
     exit 0, because the runner records anything that exits 0.
+
+    OMN-17301 changed the SHAPE of that refusal, not the refusal itself. This
+    module previously asserted the raw ``permission denied to create role``
+    string, which pinned the exact defect OMN-17301 exists to remove: the
+    unhandled SQLSTATE 42501 that aborts the file and tells the operator
+    nothing about which seam provisions the principal. The migration still
+    exits non-zero with the role still absent -- both asserted below,
+    unchanged -- but it now does so through a handler that names the role, the
+    executing identity, and the remediation. The assertion is tightened
+    accordingly: the actionable message must be present AND the raw leak must
+    be gone. Asserting only the former would let a future edit reintroduce the
+    raw abort alongside the handler and still pass.
     """
     bootstrap = ephemeral_postgres.connect()
     bootstrap.autocommit = True
@@ -358,7 +370,20 @@ def test_094_still_refuses_when_the_role_is_absent_and_cannot_be_created(
         "with app_dashboard absent and no CREATEROLE, 094 must fail loudly:\n"
         + result.stdout
     )
-    assert "permission denied to create role" in result.stderr, result.stderr
+    assert "app_dashboard does not exist on this cluster" in result.stderr, (
+        "the refusal must name the missing principal, not leak a bare psql "
+        "privilege error (OMN-17301):\n" + result.stderr
+    )
+    assert "CREATEROLE" in result.stderr, result.stderr
+    assert "provision-cluster-roles.sh" in result.stderr, (
+        "the refusal must name the provisioning seam that holds the privilege, "
+        "or the operator has no remediation to act on (OMN-17301):\n" + result.stderr
+    )
+    assert "permission denied to create role" not in result.stderr, (
+        "the raw SQLSTATE 42501 abort is the OMN-17301 defect itself -- a "
+        "handler that RAISEs alongside it rather than instead of it leaves the "
+        "opaque failure in the deploy log:\n" + result.stderr
+    )
 
     verify = ephemeral_postgres.connect()
     verify.autocommit = True
