@@ -32,32 +32,7 @@
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'role_omniweb') THEN
-    -- OMN-17301: the privilege check is what aborts here, not the existence
-    -- check, so the statement needs a handler and not only the IF guard.
-    BEGIN
-      CREATE ROLE role_omniweb WITH LOGIN;
-    EXCEPTION
-      WHEN duplicate_object OR unique_violation THEN
-        NULL; -- role already exists (created concurrently)
-      WHEN insufficient_privilege THEN
-        RAISE EXCEPTION USING
-          ERRCODE = 'insufficient_privilege',
-          MESSAGE = format(
-            'role_omniweb does not exist on this cluster and the executing role %I '
-            'cannot create it: CREATE ROLE requires the CREATEROLE attribute.',
-            current_user),
-          DETAIL =
-            'Roles are cluster-scoped. Every migration identity on the managed '
-            'lane (role_omnibase_infra for the flat loop, role_omnidash for the '
-            'node loop) is provisioned NOCREATEROLE by contract, and the '
-            'instance has no superuser role this Job can authenticate as '
-            '(OMN-15343). No loop in this corpus can create the role.',
-          HINT =
-            'Provision it once at the seam that holds the privilege, then '
-            're-run: from omninode_infra, scripts/provision-cluster-roles.sh '
-            '--apply. This migration is an idempotent no-op once the role '
-            'exists. Ticket: OMN-17301.';
-    END;
+    CREATE ROLE role_omniweb WITH LOGIN;
   END IF;
 END;
 $$;
@@ -71,18 +46,22 @@ GRANT USAGE ON SCHEMA public TO role_omniweb;
 -- (e.g. CI test DB that only runs omnibase_infra migrations).
 DO $$
 BEGIN
-  GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.waitlist_signups TO role_omniweb;
-EXCEPTION
-  WHEN undefined_table THEN
-    RAISE NOTICE 'public.waitlist_signups is absent; role_omniweb table grant skipped.';
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'waitlist_signups'
+  ) THEN
+    EXECUTE 'GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.waitlist_signups TO role_omniweb';
+  END IF;
 END;
 $$;
 
 DO $$
 BEGIN
-  GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.admin_events_log TO role_omniweb;
-EXCEPTION
-  WHEN undefined_table THEN
-    RAISE NOTICE 'public.admin_events_log is absent; role_omniweb table grant skipped.';
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'admin_events_log'
+  ) THEN
+    EXECUTE 'GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.admin_events_log TO role_omniweb';
+  END IF;
 END;
 $$;
