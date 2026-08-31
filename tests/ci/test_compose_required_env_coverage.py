@@ -99,13 +99,13 @@ RENDER_FIXTURES: tuple[RenderFixture, ...] = (
         path="tests/integration/infra/test_stability_test_runtime_compose_render.py",
         env_dicts=("COMPOSE_RENDER_ENV",),
     ),
-    # OMN-17150 collaborator lane. `env_dicts=()` is deliberate, not an
-    # omission: this fixture supplies NOTHING from a module-level Python dict.
-    # Its render env comes entirely from the two committed `--env-file` files it
-    # passes to compose (docker/runtime-policy.env + docker/lakshman.env.example),
-    # which `extract_env_file_vars` already reads out of the fixture source. That
-    # is the point of the fixture — it proves a FRESH CLONE renders, so a dummy
-    # dict here would weaken it by supplying values the lane owner will not have.
+    # OMN-17150 collaborator lane. Most of this fixture's env comes from the two
+    # committed `--env-file` files it passes to compose (docker/runtime-policy.env
+    # + docker/lakshman.env.example), which `extract_env_file_vars` reads out of
+    # the fixture source. `RENDER_ONLY_SECRETS` covers the deliberate gap: the
+    # four infrastructure credentials ship EMPTY in the template so compose's
+    # `:?` guards fail closed on an un-edited copy, so the fixture — not the
+    # shipped template — supplies render-only stand-ins for them.
     #
     # It also renders a STANDALONE lane file (docker/docker-compose.lakshman.yml,
     # never layered on docker-compose.infra.yml), so
@@ -115,7 +115,7 @@ RENDER_FIXTURES: tuple[RenderFixture, ...] = (
     # view, standalone or not.
     RenderFixture(
         path="tests/integration/infra/test_lakshman_compose_render.py",
-        env_dicts=(),
+        env_dicts=("RENDER_ONLY_SECRETS",),
     ),
 )
 
