@@ -184,6 +184,11 @@ jobs:
           OMNI_HOME: ${{ steps.stage-siblings.outputs.workspace_root }}
           # The consuming pin authority is omnimarket's uv.lock (OMN-12977).
           CONSUMER_LOCK: ${{ steps.stage-siblings.outputs.workspace_root }}/omnimarket/uv.lock
+          # OMN-17291: stage_workspace.sh refuses an unpinned build. The clones
+          # above were cloned fresh AT sibling_ref, so arming RT-1 with the same
+          # ref makes the checkout a no-op and turns the vendored SHA into an
+          # asserted fact instead of an unfalsifiable claim.
+          DEPLOY_REF: ${{ inputs.sibling_ref }}
         run: |
           set -euo pipefail
           bash scripts/runtime_build/stage_workspace.sh

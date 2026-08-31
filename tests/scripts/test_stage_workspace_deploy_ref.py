@@ -8,7 +8,8 @@ Proves, against a REAL behind clone (exists-but-WRONG, not absent):
   * with DEPLOY_REF set, the ambient BEHIND clone is checked out to the intended
     ref before staging, so the vendored-SHA manifest carries the NEW ref SHA (if
     the checkout were a no-op the manifest would carry the stale behind SHA);
-  * without DEPLOY_REF the build is loudly stamped unpinned and NOT asserted;
+  * without DEPLOY_REF the build is REFUSED outright (OMN-17291), and the
+    ambient-tree build is reachable only behind the named opt-in;
   * the exact assertion command stage_workspace.sh runs goes RED on a poisoned
     (real stale) vendored SHA;
   * an unresolvable DEPLOY_REF fails the build closed (exit 4).
@@ -105,6 +106,7 @@ def _run_stage(
     *,
     deploy_ref: str | None = None,
     hotpatch: bool = False,
+    allow_unpinned: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     (build_ctx / "workspace").mkdir(parents=True, exist_ok=True)
     env = {
@@ -112,10 +114,15 @@ def _run_stage(
         "OMNI_HOME": str(omni_home),
         "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
     }
+    env.pop("DEPLOY_REF", None)
+    env.pop("DEPLOY_HOTPATCH", None)
+    env.pop("ALLOW_UNPINNED_DEPLOY_SOURCE", None)
     if deploy_ref is not None:
         env["DEPLOY_REF"] = deploy_ref
     if hotpatch:
         env["DEPLOY_HOTPATCH"] = "1"
+    if allow_unpinned:
+        env["ALLOW_UNPINNED_DEPLOY_SOURCE"] = "1"
     return subprocess.run(
         ["bash", str(STAGE_SCRIPT)],
         cwd=build_ctx,
@@ -170,12 +177,31 @@ def test_deploy_ref_checks_out_behind_clone_and_asserts_green(tmp_path: Path) ->
 
 
 @pytest.mark.unit
-def test_without_deploy_ref_is_unpinned_and_unasserted(tmp_path: Path) -> None:
+def test_without_deploy_ref_the_build_is_refused(tmp_path: Path) -> None:
+    """OMN-17291 superseded the warn-and-build-anyway contract this test used to
+    pin. An unasserted source ref must not be able to produce a build at all."""
+    omni_home = _make_omni_home(tmp_path)
+    _behind_core(omni_home)
+
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(omni_home, build_ctx, deploy_ref=None)
+    assert result.returncode == 5, result.stderr
+    assert "DEPLOY_REF unset" in result.stderr
+
+    # Refused before staging: no provenance, no expected-refs, nothing vendored.
+    assert not (build_ctx / "workspace" / "sibling-vcs-provenance.json").exists()
+    assert not (build_ctx / "workspace" / "deploy-source-refs.json").exists()
+
+
+@pytest.mark.unit
+def test_unpinned_ambient_build_behind_explicit_opt_in(tmp_path: Path) -> None:
+    """The ambient-tree build survives as a NAMED opt-in: still unasserted (the
+    behind SHA is vendored), but never the silent default."""
     omni_home = _make_omni_home(tmp_path)
     old_sha, _new_sha = _behind_core(omni_home)
 
     build_ctx = tmp_path / "ctx"
-    result = _run_stage(omni_home, build_ctx, deploy_ref=None)
+    result = _run_stage(omni_home, build_ctx, deploy_ref=None, allow_unpinned=True)
     assert result.returncode == 0, result.stderr
 
     # Unpinned: no clean-checkout ran, so the ambient BEHIND SHA was vendored.
@@ -185,9 +211,9 @@ def test_without_deploy_ref_is_unpinned_and_unasserted(tmp_path: Path) -> None:
         )
     )
     assert vcs["siblings"]["omnibase_core"]["vcs_ref"] == old_sha
-    # No expected-refs manifest, and the unpinned warning fired.
+    # No expected-refs manifest, and the opt-in is named in the log.
     assert not (build_ctx / "workspace" / "deploy-source-refs.json").exists()
-    assert "DEPLOY_REF unset" in result.stderr
+    assert "ALLOW_UNPINNED_DEPLOY_SOURCE=1" in result.stderr
     assert "NOT asserted" in result.stderr
 
 

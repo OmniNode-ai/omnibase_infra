@@ -107,6 +107,11 @@ def _run_stage(omni_home: Path, build_ctx: Path) -> subprocess.CompletedProcess[
         # Synthetic clones are pinned at _PIN_VERSION matching the consumer lock,
         # so the preflight resolves clean without an allow-drift override.
         "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
+        # OMN-17291: stage_workspace.sh refuses an unpinned build by default.
+        # These tests exercise the AMBIENT staging path deliberately (they are
+        # about VCS-provenance capture, not the pinning contract), so they take
+        # the named opt-in rather than arming RT-1.
+        "ALLOW_UNPINNED_DEPLOY_SOURCE": "1",
     }
     return subprocess.run(
         ["bash", str(STAGE_SCRIPT)],
@@ -167,6 +172,11 @@ def test_stage_writes_vcs_provenance_without_rsync(tmp_path: Path) -> None:
         "OMNI_HOME": str(omni_home),
         "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
         "PATH": _path_without_rsync(tmp_path),
+        # OMN-17291: stage_workspace.sh refuses an unpinned build by default.
+        # These tests exercise the AMBIENT staging path deliberately (they are
+        # about VCS-provenance capture, not the pinning contract), so they take
+        # the named opt-in rather than arming RT-1.
+        "ALLOW_UNPINNED_DEPLOY_SOURCE": "1",
     }
     result = subprocess.run(
         ["bash", str(STAGE_SCRIPT)],
