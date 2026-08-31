@@ -112,6 +112,7 @@ databases:
               - session_outcomes
               - session_replay_snapshots
               - swarm_runs
+              - tenant_registry_mirror
               - traces
               - voice_sessions
             privileges: [INSERT, SELECT, UPDATE]
