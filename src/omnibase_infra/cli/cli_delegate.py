@@ -35,16 +35,26 @@ in) -> hard refusal naming the ambiguity, because silently resolving it made
 the transport a coin flip (14 kafka / 6 inmemory over 20 unchanged-env calls,
 ``OmniNode-ai/knowledge-base#59``). This makes delegation use
 "the same event bus the rest of the system is configured with" BY DEFAULT — no
-``--bus kafka`` flag required. When resolved (or explicitly passed) to
-``kafka``, the typed ``ModelDelegateSkillRequest`` command is published to the
-delegate-skill command topic declared in the contract's
-``event_bus.publish_topics``, where the deployed
-``node_delegate_skill_orchestrator`` consumer picks it up
-(``feedback_bus_is_the_transport`` — the bus is THE transport) and its
-projection lands in the shared ``delegation_events`` table, not per-machine
-SQLite. ``--bus``/``--kafka-bootstrap`` remain explicit OVERRIDES for forcing a
-specific bus; both flow straight through ``backend_overrides`` to
-``RuntimeLocal``, which never hardcodes the broker.
+``--bus kafka`` flag required.
+
+**Execution locality (OMN-17295): ``--bus`` selects the TRANSPORT, never the
+executor.** On both values the ``node_delegate_skill_orchestrator`` runs
+IN-PROCESS in this CLI process, resolved from the local venv's installed
+``omnimarket``. :func:`build_backend_overrides` is the only consumer of the
+flag and it returns ``{"event_bus": <bus>}`` (plus an optional
+``kafka_bootstrap``) — nothing in that map names an executor or a remote host.
+With ``kafka``, the typed ``ModelDelegateSkillRequest`` command and this run's
+terminal are carried over the live broker
+(``feedback_bus_is_the_transport`` — the bus is THE transport) so the
+projection lands in the shared ``delegation_events`` table rather than
+per-machine SQLite; the accept/climb decision itself is still made by the
+orchestrator code in THIS process. A ``--bus kafka`` invocation is therefore
+NOT a probe of a deployed lane's behaviour, and there is no remote-execution
+mode to select: building one is deliberately out of scope (a thin client, if
+it is ever built, is gateway-mediated). ``--bus``/``--kafka-bootstrap`` are
+explicit OVERRIDES for forcing a specific transport; both flow straight
+through ``backend_overrides`` to ``RuntimeLocal``, which never hardcodes the
+broker.
 
 stdout receives exactly ONE
 :class:`~omnibase_core.models.dispatch.model_skill_result.ModelSkillResult`
@@ -74,6 +84,10 @@ error) even when the hang is not asyncio-cooperative.
 .. versionadded:: OMN-13096
 .. versionchanged:: OMN-14397
    Fresh ``correlation_id`` per invocation; hard ``SIGALRM`` timeout backstop.
+.. versionchanged:: OMN-17295
+   The minted ``correlation_id`` is threaded into ``run_receipt_mode`` so the
+   receipt is selected strictly by this run's identity; ``--bus`` help no
+   longer claims a deployed runtime consumer dispatches the work.
 """
 
 from __future__ import annotations
@@ -176,9 +190,17 @@ TASK_TYPE_CHOICES = (
     "review",
 )
 
-# Event-bus targets the CLI can select (OMN-13532). ``inmemory`` runs the
-# orchestrator in-process (default, no broker). ``kafka`` publishes the typed
-# command to the live broker so a deployed runtime consumer dispatches it.
+# Event-bus targets the CLI can select (OMN-13532). This is a TRANSPORT
+# choice, not an execution-locality choice (OMN-17295): the orchestrator runs
+# IN-PROCESS in this CLI, resolved from the local venv, for BOTH values.
+# ``build_backend_overrides`` — the only consumer of ``--bus`` — returns
+# ``{"event_bus": <bus>}`` (plus an optional ``kafka_bootstrap``) and hands it
+# to ``RuntimeLocal``; nothing in that map names an executor. ``inmemory``
+# keeps this run's events in-process; ``kafka`` routes the same in-process
+# run's events through the live broker so its evidence lands in the shared
+# projection. Neither hands the work to a deployed runtime consumer — there is
+# no remote-execution mode, and building one is deliberately out of scope (a
+# thin client, if it is ever built, is gateway-mediated).
 # These mirror ``RuntimeLocal.SUPPORTED_EVENT_BUS_VALUES`` — the runtime is the
 # source of truth and rejects anything outside that set.
 BUS_CHOICES = SUPPORTED_BUS_TYPES
@@ -473,14 +495,18 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     type=click.Choice(BUS_CHOICES),
     default=None,
     help=(
-        "Event-bus backend. Omit to auto-resolve (OMN-14376): 'kafka' when "
-        "KAFKA_BOOTSTRAP_SERVERS is configured and the broker probes healthy "
-        "— the SAME bus the rest of the system is configured with, so the "
-        "delegation lands in the shared delegation_events projection — else "
-        "'inmemory'. Pass explicitly to force a specific bus regardless of "
-        "the probe: 'inmemory' runs the orchestrator in-process (no broker); "
-        "'kafka' publishes the typed delegate-skill command to the broker so "
-        "a deployed runtime consumer dispatches it."
+        "Event-bus backend — event TRANSPORT only. It does not change where "
+        "the work runs: the delegate orchestrator always executes in-process "
+        "in this CLI, resolved from the local venv, on both values. "
+        "'inmemory' keeps this run's events in-process (no broker); 'kafka' "
+        "routes the same in-process run's events through the live broker, so "
+        "its evidence lands in the shared delegation_events projection "
+        "instead of the local SQLite fallback. Neither value hands execution "
+        "to a deployed runtime consumer. Omit to auto-resolve (OMN-14376): "
+        "'kafka' when KAFKA_BOOTSTRAP_SERVERS is configured and the broker "
+        "probes healthy — the SAME bus the rest of the system is configured "
+        "with — else 'inmemory'. Pass explicitly to force a specific "
+        "transport regardless of the probe."
     ),
 )
 @click.option(
@@ -581,7 +607,7 @@ def delegate_command(
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
-        # Publish through the configured Kafka broker so a deployed runtime dispatches it:
+        # Still runs in-process; --bus only routes this run's events through the broker:
         onex delegate "document the router" --bus kafka --kafka-bootstrap "$KAFKA_BOOTSTRAP_SERVERS"
     """
     try:
@@ -765,6 +791,11 @@ def run_delegate(
                 timeout=timeout,
                 verbose=verbose,
                 emit_socket=emit_socket or default_emit_socket_path(),
+                # OMN-17295 / OMN-14872: the receipt layer cannot select by an
+                # identity it was never told. Handing it the id this CLI just
+                # minted is what lets it refuse another run's terminal
+                # envelope instead of printing it as ours.
+                expected_correlation_id=correlation_id,
             )
     except DelegateTimeoutExceededError as exc:
         click.echo(str(exc), err=True)
