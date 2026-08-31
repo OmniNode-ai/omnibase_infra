@@ -5,6 +5,11 @@ hook's refusal text cited for months and which **has never existed in this
 repo** (OMN-16446, OMN-16968 "adjacent runbook gap"). If you followed a `die()`
 message here, this is the page it meant.
 
+> **Running work inside the `.201` gate-runner container** (`h201c`) has its
+> own executable recipe: [`gate-runner-entrypoint.md`](gate-runner-entrypoint.md).
+> Use `scripts/ci/run_on_gate_runner.sh --detached`; a raw `docker exec` wedges
+> permanently once its output crosses the 64 KiB pipe buffer (OMN-17317).
+
 ## What changed
 
 Before OMN-16991 the heavy (full-suite) pre-push branch tested exactly two
