@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex -- the sanctioned invocation of the ONEX CLI (OMN-17190)
+# ----------------------------------------------------------------------------
+# THE DEFECT THIS EXISTS TO CLOSE
+# ============================================================================
+# The documented invocation was a shell alias:
+#
+#     alias onex='uv run --project $OMNI_HOME/omnibase_infra onex'
+#
+# `uv run` does NOT pin the command to the project environment. It syncs the
+# project, prepends that environment's `bin/` to PATH, and then resolves the
+# command name normally -- so when `<project>/.venv/bin/onex` is not resolvable
+# (a uv reinstall of the package that owns the console script is rewriting it,
+# a partially-built venv, a venv uv decided to recreate), uv SILENTLY runs the
+# first `onex` on the inherited PATH instead. No warning, no non-zero exit.
+#
+# Proven on this Mac 2026-08-30: with `<project>/.venv/bin/onex` hidden,
+# `uv run --project <project> onex node <name>` executed
+# `~/.local/bin/onex` -> a `uv tool` environment on Python 3.13 carrying
+# omnibase_infra 0.38.11 and omnimarket 0.4.10 installed from PyPI. That
+# interpreter:
+#
+#   * has NO `direct_url.json` for omnimarket, so the drift guard's
+#     `installed_omnimarket_commit()` returns None and it reports
+#     "omnimarket is NOT INSTALLED from git in this interpreter";
+#   * predates OMN-17190 -- its `check_omnimarket_drift()` signature has no
+#     `reconcile` parameter at all -- so NO self-heal is even attempted;
+#   * knows nothing about the real CLI venv, so it refuses identically whether
+#     that venv is drifted or perfectly IN_SYNC.
+#
+# That is the entire OMN-17190 verification failure ("10/15 alias invocations
+# hit the pre-OMN-17190 hard refusal with no evidence a reconcile was
+# attempted; one failure occurred against a confirmed-IN_SYNC venv"). It was
+# never a drift bug and never a uv-sync bug -- uv run's sync is inexact and
+# leaves the composed omnimarket layer alone (verified: `uv run -v` logs
+# `Unnecessary package: omnimarket` and does not remove it). It is an
+# INTERPRETER IDENTITY bug: the self-heal shipped in OMN-17190 is real and
+# works, but on those invocations it was not the code that ran.
+#
+# ============================================================================
+# THE CONTRACT
+# ============================================================================
+# This wrapper execs the CLI venv's own entrypoint BY ABSOLUTE PATH and never
+# consults PATH for `onex`. There is no uv in the invocation path at all, so
+# there is no implicit sync, no environment selection, and no fallback:
+#
+#   * the interpreter is `$OMNI_HOME/omnibase_infra/.venv/bin/onex`, always;
+#   * if that entrypoint is missing, the workspace reconciler runs ONCE and the
+#     wrapper re-checks -- the same self-heal-then-proceed policy the drift
+#     guard uses, and the same single owner of repair policy;
+#   * if it is still missing, this REFUSES with a typed message naming the
+#     missing path, the reconcile command, and the PATH `onex` it deliberately
+#     did not run. It never silently runs something else.
+#
+# Robustness over configuration, deliberately: the correctness of the ONEX CLI
+# must not depend on how an operator happened to write an alias.
+#
+# Usage:
+#   scripts/onex <args...>          # identical argv to the `onex` entrypoint
+#   alias onex='$OMNI_HOME/omnibase_infra/scripts/onex'
+#
+# Env:
+#   OMNI_HOME   canonical registry root. Optional -- when unset it is derived
+#               from this script's own location, which is exact rather than
+#               guessed (this file lives at <omni_home>/omnibase_infra/scripts).
+#   ONEX_WRAPPER_NO_RECONCILE=1
+#               skip the self-heal and refuse immediately on a missing
+#               entrypoint. For tests and for diagnosing the wrapper itself;
+#               it never affects a working install.
+# ----------------------------------------------------------------------------
+set -uo pipefail
+
+readonly EXIT_REFUSED=2
+
+_say() { printf '[onex] %s\n' "$*" >&2; }
+
+# Resolve this script's real directory even when reached through a symlink --
+# an operator who symlinks this onto their PATH must land in the same place.
+_self="${BASH_SOURCE[0]}"
+while [[ -L "$_self" ]]; do
+  _link="$(readlink "$_self")"
+  case "$_link" in
+    /*) _self="$_link" ;;
+    *) _self="$(dirname "$_self")/$_link" ;;
+  esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$_self")" && pwd)"
+INFRA_DIR="$(dirname "$SCRIPT_DIR")"
+
+# $OMNI_HOME wins when set (an operator may run a wrapper from one checkout
+# against a registry root they named explicitly); otherwise derive it from this
+# file. Deriving is not a silent default -- it is the one answer that is always
+# right for the checkout this script is part of.
+OMNI_HOME="${OMNI_HOME:-$(dirname "$INFRA_DIR")}"
+
+ENTRYPOINT="$OMNI_HOME/omnibase_infra/.venv/bin/onex"
+RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
+
+# --------------------------------------------------------------------------- #
+# Shadow warning
+# --------------------------------------------------------------------------- #
+# A bare `onex` typed in a shell that does not use this wrapper -- or run from
+# any script, hook, or Makefile -- still resolves through PATH. When that
+# resolves to a DIFFERENT interpreter, every such invocation is running some
+# other build of the CLI: on this Mac, one three minor versions behind with a
+# PyPI omnimarket. Naming it on every dispatch is deliberate; a silent shadow
+# is exactly the failure this wrapper was written to end, and the warning stops
+# the moment the stale install is removed.
+_warn_on_shadowed_path_onex() {
+  local path_onex
+  path_onex="$(command -v onex 2>/dev/null || true)"
+  [[ -n "$path_onex" ]] || return 0
+  [[ "$path_onex" != "$ENTRYPOINT" ]] || return 0
+  [[ "$path_onex" != "$SCRIPT_DIR/onex" ]] || return 0
+  _say "WARNING: a different 'onex' shadows the CLI venv on PATH:"
+  _say "  PATH resolves : $path_onex"
+  _say "  this wrapper  : $ENTRYPOINT"
+  _say "  Anything that invokes a bare 'onex' without this wrapper (scripts,"
+  _say "  hooks, Makefiles, a non-interactive shell that never read the alias)"
+  _say "  runs that other build instead, against a different interpreter and a"
+  _say "  different omnimarket. Remove it, e.g.:  uv tool uninstall omnibase-core"
+}
+
+_warn_on_shadowed_path_onex
+
+# --------------------------------------------------------------------------- #
+# Exec the CLI venv's entrypoint -- never PATH
+# --------------------------------------------------------------------------- #
+if [[ -x "$ENTRYPOINT" ]]; then
+  exec "$ENTRYPOINT" "$@"
+fi
+
+if [[ "${ONEX_WRAPPER_NO_RECONCILE:-0}" != "1" && -f "$RECONCILER" ]]; then
+  _say "CLI entrypoint missing at $ENTRYPOINT -- reconciling once before refusing."
+  # Same policy owner as the in-CLI self-heal: this wrapper holds no repair
+  # logic of its own, it only decides WHEN the reconciler runs.
+  bash "$RECONCILER" --omni-home "$OMNI_HOME" >&2
+  if [[ -x "$ENTRYPOINT" ]]; then
+    exec "$ENTRYPOINT" "$@"
+  fi
+fi
+
+_say "REFUSED: the ONEX CLI entrypoint does not exist."
+_say "  expected : $ENTRYPOINT"
+_say "  reconcile: bash $RECONCILER --omni-home $OMNI_HOME"
+_path_onex="$(command -v onex 2>/dev/null || true)"
+if [[ -n "$_path_onex" && "$_path_onex" != "$SCRIPT_DIR/onex" ]]; then
+  _say "  NOT falling back to the 'onex' on PATH ($_path_onex): it is a"
+  _say "  different interpreter with its own omnimarket, and running it would"
+  _say "  produce a refusal -- or worse, a receipt -- from a build nobody chose."
+fi
+exit "$EXIT_REFUSED"
