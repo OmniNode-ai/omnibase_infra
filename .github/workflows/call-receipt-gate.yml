@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   verify:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@3608b195f9183b03e5dc58b03f325462896f1c0d # OMN-16432: pinned to fix SHA — main is release-synced; repoint to @main after the next core release ships
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@31e44e9db9f172059f03a7373d762536562a2f6f # OMN-13902/OMN-17292: pass PR commit text into final receipt identity binding
     with:
       branch-policy-mode: >-
         ${{
