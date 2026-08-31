@@ -133,6 +133,30 @@ _PROOF_NOOP_CONTRACT = (
     "  default_handler: tests.fixtures.handler_proof_noop:HandlerProofNoop\n"
 )
 
+# Delegate-SHAPED stand-in (OMN-17295). ``ModelProofNoopRequest`` declares no
+# ``correlation_id``, so a run against it produces a terminal stamped with an
+# id RuntimeLocal minted for itself and no caller can attribute — which the
+# OMN-17295 correlation join correctly refuses. The real delegate request model
+# DOES declare ``correlation_id`` (and is frozen, so RuntimeLocal's event-driven
+# overwrite is refused and the CLI's minted id survives onto the wire). Tests
+# whose subject is the SHAPE of the delegate receipt must therefore run against
+# a contract that round-trips the correlation id, or they are asserting against
+# a stand-in the real path does not resemble.
+_CORRELATED_NOOP_CONTRACT = (
+    "---\n"
+    "name: correlated_noop\n"
+    "node_type: compute\n"
+    "terminal_event: onex.evt.proof.correlated-noop-completed.v1\n"
+    "handler:\n"
+    "  module: tests.fixtures.handler_correlated_noop\n"
+    "  class: HandlerCorrelatedNoop\n"
+    "  input_model: tests.fixtures.handler_correlated_noop"
+    ".ModelCorrelatedNoopRequest\n"
+    "handler_routing:\n"
+    "  default_handler: tests.fixtures.handler_correlated_noop"
+    ":HandlerCorrelatedNoop\n"
+)
+
 
 class TestClassifyTaskType:
     @pytest.mark.parametrize(
@@ -524,7 +548,7 @@ class TestSingleReceiptOnStdout:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         contract_path = tmp_path / "contract.yaml"
-        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate,
             "_resolve_packaged_contract",
@@ -558,7 +582,7 @@ class TestSingleReceiptOnStdout:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         contract_path = tmp_path / "contract.yaml"
-        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate,
             "_resolve_packaged_contract",
@@ -1334,23 +1358,7 @@ def test_drift_guard_fires_before_delegate_dispatch(
 
 
 class TestExplicitOverrideProvenance:
-    """OMN-17304 AC1 — ``--bus``/``--kafka-bootstrap`` announce themselves as overrides.
-
-    Both flags are tier 1 of the shared resolution authority
-    (``auto_configure.resolve_bus_type``): when either is supplied the CLI
-    performs no resolution at all. Before this class, that decision was
-    *silent* — every provenance line in ``run_delegate`` lived inside the
-    ``if bus is None:`` branch, so an explicit ``--bus kafka`` produced no log
-    record whatsoever and nothing downstream (capture file, receipt, operator
-    reading stderr) could distinguish "the configured authority selected
-    kafka" from "a human typed --bus kafka and the authority was never
-    consulted".
-
-    That distinction is the whole point of the flags being overrides. A probe
-    result and a typed flag are different kinds of evidence, and a lane-probe
-    receipt that cannot tell them apart is the same class of instrument defect
-    as OMN-17295.
-    """
+    """OMN-17304 AC1 -- ``--bus``/``--kafka-bootstrap`` announce overrides."""
 
     _CLI_LOGGER = "omnibase_infra.cli.cli_delegate"
 
@@ -1360,7 +1368,6 @@ class TestExplicitOverrideProvenance:
         monkeypatch: pytest.MonkeyPatch,
         **bus_kwargs: object,
     ) -> int:
-        """Run ``run_delegate`` with the real bus wiring and a stubbed dispatch."""
         monkeypatch.setattr(
             cli_delegate,
             "_resolve_packaged_contract",
@@ -1388,7 +1395,6 @@ class TestExplicitOverrideProvenance:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        # An explicit --bus bypasses resolution entirely (tier 1). Say so.
         with caplog.at_level(logging.INFO, logger=self._CLI_LOGGER):
             assert self._dispatch(tmp_path, monkeypatch, bus="inmemory") == 0
 
@@ -1405,9 +1411,6 @@ class TestExplicitOverrideProvenance:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        # The broker address is a second, independent override: --bus names the
-        # transport, --kafka-bootstrap names the endpoint. Both are typed, so
-        # both must be attributable in the capture.
         with caplog.at_level(logging.INFO, logger=self._CLI_LOGGER):
             assert (
                 self._dispatch(
@@ -1434,10 +1437,6 @@ class TestExplicitOverrideProvenance:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        # The counter-assertion that keeps the label meaningful: when no flag
-        # is typed the transport IS resolved, so nothing may claim to be an
-        # override. Without this, labelling every run "override" would pass
-        # the two tests above while carrying no information.
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
 
@@ -1445,8 +1444,6 @@ class TestExplicitOverrideProvenance:
             assert self._dispatch(tmp_path, monkeypatch) == 0
 
         assert not self._override_records(caplog)
-        # ...and the resolution itself is still announced, so the run is not
-        # simply silent about where its transport came from.
         assert any("inmemory" in r.getMessage() for r in caplog.records), (
             "an auto-resolved run logged no transport provenance at all"
         )
@@ -1457,8 +1454,6 @@ class TestExplicitOverrideProvenance:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        # stdout is reserved for exactly one ModelSkillResult JSON. Provenance
-        # is stderr/capture-only, like every other line in run_delegate.
         assert (
             self._dispatch(
                 tmp_path,
@@ -1469,3 +1464,158 @@ class TestExplicitOverrideProvenance:
             == 0
         )
         assert capsys.readouterr().out == ""
+
+
+class TestBusHelpTextTellsTheTruth:
+    """OMN-17295 AC4: ``--help`` must not claim an execution mode that does not exist.
+
+    As shipped, ``onex delegate --help`` said ``--bus kafka`` "publishes the
+    typed delegate-skill command to the broker so a deployed runtime consumer
+    dispatches it." That is false. :func:`build_backend_overrides` — the ONLY
+    thing ``--bus`` feeds — returns ``{"event_bus": <bus>}`` (plus an optional
+    ``kafka_bootstrap``) and hands it to ``RuntimeLocal``, which executes the
+    orchestrator IN-PROCESS out of the local venv on both bus values. The flag
+    selects the event TRANSPORT; it never relocates execution.
+
+    A remote-execution mode is explicitly out of scope (operator-reviewed): a
+    thin client, if it is ever built, is gateway-mediated. So the fix is the
+    help text, not a new mode.
+    """
+
+    @staticmethod
+    def _help_text() -> str:
+        result = CliRunner().invoke(delegate_command, ["--help"])
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    def test_bus_only_ever_sets_the_event_bus_backend(self) -> None:
+        """The structural fact the help text has to match."""
+        assert build_backend_overrides(bus="kafka", kafka_bootstrap=None) == {
+            "event_bus": "kafka"
+        }
+        assert build_backend_overrides(bus="kafka", kafka_bootstrap="broker:19092") == {
+            "event_bus": "kafka",
+            "kafka_bootstrap": "broker:19092",
+        }
+        # Nothing in the override map names a remote executor, a deployed
+        # consumer, or an execution locality.
+        for overrides in (
+            build_backend_overrides(bus="kafka", kafka_bootstrap="broker:19092"),
+            build_backend_overrides(bus="inmemory", kafka_bootstrap=None),
+        ):
+            assert set(overrides) <= {"event_bus", "kafka_bootstrap"}
+
+    def test_help_does_not_claim_a_deployed_consumer_dispatches_the_work(
+        self,
+    ) -> None:
+        help_text = " ".join(self._help_text().split()).lower()
+        for false_claim in (
+            "a deployed runtime consumer dispatches it",
+            "so a deployed runtime dispatches it",
+            "deployed runtime consumer picks it up",
+        ):
+            assert false_claim not in help_text, (
+                f"--help still claims remote execution: {false_claim!r}"
+            )
+
+    def test_help_states_execution_is_in_process_and_bus_is_transport_only(
+        self,
+    ) -> None:
+        help_text = " ".join(self._help_text().split()).lower()
+        assert "in-process" in help_text, (
+            "--help must state that the orchestrator always runs in-process"
+        )
+        assert "transport" in help_text, (
+            "--help must state that --bus selects the event transport only"
+        )
+        assert "does not change where the work runs" in help_text
+
+
+class TestCorrelationReachesTheReceipt:
+    """OMN-17295 / OMN-14872: the CLI must TELL receipt-mode which run this is.
+
+    ``run_delegate`` mints the correlation id and writes it into the payload,
+    but before this change it never handed that id to ``run_receipt_mode`` —
+    so the receipt layer had nothing to join against and fell back to reading
+    whatever correlation the workflow content happened to declare. That is why
+    a stale terminal envelope could be printed as this run's result.
+    """
+
+    def test_run_delegate_threads_its_correlation_id_into_receipt_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[tuple[str, str]] = []
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            payload = json.loads(
+                Path(str(kwargs["input_path"])).read_text(encoding="utf-8")
+            )
+            seen.append(
+                (payload["correlation_id"], str(kwargs["expected_correlation_id"]))
+            )
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+
+        assert len(seen) == 1
+        payload_correlation, receipt_correlation = seen[0]
+        uuid.UUID(payload_correlation)
+        assert payload_correlation == receipt_correlation, (
+            "the id written into the request and the id the receipt joins on "
+            "must be the same run identity"
+        )
+
+    def test_receipt_correlation_equals_the_payload_correlation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-14872: the receipt announced an id the request never carried.
+
+        Reported shape: the outer receipt's ``correlation_id`` differed from
+        the id written into ``<state-root>/tmp/delegate-input-*.json``, so a
+        caller correlating its own request against the printed receipt was
+        matching on two different identities. Real dispatch path, no mocks.
+        """
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setattr(
+            cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        state_root = tmp_path / "state"
+
+        result = CliRunner().invoke(
+            delegate_command,
+            [
+                "research the routing architecture",
+                "--state-root",
+                str(state_root),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+
+        receipt = json.loads(result.stdout.strip())
+        payloads = list((state_root / "tmp").glob("delegate-input-*.json"))
+        assert len(payloads) == 1
+        request = json.loads(payloads[0].read_text(encoding="utf-8"))
+
+        assert receipt["correlation_id"] == request["correlation_id"], (
+            "the receipt must be reported under the id the request carried"
+        )

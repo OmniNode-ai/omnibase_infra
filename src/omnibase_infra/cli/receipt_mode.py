@@ -329,8 +329,24 @@ def _fully_qualified_name(obj: object) -> str:
     return f"{cls.__module__}.{cls.__qualname__}"
 
 
-def _extract_correlation_id(workflow_data: dict[str, JsonValue]) -> uuid.UUID:
-    """Extract the run's correlation_id from workflow state, else mint one."""
+def _extract_correlation_id(
+    workflow_data: dict[str, JsonValue],
+    expected_correlation_id: uuid.UUID | None = None,
+) -> uuid.UUID:
+    """Resolve the correlation id this receipt reports as its own.
+
+    When the caller minted a correlation id for THIS invocation
+    (``onex delegate`` does — it writes the id into the request payload), that
+    id IS the run's identity and wins unconditionally. Reading the id back out
+    of the workflow content instead is what let a receipt announce a foreign
+    run's correlation as though it were this run's (OMN-17295 / OMN-14872).
+
+    Only when the caller has no identity to offer (``onex node`` /
+    ``onex skill``, which mint none) does this fall back to whatever the
+    workflow content declares, and finally to a fresh id.
+    """
+    if expected_correlation_id is not None:
+        return expected_correlation_id
     for key in ("handler_result", "terminal_payload"):
         candidate = workflow_data.get(key)
         if isinstance(candidate, dict):
@@ -398,6 +414,83 @@ def _verify_workflow_data_identity(
         f"{stamped!r} does not match this invocation's run_id {str(run_id)!r} "
         "— discarding untrusted workflow data instead of serving another "
         "run's result as this run's own."
+    )
+    return {}, reason
+
+
+def _declared_correlation_ids(workflow_data: dict[str, JsonValue]) -> set[str]:
+    """Every ``correlation_id`` the loaded workflow content claims for itself.
+
+    Both levels are read. A delegate terminal is a ``ModelEventEnvelope``
+    dump: the envelope carries ``correlation_id`` at the top and the domain
+    payload carries its own copy under ``payload``. A wrong-run envelope can
+    disagree with this run at either level, so both are collected and the
+    caller requires the whole set to be this run's id.
+    """
+    found: set[str] = set()
+    for key in ("handler_result", "terminal_payload"):
+        candidate = workflow_data.get(key)
+        if not isinstance(candidate, dict):
+            continue
+        containers: list[object] = [candidate, candidate.get("payload")]
+        for container in containers:
+            if not isinstance(container, dict):
+                continue
+            raw = container.get("correlation_id")
+            if isinstance(raw, str) and raw:
+                found.add(raw)
+    return found
+
+
+def _verify_workflow_data_correlation(
+    workflow_data: dict[str, JsonValue],
+    expected_correlation_id: uuid.UUID | None,
+) -> tuple[dict[str, JsonValue], str | None]:
+    """Select the receipt strictly by THIS run's correlation id (OMN-17295).
+
+    The OMN-15449 anchor join above proves the FILE was written by this
+    invocation. It says nothing about whose terminal envelope the runtime put
+    inside it, and that is a distinct failure:
+    ``RuntimeLocal._on_terminal_event`` adopts the FIRST terminal that arrives
+    on the subscribed terminal topic with no correlation predicate, so a
+    retained terminal from an earlier run (a fresh Kafka consumer group reads
+    from the beginning of a topic that still holds last night's events)
+    becomes this run's ``terminal_payload`` and is written out under this
+    run's ``run_id``. Live shape, this repo's ``.onex_state`` on 2026-08-31:
+    ``run_id`` fresh at 04:11 local, ``terminal_payload.envelope_timestamp``
+    ``2026-08-30T23:02:44Z``, ``payload.prompt_text`` a different prompt
+    entirely — a confident, wrong answer with nothing on the surface marking
+    it as wrong.
+
+    The CLI is the last boundary that still knows which correlation id it
+    minted, so the join lands here. Content is served ONLY when every
+    correlation id it declares is this run's own. Anything else — a foreign
+    id, a mix, or no id at all — is discarded and reported as an explicit
+    "no receipt found", because an unattributable receipt and a wrong receipt
+    are the same defect from the caller's side.
+
+    Absent ids fail closed for the same reason the anchor join refuses an
+    absent ``run_id``: UNKNOWN provenance is never read as ours.
+
+    ``expected_correlation_id`` is ``None`` for callers that mint no
+    correlation id of their own (``onex node``, ``onex skill``); those paths
+    are left exactly as they were.
+    """
+    if expected_correlation_id is None or not workflow_data:
+        return workflow_data, None
+    expected = str(expected_correlation_id)
+    declared = _declared_correlation_ids(workflow_data)
+    if declared == {expected}:
+        return workflow_data, None
+    if declared:
+        observed = ", ".join(sorted(declared))
+        detail = f"the stored receipt names correlation {observed}"
+    else:
+        detail = "the stored receipt names no correlation id at all"
+    reason = (
+        f"OMN-17295 correlation-join refusal: no receipt found for this run's "
+        f"correlation {expected} — {detail}. Discarding it rather than "
+        "rendering another run's envelope as this run's result."
     )
     return {}, reason
 
@@ -508,8 +601,17 @@ def run_receipt_mode(
     timeout: int,
     verbose: bool,
     emit_socket: Path,
+    expected_correlation_id: uuid.UUID | None = None,
 ) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
+
+    ``expected_correlation_id`` (OMN-17295) is the correlation id the CALLER
+    minted for this invocation, when it has one. ``onex delegate`` mints it,
+    writes it into the request payload, and passes it here so the receipt can
+    be selected strictly by this run's identity — see
+    :func:`_verify_workflow_data_correlation`. Callers that mint no
+    correlation id (``onex node``, ``onex skill``) pass ``None`` and keep the
+    pre-existing behaviour unchanged.
 
     Returns the process exit code (the runtime's exit code; 1 when the
     runtime raised before producing a workflow result).
@@ -588,17 +690,27 @@ def run_receipt_mode(
     workflow_data, identity_refusal = _verify_workflow_data_identity(
         workflow_data, run_id
     )
-    if identity_refusal:
-        logger.error(identity_refusal)
+    # OMN-17295: two independent joins, both fail-closed. The anchor join
+    # above proves the FILE is this run's; this one proves the CONTENT is.
+    workflow_data, correlation_refusal = _verify_workflow_data_correlation(
+        workflow_data, expected_correlation_id
+    )
+    for refusal, refusal_type in (
+        (identity_refusal, "WorkflowResultIdentityMismatch"),
+        (correlation_refusal, "WorkflowResultCorrelationMismatch"),
+    ):
+        if not refusal:
+            continue
+        logger.error(refusal)
         if not runtime_error:
-            runtime_error = identity_refusal
-            runtime_error_type = "WorkflowResultIdentityMismatch"
+            runtime_error = refusal
+            runtime_error_type = refusal_type
             # AC3 (OMN-15449): "refuse (non-verified, non-zero exit)" — a
             # RuntimeLocal that itself returned COMPLETED/exit 0 must not
-            # let that success code escape once the anchor join has decided
-            # its own workflow data cannot be trusted.
+            # let that success code escape once a join has decided its own
+            # workflow data cannot be trusted.
             exit_code = 1
-    correlation_id = _extract_correlation_id(workflow_data)
+    correlation_id = _extract_correlation_id(workflow_data, expected_correlation_id)
     handler_result_model_name: str | None = (
         _fully_qualified_name(handler_result_obj)
         if handler_result_obj is not None
