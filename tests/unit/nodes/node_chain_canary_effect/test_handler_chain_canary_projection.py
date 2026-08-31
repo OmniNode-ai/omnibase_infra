@@ -38,12 +38,20 @@ database.
 
 from __future__ import annotations
 
+import asyncio
+import sys
+import time
 from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary import (
     HandlerChainCanary,
+    _readback_projection_via_asyncpg,
+)
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_canary_verdict import (
+    EnumChainCanaryVerdict,
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link import (
     EnumChainLink,
@@ -58,10 +66,15 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_res
     ModelChainCanaryResult,
 )
 
-_PROBE_URL = "http://127.0.0.1:8085"
-_BOOTSTRAP = "127.0.0.1:19092"
-_SUCCESS_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"
-_PROJECTION_DSN = "postgresql://probe@127.0.0.1:5436/omnibase_infra"
+# Endpoints use the RFC 2606 reserved `.invalid` TLD, matching the sibling
+# canary suites. This is isolation, not cosmetics: every leg here is stubbed,
+# so a loopback literal would silently reach a real local Redpanda or Postgres
+# if one happened to be up, and the suite would stop being hermetic without
+# ever failing. `.invalid` cannot resolve, so it cannot reach anything.
+_PROBE_URL = "http://runtime.invalid:8085"
+_BOOTSTRAP = "broker.invalid:19092"
+_SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
+_PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
 
 # The three non-terminal states OMN-14843 actually measured, with the count it
 # found for each. Parametrizing on the measured set rather than one invented
@@ -306,3 +319,237 @@ async def test_projection_is_read_for_the_probes_own_correlation_id() -> None:
     projection_ids = [call[1] for call in projection.calls]
     assert len(projection_ids) == 1
     assert projection_ids == terminal.calls
+
+
+# -- the SCALAR verdict, not just the link (OMN-16963, CodeRabbit #1) ------
+#
+# Before this block existed, `_decide()` never received the projection result
+# at all. The per-link status was honest and the scalar verdict was not: an
+# unconfigured, stranded, absent or unreadable projection still produced
+# GREEN with success=True. That is the same over-reading this node exists to
+# end -- a partial probe rendering as a full proof -- reproduced one level up,
+# at the summary rather than at the link.
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("projection", "dsn", "expected"),
+    [
+        (
+            _ProjectionReadback(state="RECEIVED"),
+            _PROJECTION_DSN,
+            EnumChainCanaryVerdict.PROJECTION_STRANDED,
+        ),
+        (
+            _ProjectionReadback(state=""),
+            _PROJECTION_DSN,
+            EnumChainCanaryVerdict.PROJECTION_ROW_ABSENT,
+        ),
+        (
+            _ProjectionReadback(state=None, error="connection refused"),
+            _PROJECTION_DSN,
+            EnumChainCanaryVerdict.PROJECTION_READBACK_FAILED,
+        ),
+        (
+            _ProjectionReadback(state="COMPLETED"),
+            "",
+            EnumChainCanaryVerdict.PROJECTION_READBACK_NOT_CONFIGURED,
+        ),
+    ],
+    ids=["stranded", "row_absent", "unreadable", "not_configured"],
+)
+async def test_non_passing_link_two_is_never_green(
+    projection: _ProjectionReadback,
+    dsn: str,
+    expected: EnumChainCanaryVerdict,
+) -> None:
+    """Each non-passing projection outcome gets its own scalar verdict.
+
+    They are not collapsed into one red for the same reason the terminal
+    readback's outcomes are not: a stranded row, an absent row and an
+    unreadable projection send an operator to three different layers.
+
+    Every case here has a healthy ingress AND a real terminal on the bus --
+    the exact shape that used to return GREEN.
+    """
+    handler = _handler(
+        projection=projection,
+        terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
+    )
+
+    result = await handler.handle(_request(projection_dsn=dsn))
+
+    assert result.verdict is expected
+    assert result.success is False
+    assert result.chain_proof_complete is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_missing_terminal_outranks_a_stranded_projection() -> None:
+    """A terminal that never landed is the larger fact.
+
+    With no terminal on the bus the projection has nothing to disagree with,
+    so reporting PROJECTION_STRANDED there would name the wrong layer.
+    """
+    # "" is read-and-not-found; None would be read-failed, a different verdict.
+    handler = _handler(
+        projection=_ProjectionReadback(state="RECEIVED"),
+        terminal_readback=_TerminalReadback(found=""),
+    )
+
+    result = await handler.handle(_request())
+
+    assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_quarantine_outranks_a_stranded_projection() -> None:
+    """QUARANTINED still outranks everything -- it names the defect.
+
+    In the OMN-16767 incident several symptoms are true at once, and a
+    stranded projection is one of them. Reporting the stranding there would
+    send someone to the projection layer when a handler is refusing the event.
+    """
+    handler = _handler(
+        projection=_ProjectionReadback(state="RECEIVED"),
+        terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
+        quarantine=_Quarantine(found=True),
+    )
+
+    result = await handler.handle(_request())
+
+    assert result.verdict is EnumChainCanaryVerdict.QUARANTINED
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "dsn"),
+    [
+        ("RECEIVED", _PROJECTION_DSN),
+        ("ROUTED", _PROJECTION_DSN),
+        ("INFERENCE_COMPLETED", _PROJECTION_DSN),
+        ("", _PROJECTION_DSN),
+        ("COMPLETED", ""),
+    ],
+)
+async def test_success_and_link_two_can_never_disagree(state: str, dsn: str) -> None:
+    """The invariant, stated directly rather than per-case.
+
+    If link 2 is anything other than PASS, ``success`` must be False. This is
+    the guard that stops the defect returning by a route these tests did not
+    anticipate -- a new projection status, or a new branch in ``_decide``.
+    """
+    handler = _handler(
+        projection=_ProjectionReadback(state=state),
+        terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
+    )
+
+    result = await handler.handle(_request(projection_dsn=dsn))
+
+    link_two_passed = (
+        _link(result, EnumChainLink.ROUTING_PROJECTED) is EnumChainLinkStatus.PASS
+    )
+    assert link_two_passed is False
+    assert result.success is False
+
+
+# -- the readback's own resilience (CodeRabbit #2 and #3) -----------------
+
+
+class _FakeConnection:
+    """Minimal asyncpg connection stand-in."""
+
+    def __init__(
+        self,
+        *,
+        row: dict[str, object] | None = None,
+        fetch_delay_s: float = 0.0,
+        close_raises: bool = False,
+    ) -> None:
+        self._row = row
+        self._fetch_delay_s = fetch_delay_s
+        self._close_raises = close_raises
+        self.closed = False
+
+    async def fetchrow(self, query: str, correlation_id: str) -> object:
+        if self._fetch_delay_s:
+            await asyncio.sleep(self._fetch_delay_s)
+        return self._row
+
+    async def close(self) -> None:
+        self.closed = True
+        if self._close_raises:
+            raise OSError("connection reset while closing")
+
+
+class _FakeAsyncpg:
+    """Stands in for the lazily-imported ``asyncpg`` module."""
+
+    def __init__(
+        self, connection: _FakeConnection, *, connect_delay_s: float = 0.0
+    ) -> None:
+        self._connection = connection
+        self._connect_delay_s = connect_delay_s
+
+    async def connect(self, dsn: str) -> _FakeConnection:
+        if self._connect_delay_s:
+            await asyncio.sleep(self._connect_delay_s)
+        return self._connection
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_close_failure_does_not_replace_the_read_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure to close must not escape and abort the sibling legs.
+
+    ``close()`` ran in a bare ``finally`` outside the ``except``, so an error
+    there propagated past the fail-closed return, out of ``asyncio.gather()``,
+    and took the terminal and quarantine legs down with it. The connection is
+    discarded either way; the read outcome is the only fact worth reporting.
+    """
+    connection = _FakeConnection(row={"state": "COMPLETED"}, close_raises=True)
+    monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
+
+    state, error = await _readback_projection_via_asyncpg(
+        _PROJECTION_DSN, str(uuid4()), 5.0
+    )
+
+    assert state == "COMPLETED"
+    assert error == ""
+    assert connection.closed is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_connect_and_query_share_one_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``timeout_s`` is the budget for the leg, not for each call in it.
+
+    Applied per-call it bounded connect AND query separately, so the leg could
+    hold ``asyncio.gather()`` for ~2x its window -- which defeats the "costs no
+    extra wall-clock" property that justifies running it concurrently at all.
+
+    Here connect and fetch each fit inside the window individually and do not
+    fit together, so this passes only if one deadline spans both.
+    """
+    connection = _FakeConnection(row={"state": "COMPLETED"}, fetch_delay_s=0.25)
+    monkeypatch.setitem(
+        sys.modules, "asyncpg", _FakeAsyncpg(connection, connect_delay_s=0.25)
+    )
+
+    started = time.monotonic()
+    state, error = await _readback_projection_via_asyncpg(
+        _PROJECTION_DSN, str(uuid4()), 0.3
+    )
+    elapsed = time.monotonic() - started
+
+    assert state is None
+    assert error
+    assert elapsed < 0.6

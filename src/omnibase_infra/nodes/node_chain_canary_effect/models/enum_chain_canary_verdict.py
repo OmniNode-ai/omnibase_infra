@@ -22,11 +22,17 @@ class EnumChainCanaryVerdict(StrEnum):
     back. Reporting the more specific one is the whole diagnostic value.
 
     A ``GREEN`` here is a PROBE verdict, not a chain proof. OMN-16025 is a
-    five-link gate and this probe has legs for three of them, so read
+    five-link gate and this probe has legs for four of them, so read
     ``ModelChainCanaryResult.link_verdicts`` before quoting a colour at
     anybody: ``chain_proof_complete`` is the field that answers "is the
     chain proven", and it is False whenever any link is unproven
     (OMN-16931).
+
+    As of OMN-16963 a non-passing link 2 also fails the SCALAR verdict, not
+    only ``chain_proof_complete``. Before that, an unconfigured or stranded
+    projection still produced ``GREEN`` with ``success=True`` — the same
+    over-reading this node exists to end, reproduced one level up at the
+    summary rather than at the link.
     """
 
     # A terminal event came back inside the budget, and the run's own
@@ -66,6 +72,59 @@ class EnumChainCanaryVerdict(StrEnum):
     # unreachable, topic missing, scan error). Fails closed: an unrunnable
     # check is never reported as a passing one.
     QUARANTINE_PROBE_FAILED = "quarantine_probe_failed"
+    # -- link 2, the projection readback (OMN-16963) --------------------
+    # These mirror the terminal readback's four non-passing outcomes rather
+    # than collapsing into one, for the same reason the terminal ones are
+    # not collapsed: they send an operator to different layers. They are
+    # reported only when the terminal IS on the bus, because that is the
+    # disagreement OMN-14843 measured — the topic layer healthy at the same
+    # moment the FSM was stranded — and a missing terminal is the larger
+    # fact when both hold.
+    #
+    # The projection carries a row for this correlation id and it is not a
+    # terminal FSM state. The chain moved the event and the FSM did not
+    # finish with it. This is the OMN-14843 shape.
+    PROJECTION_STRANDED = "projection_stranded"
+    # The projection was readable and carries NO row for this correlation
+    # id. Distinct from STRANDED on purpose: a row that stopped mid-FSM is a
+    # projection defect, an absent row may equally be a publish that never
+    # happened, and they send you to different layers.
+    PROJECTION_ROW_ABSENT = "projection_row_absent"
+    # The projection readback was configured but could not be executed.
+    # Fails closed on the same terms as TERMINAL_READBACK_FAILED.
+    PROJECTION_READBACK_FAILED = "projection_readback_failed"
+    # No DSN was configured for the projection readback, so the run has no
+    # evidence about link 2 at all. Deliberately NOT green-with-a-caveat the
+    # way an unconfigured quarantine leg is: quarantine is a supplementary
+    # check, link 2 is one of the five OMN-16025 chain links, and a run that
+    # cannot see it is the three-links-rendered-as-five defect this ticket
+    # exists to end.
+    PROJECTION_READBACK_NOT_CONFIGURED = "projection_readback_not_configured"
+    # -- link 5, the ledger chain replay (OMN-16964) --------------------
+    # Mirrors link 2's treatment for the same reason: the per-link status was
+    # honest while the scalar verdict was not. Reported only when links 2 and
+    # 4 have both passed, so the ledger is the last thing left to disprove.
+    #
+    # The assembled chain has a gap, so there is no complete chain to replay.
+    LEDGER_CHAIN_INCOMPLETE = "ledger_chain_incomplete"
+    # A COMPLETE chain was replayed and the replay was not green. Distinct
+    # from CHAIN_INCOMPLETE: there the replay never had material to run on.
+    # Named FAILED rather than NOT_GREEN to match the contract member that
+    # landed in #3072 and EnumLedgerReplayStatus.REPLAY_FAILED one level
+    # down — one vocabulary across the status enum, the verdict enum and the
+    # contract, rather than three synonyms for the same fact.
+    LEDGER_REPLAY_FAILED = "ledger_replay_failed"
+    # The tier-2 verifier returned SKIP. It was pointed at this run and
+    # checked nothing. This is the verdict OMN-16025's "SKIP != PASS" wording
+    # exists to make expressible: unlike an unconfigured leg, this one ran.
+    LEDGER_VERIFIER_SKIPPED = "ledger_verifier_skipped"
+    # The chain could not be assembled, replayed or verified at all. Fails
+    # closed on the same terms as the other unrunnable checks.
+    LEDGER_REPLAY_UNREADABLE = "ledger_replay_unreadable"
+    # No source was configured for the ledger replay, so the run has no
+    # evidence about link 5. Red for the same reason link 2's is: link 5 is
+    # one of the five OMN-16025 chain links, not a supplementary check.
+    LEDGER_REPLAY_NOT_CONFIGURED = "ledger_replay_not_configured"
     # ONEX_CHAIN_CANARY_DISABLED was set. Zero I/O was performed.
     SKIPPED_DISABLED = "skipped_disabled"
 
