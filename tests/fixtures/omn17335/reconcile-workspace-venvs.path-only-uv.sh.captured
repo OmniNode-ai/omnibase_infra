@@ -122,9 +122,6 @@
 #                                    no default, CLAUDE.md rule 8)
 #   ONEX_RECONCILE_INSTALL_SCRIPT    override the provider co-install script
 #                                    (tests only; defaults to the sibling script)
-#   ONEX_RECONCILE_UV_BIN            absolute path to `uv`, tried FIRST. Not a
-#                                    bypass: it changes which uv runs, never
-#                                    whether the sync has to succeed.
 #   CLAUDE_PLUGIN_DATA               optional; when its .venv exists it is a
 #                                    hook-venv surface too
 #
@@ -132,8 +129,7 @@
 #   0  IN_SYNC (--check) / reconciled successfully (default)
 #   1  DRIFT detected (--check only -- never returned by the repair path)
 #   2  reconcile FAILED; the message names the exact command to run by hand
-#   3  INDETERMINATE configuration (no OMNI_HOME, no canonical clone, no uv,
-#      or a surface this process must not write)
+#   3  INDETERMINATE configuration (no OMNI_HOME, no canonical clone)
 #
 # There is NO bypass variable. The OMN-13930 override
 # (ONEX_ALLOW_OMNIMARKET_DRIFT) exists on the *guard*, for an operator who
@@ -211,191 +207,11 @@ if [[ ! -d "$MARKET_CLONE/.git" ]]; then
   exit "$EXIT_INDETERMINATE"
 fi
 
-# --------------------------------------------------------------------------- #
-# Surface ownership, and resolving the one tool that does all the writing
-# --------------------------------------------------------------------------- #
-# OMN-17335. The first live `.201` run of this reconciler refused with
-# "`uv` is not on PATH", and the ticket filed against it concluded uv was not
-# installed on the host at all. That conclusion was wrong, and the probe that
-# produced it is the same shape as the defect this whole epic exists to close:
-#
-#     $ command -v uv                      -> (nothing)      # non-interactive PATH
-#     $ /home/<owner>/.local/bin/uv --version -> uv 0.11.5    # it is installed
-#
-# A non-interactive shell never sources the profile that puts `~/.local/bin` on
-# PATH, and the cron.d unit sets an explicit minimal PATH, so PATH-only
-# resolution CANNOT see a user-local install by construction. The absence of a
-# name on PATH was read as the absence of the tool -- an empty result treated as
-# evidence of absence. So resolution is now an ordered list of candidates, and a
-# refusal names every one of them.
-#
-# The second defect only became visible while fixing the first. The cron unit
-# runs as ROOT; the venv and every file in it are owned by the operator user.
-# Putting uv on root's PATH would have "fixed" the refusal by having root write
-# root-owned files into a user-owned venv -- after which the owner's own
-# reconcile fails on permissions. That trades a loud, correct failure for a
-# quiet, latent one, which is strictly worse than the bug. So every operation
-# that WRITES runs as the owner of the surface, or does not run.
-#
-# Both rules are enforced mechanically by scripts/check_reconciler_privilege.py
-# (pre-commit + CI), not by this comment.
-
-CURRENT_USER="$(id -un)"
-SURFACE_OWNER=""
-SURFACE_OWNER_HOME=""
-UV_BIN=""
-RUN_AS=()
-UV_SEARCHED=()
-
-# Owner of the nearest existing ancestor of a path. GNU and BSD `stat` disagree
-# on the flag, and this script runs on both Linux hosts and this Mac.
-surface_owner() {
-  local path="$1"
-  while [[ -n "$path" && "$path" != "/" && ! -e "$path" ]]; do
-    path="$(dirname "$path")"
-  done
-  [[ -e "$path" ]] || return 1
-  stat -c '%U' "$path" 2>/dev/null && return 0   # GNU
-  stat -f '%Su' "$path" 2>/dev/null && return 0  # BSD
-  return 1
-}
-
-# Home directory of a user, WITHOUT the `eval echo ~user` trick (which expands
-# whatever the name happens to contain). $HOME is used only for the current
-# user, where it is authoritative and where a test can control it.
-user_home() {
-  local user="$1" home=""
-  if [[ "$user" == "$CURRENT_USER" && -n "${HOME:-}" ]]; then
-    printf '%s' "$HOME"
-    return 0
-  fi
-  home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6)"
-  if [[ -z "$home" ]]; then
-    home="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
-  fi
-  [[ -n "$home" ]] || return 1
-  printf '%s' "$home"
-}
-
-# Decide, once, who the package operations must run as. Sets RUN_AS to the
-# command prefix that gets there -- empty when this process already IS the
-# owner, which is the case on every developer machine.
-plan_privileges() {
-  local surface="$INFRA_DIR"
-  [[ -d "$INFRA_VENV" ]] && surface="$INFRA_VENV"
-
-  if ! SURFACE_OWNER="$(surface_owner "$surface")"; then
-    say "INDETERMINATE: cannot read the owner of $surface."
-    say "  Every package operation below writes into that tree. Without knowing"
-    say "  who owns it there is no way to write as the right user, and writing"
-    say "  as the wrong one leaves a venv its owner can no longer reconcile."
-    exit "$EXIT_INDETERMINATE"
-  fi
-  SURFACE_OWNER_HOME="$(user_home "$SURFACE_OWNER" || true)"
-
-  if [[ "$SURFACE_OWNER" == "$CURRENT_USER" ]]; then
-    RUN_AS=()
-    return 0
-  fi
-
-  # --check writes nothing, so an ownership mismatch is not an obstacle to it.
-  # Refusing here would break the read-only SessionStart probe for any user who
-  # can read the tree, and a read-only probe that refuses teaches people to stop
-  # running it.
-  if [[ "$MODE" == "check" ]]; then
-    RUN_AS=()
-    return 0
-  fi
-
-  if [[ "$(id -u)" -eq 0 ]] && command -v runuser >/dev/null 2>&1; then
-    # HOME is set explicitly: `runuser` without `-l` keeps root's HOME, so uv
-    # would try to write its cache into /root/.cache as an unprivileged user and
-    # fail on permissions -- a confusing failure two layers from its cause.
-    if [[ -z "$SURFACE_OWNER_HOME" ]]; then
-      say "INDETERMINATE: $surface is owned by $SURFACE_OWNER, whose home directory"
-      say "  could not be resolved. Dropping privileges without a HOME points uv's"
-      say "  cache at root's, which the dropped user cannot write."
-      exit "$EXIT_INDETERMINATE"
-    fi
-    RUN_AS=(runuser -u "$SURFACE_OWNER" -- env "HOME=$SURFACE_OWNER_HOME")
-    say "writing as $SURFACE_OWNER (owner of $surface); this process is $CURRENT_USER"
-    return 0
-  fi
-
-  say "INDETERMINATE: $surface is owned by $SURFACE_OWNER, but this process runs"
-  say "  as $CURRENT_USER and cannot become that user."
-  say "  Writing anyway would put $CURRENT_USER-owned files inside a"
-  say "  $SURFACE_OWNER-owned venv, after which $SURFACE_OWNER's own reconcile"
-  say "  fails on permissions. A loud refusal now beats a silent breakage later."
-  say "  Run this as $SURFACE_OWNER, or as root on a host that has runuser."
-  exit "$EXIT_INDETERMINATE"
-}
-
-# Ordered candidates, every one of them named in the refusal. There is
-# deliberately NO hardcoded system path here: /usr/local/bin and /opt/homebrew/bin
-# are already on any PATH that includes them, so the PATH candidate covers them,
-# and a hardcoded absolute path would also make these tests non-hermetic.
-resolve_uv() {
-  local candidate owner_home
-  UV_SEARCHED=()
-
-  if [[ -n "${ONEX_RECONCILE_UV_BIN:-}" ]]; then
-    UV_SEARCHED+=("$ONEX_RECONCILE_UV_BIN  (ONEX_RECONCILE_UV_BIN)")
-    if [[ -x "$ONEX_RECONCILE_UV_BIN" ]]; then
-      UV_BIN="$ONEX_RECONCILE_UV_BIN"
-      return 0
-    fi
-  fi
-
-  candidate="$(command -v uv 2>/dev/null || true)"
-  UV_SEARCHED+=("${candidate:-<not found>}  (PATH=${PATH})")
-  if [[ -n "$candidate" && -x "$candidate" ]]; then
-    UV_BIN="$candidate"
-    return 0
-  fi
-
-  # The case that actually broke `.201`: uv installed under the surface owner's
-  # home, invisible to a cron PATH.
-  owner_home="$SURFACE_OWNER_HOME"
-  if [[ -n "$owner_home" ]]; then
-    candidate="$owner_home/.local/bin/uv"
-    UV_SEARCHED+=("$candidate  (home of $SURFACE_OWNER)")
-    if [[ -x "$candidate" ]]; then
-      UV_BIN="$candidate"
-      return 0
-    fi
-  else
-    UV_SEARCHED+=("<home of $SURFACE_OWNER could not be resolved>")
-  fi
-
-  return 1
-}
-
-# Run a command as the owner of the surface being written. Every package
-# operation in this script goes through here; check_reconciler_privilege.py
-# fails the build if one does not.
-as_owner() {
-  if [[ ${#RUN_AS[@]} -eq 0 ]]; then
-    "$@"
-  else
-    "${RUN_AS[@]}" "$@"
-  fi
-}
-
-plan_privileges
-
-if ! resolve_uv; then
-  say "INDETERMINATE: no usable \`uv\`; every sync below is a uv operation."
-  say "  Searched, in order:"
-  for _candidate in "${UV_SEARCHED[@]}"; do
-    say "    - $_candidate"
-  done
-  say "  Install uv, or set ONEX_RECONCILE_UV_BIN to an absolute uv path."
-  say "  Note that 'not on PATH' is NOT 'not installed': a cron unit's PATH"
-  say "  cannot reach a user-local install (OMN-17335)."
+UV_BIN="$(command -v uv 2>/dev/null || true)"
+if [[ -z "$UV_BIN" ]]; then
+  say "INDETERMINATE: \`uv\` is not on PATH; every sync below is a uv operation."
   exit "$EXIT_INDETERMINATE"
 fi
-trace "uv resolved to $UV_BIN"
 
 # --------------------------------------------------------------------------- #
 # Pure observations (the future NodeCompute inputs)
@@ -420,7 +236,7 @@ market_head() {
 lock_layer_ok() {
   local project="$1"
   shift
-  (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+  (cd "$project" && env -u PYTHONPATH "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
 }
 
 installed_market_commit() {
@@ -574,7 +390,7 @@ run_repair() {
       # OMNIMARKET_REF is set explicitly so the install script's own ls-remote
       # default (OMN-16366 reversed drift) can never apply here.
       trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $INFRA_PYTHON"
-      if ! as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
+      if ! env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
           bash "$INSTALL_SCRIPT" --execute "$INFRA_PYTHON"; then
         fail "provider co-install did not complete; omnimarket is not installed." \
           "Every \`onex skill\`/\`onex node\`/\`onex delegate\` dispatch will refuse" \
@@ -595,7 +411,7 @@ run_repair() {
       # --inexact: do not remove the composed provider layer, which the lock
       #   correctly does not mention and must not be asked to.
       trace "uv sync --frozen --inexact --project $INFRA_DIR"
-      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
+      if ! (cd "$INFRA_DIR" && env -u PYTHONPATH "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
         fail "cli venv lock sync did not complete." \
           "Run by hand and read the error:" \
           "  cd $INFRA_DIR && env -u PYTHONPATH uv sync --frozen --inexact"
@@ -612,22 +428,9 @@ run_repair() {
   # OMN-15620 class, and precisely the sort of thing that makes one venv answer
   # a question differently from another. An exact sync is what removes it.
   local project any_hook=0
-  local hook_owner
   while IFS= read -r project; do
     [[ -n "$project" ]] || continue
     any_hook=1
-    # RUN_AS was planned from the CLI venv's owner. A hook venv owned by someone
-    # else would be written as the wrong user by that same prefix, which is the
-    # exact hazard plan_privileges exists to prevent -- so it is refused rather
-    # than written. Silently skipping it would be the OMN-17291 condition: a
-    # surface nobody reconciles and nobody is told about.
-    hook_owner="$(surface_owner "$project/.venv" || true)"
-    if [[ -n "$hook_owner" && "$hook_owner" != "$SURFACE_OWNER" ]]; then
-      say "INDETERMINATE: hook venv $project/.venv is owned by $hook_owner, but the"
-      say "  package operations are running as $SURFACE_OWNER (owner of $INFRA_DIR)."
-      say "  Reconcile it as $hook_owner, or make the two surfaces share an owner."
-      exit "$EXIT_INDETERMINATE"
-    fi
     trace "uv sync --frozen --check --project $project"
     if lock_layer_ok "$project"; then
       say "hook venv: already in sync ($project/.venv)"
@@ -635,7 +438,7 @@ run_repair() {
     fi
     say "hook venv: reconciling $project/.venv to $project/uv.lock"
     trace "uv sync --frozen --project $project"
-    if ! (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --project "$project"); then
+    if ! (cd "$project" && env -u PYTHONPATH "$UV_BIN" sync --frozen --project "$project"); then
       fail "hook venv lock sync did not complete for $project." \
         "Run by hand and read the error:" \
         "  cd $project && env -u PYTHONPATH uv sync --frozen"

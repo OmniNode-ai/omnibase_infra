@@ -2667,6 +2667,9 @@ jobs:
       - name: Every reconciler proves movement by reading the surface back
         run: python3 scripts/check_reconciler_movement_proof.py
 
+      - name: Every reconciler resolves its tools explicitly and writes as the owner
+        run: python3 scripts/check_reconciler_privilege.py
+
   validate-validator-requirements:
     name: Enforce validator-requirements.yaml (OMN-13291)
     # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
