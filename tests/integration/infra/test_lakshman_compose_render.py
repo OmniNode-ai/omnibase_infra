@@ -37,6 +37,28 @@ ENV_EXAMPLE = "docker/lakshman.env.example"
 LAKSHMAN_NETWORK = "omnibase-infra-lakshman-network"
 COMPOSE_PROJECT = "omnibase-infra-lakshman"
 
+#: Render-only stand-ins for the credentials above.
+#:
+#: These live HERE, in the test, and deliberately NOT in the shipped template.
+#: The template is what a lane owner copies, so a non-empty value there is a
+#: working credential published in git history — the OMN-17150 review finding.
+#: Supplying them from the fixture keeps the template fail-closed while still
+#: letting this module prove the lane renders. They are obvious non-secrets and
+#: are never written to disk.
+RENDER_ONLY_SECRETS = {
+    "POSTGRES_PASSWORD": "render-only-not-a-secret",
+    "VALKEY_PASSWORD": "render-only-not-a-secret",
+    "OMNINODE_RUNTIME_PASSWORD": "render-only-not-a-secret",
+    "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-not-a-secret",
+}
+
+#: Compose resolves a relative bind-mount source against the directory holding
+#: the first `-f` file (`docker/`), not the repo root — so the sibling omnimarket
+#: checkout is TWO levels up. `../omnimarket/...` silently resolved inside the
+#: repo, to a path that does not exist.
+EXPECTED_SKILLS_SOURCE = (REPO_ROOT.parent / "omnimarket/plugins/onex/skills").resolve()
+SKILLS_MOUNT_TARGET = "/app/skills"
+
 EXPECTED_RENDERED_SERVICES = {
     "postgres",
     "redpanda",
@@ -144,6 +166,13 @@ def _compose_render_env() -> dict[str, str]:
         "PATH": os.environ.get("PATH", ""),
         "PYTHONPATH": python_path,
         "USER": os.environ.get("USER", ""),
+        # Explicit render-only stand-ins, NOT inherited from the ambient shell:
+        # the shipped template leaves these empty on purpose, so the fixture has
+        # to supply them or every render below fails closed. That emptiness is
+        # pinned by test_shipped_template_credentials_are_empty in
+        # tests/ci/test_lakshman_lane_governance_boundary.py (kept there because
+        # it must run on hosts without Docker, which this module skips).
+        **RENDER_ONLY_SECRETS,
     }
 
 
@@ -361,3 +390,41 @@ def test_lakshman_lane_infrastructure_credentials_stay_fail_closed() -> None:
             f"{required_ref!r} lost its fail-closed guard; the lane would boot "
             "with a blank credential or an empty skills mount"
         )
+
+
+@pytest.mark.integration
+def test_skills_mount_resolves_to_the_sibling_omnimarket_checkout() -> None:
+    """The /app/skills bind mount must point OUTSIDE the repo, at the sibling.
+
+    OMN-17150 review finding. The template shipped `../omnimarket/...`, which
+    Compose resolves against `docker/` (the first `-f` file's directory), NOT the
+    repo root — landing on `<repo>/omnimarket/...`, a path that does not exist.
+
+    This is not a cosmetic path nit for THIS lane: the mount feeds `/app/skills`,
+    and a runtime with no skills tree reports healthy and then cannot serve a
+    single skill. The lane owner's Task 0 is `GET /health` 200 followed by an
+    `onex delegate` round-trip — the exact sequence that would pass the health
+    check and then fail the delegate call.
+    """
+    services = _compose_config_json()["services"]
+    mounted_by = {
+        name: volume["source"]
+        for name, config in services.items()
+        for volume in config.get("volumes", [])
+        if volume.get("target") == SKILLS_MOUNT_TARGET
+    }
+    assert mounted_by, (
+        f"No service mounts {SKILLS_MOUNT_TARGET}. The runtime services need the "
+        "skills tree; a lane that mounts nothing there is silently skill-less."
+    )
+    wrong = {
+        name: source
+        for name, source in mounted_by.items()
+        if Path(source).resolve() != EXPECTED_SKILLS_SOURCE
+    }
+    assert not wrong, (
+        f"These services resolve {SKILLS_MOUNT_TARGET} to the wrong host path: "
+        f"{wrong}. Expected the sibling checkout {EXPECTED_SKILLS_SOURCE}. "
+        "Compose resolves a relative source against docker/, so a sibling "
+        "checkout needs TWO levels up (../../omnimarket/...), not one."
+    )
