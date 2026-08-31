@@ -276,7 +276,31 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # the in-place rewrite of an already-applied migration that caused OMN-17139.
     # The grant it issues is deliberately SELECT/INSERT/UPDATE and NOT DELETE:
     # an obligation leaves the open set only via a recorded terminal event.
-    assert len(result.declarations) == 124
+    # +1 for OMN-17288's node_projection_delegation/
+    # 0033_delegation_events_uuid_via_registry_single_transaction.sql, which
+    # supersedes 0032. 0032 put DROP POLICY / CREATE POLICY / GRANT after its
+    # DO block, and both of its defects follow from that: `RETURN` exits the
+    # block and not the file, so the documented "table absent, nothing to
+    # convert" path ran those trailing statements anyway and aborted on
+    # `relation "delegation_events" does not exist`; and `END$$` COMMITS -- the
+    # runner is `psql -v ON_ERROR_STOP=1 -f` with NO --single-transaction -- so
+    # the table was committed with RLS enabled and ZERO policies until the
+    # standalone CREATE POLICY landed, an interruption in that window denying
+    # every application read. 0033 moves the recreate and the app_dashboard
+    # GRANT inside the guarded block. Both defects are proven against 0032's
+    # real bytes on a scratch Postgres in omnimarket
+    # tests/test_omn17288_migration_policy_atomicity.py.
+    #
+    # 0032's OWN declaration also moves in this change -- its checksum, not its
+    # ordinal -- because a prose comment in it quoted a live customer's tenant
+    # slug and this repository is PUBLIC (OMN-17288 finding 2). That edit is
+    # authorised by the supersession row above, which is the only escape
+    # check_migration_append_only.py accepts. It is safe on the facts as well
+    # as on the rule: probed read-only 2026-08-31 against
+    # platform_catalog.schema_migrations, 0032 is applied on NO lane -- dev
+    # holds 0030+0031, stability-test holds 0030, prod and judge carry no
+    # platform_catalog ledger at all.
+    assert len(result.declarations) == 125
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

@@ -337,10 +337,28 @@ FENCED_HOOK_EVENT_CAPTURE_IDS = (
 # action, not an agent's inference that the mirror "looks caught up". 0031 stays
 # in this tuple permanently -- it is RETIRED, not released (supersession
 # recorded in _ledger/migration-supersessions.tsv).
+# OMN-17288 superseded 0032 in turn, and 0033 is the THIRD id in this tuple.
+# 0032 placed DROP POLICY / CREATE POLICY / GRANT after its DO block, which
+# broke it two ways: (a) `RETURN` exits the block, not the file, so the path
+# 0032 documented as "nothing to convert" ran those trailing statements against
+# a relation it had just established does not exist, and aborted; (b) `END$$`
+# COMMITS -- the runner is `psql -v ON_ERROR_STOP=1 -f` with NO
+# --single-transaction -- so between that commit and the standalone
+# CREATE POLICY the table was committed with RLS enabled and ZERO policies,
+# denying every application read if anything interrupted it there. Both are
+# proven against 0032's real bytes on a scratch Postgres in omnimarket
+# tests/test_omn17288_migration_policy_atomicity.py. 0033 moves the recreate
+# and the GRANT inside the guarded block and lets the already-uuid branch fall
+# through to them. It is fenced on ARRIVAL for the same reason 0032 was -- it
+# is the conversion, and it can abort. 0031 and 0032 both stay in this tuple
+# permanently: they are RETIRED, not released, and when the operator un-gates
+# it is 0033 and only 0033.
 FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql",
     "node:node_projection_delegation:"
     "0032_delegation_events_tenant_id_uuid_via_registry.sql",
+    "node:node_projection_delegation:"
+    "0033_delegation_events_uuid_via_registry_single_transaction.sql",
 )
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
