@@ -1502,6 +1502,39 @@ acquire_lock() {
 # Cleanup -- partial deployment rollback, --force backup restore, + lock release
 # =============================================================================
 
+containers_bound_to_deploy_dir() {
+    # OMN-17287: print the names of RUNNING containers that have a bind mount
+    # whose source is at or under "$1". Empty output means none.
+    #
+    # This is the difference between an ORPHANED deployment directory (nothing
+    # references it -- safe to remove) and a LIVE one (the lane is serving out
+    # of it right now). cleanup_on_exit() must never remove the latter.
+    local dir="${1%/}"
+    local ids id name src
+
+    [[ -n "${dir}" ]] || return 0
+    command -v docker >/dev/null 2>&1 || return 0
+
+    ids="$(docker ps --quiet 2>/dev/null || true)"
+    [[ -n "${ids}" ]] || return 0
+
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        name="$(docker inspect --format '{{.Name}}' "${id}" 2>/dev/null || true)"
+        name="${name#/}"
+        [[ -n "${name}" ]] || name="${id}"
+        while IFS= read -r src; do
+            [[ -n "${src}" ]] || continue
+            if [[ "${src}" == "${dir}" || "${src}" == "${dir}/"* ]]; then
+                printf '%s\n' "${name}"
+                break
+            fi
+        done < <(docker inspect \
+            --format '{{range .Mounts}}{{println .Source}}{{end}}' \
+            "${id}" 2>/dev/null || true)
+    done <<< "${ids}"
+}
+
 cleanup_on_exit() {
     # Remove orphaned deployment directory on failure and restore --force backups.
     # If DEPLOY_DIR_TO_CLEANUP is set and registry.json does NOT point to it,
@@ -1513,8 +1546,36 @@ cleanup_on_exit() {
             active_path="$(jq -r '.deploy_path // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
         fi
         if [[ "${active_path}" != "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
-            log_warn "Cleaning up partial deployment: ${DEPLOY_DIR_TO_CLEANUP}"
-            rm -rf "${DEPLOY_DIR_TO_CLEANUP}" 2>/dev/null || true
+            # OMN-17287: a directory the lane's containers are still bind-mounted
+            # to is NOT an orphan. DEPLOY_DIR_TO_CLEANUP stays armed through
+            # restart_services()/bringup_full_stack() (OMN-15352 made the registry
+            # write commit-on-success, so there is no earlier safe disarm point),
+            # which means any failure after containers start would otherwise
+            # rm -rf the payload out from under a running lane. Docker then
+            # re-creates the missing bind sources as empty root-owned directories
+            # on the next container restart, and the runtime fail-fasts with
+            # "RuntimeHostProcess requires 'service_name'" because /app/contracts
+            # is empty. Refuse, and leave the lane recoverable -- a re-run rsyncs
+            # over this directory anyway.
+            local bound_containers
+            bound_containers="$(containers_bound_to_deploy_dir "${DEPLOY_DIR_TO_CLEANUP}")"
+            if [[ -n "${bound_containers}" ]]; then
+                log_error "================================================================="
+                log_error "REFUSING to remove partial deployment: ${DEPLOY_DIR_TO_CLEANUP}"
+                log_error "Running containers are still bind-mounted to it:"
+                while IFS= read -r _bound_name; do
+                    [[ -n "${_bound_name}" ]] || continue
+                    log_error "  - ${_bound_name}"
+                done <<< "${bound_containers}"
+                log_error "Removing it would strand those containers on a deleted"
+                log_error "payload (empty /app/contracts on their next restart)."
+                log_error "The directory is left in place. Re-run the deploy to"
+                log_error "re-sync it, or stop the lane first if you must remove it."
+                log_error "================================================================="
+            else
+                log_warn "Cleaning up partial deployment: ${DEPLOY_DIR_TO_CLEANUP}"
+                rm -rf "${DEPLOY_DIR_TO_CLEANUP}" 2>/dev/null || true
+            fi
         fi
     fi
 
