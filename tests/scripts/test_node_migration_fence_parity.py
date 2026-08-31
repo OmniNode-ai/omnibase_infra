@@ -279,11 +279,36 @@ FENCED_DELEGATION_IDS = (
     "node:node_projection_delegation:"
     "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
 )
-# The OMN-15335/OMN-15343 registration TRIO. 0002 was in the k8s list from the
-# start and missing here until OMN-15379 — a fence that gated the CREATE (0000)
-# but not the dependent ALTER (0002) took every cold compose lane to exit 3 with
-# `relation "node_service_registry" does not exist`.
+# The registration hold, as of OMN-17150 (2026-08-31): 0002 ALONE.
+#
+# It was the full trio from OMN-15379 until OMN-17150. 0000 (the CREATE) and
+# 0001 (heartbeat columns) were released from the baseline because fencing them
+# fenced the ONLY migration in the corpus that creates node_service_registry —
+# a table scripts/check_migrations_complete.sh REQUIRES before migration-gate
+# reports HEALTHY. Every lane without a release therefore cold-booted into a
+# permanent deadlock (proven live on omnibase-infra-lakshman, 2026-08-31).
+#
+# The old rationale here was that "a fence that gated the CREATE (0000) but not
+# the dependent ALTER (0002) took every cold compose lane to exit 3 with
+# `relation "node_service_registry" does not exist`". That is true and still is,
+# but it is directional: it forbids CREATE-fenced + ALTER-released. The shape
+# below is the reverse — CREATE released, ALTER held — which has no such failure
+# mode, and which 0003/0004 already assume (both are written
+# `IF to_regclass(...) IS NOT NULL`).
+#
+# 0002 stays, and could not have come with them: it enables FORCE ROW LEVEL
+# SECURITY and is not grandfathered, so removing it from the manifest hands it
+# to the OMN-15336 item-4 guard, which is FATAL for an unclassified FORCE id
+# that has never applied — turning a hung gate on prod/judge into a hard
+# migration failure.
 FENCED_REGISTRATION_IDS = (
+    "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
+)
+# All three files the registration node ships in the range this module drives,
+# regardless of fence state. The live fixtures copy THIS tuple: after OMN-17150
+# the fenced set and the applied set are deliberately different, so a fixture
+# built from either one alone would prove only half of the behaviour.
+REGISTRATION_TRIO_IDS = (
     "node:node_projection_registration:0000_create_node_service_registry.sql",
     "node:node_projection_registration:0001_add_heartbeat_columns.sql",
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
@@ -454,6 +479,21 @@ K8S_RULING_21_RELEASE = (
     "node:node_projection_registration:0001_add_heartbeat_columns.sql",
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
 )
+# OMN-17150 released these two from the shared BASELINE, so the k8s Job's
+# ruling-21 array now names ids the baseline no longer covers. That is inert,
+# not drift, and provably so: on both runners the release set is consulted ONLY
+# inside the already-fenced branch (run-forward-migrations.sh's node loop; the
+# k8s Job's identical baseline-minus-release filter), so an id that is not in
+# the baseline can neither be gated nor un-gated by naming it. The k8s outcome
+# is byte-identical either way — the two files applied there before and apply
+# there now. Trimming the omninode_infra array is housekeeping and is tracked
+# separately; it is deliberately NOT required for this repo's fence to be
+# correct, which is why the check below tolerates exactly these two and nothing
+# else.
+K8S_RELEASE_IDS_NOW_UNFENCED = (
+    "node:node_projection_registration:0000_create_node_service_registry.sql",
+    "node:node_projection_registration:0001_add_heartbeat_columns.sql",
+)
 
 # --- OMN-15379 lane-scoped release (operator ruling 15, 2026-07-29) ----------
 # Ruling 15: node_service_registry FORCE ROW LEVEL SECURITY extends to the LAB
@@ -468,9 +508,13 @@ DEV_LANE_VALUE = "dev"
 # Spelled out rather than aliased to FENCED_REGISTRATION_IDS: if the two are
 # meant to be equal, that equality is an assertion, not a definition. Aliasing
 # would let a change to one silently move the other.
+#
+# Narrowed to 0002 by OMN-17150, in step with the fence: 0000/0001 left the
+# baseline, so releasing them here would name ids the fence no longer covers.
+# The dev lane's OUTCOME is unchanged — all three still apply there — but two of
+# them now apply because nothing fences them, not because this release un-gates
+# them.
 LANE_RELEASED_IDS = (
-    "node:node_projection_registration:0000_create_node_service_registry.sql",
-    "node:node_projection_registration:0001_add_heartbeat_columns.sql",
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
 )
 
@@ -910,19 +954,24 @@ def test_unset_and_unknown_lane_are_fully_fenced() -> None:
     )
 
 
-def test_dev_lane_releases_exactly_the_registration_trio() -> None:
-    """Ruling 15 is scoped to node_service_registry and to nothing else."""
+def test_dev_lane_releases_exactly_the_registration_hold() -> None:
+    """Ruling 15 is scoped to node_service_registry and to nothing else.
+
+    Post-OMN-17150 that is 0002 alone, because 0000/0001 are no longer fenced
+    for any lane to release. Ruling 15 itself is untouched — the dev lane still
+    ends up with the whole trio applied.
+    """
     policies = parse_lane_release_policies(extract_fence_block())
     assert policies[DEV_LANE_VALUE] == LANE_RELEASED_IDS, (
         "the dev/lab lane release set changed. Operator ruling 15 releases "
-        "exactly the node_projection_registration trio:\n  "
+        "exactly the still-fenced half of the registration trio:\n  "
         + "\n  ".join(LANE_RELEASED_IDS)
         + "\nFound:\n  "
         + "\n  ".join(policies[DEV_LANE_VALUE])
     )
     # The equality that the two constants are DEFINED separately to express.
     assert LANE_RELEASED_IDS == FENCED_REGISTRATION_IDS, (
-        "the released trio and the fenced registration trio have diverged"
+        "the dev-lane release and the fenced registration hold have diverged"
     )
 
 
@@ -1255,20 +1304,35 @@ def test_fence_matches_omninode_infra_k8s_runner() -> None:
     )
 
     baseline = manifest_ids()
-    stray = sorted(set(k8s_release) - set(baseline))
+    stray = sorted(set(k8s_release) - set(baseline) - set(K8S_RELEASE_IDS_NOW_UNFENCED))
     assert not stray, (
         f"{provenance}: the k8s release names ids the shared manifest "
-        f"baseline does not cover: {stray}"
+        f"baseline does not cover, beyond the known-inert set: {stray}"
     )
     effective_k8s_fence = tuple(i for i in baseline if i not in k8s_release)
+    # Everything in the baseline EXCEPT the registration hold, which ruling 21
+    # releases durably on the k8s Job. Spelled out group by group so a failure
+    # names which hold moved rather than dumping two id lists to diff by eye.
+    #
+    # This expectation was stale before OMN-17150 — it omitted the OMN-16090
+    # hook_event_capture hold and the OMN-16493/16930/17288 delegation UUID
+    # conversion holds, so the assertion could not have passed on any recent
+    # tree. It is opt-in, which is why nobody saw it go red. Repaired here.
     expected_effective_k8s_fence = (
-        FENCED_DELEGATION_IDS + FENCED_PR_REVIEW_BOT_IDS + FENCED_INFERENCE_RESPONSE_IDS
+        FENCED_DELEGATION_IDS
+        + FENCED_REGISTRATION_IDS
+        + FENCED_PR_REVIEW_BOT_IDS
+        + FENCED_INFERENCE_RESPONSE_IDS
+        + FENCED_HOOK_EVENT_CAPTURE_IDS
+        + FENCED_DELEGATION_UUID_CONVERSION_IDS
+    )
+    expected_effective_k8s_fence = tuple(
+        i for i in expected_effective_k8s_fence if i not in k8s_release
     )
     assert effective_k8s_fence == expected_effective_k8s_fence, (
         "the k8s Job's effective (post-release) fence no longer equals the "
-        "delegation quartet plus the OMN-15717 node_pr_review_bot hold plus "
-        "the OMN-15336 item-4 inference-response hold — either the shared "
-        "manifest baseline or the k8s release changed: "
+        "expected composition of the pinned holds — either the shared manifest "
+        "baseline or the k8s release changed: "
         f"{effective_k8s_fence}"
     )
 
@@ -1590,13 +1654,26 @@ def test_fence_free_runner_applies_the_fenced_migration(
 # The pair is the discriminator. A runner that ignored the lane indicator
 # entirely would fail one of the two legs whichever way it defaulted, so
 # neither leg can pass vacuously:
-#   * dev lane      -> the trio is APPLIED and relforcerowsecurity is true
-#   * default lane  -> the trio is SKIPPED and the table does not exist
+#   * dev lane      -> the trio is APPLIED and relforcerowsecurity is TRUE
+#   * default lane  -> the table EXISTS (0000/0001 unfenced, OMN-17150) but
+#                      relforcerowsecurity is FALSE and there is no tenant_id
+#                      column, because 0002 is still fenced
+#
+# The default leg used to assert the table was ABSENT. That was the OMN-17150
+# defect written down as an invariant: the migration gate requires the table,
+# so "absent on every non-dev lane" and "the gate reports HEALTHY" could never
+# both be true on a cold boot. The discriminator is now FORCE RLS, which is
+# what ruling 15 was ever actually about.
 # --------------------------------------------------------------------------
 
 REGISTRATION_NODE = "node_projection_registration"
 REGISTRY_TABLE = "node_service_registry"
 VENDORED_NODES = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
+# The SHIPPED migration-gate healthcheck, run as the container runs it. Driving
+# the real script is the point: a reimplementation of "does the table exist"
+# inside this test could not have caught OMN-17150, because the contradiction
+# was between two committed files, not between a file and a belief about it.
+GATE_HEALTHCHECK = REPO_ROOT / "scripts" / "check_migrations_complete.sh"
 
 
 @pytest.fixture
@@ -1629,12 +1706,12 @@ def real_registration_tree(tmp_path: Path) -> Path:
     node_dir = forward / "nodes" / REGISTRATION_NODE
     node_dir.mkdir(parents=True)
     copied = []
-    for released in LANE_RELEASED_IDS:
-        _, node_name, filename = released.split(":", 2)
+    for member in REGISTRATION_TRIO_IDS:
+        _, node_name, filename = member.split(":", 2)
         source = VENDORED_NODES / node_name / filename
         assert source.is_file(), (
-            f"vendored migration {source} is missing; the released id names "
-            "nothing and this proof would be vacuous"
+            f"vendored migration {source} is missing; the id names nothing and "
+            "this proof would be vacuous"
         )
         (node_dir / filename).write_text(source.read_text(encoding="utf-8"))
         copied.append(filename)
@@ -1716,9 +1793,9 @@ def test_dev_lane_applies_the_registration_trio_with_force_rls(
     )
 
     ledger = _ledger_ids(pg_target, node_db)
-    assert set(LANE_RELEASED_IDS) <= ledger, (
-        "the released ids were applied but not RECORDED, so the next run would "
-        f"re-apply them: {sorted(set(LANE_RELEASED_IDS) - ledger)}"
+    assert set(REGISTRATION_TRIO_IDS) <= ledger, (
+        "the trio was applied but not RECORDED, so the next run would "
+        f"re-apply it: {sorted(set(REGISTRATION_TRIO_IDS) - ledger)}"
     )
 
     # 0001's heartbeat column and 0002's tenant column both landed — proof the
@@ -1764,17 +1841,28 @@ def test_dev_lane_applies_the_registration_trio_with_force_rls(
 
 
 @pytest.mark.integration
-def test_default_lane_skips_the_trio_and_the_registry_table_is_absent(
+def test_default_lane_creates_the_registry_table_without_force_rls(
     pg_target: PgTarget,
     real_registration_tree: Path,
     node_db: str,
 ) -> None:
-    """No lane indicator: FULL fence. Same tree, same runner, opposite outcome.
+    """No lane indicator: the table EXISTS, and FORCE RLS does not.
 
-    This is the half that makes the pair a proof rather than a demonstration.
+    This assertion is inverted from what it was before OMN-17150, and the
+    inversion is the point. It used to read
+    ``assert not _table_exists(... REGISTRY_TABLE)`` under the name
+    ``test_default_lane_skips_the_trio_and_the_registry_table_is_absent`` — an
+    invariant pinning "node_service_registry does not exist on any non-dev
+    lane" while ``scripts/check_migrations_complete.sh`` simultaneously refused
+    to report HEALTHY until that same table existed. Two green surfaces, one
+    deadlock, nobody asked the two of them the same question. Cold-booting a
+    lane is what asks it, and no lane had been cold-booted between ruling 15
+    landing and 2026-08-31.
+
     ``lane=None`` unsets the variable entirely, which is the state of
-    stability-test, prod, judge, CI, and a fresh-volume
-    ``docker compose -f docker-compose.infra.yml up``.
+    stability-test, prod, judge, the lakshman lane, CI, and a fresh-volume
+    ``docker compose -f docker-compose.infra.yml up`` — i.e. everything except
+    the lab lane.
     """
     result = _run(RUNNER, pg_target, real_registration_tree, node_db, lane=None)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1782,19 +1870,124 @@ def test_default_lane_skips_the_trio_and_the_registry_table_is_absent(
     assert "RELEASED on lane" not in result.stdout, (
         f"a lane release fired with no lane indicator set:\n{result.stdout}"
     )
-    for released in LANE_RELEASED_IDS:
-        assert "SKIP (operator-gated" in result.stdout and released in result.stdout, (
-            f"{released} was not reported as operator-gated:\n{result.stdout}"
+    for held in FENCED_REGISTRATION_IDS:
+        assert "SKIP (operator-gated" in result.stdout and held in result.stdout, (
+            f"{held} was not reported as operator-gated:\n{result.stdout}"
         )
 
-    assert not _table_exists(pg_target, node_db, REGISTRY_TABLE), (
-        f"FENCE BREACH: {REGISTRY_TABLE} EXISTS on a lane with no indicator — "
-        "0000 applied unfenced"
+    # THE fix, asserted from the database: the CREATE is no longer fenced, so a
+    # lane with no indicator gets the table the migration gate requires.
+    assert _table_exists(pg_target, node_db, REGISTRY_TABLE), (
+        f"{REGISTRY_TABLE} does NOT exist on a default lane. The migration "
+        "gate requires it (REQUIRED_PROJECTION_TABLES), so this is the "
+        "OMN-17150 deadlock: forward-migration exits 0, the sentinel goes "
+        "TRUE, and migration-gate stays unhealthy forever"
     )
+
+    # ...and the half that is still held is genuinely still held. Read from
+    # pg_class, not from the log: "the runner said SKIP" is not proof that FORCE
+    # is off.
+    enabled, forced = _relrowsecurity(pg_target, node_db, REGISTRY_TABLE)
+    assert not forced, (
+        f"FENCE BREACH: {REGISTRY_TABLE}.relforcerowsecurity is TRUE on a lane "
+        "with no indicator — 0002 applied unfenced, which is the one thing "
+        "OMN-17150 did not release"
+    )
+    assert not enabled, (
+        f"{REGISTRY_TABLE}.relrowsecurity is TRUE on a default lane; only 0002 "
+        "enables it and 0002 is fenced"
+    )
+
+    scoped = PgTarget(
+        host=pg_target.host,
+        port=pg_target.port,
+        user=pg_target.user,
+        password=pg_target.password,
+        dbname=node_db,
+    )
+    columns = set(
+        _psql(
+            scoped,
+            "SELECT column_name FROM information_schema.columns "  # noqa: S608
+            f"WHERE table_schema='public' AND table_name='{REGISTRY_TABLE}'",
+        ).splitlines()
+    )
+    assert {"last_heartbeat_at", "uptime_seconds"} <= columns, (
+        "the heartbeat columns are absent on a default lane — 0000 declares "
+        f"them directly, so the CREATE did not apply as expected: {sorted(columns)}"
+    )
+    assert "tenant_id" not in columns, (
+        "tenant_id is present on a default lane; only the fenced 0002 adds it"
+    )
+
     ledger = _ledger_ids(pg_target, node_db)
-    assert not (ledger & set(LANE_RELEASED_IDS)), (
+    assert not (ledger & set(FENCED_REGISTRATION_IDS)), (
         "a fenced id was recorded on the default lane, which would make the "
-        f"eventual un-fence a silent no-op: {sorted(ledger & set(LANE_RELEASED_IDS))}"
+        f"eventual un-fence a silent no-op: {sorted(ledger & set(FENCED_REGISTRATION_IDS))}"
+    )
+    unfenced_trio = set(REGISTRATION_TRIO_IDS) - set(FENCED_REGISTRATION_IDS)
+    assert unfenced_trio <= ledger, (
+        "the unfenced registration ids applied but were not RECORDED, so every "
+        f"run would re-apply them: {sorted(unfenced_trio - ledger)}"
+    )
+
+
+@pytest.mark.integration
+def test_default_lane_cold_boot_satisfies_the_migration_gate(
+    pg_target: PgTarget,
+    real_registration_tree: Path,
+    node_db: str,
+) -> None:
+    """End-to-end reproduction of the OMN-17150 block, in CI.
+
+    The test above proves the table exists. This one asks the actual shipped
+    healthcheck — the same ``scripts/check_migrations_complete.sh`` the
+    ``migration-gate`` container runs — whether it is satisfied, because that
+    is the surface that was red on Lakshman Patel's lane while every other
+    signal was green.
+
+    RED before the OMN-17150 fence change: forward-migration exits 0 and sets
+    the sentinel TRUE, and this script still exits 1 on ``node_service_registry
+    -> f``. That is the whole defect, and it is now a test rather than a lane
+    someone has to cold-boot to discover.
+    """
+    result = _run(RUNNER, pg_target, real_registration_tree, node_db, lane=None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Setting sentinel TRUE" in result.stdout, (
+        "the runner did not reach its sentinel step, so the gate would be red "
+        f"for an unrelated reason and this proof would be vacuous:\n{result.stdout}"
+    )
+
+    psql_dir = str(Path(_find_pg_binary("psql") or "psql").parent)
+    gate = subprocess.run(
+        ["/bin/sh", str(GATE_HEALTHCHECK)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={
+            **os.environ,
+            "PATH": f"{psql_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "POSTGRES_USER": pg_target.user,
+            "POSTGRES_PASSWORD": pg_target.password,
+            "POSTGRES_HOST": pg_target.host,
+            "POSTGRES_PORT": str(pg_target.port),
+            "POSTGRES_DB": pg_target.dbname,
+            "NODE_POSTGRES_DB": node_db,
+            # Scoped to the one table this fixture's tree can create.
+            # delegation_events is the gate's other required table and belongs
+            # to a different node; including it here would fail for a reason
+            # that has nothing to do with the fence.
+            "REQUIRED_PROJECTION_TABLES": REGISTRY_TABLE,
+        },
+    )
+    assert gate.returncode == 0, (
+        "migration-gate's healthcheck is UNSATISFIED after a clean default-lane "
+        "migration run. forward-migration reported success and set the "
+        "sentinel; the gate still refuses. That is the OMN-17150 contradiction: "
+        "the fence forbids creating a table the gate requires, so the runtime "
+        f"tier never starts.\nrunner:\n{result.stdout}\n"
+        f"gate stdout:\n{gate.stdout}\ngate stderr:\n{gate.stderr}"
     )
 
 
@@ -1816,9 +2009,13 @@ def test_unknown_lane_value_fails_closed_to_the_full_fence(
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    assert not _table_exists(pg_target, node_db, REGISTRY_TABLE), (
-        f"FENCE BREACH: an UNKNOWN lane value released the trio — "
-        f"{REGISTRY_TABLE} exists"
+    # Post-OMN-17150 the discriminator is FORCE RLS, not the table's existence:
+    # 0000 is unfenced, so the table exists on every lane by design. What an
+    # unknown lane must NOT get is the still-fenced 0002.
+    _, forced = _relrowsecurity(pg_target, node_db, REGISTRY_TABLE)
+    assert not forced, (
+        "FENCE BREACH: an UNKNOWN lane value released the fenced 0002 — "
+        f"{REGISTRY_TABLE}.relforcerowsecurity is TRUE"
     )
     assert "RELEASED on lane" not in result.stdout, result.stdout
     assert "unknown ONEX_MIGRATION_LANE" in result.stderr, (

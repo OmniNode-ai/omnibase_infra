@@ -1,0 +1,67 @@
+# shape-reconciliation-exemptions.yaml — frozen-bytes record for the OMN-15376
+# guarded-CREATE-TABLE shape gate
+#
+# Ticket: OMN-17150 (created here)
+# Gate: tests/ci/test_node_migration_shape_reconciliation.py
+#       tests/integration/migrations/test_node_migration_shape_drift_omn15376.py
+# Reader: tests/helpers/util_migration_shape.py :: shape_reconciliation_exempt_ids
+#
+# WHAT THIS IS
+# A RECORD of node migrations whose bytes are FROZEN and which therefore cannot
+# be edited to satisfy the OMN-15376 shape-reconciliation gate. It is not an
+# operator gate, it does not change what any runner applies, and it grants no
+# permission — it states a fact about the corpus that the gate must respect.
+#
+# Same discipline, and the same reason for existing, as
+# grandfathered-force-rls-migrations.yaml: that file is a frozen snapshot of
+# what was already applying before its guard existed, kept SEPARATE from
+# fenced-node-migrations.yaml precisely so a future editor cannot "release" a
+# real hazard by mislabelling it. Read this one the same way. It is deliberately
+# NOT the fence: an entry here is still applied on every lane.
+#
+# WHY IT WAS NEEDED (OMN-17150)
+# The shape gate exempts operator-FENCED ids, on the stated grounds that they
+# "are never applied and MUST NOT be edited to satisfy a gate". That conflates
+# two different reasons a migration is un-editable, and the conflation only
+# surfaced when OMN-17150 released
+# node:node_projection_registration:0000_create_node_service_registry.sql from
+# the fence — the file did not change, but it moved from exempt to in-scope and
+# the gate went red on an id nobody may edit.
+#
+# The property the exemption is really about is IMMUTABILITY, not fence
+# membership:
+#   * a fenced id is un-editable because it is held for a ruling, AND
+#   * an already-applied id is un-editable because its content sha256 is bound
+#     both by _ledger/application-migrations.tsv and by every live lane's
+#     platform_catalog.schema_migrations row. Changing one byte makes
+#     run-forward-migrations.sh's migration_is_applied() FATAL with
+#     "conflicting migration checksum" on every lane that already carries it,
+#     and the runner has no path to reconcile a stored checksum against a
+#     changed file. That is not a hypothetical: it is the documented reason
+#     node_pr_review_bot 001 was FENCED rather than fixed (see
+#     fenced-node-migrations.yaml's rationale for that id).
+#
+# WHY NOT JUST FENCE 0000 AGAIN, AS node_pr_review_bot 001 DID
+# Because that is the trap OMN-17150 exists to close. Fencing a migration to
+# dodge this gate is only survivable when nothing else requires the table it
+# creates. review_bot_bypass_log qualifies; node_service_registry does not — it
+# is in the migration gate's REQUIRED_PROJECTION_TABLES, so fencing its CREATE
+# deadlocks every cold boot outside the dev lane. The two cases look identical
+# and are not, which is why the structural invariant now lives in
+# tests/scripts/test_gate_required_tables_are_creatable.py rather than in
+# whoever remembers this paragraph.
+#
+# ADDING AN ENTRY
+# The list is PINNED by test_shape_exemptions_are_the_known_frozen_set, the same
+# way the fence baseline is pinned — an addition cannot land without a reviewer
+# seeing the pin change. Every entry must name the id, the owning ticket, and
+# the specific reason its bytes are frozen. An id that is NOT yet applied
+# anywhere does not belong here: fix the SQL instead, which is free while the
+# checksum binds nothing.
+shape_reconciliation_exemptions:
+  - id: "node:node_projection_registration:0000_create_node_service_registry.sql"
+    ticket: "OMN-17150"
+    frozen_by: >-
+      Applied and checksum-bound on every live lane. Recorded in _ledger/application-migrations.tsv as 5c320392190e6b9a1e06ab7177b7560181ca00282e107aebfccc452441e4d478, and carried in platform_catalog.schema_migrations on the dev, stability-test, prod and judge compose lanes plus the k8s/onex-dev RDS lane (ruling 21). Any edit changes the file sha256 and makes the next forward-migration run FATAL on all of them. It entered this gate's scope only because OMN-17150 released it from the operator fence so that a cold lane can create node_service_registry at all; its bytes are unchanged and its residual OMN-15376 exposure is unchanged.
+    residual: >-
+      Real but currently unreachable. The hazard needs a database where node_service_registry ALREADY exists with a pre-0001 shape while this migration has NO ledger row, so the CREATE no-ops and the file's own `CREATE INDEX ... (last_heartbeat_at)` then raises. Every database known to carry the table also carries the ledger row. 0003 (reconcile_heartbeat_observability, unfenced) converges the two heartbeat columns on a warm lane, but it runs AFTER this file, so it does not cover this file's own indexes. Closing it properly means a new reconciliation-carrying migration in the omnimarket-owned node (OMN-11012 makes that node the DDL owner; a second CREATE TABLE for this table in omnibase_infra is forbidden), not an edit here.

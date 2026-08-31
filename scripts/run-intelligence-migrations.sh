@@ -19,6 +19,7 @@
 #   POSTGRES_HOST     (default: localhost)
 #   POSTGRES_PORT     (default: 5432)
 #   MIGRATIONS_DIR    (default: /migrations/intelligence)
+#   PG_WAIT_RETRIES   (default: 30 — see section 0)
 
 set -e
 
@@ -26,8 +27,54 @@ PGUSER="${POSTGRES_USER:-postgres}"
 PGHOST="${POSTGRES_HOST:-postgres}"
 PGPORT="${POSTGRES_PORT:-5432}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/intelligence}"
+PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+# ---------------------------------------------------------------------------
+# 0. Wait for Postgres to accept connections (first-boot initdb race guard)
+# ---------------------------------------------------------------------------
+# OMN-17150 defect 1. This section is a port of run-forward-migrations.sh's own
+# section 0 (OMN-13062) — same env var, same 2s interval, same fail-loud abort —
+# and porting it IS the fix. The two one-shots start at the same instant behind
+# the same `depends_on: postgres: {condition: service_healthy}`, and only ONE of
+# them had this loop. That asymmetry, not the compose wiring, is why
+# forward-migration survives a cold boot and this script did not.
+#
+# WHY service_healthy IS NOT ENOUGH. On a fresh volume the postgres image runs a
+# TEMPORARY server for its initdb/init-script phase, and the compose healthcheck
+# (`pg_isready` over the local unix socket) answers TRUE against that temporary
+# server. Dependents are released; the temporary server is then stopped and the
+# real one started, and every connection in that window is refused. Measured on
+# omnibase-infra-lakshman 2026-08-31, deterministic across three clean boots:
+# postgres started 16:31:52, this container started 16:31:57.879, died 150ms
+# later on `Connection refused`, and postgres first reported healthy at 16:32:27.
+# The compose-side half is fixed too (the healthcheck now probes TCP, which the
+# temporary server does not listen on), but a one-shot that dies on the first
+# refusal is fragile no matter how good the upstream signal is. The retry is what
+# makes it correct rather than lucky.
+#
+# The first statement of section 1 below ends in `2>/dev/null || true`, so without
+# this loop a refusal was swallowed, DB_EXISTS came back empty, and the script
+# proceeded to CREATE DATABASE and exited 2. `restart: "no"` meant no retry, and
+# omninode-runtime's `service_completed_successfully` dependency then held the
+# entire runtime tier behind a container that had already given up. The documented
+# workaround was "run `up -d` a second time"; this removes the need for it.
+#
+# Probes `postgres` (the always-present maintenance database), not
+# `omniintelligence`, which section 1 may still have to create.
+echo "[intelligence-migration] Waiting for Postgres to accept connections..."
+retries=0
+until psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "SELECT 1" >/dev/null 2>&1; do
+  retries=$((retries + 1))
+  if [ "$retries" -ge "$PG_WAIT_RETRIES" ]; then
+    echo "[intelligence-migration] ERROR: Postgres not ready after ${PG_WAIT_RETRIES} retries. Aborting." >&2
+    exit 1
+  fi
+  echo "[intelligence-migration]   postgres not ready (attempt ${retries}/${PG_WAIT_RETRIES}), retrying in 2s..."
+  sleep 2
+done
+echo "[intelligence-migration] Postgres is ready."
 
 # ---------------------------------------------------------------------------
 # 1. Create the omniintelligence database if it does not exist

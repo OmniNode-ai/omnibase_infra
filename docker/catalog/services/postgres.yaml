@@ -19,11 +19,18 @@ ports:
   external: 5436
   internal: 5432
 healthcheck:
-  test: pg_isready -U ${POSTGRES_USER:-postgres} -d omnibase_infra
-  interval_s: 30
+  # OMN-17150 defect 1: TCP via the compose service name, not the unix socket. The postgres image's
+  # temporary initdb server listens on the socket only (listen_addresses=''),
+  # so a socket probe reports HEALTHY before the real server exists and
+  # releases every `service_healthy` dependent into a refused connection.
+  # start_period covers a cold initdb (which also runs the whole
+  # /docker-entrypoint-initdb.d forward-migration tree on this image). Kept in
+  # step with the same block in docker/docker-compose.{infra,judge,lakshman}.yml.
+  test: pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-postgres} -d omnibase_infra
+  interval_s: 10
   timeout_s: 10
-  retries: 3
-  start_period_s: 10
+  retries: 5
+  start_period_s: 180
 volumes:
   - postgres_data:/var/lib/postgresql/data
   - ./migrations/forward:/docker-entrypoint-initdb.d:ro

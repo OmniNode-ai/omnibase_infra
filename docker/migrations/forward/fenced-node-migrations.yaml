@@ -64,26 +64,127 @@
 # (e.g. widening ruling 21's scope, or adding a new ruling-15-style lane
 # carve-out) is a separate, explicit edit to that runner's release block.
 #
-# WHY THESE TWELVE IDS (verbatim rationale, unchanged from the pre-OMN-15349
-# hand-maintained lists for the first seven; the eighth (node_pr_review_bot
+# A FENCE ENTRY MAY NOT GATE THE SOLE CREATE OF A GATE-REQUIRED TABLE
+# (OMN-17150). This is a hard structural constraint on what may be added
+# below, enforced by tests/scripts/test_gate_required_tables_are_creatable.py
+# and not by review memory. The migration gate
+# (scripts/check_migrations_complete.sh) refuses to report HEALTHY until every
+# table in REQUIRED_PROJECTION_TABLES exists; the runtime tier is gated behind
+# that healthcheck. So fencing the only migration that CREATEs one of those
+# tables does not defer a decision — it deadlocks every cold boot of every
+# lane that does not carry a release, permanently, with both halves behaving
+# exactly as written. That is the shape this file shipped from 2026-07-29 to
+# 2026-08-31 for node_service_registry; see the registration entry below.
+# If a required table's CREATE genuinely must be held, the gate's required
+# list must change in the SAME commit. The invariant is: every table named in
+# REQUIRED_PROJECTION_TABLES is creatable by the BASELINE-unfenced set, with
+# no lane release applied.
+#
+# WHY THESE ELEVEN IDS (verbatim rationale, unchanged from the pre-OMN-15349
+# hand-maintained lists for the first seven, less the two registration ids
+# OMN-17150 released; the eighth (node_pr_review_bot
 # 001) was added under OMN-15717/OMN-15376, the ninth
 # (delegation_inference_response 0003) under OMN-15336 item 4 / OMN-15656 —
 # two independent PRs landing concurrently, both additive, not conflicting —
 # the tenth (hook_event_capture 0002) under OMN-16090, the ELEVENTH
 # (delegation 0031) under OMN-16493 / the 2026-08-28 "Fence 0031, HOLD the
 # repin" operator ruling, and the TWELFTH (delegation 0032) under OMN-16930 /
-# the 2026-08-29 "Hold + fix mechanism" ruling that replaced 0031's remedy):
+# the 2026-08-29 "Hold + fix mechanism" ruling that replaced 0031's remedy.
+# The ordinals are historical and are NOT renumbered when an id is released —
+# they name the ruling that added the entry, not its index in the list):
 #   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
 #     live, actively-written delegation tables; un-gate only in a change that
 #     also proves the writer sets app.tenant_id per connection. No lane may
 #     release these (see the "delegation ids are not releasable" checks in
 #     both runners).
-#   registration 0000/0001/0002 — OMN-15335 / OMN-15088 / OMN-15343. All
-#     three ALTER node_service_registry; 0002 applies FORCE ROW LEVEL
-#     SECURITY. 0000 (CREATE) and 0002 (the dependent ALTER) must move
-#     together — a fence that gates one but not the other is worse than no
-#     fence (OMN-15379 postmortem: a cold compose lane with 0000 fenced and
-#     0002 not died with "relation node_service_registry does not exist").
+#   registration 0002 — OMN-15343 (introduced-by) / OMN-14894 (tranche 1).
+#     FORCE ROW LEVEL SECURITY plus a tenant_id column on
+#     node_service_registry. THIS is the id the hold was ever really about,
+#     and it stays.
+#
+#     0000 (CREATE) AND 0001 (heartbeat columns) WERE RELEASED FROM THIS
+#     BASELINE 2026-08-31 UNDER OMN-17150. Recorded in full because the
+#     entry they replace claimed the opposite ("0000 and 0002 must move
+#     together") and a future reader will otherwise re-derive it:
+#
+#     WHY THEY WERE HERE. Two reasons, both spent:
+#       (a) OMN-15335 — on cloud RDS omnidash_analytics, node_service_registry
+#           was owned by omninodeadmin while the node loop connects as
+#           role_omnidash, so 0000's no-op CREATE was followed by an ALTER
+#           that died with `must be owner of table node_service_registry`.
+#           That is a CLOUD OWNERSHIP defect, never a property of the SQL.
+#           OMN-15335 is Done (2026-08-29) and the ownership seam landed
+#           (omninode_infra#738, #997, #1103); operator ruling 21 (OMN-15332
+#           comment 1a067542, 2026-07-31) then DURABLY released the trio on
+#           exactly the runner that hit it. The reason cannot outlive the
+#           lane it was about.
+#       (b) OMN-15379 ruling 15 / its postmortem — "a fence that gates one but
+#           not the other is worse than no fence: a cold compose lane with
+#           0000 fenced and 0002 NOT fenced died with `relation
+#           node_service_registry does not exist`." That postmortem is about
+#           ONE direction: the dependency fenced while the dependent runs.
+#           The reverse — dependency released, dependent held — has no such
+#           failure mode, and is the shape this file now carries. 0003 and
+#           0004 already ship UNFENCED and are both written `IF
+#           to_regclass(...) IS NOT NULL`, i.e. the corpus already assumes
+#           the two halves can be at different fence states.
+#
+#     WHAT THE FENCE COST WHILE THEY WERE HERE (OMN-17150, found by the first
+#     cold boot of a lane built AFTER ruling 15). 0000 is the ONLY migration
+#     in this corpus that creates node_service_registry, and
+#     scripts/check_migrations_complete.sh's REQUIRED_PROJECTION_TABLES
+#     requires that table to exist before migration-gate reports HEALTHY. Any
+#     lane without ONEX_MIGRATION_LANE=dev therefore cold-booted into a
+#     permanent deadlock: forward-migration exits 0 and sets the sentinel
+#     TRUE, migration-gate stays unhealthy forever, and the whole runtime
+#     tier (omninode-runtime, runtime-effects, projection-api) never starts.
+#     Reproduced live on the omnibase-infra-lakshman lane 2026-08-31, three
+#     clean boots. It did not bite dev (released by ruling 15), staging (k8s,
+#     released by ruling 21), or prod/stability-test/judge — those three
+#     carry a node_service_registry that PREDATES this entry. Latent, not
+#     absent: the next clean rebuild of any of them hit the same wall.
+#
+#     WHY RELEASING WAS THE FIX AND DROPPING THE TABLE FROM THE GATE WAS NOT.
+#     node_service_registry has live readers beyond the gate — omnidash's
+#     node-registry and mcp-tools panels
+#     (omnidash/server/postgres-projection-reader.ts), omnimarket's
+#     node_projection_registration writer and its heartbeat emitter. A lane
+#     that boots without it starts a runtime whose registration chain is dead.
+#     The gate was right; this entry was wrong.
+#
+#     WHY 0002 COULD NOT COME WITH THEM, mechanically and not merely by
+#     preference: 0002 enables FORCE ROW LEVEL SECURITY and is not in
+#     grandfathered-force-rls-migrations.yaml, so removing it from this list
+#     hands it to the OMN-15336 item-4 guard
+#     (migration_declares_unclassified_force_rls), which is FATAL for a
+#     FORCE-enabling id that is neither fenced nor grandfathered and has
+#     never applied on that database. On prod and judge — where 0002 has
+#     never applied — unfencing it converts a hung gate into a hard
+#     migration-run failure. It would also turn FORCE back ON there with no
+#     path to reverse it: 0004 (the NO FORCE remedy) is UNFENCED and is
+#     therefore already recorded as applied on those lanes, so it would be
+#     skipped as already-applied and never run after 0002. Releasing 0002 is
+#     a live operator decision about tenancy posture, and this is not it.
+#
+#     WHAT THIS LEAVES ON A COLD LANE: node_service_registry exists with its
+#     heartbeat columns (0000 declares them; 0003 reconciles them unfenced),
+#     no tenant_id column, RLS never enabled, FORCE never enabled. That is
+#     the same posture prod and judge have carried since before this file
+#     existed, and 0004's own header already names it as the correct one for
+#     omninode_internal runtime state. Known residual, stated rather than
+#     hidden: 0002 also carries `GRANT SELECT ... TO app_dashboard`, so a
+#     cold lane gives app_dashboard no read on this table — identical to
+#     prod/judge today, and not a new gap.
+#
+#     NO-OP ON EVERY WARM LANE, and this is why it could land without
+#     touching one. 0000/0001 are already recorded on all four .201 lanes
+#     (live readback 2026-07-28/29, quoted in
+#     tests/scripts/test_node_migration_fence_parity.py's own docstring:
+#     dev + stability-test carry all six gated ids and registration 0002;
+#     prod + judge carry registration 0000/0001), so the ledger probe skips
+#     them. Should any lane's canonical-ledger row be missing, both files are
+#     idempotent (CREATE TABLE / INDEX / ADD COLUMN, all IF NOT EXISTS) and a
+#     re-apply is a no-op except 0001's NULL-only heartbeat backfill.
 #   node_pr_review_bot 001 — OMN-15717 / OMN-15376. The CREATE TABLE IF NOT
 #     EXISTS for review_bot_bypass_log declares 7 columns with no ALTER TABLE
 #     ADD COLUMN IF NOT EXISTS reconciliation, tripping the OMN-15376 static
@@ -354,10 +455,11 @@ fenced_node_migrations:
     ticket: "OMN-15313"
   - id: "node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql"
     ticket: "OMN-15313"
-  - id: "node:node_projection_registration:0000_create_node_service_registry.sql"
-    ticket: "OMN-15335"
-  - id: "node:node_projection_registration:0001_add_heartbeat_columns.sql"
-    ticket: "OMN-15088"
+  # 0000_create_node_service_registry.sql and 0001_add_heartbeat_columns.sql
+  # were released from this baseline under OMN-17150 (2026-08-31). See the
+  # "registration 0002" rationale in the header for the full argument; the
+  # short version is that fencing the sole CREATE of a table the migration
+  # gate REQUIRES deadlocked every cold boot outside the dev lane.
   - id: "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
     ticket: "OMN-15343"
   - id: "node:node_pr_review_bot:001_create_review_bot_bypass_log.sql"

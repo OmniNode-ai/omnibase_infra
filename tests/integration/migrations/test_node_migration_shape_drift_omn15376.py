@@ -67,6 +67,7 @@ from tests.helpers.util_migration_shape import (
     fenced_migration_ids,
     guarded_create_tables,
     node_migration_files,
+    shape_reconciliation_exempt_ids,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres, pytest.mark.serial]
@@ -574,27 +575,59 @@ def _drop_database(srv: Server, name: str) -> None:
     _psql(srv, "postgres", "-c", f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
 
 
-# FENCE-PARITY GAP, found by running this suite (OMN-15379):
-# omninode_infra's k8s Job runner fences SEVEN node ids; this repo's
-# scripts/run-forward-migrations.sh fences SIX -- it is missing
+# RESOLVED (OMN-15349/OMN-15379), kept because the reasoning is still the
+# clearest statement of why the registration pair moves together. The original
+# note read: "omninode_infra's k8s Job runner fences SEVEN node ids; this repo's
+# runner fences SIX -- it is missing
 # node:node_projection_registration:0002_node_service_registry_tenant_rls.sql.
 # 0002 ALTERs node_service_registry, which only the FENCED 0000 creates, so on
 # any lane where that table does not already exist the compose runner skips 0000
-# and then dies on 0002 with `relation "node_service_registry" does not exist`.
-# That is a real wall and a separate ticket; it is NOT the shape-drift class and
-# must not be what makes this suite red. Excluded here with its ticket, not
-# silently: the fence itself is operator-gated and is not edited from this lane.
-_K8S_ONLY_FENCED = frozenset(
-    {"node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"}
-)
+# and then dies on 0002 with `relation "node_service_registry" does not exist`."
+# That parity gap was closed: 0002 is in the single-sourced baseline manifest
+# both runners now read, so `fenced_migration_ids()` already covers it and this
+# local set is redundant. It is kept as an empty, named constant rather than
+# deleted so the union below still says out loud that the corpus is filtered by
+# more than one fact.
+_K8S_ONLY_FENCED: frozenset[str] = frozenset()
 
 
 def _corpus() -> list[tuple[str, Path]]:
+    """Everything the runner APPLIES on a lane with no release — fenced ids only.
+
+    Deliberately NOT filtered by the frozen-bytes exemption (OMN-17150). That
+    record says "do not demand an EDIT of this file", not "this file does not
+    apply": on every real lane registration/0000 runs, and 0001 ALTERs the table
+    it creates. Dropping 0000 from the applied set here would reproduce the
+    OMN-15379 postmortem inside the harness — 0001 dying on `relation
+    "node_service_registry" does not exist` — which is a defect in the fixture,
+    not in the corpus. The obligation scope is ``_drift_scope`` below.
+    """
     fenced = fenced_migration_ids() | _K8S_ONLY_FENCED
     return [
         (migration_id, path)
         for migration_id, path in node_migration_files()
         if migration_id not in fenced
+    ]
+
+
+def _drift_scope() -> list[tuple[str, Path]]:
+    """The corpus this suite holds to the drift-convergence obligation.
+
+    ``_corpus()`` minus the frozen-bytes exemptions (OMN-17150). Seeding a
+    drifted shape for an exempt table would assert an obligation the file
+    cannot discharge: satisfying it requires adding guarded ADD COLUMNs to a
+    file whose content sha256 is bound by live ledger rows, so the edit would
+    make the next forward-migration run FATAL on every lane. The exempt file
+    still APPLIES here (see ``_corpus``); it is only not seeded into a drifted
+    state. Its residual is recorded in
+    docker/migrations/forward/shape-reconciliation-exemptions.yaml rather than
+    silently skipped.
+    """
+    frozen = shape_reconciliation_exempt_ids()
+    return [
+        (migration_id, path)
+        for migration_id, path in _corpus()
+        if migration_id not in frozen
     ]
 
 
@@ -615,7 +648,7 @@ def _strip_reconciliation(sql: str) -> str:
 def _drift_seed_statements() -> list[str]:
     """``CREATE TABLE`` for every corpus table, carrying only its first column."""
     statements: list[str] = []
-    for _migration_id, path in _corpus():
+    for _migration_id, path in _drift_scope():
         for table in guarded_create_tables(path.read_text(encoding="utf-8")):
             # This proof snapshots public-schema drift. Non-public tables carry
             # separate topology/operator preconditions and assertions.

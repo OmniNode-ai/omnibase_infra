@@ -184,7 +184,33 @@ services:
       - omnibase-infra-judge-network
     healthcheck:
       !!merge <<: *healthcheck-defaults
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d omnibase_infra"]
+      # OMN-17150 defect 1: probe over TCP, not the local unix socket. On a
+      # fresh volume the postgres image runs a TEMPORARY server for its
+      # initdb / init-script phase with `listen_addresses=''` — unix socket
+      # only, no TCP listener. A socket-based `pg_isready` therefore answers
+      # HEALTHY against that temporary server, releases every
+      # `condition: service_healthy` dependent, and those dependents are then
+      # refused while the temporary server is stopped and the real one starts.
+      # Probing the compose SERVICE NAME (not a literal address) forces a real
+      # TCP connection over the lane network — the same path every dependent
+      # uses — so this check answers TRUE only for the server they can actually
+      # reach, which is the property `service_healthy` is supposed to carry. A
+      # loopback literal would work equally well and is deliberately not used:
+      # test_self_contained_infrastructure rejects hardcoded addresses in
+      # compose, and it is right to — the service name is the portable form. Measured on omnibase-infra-lakshman 2026-08-31:
+      # intelligence-migration was released 5.7s after postgres started and
+      # ~29s before postgres was really serving, and died on the refusal.
+      #
+      # start_period is sized for a genuine cold initdb — on this image the
+      # whole /docker-entrypoint-initdb.d forward-migration tree runs inside
+      # that window — so a still-initialising server stays `health: starting`
+      # instead of flipping UNHEALTHY and failing the dependents outright.
+      # Same right-sizing rationale as the OMN-12973 migration-gate floor. The
+      # shorter interval keeps a warm volume reporting healthy quickly.
+      test: ["CMD-SHELL", "pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-postgres} -d omnibase_infra"]
+      interval: 10s
+      start_period: 180s
+      retries: 5
     logging: *logging-defaults
     restart: unless-stopped
   redpanda:
