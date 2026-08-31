@@ -266,7 +266,17 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # a literal CASE). 0031's own declaration is untouched -- its bytes are
     # immutable, the .201 dev lane holds its content_sha256, and supersession is
     # recorded in _ledger/migration-supersessions.tsv rather than by editing it.
-    assert len(result.declarations) == 123
+    # +1 for OMN-17019's node_projection_open_obligations/
+    # 0001_create_open_obligations.sql, the C9 open-obligations projection
+    # of the OMN-16176 ledger ladder. Like node_projection_work_events above it
+    # CREATEs directly in omninode_internal and issues its own omninode_runtime
+    # grant, so it needs no OMN-15359 cutover entry and cannot repeat the
+    # OMN-16993 grant-missing failure by construction. It is a NET-NEW file --
+    # never applied in any lane -- so vendoring it is purely additive and is not
+    # the in-place rewrite of an already-applied migration that caused OMN-17139.
+    # The grant it issues is deliberately SELECT/INSERT/UPDATE and NOT DELETE:
+    # an obligation leaves the open set only via a recorded terminal event.
+    assert len(result.declarations) == 124
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
