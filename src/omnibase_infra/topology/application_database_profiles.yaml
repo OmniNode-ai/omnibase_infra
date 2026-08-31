@@ -31,6 +31,14 @@ profiles:
     deployment_repository: OmniNode-ai/omnibase_infra
     injection_path: docker/docker-compose.prod.yml
     runtime_policy_profile: prod
+  # OMN-17150: collaborator lane (compose project omnibase-infra-lakshman).
+  # Dev-class and fully mutable, resolving the same `local` topology instance as
+  # every other compose lane.
+  lakshman:
+    instance: local
+    deployment_repository: OmniNode-ai/omnibase_infra
+    injection_path: docker/docker-compose.lakshman.yml
+    runtime_policy_profile: lakshman
   onex-dev:
     instance: onex-dev
     deployment_repository: OmniNode-ai/omninode_infra

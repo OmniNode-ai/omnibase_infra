@@ -1,0 +1,570 @@
+# docker-compose.lakshman.yml
+# OMN-17150 / OMN-17143: dedicated COLLABORATOR lane for Lakshman Patel.
+#
+# WHAT THIS LANE IS
+# -----------------
+# A fifth .201 runtime lane, owned by and mutable by one external collaborator.
+# Its class is `dev`, not `stability`: CLAUDE.md's lane table calls the dev lane
+# a "fully mutable test platform", and this lane carries the same boundary. He
+# builds it, runs it, breaks it and resets it without asking.
+#
+# WHAT THIS LANE IS NOT — and the three gates that must never grow to cover it:
+#
+#   1. `scripts/preflight_lane_deploy_attribution.py` GOVERNED_LANES is
+#      {stability-test, prod, judge}. `lakshman` is deliberately absent, for the
+#      same reason `dev` is: gating a fully-mutable platform pushes its owner off
+#      the sanctioned path for zero governance gain.
+#   2. That script's GRANT_INTERLOCK_LANES is {stability-test} only. A rebuild of
+#      THIS lane can never invalidate the `stability-proven` premise of a live
+#      prod-promotion grant, because no grant may resolve against it.
+#   3. omni_home's `no-raw-prod-bypass` gate
+#      (tests/test_no_raw_prod_bypass_policy.py, OMN-13434 / OMN-15243) matches on
+#      the compose projects `omnibase-infra-prod`, `omnibase-infra-stability-test`
+#      and `omnibase-infra-judge`. `omnibase-infra-lakshman` contains none of them
+#      as a substring and shares none of their ports, so a plain
+#      `docker compose -p omnibase-infra-lakshman --profile lakshman up -d` is not
+#      a governed-lane mutation and is not flagged. That is correct and intended:
+#      this lane's owner runs it directly, with no deploy agent and no grant.
+#
+# tests/ci/test_lakshman_lane_governance_boundary.py pins all three, in both
+# directions — the lane must stay OUT, and the existing lanes must stay IN.
+#
+# NEVER A PROOF LANE. No synthetic integration evidence, no golden-chain receipt
+# and no `stability-proven` digest may be sourced from here.
+#
+# SHAPE
+# -----
+# Modelled on docker-compose.judge.yml (OMN-12924), which is the repo's only
+# standalone single-lane file, with four corrections for a MUTABLE lane:
+#
+#   a. Volumes are namespaced `omnibase-infra-lakshman-*` / `omninode-lakshman-*`
+#      so tearing this lane down with its own profile and volume removal wipes
+#      this lane's state and nothing else on the host. Resetting is a
+#      first-class operation here; on the judge lane it is not. (The teardown
+#      command itself lives in the bring-up guide, not in this header — a
+#      compose file is not the place for runnable lane recipes.)
+#   b. Cloud LLM credentials are OPTIONAL (`:-`), not fail-closed (`:?`). The
+#      judge lane hard-requires GEMINI_API_KEY/GOOGLE_API_KEY because it exists
+#      to reproduce a specific cloud-routed judgement. This lane must boot to a
+#      healthy `/health` with no cloud credentials at all — configuring a model
+#      backend is a separate, later step for its owner.
+#   c. The broker reserves 2G, not the judge lane's 8G default. This is the fifth
+#      Redpanda on a shared host; a sandbox does not get a proof lane's headroom.
+#      Override with LAKSHMAN_REDPANDA_MEMORY.
+#   d. Infrastructure credentials stay fail-closed (`:?`). Mutable is not the
+#      same as sloppy: a lane that boots with a blank Postgres password is a
+#      worse outcome than one that refuses to boot.
+#
+# PORTS — the OMN-17143 reserved block, verified free on .201 by read-only
+# `ss -ltn` on 2026-08-30. The adjacent 48085/48086 pair is the JUDGE lane's
+# runtime main/effects and 49092 is the prod broker's external Kafka port; this
+# block deliberately avoids both.
+#
+#   runtime main    58085   (contract: LAKSHMAN_RUNTIME_MAIN_PORT)
+#   runtime effects 58086   (contract: LAKSHMAN_RUNTIME_EFFECTS_PORT)
+#   postgres        45436
+#   valkey          46379
+#   redpanda kafka  55092   (external; container-internal stays 19092)
+#   redpanda admin  55644
+#   projection-api  53002
+#   keycloak        58080   reserved, unused — this lane runs no Keycloak
+#
+# The effects port follows the +1 convention every other lane uses
+# (8085/8086, 18085/18086, 28085/28086, 48085/48086).
+#
+# BRING-UP is deliberately NOT performed by the PR that lands this file. It is
+# the lane owner's Task 0 (OMN-17150). Validation here stops at a non-mutating
+# render:
+#
+#   docker compose --env-file docker/runtime-policy.env \
+#     --env-file docker/lakshman.env.example \
+#     -f docker/docker-compose.lakshman.yml \
+#     --profile lakshman config --quiet
+#
+name: omnibase-infra-lakshman
+x-omninode-contract-overlay:
+  lakshman-redpanda:
+    advertised_kafka_addr: &lakshman_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://localhost:55092"
+    kafka_port_publish: &lakshman_redpanda_kafka_port_publish "55092:19092"
+    admin_port_publish: &lakshman_redpanda_admin_port_publish "55644:9644"
+  lakshman-model-secrets:
+    # Correction (b): no required_secret_refs. Every cloud LLM ref below is
+    # optional so the lane boots without any of them.
+    optional_secret_refs:
+      - GEMINI_API_KEY
+      - GOOGLE_API_KEY
+      - OPENROUTER_API_KEY
+      - LLM_GLM_API_KEY
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+x-logging-defaults: &logging-defaults
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+x-runtime-base: &runtime-base
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.runtime
+    args:
+      BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+      EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+  profiles: ["lakshman"]
+  networks: !override
+    - omnibase-infra-lakshman-network
+  logging: *logging-defaults
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 1536M
+      reservations:
+        cpus: "0.25"
+        memory: 256M
+x-lakshman-runtime-env: &lakshman-runtime-env
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+  POSTGRES_HOST: postgres
+  OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
+  OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+  # OMN-16843: this lane defines its own runtime env block rather than merging
+  # docker-compose.infra.yml's x-runtime-env anchor, so it inherits NOTHING and
+  # must carry this key itself. Same fail-closed form and same reasoning as the
+  # base file's block: the internal projections connect as the non-BYPASSRLS
+  # omninode_runtime principal, never as the postgres superuser.
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — the internal projections connect to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-16843), never as the postgres superuser}@postgres:5432/omnidash_analytics"
+  # OMN-15425: the TENANT-domain counterpart, carried here for the same reason.
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set — the tenant projections connect to omnidash_analytics as the non-BYPASSRLS tenant_projection_writer principal (OMN-15425), never as the postgres superuser and never as the dashboard-facing analytics role}@postgres:5432/omnidash_analytics"
+  KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  KAFKA_BROKER_ALLOWLIST: "redpanda:"
+  BUS_ID: "lakshman"
+  VALKEY_HOST: "valkey"
+  VALKEY_PORT: "6379"
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
+  ONEX_CONTRACTS_DIR: /app/contracts
+  ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
+  ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+  ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+  ONEX_ENVIRONMENT: lakshman
+  KAFKA_ENVIRONMENT: lakshman
+  ONEX_DATABASE_TOPOLOGY_PROFILE: lakshman
+  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${LAKSHMAN_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set LAKSHMAN_TOPIC_PROVISIONER_MAX_PARTITIONS}
+  ONEX_STATE_ROOT: /app/data/.onex_state_lakshman
+  ONEX_STATE_DIR: /app/data/.onex_state_lakshman
+  ONEX_BOX_ID: omninode-pc
+  BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  # OMN-15628/OMN-15645: this lane owns a separate x-runtime-env anchor, so the
+  # routing-tiers pin must be carried explicitly. Same in-image path as the base
+  # infra anchor; docker/Dockerfile.runtime bakes it from the installed
+  # omnimarket package.
+  DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
+  BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
+  LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
+  LLM_CODER_URL: ${LLM_CODER_URL:-https://generativelanguage.googleapis.com}
+  LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:-https://generativelanguage.googleapis.com}
+  LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:-https://generativelanguage.googleapis.com}
+  LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:-https://generativelanguage.googleapis.com}
+  BIFROST_LOCAL_CODER_ENDPOINT_URL: ${BIFROST_LOCAL_CODER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  # OMN-6790: the z.ai GLM CODING PLAN surface. We hold a Coding Plan, not a
+  # pay-as-you-go balance; the bare /api/paas/v4 surface answers a Coding-Plan
+  # key with HTTP 429 code 1113, which is a WRONG-ENDPOINT signal and never a
+  # billing fact. Authority for this URL is omnimarket's routing contract; this
+  # default only keeps the lane off the wrong product. Guarded by
+  # tests/test_glm_endpoint_surface_omn6790.py.
+  LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/coding/paas/v4}
+  LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
+  # Correction (b): every cloud model credential below is OPTIONAL. The lane
+  # must reach a healthy /health with none of them set; wiring a model backend
+  # is a later, separate step for the lane owner.
+  LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:-}
+  LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:-}
+  LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  GH_TOKEN: ${GITHUB_TOKEN:-}
+  ONEX_REGISTRATION_AUTO_ACK: "false"
+  USE_EVENT_ROUTING: "true"
+  # This lane runs neither Infisical nor Keycloak (see the disabled stubs at the
+  # end of the services block). Every address is blanked so no service on this
+  # lane can resolve a credential broker or an issuer belonging to another lane
+  # — the OMN-12966 / OMN-13037 dangling-credential class.
+  INFISICAL_ADDR: ""
+  INFISICAL_CLIENT_ID: ""
+  INFISICAL_CLIENT_SECRET: ""
+  INFISICAL_PROJECT_ID: ""
+  INFISICAL_ENVIRONMENT: ""
+  KEYCLOAK_ADMIN_URL: ""
+  KEYCLOAK_REALM: ""
+  KEYCLOAK_ADMIN_CLIENT_ID: ""
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ""
+  KEYCLOAK_ISSUER: ""
+  ONEX_SERVICE_CLIENT_ID: ""
+  ONEX_SERVICE_CLIENT_SECRET: ""
+  OMNIMEMORY_ENABLED: ${LAKSHMAN_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
+  OMNIMEMORY_MEMGRAPH_HOST: ${LAKSHMAN_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
+  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:?runtime policy contract must set OMNIMEMORY_MEMGRAPH_PORT}
+  OMNIMEMORY_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnimemory"
+  QDRANT_HOST: ""
+  QDRANT_PORT: "6333"
+  QDRANT_API_KEY: ""
+  KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-lakshman-postgres
+    profiles: ["lakshman"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: omnibase_infra
+    ports: !override
+      - "${LAKSHMAN_POSTGRES_EXTERNAL_PORT:-45436}:5432"
+    volumes:
+      - lakshman_postgres_data:/var/lib/postgresql/data
+      - ./migrations/forward:/docker-entrypoint-initdb.d:ro
+    networks: !override
+      - omnibase-infra-lakshman-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d omnibase_infra"]
+    logging: *logging-defaults
+    restart: unless-stopped
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-lakshman-redpanda
+    profiles: ["lakshman"]
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - *lakshman_redpanda_advertised_kafka_addr
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      # Correction (c): 2G, not the judge lane's 8G. This is the fifth broker on
+      # a shared host and this lane is a sandbox, not a proof surface.
+      - --memory
+      - ${LAKSHMAN_REDPANDA_MEMORY:-2G}
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --default-log-level=warn
+      - --set
+      - topic_partitions_per_shard=7000
+    ports: !override
+      - *lakshman_redpanda_kafka_port_publish
+      - *lakshman_redpanda_admin_port_publish
+    volumes:
+      - lakshman_redpanda_data:/var/lib/redpanda/data
+    networks: !override
+      - omnibase-infra-lakshman-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      start_period: 30s
+    logging: *logging-defaults
+    restart: unless-stopped
+  redpanda-partition-cap:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-lakshman-redpanda-partition-cap
+    profiles: ["lakshman"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: !override
+      - omnibase-infra-lakshman-network
+    restart: "no"
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    container_name: omnibase-infra-lakshman-valkey
+    profiles: ["lakshman"]
+    command: >-
+      sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$$VALKEY_PASSWORD"'
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
+    ports: !override
+      - "${LAKSHMAN_VALKEY_EXTERNAL_PORT:-46379}:6379"
+    volumes:
+      - lakshman_valkey_data:/data
+    networks: !override
+      - omnibase-infra-lakshman-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+    logging: *logging-defaults
+    restart: unless-stopped
+  forward-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-lakshman-forward-migration
+    profiles: ["lakshman"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      MIGRATIONS_DIR: /migrations/forward
+      # OMN-16993 / OMN-15425: warm-volume re-assert of the two non-superuser
+      # LOGIN credentials. This service redeclares the base definition wholesale,
+      # so the base file's copies of these lines do not reach this lane.
+      OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+      TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
+    volumes:
+      - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
+      - ../docker/migrations/forward:/migrations/forward:ro
+    entrypoint: ["sh", "/run-forward-migrations.sh"]
+    networks: !override
+      - omnibase-infra-lakshman-network
+    restart: "no"
+    logging: *logging-defaults
+  migration-gate:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-lakshman-migration-gate
+    profiles: ["lakshman"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
+    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
+    volumes:
+      - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
+    networks: !override
+      - omnibase-infra-lakshman-network
+    healthcheck:
+      test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *logging-defaults
+    restart: unless-stopped
+  intelligence-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-lakshman-intelligence-migration
+    profiles: ["lakshman"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MIGRATIONS_DIR: /migrations/intelligence
+    volumes:
+      - ../scripts/run-intelligence-migrations.sh:/run-intelligence-migrations.sh:ro
+      - ../docker/migrations/intelligence:/migrations/intelligence:ro
+    entrypoint: ["sh", "/run-intelligence-migrations.sh"]
+    networks: !override
+      - omnibase-infra-lakshman-network
+    restart: "no"
+    logging: *logging-defaults
+  omninode-runtime:
+    !!merge <<: *runtime-base
+    container_name: omninode-lakshman-runtime
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      intelligence-migration:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      redpanda-partition-cap:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+    environment:
+      !!merge <<: *lakshman-runtime-env
+      RUNTIME_PROFILE: main
+      OTEL_SERVICE_NAME: omninode-lakshman-runtime-main
+      ONEX_RUNTIME_ID: lakshman-main
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/lakshman/main
+      ONEX_RUNTIME_CAPABILITIES: ${LAKSHMAN_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${LAKSHMAN_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${LAKSHMAN_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${LAKSHMAN_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
+      ONEX_GROUP_ID: onex-lakshman-runtime-main
+      KAFKA_INSTANCE_ID: lakshman-main
+      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${LAKSHMAN_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
+    ports: !override
+      - "${LAKSHMAN_RUNTIME_MAIN_PORT:?runtime policy contract must set LAKSHMAN_RUNTIME_MAIN_PORT}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - lakshman_runtime_logs:/app/logs
+      - lakshman_runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    tmpfs:
+      - /run/onex-runtime:uid=1000,gid=1000,mode=0770
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels:
+      - "com.omninode.lane=lakshman"
+      - "com.omninode.ticket=OMN-17150"
+      - "com.omninode.lane.class=collaborator"
+      - "com.omninode.runtime.address=runtime://omninode-pc/lakshman/main"
+      - "com.omninode.runtime.id=lakshman-main"
+  runtime-effects:
+    !!merge <<: *runtime-base
+    container_name: omninode-lakshman-runtime-effects
+    depends_on:
+      omninode-runtime:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      !!merge <<: *lakshman-runtime-env
+      RUNTIME_PROFILE: effects
+      OTEL_SERVICE_NAME: omninode-lakshman-runtime-effects
+      ONEX_RUNTIME_ID: lakshman-effects
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/lakshman/effects
+      ONEX_RUNTIME_CAPABILITIES: ${LAKSHMAN_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${LAKSHMAN_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${LAKSHMAN_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${LAKSHMAN_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${LAKSHMAN_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${LAKSHMAN_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_GROUP_ID: onex-lakshman-runtime-effects
+      KAFKA_INSTANCE_ID: lakshman-effects
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+    ports: !override
+      - "${LAKSHMAN_RUNTIME_EFFECTS_PORT:?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_PORT}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - lakshman_effects_logs:/app/logs
+      - lakshman_effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels:
+      - "com.omninode.lane=lakshman"
+      - "com.omninode.ticket=OMN-17150"
+      - "com.omninode.lane.class=collaborator"
+      - "com.omninode.runtime.address=runtime://omninode-pc/lakshman/effects"
+      - "com.omninode.runtime.id=lakshman-effects"
+  projection-api:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-lakshman-projection-api
+    command: ["omnimarket-projection-api"]
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: *lakshman-runtime-env
+      RUNTIME_PROFILE: projection-api
+      OTEL_SERVICE_NAME: omnimarket-lakshman-projection-api
+      BIFROST_CONTRACT_PATH: ""
+      # The projection API serves materialized read models and never invokes the
+      # delegation routing reducer. Kept explicit so a layered render cannot
+      # inherit the runtime anchor's routing-tiers path.
+      DELEGATION_ROUTING_TIERS_PATH: ""
+    ports: !override
+      - "${LAKSHMAN_PROJECTION_API_PORT:-53002}:3002"
+    volumes:
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      - "com.omninode.lane=lakshman"
+      - "com.omninode.ticket=OMN-17150"
+      - "com.omninode.lane.class=collaborator"
+      - "com.omninode.service=projection-api"
+  # OMN-13772 / OMN-13581 defence-in-depth. This file is designed to be run
+  # STANDALONE (`-f docker/docker-compose.lakshman.yml`), and no sanctioned tool
+  # layers it — `scripts/deploy-runtime.sh` does not know this lane, deliberately
+  # (see the governance note in this file's header). But the base infra compose
+  # defines keycloak and infisical with NO compose profile, so if anyone ever
+  # renders `-f docker-compose.infra.yml -f docker-compose.lakshman.yml` the two
+  # would activate under THIS project name, attached to the DEV network with DEV
+  # container names — the cross-lane displacement class OMN-13581 is named for.
+  # Forcing them behind a never-enabled profile costs nothing (inactive-profile
+  # stubs are dropped from a standalone render) and removes the foot-gun.
+  keycloak:
+    profiles: !override ["lakshman-disabled"]
+  infisical:
+    profiles: !override ["lakshman-disabled"]
+networks:
+  omnibase-infra-lakshman-network:
+    name: omnibase-infra-lakshman-network
+    driver: bridge
+volumes:
+  # Correction (a): every volume is namespaced to this lane, so a
+  # profile-scoped teardown with volume removal wipes this lane's state and
+  # nothing else on the host.
+  lakshman_postgres_data:
+    name: omnibase-infra-lakshman-postgres-data
+  lakshman_redpanda_data:
+    name: omnibase-infra-lakshman-redpanda-data
+  lakshman_valkey_data:
+    name: omnibase-infra-lakshman-valkey-data
+  lakshman_runtime_logs:
+    name: omninode-lakshman-runtime-logs
+  lakshman_runtime_data:
+    name: omninode-lakshman-runtime-data
+  lakshman_effects_logs:
+    name: omninode-lakshman-effects-logs
+  lakshman_effects_data:
+    name: omninode-lakshman-effects-data

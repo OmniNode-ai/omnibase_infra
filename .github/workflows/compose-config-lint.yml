@@ -62,12 +62,13 @@ jobs:
         run: |
           echo "================================================================"
           echo "Compose Config Lint — OMN-13037 / Retro B-9"
-          echo "Checks: stability-test, prod, judge overlay files"
+          echo "Checks: stability-test, prod, judge, lakshman overlay files"
           echo "================================================================"
           uv run python scripts/lint_compose_dangling_deps.py \
             docker/docker-compose.stability-test.yml \
             docker/docker-compose.prod.yml \
-            docker/docker-compose.judge.yml
+            docker/docker-compose.judge.yml \
+            docker/docker-compose.lakshman.yml
 
       - name: Unit tests for lint script
         run: |

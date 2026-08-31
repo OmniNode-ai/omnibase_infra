@@ -45,7 +45,13 @@ def _load_dotenv(path: Path) -> dict[str, str]:
 def test_runtime_policy_contract_declares_runtime_lanes() -> None:
     contract = _load_contract()
 
-    assert set(contract.profiles) == {"dev", "stability-test", "judge", "prod"}
+    assert set(contract.profiles) == {
+        "dev",
+        "stability-test",
+        "judge",
+        "prod",
+        "lakshman",
+    }
     assert contract.profiles["dev"].main_port == 8085
     assert contract.profiles["dev"].effects_port == 8086
     assert contract.profiles["stability-test"].main_port == 18085
@@ -56,6 +62,49 @@ def test_runtime_policy_contract_declares_runtime_lanes() -> None:
     assert contract.profiles["judge"].topic_provisioner_max_partitions == 1
     assert contract.profiles["prod"].main_port == 28085
     assert contract.profiles["prod"].effects_port == 28086
+    # OMN-17150 / OMN-17143 reserved collaborator block. 58085/58086 deliberately
+    # avoids 48085/48086 (judge runtime main/effects) and 49092 (prod broker
+    # external Kafka), which are the two near-misses the reservation called out.
+    assert contract.profiles["lakshman"].main_port == 58085
+    assert contract.profiles["lakshman"].effects_port == 58086
+    assert contract.profiles["lakshman"].topic_provisioner_max_partitions == 1
+
+
+def test_every_lane_effects_port_is_main_port_plus_one() -> None:
+    """OMN-17150: the effects port is derived, not chosen.
+
+    Every lane in this contract publishes effects on main+1 (8085/8086,
+    18085/18086, 28085/28086, 48085/48086, 58085/58086). Stating it as a rule
+    means the next lane cannot quietly pick an unrelated effects port, and the
+    reserved collaborator block is held to the same convention as the four that
+    predate it.
+    """
+    contract = _load_contract()
+
+    for name, profile in contract.profiles.items():
+        assert profile.effects_port == profile.main_port + 1, (
+            f"lane {name!r} publishes effects on {profile.effects_port}, which is "
+            f"not main_port ({profile.main_port}) + 1"
+        )
+
+
+def test_no_two_lanes_share_a_runtime_port() -> None:
+    """OMN-13581 cross-lane displacement class, stated over the contract.
+
+    A lane that reuses another lane's published runtime port displaces it on the
+    shared .201 host. The reservation for the collaborator lane exists precisely
+    to prevent an ad-hoc port pick; this asserts the property it was protecting.
+    """
+    contract = _load_contract()
+
+    seen: dict[int, str] = {}
+    for name, profile in contract.profiles.items():
+        for port in (profile.main_port, profile.effects_port):
+            assert port not in seen, (
+                f"lane {name!r} publishes port {port}, already claimed by "
+                f"lane {seen[port]!r}"
+            )
+            seen[port] = name
 
 
 def test_runtime_policy_env_matches_contract_renderer() -> None:
@@ -80,6 +129,9 @@ def test_runtime_policy_env_shell_source_preserves_json() -> None:
             "JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
             "JUDGE_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON",
             "JUDGE_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON",
+            "LAKSHMAN_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
+            "LAKSHMAN_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON",
+            "LAKSHMAN_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON",
         ]
     )
     command = f"""
@@ -132,6 +184,10 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
     assert env["JUDGE_RUNTIME_EFFECTS_PORT"] == "48086"
     assert env["JUDGE_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
     assert env["PROD_RUNTIME_MAIN_PORT"] == "28085"
+    assert env["LAKSHMAN_RUNTIME_MAIN_PORT"] == "58085"
+    assert env["LAKSHMAN_RUNTIME_EFFECTS_PORT"] == "58086"
+    assert env["LAKSHMAN_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
+    assert env["LAKSHMAN_COMPOSE_PROJECT"] == "omnibase-infra-lakshman"
     assert (
         env["STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES"]
         == "market.skill-proof,workflow.orchestration,runtime.main"
@@ -211,6 +267,7 @@ def test_worker_replicas_rendered_into_policy_env_for_every_lane() -> None:
     assert env["STABILITY_TEST_WORKER_REPLICAS"] == "1"
     assert env["JUDGE_WORKER_REPLICAS"] == "1"
     assert env["PROD_WORKER_REPLICAS"] == "1"
+    assert env["LAKSHMAN_WORKER_REPLICAS"] == "1"
 
 
 def test_runtime_worker_replicas_are_fail_fast_not_silent_default() -> None:
@@ -267,6 +324,11 @@ def test_boundary_dlq_enabled_declared_explicitly_for_every_lane() -> None:
     assert contract.profiles["stability-test"].boundary_dlq_enabled is True
     assert contract.profiles["judge"].boundary_dlq_enabled is False
     assert contract.profiles["prod"].boundary_dlq_enabled is False
+    # OMN-17150: OFF. The dev and stability-test lanes are ON only because each
+    # was flipped after a measured live DLQ readback on that lane. The
+    # collaborator lane has never run, so no such measurement exists and
+    # declaring it ON would assert something unproven.
+    assert contract.profiles["lakshman"].boundary_dlq_enabled is False
 
 
 def test_boundary_dlq_enabled_rendered_into_policy_env_for_every_lane() -> None:
@@ -277,6 +339,7 @@ def test_boundary_dlq_enabled_rendered_into_policy_env_for_every_lane() -> None:
     assert env["STABILITY_TEST_BOUNDARY_DLQ_ENABLED"] == "true"
     assert env["JUDGE_BOUNDARY_DLQ_ENABLED"] == "false"
     assert env["PROD_BOUNDARY_DLQ_ENABLED"] == "false"
+    assert env["LAKSHMAN_BOUNDARY_DLQ_ENABLED"] == "false"
 
 
 def test_stability_test_boundary_dlq_wired_fail_fast_prod_and_judge_untouched() -> None:
