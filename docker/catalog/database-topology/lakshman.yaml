@@ -311,7 +311,7 @@ databases:
       public:
         domain: OMNINODE_INTERNAL
         owner: owner_omniintelligence
-environment: stability-test
+environment: lakshman
 schema_version: '1.0'
 source:
   path: src/omnibase_infra/topology/instances/local.yaml

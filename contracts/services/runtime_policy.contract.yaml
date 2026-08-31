@@ -436,3 +436,138 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+  # OMN-17150 / OMN-17143: COLLABORATOR lane, owned by and mutable by one
+  # external collaborator (Lakshman Patel). Dev-class boundary — CLAUDE.md calls
+  # the dev lane a "fully mutable test platform" and this lane carries the same
+  # semantics — and explicitly NOT stability-class:
+  #
+  #   * absent from scripts/preflight_lane_deploy_attribution.py GOVERNED_LANES
+  #     (same reason `dev` is absent: gating a fully-mutable platform pushes its
+  #     owner off the sanctioned path for no governance gain),
+  #   * absent from that script's GRANT_INTERLOCK_LANES, so a rebuild here can
+  #     never invalidate the `stability-proven` premise of a live prod grant,
+  #   * absent from omni_home's no-raw-prod-bypass matcher, whose governed set
+  #     is {omnibase-infra-prod, omnibase-infra-stability-test,
+  #     omnibase-infra-judge} — `omnibase-infra-lakshman` matches none of them.
+  #
+  # It is NEVER a proof lane: no synthetic integration evidence, no golden-chain
+  # receipt, no `stability-proven` digest, and never a premise for a promotion
+  # grant. tests/ci/test_lakshman_lane_governance_boundary.py pins every one of
+  # those statements, in both directions.
+  #
+  # Ports are the OMN-17143 reserved block (58085/58086), verified free on .201
+  # by read-only `ss -ltn` on 2026-08-30. The effects port follows the +1
+  # convention every other lane uses.
+  lakshman:
+    compose_project: omnibase-infra-lakshman
+    main_port: 58085
+    effects_port: 58086
+    # Single-broker sandbox; same cap as the other single-broker lanes.
+    topic_provisioner_max_partitions: 1
+    # OMN-14551: OFF, and stated rather than inherited (the field has no
+    # default). The dev and stability-test lanes are ON only because each was
+    # flipped after a measured live DLQ proof ON THAT LANE. This lane has never
+    # run, so there is no such proof and claiming the flip would be asserting
+    # something unmeasured. Its owner can request the flip once the lane is up
+    # and a readback exists.
+    boundary_dlq_enabled: false
+    secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
+    secret_resolver_mappings:
+      - logical_name: llm.openrouter.api_key
+        source:
+          source_type: env
+          source_path: OPENROUTER_API_KEY
+      - logical_name: llm.glm.api_key
+        source:
+          source_type: env
+          source_path: LLM_GLM_API_KEY
+      - logical_name: llm.gemini.api_key
+        source:
+          source_type: env
+          source_path: GEMINI_API_KEY
+      # OMN-12971: Vertex bearer-token ref. The logical ref MUST match the
+      # cloud-vertex-gemini backend's secret_ref in omnimarket
+      # bifrost_delegation.yaml. source_type=file → the ref resolves to the
+      # mounted token FILE; only the ref name and the in-container path live
+      # here, never a value.
+      - logical_name: llm.vertex.access_token
+        source:
+          source_type: file
+          source_path: /run/secrets/vertex_access_token
+      # OMN-13726: Slack bot token for outbound Slack integrations.
+      - logical_name: slack.bot_token
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
+      # OMN-16921: node_slack_publish_effect resolves the LITERAL string
+      # "SLACK_BOT_TOKEN" (its own contract's secrets-block key), not the dotted
+      # convention name above. Under this lane's enable_convention_fallback:
+      # false posture the dotted mapping alone would miss. Additive.
+      - logical_name: SLACK_BOT_TOKEN
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
+      # OMN-15918 / OMN-16110: service_kernel's gateway-attach boot check hard
+      # -requires all five of these whenever secret_resolver_config_path is set
+      # (ProtocolConfigurationError otherwise). See the dev profile's block for
+      # the full rationale; tests/ci/test_runtime_policy_contract.py drives the
+      # real boot function against this profile.
+      - logical_name: gateway.attach.keycloak.issuer
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ISSUER
+      - logical_name: gateway.attach.keycloak.introspection
+        source:
+          source_type: env
+          source_path: GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL
+      - logical_name: gateway.attach.keycloak.jwks
+        source:
+          source_type: env
+          source_path: GATEWAY_ATTACH_KEYCLOAK_JWKS_URL
+      - logical_name: gateway.attach.keycloak.admin_client_credentials.client_id
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ADMIN_CLIENT_ID
+      - logical_name: gateway.attach.keycloak.admin_client_credentials.client_secret
+        source:
+          source_type: env
+          source_path: KEYCLOAK_ADMIN_CLIENT_SECRET
+    services:
+      main:
+        runtime_id: lakshman-main
+        runtime_address: runtime://omninode-pc/lakshman/main
+        capabilities:
+          - market.skill-proof
+          - workflow.orchestration
+          - runtime.main
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: true
+      effects:
+        runtime_id: lakshman-effects
+        runtime_address: runtime://omninode-pc/lakshman/effects
+        capabilities:
+          - effects.consumer
+          - market.skill-proof
+          - runtime.effects
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
+      worker:
+        runtime_id: lakshman-worker
+        runtime_address: runtime://omninode-pc/lakshman/worker
+        # OMN-12990: explicit worker replica pin in the ledgered config surface.
+        # Declared for contract completeness (the profile model requires all
+        # three processes). Like the judge lane, this lane's compose file runs
+        # no worker container today, so the manifest declares none either.
+        replicas: 1
+        capabilities:
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false

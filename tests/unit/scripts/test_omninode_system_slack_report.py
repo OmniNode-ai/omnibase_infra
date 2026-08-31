@@ -104,18 +104,54 @@ LANE_PORT_KEYS = _derive_lane_port_keys(RUNTIME_POLICY_ENV)
 RUNTIME_LANE_SPECS_RE = re.compile(
     r"^RUNTIME_LANE_SPECS=\((?P<body>.*?)^\)", re.MULTILINE | re.DOTALL
 )
+# OMN-17150: the sibling table of lanes the reporter deliberately does NOT probe.
+# Its whole purpose is to keep "not probed" a declaration instead of an absence:
+# the parity assertion below is over the UNION of the two tables, so a lane can
+# never leave this file silently, only move visibly between the two.
+RUNTIME_LANE_UNPROBED_RE = re.compile(
+    r"^RUNTIME_LANE_UNPROBED=\((?P<body>.*?)^\)", re.MULTILINE | re.DOTALL
+)
+
+#: Lanes that MUST stay in the probed table. Every lane the platform itself is
+#: responsible for keeping up. Named explicitly rather than derived, because the
+#: whole risk the unprobed table introduces is that one of these gets quietly
+#: moved into it -- which is the OMN-15556 judge blind spot with an extra step.
+MUST_BE_PROBED_LANES = frozenset({"dev", "stability-test", "prod", "judge"})
 
 
-def _script_lane_specs(script: Path) -> dict[str, str]:
-    """Parse the reporter's own RUNTIME_LANE_SPECS array into {lane: policy_key}."""
-    match = RUNTIME_LANE_SPECS_RE.search(script.read_text())
-    assert match, f"RUNTIME_LANE_SPECS array not found in {script}"
+def _parse_lane_table(script: Path, pattern: re.Pattern[str]) -> dict[str, str]:
+    """Parse one of the reporter's ``lane|policy-key`` bash arrays."""
+    match = pattern.search(script.read_text())
+    if match is None:
+        return {}
     specs: dict[str, str] = {}
     for row in re.findall(r'"([^"]+)"', match.group("body")):
         lane, _, key = row.partition("|")
         specs[lane] = key
-    assert specs, f"RUNTIME_LANE_SPECS in {script} parsed to an empty map"
     return specs
+
+
+def _script_lane_specs(script: Path) -> dict[str, str]:
+    """Parse the reporter's own RUNTIME_LANE_SPECS array into {lane: policy_key}."""
+    specs = _parse_lane_table(script, RUNTIME_LANE_SPECS_RE)
+    assert specs, f"RUNTIME_LANE_SPECS in {script} is missing or parsed to an empty map"
+    return specs
+
+
+def _script_unprobed_lane_specs(script: Path) -> dict[str, str]:
+    """Parse RUNTIME_LANE_UNPROBED. Absent (or empty) is legal -- it means every
+    policy lane is probed, which is the stronger state."""
+    return _parse_lane_table(script, RUNTIME_LANE_UNPROBED_RE)
+
+
+#: The lanes this reporter is expected to actually probe: every policy lane the
+#: script has not explicitly declared unprobed. Derived, so it tracks the script.
+UNPROBED_LANE_PORT_KEYS = _script_unprobed_lane_specs(FIXED_SCRIPT)
+PROBED_LANE_PORT_KEYS = {
+    lane: key
+    for lane, key in LANE_PORT_KEYS.items()
+    if lane not in UNPROBED_LANE_PORT_KEYS
+}
 
 
 pytestmark = pytest.mark.skipif(
@@ -461,7 +497,13 @@ def _outage_docker() -> dict[str, Any]:
 
 @pytest.fixture
 def lane_ports() -> dict[str, str]:
-    return {lane: _policy_port(key) for lane, key in LANE_PORT_KEYS.items()}
+    """The lanes the reporter probes, and their policy-resolved ports.
+
+    Scoped to PROBED_LANE_PORT_KEYS rather than every policy lane (OMN-17150): a
+    lane the script explicitly declares unprobed must not be asserted present in
+    the digest. The parity test below is what keeps that declaration honest.
+    """
+    return {lane: _policy_port(key) for lane, key in PROBED_LANE_PORT_KEYS.items()}
 
 
 # --------------------------------------------------------------------------
@@ -550,6 +592,13 @@ def test_every_lane_main_runtime_port_is_in_the_probe_set(
             f"lane {lane} (:{port}) is not probed -- a lane's MAIN runtime health "
             f"endpoint was dropped from the alert (OMN-15509 AC2/AC7)"
         )
+    # OMN-17150: and the converse. A lane declared unprobed must not show up in
+    # the digest, or the declaration is a lie and the sandbox pages the on-call.
+    for lane in UNPROBED_LANE_PORT_KEYS:
+        assert f"runtime-{lane}-" not in endpoints, (
+            f"lane {lane} is declared in RUNTIME_LANE_UNPROBED yet appears in the "
+            f"digest -- either probe it deliberately or stop declaring it"
+        )
 
 
 def test_reporter_lane_specs_and_policy_lanes_are_in_two_way_parity() -> None:
@@ -568,22 +617,48 @@ def test_reporter_lane_specs_and_policy_lanes_are_in_two_way_parity() -> None:
     how judge stayed invisible through OMN-15509 and OMN-15525.
     """
     script_lanes = _script_lane_specs(FIXED_SCRIPT)
+    unprobed_lanes = _script_unprobed_lane_specs(FIXED_SCRIPT)
 
-    unprobed = sorted(set(LANE_PORT_KEYS) - set(script_lanes))
-    assert not unprobed, (
-        f"lane(s) {unprobed} declare a *_RUNTIME_MAIN_PORT in "
-        f"{RUNTIME_POLICY_ENV.name} but are absent from RUNTIME_LANE_SPECS in "
-        f"{FIXED_SCRIPT.name} -- a live runtime lane whose death pages nobody"
+    overlap = sorted(set(script_lanes) & set(unprobed_lanes))
+    assert not overlap, (
+        f"lane(s) {overlap} appear in BOTH RUNTIME_LANE_SPECS and "
+        f"RUNTIME_LANE_UNPROBED in {FIXED_SCRIPT.name} -- the tables must "
+        f"partition the policy's lanes, not overlap"
     )
-    phantom = sorted(set(script_lanes) - set(LANE_PORT_KEYS))
+
+    declared = {**script_lanes, **unprobed_lanes}
+    undeclared = sorted(set(LANE_PORT_KEYS) - set(declared))
+    assert not undeclared, (
+        f"lane(s) {undeclared} declare a *_RUNTIME_MAIN_PORT in "
+        f"{RUNTIME_POLICY_ENV.name} but appear in neither RUNTIME_LANE_SPECS nor "
+        f"RUNTIME_LANE_UNPROBED in {FIXED_SCRIPT.name} -- a live runtime lane "
+        f"whose death pages nobody. Probe it, or declare it unprobed with a "
+        f"reason; silence is not one of the options."
+    )
+    phantom = sorted(set(declared) - set(LANE_PORT_KEYS))
     assert not phantom, (
-        f"lane(s) {phantom} appear in RUNTIME_LANE_SPECS but declare no "
+        f"lane(s) {phantom} appear in a reporter lane table but declare no "
         f"*_RUNTIME_MAIN_PORT in {RUNTIME_POLICY_ENV.name} -- the port can "
         f"never resolve, so the reporter alarms forever on a phantom lane"
     )
-    assert script_lanes == LANE_PORT_KEYS, (
+    assert declared == LANE_PORT_KEYS, (
         f"lane -> policy-key mapping disagrees between the reporter and the "
-        f"policy: script={script_lanes} policy={LANE_PORT_KEYS}"
+        f"policy: script={declared} policy={LANE_PORT_KEYS}"
+    )
+
+    # OMN-17150: the unprobed table is a narrow, declared exception -- never a
+    # place a platform-owned lane can be parked. Moving any of these four out of
+    # the probed table is the OMN-15556 blind spot with an extra step, so it
+    # fails here regardless of what reason accompanies it.
+    misfiled = sorted(MUST_BE_PROBED_LANES & set(unprobed_lanes))
+    assert not misfiled, (
+        f"lane(s) {misfiled} were moved into RUNTIME_LANE_UNPROBED. These lanes "
+        f"are platform-owned and must be probed; only a lane nobody promised to "
+        f"keep up (a collaborator sandbox) belongs in that table."
+    )
+    missing_required = sorted(MUST_BE_PROBED_LANES - set(script_lanes))
+    assert not missing_required, (
+        f"lane(s) {missing_required} are missing from RUNTIME_LANE_SPECS entirely"
     )
 
 
@@ -603,18 +678,32 @@ def test_lane_specs_carry_no_hardcoded_fallback_ports() -> None:
     renamed key or an unrendered policy file silently probed a guessed port.
     """
     source = FIXED_SCRIPT.read_text()
-    specs = re.search(r"RUNTIME_LANE_SPECS=\((.*?)\n\)", source, re.DOTALL)
-    assert specs, "RUNTIME_LANE_SPECS table not found"
-    for raw in specs.group(1).strip().splitlines():
-        entry = raw.strip().strip('"')
-        if not entry:
-            continue
-        fields = entry.split("|")
-        assert len(fields) == 2, (
-            f"lane spec {entry!r} carries more than lane|key -- a third field is "
-            "the hardcoded fallback port OMN-15525 removed"
+    tables = {
+        "RUNTIME_LANE_SPECS": re.search(
+            r"RUNTIME_LANE_SPECS=\((.*?)\n\)", source, re.DOTALL
+        ),
+    }
+    # OMN-17150: the unprobed table carries the same lane|key rows and must obey
+    # the same rule -- a literal port smuggled in there would resurface the
+    # moment the lane graduates back into the probed table.
+    if "RUNTIME_LANE_UNPROBED=(" in source:
+        tables["RUNTIME_LANE_UNPROBED"] = re.search(
+            r"RUNTIME_LANE_UNPROBED=\((.*?)\n\)", source, re.DOTALL
         )
-        assert not re.fullmatch(r"\d+", fields[1]), entry
+
+    assert tables["RUNTIME_LANE_SPECS"], "RUNTIME_LANE_SPECS table not found"
+    for table_name, table in tables.items():
+        assert table, f"{table_name} table not found"
+        for raw in table.group(1).strip().splitlines():
+            entry = raw.strip().strip('"')
+            if not entry or entry.startswith("#"):
+                continue
+            fields = entry.split("|")
+            assert len(fields) == 2, (
+                f"{table_name} row {entry!r} carries more than lane|key -- a "
+                "third field is the hardcoded fallback port OMN-15525 removed"
+            )
+            assert not re.fullmatch(r"\d+", fields[1]), entry
 
 
 def test_cron_unit_points_at_the_versioned_script_name() -> None:
@@ -994,7 +1083,7 @@ def test_missing_runtime_policy_file_is_critical_not_a_hardcoded_port(
         extra_env={"OMNINODE_RUNTIME_POLICY_ENV": str(tmp_path / "no-such-policy.env")},
     )
 
-    for lane in LANE_PORT_KEYS:
+    for lane in PROBED_LANE_PORT_KEYS:
         assert f"runtime-{lane}-unresolved" in report, (
             f"lane {lane} did not report an unresolvable port with the policy "
             f"file absent -- it fell back to a hardcoded port (OMN-15525):\n{report}"
@@ -1016,12 +1105,16 @@ def test_renamed_policy_key_is_critical(
     # Hardcoding three lines here meant a newly-declared lane was silently
     # absent from the partial policy, so it read as unresolved for the wrong
     # reason and the test proved nothing about that lane.
+    #
+    # Scoped to the PROBED lanes (OMN-17150): a lane the reporter never looks up
+    # cannot be renamed out from under it, and writing a key it never reads
+    # would prove nothing either way.
     partial.write_text(
         "".join(
             f"{key}_RENAMED={lane_ports[lane]}\n"
             if lane == "dev"
             else f"{key}={lane_ports[lane]}\n"
-            for lane, key in LANE_PORT_KEYS.items()
+            for lane, key in PROBED_LANE_PORT_KEYS.items()
         )
     )
     bin_dir = _make_stub_bin(

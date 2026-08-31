@@ -316,7 +316,7 @@ schema_version: '1.0'
 source:
   path: src/omnibase_infra/topology/instances/onex-prod.yaml
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
-  profile_catalog_sha256: 759f32da77ad41b874fbb05d2824c44f9de4c64e9d269d99da21445225a90ca1
+  profile_catalog_sha256: 0e01755c1dc17827d763b60c287617357be7a2393123df2575d9278be73a1816
   repository: OmniNode-ai/omnibase_infra
   sha256: 0dbb4df719243a129edd8f0aa8ff3b531fb2eb78756b3dd5fe894488c622e407
 topology_instance: onex-prod
