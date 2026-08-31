@@ -11,6 +11,9 @@ from omnibase_infra.runtime.models.model_runtime_process_policy import (
     RuntimeProcessName,
 )
 from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
+from omnibase_infra.runtime.models.model_secret_namespace_rule import (
+    ModelSecretNamespaceRule,
+)
 
 
 class ModelRuntimeProfilePolicy(BaseModel):
@@ -29,6 +32,11 @@ class ModelRuntimeProfilePolicy(BaseModel):
     boundary_dlq_enabled: bool
     secret_resolver_config_path: str = ""
     secret_resolver_mappings: tuple[ModelSecretMapping, ...] = ()
+    # OMN-16944: rule-based sources for runtime-MINTED refs (BYOK credential
+    # refs carry a uuid4, so no per-credential `mappings` entry can exist).
+    # Declared once per lane; serves every credential registered afterwards
+    # with no manifest edit and no redeploy.
+    secret_resolver_namespaces: tuple[ModelSecretNamespaceRule, ...] = ()
     processes: dict[RuntimeProcessName, ModelRuntimeProcessPolicy] = Field(
         alias="services"
     )
@@ -47,9 +55,15 @@ class ModelRuntimeProfilePolicy(BaseModel):
             msg = "runtime profile secret resolver logical names must be unique"
             raise ValueError(msg)
         if (
-            self.secret_resolver_mappings
-            and not self.secret_resolver_config_path.strip()
-        ):
-            msg = "runtime profile secret resolver mappings require a config path"
+            self.secret_resolver_mappings or self.secret_resolver_namespaces
+        ) and not self.secret_resolver_config_path.strip():
+            msg = (
+                "runtime profile secret resolver mappings/namespaces require a "
+                "config path"
+            )
+            raise ValueError(msg)
+        namespace_names = [rule.namespace for rule in self.secret_resolver_namespaces]
+        if len(namespace_names) != len(set(namespace_names)):
+            msg = "runtime profile secret resolver namespace names must be unique"
             raise ValueError(msg)
         return self

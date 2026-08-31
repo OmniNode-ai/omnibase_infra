@@ -195,6 +195,14 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelRuntimeSchedulerMetrics": "Metrics model, simple but low priority",
     "ModelSecretCacheStats": "Simple metrics, low priority",
     "ModelSecretMapping": "Secret mapping with source/target validation",
+    "ModelSecretNamespaceRule": (
+        "Rule model whose construction is a validation chain, not a data shape "
+        "(OMN-16944): the ref pattern must compile, be anchored and reject the "
+        "empty match, source_type is restricted to store-backed sources, and "
+        "source_path_template must reference {ref}. A round-trip factory would "
+        "have to satisfy all four to build one instance, and the refusals are "
+        "the behaviour under test in test_omn16944_secret_namespace_rule.py"
+    ),
     "ModelSecretResolverConfig": "Config with secret source dependencies",
     "ModelSecretResolverMetrics": "Metrics model, simple but low priority",
     "ModelSecretSourceInfo": "Source info with enum dependencies",

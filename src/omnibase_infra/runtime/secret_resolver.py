@@ -84,6 +84,7 @@ import json
 import logging
 import os
 import random
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -105,6 +106,9 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.runtime.models.model_cached_secret import ModelCachedSecret
 from omnibase_infra.runtime.models.model_secret_cache_stats import ModelSecretCacheStats
+from omnibase_infra.runtime.models.model_secret_namespace_rule import (
+    ModelSecretNamespaceRule,
+)
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
@@ -431,6 +435,11 @@ class SecretResolver:
         self._mappings: dict[str, ModelSecretSourceSpec] = {
             m.logical_name: m.source for m in config.mappings
         }
+        # OMN-16944: rule-based sources for runtime-MINTED refs, compiled once.
+        # Declaration order is match order; the first claiming rule wins.
+        self._namespaces: tuple[
+            tuple[re.Pattern[str], ModelSecretNamespaceRule], ...
+        ] = tuple((re.compile(rule.ref_pattern), rule) for rule in config.namespaces)
         self._ttl_overrides: dict[str, int] = {
             m.logical_name: m.ttl_seconds
             for m in config.mappings
@@ -1249,6 +1258,48 @@ class SecretResolver:
         """
         return list(self._mappings.keys())
 
+    def list_configured_namespaces(self) -> list[str]:
+        """List declared namespace-rule identifiers (OMN-16944).
+
+        Names only -- never a pattern's matches, never a value. A lane's
+        namespace surface is as inspectable as its ``mappings`` surface.
+
+        Returns:
+            Namespace identifiers in declaration (match) order.
+        """
+        return [rule.namespace for _, rule in self._namespaces]
+
+    def resolve_namespace_source(
+        self, logical_name: str
+    ) -> ModelSecretSourceSpec | None:
+        """Return the namespace-derived source for ``logical_name``, if claimed.
+
+        OMN-16944. Declaration order is match order; the first rule that claims
+        the name supplies its source. Returns ``None`` when no rule claims it --
+        which is the fail-closed default: a minted ref on a lane that declares
+        no namespace has no source at all.
+
+        Args:
+            logical_name: The (possibly runtime-minted) logical name.
+
+        Returns:
+            The interpolated ``ModelSecretSourceSpec``, or ``None``.
+        """
+        rule = self._matching_namespace(logical_name)
+        if rule is None:
+            return None
+        return ModelSecretSourceSpec(
+            source_type=rule.source_type,
+            source_path=rule.source_path_for(logical_name),
+        )
+
+    def _matching_namespace(self, logical_name: str) -> ModelSecretNamespaceRule | None:
+        """Return the first namespace rule claiming ``logical_name``."""
+        for pattern, rule in self._namespaces:
+            if pattern.fullmatch(logical_name) is not None:
+                return rule
+        return None
+
     def get_source_info(self, logical_name: str) -> ModelSecretSourceInfo | None:
         """Return source type and masked path for a logical name.
 
@@ -1556,6 +1607,18 @@ class SecretResolver:
         # Try explicit mapping first
         if logical_name in self._mappings:
             return self._mappings[logical_name]
+
+        # OMN-16944: rule-based sources for runtime-MINTED refs. A ref a
+        # namespace claims resolves ONLY through that namespace's store-backed
+        # source -- this returns before the convention-fallback branch below, so
+        # a claimed ref can never fall through to an environment variable
+        # regardless of enable_convention_fallback. When the store holds no
+        # value for the interpolated path, resolution still yields None and a
+        # required=True caller still raises: declaring a namespace widens WHICH
+        # refs have a source, never what happens when a source has no value.
+        namespaced = self.resolve_namespace_source(logical_name)
+        if namespaced is not None:
+            return namespaced
 
         # OMN-14951 gap 1 (2026-07-23 hardening): a declared-required key
         # must NEVER resolve via convention fallback, unconditionally --
@@ -1915,6 +1978,12 @@ class SecretResolver:
         # Check for explicit override
         if logical_name in self._ttl_overrides:
             return self._ttl_overrides[logical_name]
+
+        # OMN-16944: a namespace rule may carry its own TTL for every ref it
+        # claims -- a per-credential entry cannot exist to carry one.
+        namespace = self._matching_namespace(logical_name)
+        if namespace is not None and namespace.ttl_seconds is not None:
+            return namespace.ttl_seconds
 
         # Use default based on source type
         ttl_defaults = {

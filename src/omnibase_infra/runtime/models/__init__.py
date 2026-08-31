@@ -47,6 +47,7 @@ Exports:
     ModelSecretSourceSpec: Source specification for a single secret
     SecretSourceType: Type alias for secret source types (env, vault, file)
     ModelSecretMapping: Mapping from logical name to source specification
+    ModelSecretNamespaceRule: Rule-based source for runtime-minted secret refs
     ModelSecretResolverConfig: Configuration for SecretResolver
     ModelCachedSecret: Cached secret with TTL tracking
     ModelSecretCacheStats: Cache statistics for observability
@@ -214,6 +215,9 @@ from omnibase_infra.runtime.models.model_runtime_scheduler_metrics import (
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.runtime.models.model_secret_cache_stats import ModelSecretCacheStats
 from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
+from omnibase_infra.runtime.models.model_secret_namespace_rule import (
+    ModelSecretNamespaceRule,
+)
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
@@ -292,6 +296,7 @@ __all__: list[str] = [
     "ModelRuntimeTick",
     "ModelSecretCacheStats",
     "ModelSecretMapping",
+    "ModelSecretNamespaceRule",
     "ModelSecretResolverConfig",
     "ModelSecretResolverMetrics",
     "ModelSecretSourceInfo",

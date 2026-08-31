@@ -105,10 +105,14 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
             profile.boundary_dlq_enabled
         )
         secret_resolver_config_json = ""
-        if profile.secret_resolver_mappings:
+        if profile.secret_resolver_mappings or profile.secret_resolver_namespaces:
             secret_resolver_config_json = json.dumps(
                 ModelSecretResolverConfig(
                     mappings=list(profile.secret_resolver_mappings),
+                    # OMN-16944: rule-based sources for runtime-minted refs
+                    # ride the SAME rendered lane surface as the exact-match
+                    # mappings, so a lane declares both in one contract block.
+                    namespaces=list(profile.secret_resolver_namespaces),
                     enable_convention_fallback=False,
                 ).model_dump(mode="json", exclude_defaults=True),
                 separators=(",", ":"),

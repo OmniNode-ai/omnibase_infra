@@ -13,6 +13,9 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
+from omnibase_infra.runtime.models.model_secret_namespace_rule import (
+    ModelSecretNamespaceRule,
+)
 
 
 class ModelSecretResolverConfig(BaseModel):
@@ -76,6 +79,17 @@ class ModelSecretResolverConfig(BaseModel):
         "Takes precedence over convention-based resolution.",
     )
 
+    # Rule-based sources for runtime-minted refs (OMN-16944). See
+    # ModelSecretNamespaceRule: one declaration serves every ref matching its
+    # anchored pattern, including refs minted after this lane was deployed.
+    namespaces: list[ModelSecretNamespaceRule] = Field(
+        default_factory=list,
+        description="Pattern-scoped, store-backed sources for logical names that are "
+        "MINTED at runtime and therefore cannot be pre-declared in 'mappings' "
+        "(OMN-16944). Consulted after explicit mappings and before convention "
+        "fallback; a name a namespace claims never reaches convention fallback.",
+    )
+
     # Default TTLs by source type (in seconds)
     default_ttl_env_seconds: int = Field(
         default=86400,
@@ -137,6 +151,53 @@ class ModelSecretResolverConfig(BaseModel):
 
     # NOTE: Vault configuration will be added when ModelVaultHandlerConfig is available
     # vault_config: ModelVaultHandlerConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_namespaces_claim_no_declared_name(
+        self,
+    ) -> ModelSecretResolverConfig:
+        """A namespace rule may never claim a declared platform secret name.
+
+        OMN-16944. Namespaces exist for names nobody declares -- refs minted at
+        runtime. A rule broad enough to also match a ``required_secrets`` or
+        ``bootstrap_secrets`` name would silently reroute a platform secret
+        through the tenant-credential store (or, for a bootstrap key, through a
+        chain that cannot run before that key is resolved). Both are rejected at
+        construction time, naming every collision at once, rather than being
+        discovered as a resolution surprise on a deployed lane.
+
+        Duplicate ``namespace`` identifiers are rejected for the same reason
+        introspection exists: two rules answering to one name make a lane's
+        declared surface unreadable.
+        """
+        if not self.namespaces:
+            return self
+
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for rule in self.namespaces:
+            if rule.namespace in seen:
+                duplicates.append(rule.namespace)
+            seen.add(rule.namespace)
+        if duplicates:
+            raise ValueError(
+                "namespaces must have unique 'namespace' identifiers; duplicated: "
+                f"{sorted(set(duplicates))}"
+            )
+
+        collisions: list[str] = []
+        for declared in (*self.required_secrets, *self.bootstrap_secrets):
+            for rule in self.namespaces:
+                if rule.matches(declared):
+                    collisions.append(f"{rule.namespace} claims {declared!r}")
+        if collisions:
+            raise ValueError(
+                "a namespace rule must not claim a declared secret name -- "
+                "namespaces are for runtime-MINTED refs only (OMN-16944). "
+                "Offending rules: " + "; ".join(sorted(collisions))
+            )
+
+        return self
 
     @model_validator(mode="after")
     def _validate_required_secrets_route_through_infisical(
