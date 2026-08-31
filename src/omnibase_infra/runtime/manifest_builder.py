@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
 )
@@ -227,10 +228,28 @@ async def publish_runtime_manifest(
             f"got {type(payload).__name__}"
         )
 
+    # OMN-17296: the envelope event_type MUST be the topic-derived
+    # ``<producer>.<event-name>`` alias, because that is the key
+    # ``derive_entry_message_types`` registers the subscriber's dispatcher under and
+    # ``MessageDispatchEngine.dispatch`` matches ``envelope.event_type`` against it
+    # verbatim. This was hard-coded to the bare ``"runtime-manifest-published"`` (producer
+    # segment missing), so ``node_runtime_manifest_reducer`` consumed, DLQ-routed
+    # (failure_class=no_dispatcher) and COMMITTED every manifest event at LAG 0 — 189
+    # dropped events per runtime start on the dev lane, and the OMN-15512
+    # attach-readiness blocker set never reached ``runtime_manifests``. Derived here, not
+    # spelled out, so publisher and dispatch index cannot drift again.
+    event_type = derive_event_type_alias_for_topic(topic)
+    if event_type is None:
+        raise ValueError(
+            "Cannot derive an event_type alias for the runtime-manifest topic "
+            f"{topic!r}: it is not a 5-segment onex.<kind>.<producer>.<name>.v<n> topic. "
+            "Publishing with an underivable alias would be unroutable and DLQ every "
+            "manifest event (OMN-17296)."
+        )
     envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
         payload=payload,
         correlation_id=correlation_id,
-        event_type="runtime-manifest-published",
+        event_type=event_type,
         source_tool="service_kernel",
     )
     await event_bus.publish_envelope(envelope=envelope, topic=topic)

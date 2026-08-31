@@ -98,6 +98,9 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 from omnibase_infra.event_bus.model_topic_set_readiness import (
     ModelTopicSetReadiness,
 )
+from omnibase_infra.event_bus.topic_constants import (
+    derive_event_type_alias_for_topic,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -5907,7 +5910,7 @@ def _make_raw_event_projection_callback(
                 correlation_id=raw_message.headers.correlation_id,
                 envelope_timestamp=raw_message.headers.timestamp,
                 event_type=(
-                    _derive_event_type_alias_from_topic(topic)
+                    derive_event_type_alias_for_topic(topic)
                     or raw_message.headers.event_type
                 ),
                 source_tool=raw_message.headers.source,
@@ -6603,14 +6606,6 @@ def _node_kind_from_node_type(node_type: str | None) -> EnumNodeKind | None:
     return None
 
 
-def _derive_event_type_alias_from_topic(topic: str) -> str | None:
-    """Derive the dispatch-engine event_type alias from an ONEX topic."""
-    parts = topic.split(".")
-    if len(parts) >= 5 and parts[0] == "onex":
-        return f"{parts[2]}.{parts[3]}"
-    return None
-
-
 def _topics_for_handler_entry(
     contract: ModelDiscoveredContract,
     entry: ModelHandlerRoutingEntry,
@@ -6640,7 +6635,7 @@ def _topics_for_handler_entry(
             topic
             for topic in topics
             if topic == event_type_alias
-            or _derive_event_type_alias_from_topic(topic) == event_type_alias
+            or derive_event_type_alias_for_topic(topic) == event_type_alias
         )
         return matched
 
@@ -6722,7 +6717,7 @@ def derive_entry_message_types(
         topic_aliases = {
             alias
             for topic in subscribe_topics
-            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
+            if (alias := derive_event_type_alias_for_topic(topic)) is not None
         }
         if topic_aliases:
             message_types = (message_types or set()).union(topic_aliases)
@@ -6805,7 +6800,7 @@ def _start_event_type_aliases(contract: ModelDiscoveredContract) -> tuple[str, .
             or parts[4] != "v1"
         ):
             continue
-        alias = _derive_event_type_alias_from_topic(topic)
+        alias = derive_event_type_alias_for_topic(topic)
         if alias is not None:
             aliases.append(alias)
     return tuple(dict.fromkeys(aliases))

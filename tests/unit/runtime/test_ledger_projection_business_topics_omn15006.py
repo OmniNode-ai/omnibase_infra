@@ -289,7 +289,7 @@ def _raw_wrapper_envelope(topic: str, *, event_type: str) -> ModelEventEnvelope[
         ),
         pytest.param(
             # event_type alias derived from the topic by
-            # `_derive_event_type_alias_from_topic` (handler_wiring.py):
+            # `derive_event_type_alias_for_topic` (event_bus/topic_constants.py):
             # f"{parts[2]}.{parts[3]}" for a standard 5-segment topic, i.e.
             # "omnibase-infra.events" for "onex.dlq.omnibase-infra.events.v1".
             TOPIC_DLQ_EVENTS,
