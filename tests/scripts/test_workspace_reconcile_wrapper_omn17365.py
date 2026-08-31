@@ -68,12 +68,25 @@ def _make_tree(root: Path, marker: str) -> Path:
     return root
 
 
-def _run(env_file: Path, ambient_omni_home: Path) -> subprocess.CompletedProcess[str]:
+def _run(
+    env_file: Path, ambient_omni_home: Path | None
+) -> subprocess.CompletedProcess[str]:
+    """Invoke the wrapper.
+
+    ``ambient_omni_home=None`` models the real cron environment, which exports
+    almost nothing. That distinction is load-bearing: with an ambient value in
+    scope, an env file that expands ``$OMNI_HOME`` resolves it from the ambient
+    one and a missing default goes unnoticed -- which is how the first cut of
+    this fix passed its tests and still took the host down.
+    """
     env = {
         **os.environ,
         "OMNINODE_ALERT_ENV_FILE": str(env_file),
-        "OMNI_HOME": str(ambient_omni_home),
     }
+    if ambient_omni_home is None:
+        env.pop("OMNI_HOME", None)
+    else:
+        env["OMNI_HOME"] = str(ambient_omni_home)
     return subprocess.run(
         ["bash", str(_WRAPPER)],
         capture_output=True,
@@ -194,11 +207,23 @@ def test_reconciler_is_assigned_after_the_env_file_is_sourced() -> None:
     )
 
 
-def test_omni_home_default_is_applied_after_the_sourcing_too() -> None:
-    """The default and the path must be resolved from the same point.
+def test_omni_home_default_is_applied_before_the_sourcing() -> None:
+    """The default and the path go on OPPOSITE sides of the sourcing block.
 
-    Splitting them -- default early, path late -- reintroduces the same class of
-    bug in the other direction.
+    An earlier revision of this file asserted the reverse -- that the default
+    should also move below the block -- and that assertion was wrong in a way
+    that took the host down. The `.201` env file both ASSIGNS ``OMNI_HOME`` and
+    later REFERENCES it (line 154 expands ``"$OMNI_HOME"``). The wrapper runs
+    under ``set -u``, so with no value in scope the source aborts::
+
+        /data/omninode/omnibase_infra/.env: line 154: OMNI_HOME: unbound variable
+        EXIT=1
+
+    and the reconcile exits having done nothing at all -- strictly worse than
+    the bug it was fixing, which at least still advanced the clones.
+
+    So: the default seeds a value the env file can read, the env file may then
+    override it, and the path is derived from whatever survives.
     """
     source = _WRAPPER.read_text(encoding="utf-8")
 
@@ -208,7 +233,59 @@ def test_omni_home_default_is_applied_after_the_sourcing_too() -> None:
     sourcing = re.search(r'^\s*\.\s+"\$ALERT_ENV_FILE"', source, re.MULTILINE)
     assert sourcing is not None
 
-    assert default.start() > sourcing.end(), (
-        "the OMNI_HOME default is applied before the env file is sourced, so a "
-        "host relying on the env file's value would be overridden by the default"
+    assert default.start() < sourcing.start(), (
+        "the OMNI_HOME default is applied after the env file is sourced. An env "
+        "file that REFERENCES $OMNI_HOME then aborts the source under set -u "
+        "and the whole reconcile exits non-zero having done nothing (OMN-17365)."
+    )
+
+
+def test_an_env_file_that_references_omni_home_does_not_abort_the_run(
+    tmp_path: Path,
+) -> None:
+    """The live failure, reproduced with the real file's ordering.
+
+    The `.201` env file EXPANDS ``$OMNI_HOME`` at lines 154, 158, 165, 181, 196
+    and 226, and only ASSIGNS it at line 245 -- 91 lines later. Under ``set -u``,
+    in cron's near-empty environment, the source aborts on the first expansion::
+
+        /data/omninode/omnibase_infra/.env: line 154: OMNI_HOME: unbound variable
+        EXIT=1
+
+    and the reconcile then does nothing at all -- strictly worse than the bug it
+    was fixing, which at least still advanced the clones.
+
+    Two details are load-bearing and both were wrong in this test's first draft:
+    the expansion must come BEFORE the assignment, and the ambient environment
+    must be empty. With an ambient ``OMNI_HOME`` in scope the expansion resolves
+    from it, the missing default is invisible, and the test passes against a
+    wrapper that is broken on the host.
+    """
+    sourced = _make_tree(tmp_path / "sourced", "sourced")
+
+    env_file = tmp_path / "alert.env"
+    env_file.write_text(
+        "# expansion first, assignment later -- the real file's shape\n"
+        'OMNICLAUDE_CONTRACTS_ROOT="$OMNI_HOME/omniclaude/contracts"\n'
+        f"OMNI_HOME={sourced}\n",
+        encoding="utf-8",
+    )
+
+    result = _run(env_file, None)
+
+    assert "unbound variable" not in result.stderr, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RAN_FROM=sourced" in result.stdout
+
+
+def test_the_wrapper_declares_exactly_one_omni_home_default() -> None:
+    """Two defaults means the second is dead code that reads as load-bearing.
+
+    Moving the assignment left a redundant copy behind once already; a reader
+    trying to work out which one wins is a reader who will move the wrong one.
+    """
+    source = _WRAPPER.read_text(encoding="utf-8")
+    defaults = re.findall(r'^OMNI_HOME="\$\{OMNI_HOME:-', source, re.MULTILINE)
+    assert len(defaults) == 1, (
+        f"expected exactly one OMNI_HOME default, found {len(defaults)}"
     )

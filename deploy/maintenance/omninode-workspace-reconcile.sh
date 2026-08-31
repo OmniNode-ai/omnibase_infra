@@ -58,24 +58,35 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 ALERT_ENV_FILE="${OMNINODE_ALERT_ENV_FILE:-/data/omninode/omnibase_infra/.env}"
 
-# OMN-17365: RECONCILER is deliberately NOT resolved here.
+# OMN-17365: the DEFAULT is applied here, but RECONCILER is resolved AFTER the
+# sourcing below. The two halves land on opposite sides of that block on purpose,
+# and getting either one wrong has already broken this host once.
 #
-# The env file sourced below is `set -a`, and on `.201` it assigns OMNI_HOME.
-# Resolving the reconciler path before that assignment took the DEFAULT root
-# while the `--omni-home` argument below took the SOURCED one, so the script
-# that ran and the tree it reconciled were two different checkouts:
+# Why the default must come BEFORE the sourcing:
+#   the `.201` env file both ASSIGNS OMNI_HOME and later REFERENCES it (line 154
+#   expands "$OMNI_HOME"). This script runs under `set -u`, so with no value in
+#   scope the source aborts on `OMNI_HOME: unbound variable` and the whole
+#   reconcile exits non-zero having done nothing -- which is exactly what the
+#   first cut of this fix caused, live, by moving the default below the block.
 #
-#   executed:    /data/omninode/omni_home/omnibase_infra/scripts/  (nothing advances this)
-#   reconciled:  /data/omninode/omnibase_infra/                    (the clone loop's target)
+# Why RECONCILER must come AFTER it:
+#   the sourcing is `set -a` and it overwrites OMNI_HOME. Resolving the path up
+#   here took the DEFAULT root while `--omni-home` below took the SOURCED one, so
+#   the script that ran and the tree it reconciled were two different checkouts:
 #
-# That silently voids the bound this whole design rests on. The header below
-# accepts "a stale clone runs a stale reconciler" because "the reconciler's
-# first act is to advance the clones, so the next tick runs the current code" --
-# which is only true when the tree it runs from is the tree it advances. It was
-# not, so every tick re-ran the same stale code indefinitely, and a fix merged
-# to dev could never reach the host no matter how many ticks passed.
+#     executed:    /data/omninode/omni_home/omnibase_infra/scripts/  (nothing advances this)
+#     reconciled:  /data/omninode/omnibase_infra/                    (the clone loop's target)
 #
-# Both values now come from the same resolved OMNI_HOME, after the sourcing.
+#   That silently voids the bound this design rests on. The header above accepts
+#   "a stale clone runs a stale reconciler" because "the reconciler's first act
+#   is to advance the clones, so the next tick runs the current code" -- true
+#   only when the tree it runs from is a tree it advances. It was not, so every
+#   tick re-ran identical stale code and no merged fix could reach the host.
+#
+# Net: the default seeds a value the env file can read; the env file may then
+# override it; the path is derived from whatever survives.
+OMNI_HOME="${OMNI_HOME:-/data/omninode/omni_home}"
+
 if [[ -r "$ALERT_ENV_FILE" ]]; then
   # xtrace is suppressed across the source and restored afterwards. Under
   # `bash -x` — which is what anyone debugging a cron job reaches for first —
@@ -93,7 +104,6 @@ if [[ -r "$ALERT_ENV_FILE" ]]; then
   unset _xtrace_was_on
 fi
 
-OMNI_HOME="${OMNI_HOME:-/data/omninode/omni_home}"
 RECONCILER="${OMNI_HOME}/omnibase_infra/scripts/reconcile-host.sh"
 
 if [[ ! -f "$RECONCILER" ]]; then
