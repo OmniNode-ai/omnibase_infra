@@ -574,7 +574,15 @@ run_repair() {
       # OMNIMARKET_REF is set explicitly so the install script's own ls-remote
       # default (OMN-16366 reversed drift) can never apply here.
       trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $INFRA_PYTHON"
+      # PATH carries the resolved uv down to the child (OMN-17383). The
+      # co-install calls bare `uv`, and it inherits the cron PATH -- which is
+      # exactly the PATH that cannot reach a user-local install, so on `.201`
+      # this step died with "uv: command not found" even after resolve_uv() had
+      # already located the binary in the parent. The interpreter is PASSED
+      # DOWN rather than re-resolved: two independent resolutions can disagree,
+      # and then the version the parent proved usable is not the one that runs.
       if ! as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
+          PATH="$(dirname "$UV_BIN"):$PATH" \
           bash "$INSTALL_SCRIPT" --execute "$INFRA_PYTHON"; then
         fail "provider co-install did not complete; omnimarket is not installed." \
           "Every \`onex skill\`/\`onex node\`/\`onex delegate\` dispatch will refuse" \
