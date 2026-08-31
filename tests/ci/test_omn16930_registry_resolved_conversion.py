@@ -51,10 +51,19 @@ _SUPERSEDED = (
     / "node_projection_delegation"
     / ("0031_delegation_events_tenant_id_to_uuid.sql")
 )
-_CONVERSION = (
+# OMN-17288 superseded 0032 with 0033. The corpus invariants below follow the
+# OPERATIVE conversion, because they exist to stop a future edit from
+# re-introducing a literal map -- and that edit would land in whichever file is
+# live, not in a retired one.
+_SUPERSEDED_0032 = (
     _NODES
     / "node_projection_delegation"
     / ("0032_delegation_events_tenant_id_uuid_via_registry.sql")
+)
+_CONVERSION = (
+    _NODES
+    / "node_projection_delegation"
+    / ("0033_delegation_events_uuid_via_registry_single_transaction.sql")
 )
 _MIRROR = (
     _NODES
@@ -72,15 +81,24 @@ _LANE_RECORDED_0031_SHA256 = (
     "79ee3b021d0a04088b2f733fa0558ea110b2a6f75b4fb338abe9c5c123f74442"
 )
 
-# Every slug in the live census, plus the two non-tenant literals the SEED
-# fixtures were written under. None of these may appear in 0032's resolution
-# path.
+# The live-census slugs and the two non-tenant literals the SEED fixtures were
+# written under. None may appear in the conversion's resolution path.
+#
+# OMN-17288: the census also contained one EXTERNAL CUSTOMER's slug, and this
+# repository is PUBLIC, so it is gone from this tuple and replaced by the
+# synthetic stand-in the omnimarket fixtures now use. A blacklist that has lost
+# an entry is a weaker blacklist, so the loss is paid for structurally rather
+# than absorbed: `test_the_transform_expression_carries_no_literal` and
+# `test_no_case_map_survives_in_the_conversion` below reject the regression
+# SHAPE -- any quoted literal inside the transform expression, and any CASE map
+# anywhere -- for every slug that could ever exist, named or not. That is
+# strictly more coverage than the seven strings this tuple ever had.
 _SLUG_LITERALS = (
     "beta-business-proof",
     "beta-gateway-canary-79afa7263852",
     "d5-e2e-0b5ae67c",
     "delegation-spotcheck-1786977419",
-    "t-1lostguy1",
+    "t-external-fixture-omn17288",
     "11111111-1111-1111-1111-111111111111",
     "22222222-2222-2222-2222-222222222222",
 )
@@ -142,6 +160,26 @@ class TestSupersededMigrationIsImmutable:
             "OMN-16930; found " + str(len(matching))
         )
 
+    def test_the_second_supersession_is_recorded(self) -> None:
+        """OMN-17288: 0032 -> 0033.
+
+        Without this row ``check_migration_append_only.py`` would have refused
+        the change at all -- 0032 is manifest-declared, so its bytes may only
+        move in the same diff that lands a higher-ordinal successor.
+        """
+        rows = (_LEDGER / "migration-supersessions.tsv").read_text().splitlines()
+        matching = [
+            row
+            for row in rows
+            if row.startswith("nodes/node_projection_delegation/0032_")
+            and "0033_delegation_events_uuid_via_registry_single_transaction.sql" in row
+            and "OMN-17288" in row
+        ]
+        assert len(matching) == 1, (
+            "0032 -> 0033 must carry exactly one supersession row citing "
+            "OMN-17288; found " + str(len(matching))
+        )
+
 
 class TestReplacementResolvesFromTheRegistry:
     def test_no_slug_literal_appears_in_the_conversion(self) -> None:
@@ -158,6 +196,48 @@ class TestReplacementResolvesFromTheRegistry:
             "time -- a literal map cannot track a registry that gains tenants "
             "on every signup, and a migration is immutable once applied "
             "(OMN-16930)."
+        )
+
+    def test_the_transform_expression_carries_no_literal(self) -> None:
+        """OMN-17288. The regression SHAPE, not a list of names.
+
+        0031's defect was a literal map in the transform expression. The
+        blacklist above can only catch slugs someone already enumerated; the
+        registry gains tenants on every signup, so the next one to be
+        hardcoded is by definition not in it. A transform expression that
+        resolves by JOIN needs no quoted literal at all, so any quoted literal
+        there is the regression regardless of what it spells.
+        """
+        body = _strip_sql_comments(_CONVERSION.read_text(encoding="utf-8"))
+        transforms = re.findall(
+            r"ALTER\s+COLUMN\s+tenant_id\s+TYPE\s+UUID\s+USING\s*\((.*?)\)",
+            body,
+            re.S | re.I,
+        )
+        assert transforms, (
+            "no `ALTER COLUMN tenant_id TYPE UUID USING (...)` found -- the "
+            "conversion changed shape and this guard is no longer looking at "
+            "the thing it guards"
+        )
+        offenders = [expr for expr in transforms if "'" in expr]
+        assert not offenders, (
+            f"the transform expression(s) {offenders} carry a quoted literal. "
+            "Identity must resolve by JOINing tenant_registry_mirror at apply "
+            "time; a literal there is a hardcoded map, which is incomplete by "
+            "construction and immutable once applied (OMN-16930)."
+        )
+
+    def test_no_case_map_survives_in_the_conversion(self) -> None:
+        """The other half of the shape. 0031 was `CASE tenant_id WHEN ... END`.
+
+        A CASE map is perfectly valid SQL and passes every other test in this
+        corpus, which is exactly why it is named here.
+        """
+        body = _strip_sql_comments(_CONVERSION.read_text(encoding="utf-8"))
+        assert not re.search(r"\bCASE\b", body, re.I), (
+            "the conversion grew a CASE expression. 0031's closed literal CASE "
+            "with no ELSE is the defect this whole supersession chain exists "
+            "to retire -- resolution is a JOIN against tenant_registry_mirror."
         )
 
     def test_the_conversion_joins_the_mirror(self) -> None:
@@ -206,12 +286,13 @@ class TestReplacementResolvesFromTheRegistry:
 
 
 class TestBothMigrationsStayFenced:
-    def test_the_fence_holds_0031_and_0032(self) -> None:
+    def test_the_fence_holds_0031_and_0032_and_0033(self) -> None:
         """The un-gate is an operator action gated on TWO independent things.
 
-        0032 releasing itself the moment it merges would abort every deploy
-        until the projection caught up -- correctly, and uselessly. 0031 stays
-        fenced because leaving a retired id fenced is what keeps it retired.
+        0033 releasing itself the moment it merges would abort every deploy
+        until the projection caught up -- correctly, and uselessly. 0031 and
+        0032 stay fenced because leaving a retired id fenced is what keeps it
+        retired: when the operator un-gates, it is 0033 and only 0033.
         """
         fence = (
             Path(__file__).resolve().parents[2]
@@ -228,6 +309,14 @@ class TestBothMigrationsStayFenced:
         assert (
             "node:node_projection_delegation:"
             "0032_delegation_events_tenant_id_uuid_via_registry.sql" in ids
+        )
+        assert (
+            "node:node_projection_delegation:"
+            "0033_delegation_events_uuid_via_registry_single_transaction.sql" in ids
+        ), (
+            "0033 is the OPERATIVE conversion (OMN-17288) and must arrive "
+            "fenced on the same interlock 0032 carried -- the mirror has to be "
+            "caught up before it can resolve anything"
         )
         # The mirror's create is deliberately NOT fenced: it is 0032's
         # precondition, so fencing it would guarantee the ordering violation
