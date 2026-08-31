@@ -873,6 +873,53 @@ jobs:
             --check-placeholders \
             --scan-dir src/omnibase_infra
 
+  # OMN-17320: exposed-identifier gate. Blocks any denylisted customer identifier
+  # from re-entering this PUBLIC repo. Provenance: OMN-17288 scrubbed a live tenant
+  # slug out of five files here (omnibase_infra#3062, 3f10ee5e); three hours later
+  # omnimarket#2239 reintroduced the same slug there with every enforced gate green,
+  # on the very PR whose acceptance criterion was "zero grep hits". Nothing
+  # mechanically enforced the convention -- this job is that mechanism.
+  #
+  # Registered in scripts/ci/ci_summary_gate.py::STRICT_GATE_JOBS. THAT LINE IS HALF
+  # THE MECHANISM: the default-deny sweep already fails CI Summary when this job
+  # FAILS, but an unregistered job that is `skipped` or deleted yields SUCCESS -- so
+  # without the registration, removing this job would silently restore the
+  # unenforced state that produced the recurrence.
+  exposed-identifier-gate:
+    needs: occ-preflight
+    if: always()
+    name: Exposed Identifier Gate (OMN-17320)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Full tree, not the diff: a denylisted identifier reaching dev by ANY route
+      # (a rebase carrying it in, as happened on omnimarket#2241) must red the PR,
+      # not just one that edits the offending line. Stdlib-only, so no uv setup.
+      - name: Scan the working tree for denylisted identifiers
+        run: |
+          echo "================================================================"
+          echo "Exposed Identifier Gate (OMN-17320)"
+          echo "================================================================"
+          python3 scripts/validation/check_exposed_identifiers.py \
+            --mode blocking --scope all
+
+      - name: Report the cross-repo parity fingerprint
+        if: always()
+        run: |
+          echo "omnibase_infra copy:"
+          python3 scripts/validation/check_exposed_identifiers.py --print-fingerprint
+
   # Pin reachability -- every cross-repo pin (workflow `uses:`/`with:` refs,
   # pyproject [tool.uv.sources] revs, uv.lock git revs) must name a commit
   # reachable from a PROTECTED branch of the target repo (OMN-15538).

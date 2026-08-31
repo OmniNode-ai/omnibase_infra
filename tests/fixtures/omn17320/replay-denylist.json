@@ -1,0 +1,24 @@
+{
+  "schema": "onex.exposed-identifier-denylist/1",
+  "ticket": "OMN-17320",
+  "salt": "onex-exposed-identifier-v1:",
+  "annotation_class": "exposed-identifier",
+  "plaintext_source": "Replay-only denylist. Its single entry is the SAME-LENGTH stand-in substituted into the captured artifact beside it, not a real identifier.",
+  "readme": [
+    "This exists so the OMN-17320 incident replay can be non-vacuous without",
+    "committing the real tenant slug into a PUBLIC repo -- which is the exact",
+    "disclosure the guard under test prevents.",
+    "See tests/incident_replays/registry.yaml case omn17320-slug-reintroduced-with-every-gate-green",
+    "for the redaction record and the pre-redaction sha256."
+  ],
+  "entries": [
+    {
+      "id": "omn17320-replay-standin",
+      "kind": "tenant-slug",
+      "length": 11,
+      "sha256": "7d6f5bf2792bf9ef0fc9b757b5323e0b893fe8a0ab48c2e422a1c5a70cb0e008",
+      "ticket": "OMN-17320",
+      "notes": "Same-length stand-in occupying the real slug's byte span in the captured artifact."
+    }
+  ]
+}

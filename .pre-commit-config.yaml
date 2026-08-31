@@ -182,6 +182,23 @@ repos:
         exclude: ^(tests/|archived/).*\.py$
         pass_filenames: true # Only check changed files, not entire codebase
         stages: [pre-push] # Moved to pre-push: ~1-5s for changed files only
+      # OMN-17320: exposed-identifier gate. Salted-SHA256 denylist of customer
+      # identifiers that must never re-enter this PUBLIC repo. OMN-17288 scrubbed a
+      # live tenant slug from five files here; three hours later an unrelated lane
+      # reintroduced it in omnimarket with every gate green. The denylist holds
+      # digests, never plaintext -- writing the literal into a pattern list in a
+      # public repo would be the very occurrence the gate prevents.
+      # Same script + same denylist as omnimarket (byte-identical; parity pinned by
+      # tests/ci/test_exposed_identifier_gate.py::test_cross_repo_fingerprint_pin).
+      # Escape hatch, per line only, ticket + reason required:
+      #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
+      - id: exposed-identifier-gate
+        name: Exposed identifier gate (OMN-17320)
+        entry: python3 scripts/validation/check_exposed_identifiers.py --mode blocking
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
+        exclude: ^(archived/|workspace/sibling-repos/).*$
       # Cleanup: Clear tmp/ directory before commits
       - id: clean-tmp-directory
         name: Clean tmp directory
