@@ -170,6 +170,21 @@ def _setup_home_env(tmp_path: Path, extra_env: str = "") -> tuple[Path, Path]:
     return home, bin_dir
 
 
+def _hotpatch_ledger_env(tmp_path: Path) -> dict[str, str]:
+    """OMN-17282: point the Hot-Patch Ledger Preflight (OMN-13014) at a path
+
+    guaranteed not to exist, instead of the script's default
+    ``/data/omninode/hotpatch-ledger/ledger.yaml``. That default is a real,
+    host-global, absolute path -- on a genuine former deploy target (e.g. the
+    .201 lab host) a real ledger file exists there from real historical
+    hot-patches, so the preflight fires for real and this test's
+    OMNI_HOME-popped sandbox fails a check that has nothing to do with what
+    this test verifies. Scoping it under tmp_path makes the test hermetic
+    regardless of what the executing host's real filesystem happens to hold.
+    """
+    return {"HOTPATCH_LEDGER_PATH": str(tmp_path / "no-hotpatch-ledger.yaml")}
+
+
 @pytest.mark.unit
 def test_print_compose_cmd_workspace_yields_stability_candidate(
     tmp_path: Path,
@@ -187,6 +202,7 @@ def test_print_compose_cmd_workspace_yields_stability_candidate(
             "OMNI_HOME": str(omni_home),
             "HOME": str(home),
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            **_hotpatch_ledger_env(tmp_path),
         }
     )
     env.pop("EXPECTED_BUILD_SOURCE", None)
@@ -223,6 +239,7 @@ def test_print_compose_cmd_release_yields_clean_main(
             "BUILD_SOURCE": "release",
             "HOME": str(home),
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            **_hotpatch_ledger_env(tmp_path),
         }
     )
     env.pop("EXPECTED_BUILD_SOURCE", None)

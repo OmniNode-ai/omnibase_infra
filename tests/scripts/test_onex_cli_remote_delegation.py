@@ -48,6 +48,24 @@ def _run_infra_function(
         bin_dir / "ssh",
         '#!/usr/bin/env bash\nprintf \'%s\\n\' "$@" > "$ONEX_TEST_SSH_LOG"\n',
     )
+    # OMN-17282: _onex_host_is_local() shells out to the REAL `hostname`/
+    # `hostname -I` (and, on macOS, `ipconfig getifaddr`) to decide whether a
+    # configured POSTGRES_HOST/KAFKA_BOOTSTRAP_SERVERS target is "this
+    # machine." These tests hardcode 192.168.86.201 as "definitely remote,
+    # must delegate" -- true everywhere except when the test itself executes
+    # ON 192.168.86.201 (e.g. the pre-push lab-host dispatcher choosing that
+    # box), where the real answer is correctly "local, don't delegate" and
+    # the test's own assumption breaks. Stub identity commands so the
+    # decision is hermetic regardless of the executing machine's real
+    # network identity.
+    _write_executable(
+        bin_dir / "hostname",
+        "#!/usr/bin/env bash\nif [ \"$1\" = \"-I\" ]; then printf '\\n'; else printf 'onex-test-sandbox\\n'; fi\n",
+    )
+    _write_executable(
+        bin_dir / "ipconfig",
+        "#!/usr/bin/env bash\nexit 1\n",
+    )
 
     env = {
         **os.environ,
