@@ -3684,6 +3684,18 @@ jobs:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
         run: uv run python scripts/validation/check_migration_append_only.py --base "${APPEND_ONLY_BASE}"
 
+      # OMN-17298: RLS enabled with no admitting policy is an outage, not a
+      # stricter boundary -- PostgreSQL denies every row to every non-owner,
+      # non-BYPASSRLS principal, and the resulting SQLSTATE 42501 reads at the
+      # call site exactly like a missing GRANT. The class has now recurred
+      # three times on tenant-classified projection relations (0032 ->
+      # superseded by 0033; node_canary_score_reducer 0003 -> superseded by
+      # 0004, which this gate found on its first run and which HAD been applied
+      # on the .201 dev lane; plus the opening hypothesis of OMN-17298 itself).
+      # Detection that is not a gate does not hold (Operating Rule 5).
+      - name: Check node migration RLS policy atomicity
+        run: uv run python scripts/validation/check_migration_rls_policy_atomicity.py
+
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:
