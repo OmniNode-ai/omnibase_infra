@@ -616,3 +616,73 @@ def test_non_allowlisted_table_in_public_still_fails(
     public/unqualified exemption -- a table absent from the shared allowlist
     must still be rejected exactly as before."""
     assert expected in "\n".join(lint_application_database_sql(statement, _TOPOLOGY))
+
+
+# ---------------------------------------------------------------------------
+# OMN-17301: PL/pgSQL `SELECT ... INTO <var>` is variable assignment, never a
+# relation target. PostgreSQL has no `SELECT INTO <table>` form inside
+# PL/pgSQL — the create-table-as spelling is plain-SQL only — so treating a
+# declared variable as an unqualified relation is a false positive that fires
+# on any migration whose DO block reads a catalog value into a local.
+# Reproduced by 103_create_tenant_projection_writer_role.sql, whose CONNECT
+# readback declares db_present / explicit_grant / effective_connect.
+# ---------------------------------------------------------------------------
+
+
+def test_plpgsql_select_into_declared_variable_is_not_a_relation_target() -> None:
+    sql = (
+        "DO $$\n"
+        "DECLARE\n"
+        "  db_present        boolean;\n"
+        "  explicit_grant    boolean;\n"
+        "  effective_connect boolean;\n"
+        "BEGIN\n"
+        "  SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database "
+        "WHERE datname = 'omnidash_analytics')\n"
+        "    INTO db_present;\n"
+        "  SELECT true INTO explicit_grant;\n"
+        "  SELECT has_database_privilege('r', 'omnidash_analytics', 'CONNECT')\n"
+        "    INTO effective_connect;\n"
+        "END\n"
+        "$$;"
+    )
+
+    violations = lint_application_database_sql(sql, _TOPOLOGY)
+
+    assert violations == (), violations
+    # A declared variable is not a created relation either.
+    assert application_database_created_catalog_identities(sql) == ()
+
+
+def test_plpgsql_select_into_undeclared_name_still_fails_closed() -> None:
+    """The narrowing is scoped to DECLARE'd names — it is not a blanket pass."""
+    sql = (
+        "DO $$\n"
+        "DECLARE\n"
+        "  db_present boolean;\n"
+        "BEGIN\n"
+        "  SELECT 1 INTO events_copy;\n"
+        "END\n"
+        "$$;"
+    )
+
+    assert "schema-qualified" in "\n".join(
+        lint_application_database_sql(sql, _TOPOLOGY)
+    )
+
+
+def test_plpgsql_declared_variable_does_not_mask_a_real_relation_read() -> None:
+    """Declaring a name must not license an unqualified FROM of the same name."""
+    sql = (
+        "DO $$\n"
+        "DECLARE\n"
+        "  events boolean;\n"
+        "BEGIN\n"
+        "  SELECT count(*) > 0 FROM events INTO events;\n"
+        "END\n"
+        "$$;"
+    )
+
+    assert "schema-qualified" in "\n".join(
+        lint_application_database_sql(sql, _TOPOLOGY)
+    )
