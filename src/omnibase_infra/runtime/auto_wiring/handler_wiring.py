@@ -82,7 +82,11 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
-from omnibase_infra.errors import TopicReplicationPolicyError
+from omnibase_infra.errors import (
+    EnvelopeValidationError,
+    ProjectionNotMaterializedError,
+    TopicReplicationPolicyError,
+)
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
 )
@@ -3268,6 +3272,31 @@ def _extract_rows_upserted(result: object) -> int:
     return 0
 
 
+def _is_projection_content_failure(exc: BaseException) -> bool:
+    """Is this failure the EVENT's defect rather than the write path's?
+
+    OMN-17379. The projection dispatch callback treats these two classes
+    oppositely, and conflating them is what cost ``pr_merged_events`` 230 merged
+    PRs:
+
+    * ``True`` — the inbound payload cannot be coerced into what the handler
+      declares it needs. Redelivering the identical bytes reproduces the
+      identical failure forever, so the record is DLQ'd and the offset advances.
+    * ``False`` — everything else. An ``InsufficientPrivilege`` on a sequence, a
+      refused connection, a missing relation, a tenant-authority refusal: the
+      event is well-formed and still owed a row. The offset is withheld so Kafka
+      redelivers once the runtime is repaired.
+
+    Deliberately a closed allowlist keyed on validation types, not a denylist of
+    "infrastructure" errors. A failure this function cannot positively identify
+    as the event's own defect is treated as the runtime's — the direction that
+    stalls loudly rather than the direction that discards a fact silently.
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
+    return isinstance(exc, PydanticValidationError | EnvelopeValidationError)
+
+
 async def _route_projection_error_to_dlq(
     event_bus: object | None,
     dlq_topics: list[str],
@@ -3499,6 +3528,9 @@ def _make_projection_dispatch_callback(
         projected = False
         adapter: object | None = None
         result: object = None
+        # OMN-17379: set only for a NON-content failure — one whose remedy is to
+        # repair the runtime and redeliver, never to discard the event.
+        write_path_failure: Exception | None = None
         try:
             # MessageDispatchEngine hands callbacks a JSON-safe materialization.
             # The original typed envelope is retained only for stable transport
@@ -3592,15 +3624,11 @@ def _make_projection_dispatch_callback(
                 _extract_projection_topic(envelope) or "unknown",
                 type(exc).__name__,
             )
-            # OMN-13548 (D-03): route the offending event to the contract DLQ
-            # instead of dropping it silently.
-            await _route_projection_error_to_dlq(
-                event_bus,
-                dlq_topics,
-                envelope,
-                handler_name,
-                f"{type(exc).__name__}: {_sanitize_exc(exc)}",
-            )
+            # OMN-17379: a TypeError here is the runtime denying the handler its
+            # own injected contract (`_db`/`_event_type`) — a WIRING defect, never
+            # the event's. The event is valid and still owed a row, so it is not
+            # DLQ'd-and-acked; the offset is withheld below.
+            write_path_failure = exc
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "Projection handler error: handler=%s topic=%s error_type=%s error=%s",
@@ -3609,23 +3637,45 @@ def _make_projection_dispatch_callback(
                 type(exc).__name__,
                 exc,
             )
-            # OMN-13548 (D-03): a ValidationError (e.g. a malformed delegation
-            # event missing a required field) raised by the projection handler
-            # on the REAL dispatch path lands here. Route the raw envelope to the
-            # contract-declared DLQ topic so the dropped event is durably
-            # recoverable on the bus rather than vanishing after this log line.
-            await _route_projection_error_to_dlq(
-                event_bus,
-                dlq_topics,
-                envelope,
-                handler_name,
-                f"{type(exc).__name__}: {_sanitize_exc(exc)}",
-            )
+            if _is_projection_content_failure(exc):
+                # OMN-13548 (D-03): a ValidationError (e.g. a malformed delegation
+                # event missing a required field) raised by the projection handler
+                # on the REAL dispatch path lands here. The EVENT is the defect and
+                # redelivery can never repair it, so route the raw envelope to the
+                # contract-declared DLQ topic (or the platform quarantine sink) and
+                # let the offset advance — otherwise one malformed record wedges
+                # the partition forever.
+                await _route_projection_error_to_dlq(
+                    event_bus,
+                    dlq_topics,
+                    envelope,
+                    handler_name,
+                    f"{type(exc).__name__}: {_sanitize_exc(exc)}",
+                )
+            else:
+                # OMN-17379: the WRITE PATH is the defect, not the event. Handing
+                # the record to a DLQ here and returning normally is an ACK, and
+                # that ACK is how `pr_merged_events` acknowledged 230 merged PRs
+                # into nothing while reporting Stable/lag-0. Withhold the offset
+                # instead; the record stays on its own topic, uncommitted, and is
+                # redelivered once the write path is repaired.
+                write_path_failure = exc
         finally:
             if adapter is not None:
                 close = getattr(adapter, "close", None)
                 if callable(close):
                     close()
+
+        if write_path_failure is not None:
+            raise ProjectionNotMaterializedError(
+                f"projection handler {handler_name} consumed an event from "
+                f"{_extract_projection_topic(envelope) or 'unknown'} and wrote no "
+                f"row because its write path failed "
+                f"({type(write_path_failure).__name__}: "
+                f"{_sanitize_exc(write_path_failure)}); the offset must not "
+                f"advance (OMN-17379)",
+                projection_type=handler_name,
+            ) from write_path_failure
 
         if projected and event_bus is not None and terminal_event is not None:
             await _emit_projection_terminal_event(
@@ -5474,6 +5524,16 @@ def _make_event_bus_callback(
                 # a raised handler exception takes.
                 _raise_if_silent_dispatch_failure(result, topic)
                 return
+            except ProjectionNotMaterializedError as exc:
+                # OMN-17379: non-retryable HERE, but for the opposite reason to
+                # the tuple below. The write path is broken for as long as it
+                # takes an operator to repair it (a missing GRANT, a dead
+                # database), so burning the local backoff budget re-issuing the
+                # same statement proves nothing. The record is preserved by
+                # withholding the offset, not by retrying in-process — Kafka
+                # redelivery is the retry, and it happens after the repair.
+                last_exc = exc
+                break
             except (
                 PydanticValidationError,
                 ProtocolConfigurationError,
@@ -5883,6 +5943,15 @@ def _make_event_bus_callback(
                 flow_counters.record_in(consumer_group, topic)
                 with active_flow_key(consumer_group, topic):
                     await _dispatch_with_bounded_retry(envelope, message)
+        except ProjectionNotMaterializedError:
+            # OMN-17379: propagate unconditionally, for the same reason
+            # BoundaryApplyPublishError does. Routing it through
+            # `_route_swallowed_exception` would DLQ a well-formed event and
+            # return normally — an ACK — which is precisely the swallow that let
+            # `pr_merged_events` sit 24 days behind the topic it consumes at
+            # TOTAL-LAG 0. Raising reaches `_dispatch_to_subscriber`, which
+            # classifies this type as offset-unsafe and rewinds.
+            raise
         except BoundaryApplyPublishError as exc:
             # OMN-14498 (adversarial verify, comment 3c6da9a0): this marks an
             # already-exhausted UNCONDITIONAL DLQ attempt for a non-outbox

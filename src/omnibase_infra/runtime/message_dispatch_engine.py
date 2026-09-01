@@ -159,6 +159,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import (
     BindingResolutionError,
     ModelInfraErrorContext,
+    ProjectionNotMaterializedError,
     ProtocolConfigurationError,
 )
 from omnibase_infra.models.bindings import (
@@ -1597,6 +1598,16 @@ class MessageDispatchEngine:
                 raise
             except asyncio.CancelledError:
                 # Never suppress async cancellation
+                raise
+            except ProjectionNotMaterializedError:
+                # OMN-17379: never absorb a projection write-path failure into a
+                # FAILED result. Absorbing it is exactly what made the defect
+                # invisible: the catch-all below records an error string and
+                # returns, the consume boundary reads "no exception" as success,
+                # and the offset advances past an event that was never written.
+                # This type is the NACK signal `EventBusKafka._dispatch_to_subscriber`
+                # reads to rewind the fetch position, so it must reach the
+                # boundary as an exception, not as a result field.
                 raise
             except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 dispatcher_duration_ms = (

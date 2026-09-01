@@ -318,6 +318,22 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_session_replay/"
             "0002_grant_omninode_runtime_session_replay_snapshots.sql"
         ),
+        # OMN-17379: pr_merged_events is the same legacy-public projection table
+        # class as the session_replay sibling directly above — its contract
+        # declares schema omninode_internal while the physical relation remains
+        # in public pending the governed OMN-15359 cutover. This migration
+        # creates no relation authority; it grants the topology-declared
+        # omninode_runtime writer on that table AND on the sequence its
+        # BIGSERIAL primary key drives, which `GRANT INSERT ON TABLE` does not
+        # reach. The sequence half is why this file exists: without it every
+        # INSERT failed `permission denied for sequence
+        # pr_merged_events_projection_cursor_seq` and the feed sat 24 days stale
+        # at TOTAL-LAG 0. GRANT still fails loudly if the role, relation, or
+        # sequence is absent.
+        Path(
+            "docker/migrations/forward/nodes/node_pr_merged_projection/"
+            "0002_grant_omninode_runtime_pr_merged_events.sql"
+        ),
     }
 )
 

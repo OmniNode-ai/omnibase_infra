@@ -15,6 +15,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
 from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory
+from omnibase_infra.errors import ProjectionNotMaterializedError
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
     _resolve_projection_database_target,
@@ -219,6 +220,19 @@ async def test_dispatch_without_verified_capability_records_but_never_selects(
 async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The binding refuses the wrong principal — and now WITHHOLDS the offset.
+
+    OMN-17379: this previously asserted the callback returned normally after the
+    refusal. Returning normally IS an ACK, so the offset advanced past an event
+    the projection never wrote, with nothing but a log line to show for it. A
+    binding connected as the wrong role is the RUNTIME's defect — the event is
+    well-formed and still owed a row — so the refusal now propagates as
+    ``ProjectionNotMaterializedError`` and the partition rewinds instead.
+
+    Everything the row already pinned is unchanged and still asserted: exactly
+    one connect, the identity probe as the ONLY statement issued (the refusal
+    precedes any write), and the connection closed.
+    """
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls, principal="unverified_projection_writer")
     monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
@@ -234,8 +248,13 @@ async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
     )
 
     with patch("psycopg2.connect", return_value=connection) as connect:
-        await callback(envelope)
+        with pytest.raises(ProjectionNotMaterializedError) as excinfo:
+            await callback(envelope)
 
+    assert "unverified_projection_writer" in str(excinfo.value), (
+        "the withheld-offset error must name the principal it actually "
+        f"connected as, or an operator cannot repair it; got {excinfo.value!s}"
+    )
     connect.assert_called_once_with("postgresql://fixture")
     assert calls == [("SELECT current_user, current_database()", None)]
     assert connection.close_calls == 1
