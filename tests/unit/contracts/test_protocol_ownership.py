@@ -148,6 +148,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
     "ProtocolDelegationDispatchPort": "runtime/protocols/protocol_delegation_dispatch_port.py",  # [RUNTIME] OMN-E0 delegation dispatch port interface — infra-internal, narrows dispatch surface for handler injection
     "ProtocolFirstEffectLedger": "runtime/first_effect_ledger/protocol.py",  # [RUNTIME] durable observation-ledger boundary; it cannot publish or authorize an effect
+    "ProtocolSignedFirstEffectGrantIngress": "runtime/first_effect_ledger/protocol_signed_first_effect_grant_ingress.py",  # [RUNTIME] RSD verifier-to-Infra composition seam: accepts a raw signed wire and returns Infra's payload-free verified-grant record. It is implemented and consumed only by this runtime's fixed deployment-pin/transactional ledger composition; omnibase_spi has no corresponding grant lifecycle, verifier, or Infra record type, so this is not a cross-repo contract.
     "ProtocolTransactionalFirstEffectOutbox": "runtime/first_effect_ledger/composition.py",  # [RUNTIME] injected atomic outbox stager required for first-effect composition; Infra remains observation-only
     # OMN-13445: the 5 ProtocolLocalRuntime* protocols relocated to
     # omnibase_core.protocols.runtime (Phase 1b, OMN-13444 / core #1296). Infra's
