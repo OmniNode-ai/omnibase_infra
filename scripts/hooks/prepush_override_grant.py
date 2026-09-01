@@ -151,6 +151,79 @@ def env_rejection_message(names: list[str]) -> str:
 
 
 # --------------------------------------------------------------------------
+# Placement-map rejection (OMN-17441) -- a DIFFERENT class, kept distinct
+# --------------------------------------------------------------------------
+#
+# `PREPUSH_LOAD_OVERRIDE_MAP` / `PREPUSH_SLOT_OVERRIDE_MAP` / `..._MEM_...` /
+# `..._UV_...` are read by `prepush_dispatch.sh::prepush_map_lookup` to stand in
+# for the per-host load ratio, slot state, free memory and uv version the picker
+# would otherwise measure over ssh. They exist ONLY as a test-injection seam.
+#
+# They are NOT a gate bypass and must not be described as one: the verdict is
+# still a real pytest exit bound to the tree by a completion marker, so an
+# inherited value can move WHERE work runs, never WHETHER it passed. What it can
+# do is send a real push to a host the hook believes is idle, or to a slot it
+# believes is free, on the strength of a stale fixture value in an operator's
+# shell. That is the same "a variable that changes hook behaviour and was never
+# meant to survive outside a controlled test subprocess" shape OMN-16480 closed
+# one class over, which is why the two live side by side here rather than being
+# merged: merging them would either overstate this risk or understate that one.
+#
+# Matched by SHAPE, for OMN-16480's reason. The ticket names two variables; two
+# names are not a class, and a future `PREPUSH_DISK_OVERRIDE_MAP` must not
+# depend on anyone remembering to extend a list.
+PLACEMENT_MAP_ENV_RE = re.compile(r"^PREPUSH_[A-Z0-9_]*_OVERRIDE_MAP$")
+
+#: The carve-out marker. Set by PYTEST ITSELF for the duration of each test and
+#: cleared afterwards -- not a variable this repo invented, so it cannot be
+#: quietly widened here, and it is absent from an operator shell and from
+#: `pytest_configure` (which runs before collection). `tests/ci/`'s hook
+#: subprocesses need the maps to keep the lab-dispatch leg network-free
+#: (`tests/ci/_prepush_lab_isolation.py`); deleting that seam would re-arm the
+#: distributed recursion observed on 2026-08-30, where a unit test shipped a
+#: real bundle to a real lab host and took its exclusive slot for an hour.
+TEST_HARNESS_MARKER = "PYTEST_CURRENT_TEST"
+
+
+def inherited_placement_map_env_vars(env: Mapping[str, str]) -> list[str]:
+    """Names of set, non-empty ``PREPUSH_*_OVERRIDE_MAP`` variables in ``env``.
+
+    Empty in a pytest-harness environment: see ``TEST_HARNESS_MARKER``.
+
+    Empty/whitespace values are not "set", matching ``inherited_override_env_vars``
+    and the shell's ``[ -n "$VAR" ]``. `tests/unit/scripts/test_prepush_host_table.py`
+    depends on that: it CLEARS these maps by exporting them empty.
+    """
+    if str(env.get(TEST_HARNESS_MARKER, "")).strip():
+        return []
+    return sorted(
+        name
+        for name, value in env.items()
+        if PLACEMENT_MAP_ENV_RE.match(name) and str(value).strip()
+    )
+
+
+def placement_map_rejection_message(names: list[str]) -> str:
+    """Refusal text naming the leaked maps and what they would have done."""
+    joined = ", ".join(names)
+    return (
+        f"inheritable placement-override map(s) present: {joined}. These are "
+        "REJECTED, never honored outside the test harness (OMN-17441). They "
+        "replace the LIVE per-host load, slot, memory and uv readings the "
+        "picker takes over ssh with whatever a shell happens to be carrying, so "
+        "an inherited fixture value routes a real push to a host that was never "
+        "probed -- a slot believed free while another run holds it, or a load "
+        "believed idle on a machine at 4x its cores. They cannot make a failing "
+        "suite pass (the verdict is still a real pytest exit bound to the tree "
+        "by a completion marker); they can only send the work somewhere the "
+        f"evidence never said was fit. Unset them (`unset {names[0]}`) and "
+        "re-run. To simulate host states, call the picker's own functions "
+        "directly as tests/unit/scripts/test_prepush_host_table.py does, rather "
+        "than exporting the maps into a live hook run."
+    )
+
+
+# --------------------------------------------------------------------------
 # Paths
 # --------------------------------------------------------------------------
 

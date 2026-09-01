@@ -101,6 +101,12 @@
 # Note the asymmetry: the two knobs above can only make the hook run MORE tests,
 # so they are not bypasses; an ALLOW override makes it accept WEAKER evidence,
 # which is why it may not be ambient.
+#
+# ALSO not an env override (OMN-17441): the per-host PLACEMENT maps
+# `PREPUSH_*_OVERRIDE_MAP` (LOAD / SLOT / MEM / UV), which prepush_dispatch.sh
+# consults instead of the live ssh probe. They are a test-injection seam, they
+# are rejected at entry outside pytest's own harness, and they can only steer
+# WHERE work runs -- never whether it passed.
 
 set -euo pipefail
 
@@ -169,6 +175,48 @@ reject_inherited_env_overrides() {
       "unset them in this shell (e.g. \`unset ${leaked%% *}\`), then, if this run genuinely must proceed on this host, mint a scoped single-use grant: \`uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'\`. The grant is bound to this repo and this HEAD sha, expires in minutes, is consumed by the first guard that reads it (so no child process can reuse it), and appends a receipt line to .onex_state/prepush_override/receipts.jsonl"
 }
 reject_inherited_env_overrides
+
+# =============================================================================
+# Inheritable PLACEMENT-override maps are REJECTED AT ENTRY (OMN-17441)
+# =============================================================================
+# A second inheritable class, and deliberately a SEPARATE guard rather than a
+# widened prefix on the one above -- the two differ in what they can do, and
+# collapsing them would either overstate this risk or understate that one.
+#
+# `PREPUSH_LOAD_OVERRIDE_MAP` / `PREPUSH_SLOT_OVERRIDE_MAP` (and, alongside them
+# in prepush_dispatch.sh, `PREPUSH_MEM_OVERRIDE_MAP` / `PREPUSH_UV_OVERRIDE_MAP`)
+# are consulted by prepush_map_lookup INSTEAD of the live ssh probe. They exist
+# purely as a test-injection seam. An inherited value cannot manufacture a PASS
+# -- the verdict is still a real pytest exit bound to the tree by a completion
+# marker -- but it decides WHERE the work goes: a stale fixture in an operator
+# shell can hand the picker a phantom free slot or a manufactured idle host and
+# route a real push onto a machine nothing probed. omnibase_infra#3091 named
+# this residual in its own PR body and deferred it; this is that ticket.
+#
+# Matched by SHAPE (`PREPUSH_*_OVERRIDE_MAP`), so a future
+# `PREPUSH_DISK_OVERRIDE_MAP` is covered without anyone remembering a list --
+# the OMN-16480 lesson applied to the suffix that delimits this class.
+#
+# THE ONE EXEMPTION, and why it is not a hole: pytest's own PYTEST_CURRENT_TEST.
+# tests/ci/_prepush_lab_isolation.py sets PREPUSH_SLOT_OVERRIDE_MAP to a map
+# naming no real row, which is what stops the hook-subprocess tests in that
+# directory from shipping a real git bundle to a real lab host and holding its
+# exclusive slot for an hour (observed live 2026-08-30). pytest sets and clears
+# that marker per test; it is not a knob this repo can widen, it is absent from
+# an operator shell, and because this class cannot alter a verdict, the worst a
+# leak of both could cost is routing accuracy. The scrub before each pytest
+# spawn (scrub_prepush_override_env) already stops the maps inheriting DOWN into
+# the suite; this stops them inheriting IN.
+reject_inherited_placement_maps() {
+  local maps
+  [ -z "${PYTEST_CURRENT_TEST:-}" ] || return 0
+  maps="$(env | sed -n 's/^\(PREPUSH_[A-Za-z0-9_]*_OVERRIDE_MAP\)=..*/\1/p' | sort -u | tr '\n' ' ')"
+  maps="${maps% }"
+  [ -n "$maps" ] || return 0
+  die "inheritable placement-override map(s) present: ${maps} -- these are REJECTED, never honored outside the test harness (OMN-17441). They replace the LIVE per-host load/slot/memory/uv readings with whatever this shell is carrying, so the picker routes a real push to a host nothing probed" \
+      "unset them in this shell (e.g. \`unset ${maps%% *}\`) and re-run. To simulate host states, call the picker's own functions directly the way tests/unit/scripts/test_prepush_host_table.py does, rather than exporting the maps into a live hook run"
+}
+reject_inherited_placement_maps
 
 # consume_override_grant CONTEXT -- 0 when a valid single-use grant was claimed
 # for this run, 1 otherwise. Delegates to the one implementation

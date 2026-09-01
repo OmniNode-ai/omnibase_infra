@@ -62,6 +62,8 @@ from scripts.hooks.prepush_override_grant import (
     env_rejection_message,
     has_active_override,
     inherited_override_env_vars,
+    inherited_placement_map_env_vars,
+    placement_map_rejection_message,
     resolve_head_sha,
     resolve_repo_root,
 )
@@ -335,6 +337,21 @@ def enforce(config: object, full_suite_target: str) -> None:
     leaked = inherited_override_env_vars(os.environ)
     if leaked:
         pytest.exit(env_rejection_message(leaked), returncode=1)
+
+    # OMN-17441: the placement-map class, refused at the same point and for the
+    # same reason -- one entry point honoring an inheritable knob is enough to
+    # keep the class alive (OMN-15977 Hole 1 existed precisely because only the
+    # push path was covered).
+    #
+    # This check is NOT vacuous despite running inside pytest. It fires at
+    # `pytest_configure`, BEFORE collection, and PYTEST_CURRENT_TEST is set per
+    # TEST -- so a direct `uv run pytest tests/unit/` launched from a shell
+    # carrying a leaked map is refused here exactly as a push is, while a hook
+    # subprocess spawned from inside a running test keeps the harness carve-out
+    # that tests/ci/_prepush_lab_isolation.py depends on.
+    leaked_maps = inherited_placement_map_env_vars(os.environ)
+    if leaked_maps:
+        pytest.exit(placement_map_rejection_message(leaked_maps), returncode=1)
 
     host = resolve_local_hostname()
     # OMN-16991: identity comes from the committed host table, not from
