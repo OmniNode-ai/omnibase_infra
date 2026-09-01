@@ -17,25 +17,23 @@ the CLI entrypoint:
 4. dispatch through the OMN-13094 receipt-mode path
    (:func:`omnibase_infra.cli.receipt_mode.run_receipt_mode`).
 
-Bus target (OMN-13532, default flipped under OMN-14376, made deterministic
-under OMN-16678). ``--bus`` is OPTIONAL, never required for a delegation to
-reach the shared platform substrate. When omitted, :func:`resolve_default_bus`
-calls the ONE shared authority
+Bus target (OMN-13532; default flipped under OMN-14376; made deterministic
+under OMN-16678; made CONFIG-RESOLVED under OMN-17304). ``--bus`` is OPTIONAL,
+never required for a delegation to reach the shared platform substrate. When
+omitted, :func:`resolve_default_bus` resolves the CLI's EMBEDDED runtime the
+way every other runtime resolves — from that runtime's OWN configuration,
+through the ONE shared authority
 (``backends/auto_configure.py::resolve_bus_type``, also used by
 ``select_event_bus``), which applies a single resolution order —
-**explicit ``--bus`` > ``ONEX_EVENT_BUS_TYPE`` > broker probe**:
-``KAFKA_BOOTSTRAP_SERVERS`` unset -> ``inmemory``; set and the broker probes
-HEALTHY/AUTHORITATIVE (``backends/backend_probe.py::probe_kafka``, a bounded
-TCP + topic-list check) -> ``kafka``; set but the TCP connect is refused ->
-``inmemory`` with a WARNING logged (stderr / capture, never stdout) so the
-silent-local-SQLite failure mode is never repeated. Set, TCP-connectable, but
-the broker's serving state INDETERMINATE (metadata timeout / auth failure —
-the state a transient ``list_topics`` timeout against a healthy broker lands
-in) -> hard refusal naming the ambiguity, because silently resolving it made
-the transport a coin flip (14 kafka / 6 inmemory over 20 unchanged-env calls,
-``OmniNode-ai/knowledge-base#59``). This makes delegation use
-"the same event bus the rest of the system is configured with" BY DEFAULT — no
-``--bus kafka`` flag required.
+**explicit ``--bus`` > configured authority > shipped ``inmemory`` default**:
+the ``ONEX_CONTRACTS_DIR`` bootstrap pointer names a contracts directory whose
+``runtime/runtime_config.yaml`` is the configured authority; with no pointer
+(or no file) the SHIPPED tier-0 default runtime config answers — in-memory
+bus, ``local`` profile — with a WARNING logged (stderr / capture, never
+stdout) naming the local-SQLite consequence. ``ONEX_EVENT_BUS_TYPE`` holds NO
+tier (set-and-ignored produces a warning), and a broker's reachability no
+longer decides the transport: execution locus is a resolved property of
+configuration, not an environmental accident.
 
 **Execution locality (OMN-17295): ``--bus`` selects the TRANSPORT, never the
 executor.** On both values the ``node_delegate_skill_orchestrator`` runs
@@ -205,73 +203,75 @@ TASK_TYPE_CHOICES = (
 # source of truth and rejects anything outside that set.
 BUS_CHOICES = SUPPORTED_BUS_TYPES
 
-# Fallback bus when auto-resolution cannot select ``kafka`` (no broker
-# configured, or a configured broker that fails the health probe): in-process,
-# fully self-contained. This is the SAME value ``resolve_default_bus`` returns
-# for both of those cases — it is not merely a historical default anymore, but
-# the fail-safe floor auto-resolution always lands on when the shared bus is
-# not provably reachable.
+# The absent-authority default (OMN-17304): the transport the SHIPPED tier-0
+# default runtime config declares, and therefore what ``resolve_default_bus``
+# returns when no configured authority answers. In-process, fully
+# self-contained — the offline/standalone floor. This constant mirrors
+# ``runtime/tier0_runtime_config.yaml``'s ``event_bus.type``; the tier-0
+# golden tests pin the two together.
 DEFAULT_BUS = BUS_INMEMORY
 
 
 def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str]:
-    """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-14376).
+    """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-17304).
 
-    Shares the SAME authority the runtime kernel calls
-    (``service_kernel.py::_resolve_event_bus_transport`` ->
-    ``backends/auto_configure.py::resolve_bus_type``) so delegation defaults to
-    "the event bus the rest of the system is configured with" instead of a
-    source-hardcoded ``inmemory`` — the OMN-14376 root cause.
+    The CLI hosts a runtime instance, and per the OMN-17304 operator ruling a
+    runtime resolves its transport from its OWN configuration through the ONE
+    shared authority — the same
+    ``backends/auto_configure.py::resolve_bus_type`` seam the runtime kernel
+    calls (``service_kernel.py::_resolve_event_bus_transport``). There is no
+    CLI-specific config surface and no CLI-specific ladder:
 
-    OMN-16693 added a ``config.event_bus.type`` tier between the env override
-    and the probe. This path passes none: the CLI has no runtime contract to
-    speak for, so it falls through that tier to the probe exactly as before.
+    1. The embedded runtime's configuration is resolved by
+       :func:`omnibase_infra.runtime.service_kernel.resolve_embedded_runtime_config`:
+       the ``ONEX_CONTRACTS_DIR`` BOOTSTRAP pointer names a contracts
+       directory whose ``runtime/runtime_config.yaml`` is the configured
+       authority; with no pointer (or no file), the SHIPPED tier-0 default
+       runtime config answers — in-memory bus, ``local`` profile. An
+       unconfigured install is still config-resolved.
+    2. ``config.event_bus.type`` from that configuration is passed as
+       ``config_bus=`` — the tier the pre-ruling CLI skipped, which is what
+       made ``~/.zshrc`` the transport authority.
 
-    OMN-16678: this is now a thin call into
-    :func:`omnibase_infra.backends.auto_configure.resolve_bus_type` — the ONE
-    authority both this path and ``select_event_bus`` share. Two prior defects
-    are closed by that unification:
+    Because a config answer ALWAYS exists on this path, the broker-probe tier
+    is structurally unreachable: a reachable (or unreachable) broker no longer
+    decides the transport, and neither does ``ONEX_EVENT_BUS_TYPE`` — that env
+    var holds NO tier any more (set-and-ignored produces a warning from the
+    shared authority; see :func:`resolve_bus_type`). A configured ``kafka``
+    with an unreachable broker now fails loudly downstream instead of
+    silently degrading to a transport the config did not declare.
 
-      * ``ONEX_EVENT_BUS_TYPE`` was honoured by ``select_event_bus`` and
-        SILENTLY IGNORED here, so setting it to pin ``onex delegate`` to the
-        in-process bus did nothing. It is now tier 2 of one shared order:
-        explicit ``--bus`` > ``ONEX_EVENT_BUS_TYPE`` > probe.
-      * The probe's ``REACHABLE`` state mapped to ``inmemory`` here and to
-        ``kafka`` there, and ``probe_kafka`` degrades ANY Stage-2 metadata
-        failure — including a plain 2s ``list_topics`` timeout against a
-        healthy broker — into ``REACHABLE``. Measured: 20 consecutive calls,
-        unchanged env, healthy broker -> kafka 14x / inmemory 6x
-        (``OmniNode-ai/knowledge-base#59``). ``REACHABLE`` now raises
-        :class:`~omnibase_infra.backends.auto_configure.EventBusResolutionAmbiguousError`
-        rather than resolving to a transport that varies run to run.
-
-    This module still never reads ``KAFKA_BOOTSTRAP_SERVERS`` itself (the
-    ``check-env-reads`` CI gate blocks raw environment reads outside the
-    approved config surfaces): ``probe_kafka`` resolves it, and the
-    ``ONEX_EVENT_BUS_TYPE`` read stays in ``auto_configure.py``, the file that
-    already owned it.
+    This module still reads no environment itself (the ``check-env-reads`` CI
+    gate blocks raw environment reads outside the approved config surfaces):
+    the ``ONEX_CONTRACTS_DIR`` bootstrap read lives in ``service_kernel.py``
+    and the set-and-ignored warning read stays in ``auto_configure.py`` — the
+    files that already own those boundaries.
 
     Only called when ``--bus`` is NOT explicitly supplied — an explicit
-    ``--bus`` (kafka or inmemory) is never second-guessed by this probe.
+    ``--bus`` (kafka or inmemory) is tier 1 of the shared order and is never
+    second-guessed.
 
-    OMN-16529: ``authority_topic=SUFFIX_DELEGATION_REQUEST`` is passed so
-    ``probe_kafka``'s AUTHORITATIVE tier is decided by live consumer-group
-    liveness on the exact topic this delegation is about to publish to,
-    rather than by comparing the caller's dialed host string against the
-    broker's advertised listener host — a check that is structurally blind
-    for any off-box caller (a Tailscale/MagicDNS-fronted broker advertises
-    its MagicDNS hostname, never the caller's LAN IP, so the two strings
-    never match no matter how healthy the broker is). ``HEALTHY`` already
-    passed unconditionally before this change, so this does not alter
-    on-box behavior; off-box it upgrades a correct-but-mislabelled HEALTHY
-    determination to the AUTHORITATIVE state that actually reflects "a live
-    consumer is bound and ready to serve this request right now."
+    ``authority_topic=SUFFIX_DELEGATION_REQUEST`` is still threaded through
+    (OMN-16529) so the probe tier — should a future caller ever reach it with
+    no config — keys AUTHORITATIVE on live consumer-group liveness for the
+    exact delegation topic; on the current path it is inert by construction.
+
+    Returns:
+        ``(bus_type, reason)`` — the resolved transport and provenance naming
+        WHICH authority answered (the config file path, or the shipped tier-0
+        default), for the capture log and receipts.
 
     Raises:
-        EventBusResolutionAmbiguousError: the probe is indeterminate and
-            neither ``--bus`` nor ``ONEX_EVENT_BUS_TYPE`` decided the transport.
+        ProtocolConfigurationError: the resolved runtime config exists but is
+            invalid — including a lane-profile config declaring the in-memory
+            bus (the OMN-17304 profile axis).
     """
+    from omnibase_infra.runtime.service_kernel import resolve_embedded_runtime_config
+
+    config, config_source = resolve_embedded_runtime_config()
     return resolve_bus_type(
+        config_bus=str(config.event_bus.type),
+        config_source=config_source,
         kafka_bootstrap=kafka_bootstrap,
         authority_topic=SUFFIX_DELEGATION_REQUEST,
     )
@@ -502,11 +502,11 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
         "routes the same in-process run's events through the live broker, so "
         "its evidence lands in the shared delegation_events projection "
         "instead of the local SQLite fallback. Neither value hands execution "
-        "to a deployed runtime consumer. Omit to auto-resolve (OMN-14376): "
-        "'kafka' when KAFKA_BOOTSTRAP_SERVERS is configured and the broker "
-        "probes healthy — the SAME bus the rest of the system is configured "
-        "with — else 'inmemory'. Pass explicitly to force a specific "
-        "transport regardless of the probe."
+        "to a deployed runtime consumer. Omit to resolve from the runtime's "
+        "configured authority (OMN-17304): the runtime config named by the "
+        "ONEX_CONTRACTS_DIR bootstrap pointer, else the shipped tier-0 "
+        "default (inmemory). ONEX_EVENT_BUS_TYPE and broker reachability "
+        "play no part. Pass explicitly to override the configured authority."
     ),
 )
 @click.option(
@@ -658,11 +658,13 @@ def run_delegate(
     :data:`DELEGATE_SOURCE_CHOICES`; the CLI's ``click.Choice`` enforces this
     at the flag boundary, and this function does not re-validate it.
 
-    ``bus`` selects the event-bus backend. ``None`` (the CLI default, OMN-14376)
-    auto-resolves via :func:`resolve_default_bus` — ``kafka`` when
-    ``KAFKA_BOOTSTRAP_SERVERS`` is configured and probes healthy, else
-    ``inmemory`` — so delegation reaches the shared platform substrate BY
-    DEFAULT, with no ``--bus kafka`` flag required. An explicit ``"inmemory"``
+    ``bus`` selects the event-bus backend. ``None`` (the CLI default,
+    OMN-17304) resolves via :func:`resolve_default_bus` from the embedded
+    runtime's OWN configuration — the runtime config named by the
+    ``ONEX_CONTRACTS_DIR`` bootstrap pointer, else the shipped tier-0 default
+    (``inmemory``) — so a configured install reaches the shared platform
+    substrate BY DEFAULT, with no ``--bus kafka`` flag required, and an
+    unconfigured one stays fully offline. An explicit ``"inmemory"``
     or ``"kafka"`` is never second-guessed. ``kafka_bootstrap`` optionally
     overrides the broker when the resolved/explicit bus is ``"kafka"`` — it is
     a usage error to supply it without also explicitly requesting
@@ -717,11 +719,11 @@ def run_delegate(
         if bus == "kafka":
             logger.info("onex delegate: auto-resolved event bus -> kafka (%s)", reason)
         else:
-            # Covers BOTH "no broker configured" and "configured but not
-            # healthy" (the OMN-14380 off-box-caller / stale-broker symptom)
-            # — ``reason`` (from ``resolve_default_bus``/``probe_kafka``)
-            # already distinguishes the two in text. Warn unconditionally
-            # (mirrors ``service_kernel.py``'s own precedent of warning when
+            # Covers BOTH "shipped tier-0 default answered (no configured
+            # authority)" and "the configured authority itself declares
+            # inmemory" — ``reason`` (from ``resolve_default_bus``) already
+            # names which in text. Warn unconditionally (mirrors
+            # ``service_kernel.py``'s own precedent of warning when
             # KAFKA_BOOTSTRAP_SERVERS is unset) rather than silently repeating
             # the OMN-14376 data-loss default. stderr / capture log only —
             # the receipt stream on stdout stays clean.

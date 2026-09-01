@@ -174,18 +174,42 @@ class TestEventBusValidation:
         errors = validate_runtime_config(config)
         assert errors == []
 
-    def test_inmemory_event_bus_rejected(self) -> None:
-        """Test that inmemory event bus type is rejected (not production-safe)."""
+    def test_inmemory_event_bus_rejected_without_local_profile(self) -> None:
+        """OMN-17304: inmemory under the (default) lane profile is rejected."""
         config: dict[str, object] = {"event_bus": {"type": "inmemory"}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
-        assert "event_bus.type" in errors[0]
+        assert "profile" in errors[0]
+
+    def test_inmemory_event_bus_accepted_under_local_profile(self) -> None:
+        """OMN-17304: inmemory is a first-class configured value when the
+        config declares the local profile (the shipped tier-0 default pair)."""
+        config: dict[str, object] = {
+            "event_bus": {"type": "inmemory", "profile": "local"}
+        }
+        errors = validate_runtime_config(config)
+        assert errors == []
+
+    def test_inmemory_event_bus_rejected_under_explicit_lane_profile(self) -> None:
+        """An explicit lane profile rejects inmemory exactly like the default."""
+        config: dict[str, object] = {
+            "event_bus": {"type": "inmemory", "profile": "lane"}
+        }
+        errors = validate_runtime_config(config)
+        assert len(errors) == 1
+        assert "lane" in errors[0]
+
+    def test_invalid_event_bus_profile(self) -> None:
+        """An unknown profile value fails validation naming the field."""
+        config: dict[str, object] = {"event_bus": {"type": "kafka", "profile": "prod"}}
+        errors = validate_runtime_config(config)
+        assert len(errors) == 1
+        assert "event_bus.profile" in errors[0]
 
     def test_invalid_event_bus_type(self) -> None:
         """Test that invalid event bus type fails validation."""
         # NOTE: "redis" is intentionally used as an example of an invalid event bus type.
-        # This is unrelated to the REDIS->VALKEY cache backend rename; event_bus only
-        # supports "kafka" and "cloud" types.
+        # This is unrelated to the REDIS->VALKEY cache backend rename.
         config: dict[str, object] = {"event_bus": {"type": "redis"}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
@@ -416,11 +440,13 @@ class TestConstants:
         assert not TOPIC_NAME_PATTERN.match("")
 
     def test_valid_event_bus_types(self) -> None:
-        """Test that VALID_EVENT_BUS_TYPES contains only production-safe values."""
-        assert "kafka" in VALID_EVENT_BUS_TYPES
-        assert "cloud" in VALID_EVENT_BUS_TYPES
-        assert "inmemory" not in VALID_EVENT_BUS_TYPES
-        assert len(VALID_EVENT_BUS_TYPES) == 2
+        """VALID_EVENT_BUS_TYPES is the full EnumEventBusType vocabulary.
+
+        OMN-17304: whether 'inmemory' is LEGAL for a runtime is decided by
+        the event_bus.profile axis (lane rejects, local accepts), not by
+        removing the word from the vocabulary.
+        """
+        assert frozenset({"kafka", "cloud", "inmemory"}) == VALID_EVENT_BUS_TYPES
 
     def test_grace_period_bounds(self) -> None:
         """Test that grace period bounds match ModelShutdownConfig constraints."""

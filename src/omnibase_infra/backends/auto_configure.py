@@ -33,9 +33,13 @@ BUS_INMEMORY = "inmemory"
 BUS_KAFKA = "kafka"
 SUPPORTED_BUS_TYPES: tuple[str, ...] = (BUS_INMEMORY, BUS_KAFKA)
 
-# The single, pre-existing operator override. OMN-16678 did NOT introduce a new
-# env-var surface; it made the one that already existed authoritative for every
-# call site instead of only for ``select_event_bus``.
+# OMN-17304: this env var holds NO tier in transport resolution any more.
+# Per the operator ruling, env vars may bootstrap WHERE configuration is found
+# (ONEX_CONTRACTS_DIR), never WHAT the transport is — a shell profile deciding
+# the transport of every delegation was exactly the environmental accident the
+# ruling removed. The name is retained solely so :func:`resolve_bus_type` can
+# WARN when it is set-and-ignored, giving operators a signal to delete the
+# export rather than a silent behaviour change.
 BUS_TYPE_OVERRIDE_ENV = "ONEX_EVENT_BUS_TYPE"
 
 # The ONE accepted vocabulary, shared by EVERY tier (OMN-16693). ``cloud`` is
@@ -147,6 +151,7 @@ def resolve_bus_type(
     *,
     explicit_bus: str | None = None,
     config_bus: str | None = None,
+    config_source: str | None = None,
     kafka_bootstrap: str | None = None,
     authority_topic: str | None = None,
 ) -> tuple[str, str]:
@@ -157,32 +162,21 @@ def resolve_bus_type(
     (the ``onex delegate`` path) both route through this function, so the two
     can no longer disagree about what the operator asked for.
 
-    Resolution order, highest first:
+    Resolution order, highest first (OMN-17304):
 
     1. **Explicit argument** (``--bus`` at the CLI, ``bus_type=`` in-process).
        Never second-guessed and never probed against.
-    2. **``ONEX_EVENT_BUS_TYPE``**. Accepts ``inmemory`` / ``kafka`` / ``cloud``
-       (case- and whitespace-insensitive); empty or unset falls through. An
-       unrecognised value raises rather than degrading to "probe and hope" — a
-       typo in an override must not read as "no override".
-    3. **Declared config** (``config.event_bus.type``, OMN-16693). The runtime
-       contract's own statement of intent. It ranks BELOW the env var, not
-       above: ``contracts/runtime/runtime_config.yaml`` ships
-       ``event_bus.type: kafka`` explicitly and documents ``ONEX_EVENT_BUS_TYPE``
-       as its override, and eight CI workflows set that var to ``inmemory``
-       against those same contracts. A checked-in YAML baseline is a different
-       kind of "explicit" from a flag typed at invocation, which is why tier 1
-       stays reserved for the latter.
-
-       This tier exists because before OMN-16693 the runtime kernel supplied no
-       tier at all — it read ``config.event_bus.type`` only to decide whether to
-       forward ``KAFKA_BOOTSTRAP_SERVERS``, then let the probe pick the
-       transport. A contract declaring ``kafka`` could therefore boot in-memory
-       whenever the broker happened to be down (the OMN-14376 failure class),
-       and a transient metadata timeout could fail boot outright even though
-       the contract was unambiguous.
-    4. **Live broker probe** (:func:`~omnibase_infra.backends.backend_probe.probe_kafka`),
-       mapped totally:
+    2. **Declared config** (``config.event_bus.type``, OMN-16693). The
+       runtime's own configured statement of intent, honoured without probing:
+       the config already stated the answer, and probing it only reintroduces
+       the chance to contradict it. Every runtime has one — the deployed lanes
+       ship ``contracts/runtime/runtime_config.yaml``, and an unconfigured
+       install resolves the SHIPPED tier-0 default
+       (``runtime/tier0_runtime_config.yaml``: in-memory bus, local profile),
+       so for config-resolved callers the probe tier below is structurally
+       unreachable.
+    3. **Live broker probe** (:func:`~omnibase_infra.backends.backend_probe.probe_kafka`),
+       reached only by callers that genuinely pass no config, mapped totally:
 
        * ``AUTHORITATIVE`` / ``HEALTHY`` -> ``kafka``. Determinate positive.
        * ``DISCOVERED`` -> ``inmemory``. Determinate negative: reached only by
@@ -196,10 +190,25 @@ def resolve_bus_type(
          resolution non-repeatable (14 kafka / 6 inmemory over 20 calls,
          unchanged env — ``OmniNode-ai/knowledge-base#59``).
 
+    **``ONEX_EVENT_BUS_TYPE`` holds NO tier (OMN-17304).** The pre-ruling
+    ladder ranked it above config, which made one line in an operator's shell
+    profile the transport authority for every delegation on the machine. Per
+    the operator ruling, env vars may bootstrap WHERE configuration is found
+    (``ONEX_CONTRACTS_DIR``), never WHAT the transport is. A set value is
+    ignored — with a WARNING naming the removal, so the export is deleted
+    rather than silently dead. This applies to every caller: configured
+    binding outranks env everywhere, because env stopped being a peer
+    authority at all.
+
     Args:
         explicit_bus: Caller-supplied transport, or ``None`` to auto-resolve.
-        config_bus: The transport declared by ``config.event_bus.type``, or
-            ``None`` when the caller has no contract to speak for (the CLI).
+        config_bus: The transport declared by the runtime's configuration
+            (``config.event_bus.type``), or ``None`` when the caller genuinely
+            has no config to speak for.
+        config_source: Optional human-readable provenance of WHERE
+            ``config_bus`` came from (a file path, "shipped tier-0 default
+            ..."), appended to the returned reason so a receipt can name the
+            authority, not merely the tier.
         kafka_bootstrap: Broker override. ``None`` lets ``probe_kafka`` resolve
             ``KAFKA_BOOTSTRAP_SERVERS`` itself — the already-approved boundary
             for that lookup.
@@ -213,11 +222,33 @@ def resolve_bus_type(
         naming which tier decided, for logging and receipts.
 
     Raises:
-        ValueError: ``explicit_bus``, ``ONEX_EVENT_BUS_TYPE``, or ``config_bus``
-            names a transport that does not exist.
+        ValueError: ``explicit_bus`` or ``config_bus`` names a transport that
+            does not exist.
         EventBusResolutionAmbiguousError: the probe result is indeterminate and
             nothing above it declared an intent to disambiguate it.
     """
+    # OMN-17304: warn on a set-and-ignored ONEX_EVENT_BUS_TYPE. The env-var
+    # name is spelled as a LITERAL here, not as BUS_TYPE_OVERRIDE_ENV:
+    # `check-env-reads` grandfathers an added read only when it can extract a
+    # literal name and match it against the same file's base version, and it
+    # deliberately blocks the constant-name (non-literal) read form outright.
+    # This read pre-dates OMN-16678 in this file; it no longer participates in
+    # resolution — it exists solely to tell the operator their export stopped
+    # doing anything (the value is not even validated: a dead variable must
+    # not retain the power to fail a boot).
+    raw_ignored = os.getenv("ONEX_EVENT_BUS_TYPE", "").strip()
+    if raw_ignored:
+        logger.warning(
+            "%s=%s is set but is ignored (OMN-17304): it no longer holds any "
+            "tier in transport resolution. The transport resolves from the "
+            "runtime's configured authority (explicit argument > "
+            "config.event_bus.type > broker probe); env vars may bootstrap "
+            "where config is found (ONEX_CONTRACTS_DIR), never what the "
+            "transport is. Remove the export.",
+            BUS_TYPE_OVERRIDE_ENV,
+            raw_ignored,
+        )
+
     # Tier 1 — explicit caller selection.
     if explicit_bus is not None:
         normalized = _normalize_bus_value(
@@ -227,37 +258,22 @@ def resolve_bus_type(
         )
         return normalized, f"explicit bus selection: {normalized}"
 
-    # Tier 2 — the operator override, honoured identically by every call site.
-    # The env-var name is spelled as a LITERAL here, not as BUS_TYPE_OVERRIDE_ENV:
-    # `check-env-reads` grandfathers an added read only when it can extract a
-    # literal name and match it against the same file's base version, and it
-    # deliberately blocks the constant-name (non-literal) read form outright —
-    # there is nothing to match on. This read pre-dates OMN-16678 in this file,
-    # so keeping it literal keeps the gate's narrowed rule satisfied without
-    # widening the allowlist. Drift between this literal and the constant is
-    # pinned by the resolution-order tests, which set the env via the constant
-    # and assert the override actually fires.
-    raw_override = os.getenv("ONEX_EVENT_BUS_TYPE", "").strip().lower()
-    if raw_override:
-        resolved_override = _normalize_bus_value(
-            raw_override,
-            source=f"{BUS_TYPE_OVERRIDE_ENV} value",
-            remedy="Unset it to fall through to the declared config or the broker probe.",
-        )
-        return resolved_override, f"{BUS_TYPE_OVERRIDE_ENV}={raw_override}"
-
-    # Tier 3 — the transport the runtime contract declares (OMN-16693). Honoured
-    # without probing: the contract already stated the answer, and probing it
-    # only reintroduces the chance to contradict it.
+    # Tier 2 — the transport the runtime's configuration declares (OMN-16693,
+    # promoted to the top non-explicit tier by OMN-17304). Honoured without
+    # probing: the config already stated the answer, and probing it only
+    # reintroduces the chance to contradict it.
     if config_bus is not None:
         resolved_config = _normalize_bus_value(
             config_bus,
             source="config.event_bus.type",
-            remedy="Correct the runtime contract's event_bus.type field.",
+            remedy="Correct the runtime config's event_bus.type field.",
         )
-        return resolved_config, f"config.event_bus.type={config_bus}"
+        provenance = f"config.event_bus.type={config_bus}"
+        if config_source:
+            provenance = f"{provenance} ({config_source})"
+        return resolved_config, provenance
 
-    # Tier 4 — probe. Total over EnumProbeState; no implicit default branch.
+    # Tier 3 — probe. Total over EnumProbeState; no implicit default branch.
     probe = probe_kafka(
         bootstrap_servers=kafka_bootstrap, authority_topic=authority_topic
     )
@@ -270,9 +286,9 @@ def resolve_bus_type(
         f"accepted a TCP connection but its serving state could not be "
         f"established, so the transport cannot be resolved repeatably. "
         f"Select one explicitly: pass the bus argument (e.g. "
-        f"'--bus {BUS_KAFKA}' / '--bus {BUS_INMEMORY}'), set "
-        f"{BUS_TYPE_OVERRIDE_ENV}={BUS_KAFKA}|{BUS_INMEMORY}, or declare "
-        f"event_bus.type in the runtime contract."
+        f"'--bus {BUS_KAFKA}' / '--bus {BUS_INMEMORY}'), or declare "
+        f"event_bus.type in the runtime config (OMN-17304 — "
+        f"{BUS_TYPE_OVERRIDE_ENV} no longer selects a transport)."
     )
 
 
@@ -289,8 +305,8 @@ def select_event_bus(
     This function owns CONSTRUCTION only. The decision of which transport to
     build belongs to :func:`resolve_bus_type` (OMN-16678), which is shared with
     ``cli/cli_delegate.py::resolve_default_bus`` so both paths apply one
-    resolution order: explicit argument > ``ONEX_EVENT_BUS_TYPE`` >
-    ``config.event_bus.type`` > probe.
+    resolution order (OMN-17304): explicit argument >
+    ``config.event_bus.type`` > probe (``ONEX_EVENT_BUS_TYPE`` holds no tier).
 
     The runtime kernel resolves first and passes the answer back in as
     ``bus_type`` (OMN-16693), so the config tier is applied there and tier 1

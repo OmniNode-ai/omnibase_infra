@@ -519,19 +519,24 @@ class TestBootstrap:
     """Tests for the bootstrap function."""
 
     @pytest.fixture(autouse=True)
-    def use_inmemory_event_bus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def use_inmemory_event_bus(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Ensure inmemory event bus is used for all bootstrap tests by default.
 
-        Since OMN-1869, the runtime config defaults to kafka event bus.
         Most tests in this class focus on bootstrap behavior, not event bus
-        configuration, so we force inmemory to avoid Kafka configuration errors.
+        configuration, so we force inmemory to avoid Kafka configuration
+        errors — via a configured local-profile runtime config reached through
+        the ONEX_CONTRACTS_DIR bootstrap pointer (OMN-17304; the old
+        ONEX_EVENT_BUS_TYPE mechanism holds no tier any more).
 
         Tests that specifically test Kafka behavior (like
         test_bootstrap_creates_kafka_event_bus_when_configured) override this
         by explicitly setting/clearing environment variables.
         """
-        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
-        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        from tests.unit.runtime.conftest import force_inmemory_runtime_config
+
+        force_inmemory_runtime_config(monkeypatch, tmp_path)
         monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
 
     @pytest.fixture
@@ -692,12 +697,11 @@ class TestBootstrap:
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
         # Clear KAFKA_ENVIRONMENT so ONEX_ENVIRONMENT takes effect
         monkeypatch.delenv("KAFKA_ENVIRONMENT", raising=False)
-        # Ensure EventBusInmemory is used by setting ONEX_EVENT_BUS_TYPE override
-        # (config defaults to kafka since OMN-1869)
-        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
-        # Mock config to use inmemory event bus
+        # Mock config declaring the inmemory transport (OMN-17304: the
+        # config IS the resolution authority — this mock stands in for a
+        # local-profile runtime config, so no env var is needed or honoured).
         mock_config = MagicMock()
         mock_config.name = "test-runtime"
         mock_config.input_topic = "test-input"
@@ -705,7 +709,8 @@ class TestBootstrap:
         mock_config.group_id = "test-group"
         mock_config.contract_version = "v1"
         mock_config.event_bus = MagicMock()
-        mock_config.event_bus.type = "kafka"  # Use kafka (inmemory is forbidden)
+        mock_config.event_bus.type = "inmemory"
+        mock_config.event_bus.profile = "local"
         mock_config.event_bus.environment = "test-env"
 
         with (
@@ -732,6 +737,7 @@ class TestBootstrap:
         mock_runtime_host: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Test that bootstrap calls select_event_bus with kafka params when configured."""
         monkeypatch.setenv("KAFKA_ENVIRONMENT", "dev")
@@ -740,7 +746,24 @@ class TestBootstrap:
         monkeypatch.setenv("KAFKA_BROKER_ALLOWLIST", "kafka:,localhost:")
         # Clear ONEX_ENVIRONMENT to avoid interference
         monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
-        # Clear any CI override that forces inmemory event bus
+        # OMN-17304: "configured" means the runtime's OWN config declares
+        # kafka — override the class autouse fixture's inmemory pointer with
+        # a kafka-declaring runtime config (the env var holds no tier).
+        kafka_contracts = tmp_path / "kafka-contracts"
+        (kafka_contracts / "runtime").mkdir(parents=True, exist_ok=True)
+        (kafka_contracts / "runtime" / "runtime_config.yaml").write_text(
+            (
+                'name: "runtime_config"\n'
+                'description: "Test-local kafka runtime config (OMN-17304)"\n'
+                'input_topic: "requests"\n'
+                'output_topic: "responses"\n'
+                'group_id: "onex-runtime"\n'
+                "event_bus:\n"
+                '  type: "kafka"\n'
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(kafka_contracts))
         monkeypatch.delenv("ONEX_EVENT_BUS_TYPE", raising=False)
 
         mock_bus_instance = MagicMock(spec=ProtocolEventBusLike)
@@ -761,9 +784,12 @@ class TestBootstrap:
 
             await bootstrap()
 
-        # Verify select_event_bus was called with kafka bootstrap servers
+        # Verify select_event_bus was called with kafka bootstrap servers AND
+        # the config-resolved kafka transport (OMN-17304: the configured
+        # authority, not an env var, selected it).
         mock_select.assert_called_once()
         call_kwargs = mock_select.call_args[1]
+        assert call_kwargs["bus_type"] == "kafka"
         assert call_kwargs["kafka_bootstrap_servers"] == "kafka:9092"
         assert call_kwargs["environment"] == "dev"
 
@@ -1040,7 +1066,12 @@ shutdown:
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
         config_file = runtime_dir / "runtime_config.yaml"
-        config_file.write_text("name: test-kernel\n")
+        config_file.write_text(
+            # OMN-17304: an omitted event_bus block means the model default
+            # (kafka), which needs a broker — these tests want the in-memory
+            # bus, so the config declares it first-class under local profile.
+            'name: test-kernel\nevent_bus:\n  type: "inmemory"\n  profile: "local"\n'
+        )
 
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
@@ -1102,12 +1133,17 @@ shutdown:
 
         # Create config with very short grace period for testing
         from omnibase_infra.runtime.models import (
+            ModelEventBusConfig,
             ModelRuntimeConfig,
             ModelShutdownConfig,
         )
 
         test_config = ModelRuntimeConfig(
             name="test-kernel",  # Required for introspection subscription (OMN-1602)
+            # OMN-17304: config is the transport authority — declare the
+            # in-memory bus first-class (local profile) instead of relying on
+            # the removed ONEX_EVENT_BUS_TYPE tier.
+            event_bus=ModelEventBusConfig(type="inmemory", profile="local"),
             shutdown=ModelShutdownConfig(
                 grace_period_seconds=0
             ),  # 0 second timeout for instant timeout
@@ -1154,12 +1190,17 @@ shutdown:
         """Test that bootstrap uses grace_period_seconds from config."""
         # Create config with custom grace period
         from omnibase_infra.runtime.models import (
+            ModelEventBusConfig,
             ModelRuntimeConfig,
             ModelShutdownConfig,
         )
 
         test_config = ModelRuntimeConfig(
             name="test-kernel",  # Required for introspection subscription (OMN-1602)
+            # OMN-17304: config is the transport authority — declare the
+            # in-memory bus first-class (local profile) instead of relying on
+            # the removed ONEX_EVENT_BUS_TYPE tier.
+            event_bus=ModelEventBusConfig(type="inmemory", profile="local"),
             shutdown=ModelShutdownConfig(grace_period_seconds=45),  # Custom timeout
         )
 
@@ -1436,15 +1477,19 @@ class TestIntegration:
     """Integration tests for kernel with real components."""
 
     @pytest.fixture(autouse=True)
-    def use_inmemory_event_bus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def use_inmemory_event_bus(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Ensure inmemory event bus is used for all integration tests.
 
-        Since OMN-1869, the runtime config defaults to kafka event bus.
         These integration tests use real EventBusInmemory but mocked shutdown,
-        so we force inmemory to avoid Kafka configuration errors.
+        so we force inmemory to avoid Kafka configuration errors — via a
+        configured local-profile runtime config (OMN-17304; the old env-var
+        mechanism holds no tier any more).
         """
-        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
-        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        from tests.unit.runtime.conftest import force_inmemory_runtime_config
+
+        force_inmemory_runtime_config(monkeypatch, tmp_path)
         monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
         from tests.unit.runtime.conftest import _default_node_graph_config
 
@@ -1471,7 +1516,12 @@ class TestIntegration:
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
         runtime_config_file = runtime_dir / "runtime_config.yaml"
-        runtime_config_file.write_text("name: test-kernel\n")
+        runtime_config_file.write_text(
+            # OMN-17304: an omitted event_bus block means the model default
+            # (kafka), which needs a broker — these tests want the in-memory
+            # bus, so the config declares it first-class under local profile.
+            'name: test-kernel\nevent_bus:\n  type: "inmemory"\n  profile: "local"\n'
+        )
 
         # Create a minimal handler contract in tmp_path for discovery
         handlers_dir = tmp_path / "handlers" / "http"
@@ -1527,7 +1577,12 @@ class TestIntegration:
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
         runtime_config_file = runtime_dir / "runtime_config.yaml"
-        runtime_config_file.write_text("name: test-kernel\n")
+        runtime_config_file.write_text(
+            # OMN-17304: an omitted event_bus block means the model default
+            # (kafka), which needs a broker — these tests want the in-memory
+            # bus, so the config declares it first-class under local profile.
+            'name: test-kernel\nevent_bus:\n  type: "inmemory"\n  profile: "local"\n'
+        )
 
         # Create a minimal handler contract in tmp_path for discovery
         handlers_dir = tmp_path / "handlers" / "http"
@@ -1582,15 +1637,19 @@ class TestHttpPortValidation:
     """Tests for HTTP port validation in bootstrap."""
 
     @pytest.fixture(autouse=True)
-    def use_inmemory_event_bus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def use_inmemory_event_bus(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Ensure inmemory event bus is used for all port validation tests.
 
-        Since OMN-1869, the runtime config defaults to kafka event bus.
-        These tests focus on HTTP port validation, not event bus configuration,
-        so we force inmemory to avoid Kafka configuration errors.
+        These tests focus on HTTP port validation, not event bus
+        configuration, so we force inmemory to avoid Kafka configuration
+        errors — via a configured local-profile runtime config (OMN-17304;
+        the old env-var mechanism holds no tier any more).
         """
-        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
-        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        from tests.unit.runtime.conftest import force_inmemory_runtime_config
+
+        force_inmemory_runtime_config(monkeypatch, tmp_path)
         monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
 
     @pytest.fixture
@@ -1865,9 +1924,8 @@ class TestHttpPortValidation:
         from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "not_a_number")
-        # Ensure inmemory event bus is used (config defaults to kafka since OMN-1869)
-        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
-        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        # The inmemory transport comes from mock_inmemory_runtime_config's
+        # configured local-profile runtime config (OMN-17304).
 
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
@@ -1925,9 +1983,8 @@ class TestHttpPortValidation:
         from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", invalid_port_value)
-        # Ensure inmemory event bus is used (config defaults to kafka since OMN-1869)
-        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
-        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        # The inmemory transport comes from mock_inmemory_runtime_config's
+        # configured local-profile runtime config (OMN-17304).
 
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
@@ -1972,8 +2029,12 @@ class TestEventBusTypeHonored:
         content = kernel_path.read_text(encoding="utf-8")
         # The old comment said event_bus was PARTIAL/only environment used
         assert "PARTIAL - only environment field used" not in content
-        # The defense-in-depth assertion should be present as executable code
-        assert "if not config.event_bus.type.is_production_safe:" in content
+        # The defense-in-depth assertion should be present as executable code,
+        # profile-aware since OMN-17304 (lane rejects, local accepts).
+        assert (
+            "if not config.event_bus.type.is_production_safe"
+            " and not _profile_is_local:" in content
+        )
 
     def test_model_runtime_config_event_bus_active(self) -> None:
         """model_runtime_config.py should mark event_bus as ACTIVE, not PARTIAL."""

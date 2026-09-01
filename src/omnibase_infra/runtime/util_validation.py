@@ -45,8 +45,15 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 # (e.g., "onex.evt.platform.node-introspection.v1")  # onex-topic-allow: pending contract auto-wiring
 TOPIC_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
-# Valid event bus types (matches EnumEventBusType production-safe values)
-VALID_EVENT_BUS_TYPES = frozenset({"kafka", "cloud"})
+# Valid event bus types (matches EnumEventBusType). Whether "inmemory" is
+# LEGAL for a given runtime is decided by the event_bus.profile axis
+# (OMN-17304), not by the vocabulary: lane-profile runtimes reject it,
+# local-profile runtimes accept it. The cross-field rule is enforced both
+# here (early, actionable) and by ModelEventBusConfig.validate_production_safe.
+VALID_EVENT_BUS_TYPES = frozenset({"kafka", "cloud", "inmemory"})
+
+# Valid event_bus.profile values (matches EnumEventBusProfile, OMN-17304).
+VALID_EVENT_BUS_PROFILES = frozenset({"lane", "local"})
 
 # Shutdown grace period bounds (matches ModelShutdownConfig constraints)
 MIN_GRACE_PERIOD_SECONDS = 0
@@ -66,7 +73,9 @@ def validate_runtime_config(
         - input_topic: Must be string matching ^[a-zA-Z0-9._-]+$
         - output_topic: Must be string matching ^[a-zA-Z0-9._-]+$
         - consumer_group/group_id: Must be string matching ^[a-zA-Z0-9._-]+$
-        - event_bus.type: Must be "inmemory" or "kafka"
+        - event_bus.type: Must be one of "kafka", "cloud", "inmemory"
+        - event_bus.profile: Must be "lane" or "local"; "inmemory" requires
+          the "local" profile (OMN-17304)
         - shutdown.grace_period_seconds: Must be integer 0-3600
 
     Args:
@@ -143,6 +152,34 @@ def validate_runtime_config(
                         f"event_bus.type must be one of {sorted(VALID_EVENT_BUS_TYPES)}, "
                         f"got: '{bus_type}'"
                     )
+
+            # Validate event_bus.profile enum (OMN-17304 profile axis)
+            if "profile" in event_bus:
+                bus_profile = event_bus["profile"]
+                if not isinstance(bus_profile, str):
+                    errors.append(
+                        f"event_bus.profile must be a string, "
+                        f"got {type(bus_profile).__name__}"
+                    )
+                elif bus_profile not in VALID_EVENT_BUS_PROFILES:
+                    errors.append(
+                        f"event_bus.profile must be one of "
+                        f"{sorted(VALID_EVENT_BUS_PROFILES)}, got: '{bus_profile}'"
+                    )
+
+            # Cross-field: the in-memory bus is only legal under the local
+            # profile (OMN-17304). The profile default is 'lane' (fail-closed),
+            # so an inmemory declaration without an explicit local profile is a
+            # misconfiguration — same rule ModelEventBusConfig enforces.
+            if (
+                event_bus.get("type") == "inmemory"
+                and event_bus.get("profile") != "local"
+            ):
+                errors.append(
+                    "event_bus.type 'inmemory' requires event_bus.profile "
+                    "'local' — the default profile 'lane' rejects "
+                    "non-production-safe transports (OMN-17304)"
+                )
 
             # Validate event_bus.environment is string if present
             if "environment" in event_bus:

@@ -10,17 +10,33 @@
 # CONFIGURATION PRIORITY:
 # =============================================================================
 # When this file exists, contract values are loaded and used directly.
-# Only ONEX_ENVIRONMENT and ONEX_EVENT_BUS_TYPE override contract values
-# at runtime (applied by bootstrap after config loading).
+# Only ONEX_ENVIRONMENT overrides a contract value at runtime (applied by
+# bootstrap after config loading).
 #
 # event_bus.type specifically is resolved by ONE authority shared with the
 # `onex delegate` CLI path (omnibase_infra/backends/auto_configure.py ::
-# resolve_bus_type, OMN-16678/OMN-16693). Its order, highest first:
+# resolve_bus_type, OMN-16678/OMN-16693/OMN-17304). Its order, highest first:
 #
 #   1. explicit argument   -- `--bus <x>` at the CLI, bus_type= in-process
-#   2. ONEX_EVENT_BUS_TYPE -- this file's documented operator override
-#   3. event_bus.type      -- the value declared below
-#   4. live broker probe   -- only when none of the above declares an intent
+#   2. event_bus.type      -- the value declared below (the configured
+#                             authority; every runtime has one — an
+#                             unconfigured install resolves the SHIPPED
+#                             tier-0 default, src/omnibase_infra/runtime/
+#                             tier0_runtime_config.yaml: inmemory, local
+#                             profile)
+#   3. live broker probe   -- only for callers with no config at all;
+#                             structurally unreachable for config-resolved
+#                             runtimes
+#
+# ONEX_EVENT_BUS_TYPE holds NO tier (OMN-17304): env vars may bootstrap WHERE
+# configuration is found (ONEX_CONTRACTS_DIR), never WHAT the transport is.
+# A set value is ignored, with a warning, so the export gets deleted rather
+# than silently going dead.
+#
+# event_bus.profile (OMN-17304) selects the validation profile: "lane" (the
+# fail-closed default — what this file's omission means) rejects the
+# in-memory bus; "local" accepts it. This lane config deliberately does not
+# declare the field.
 #
 # A declared event_bus.type is honoured WITHOUT probing the broker: an
 # unreachable broker no longer silently downgrades a `kafka` contract to the
@@ -28,22 +44,24 @@
 # boot on an otherwise unambiguous contract. An unrecognised value on ANY tier
 # raises at boot rather than falling through to the probe.
 #
-# When this file does NOT exist, the kernel falls back to ONEX_GROUP_ID and
-# model defaults. Topics are ALWAYS derived from contract event_bus
-# declarations (OMN-8784); there is no env-var override for topics.
+# When this file does NOT exist, the kernel resolves the shipped tier-0
+# default runtime config (ONEX_GROUP_ID still overrides the consumer group).
+# Topics are ALWAYS derived from contract event_bus declarations (OMN-8784);
+# there is no env-var override for topics.
 #
 # =============================================================================
 # ENVIRONMENT VARIABLES:
 # =============================================================================
 # Runtime overrides (always applied, even when this file is present):
 #   ONEX_ENVIRONMENT    - Override event_bus.environment
-#   ONEX_EVENT_BUS_TYPE - Override event_bus.type ("inmemory" or "kafka")
-#                         Use "inmemory" for CI/testing without Kafka
 #   ONEX_LOG_LEVEL      - Logging level (used directly by kernel, not
 #                         through this contract)
 #
 # Fallback defaults (only when this file is absent):
 #   ONEX_GROUP_ID       - Default group_id
+#
+# Removed from transport resolution (OMN-17304) — set-and-ignored warns:
+#   ONEX_EVENT_BUS_TYPE - no longer overrides event_bus.type
 #
 # Removed (OMN-8784) — kernel hard-fails if set:
 #   ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC

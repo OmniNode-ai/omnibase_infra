@@ -3254,9 +3254,11 @@ class RuntimeHostProcess:
                         # mode (e.g., tests). This prevents port-binding conflicts
                         # when multiple RuntimeHostProcess instances start within the
                         # same process (each would attempt to bind the same MCP port).
-                        if (
-                            "skip_server" not in effective_config
-                            and os.environ.get("ONEX_EVENT_BUS_TYPE") == "inmemory"
+                        # OMN-17304: keyed off the RESOLVED bus this host actually
+                        # runs on, not ONEX_EVENT_BUS_TYPE — that env var no longer
+                        # carries a transport value anywhere.
+                        if "skip_server" not in effective_config and (
+                            type(self._event_bus).__name__ == "EventBusInmemory"
                         ):
                             effective_config["skip_server"] = True
 
