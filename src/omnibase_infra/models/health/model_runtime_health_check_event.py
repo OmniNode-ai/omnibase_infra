@@ -85,6 +85,15 @@ class ModelRuntimeHealthCheckEvent(BaseModel):
             "quarantine sink over the observation window (OMN-16994)"
         ),
     )
+    nonwriting_projection_count: int = Field(
+        default=0,
+        description=(
+            "Attached projections whose in-process dispatch is a deliberate "
+            "no-op (standalone-runner shape): offsets commit and nothing is "
+            "written here, and the two counts above read 0 through it because "
+            "the topic IS attached and nothing raises (OMN-17448)"
+        ),
+    )
 
 
 __all__: list[str] = ["ModelRuntimeHealthCheckEvent"]

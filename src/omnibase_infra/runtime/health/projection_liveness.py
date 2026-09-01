@@ -167,6 +167,7 @@ def evaluate_projection_liveness(
     projections: tuple[ModelProjectionContractRef, ...],
     attached_topics: frozenset[str],
     flow_windows: Iterable[ModelNodeFlowWindow],
+    dispatch_skipped: frozenset[str] = frozenset(),
 ) -> ModelProjectionLivenessVerdict:
     """Compute the projection liveness verdict from injected observations.
 
@@ -181,6 +182,15 @@ def evaluate_projection_liveness(
         flow_windows: Closed OMN-16777 flow windows. Empty means the saturation
             half reports UNKNOWN — a runtime whose heartbeat has not yet closed
             a window has not proven anything either way.
+        dispatch_skipped: OMN-17448. Contract names this process wired onto the
+            standalone-runner branch, from
+            ``omnibase_infra.runtime.projection_dispatch_ledger``. Unlike the
+            two halves above, an empty set here is NOT ambiguous: the ledger is
+            written by the wiring seam on the same branch it describes, so
+            "nothing recorded" means "no projection took that branch in this
+            process". Only projections that are BOTH in scope and actually
+            subscribed are named — a contract this runtime does not own cannot
+            be a non-writing projection of it.
 
     Returns:
         The verdict. Names, counts, and two UNKNOWN flags; no status word.
@@ -222,6 +232,12 @@ def evaluate_projection_liveness(
             and (min(totals_dlq.get(name, 0), taken) / taken) >= DLQ_SATURATION_RATIO
         )
 
+    # OMN-17448. Narrowed to projections this health cycle already has in scope,
+    # so a stale or foreign ledger entry can never manufacture a name the
+    # operator cannot look up in the contract set this runtime wired.
+    in_scope = {ref.name for ref in projections}
+    nonwriting = sorted(in_scope & dispatch_skipped)
+
     return ModelProjectionLivenessVerdict(
         projection_count=len(projections),
         attachment_evaluated=attachment_evaluated,
@@ -229,6 +245,7 @@ def evaluate_projection_liveness(
         saturation_evaluated=saturation_evaluated,
         dlq_saturated_projections=tuple(saturated),
         observed_window_count=len(windows),
+        nonwriting_projections=tuple(nonwriting),
     )
 
 
@@ -277,12 +294,28 @@ def describe_dlq_saturation(verdict: ModelProjectionLivenessVerdict) -> str:
     )
 
 
+def describe_projection_write_path(verdict: ModelProjectionLivenessVerdict) -> str:
+    """Build the ``projection_write_path`` dimension detail (OMN-17448)."""
+    if not verdict.nonwriting_projections:
+        return (
+            f"All {verdict.projection_count} declared projection(s) dispatch in-process"
+        )
+    return (
+        f"{len(verdict.nonwriting_projections)}/{verdict.projection_count} declared "
+        f"projection(s) are subscribed here but dispatch NOTHING in this process "
+        f"(standalone-runner shape): offsets commit and no row is written unless a "
+        f"dedicated writer is deployed for each on this lane: "
+        f"{_name_list(verdict.nonwriting_projections)}"
+    )
+
+
 __all__: list[str] = [
     "DLQ_SATURATION_MIN_MESSAGES",
     "DLQ_SATURATION_RATIO",
     "MAX_NAMED_PROJECTIONS",
     "describe_dlq_saturation",
     "describe_projection_attachment",
+    "describe_projection_write_path",
     "evaluate_projection_liveness",
     "select_projection_contracts",
 ]

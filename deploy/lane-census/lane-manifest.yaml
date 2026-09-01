@@ -250,6 +250,18 @@ lanes:
       - name: omninode-runtime-effects
         kind: service
         replicas: 1
+      # OMN-17448: the standalone projection writers. Declared here so the lane
+      # map states what the dev lane actually runs -- while these were absent,
+      # every *ProjectionRunner node on this lane consumed to LAG 0 and wrote
+      # nothing, and no census, health surface or lane document said so.
+      # `optional: true` on this lane still holds: an entirely-down dev lane is
+      # not drift. When dev IS up, these must be running.
+      - name: omnimarket-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-delegation-writer
+        kind: service
+        replicas: 1
   # OMN-17143: COLLABORATOR lane reserved for Lakshman Patel (operator decision
   # 2026-08-30). This entry is a RESERVATION, not a running lane — there is no
   # docker/docker-compose.lakshman.yml yet and no containers exist. It is

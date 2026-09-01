@@ -11,6 +11,11 @@ signal missed, because each of them measures *connectedness* rather than
 * **DLQ-saturated** — a consumer IS attached and IS consuming, and routes 100%
   of what it takes to a DLQ/quarantine sink. Offsets commit on the DLQ route, so
   consumer lag reads 0 and every lag-based check reads green over a total loss.
+* **non-writing** (OMN-17448) — a consumer IS attached and IS consuming, and its
+  in-process dispatch is a deliberate no-op because the handler has the
+  standalone-runner shape (OMN-15905). Offsets commit, nothing raises, nothing
+  is DLQ'd, and the rows exist only if a dedicated writer process is deployed
+  elsewhere. Both fields above read green through this by construction.
 
 The projection unit itself lives in
 :mod:`omnibase_infra.models.health.model_projection_contract_ref`.
@@ -67,6 +72,18 @@ class ModelProjectionLivenessVerdict(BaseModel):
     )
     observed_window_count: int = Field(
         default=0, ge=0, description="Closed flow windows the ratio was taken over"
+    )
+    nonwriting_projections: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "OMN-17448. Projections this process SUBSCRIBES and deliberately "
+            "does not dispatch: the standalone-runner branch returns None "
+            "before any handler runs, so the consumer takes every message and "
+            "commits every offset while persisting nothing here. Not a defect "
+            "on its own -- the rows depend on a dedicated writer process this "
+            "one cannot see -- but invisible to both fields above, because the "
+            "topic IS attached and nothing raises so nothing reaches a DLQ."
+        ),
     )
 
 

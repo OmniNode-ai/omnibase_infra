@@ -135,6 +135,31 @@ readonly COMPOSE_PROJECT="${DEV_COMPOSE_PROJECT}"
 readonly REDPANDA_CONTAINER="omnibase-infra-redpanda"
 readonly POSTGRES_CONTAINER="omnibase-infra-postgres"
 readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
+
+# OMN-17448: BUILD/RESTART scope, deliberately WIDER than CORE_SERVICES and
+# deliberately not merged into it.
+#
+# The two standalone projection writers are declared only in
+# docker/docker-compose.dev-lane.yml, so they exist on this lane and no other.
+# They must be rebuilt and recreated by a governed refresh or they keep running
+# a stale image forever: this script exports
+# RUNTIME_BUILD_SERVICES_OVERRIDE, and deploy-runtime.sh treats an explicit
+# override as an instruction to touch ONLY the named services -- so a writer
+# absent from that list is never rebuilt. `restart: unless-stopped` means it
+# survives the refresh, which makes the failure quiet: a running writer on
+# last-release code, indistinguishable from a current one.
+#
+# They are NOT added to CORE_SERVICES because that array drives the health
+# gate, the pre-image-id capture and the rollback anchors, and
+# verify_dev_refresh.py carries its own CORE_SERVICE_NAMES that must stay
+# matched to it. Widening the VERIFICATION surface is a separate change with
+# its own live proof; widening the BUILD surface is what stops the drift, and
+# it is the half that is provable here.
+readonly REFRESH_BUILD_SERVICES=(
+    "${CORE_SERVICES[@]}"
+    projection-tenant-registry-writer
+    projection-delegation-writer
+)
 readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
 
 # OMN-14958: probe host parameterized -- localhost is only correct ON the lane
@@ -271,6 +296,7 @@ log "lane            : ${LANE} (compose project ${COMPOSE_PROJECT})"
 log "ref             : ${REF}"
 log "min contracts   : ${MIN_CONTRACTS}"
 log "core services   : ${CORE_SERVICES[*]}"
+log "build scope     : ${REFRESH_BUILD_SERVICES[*]}"
 log "mode            : ${MODE}"
 
 # --- probe live state to decide WARM vs COLD-AWARE --------------------------
@@ -307,7 +333,7 @@ if [[ "${MODE}" != "execute" ]]; then
     case "${BRANCH}" in
         warm)
             log "would run (warm): OMNI_HOME=${OMNI_HOME} OMNIBASE_INFRA_COMPOSE_PROJECT=${COMPOSE_PROJECT} \\"
-            log "  BUILD_SOURCE=workspace DEPLOY_REF=${REF} RUNTIME_BUILD_SERVICES_OVERRIDE=\"${CORE_SERVICES[*]}\" \\"
+            log "  BUILD_SOURCE=workspace DEPLOY_REF=${REF} RUNTIME_BUILD_SERVICES_OVERRIDE=\"${REFRESH_BUILD_SERVICES[*]}\" \\"
             log "  ${DEPLOY_RUNTIME} --execute --force --restart" ;;
         cold-aware-restart)
             log "would run (cold-aware, deps up): same as warm but no pre-image/ancestry/rollback capture" ;;
@@ -434,7 +460,7 @@ else
         export BUILD_SOURCE="workspace"
         # shellcheck disable=SC2030,SC2031
         export DEPLOY_REF="${REF}"
-        export RUNTIME_BUILD_SERVICES_OVERRIDE="${CORE_SERVICES[*]}"
+        export RUNTIME_BUILD_SERVICES_OVERRIDE="${REFRESH_BUILD_SERVICES[*]}"
         bash "${DEPLOY_RUNTIME}" --execute --force --restart
     ) || DEPLOY_EXIT=$?
 fi

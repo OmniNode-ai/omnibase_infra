@@ -128,6 +128,7 @@ def _run_readback(
     ps_map: dict[str, str],
     revision_map: dict[str, str],
     version_map: dict[str, str] | None = None,
+    scoped_override: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Extract + execute readback_deployed_ref() with real dependencies, stubbed docker."""
     stub_dir = tmp_path / "stubs"
@@ -146,6 +147,11 @@ def _run_readback(
         (stub_dir / "version" / container).write_text(version, encoding="utf-8")
 
     services_literal = " ".join(f'"{s}"' for s in runtime_build_services)
+    override_line = (
+        f'RUNTIME_BUILD_SERVICES_OVERRIDE="{services_literal}"'
+        if scoped_override
+        else "unset RUNTIME_BUILD_SERVICES_OVERRIDE"
+    )
 
     harness = "\n".join(
         [
@@ -158,7 +164,14 @@ def _run_readback(
             _extract_function("resolve_lane_overlay_filename"),
             _extract_function("resolve_compose_file_args"),
             _extract_function("resolve_lane_runtime_container_name"),
+            (
+                "DEV_LANE_ONLY_RUNTIME_SERVICES=("
+                "projection-tenant-registry-writer projection-delegation-writer"
+                ")"
+            ),
+            _extract_function("resolve_lane_runtime_services"),
             _extract_function("readback_deployed_ref"),
+            override_line,
             f"RUNTIME_BUILD_SERVICES=({services_literal})",
             (
                 f'readback_deployed_ref "{GIT_SHA}" "{VERSION}" '
@@ -194,6 +207,7 @@ def test_scoped_run_ignores_out_of_scope_stale_container(tmp_path: Path) -> None
             # RUNTIME_BUILD_SERVICES for this scoped run.
             "omninode-runtime": STALE_SHA,
         },
+        scoped_override=True,
     )
     assert result.returncode == 0, result.stderr
     calls_log = (tmp_path / "stubs" / "calls.log").read_text(encoding="utf-8")
@@ -215,6 +229,7 @@ def test_scoped_run_fails_and_restores_on_in_scope_mismatch(tmp_path: Path) -> N
         runtime_build_services=["runtime-effects"],
         ps_map={"runtime-effects": "omninode-runtime-effects"},
         revision_map={"omninode-runtime-effects": STALE_SHA},
+        scoped_override=True,
     )
     assert result.returncode == 1, (
         f"expected RT-6 to fail-closed on a genuine in-scope mismatch; "
@@ -237,6 +252,8 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "skill-lifecycle-consumer",
         "intelligence-api",
         "omninode-contract-resolver",
+        "projection-tenant-registry-writer",
+        "projection-delegation-writer",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -246,6 +263,8 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "skill-lifecycle-consumer": "omninode-skill-lifecycle-consumer",
         "intelligence-api": "omnibase-intelligence-api",
         "omninode-contract-resolver": "omninode-contract-resolver",
+        "projection-tenant-registry-writer": "projection-tenant-registry-writer",
+        "projection-delegation-writer": "projection-delegation-writer",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not

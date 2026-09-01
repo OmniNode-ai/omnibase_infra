@@ -3,7 +3,19 @@
 #
 # WHAT THIS IS FOR
 # ----------------
-# It carries exactly ONE thing: the lane indicator that lets the compose
+# Everything the DEV/LAB LANE gets and no other lane may inherit. Three things
+# as of OMN-17448, each with its own block below and each here for the same
+# fail-closed reason:
+#
+#   1. OMN-15379 — the migration lane indicator (this block).
+#   2. OMN-15363 — the lab-lane analytics connection identity (role_omnidash).
+#   3. OMN-17448 — the standalone projection writer services.
+#
+# The header used to say "it carries exactly ONE thing". That stopped being
+# true at (2) and is corrected here rather than left to mislead the next reader
+# into thinking a second entry is a mistake.
+#
+# (1) The lane indicator that lets the compose
 # forward-migration runner apply the node_projection_registration trio
 # (0000 CREATE / 0001 heartbeat columns / 0002 ENABLE + FORCE ROW LEVEL
 # SECURITY) on the lab lane, which operator ruling 15 designates as the FORCE
@@ -50,7 +62,7 @@
 # Ruling: operator ruling 15, 2026-07-29 — FORCE on node_service_registry is
 #         lab-lane-only; the omninode_infra k8s fence is unchanged at 7 ids.
 # =============================================================================
-# LAB-LANE ANALYTICS CONNECTION IDENTITY (OMN-15363)
+# (2) LAB-LANE ANALYTICS CONNECTION IDENTITY (OMN-15363)
 # =============================================================================
 # WHAT THIS IS FOR
 # ----------------
@@ -109,6 +121,13 @@
 # Ticket: OMN-15363. Gate this enables: OMN-15416 (prove FORCE-RLS with real
 # non-owner pools). Unchanged by this block: no FORCE/RLS state on any table, no
 # migration fence, no other lane.
+# YAML anchors do NOT cross compose files, so the writer services below cannot
+# reference the base file's `x-logging-defaults`. Same values, declared locally.
+x-dev-lane-logging: &dev_lane_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 x-dev-lane-analytics-env: &dev_lane_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set — the lab lane connects to omnidash_analytics as the non-BYPASSRLS role_omnidash (OMN-15363), never as the postgres superuser}@postgres:5432/omnidash_analytics"
 services:
@@ -137,3 +156,228 @@ services:
   omninode-contract-resolver:
     environment:
       !!merge <<: *dev_lane_analytics_env
+  # ===========================================================================
+  # STANDALONE PROJECTION WRITERS (OMN-17448)
+  # ===========================================================================
+  # WHAT THESE ARE FOR
+  # ------------------
+  # A handler with the standalone-runner shape (its own `run()` consume loop,
+  # its own `project_event`, its own topic set, its own DB adapter) is
+  # deliberately NOT dispatched by the shared kernel. `handler_wiring.py`'s
+  # auto-wired projection callback opens with:
+  #
+  #     if is_projection_runner:
+  #         logger.debug("Projection runner skipped by DB-injection auto-wiring: ...")
+  #         return None
+  #
+  # That skip is correct and load-bearing (OMN-15905 / OMN-16874): the runtime
+  # cannot scope the lifetime of a pool it did not create, and a runner
+  # dispatched in-process died `Event loop is closed` on every message. The
+  # sanctioned way to run such a handler for real is a DEDICATED PROCESS
+  # outside the kernel.
+  #
+  # WHAT WAS BROKEN
+  # ---------------
+  # The kernel still SUBSCRIBES these contracts' topics. So the consumer joins,
+  # takes every message, and commits every offset while the callback returns
+  # None before any handler runs: consume -> ack -> nothing written -> no DLQ
+  # record -> no terminal event -> no ERROR log. Silent by construction, and
+  # invisible to both OMN-16994 liveness masks (the topic IS attached, and
+  # nothing raises so nothing is DLQ'd).
+  #
+  # OMN-15905 fixed this for onex-dev k8s by adding dedicated writer
+  # Deployments under `omninode_infra/k8s/onex-dev/runtime/`. Nothing ever
+  # mirrored that onto compose. Measured on the .201 dev lane 2026-09-01, after
+  # the OMN-17374 lane-apply deploy: a well-formed TENANT_CREATED published to
+  # `onex.tenant.events` (offset 37) moved the consumer group to LAG 0 and left
+  # `tenant_registry_mirror` at 0 rows, the malformed-DLQ topic at HWM 0, and
+  # zero log lines for that correlation id in any of the four runtime
+  # containers. `node_projection_tenant_registry` additionally had no writer on
+  # ANY lane -- it is absent from the onex-dev Deployment set too, which is why
+  # its mirror was empty on both .201 and staging.
+  #
+  # WHY THIS FILE AND NOT docker-compose.infra.yml
+  # ----------------------------------------------
+  # Same fail-closed reasoning as the migration-lane indicator at the top of
+  # this file, and it is the whole reason these services live here. The base
+  # file is merged by EVERY lane: stability-test, prod and judge each layer
+  # their own overlay on top of it. A service written into the base would be
+  # inherited by all of them and by any lane added later. Only the dev lane
+  # loads this file (`resolve_compose_file_args()` falls through to it for the
+  # bare `omnibase-infra` project), so declaring the writers here changes the
+  # dev lane and provably nothing else. Parity for the other lanes is separate,
+  # deliberate work with its own approval -- not a side effect of this file.
+  #
+  # SCOPE, STATED HONESTLY
+  # ----------------------
+  # Two writers, not five. onex-dev runs five standalone writers
+  # (delegation, live-events, registration, savings, tenant-credentials).
+  # This file lands the two that are on the beta-critical path -- the ones
+  # OMN-17298 AC3, OMN-17374 AC3 and OMN-16804 AC5 are blocked behind. The
+  # remaining three follow the same pattern and are ticketed separately; the
+  # pattern is this block, copied.
+  #
+  # NO ANCHOR REUSE
+  # ---------------
+  # `x-runtime-base` / `x-runtime-env` live in the base file and YAML anchors
+  # do not cross compose files, so these two services spell out their own
+  # config. They are deliberately MINIMAL: a BaseProjectionRunner subclass is a
+  # bare Kafka consumer with a DB pool. It has no HTTP surface beyond its own
+  # readiness server, no Bifrost rendering, no delegation routing, no contract
+  # discovery, and no secret resolver -- so none of the runtime kernel's env is
+  # wired here, and adding it would only create failure modes these processes
+  # cannot have.
+  #
+  # DATABASE IDENTITY (see OMN-17448's grant-binding finding)
+  # --------------------------------------------------------
+  # `BaseProjectionRunner` resolves its own DSN through
+  # `ModelProjectionRuntimeBinding.from_legacy_settings()`, which prefers
+  # `OMNIDASH_ANALYTICS_DB_URL`. It is never handed the topology-resolved
+  # binding: `bind_projection_database_url()` is called only on the in-process
+  # dispatch path, and by construction the runtime does not dispatch these.
+  # So a standalone writer connects as `role_omnidash` on this lane -- NOT as
+  # `omninode_runtime`, which is the principal the topology declares for these
+  # relations' `omninode_internal` domain and the one OMN-17374's migration
+  # granted. Both writes land anyway, but by a DIFFERENT mechanism: flat
+  # migration `096_grant_role_omnidash_omnidash_analytics.sql` issues
+  # `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO
+  # role_omnidash`, which covers every relation in this schema including ones
+  # added later. That blanket grant is what these writers actually rest on, and
+  # `scripts/validation/check_topology_grant_delivery.py` cannot see it (it
+  # matches named-relation GRANT statements, never `ON ALL TABLES`). Recorded
+  # rather than silently relied on; the "should a standalone writer resolve the
+  # topology binding" question is OMN-16911's residual, not this file's.
+  #
+  # Ticket: OMN-17448. Pattern source:
+  #   omninode_infra/k8s/onex-dev/runtime/deployment-omnimarket-projection-*-writer.yaml
+  projection-tenant-registry-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-projection-tenant-registry-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    # The `if __name__ == "__main__"` entrypoint on the handler module, exactly
+    # as the onex-dev Deployment invokes it. Same class, same code path, same
+    # image contents -- the only difference between the two lanes is the
+    # orchestrator that starts the process.
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_tenant_registry.handlers.handler_tenant_registry_projection
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+      # KAFKA_BROKERS is the env `BaseProjectionRunner.kafka_bootstrap_servers`
+      # reads first (runner.py KAFKA_BROKERS_ENV). Docker-internal hostname, as
+      # every other runtime service on this lane uses.
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      # Its OWN consumer group, distinct from the shared kernel's subscription
+      # to the same topic and from the sibling writer's. Two processes reading
+      # the same topic under one group would split the partitions between a
+      # writer and a no-op consumer, so half the tenants would silently never
+      # land -- a worse failure than the one this service fixes, because it
+      # would look like it worked. Canonical
+      # {env}.{service}.{node}.{purpose}.{version} shape, read via
+      # ModelProjectionRuntimeBinding.from_legacy_settings()'s
+      # KAFKA_CONSUMER_GROUP fallback.
+      KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.tenant-registry-writer.consume.v1"
+      # Opt-in readiness/liveness HTTP server
+      # (BaseProjectionRunner.PROJECTION_RUNNER_HEALTH_PORT_ENV). Container-
+      # internal only: the healthcheck below curls localhost, and publishing a
+      # host port would put this service into the lane port map for no reader.
+      PROJECTION_RUNNER_HEALTH_PORT: "8098"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8098/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-tenant-registry-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17448"
+      - "autoheal=true"
+  projection-delegation-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-projection-delegation-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.delegation-writer.consume.v1"
+      # 8098 is the tenant-registry writer's. Distinct ports keep two unrelated
+      # processes distinguishable in logs and metrics, the same reason the five
+      # onex-dev writers hold 8093-8097.
+      PROJECTION_RUNNER_HEALTH_PORT: "8099"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8099/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1024M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-delegation-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17448"
+      - "autoheal=true"

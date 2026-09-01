@@ -150,6 +150,9 @@ from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
 from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_refs
+from omnibase_infra.runtime.projection_dispatch_ledger import (
+    record_dispatch_skipped_projection,
+)
 from omnibase_infra.runtime.projection_tenant_authority import (
     VerifiedProjectionTenantAuthority,
     assert_projection_tenant_authority_matches_event,
@@ -3458,6 +3461,7 @@ def _make_projection_dispatch_callback(
     target: ProjectionDatabaseTarget,
     subscribe_topics: tuple[str, ...],
     sinks: ProjectionDispatchSinks | None = None,
+    contract_name: str = "",
 ) -> DispatcherFunc:
     """Create a dispatch callback for projection handlers (db_io.db_tables declared).
 
@@ -3488,6 +3492,22 @@ def _make_projection_dispatch_callback(
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
     is_projection_runner = _is_standalone_projection_runner(handler_instance)
+    if is_projection_runner:
+        # OMN-17448. The callback below returns None for this handler, by
+        # design (OMN-15905) -- but the kernel still SUBSCRIBES the contract's
+        # topics, so the consumer takes every message and commits every offset
+        # while nothing is written here. Recorded on the SAME branch that
+        # decides it, so the health ledger cannot drift from the wiring.
+        record_dispatch_skipped_projection(contract_name)
+        logger.warning(
+            "Projection %r wires a standalone runner (%s): this process "
+            "subscribes its topics and dispatches NOTHING, so it persists no "
+            "rows unless a dedicated writer process is deployed for it on this "
+            "lane (OMN-15905 pattern). db_tables=%s",
+            contract_name or "<unnamed contract>",
+            handler_name,
+            [table.name for table in target.tables],
+        )
     db_urls = (
         {}
         if is_projection_runner
@@ -9177,6 +9197,7 @@ def _prepare_handler_wiring(
                 terminal_event=projection_terminal_event,
                 dlq_topics=tuple(projection_dlq_topics),
             ),
+            contract_name=contract.name,
         )
         logger.info(
             "Auto-wired projection handler with DB injection: handler=%s db_tables=%s "
