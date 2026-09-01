@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# Shared OMN-15807 parser parity fixture.
-schema_version: "bifrost_lane_overlay.v2"
+# Shared OMN-15807 parser parity fixture (OMN-17502: v3 adds `locale`).
+schema_version: "bifrost_lane_overlay.v3"
 lane: dev
+locale: lab
 backends:
   - backend_id: local-coder
     endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"

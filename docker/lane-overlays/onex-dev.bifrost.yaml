@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-17502: Typed Bifrost delegation overlay for the onex-dev cluster lane.
+#
+# This lane is CLOUD-ONLY, and this file is the first place the schema has let
+# it say so. onex-dev runs in the cluster, not on the lab network: its
+# delegation has always resolved to the base contract's cloud backends, and the
+# authorized local endpoints are refused from inside the namespace (probed live
+# from `onex-api` in the onex-dev namespace on 2026-09-01 — both the .201 and
+# .200 lab ports returned ConnectionRefused). Beta axiom 9 puts the lane's
+# execution locale in the cloud with customer keys, so a local rung here would
+# be a rung nothing can call.
+#
+# `locale: cloud` + an empty `backends` mapping is a STATED FACT, not a
+# fallthrough: ModelBifrostLaneOverlay has no default locale, a cloud lane that
+# lists any backend is rejected naming the lane, and a lab lane that lists none
+# is rejected the same way. The renderer then emits the base contract's cloud
+# backends with every local backend explicitly disabled (`endpoint_url: null` —
+# the shape omnimarket's `_load_bifrost_endpoints` skips), so the chain of
+# responders never attempts a local rung, while the local ids stay DECLARED so
+# the routing rules that name them still resolve.
+#
+# Before this file existed the lane had two options, both wrong: mount another
+# lane's lab bindings — advertising three unreachable backends, which is the
+# OMN-17150 defect done explicitly — or crash-loop on the fail-closed overlay
+# requirement, which is what the released OMN-17150 image did to
+# omninode-runtime, -effects and -worker.
+schema_version: "bifrost_lane_overlay.v3"
+lane: onex-dev
+locale: cloud
+backends: []

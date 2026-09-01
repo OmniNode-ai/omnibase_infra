@@ -17,6 +17,8 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
 
 _ROOT = Path(__file__).resolve().parents[3]
 _OVERLAY = _ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
+# OMN-17502: the cloud lane's committed overlay — zero local backends, stated.
+_CLOUD_OVERLAY = _ROOT / "docker" / "lane-overlays" / "onex-dev.bifrost.yaml"
 _ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
 # OMN-16833: the second live local rung — DS-V4-Flash on .200:8101.
 _DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
@@ -187,7 +189,13 @@ def test_missing_or_malformed_overlay_fails_before_dispatch(tmp_path: Path) -> N
     target = tmp_path / "rendered.yaml"
     _write_base_contract(source)
     invalid_overlay.write_text(
-        "schema_version: bifrost_lane_overlay.v2\nlane: dev\nbackends: []\n",
+        # A lab lane with zero backends: schema-valid YAML, contract-invalid
+        # overlay (OMN-16833 silent-degradation shape). A CLOUD lane with zero
+        # backends is the one legal empty overlay — see the cloud tests below.
+        "schema_version: bifrost_lane_overlay.v3\n"
+        "lane: dev\n"
+        "locale: lab\n"
+        "backends: []\n",
         encoding="utf-8",
     )
 
@@ -264,3 +272,209 @@ def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
             verify_endpoints=True,
             endpoint_probe=rejected_probe,
         )
+
+
+# ---------------------------------------------------------------------------
+# OMN-17502: cloud-locale lanes. onex-dev runs in the cluster, where the .201 /
+# .200 lab endpoints are not reachable (live probe from inside the namespace,
+# 2026-09-01: ConnectionRefused on both). Its delegation has always been
+# cloud-only; before this ticket the renderer had no way to say so, so the
+# fail-closed OMN-17150 overlay requirement crash-looped the lane.
+#
+# The assertions below encode what the CONSUMER requires, read out of
+# omnimarket rather than assumed:
+#   * ``config_loader_bifrost_delegation.load_bifrost_delegation_config``
+#     raises ``... references undeclared backend(s)`` when a routing rule or
+#     ``default_backends`` names an id the contract does not declare — hence
+#     disabled-not-deleted;
+#   * ``handler_delegation_routing._load_bifrost_endpoints`` skips a backend
+#     whose ``endpoint_url`` or ``model_name`` is empty, and
+#     ``_tier_can_route_task`` then skips a tier with no resolvable backend —
+#     hence a null endpoint is exactly "no local rung offered".
+#
+# The EXECUTABLE cross-repo seam test lives in omnimarket, next to its
+# OMN-15628 sibling (``tests/integration/node_delegation_routing_reducer/
+# test_omn15628_bifrost_renderer_reducer_seam.py``): omnimarket depends on
+# omnibase_infra, not the reverse, and this repo's venv-purity gate (OMN-15620)
+# refuses an omnimarket install into the test environment. It lands there on the
+# next omnibase-infra repin. The seam was proven live for this change before
+# landing — see the PR body's evidence block.
+# ---------------------------------------------------------------------------
+
+_CLOUD_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+)
+
+
+def _write_mixed_base_contract(
+    path: Path, *, cloud_endpoint: str | None = _CLOUD_ENDPOINT
+) -> None:
+    """A base contract shaped like the packaged omnimarket one: local backends
+    unbound (``endpoint_url: null`` + an env hint), cloud backends carrying a
+    complete URL, and routing rules that REFERENCE the local ids."""
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "backends": [
+                    {
+                        "backend_id": "local-coder",
+                        "model_name": "qwen3.8",
+                        "endpoint_url_env": "BIFROST_LOCAL_CODER_ENDPOINT_URL",
+                        "endpoint_url": None,
+                        "tier": "local",
+                    },
+                    {
+                        "backend_id": "local-heavy-reasoning",
+                        "model_name": "qwen3.8",
+                        "endpoint_url_env": "BIFROST_LOCAL_CODER_ENDPOINT_URL",
+                        "endpoint_url": None,
+                        "tier": "local",
+                    },
+                    {
+                        "backend_id": "local-ds-v4-flash",
+                        "model_name": "deepseek-v4-flash",
+                        "endpoint_url_env": "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
+                        "endpoint_url": None,
+                        "tier": "local",
+                    },
+                    {
+                        "backend_id": "local-embedding",
+                        "model_name": "text-embedding-qwen3",
+                        "endpoint_url_env": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+                        "endpoint_url": None,
+                        "tier": "local",
+                    },
+                    {
+                        "backend_id": "cloud-gemini-pro",
+                        "model_name": "gemini-2.5-flash",
+                        "endpoint_url": cloud_endpoint,
+                        "tier": "frontier_api",
+                    },
+                ],
+                "routing_rules": [
+                    {
+                        "rule_id": "d4e5f6a7-0001-4000-8000-000000000001",
+                        "task_class": "code_generation",
+                        "backend_ids": ["local-coder", "cloud-gemini-pro"],
+                    }
+                ],
+                "default_backends": ["local-coder", "cloud-gemini-pro"],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.unit
+def test_cloud_locale_renders_cloud_backends_and_disables_every_local_one(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source)
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=_CLOUD_OVERLAY,
+        target_path=target,
+        # A poisoned environment must not resurrect a local rung: the overlay,
+        # not the env, is the authority (OMN-15807) and this overlay says none.
+        environ={
+            "BIFROST_LOCAL_CODER_ENDPOINT_URL": "http://192.168.86.201:8000/v1/chat/completions",
+            "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": "http://192.168.86.200:8101/v1/chat/completions",
+        },
+    )
+
+    assert rendered == target
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+
+    # The cloud rung is the only one carrying an endpoint.
+    assert by_id["cloud-gemini-pro"]["endpoint_url"] == _CLOUD_ENDPOINT
+    for local_id in (
+        "local-coder",
+        "local-heavy-reasoning",
+        "local-ds-v4-flash",
+        "local-embedding",
+    ):
+        assert by_id[local_id]["endpoint_url"] is None, local_id
+
+    # Env transport hints are stripped for every backend, exactly as on a lab lane.
+    assert all("endpoint_url_env" not in backend for backend in by_id.values())
+    assert all("required" not in backend for backend in by_id.values())
+
+
+@pytest.mark.unit
+def test_cloud_locale_keeps_local_backend_ids_declared(tmp_path: Path) -> None:
+    """Disabled, never deleted.
+
+    ``load_bifrost_delegation_config`` (omnimarket, OMN-15628) raises
+    ``Rule <id> references undeclared backend(s)`` / ``default_backends
+    references undeclared backend(s)`` when a routing rule names a backend the
+    contract does not declare — and the base contract's ``code_generation``
+    rule and ``default_backends`` both name ``local-coder``. So a cloud lane's
+    rendered contract must keep every local id DECLARED with a null endpoint
+    (the shape ``_load_bifrost_endpoints`` drops), not drop the entries.
+    """
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source)
+
+    render_bifrost_delegation_contract(
+        source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+    )
+
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    declared = {backend["backend_id"] for backend in contract["backends"]}
+    for rule in contract["routing_rules"]:
+        assert set(rule["backend_ids"]) <= declared
+    assert set(contract["default_backends"]) <= declared
+    assert "local-coder" in declared
+
+
+@pytest.mark.unit
+def test_cloud_locale_fails_closed_when_the_base_has_no_cloud_endpoint(
+    tmp_path: Path,
+) -> None:
+    """A cloud lane with nothing to route to is a misconfiguration, not a lane
+    with zero backends — the render must refuse rather than write a contract
+    whose every rung is dead."""
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source, cloud_endpoint=None)
+
+    with pytest.raises(ProtocolConfigurationError, match="no active endpoint"):
+        render_bifrost_delegation_contract(
+            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        )
+    assert not target.exists()
+
+
+@pytest.mark.unit
+def test_cloud_lane_overlay_still_resolves_only_from_its_own_pin(
+    tmp_path: Path,
+) -> None:
+    """OMN-17150 is not relaxed by OMN-17502: a cloud lane that renders without
+    ``BIFROST_LANE_OVERLAY_PATH`` still fails, naming the lane."""
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source)
+
+    with pytest.raises(
+        ProtocolConfigurationError,
+        match=r"BIFROST_LANE_OVERLAY_PATH is not bound for lane 'onex-dev'",
+    ):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=target,
+            environ={"ONEX_ENVIRONMENT": "onex-dev"},
+        )
+    assert not target.exists()
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"BIFROST_LANE_OVERLAY_PATH": str(_CLOUD_OVERLAY)},
+    )
+    assert rendered == target

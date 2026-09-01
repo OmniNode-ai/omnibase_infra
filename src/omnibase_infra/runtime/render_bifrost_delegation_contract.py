@@ -26,6 +26,12 @@ from omnibase_infra.runtime.config_provenance import (
     build_config_provenance,
     write_provenance_sidecar,
 )
+from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
+    EnumBifrostLaneLocale,
+)
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    ACTIVE_BACKEND_KEYS,
+)
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
 )
@@ -34,6 +40,8 @@ _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
 _LANE_OVERLAY_PATH_ENV = "BIFROST_LANE_OVERLAY_PATH"
 _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
+#: The base contract's own declaration that a backend is served from the lab.
+_LOCAL_TIER = "local"
 
 EndpointProbe = Callable[[str, str, float], str | None]
 
@@ -157,13 +165,7 @@ def _probe_openai_model_endpoint(
     return None
 
 
-def _merge_lane_overlay(
-    *,
-    base: dict[str, object],
-    overlay: ModelBifrostLaneOverlay,
-    verify: bool,
-    endpoint_probe: EndpointProbe,
-) -> dict[str, object]:
+def _index_base_backends(base: dict[str, object]) -> dict[str, dict[object, object]]:
     backends = base.get("backends")
     if not isinstance(backends, list):
         raise ProtocolConfigurationError("Bifrost base contract must declare backends")
@@ -183,6 +185,46 @@ def _merge_lane_overlay(
                 "Bifrost base contract has duplicate or blank backend_id"
             )
         by_id[backend_id] = backend
+    return by_id
+
+
+def _is_local_backend(backend_id: str, backend: dict[object, object]) -> bool:
+    """Whether the BASE contract declares this backend as lab-served.
+
+    Two sources, both the contract's own: the backend's declared ``tier`` and
+    the authorized local binding table the overlay validates against. A cloud
+    lane disables every backend either one calls local.
+    """
+    return backend.get("tier") == _LOCAL_TIER or backend_id in ACTIVE_BACKEND_KEYS
+
+
+def _disable_local_backends(by_id: dict[str, dict[object, object]]) -> None:
+    """Write a cloud lane's absent local rungs into the artifact (OMN-17502).
+
+    The entries are DISABLED, never deleted. ``load_bifrost_delegation_config``
+    (omnimarket, OMN-15628) refuses a contract whose ``routing_rules`` or
+    ``default_backends`` name a backend the contract does not declare, and the
+    base contract's ``code_generation`` rule and ``default_backends`` both name
+    ``local-coder``. A null ``endpoint_url`` is the shape the reducer's
+    ``_load_bifrost_endpoints`` skips, so the chain of responders never offers a
+    local rung while the routing table stays internally consistent.
+    """
+    for backend_id, backend in by_id.items():
+        if _is_local_backend(backend_id, backend):
+            backend["endpoint_url"] = None
+
+
+def _merge_lane_overlay(
+    *,
+    base: dict[str, object],
+    overlay: ModelBifrostLaneOverlay,
+    verify: bool,
+    endpoint_probe: EndpointProbe,
+) -> dict[str, object]:
+    by_id = _index_base_backends(base)
+
+    if overlay.locale is EnumBifrostLaneLocale.CLOUD:
+        _disable_local_backends(by_id)
 
     for binding in overlay.backends:
         backend = by_id.get(binding.backend_key)
@@ -223,13 +265,16 @@ def _merge_lane_overlay(
     return base
 
 
-def _validate_rendered_contract(data: dict[str, object]) -> None:
+def _validate_rendered_contract(
+    data: dict[str, object], *, overlay: ModelBifrostLaneOverlay
+) -> None:
     backends = data.get("backends")
     if not isinstance(backends, list):
         raise ProtocolConfigurationError(
             "Rendered Bifrost contract must declare backends"
         )
     active = 0
+    local_with_endpoint: list[str] = []
     for backend in backends:
         if not isinstance(backend, dict):
             raise ProtocolConfigurationError(
@@ -246,9 +291,19 @@ def _validate_rendered_contract(data: dict[str, object]) -> None:
                     f"Rendered Bifrost endpoint must be complete: {endpoint_url!r}"
                 )
             active += 1
+            backend_id = backend.get("backend_id")
+            if isinstance(backend_id, str) and _is_local_backend(backend_id, backend):
+                local_with_endpoint.append(backend_id)
     if active == 0:
         raise ProtocolConfigurationError(
             "Rendered Bifrost contract has no active endpoint"
+        )
+    if overlay.locale is EnumBifrostLaneLocale.CLOUD and local_with_endpoint:
+        raise ProtocolConfigurationError(
+            f"Lane {overlay.lane!r} renders with locale "
+            f"{EnumBifrostLaneLocale.CLOUD.value!r} but the rendered contract "
+            f"still binds local backend(s) {sorted(local_with_endpoint)} — a "
+            "cloud lane must reach no lab endpoint (OMN-17502)"
         )
 
 
@@ -267,6 +322,11 @@ def render_bifrost_delegation_contract(
     (``BIFROST_LANE_OVERLAY_PATH``), and the endpoint-verification flag;
     endpoint, model, and local operational bindings always come from the
     resolved overlay file, never from the environment.
+
+    The overlay's execution locale decides what "merged" means (OMN-17502): a
+    ``lab`` lane binds exactly the authorized local backends, while a ``cloud``
+    lane declares none and renders the base contract's cloud backends with every
+    local rung explicitly disabled.
     """
     env = environ if environ is not None else os.environ
     target = _resolve_target_path(target_path=target_path, env=env)
@@ -288,7 +348,7 @@ def render_bifrost_delegation_contract(
         verify=should_verify,
         endpoint_probe=endpoint_probe or _probe_openai_model_endpoint,
     )
-    _validate_rendered_contract(data)
+    _validate_rendered_contract(data, overlay=overlay)
     target.parent.mkdir(parents=True, exist_ok=True)
     staged_target = target.with_suffix(f"{target.suffix}.tmp")
     staged_target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")

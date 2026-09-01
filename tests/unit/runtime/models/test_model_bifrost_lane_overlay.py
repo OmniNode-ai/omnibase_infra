@@ -7,6 +7,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
+    EnumBifrostLaneLocale,
+)
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
     ACTIVE_BACKEND_KEYS,
 )
@@ -56,8 +59,9 @@ def _binding(backend_id: str = "local-coder", **overrides: object) -> dict[str, 
 
 def _overlay(**overrides: object) -> dict[str, object]:
     data: dict[str, object] = {
-        "schema_version": "bifrost_lane_overlay.v2",
+        "schema_version": "bifrost_lane_overlay.v3",
         "lane": "dev",
+        "locale": "lab",
         "backends": [_binding(backend_id) for backend_id in _SHAPES],
     }
     data.update(overrides)
@@ -180,3 +184,91 @@ def test_unknown_duplicate_or_missing_backend_is_rejected() -> None:
     ):
         with pytest.raises(ValidationError):
             ModelBifrostLaneOverlay.model_validate(_overlay(backends=backends))
+
+
+# ---------------------------------------------------------------------------
+# OMN-17502: execution locale. A lane that runs where the lab backends do not
+# exist (the onex-dev cloud lane — beta axiom 9, cloud execution locale, BYOK)
+# must be able to state that as a FACT. Before this ticket the only schema-valid
+# overlay was the exact lab set, so a cloud lane could either mount three
+# unreachable lab endpoints or not render at all (OMN-17502 CrashLoopBackOff).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_cloud_locale_declares_zero_local_backends() -> None:
+    """A cloud lane states the absence explicitly: locale + an empty mapping."""
+    overlay = ModelBifrostLaneOverlay.model_validate(
+        {
+            "schema_version": "bifrost_lane_overlay.v3",
+            "lane": "onex-dev",
+            "locale": "cloud",
+            "backends": [],
+        }
+    )
+
+    assert overlay.locale is EnumBifrostLaneLocale.CLOUD
+    assert overlay.backends == ()
+
+
+@pytest.mark.unit
+def test_lab_locale_missing_a_backend_is_rejected_naming_lane_and_rule() -> None:
+    """The lab exact-set rule is unchanged, and the message names both."""
+    incomplete = [_binding(bid) for bid in _SHAPES][:-1]
+
+    with pytest.raises(ValidationError) as excinfo:
+        ModelBifrostLaneOverlay.model_validate(
+            _overlay(lane="dev", locale="lab", backends=incomplete)
+        )
+
+    message = str(excinfo.value)
+    assert "'dev'" in message
+    assert "locale 'lab'" in message
+    assert "local-ds-v4-flash" in message
+
+
+@pytest.mark.unit
+def test_cloud_locale_listing_a_backend_is_rejected_naming_lane_and_rule() -> None:
+    """A cloud lane may not smuggle a lab endpoint in through the overlay."""
+    with pytest.raises(ValidationError) as excinfo:
+        ModelBifrostLaneOverlay.model_validate(
+            _overlay(lane="onex-dev", locale="cloud", backends=[_binding()])
+        )
+
+    message = str(excinfo.value)
+    assert "'onex-dev'" in message
+    assert "locale 'cloud'" in message
+    assert "local-coder" in message
+
+
+@pytest.mark.unit
+def test_lab_locale_with_zero_backends_is_rejected() -> None:
+    """An empty lab overlay is the OMN-16833 silent-degradation shape."""
+    with pytest.raises(ValidationError, match="locale 'lab'"):
+        ModelBifrostLaneOverlay.model_validate(_overlay(locale="lab", backends=[]))
+
+
+@pytest.mark.unit
+def test_locale_is_required_and_has_no_default() -> None:
+    """No default: a lane's execution locale is a stated fact, never inherited.
+
+    A defaulted locale would make ``lab`` the silent answer for any overlay that
+    forgot to declare one — the same fallthrough class OMN-17150 removed from
+    the overlay PATH, one level down in the overlay CONTENT.
+    """
+    data = _overlay()
+    del data["locale"]
+
+    with pytest.raises(ValidationError, match="locale"):
+        ModelBifrostLaneOverlay.model_validate(data)
+
+    assert ModelBifrostLaneOverlay.model_fields["locale"].is_required()
+
+
+@pytest.mark.unit
+def test_schema_version_names_the_locale_shape() -> None:
+    """v2 files predate the locale field and no longer validate as v3."""
+    with pytest.raises(ValidationError, match=r"bifrost_lane_overlay\.v3"):
+        ModelBifrostLaneOverlay.model_validate(
+            _overlay(schema_version="bifrost_lane_overlay.v2")
+        )

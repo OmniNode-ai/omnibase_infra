@@ -296,12 +296,29 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "ONEX_ACTIVE_RUNTIME_PACKAGES",
         # Bifrost contract rendering knobs. k8s ConfigMap parity belongs with
         # the sibling omninode_infra ConfigMap update; tracked by OMN-10943.
-        # BIFROST_LANE_OVERLAY_PATH (OMN-17150) is the per-lane overlay pin the
-        # renderer resolves instead of its former hardcoded dev-lane default;
-        # the render itself only runs where BIFROST_CONTRACT_PATH is bound, so
+        #
+        # OMN-17502 CORRECTION. The justification that used to stand here —
+        # "the render itself only runs where BIFROST_CONTRACT_PATH is bound, so
         # the pin travels with these knobs as one debt item — the cluster
-        # binding lands together with BIFROST_CONTRACT_PATH's or not at all.
-        "BIFROST_CONTRACT_PATH",
+        # binding lands together with BIFROST_CONTRACT_PATH's or not at all" —
+        # was already false the day it was written, and BIFROST_CONTRACT_PATH
+        # is removed from this set with it. BIFROST_CONTRACT_PATH has been bound
+        # non-empty INLINE on all three onex-dev runtime Deployments since
+        # omninode_infra#792 (OMN-15628, 2026-08-01), a month before OMN-17150,
+        # so it is ON the k8s runtime-family surface and was never debt. The
+        # cluster DOES render at boot; the two halves did NOT travel together;
+        # and the consequence was OMN-17502 — the released OMN-17150 image
+        # fail-closed on the unbound per-lane pin and put omninode-runtime,
+        # -effects and -worker into CrashLoopBackOff on onex-dev.
+        #
+        # The TRUE invariant, held mechanically by
+        # ``test_bifrost_render_knobs_are_classified_by_live_cluster_state``:
+        # BIFROST_LANE_OVERLAY_PATH is a LIVE crashing gap on a lane that
+        # renders, not a dormant parity item, and it is listed here for exactly
+        # as long as the cluster does not bind it. The omninode_infra manifest
+        # half of OMN-17502 binds it alongside the mount that provides
+        # docker/lane-overlays/onex-dev.bifrost.yaml, and deletes this entry in
+        # the same change.
         "BIFROST_LANE_OVERLAY_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
@@ -924,6 +941,52 @@ def test_runtime_env_keys_have_k8s_entries() -> None:
         "  • SECRET_KEYS in tests/ci/test_env_parity.py           (k8s Secret source)\n"
         "  • LOCAL_ONLY_KEYS in tests/ci/test_env_parity.py       (local dev only)\n"
         "  • CONFIGMAP_DEBT_KEYS in tests/ci/test_env_parity.py   (temp — must file ticket)"
+    )
+
+
+@pytest.mark.ci
+def test_bifrost_render_knobs_are_classified_by_live_cluster_state() -> None:
+    """OMN-17502: the Bifrost debt classification must track the live cluster.
+
+    Two facts, both read from the manifests rather than asserted in prose:
+
+    * ``BIFROST_CONTRACT_PATH`` IS bound on the runtime-family surface, so the
+      onex-dev lane renders the delegation contract at every container boot.
+      The old CONFIGMAP_DEBT_KEYS comment denied this and used the denial to
+      justify shipping the OMN-17150 renderer change without its cluster half.
+    * ``BIFROST_LANE_OVERLAY_PATH`` is therefore a REQUIRED input on a lane that
+      renders — so it is either bound on that same surface or recorded as debt,
+      never both and never neither. When the omninode_infra half of OMN-17502
+      binds it, this assertion fails until the debt entry is deleted; that is
+      the point, so the allowlist cannot outlive the gap it describes.
+    """
+    if K8S_RUNTIME_DIR is None:
+        pytest.skip(
+            "omninode_infra not found as a sibling — set OMNINODE_INFRA_DIR to run this test"
+        )
+
+    k8s_keys = extract_k8s_runtime_family_bound_keys(K8S_RUNTIME_DIR)
+    compose_keys = extract_runtime_env_keys(COMPOSE_PATH)
+
+    assert "BIFROST_CONTRACT_PATH" in k8s_keys, (
+        "BIFROST_CONTRACT_PATH is no longer bound on every onex-dev runtime "
+        "Deployment. The lane then renders nothing, and the OMN-17502 "
+        "correction above (and the classification of BIFROST_LANE_OVERLAY_PATH "
+        "as a live gap) must be re-derived, not silently kept."
+    )
+    assert "BIFROST_CONTRACT_PATH" not in CONFIGMAP_DEBT_KEYS, (
+        "BIFROST_CONTRACT_PATH is bound on the cluster; listing it as parity "
+        "debt is a false claim (OMN-17502)."
+    )
+
+    assert "BIFROST_LANE_OVERLAY_PATH" in compose_keys
+    bound = "BIFROST_LANE_OVERLAY_PATH" in k8s_keys
+    recorded_as_debt = "BIFROST_LANE_OVERLAY_PATH" in CONFIGMAP_DEBT_KEYS
+    assert bound != recorded_as_debt, (
+        "BIFROST_LANE_OVERLAY_PATH must be either bound on the onex-dev runtime "
+        "family or recorded in CONFIGMAP_DEBT_KEYS — exactly one. "
+        f"bound={bound}, recorded_as_debt={recorded_as_debt}. If the manifest "
+        "half of OMN-17502 has landed, delete the CONFIGMAP_DEBT_KEYS entry."
     )
 
 

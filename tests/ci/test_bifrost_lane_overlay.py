@@ -12,7 +12,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY_YAML = ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
-PARITY_FIXTURE = ROOT / "tests" / "fixtures" / "bifrost_lane_overlay_v2.yaml"
+PARITY_FIXTURE = ROOT / "tests" / "fixtures" / "bifrost_lane_overlay_v3.yaml"
 COMPOSE_INFRA = ROOT / "docker" / "docker-compose.infra.yml"
 OVERLAY_ENV = ROOT / "docker" / "lane-overlays" / "dev.bifrost.env"
 RENDER_SCRIPT = ROOT / "scripts" / "render_bifrost_lane_overlay_env.py"
@@ -40,6 +40,12 @@ _RUNTIME_SERVICES = frozenset({"omninode-runtime", "runtime-effects", "runtime-w
 pytestmark = pytest.mark.unit
 sys.path.insert(0, str(ROOT / "src"))
 
+from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
+    EnumBifrostLaneLocale,
+)
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    ACTIVE_BACKEND_KEYS,
+)
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
 )
@@ -158,6 +164,7 @@ def test_every_lane_overlay_is_typed_and_named_for_its_lane() -> None:
         "dev.bifrost.yaml",
         "judge.bifrost.yaml",
         "lakshman.bifrost.yaml",
+        "onex-dev.bifrost.yaml",
     }
     for path in overlays:
         overlay = _load(path)
@@ -204,3 +211,54 @@ def test_standalone_lane_files_pin_and_mount_their_own_overlay() -> None:
             "lane must carry its own"
         )
         assert (LANE_OVERLAYS_DIR / f"{lane}.bifrost.yaml").is_file()
+
+
+# ---------------------------------------------------------------------------
+# OMN-17502: execution locale. Every overlay states where its lane runs, and a
+# CLOUD lane states its zero local backends as a fact rather than mounting
+# another lane's lab bindings to satisfy a schema.
+# ---------------------------------------------------------------------------
+
+_CLOUD_OVERLAY = LANE_OVERLAYS_DIR / "onex-dev.bifrost.yaml"
+#: Lanes whose runtime is the .201/.200 lab itself.
+_LAB_LANE_OVERLAYS = ("dev", "judge", "lakshman")
+
+
+def test_onex_dev_overlay_is_cloud_only_with_zero_local_backends() -> None:
+    """The onex-dev lane is cloud-only (beta axiom 9: cloud execution locale,
+    BYOK), and the .201/.200 lab endpoints are not reachable from the cluster.
+    Its overlay must say exactly that — not carry a lab binding it cannot use."""
+    overlay = _load(_CLOUD_OVERLAY)
+
+    assert overlay.lane == "onex-dev"
+    assert overlay.locale is EnumBifrostLaneLocale.CLOUD
+    assert overlay.backends == ()
+
+    # No lab endpoint may appear anywhere in the file, comments included: a
+    # cloud lane that names one is advertising a rung it cannot reach, which is
+    # the OMN-17150 defect class done explicitly (OMN-17502).
+    text = _CLOUD_OVERLAY.read_text(encoding="utf-8")
+    assert "chat/completions" not in text
+    for backend_key in sorted(ACTIVE_BACKEND_KEYS):
+        assert backend_key not in text
+
+
+def test_lab_lane_overlays_declare_the_lab_locale_and_the_exact_backend_set() -> None:
+    """The lab rule is unchanged by OMN-17502 — only newly stated."""
+    for lane in _LAB_LANE_OVERLAYS:
+        overlay = _load(LANE_OVERLAYS_DIR / f"{lane}.bifrost.yaml")
+        assert overlay.locale is EnumBifrostLaneLocale.LAB, lane
+        assert {binding.backend_key for binding in overlay.backends} == set(
+            ACTIVE_BACKEND_KEYS
+        ), lane
+
+
+def test_every_lane_overlay_declares_an_explicit_locale() -> None:
+    """No overlay may inherit its locale: the model has no default, so a file
+    that omits it fails to parse here rather than defaulting to lab."""
+    for path in sorted(LANE_OVERLAYS_DIR.glob("*.bifrost.yaml")):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert "locale" in raw, f"{path.name} does not state its execution locale"
+        assert raw["locale"] in {member.value for member in EnumBifrostLaneLocale}, (
+            f"{path.name} declares an unknown locale {raw['locale']!r}"
+        )

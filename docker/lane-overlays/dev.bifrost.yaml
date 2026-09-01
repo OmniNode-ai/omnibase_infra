@@ -4,8 +4,13 @@
 # not rendered through dotenv. It owns the exact authorized .201 lab binding,
 # which the shared v2 parser enforces alongside port and URL shape.
 # onex-allow-internal-ip OMN-15807 reason="typed dev-lane delegation contract"
-schema_version: "bifrost_lane_overlay.v2"
+# OMN-17502: `locale: lab` states what the schema used to assume — this lane's
+# runtime sits on the lab network, so it declares the exact authorized local
+# backend set. A lane that runs elsewhere declares `locale: cloud` and zero
+# backends instead of mounting bindings it cannot reach.
+schema_version: "bifrost_lane_overlay.v3"
 lane: dev
+locale: lab
 backends:
   - backend_id: local-coder
     endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
