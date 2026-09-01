@@ -2566,6 +2566,51 @@ def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
 _TENANT_GUC = "app.tenant_id"
 
 
+def _recorded_tenant_scope(values: Mapping[str, object]) -> str | None:
+    """The attribution the producer recorded, as the GUC compares against it.
+
+    OMN-16976. This is NOT an authority and it mints none: it is the very
+    ``tenant_id`` that is about to be persisted (or filtered on), rendered in
+    the text form ``current_setting('app.tenant_id', true)`` returns. Every
+    canonical tenant policy on this platform is
+    ``tenant_id = current_setting('app.tenant_id', true)`` -- with the explicit
+    ``::uuid`` cast where the column is a uuid -- so a statement issued with
+    the GUC unset compares against NULL and is denied by ``WITH CHECK``.
+
+    Returning ``None`` for an absent or blank tenant is load-bearing, not
+    defensive: it leaves the GUC unset, which leaves the row denied by the
+    relation's own policy. That is how the OMN-16831 ruling's item 4 -- a
+    tenant-less row is the PRODUCER's obligation, not this seam's to invent --
+    stays enforced by the database rather than by a Python refusal.
+    """
+    value = values.get("tenant_id")
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
+def _statement_tenant_scope(
+    tenant_context: VerifiedProjectionTenantAuthority | None,
+    recorded_scope: str | None,
+) -> str | None:
+    """The GUC value one statement runs under, or ``None`` for no scope at all.
+
+    A bound authority always wins: it has already been verified against the
+    dispatch event by ``_optional_tenant_context`` and, on the write path,
+    ``TenantProjectionTableOperation.upsert`` has already refused any row whose
+    ``tenant_id`` disagrees with it -- so by the time this is reached the two
+    cannot differ. ``recorded_scope`` is reached only on the unbound path, and
+    only the TENANT domain operation supplies one: the INTERNAL and CATALOG
+    operations pass none and therefore open no tenant transaction, which is the
+    behaviour their own red controls assert.
+    """
+    if tenant_context is not None:
+        return str(tenant_context.tenant_id)
+    return recorded_scope
+
+
 def _projection_tenant_context_error(message: str) -> Exception:
     from omnibase_infra.errors.error_projection import ProjectionTenantContextError
 
@@ -2687,11 +2732,25 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
             # Nothing is invented, defaulted, or overwritten here -- whether a
             # row is permitted to arrive tenant-less is the producer's
             # obligation, enforced at the write sites (ruling item 4).
+            #
+            # OMN-16976: the statement is still SCOPED to that recorded
+            # attribution. Severing attribution from authorization (OMN-16831)
+            # also, unintentionally, severed the write from the isolation
+            # MECHANISM: a bare INSERT leaves app.tenant_id unset, and every
+            # tenant-classified relation carries
+            # `WITH CHECK (tenant_id = current_setting('app.tenant_id', true))`
+            # under FORCE ROW LEVEL SECURITY, so an unset GUC compares against
+            # NULL and Postgres denied the row with InsufficientPrivilege --
+            # 40 of them per 3h on the .201 dev lane, on the one such relation
+            # currently receiving traffic. The scope value IS the row's own
+            # tenant_id, so this widens nothing: the row can only be written
+            # under the identity it already declares.
             return self._adapter._execute_upsert(
                 self._target,
                 conflict_key,
                 attributed_row,
                 tenant_context=None,
+                recorded_scope=_recorded_tenant_scope(attributed_row),
             )
         supplied_tenant = attributed_row.get("tenant_id")
         if supplied_tenant is not None:
@@ -2718,10 +2777,21 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
             # that does not exist. Refusing here alone was enough to DLQ every
             # delegation event, because the writer probes for existing
             # evidence before it upserts.
+            #
+            # OMN-16976: and symmetric in scoping too. A caller that filters on
+            # a tenant gets the statement scoped to that same tenant, because
+            # the policy's USING clause hides every row from an unset GUC --
+            # so an unscoped read-before-write returns [] on a relation that
+            # DOES hold the tenant's row, and the upsert that follows then
+            # overwrites accumulated evidence (recent_responses) instead of
+            # merging it. Silent, and worse than the refusal it replaced. A
+            # filter carrying no tenant still opens no scope: the read stays
+            # blind rather than being widened to a tenant nobody named.
             return self._adapter._execute_query(
                 self._target,
                 attributed_filters,
                 tenant_context=None,
+                recorded_scope=_recorded_tenant_scope(attributed_filters),
             )
         supplied_tenant = attributed_filters.get("tenant_id")
         if supplied_tenant is not None:
@@ -2844,16 +2914,23 @@ class ProjectionBindingConnections:
             raise RuntimeError("Projection database adapter is closed")
 
     @contextlib.contextmanager
-    def tenant_transaction(
-        self, conn: object, context: VerifiedProjectionTenantAuthority
-    ) -> Iterator[None]:
-        """Set the GUC locally from a validated context, then always end it."""
+    def tenant_transaction(self, conn: object, tenant_scope: str) -> Iterator[None]:
+        """Set the GUC locally to ``tenant_scope``, then always end it.
+
+        ``tenant_scope`` is ``str(context.tenant_id)`` when an authority is
+        bound and the row's own recorded ``tenant_id`` when none is (OMN-16976).
+        This seam does not distinguish them, and must not: its whole contract is
+        that whatever scope it is handed is transaction-LOCAL (``is_local=True``)
+        and is always ended -- committed on success, rolled back on any
+        exception, with autocommit restored in ``finally`` either way. Which
+        scopes are legitimate is decided by the caller that owns the domain.
+        """
         conn.autocommit = False  # type: ignore[attr-defined]
         try:
             with conn.cursor() as cursor:  # type: ignore[attr-defined]
                 cursor.execute(
                     "SELECT set_config(%s, %s, true)",
-                    (_TENANT_GUC, str(context.tenant_id)),
+                    (_TENANT_GUC, tenant_scope),
                 )
             yield
             conn.commit()  # type: ignore[attr-defined]
@@ -2954,6 +3031,7 @@ class ProjectionDatabaseOperations:
         row: dict[str, object],
         *,
         tenant_context: VerifiedProjectionTenantAuthority | None,
+        recorded_scope: str | None = None,
     ) -> bool:
         conflict_keys = [key.strip() for key in conflict_key.split(",") if key.strip()]
         if not conflict_keys:
@@ -2986,11 +3064,12 @@ class ProjectionDatabaseOperations:
         )
         conn = self._binding_connections.get(target.write_binding)
         adapted_row = self._adapt_row(row)
-        if tenant_context is None:
+        scope = _statement_tenant_scope(tenant_context, recorded_scope)
+        if scope is None:
             with conn.cursor() as cursor:  # type: ignore[attr-defined]
                 cursor.execute(insert_sql, adapted_row)
         else:
-            with self._binding_connections.tenant_transaction(conn, tenant_context):
+            with self._binding_connections.tenant_transaction(conn, scope):
                 with conn.cursor() as cursor:  # type: ignore[attr-defined]
                     cursor.execute(insert_sql, adapted_row)
         return True
@@ -3001,6 +3080,7 @@ class ProjectionDatabaseOperations:
         filters: dict[str, object] | None,
         *,
         tenant_context: VerifiedProjectionTenantAuthority | None,
+        recorded_scope: str | None = None,
     ) -> list[dict[str, object]]:
         # Schema/table originate in validated typed declarations, never request data.
         select_sql = f'SELECT * FROM "{target.physical_schema}"."{target.table.name}"'  # noqa: S608
@@ -3021,9 +3101,10 @@ class ProjectionDatabaseOperations:
                 cursor.execute(select_sql, params or None)
                 return [dict(record) for record in cursor.fetchall()]
 
-        if tenant_context is None:
+        scope = _statement_tenant_scope(tenant_context, recorded_scope)
+        if scope is None:
             return _query()
-        with self._binding_connections.tenant_transaction(conn, tenant_context):
+        with self._binding_connections.tenant_transaction(conn, scope):
             return _query()
 
     def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
