@@ -5333,6 +5333,7 @@ def _make_event_bus_callback(
     allowed_dispatcher_ids: Collection[str] | None = None,
     consumer_group: str | None = None,
     failure_terminal_topics: Sequence[str] = (),
+    terminal_answer_topic: str | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -5378,9 +5379,19 @@ def _make_event_bus_callback(
     its retryability. Without it, OMN-16798 left the record safe and the CALLER
     stranded -- the .201 delegation matrix DLQ'd a routing-reducer failure in
     milliseconds and the caller still burned 120 s to a ``dispatch_timeout``
-    with ``retryable: true``. Empty (the default) is the unchanged pre-OMN-16812
-    behavior; two or more is ambiguous and left alone for the same reason
-    ``apply_failure_terminal_guard`` refuses to guess.
+    with ``retryable: true``. Two or more is ambiguous and left alone for the
+    same reason ``apply_failure_terminal_guard`` refuses to guess.
+
+    ``terminal_answer_topic`` (OMN-17432): the contract's own declared
+    terminal/output topic — the address its SUCCESSFUL answers already go to.
+    Used only when ``failure_terminal_topics`` is empty, which is the common
+    case: most contracts, ``node_gateway_attach_effect`` among them, declare no
+    separate failure terminal, and for those OMN-16812's terminal never fired at
+    all. Silence there is not a conservative default — the caller is holding a
+    correlation open, so "no address" resolves to a full-timeout 503 rather than
+    to nothing. See ``_resolve_boundary_terminal_answer_topic`` for the full
+    precedence and the guards it keeps. ``None`` (the default) preserves the
+    pre-OMN-17432 silence for callers/tests that wire no terminal address.
     """
     import json
 
@@ -5597,6 +5608,7 @@ def _make_event_bus_callback(
         exc: Exception,
         correlation_id: UUID,
         failure_reason: str,
+        message: object,
     ) -> None:
         """Terminalize a handler failure this boundary is about to ACK (OMN-16812).
 
@@ -5621,25 +5633,37 @@ def _make_event_bus_callback(
             classify_boundary_failure,
         )
 
-        if len(failure_terminal_topics) != 1:
-            # Zero: the contract declares no failure terminal, so there is no
-            # address to answer at and inventing one would publish outside the
-            # contract's own allowlist. Two or more: no basis to choose --
-            # the same refusal-to-guess ``apply_failure_terminal_guard`` makes.
-            return
-        terminal_topic = failure_terminal_topics[0]
-        if terminal_topic == topic:
-            # A contract that both consumes and declares this topic would have
-            # its own failure republished onto its own subscription. Same
-            # circular-route hazard ``_is_dead_letter_source_topic`` guards on
-            # the DLQ leg, and the same answer: log-only, never amplify.
+        if _is_boundary_failure_terminal_record(message):
+            # A terminal is an answer, not a request: nobody is holding a
+            # correlation open behind it. Terminalizing it would answer no one
+            # and would propagate one handler failure across every contract
+            # subscribed downstream (OMN-17432).
             logger.error(
-                "Boundary failure terminal suppressed: declared failure terminal "
-                "%s is the consumed topic itself (OMN-16812) correlation_id=%s",
-                terminal_topic,
+                "Boundary failure terminal suppressed: the failed record is "
+                "itself a failure terminal, so no caller is waiting on it "
+                "(OMN-17432) topic=%s correlation_id=%s",
+                topic,
                 correlation_id,
             )
             return
+
+        resolved_topic = _resolve_boundary_terminal_answer_topic(
+            failure_terminal_topics=failure_terminal_topics,
+            terminal_answer_topic=terminal_answer_topic,
+            consumed_topic=topic,
+        )
+        if resolved_topic is None:
+            logger.error(
+                "Boundary failure terminal suppressed: no unambiguous declared "
+                "address to answer at (OMN-16812/OMN-17432) topic=%s "
+                "failure_terminals=%s terminal_answer_topic=%s correlation_id=%s",
+                topic,
+                list(failure_terminal_topics),
+                terminal_answer_topic,
+                correlation_id,
+            )
+            return
+        terminal_topic = resolved_topic
         publish_fn = getattr(event_bus, "publish", None) if event_bus else None
         if publish_fn is None or not callable(publish_fn):
             logger.error(
@@ -5776,7 +5800,9 @@ def _make_event_bus_callback(
             # OMN-16812: the offset advances from here, so this is an ACK over a
             # failure. Terminalize regardless of the DLQ flag -- whether the
             # record was preserved is orthogonal to whether the caller is told.
-            await _emit_boundary_failure_terminal(exc, correlation_id, sanitized)
+            await _emit_boundary_failure_terminal(
+                exc, correlation_id, sanitized, message
+            )
             return
 
         def _increment_message_lost_counter() -> None:
@@ -5834,7 +5860,9 @@ def _make_event_bus_callback(
                 # about to advance -- exactly the .201 shape where the DLQ
                 # write and the 120 s caller timeout coexisted. Answer the
                 # caller now, with the class the runtime already knows.
-                await _emit_boundary_failure_terminal(exc, correlation_id, sanitized)
+                await _emit_boundary_failure_terminal(
+                    exc, correlation_id, sanitized, message
+                )
             else:
                 # OMN-14936: a False return means the publish did NOT
                 # durably persist (rejected input, producer unavailable, or
@@ -8720,6 +8748,13 @@ async def _subscribe_contract_topics(
                 failure_terminal_topics=_declared_failure_terminal_topics(
                     contract, success_topic=output_topic or ""
                 ),
+                # OMN-17432: the address of last resort when the contract
+                # declares no separate failure terminal — its own declared
+                # terminal/output topic, which is where the caller is already
+                # listening for this contract's answer. Same value the applier
+                # publishes SUCCESS to, so it is inside the publish allowlist by
+                # construction and needs no second derivation.
+                terminal_answer_topic=output_topic,
             )
         topic_callbacks.append((topic, callback))
 
@@ -8748,6 +8783,94 @@ async def _subscribe_contract_topics(
     )
 
     return topics_subscribed
+
+
+def _is_boundary_failure_terminal_record(message: object) -> bool:
+    """Is the record this boundary just failed ITSELF a boundary failure terminal?
+
+    The distinction the emission depends on: a boundary answers CALLERS, and a
+    caller is something that sent a command and is holding a correlation open
+    for its answer. A failure terminal *is* an answer — whoever was waiting on
+    that correlation has already been told. Terminalizing a terminal answers
+    nobody.
+
+    It is also the amplification vector, which is not hypothetical: a downstream
+    contract subscribed to the topic a terminal now lands on has a dispatcher
+    registered for that topic's event_type, so the terminal reaches
+    ``model_validate`` against the SUCCESS model, fails it, and raises
+    ``publisher_malformed``. Without this guard that raise terminalizes onto the
+    downstream's own answer topic, and one handler failure walks the graph one
+    contract per hop. Proven by
+    ``test_a_downstream_consumer_of_the_answer_topic_does_not_cascade``, which
+    fails loudly if this guard is removed.
+
+    Read from the wire ``payload_type`` the emitter stamps, not from the payload
+    shape: the shape of a failure record is not distinctive enough to key on,
+    and a false positive here would silence a genuine answer.
+    """
+    from omnibase_infra.runtime.boundary_failure_terminal import (
+        ModelBoundaryFailureTerminal,
+    )
+
+    raw = getattr(message, "value", None)
+    if not isinstance(raw, bytes | bytearray | str):
+        return False
+    try:
+        decoded = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    if not isinstance(decoded, dict):
+        return False
+    return decoded.get("payload_type") == ModelBoundaryFailureTerminal.__name__
+
+
+def _resolve_boundary_terminal_answer_topic(
+    *,
+    failure_terminal_topics: Sequence[str],
+    terminal_answer_topic: str | None,
+    consumed_topic: str,
+) -> str | None:
+    """Pick the address a failing consume boundary answers at (OMN-17432).
+
+    OMN-16812 answered only where a contract declares exactly ONE failure
+    terminal distinct from its success terminal. Most contracts declare none —
+    ``node_gateway_attach_effect`` has no ``terminal_events`` block at all — and
+    for those the boundary stayed silent, which is the whole defect: a handler
+    raise produced a DLQ record, a log line, and nothing the caller could ever
+    receive. On a synchronous gateway route that is a 10 s correlation timeout
+    resolving to an opaque 503 for a request the runtime decided in milliseconds.
+
+    The precedence is a read of the contract, never a guess:
+
+    * exactly one declared FAILURE terminal -> that one (OMN-16812, unchanged);
+    * two or more -> ``None``. There is no basis to choose, and choosing would
+      be the guess ``apply_failure_terminal_guard`` refuses to make;
+    * none declared -> the contract's own declared terminal/output topic, when
+      it has one. This is emphatically not an invented address: it is inside the
+      contract's publish allowlist, and it is where every SUCCESSFUL answer for
+      this contract already goes — so it is, by construction, where the caller
+      is already listening. ``ModelBoundaryFailureTerminal`` was designed for
+      exactly this landing: its ``status`` field is the vocabulary
+      ``resolve_terminal_verdict`` reads, so a reader of that topic derives
+      ``failed`` "even on a contract whose single declared terminal is nominally
+      the success topic" (its own docstring).
+
+    In every case an address equal to the CONSUMED topic is refused, so a
+    contract that both consumes and publishes one topic cannot have its own
+    failure fed back into its own subscription — the circular-route hazard
+    ``_is_dead_letter_source_topic`` guards on the DLQ leg, with the same answer.
+
+    Declaring a distinct failure terminal remains the better practice and still
+    wins here; this is the answer of last resort for the contracts that do not.
+    """
+    if len(failure_terminal_topics) > 1:
+        return None
+    resolved = (
+        failure_terminal_topics[0] if failure_terminal_topics else terminal_answer_topic
+    )
+    if not resolved or resolved == consumed_topic:
+        return None
+    return resolved
 
 
 def _declared_failure_terminal_topics(
