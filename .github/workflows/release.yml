@@ -181,6 +181,9 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: omnibase_infra
+          # A release tag may change a workflow. The App token needs this
+          # scope to fast-forward main in that case (OMN-17272).
+          permission-workflows: write
 
       - name: Sync main to release tag
         if: ${{ !contains(steps.tag.outputs.tag, 'rc') }}
