@@ -212,6 +212,147 @@ BUS_CHOICES = SUPPORTED_BUS_TYPES
 DEFAULT_BUS = BUS_INMEMORY
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write one customer artifact atomically in its run directory."""
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _accepted_attempt(result: dict[str, object]) -> dict[str, object] | None:
+    """Return the accepted routing attempt, or ``None`` when unproven."""
+    attempts = result.get("attempts")
+    if not isinstance(attempts, list):
+        attempts = result.get("escalation_history")
+    if not isinstance(attempts, list | tuple):
+        return None
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        decision = str(attempt.get("acceptance_decision") or "").lower()
+        if decision == "accept" or (
+            not decision and bool(attempt.get("quality_gate_passed"))
+        ):
+            return attempt
+    return None
+
+
+def _write_local_run_files(
+    *,
+    receipt: object,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+) -> None:
+    """Persist local delegation output and the accepted route evidence.
+
+    Route identity is accepted only from the accepted attempt. Synthesizing a
+    route from the last attempted backend would make a failed or escalated run
+    look like a truthful answer.
+    """
+    receipt_dump = getattr(receipt, "model_dump", None)
+    if not callable(receipt_dump):
+        raise ValueError("delegate receipt is not a serializable typed result")
+    envelope = receipt_dump(mode="json")
+    if not isinstance(envelope, dict):
+        raise ValueError("delegate receipt did not serialize to an object")
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        raise ValueError("delegate receipt has no structured delegation result")
+    # ``run_receipt_mode`` is shared by ``onex node``/``onex skill`` and the
+    # delegate command. Their proof contracts intentionally return unrelated
+    # typed results; only the delegate wire DTO has route-attribution fields.
+    # Scope this writer by the receipt's declared concrete type instead of
+    # treating a generic fixture (or another node's result) as a malformed
+    # delegation. A genuine delegate DTO still fails closed below when route
+    # evidence is absent.
+    result_model = str(envelope.get("result_model") or "")
+    if "ModelDelegateSkill" not in result_model:
+        return
+    accepted = _accepted_attempt(result)
+    if accepted is None:
+        raise ValueError(
+            "delegate receipt has no accepted routing attempt; refusing to write "
+            "unattributed route artifacts"
+        )
+
+    model = str(
+        accepted.get("model_id")
+        or accepted.get("model_used")
+        or result.get("model_name")
+        or ""
+    ).strip()
+    backend_id = str(
+        accepted.get("backend_id") or accepted.get("routing_decision_id") or ""
+    ).strip()
+    routing_tier = str(
+        accepted.get("tier")
+        or accepted.get("tier_name")
+        or result.get("cost_tier_name")
+        or ""
+    ).strip()
+    endpoint = str(
+        result.get("endpoint_url")
+        or result.get("provider")
+        or result.get("delegated_to")
+        or ""
+    ).strip()
+    if not all((model, backend_id, routing_tier, endpoint)):
+        raise ValueError(
+            "delegate receipt accepted attempt is missing backend, model, tier, "
+            "or endpoint identity"
+        )
+
+    run_id = str(envelope["run_id"])
+    correlation_id = str(envelope["correlation_id"])
+    run_dir = (state_root / "runs" / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    response = str(result.get("response") or "")
+    _atomic_write_text(run_dir / "result.txt", response)
+    _atomic_write_text(
+        run_dir / "receipt.json",
+        json.dumps(
+            {
+                "receipt_id": correlation_id,
+                "correlation_id": correlation_id,
+                "run_id": run_id,
+                "backend_id": backend_id,
+                "model": model,
+                "endpoint": endpoint,
+                "routing_tier": routing_tier,
+                "status": envelope.get("status"),
+                "receipt": envelope,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    _atomic_write_text(
+        run_dir / "run.json",
+        json.dumps(
+            {
+                "run_id": run_id,
+                "correlation_id": correlation_id,
+                "lane": routing_tier,
+                "prompt": prompt,
+                "task_type": task_type,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    click.echo(
+        "delegate artifacts: "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        ),
+        err=True,
+    )
+
+
 def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str]:
     """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-17304).
 
@@ -798,6 +939,12 @@ def run_delegate(
                 # minted is what lets it refuse another run's terminal
                 # envelope instead of printing it as ours.
                 expected_correlation_id=correlation_id,
+                receipt_callback=lambda receipt: _write_local_run_files(
+                    receipt=receipt,
+                    state_root=state_root,
+                    prompt=prompt,
+                    task_type=resolved_task_type,
+                ),
             )
     except DelegateTimeoutExceededError as exc:
         click.echo(str(exc), err=True)

@@ -39,6 +39,7 @@ from typing import get_args
 import pytest
 from click.testing import CliRunner
 
+from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.backends import auto_configure
 from omnibase_infra.backends.auto_configure import (
@@ -55,6 +56,7 @@ from omnibase_infra.cli.cli_delegate import (
     DELEGATE_SOURCE,
     DELEGATE_SOURCE_CHOICES,
     DelegateTimeoutExceededError,
+    _write_local_run_files,
     build_backend_overrides,
     classify_task_type,
     delegate_command,
@@ -65,6 +67,7 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     check_omnimarket_drift,
 )
+from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
 pytestmark = pytest.mark.unit
@@ -1685,3 +1688,93 @@ class TestCorrelationReachesTheReceipt:
         assert receipt["correlation_id"] == request["correlation_id"], (
             "the receipt must be reported under the id the request carried"
         )
+
+
+class TestLocalRunArtifacts:
+    """OMN-16999: persist only route-attributed delegate receipts."""
+
+    @staticmethod
+    def _receipt(*, accepted: bool = True) -> ModelSkillResult[dict[str, object]]:
+        correlation_id = uuid.uuid4()
+        attempt: dict[str, object] = {
+            "tier": "local",
+            "backend_id": "local-coder",
+            "model_id": "qwen3.8",
+            "quality_gate_passed": accepted,
+            "acceptance_decision": "accept" if accepted else "climb",
+        }
+        return ModelSkillResult[dict[str, object]](
+            skill_name="delegate",
+            node_name="node_delegate_skill_orchestrator",
+            status=EnumSkillResultStatus.SUCCESS,
+            correlation_id=correlation_id,
+            run_id=uuid.uuid4(),
+            exit_code=0,
+            duration_ms=12,
+            result={
+                "correlation_id": str(correlation_id),
+                "task_type": "research",
+                "model_name": "qwen3.8",
+                "provider": "http://local.invalid/v1/chat/completions",
+                "response": "answer",
+                "attempts": [attempt],
+            },
+            result_model=(
+                "omnimarket.models.delegation.wire."
+                "model_delegate_skill_response.ModelDelegateSkillCompleted"
+            ),
+            runtime_identity=collect_runtime_identity(config_source="test"),
+        )
+
+    def test_writes_three_files_with_accepted_route(self, tmp_path: Path) -> None:
+        receipt = self._receipt()
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="research the route",
+            task_type="research",
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        assert (run_dir / "result.txt").read_text(encoding="utf-8") == "answer"
+        receipt_data = json.loads(
+            (run_dir / "receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt_data["receipt_id"] == str(receipt.correlation_id)
+        assert receipt_data["backend_id"] == "local-coder"
+        assert receipt_data["model"] == "qwen3.8"
+        assert receipt_data["routing_tier"] == "local"
+        assert receipt_data["endpoint"] == "http://local.invalid/v1/chat/completions"
+        run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert run_data == {
+            "correlation_id": str(receipt.correlation_id),
+            "lane": "local",
+            "prompt": "research the route",
+            "run_id": str(receipt.run_id),
+            "task_type": "research",
+        }
+
+    def test_refuses_delegate_result_without_accepted_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        receipt = self._receipt(accepted=False)
+        with pytest.raises(ValueError, match="no accepted routing attempt"):
+            _write_local_run_files(
+                receipt=receipt,
+                state_root=tmp_path,
+                prompt="research the route",
+                task_type="research",
+            )
+        assert not (tmp_path / "runs").exists()
+
+    def test_ignores_non_delegate_typed_receipt(self, tmp_path: Path) -> None:
+        receipt = self._receipt().model_copy(
+            update={"result_model": "tests.fixtures.ModelProofNoopResult"}
+        )
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="proof",
+            task_type="research",
+        )
+        assert not (tmp_path / "runs").exists()

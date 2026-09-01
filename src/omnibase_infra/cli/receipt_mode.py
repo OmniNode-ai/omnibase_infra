@@ -67,6 +67,7 @@ import socket
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -606,6 +607,7 @@ def run_receipt_mode(
     verbose: bool,
     emit_socket: Path,
     expected_correlation_id: uuid.UUID | None = None,
+    receipt_callback: Callable[[object], None] | None = None,
 ) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
 
@@ -616,6 +618,12 @@ def run_receipt_mode(
     :func:`_verify_workflow_data_correlation`. Callers that mint no
     correlation id (``onex node``, ``onex skill``) pass ``None`` and keep the
     pre-existing behaviour unchanged.
+
+    ``receipt_callback`` is invoked after the typed receipt is assembled and
+    before stdout serialization. ``onex delegate`` uses this to persist its
+    customer-facing run files without parsing stdout, which must remain one
+    receipt JSON line. Callback failures propagate so required durable files
+    cannot be mistaken for successful dispatch evidence.
 
     Returns the process exit code (the runtime's exit code; 1 when the
     runtime raised before producing a workflow result).
@@ -921,6 +929,9 @@ def run_receipt_mode(
     # requiring a `docker logs | grep <correlation>` two hours later to
     # discover it had never touched the lane.
     click.echo(render_identity_line(runtime_identity), err=True)
+
+    if receipt_callback is not None:
+        receipt_callback(receipt)
 
     try:
         click.echo(receipt.model_dump_json())
