@@ -170,6 +170,16 @@ fi
 # shellcheck source=./runtime_build/sibling_clone_manifest.sh
 source "$MANIFEST_SH"
 
+PRIVILEGE_LIB="$SCRIPT_DIR/reconcile_privilege_lib.sh"
+if [[ ! -f "$PRIVILEGE_LIB" ]]; then
+  say "INDETERMINATE: privilege library missing at $PRIVILEGE_LIB"
+  say "  Without it there is no way to know who owns the surfaces below, and"
+  say "  writing as whoever this process happens to be is the OMN-17366 defect."
+  exit "$EXIT_INDETERMINATE"
+fi
+# shellcheck source=./reconcile_privilege_lib.sh
+source "$PRIVILEGE_LIB"
+
 CLONE_DELEGATE="${ONEX_RECONCILE_CLONE_DELEGATE:-$SCRIPT_DIR/runtime_build/reconcile_deploy_clones.sh}"
 VENV_DELEGATE="${ONEX_RECONCILE_VENV_DELEGATE:-$SCRIPT_DIR/reconcile-workspace-venvs.sh}"
 
@@ -259,18 +269,85 @@ done
 clone_head() { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
 clone_target() { git -C "$1" rev-parse "origin/$BRANCH" 2>/dev/null || true; }
 
+# --------------------------------------------------------------------------- #
+# Who the clone-surface writes run as (OMN-17366)
+# --------------------------------------------------------------------------- #
+# Planned BEFORE the first fetch, because the first fetch is already a write.
+#
+# `git fetch` deposits objects, refs and reflogs. Running it as root against an
+# operator-owned clone is what left 1118 root-owned paths under `.201`'s five
+# deploy-source clones, after which a plain operator fetch fails intermittently
+# with "insufficient permission for adding an object to repository database".
+#
+# THIS APPLIES IN --check MODE TOO, and that is a deliberate divergence from
+# reconcile-workspace-venvs.sh, which exempts its check mode on the grounds that
+# a read-only probe writes nothing. True there; false here. Check mode on this
+# script still fetches -- it has to, since a verifier that takes its target from
+# the thing under verification is not a verifier -- so a `--check` that ran as
+# the wrong user would deposit exactly the objects this ticket is about.
+plan_clone_privileges() {
+  local rc=0 repo owner
+  rp_plan_privileges "$OMNI_HOME" || rc=$?
+
+  case "$rc" in
+    0) ;;
+    1)
+      say "INDETERMINATE: cannot read the owner of $OMNI_HOME."
+      say "  Every fetch and checkout below writes into that tree. Without"
+      say "  knowing who owns it there is no way to write as the right user,"
+      say "  and writing as the wrong one leaves clones their owner can no"
+      say "  longer fetch into."
+      exit "$EXIT_INDETERMINATE"
+      ;;
+    3)
+      say "INDETERMINATE: $OMNI_HOME is owned by $RP_OWNER, whose home directory"
+      say "  could not be resolved. Dropping privileges without a HOME leaves"
+      say "  git reading root's config and credentials as an unprivileged user."
+      exit "$EXIT_INDETERMINATE"
+      ;;
+    *)
+      say "INDETERMINATE: $OMNI_HOME is owned by $RP_OWNER, but this process runs"
+      say "  as $CURRENT_USER and cannot become that user."
+      say "  Fetching anyway would put $CURRENT_USER-owned objects inside"
+      say "  $RP_OWNER's clones, after which $RP_OWNER's own git commands fail"
+      say "  on permissions (OMN-17366). Run this as $RP_OWNER, or as root on a"
+      say "  host with runuser."
+      exit "$EXIT_INDETERMINATE"
+      ;;
+  esac
+
+  # One delegate invocation cannot be two users at once, so a split ownership
+  # set has no correct answer: running it as either owner writes into the
+  # other's tree as the wrong user. Refuse rather than pick.
+  for repo in "${present_clones[@]}"; do
+    owner="$(rp_surface_owner "$OMNI_HOME/$repo" 2>/dev/null || true)"
+    [[ -z "$owner" || "$owner" == "$RP_OWNER" ]] && continue
+    say "INDETERMINATE: the clones under $OMNI_HOME do not share one owner."
+    say "  $OMNI_HOME is owned by $RP_OWNER, but $repo is owned by $owner."
+    say "  The clone delegate reconciles every clone in a single process, so"
+    say "  whichever user it ran as would write into the other's tree as the"
+    say "  wrong one — the very thing this guard exists to prevent."
+    exit "$EXIT_INDETERMINATE"
+  done
+
+  [[ ${#RUN_AS[@]} -eq 0 ]] || \
+    say "writing as $RP_OWNER (owner of $OMNI_HOME); this process is $CURRENT_USER"
+}
+
 # Establish targets ourselves. See the header: taking the target from the thing
 # under verification is not verification.
 fetch_all() {
   local repo
   for repo in "${present_clones[@]}"; do
     trace "git -C $OMNI_HOME/$repo fetch --quiet --prune origin $BRANCH"
-    git -C "$OMNI_HOME/$repo" fetch --quiet --prune origin "$BRANCH" 2>/dev/null || true
+    as_owner git -C "$OMNI_HOME/$repo" fetch --quiet --prune origin "$BRANCH" 2>/dev/null || true
   done
 }
 
 declare -a before_heads=()
 say "surfaces under $OMNI_HOME (branch $BRANCH): clones=${#present_clones[@]}"
+
+plan_clone_privileges
 
 fetch_all
 for repo in "${present_clones[@]}"; do
@@ -285,7 +362,10 @@ if [[ "$MODE" == "repair" ]]; then
   else
     say "clone surface: delegating to $CLONE_DELEGATE"
     trace "OMNI_HOME=$OMNI_HOME RECONCILE_BRANCH=$BRANCH bash $CLONE_DELEGATE"
-    env OMNI_HOME="$OMNI_HOME" RECONCILE_BRANCH="$BRANCH" \
+    # The delegate fetches AND checks out, so it is the larger of the two write
+    # paths into these clones. Guarding only the fetch above would have fixed
+    # the smaller half and left the damage accumulating (OMN-17366).
+    as_owner env OMNI_HOME="$OMNI_HOME" RECONCILE_BRANCH="$BRANCH" \
       bash "$CLONE_DELEGATE" >&2 || \
       say "clone delegate exited non-zero; the readback below is what decides."
   fi
@@ -420,7 +500,12 @@ fi
     sep=",\n"
   done
   printf '\n  ],\n  "failures": %d\n}\n' "${#FAILURES[@]}"
-} > "$RECEIPT" 2>/dev/null || say "WARNING: could not write receipt to $RECEIPT"
+} | as_owner tee "$RECEIPT" >/dev/null 2>&1 || \
+  say "WARNING: could not write receipt to $RECEIPT"
+# `tee` rather than a `>` redirection: a redirect is performed by THIS shell, so
+# it would create a root-owned receipt inside an operator-owned $OMNI_HOME even
+# though every other write here drops privileges — the same defect, one file
+# over, and the file an operator is most likely to want to delete (OMN-17366).
 
 if [[ "${#FAILURES[@]}" -gt 0 ]]; then
   say "VERDICT: FAILED — ${#FAILURES[@]} surface(s) could not be proven at target."
@@ -448,7 +533,10 @@ if [[ -n "$SP" ]]; then
   [[ -n "$mc" ]] && floor_args+=(--omnimarket-commit "$mc")
 fi
 if [[ "${#floor_args[@]}" -gt 0 ]]; then
-  "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2
+  # As the owner: the floor lives inside $OMNI_HOME, and `scripts/onex` reads it
+  # on every invocation. A root-owned floor is one the operator's own reconcile
+  # can no longer restamp.
+  as_owner "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2
 else
   say "WARNING: nothing observable to stamp; floor left untouched."
 fi
