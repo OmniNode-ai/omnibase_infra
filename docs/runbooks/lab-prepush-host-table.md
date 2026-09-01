@@ -184,7 +184,8 @@ Read top to bottom; the first row that matches wins.
 | `heavy_local=allowed` | local unfit or slot held | falls to the precedence ladder below |
 | `heavy_local=prefer_remote` | sha-pinned green full-suite run on GitHub-hosted CI | accepted, nothing runs locally |
 | `heavy_local=prefer_remote` | any lab host fit (load **and** memory) with a free slot | dispatched off-box; hook reports the host that ran it |
-| `heavy_local=prefer_remote` | no lab host fit | **queue-and-wait**: re-probe the whole ranked list every 60s, up to a 900s budget, logging each attempt |
+| `heavy_local=prefer_remote` | no lab host fit, ≥1 host `busy`/`over`/`mem-over` | **queue-and-wait**: re-probe the whole ranked list every 60s, up to a 900s budget, logging each attempt |
+| `heavy_local=prefer_remote` | no lab host fit, **every** refusal structural (`unreachable`, `repo-denied`, `disabled`, `uv-unfit`) | **no wait** — falls through immediately, saying so |
 | `heavy_local=prefer_remote` | budget spent, local fit **and** slot free | runs locally behind a loud `LOCAL FALLBACK IN EFFECT` banner naming the budget waited and every host probed |
 | `heavy_local=prefer_remote` | budget spent, local **unfit** or slot held | refuses — falls to the precedence ladder below, exactly as before |
 | any | remote suite goes RED | refuses immediately; never shops for a greener host |
@@ -193,6 +194,23 @@ The budget and interval are **constants in the hook**, not
 `${PREPUSH_...:-900}`. An env indirection would be a one-word bypass of the
 whole policy: `=0` collapses the wait and lands every push straight on the local
 fallback. `test_the_off_box_budget_is_a_constant_not_an_env_override` pins that.
+
+### The budget is only spent on refusals that can drain
+
+`prepush_lab_has_transient_capacity` gates the wait. `busy`, `over` and
+`mem-over` all resolve on their own — a suite finishes, load drains, memory is
+released — so they earn the budget. `unreachable`, `repo-denied`, `disabled`,
+`uv-unfit` and `mode-*-not-eligible` do not change because a pusher waited, so
+the hook falls through immediately and prints why instead of going quiet for
+15 minutes.
+
+The case that forced this: a Mac **off the lab LAN**. Every remote row probes
+`unreachable`, and without the gate every heavy push there pays the full 900s
+before running locally anyway. Skipping a wait that cannot succeed is not a
+weakening — the caller still gets "no placement", and the local fallback still
+has to prove measured capacity **and** an exclusive slot. Classification is by
+the probe-log tokens `pick_capacity_host` writes, and an **unrecognised reason
+defaults to structural**, so a new refusal kind never silently earns a wait.
 
 The local fallback is **narrower** than the behavior it replaces, never wider:
 it calls the same `prepush_try_local_heavy_slot` the `allowed` path calls, so a

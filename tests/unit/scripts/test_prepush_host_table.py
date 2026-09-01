@@ -1888,13 +1888,19 @@ def test_the_bounded_wait_retries_then_gives_up(table_repo: Path) -> None:
     hung pre-push is indistinguishable from a broken one)."""
     body = (
         "attempts=0\n"
-        "dispatch_to_lab_host() { attempts=$((attempts + 1)); return 1; }\n"
+        "dispatch_to_lab_host() { attempts=$((attempts + 1));"
+        ' PREPUSH_PROBE_LOG="h201=busy(queue=0 heavy_pids=2)"; return 1; }\n'
         "sleep() { :; }\n"
         "rc=0\n"
         'prepush_wait_for_lab_capacity "heavy thing" 3 1 || rc=$?\n'
         'echo "RC=$rc ATTEMPTS=$attempts"\n'
     )
-    out = _driver_both(table_repo, _hook_func("prepush_wait_for_lab_capacity") + body)
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + body,
+    )
     assert "RC=1" in out, out
     # budget 3 / interval 1 -> attempts at waited=0,1,2,3 then break.
     assert "ATTEMPTS=4" in out, out
@@ -1910,13 +1916,19 @@ def test_the_bounded_wait_returns_the_moment_a_host_takes_it(
     body = (
         "attempts=0\n"
         "dispatch_to_lab_host() { attempts=$((attempts + 1));"
+        ' PREPUSH_PROBE_LOG="h201=busy(queue=0 heavy_pids=2)";'
         ' [ "$attempts" -ge 2 ] && return 0; return 1; }\n'
         "sleep() { :; }\n"
         "rc=0\n"
         'prepush_wait_for_lab_capacity "heavy thing" 600 1 || rc=$?\n'
         'echo "RC=$rc ATTEMPTS=$attempts"\n'
     )
-    out = _driver_both(table_repo, _hook_func("prepush_wait_for_lab_capacity") + body)
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + body,
+    )
     assert "RC=0 ATTEMPTS=2" in out, out
 
 
@@ -2080,3 +2092,158 @@ def test_host_is_fit_reports_unreadable_memory_as_could_not_check(
     out = _driver_both(table_repo, _with_real_load() + body)
     assert "RC=2" in out, out
     assert "memory unreadable" in out, out
+
+
+# =============================================================================
+# The wait budget is spent only on refusals that can resolve themselves
+# =============================================================================
+#
+# The bounded wait exists to catch a lab slot freeing up. That premise holds
+# for a host that is BUSY, over on load, or over on memory -- all three drain
+# on their own. It does NOT hold for a host that is unreachable, repo-denied,
+# disabled, or below the uv floor: none of those change because we waited, so
+# spending the budget on them buys nothing and costs the pusher the full
+# 900s before the local fallback it was always going to reach.
+#
+# The case that makes this concrete is a Mac off the lab LAN: every remote row
+# probes `unreachable`, and without this gate EVERY heavy push pays 15 minutes
+# of silence before running locally anyway. That is a daily-friction
+# regression, not a safety property -- skipping a wait that cannot succeed
+# never runs a suite that would otherwise have been refused, because the local
+# fallback still has to prove measured capacity AND an exclusive slot.
+
+
+def _wait_driver(probe_log: str, budget: str = "3", interval: str = "1") -> str:
+    """Drive the real wait loop with a stubbed dispatch that always misses and
+    reports PROBE_LOG, so only the transient/structural decision is under test."""
+    return (
+        "attempts=0\n"
+        "dispatch_to_lab_host() { attempts=$((attempts + 1));"
+        f' PREPUSH_PROBE_LOG="{probe_log}"; return 1; }}\n'
+        "sleep() { :; }\n"
+        "rc=0\n"
+        f'prepush_wait_for_lab_capacity "heavy thing" {budget} {interval} || rc=$?\n'
+        'echo "RC=$rc ATTEMPTS=$attempts"\n'
+    )
+
+
+def test_the_wait_is_skipped_when_every_host_is_structurally_unavailable(
+    table_repo: Path,
+) -> None:
+    """All four rows unreachable -- the lab is gone, not busy. One attempt, no
+    wait, straight to the caller's fallback ladder."""
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + _wait_driver("h200=unreachable h201=unreachable h105=unreachable"),
+    )
+    assert "RC=1" in out, out
+    assert "ATTEMPTS=1" in out, out
+    assert "budget exhausted" not in out, out
+    assert "cannot resolve on its own" in out, out
+
+
+def test_the_wait_is_spent_when_a_host_is_merely_busy(table_repo: Path) -> None:
+    """A held slot is exactly what the wait is for: it drains. Budget 3 /
+    interval 1 -> attempts at waited=0,1,2,3."""
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + _wait_driver(
+            "h200=unreachable h201=busy(queue=0 heavy_pids=2) h105=unreachable"
+        ),
+    )
+    assert "RC=1" in out, out
+    assert "ATTEMPTS=4" in out, out
+    assert "budget exhausted" in out, out
+
+
+def test_a_memory_starved_host_is_worth_waiting_for(table_repo: Path) -> None:
+    """`mem-over` is the OMN-17247 container mid-suite. It drains when the suite
+    holding the memory finishes, so it earns the wait exactly like `busy`."""
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + _wait_driver("h201=mem-over(2562MiB<4096) h105=unreachable"),
+    )
+    assert "ATTEMPTS=4" in out, out
+
+
+def test_an_overloaded_host_is_worth_waiting_for(table_repo: Path) -> None:
+    """Load drains too -- it is the original reason the lab is ever refused."""
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + _wait_driver("h201=over(2.400) h105=uv-unfit(0.8.3<0.11.0)"),
+    )
+    assert "ATTEMPTS=4" in out, out
+
+
+def test_a_uv_unfit_or_repo_denied_lab_is_not_worth_waiting_for(
+    table_repo: Path,
+) -> None:
+    """Neither an old uv nor a repo denial changes while a pusher waits. The
+    negative control for the two tests above: same loop, same stub, only the
+    probe-log reason differs, and that alone must decide."""
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + _wait_driver("h201=repo-denied h105=uv-unfit(0.8.3<0.11.0) h101=disabled"),
+    )
+    assert "ATTEMPTS=1" in out, out
+    assert "cannot resolve on its own" in out, out
+
+
+def test_skipping_the_wait_still_returns_no_placement(table_repo: Path) -> None:
+    """The skip must return 1 (no evidence), never 0. Returning 0 would tell the
+    caller a lab host had run the suite when none did -- the one way this
+    optimisation could become a bypass."""
+    out = _driver_both(
+        table_repo,
+        _hook_func("prepush_lab_has_transient_capacity")
+        + _hook_func("prepush_wait_for_lab_capacity")
+        + _wait_driver("h200=unreachable"),
+    )
+    assert "RC=1" in out, out
+
+
+# =============================================================================
+# The local refusal names the dimension that actually refused
+# =============================================================================
+
+
+def test_the_allowed_path_refusal_names_the_measured_reason() -> None:
+    """Before OMN-17392 this log line sat inside `if host_is_fit ""`, so "this
+    host is fit but its slot is held" was always true when it printed. The
+    refactor to prepush_try_local_heavy_slot moved it out of that branch, where
+    it now also fires for an over-loaded or memory-starved host and asserts
+    something measurably false. A refusal that misnames its own cause sends the
+    reader hunting for a held lock that does not exist."""
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index("guard_full_suite_host() {")
+    guard = text[start:]
+    assert "this host is fit but its heavy-suite slot is already held" not in guard, (
+        "the local-refusal log still hardcodes 'fit but slot held', which is "
+        "false whenever the host was refused for load or memory"
+    )
+    assert "PREPUSH_LOCAL_HEAVY_REASON" in guard, (
+        "expected the refusal to report the reason prepush_try_local_heavy_slot "
+        "actually measured"
+    )
+
+
+def test_try_local_heavy_slot_records_which_dimension_refused() -> None:
+    """The reason must come from the measurement, not from the call site's
+    guess about why it failed."""
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index("prepush_try_local_heavy_slot() {")
+    body = text[start : text.index("\n}\n", start)]
+    assert "PREPUSH_LOCAL_HEAVY_REASON" in body
+    assert "PREPUSH_LAST_FIT_DETAIL" in body, (
+        "the unfit branch must carry the load/memory detail host_is_fit measured"
+    )

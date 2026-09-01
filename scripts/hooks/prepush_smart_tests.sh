@@ -610,9 +610,20 @@ PREPUSH_OFFBOX_WAIT_INTERVAL_SECONDS=60
 # guard_full_suite_host unchanged in substance so the `allowed` path and the
 # post-wait fallback share one implementation and cannot drift into two
 # different notions of "may run here".
+#
+# It records WHY it said no in PREPUSH_LOCAL_HEAVY_REASON. Before this function
+# existed the refusal was logged from inside an `if host_is_fit ""` branch, so
+# "this host is fit but its slot is held" was necessarily true wherever it
+# printed. Hoisting the check into here made that sentence reachable for an
+# over-loaded or memory-starved host too, where it is measurably false and
+# sends the reader hunting for a held lock that does not exist.
 prepush_try_local_heavy_slot() {
   local lw lock_rc=0
-  host_is_fit "" || return 1
+  PREPUSH_LOCAL_HEAVY_REASON=""
+  if ! host_is_fit ""; then
+    PREPUSH_LOCAL_HEAVY_REASON="this host is not fit (${PREPUSH_LAST_FIT_DETAIL:-unmeasured})"
+    return 1
+  fi
   lw="$(prepush_local_workroot "$PREPUSH_LC_HOST" || true)"
   [ -n "$lw" ] || lw="${REPO_ROOT}/.onex_state/prepush_distribution"
   prepush_lock_acquire "$lw" || lock_rc=$?
@@ -629,6 +640,33 @@ prepush_try_local_heavy_slot() {
     log "WARNING: could not create the heavy-suite slot lock under '${lw}' -- running unserialized on this host (pre-OMN-16991 behavior). Fix the workroot to restore serialization (OMN-16174)."
     return 0
   fi
+  PREPUSH_LOCAL_HEAVY_REASON="this host is fit (${PREPUSH_LAST_FIT_DETAIL:-unmeasured}) but its heavy-suite slot is already held"
+  return 1
+}
+
+# prepush_lab_has_transient_capacity -- 0 when the last probe refused at least
+# one candidate for a reason that CAN resolve on its own, 1 when every refusal
+# is structural.
+#
+# The bounded wait below exists to catch a lab slot freeing up. That premise
+# holds for `busy` (a suite finishes), `over` (load drains) and `mem-over` (the
+# suite holding the memory exits). It does NOT hold for `unreachable`,
+# `repo-denied`, `disabled`, `uv-unfit` or `mode-*-not-eligible`: none of those
+# change because a pusher waited, so spending the budget on them buys nothing
+# and costs 900s of silence before the fallback the push was always going to
+# reach. The concrete case is a Mac off the lab LAN -- every remote row probes
+# `unreachable`, and without this gate EVERY heavy push there pays the full
+# budget before running locally anyway.
+#
+# This can only SHORTEN a wait, never skip a gate: the caller still returns "no
+# placement", and the local fallback it falls through to still has to prove
+# measured capacity AND an exclusive slot. It matches on the probe-log tokens
+# pick_capacity_host writes, so a new refusal reason defaults to STRUCTURAL --
+# a reason we have not classified does not silently earn a 15-minute wait.
+prepush_lab_has_transient_capacity() {
+  case "${PREPUSH_PROBE_LOG:-}" in
+    *"=busy("* | *"=over("* | *"=mem-over("*) return 0 ;;
+  esac
   return 1
 }
 
@@ -655,6 +693,12 @@ prepush_wait_for_lab_capacity() {
       return 0
     fi
     [ "$waited" -lt "$budget" ] || break
+    if ! prepush_lab_has_transient_capacity; then
+      log "OFF-BOX QUEUE-AND-WAIT: not waiting -- every lab refusal cannot resolve on its own."
+      log "  probed: ${PREPUSH_PROBE_LOG:-none}"
+      log "  No host is merely busy/over/memory-starved, so re-probing would return the same answer for the full ${budget}s. Falling through to the refusal ladder now."
+      return 1
+    fi
     log "OFF-BOX QUEUE-AND-WAIT (attempt ${attempt}): no lab host has headroom for ${heavy_what} yet."
     log "  probed: ${PREPUSH_PROBE_LOG:-none}"
     log "  waited ${waited}s of a ${budget}s budget; re-probing the whole ranked list in ${interval}s. Ctrl-C aborts the push."
@@ -738,7 +782,7 @@ guard_full_suite_host() {
         log "=============================================================================="
         return 0
       fi
-      log "off-box placement failed and this host cannot take the work either (${PREPUSH_LAST_FIT_DETAIL:-slot held}); refusing rather than running a suite this host cannot support"
+      log "off-box placement failed and this host cannot take the work either -- ${PREPUSH_LOCAL_HEAVY_REASON:-no local capacity measured}; refusing rather than running a suite this host cannot support"
     else
       # OMN-16295: identity alone is not enough -- this known-good host must
       # also have capacity right now.
@@ -751,7 +795,7 @@ guard_full_suite_host() {
       if prepush_try_local_heavy_slot; then
         return 0
       fi
-      log "this host is fit but its heavy-suite slot is already held; looking for another lab host before refusing"
+      log "${PREPUSH_LOCAL_HEAVY_REASON:-this host cannot take the work}; looking for another lab host before refusing"
     fi
     # Precedence, in order of EVIDENCE STRENGTH -- not convenience:
     #   1. GitHub-hosted sha-pinned FULL-suite pass (OMN-16688). Strongest:
