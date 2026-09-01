@@ -1,0 +1,281 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# contractor-integration-note.yml — OMN-17277
+#
+# WHAT THIS IS
+#   The armed trigger for the contractor integration note. When a PR merges here
+#   and its title or body cites a Linear ticket assigned to someone in the
+#   configured contractor roster, one self-contained note is posted as a comment
+#   on that ticket: what changed, what it means for the surfaces they probe, the
+#   probe, the pass expectation, and whether the change is in a released tag or
+#   on `dev` only — with the exact pin recipe in the dev-only case.
+#
+#   This file is a SHIM. It holds no logic: it resolves the merge facts, hands
+#   them to node_contractor_integration_note_effect in omnimarket, and reports
+#   what the node decided. Every judgement — is a note owed, what does it say,
+#   has it already been delivered — lives in that node's pure composer.
+#
+# WHY IT EXISTS (measured, 2026-09-01)
+#   omnibase_infra#3120 — the Bifrost lane-overlay fix a contractor was blocked
+#   on, and had himself diagnosed — merged at 15:21Z and sat unannounced for
+#   five hours. Nothing failed. The announcement was a manual promise on
+#   OMN-17150, and a manual promise is what a five-hour gap looks like when the
+#   day gets busy. WS2 of the validation charter (OMN-17274) said "the lane that
+#   merged the work writes the note, at merge time"; today proved a lane cannot
+#   be relied on to remember, so the note becomes a mechanism.
+#
+# WHY THE ARMED TRIGGER LIVES HERE AND NOT IN omnimarket
+#   `LINEAR_API_KEY` is an omnibase_infra repo secret (provisioned 2026-08-19)
+#   and is NOT an omnimarket repo secret nor an OmniNode-ai org secret. Rather
+#   than copy a Linear credential into a second repo — widening its blast radius
+#   with no operator sign-off — the trigger runs from the repo that already
+#   legitimately holds the key. This is the same split, for the same reason, as
+#   `linear-done-guard-armed.yml` and `linear-demotion-guard-armed.yml`, whose
+#   assertions likewise live in omnimarket.
+#
+#   Consequence, stated so it is not discovered later: automatic coverage is
+#   omnibase_infra's own merges. A merge in another repo reaches the note only
+#   via the `workflow_dispatch` backfill below (which accepts any repo) or via
+#   `repository_dispatch`, which is wired here and fired by nobody yet.
+#   Extending automatic coverage means provisioning the credential in that repo
+#   or adding a one-line dispatch shim there — tracked on OMN-17277.
+#
+# WHY THE BACKFILL PATH IS NOT OPTIONAL
+#   A `pull_request: closed` workflow always runs the BASE branch's copy of the
+#   file, so a change to THIS file cannot be proven by the merge that lands it —
+#   that merge still runs the old copy. `workflow_dispatch` republishes any
+#   already-merged PR by repo + number, which is both the proof path and the way
+#   any missed merge is recovered. Same lesson, same remedy as OMN-17378's fix
+#   to omnimarket's pr-merged-publisher.
+#
+# IDEMPOTENCY
+#   Safe to re-run, always. The note carries its own key (`owner/repo#number`)
+#   and the node reads the ticket's existing comments back before writing, so a
+#   re-run, a backfill of an already-noted PR, and a replay all converge on
+#   `skip_reason=already_posted`. There is no side table to drift.
+#
+# WHAT IT NEVER DOES
+#   It does not close, move, or re-assign a ticket, and it does not touch the
+#   PR. Its only write is one Linear comment.
+#
+# Ticket: OMN-17277 (epic OMN-17274)
+
+name: Contractor Integration Note
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+      - dev
+  # Backfill / proof path — see the header. Accepts any OmniNode repo, because
+  # this workflow is the only armed surface for the note today.
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "owner/repo of the merged PR (default: this repo)"
+        required: false
+        type: string
+      pr_number:
+        description: "Merged PR number to post the note for"
+        required: true
+        type: string
+      dry_run:
+        description: "Compose and print the note without writing it to Linear"
+        required: false
+        default: false
+        type: boolean
+  # Wired now so another repo can fire the note with a one-line shim without
+  # editing this file. Fired by nobody today; that is a stated gap, not an
+  # assumed capability.
+  repository_dispatch:
+    types: [contractor-integration-note]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  # Per-merge, never cancelled: a cancelled run is an undelivered note, and the
+  # whole point of this workflow is that an undelivered note must not be quiet.
+  group: >-
+    contractor-integration-note-${{
+      github.event.pull_request.number
+      || inputs.pr_number
+      || github.event.client_payload.pr_number
+      || github.run_id
+    }}
+  cancel-in-progress: false
+
+jobs:
+  post-integration-note:
+    name: Post integration note
+    # Only a real merge earns a note; a closed-unmerged PR has no merge commit,
+    # and the node refuses such a payload outright rather than describing a
+    # commit that does not exist.
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.pull_request.merged == true
+    # Trusted runner required: needs LINEAR_API_KEY.
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Resolve target repo
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          THIS_REPO: ${{ github.repository }}
+          INPUT_REPO: ${{ inputs.repo }}
+          DISPATCH_REPO: ${{ github.event.client_payload.repo }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)        TARGET_REPO="$THIS_REPO" ;;
+            workflow_dispatch)   TARGET_REPO="${INPUT_REPO:-$THIS_REPO}" ;;
+            repository_dispatch) TARGET_REPO="${DISPATCH_REPO:-$THIS_REPO}" ;;
+            *) echo "::error::unsupported event $EVENT_NAME" >&2; exit 1 ;;
+          esac
+          # owner/repo only — this value becomes a checkout target.
+          if ! printf '%s' "$TARGET_REPO" | grep -qE '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
+            echo "::error::refusing malformed repo slug: '$TARGET_REPO'" >&2
+            exit 1
+          fi
+          echo "repo=$TARGET_REPO" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the merged repo (tags needed for the release probe)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ steps.target.outputs.repo }}
+          # Full history + tags: "is this merge commit in a released tag" is
+          # answered by `git tag --contains`, and a shallow clone answers it
+          # WRONG rather than refusing — it would report every dev-only change
+          # as released-nowhere for the right reason and a released change as
+          # dev-only for the wrong one.
+          fetch-depth: 0
+          fetch-tags: true
+          path: target-repo
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Check out omnimarket (the node lives there)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          # Deliberately `dev`, not a pinned SHA: a fix to the note takes effect
+          # on the next merge without a companion PR here. The trade is that an
+          # omnimarket regression reaches this trigger immediately — acceptable
+          # because the node fails closed in every uncertain direction (an
+          # undelivered note exits non-zero), so a broken node goes RED, never
+          # silently green.
+          ref: dev
+          fetch-depth: 1
+          path: omnimarket
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Resolve the merged PR facts
+        id: facts
+        env:
+          GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          DISPATCH_PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          # The pull_request event payload and `gh api .../pulls/<n>` carry the
+          # same field shape, so both paths feed one parser in the node. Passed
+          # through the environment and written with printf: a PR title or body
+          # is attacker-controlled and never touches a command line.
+          PR_JSON: ${{ toJSON(github.event.pull_request) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            printf '%s' "$PR_JSON" > pr.json
+          else
+            PR_NUMBER="${INPUT_PR_NUMBER:-${DISPATCH_PR_NUMBER:-}}"
+            case "$PR_NUMBER" in
+              ''|*[!0-9]*)
+                echo "::error::pr_number must be a positive integer, got: '${PR_NUMBER}'" >&2
+                exit 1
+                ;;
+            esac
+            gh api "repos/${TARGET_REPO}/pulls/${PR_NUMBER}" > pr.json
+          fi
+          # Report what will be described, so the run page answers "which merge
+          # was this" without opening the payload.
+          python3 -c "
+          import json, sys
+          pr = json.load(open('pr.json'))
+          print(f\"pr=#{pr.get('number')} merged={pr.get('merged')} sha={pr.get('merge_commit_sha')}\")
+          " >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.8.3"
+          enable-cache: true
+          cache-dependency-glob: "omnimarket/uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync omnimarket dependencies
+        working-directory: omnimarket
+        run: uv sync --all-extras
+
+      - name: Fail loudly when the note is unarmed
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # An unarmed run is not a run with nothing to say. It is a merge whose
+          # note was never composed — indistinguishable, from the outside, from
+          # the five-hour silence this workflow exists to end. Fail here rather
+          # than letting the node's own exit 2 read as an ambiguous job failure.
+          if [ -z "${LINEAR_API_KEY:-}" ]; then
+            echo "::error title=Contractor integration note is unarmed::LINEAR_API_KEY is not set on omnibase_infra."
+            exit 2
+          fi
+
+      - name: Post the integration note
+        working-directory: omnimarket
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DRY_FLAG=""
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          # shellcheck disable=SC2086  # DRY_FLAG is a controlled empty-or-flag token
+          uv run python -m omnimarket.nodes.node_contractor_integration_note_effect.cli \
+            --repo "$TARGET_REPO" \
+            --pr-json "${GITHUB_WORKSPACE}/pr.json" \
+            --repo-path "${GITHUB_WORKSPACE}/target-repo" \
+            --roster config/contractor_roster.yaml \
+            $DRY_FLAG \
+            | tee "${GITHUB_WORKSPACE}/note-result.txt"
+
+      - name: Summarise the decision
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Contractor integration note (OMN-17277)"
+            echo ""
+            echo '```'
+            cat "${GITHUB_WORKSPACE}/note-result.txt" 2>/dev/null || echo "(no result — see the step log)"
+            echo '```'
+            echo ""
+            echo "Recipient set: omnimarket \`config/contractor_roster.yaml\` @ dev."
+            echo "Most merges owe no note; a named skip reason is the expected outcome."
+          } >> "$GITHUB_STEP_SUMMARY"
