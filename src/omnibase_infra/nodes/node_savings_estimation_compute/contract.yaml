@@ -27,6 +27,26 @@
 #     llm_call_metrics / session_outcomes / savings_estimates into. Reading
 #     the wrong one raised UndefinedTableError on every 60s tick from
 #     2026-08-23 until this fix.
+#   - OMN-16770 (residual, closed here as a seam and NOT as a grant):
+#     re-binding the pool moved the failure from "relation does not exist" to
+#     "permission denied for table savings_estimates". Four of the five
+#     relations the correlation batch joins are INTERNAL-domain and granted to
+#     omninode_runtime; the fifth, savings_estimates, is TENANT-domain under
+#     ENABLE + FORCE ROW LEVEL SECURITY with the policy
+#     tenant_id = current_setting('app.tenant_id', true)
+#     (node_projection_savings/081), and omninode_runtime is NOSUPERUSER /
+#     NOBYPASSRLS / non-owner by design (OMN-16843). A bare GRANT SELECT is
+#     NOT the fix: with the GUC unset the policy filters every row, so
+#     `NOT EXISTS (savings_estimates)` becomes universally true and the batch
+#     re-publishes an estimate for every session on every tick, forever.
+#     HandlerSavingsCorrelation therefore probes the premise on its own
+#     connection immediately before the anti-join and REFUSES with
+#     SavingsCorrelationUnscopedReadError unless the read is either
+#     tenant-scoped or executed by a role row-level security does not apply
+#     to. The durable close — tracking finalization in this node's own
+#     omninode_internal domain instead of reading a TENANT relation — needs a
+#     cross-repo ownership declaration in omnimarket and stays on OMN-16770;
+#     the class-wide static gate is OMN-17453.
 name: "node_savings_estimation_compute"
 contract_name: "node_savings_estimation_compute"
 node_name: "node_savings_estimation_compute"
@@ -37,7 +57,7 @@ contract_version:
 node_version:
   major: 0
   minor: 4
-  patch: 1
+  patch: 2
 node_type: "EFFECT_GENERIC"
 description: >
   EFFECT node for token savings estimation. HandlerSavingsCorrelation ingests raw injection-effectiveness / validator-catch signals into Postgres (no in-memory buffering), periodically correlates them per session by joining against llm_call_metrics and session_outcomes (owned by omnimarket's projection nodes), and calls the pure HandlerSavingsEstimation (tiered model pricing: Opus $15/M input, Sonnet $3/M input) to produce a ModelSavingsEstimate for Kafka emission to onex.evt.omnibase-infra.savings-estimated.v1.
@@ -72,7 +92,7 @@ handler_routing:
         name: "HandlerSavingsCorrelation"
         module: "omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation"
       description: >
-        Periodic batch step: finds sessions with unfinalized savings signals that are ready (session-outcome past grace window, or timed out), correlates them, and publishes savings-estimated.v1. Triggered directly by a periodic asyncio task in service_kernel.py (mirrors node_baselines_batch_compute), not by real bus traffic on this self-only command topic.
+        Periodic batch step: finds sessions with unfinalized savings signals that are ready (session-outcome past grace window, or timed out), correlates them, and publishes savings-estimated.v1. Triggered directly by a periodic asyncio task in service_kernel.py (mirrors node_baselines_batch_compute), not by real bus traffic on this self-only command topic. Readiness is decided by an anti-join against savings_estimates, a TENANT relation this node neither owns nor writes; the batch refuses (SavingsCorrelationUnscopedReadError) rather than run that anti-join on a connection where row-level security applies and no app.tenant_id is bound, because a filtered read would report every session as un-finalized (OMN-16770).
 
       input_model:
         name: "ModelSavingsCorrelationBatchCommand"
@@ -132,6 +152,11 @@ error_handling:
     - name: "InsufficientDataError"
       description: "Not enough effectiveness data to compute savings"
       recoverable: false
+    - name: "SavingsCorrelationUnscopedReadError"
+      description: >
+        The savings_estimates idempotency read cannot answer truthfully on this connection — row-level security applies and no app.tenant_id is bound, or the premise could not be read at all. Not recoverable by retry: the next tick reaches the identical connection state. Remediation is to read as a role row-level security does not apply to, or to bind the tenant scope — never a bare GRANT, which is what produces the silent all-sessions answer this refusal exists to prevent (OMN-16770).
+
+      recoverable: false
 health_check:
   enabled: true
   endpoint: "/health"
@@ -155,3 +180,5 @@ metadata:
   related_tickets:
     - "OMN-6964"
     - "OMN-7494"
+    - "OMN-16293"
+    - "OMN-16770"
