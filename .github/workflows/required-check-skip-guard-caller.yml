@@ -47,4 +47,4 @@ concurrency:
 jobs:
   required-check-skip-guard:
     if: ${{ always() }}
-    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@bfa618e2208c89537569931a8d416720ccb22d9d
+    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@7ba18152fe51ef406294b83442ab9d94148a8360
