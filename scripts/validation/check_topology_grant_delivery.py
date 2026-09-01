@@ -47,8 +47,8 @@ itself, and every grant migration in this corpus already carries one
 
 WHY A RATCHET AND NOT A CLEAN ZERO
 ----------------------------------
-Measured on 2026-09-01 the corpus delivers 24 of the 65 declared grants. The
-other 41 are real, and the live ``.201`` dev lane carries 38 of them ONLY
+Measured on 2026-09-01 the corpus delivered 24 of the 65 declared grants. The
+other 41 were real, and the live ``.201`` dev lane carried 38 of them ONLY
 because they were granted out of band by hand -- which is precisely why a fresh
 lane (staging, onex-dev, prod) does not have them and nobody notices until a
 projection starts refusing writes.
@@ -63,6 +63,45 @@ the ``test_application_migration_manifest.py`` exactness ratchet: the number may
 go DOWN in any change and may never go UP. That is not an allowlist -- no name
 is exempted, every undelivered pair is printed on every run, and a new
 undelivered grant fails the gate immediately.
+
+DELIVERY PROGRESS
+-----------------
+  * OMN-17374 delivered ``tenant_registry_mirror`` and landed this gate at 40.
+  * OMN-17440 delivered 13 more across 8 node lineages, taking the bound to 27.
+    The tranche was chosen mechanically rather than by taste: the owning nodes
+    with at least one BIGSERIAL/SERIAL-keyed relation, i.e. exactly the set
+    where a delivered TABLE grant is STILL not sufficient to write, because the
+    INSERT fails at the sequence behind the key first. Three of them
+    (``merge_state_transitions``, ``pr_lifecycle_ledger_entries``,
+    ``receipt_gate_rows``) were measured at zero rows by OMN-17377 and proven
+    refusing on the real wired path by OMN-17379.
+
+WHAT THE REMAINING 27 ARE
+-------------------------
+26 are deliverable and simply not yet done -- each has an owning node with a
+creating migration to land the grant beside. The 27th, ``nightly_loop_configs``,
+is NOT deliverable by any migration: nothing in the corpus issues a CREATE TABLE
+for it, so there is no lineage to put a grant in and no relation for a grant to
+bite on. It is named here so the floor is understood as 1 rather than 0, and
+``test_residual_relation_has_no_creating_migration`` asserts that reason still
+holds instead of trusting this prose.
+
+A NOTE ON SCOPE: THIS GATE SEES TABLES ONLY
+-------------------------------------------
+``savings_estimates`` is deliberately absent from everything above. It is
+declared for ``tenant_projection_writer`` only (already delivered) and for
+``omninode_runtime`` NOT AT ALL, so it can never appear in this gate's output.
+That is correct and must stay that way: granting the runtime principal a SELECT
+there would be actively wrong, because FORCE RLS with an unset GUC makes a
+granted SELECT return zero rows, inverting the ``NOT EXISTS`` anti-join into
+re-finalizing every session forever (OMN-16770).
+
+This gate also does not see SEQUENCES, and cannot: ``_GRANT_RE`` below matches a
+relation-and-role pair, and ``GRANT USAGE ON SEQUENCE <name> TO <role>`` does
+not parse as one at all -- so sequence grants are invisible to it rather than
+merely filtered out. A table can therefore pass this gate and still fail every
+write, which is exactly what happened to ``pr_merged_events``. That half is
+OMN-17447.
 
 The full residual is tracked by OMN-17440.
 """
@@ -89,11 +128,12 @@ _GRANT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# The count measured on 2026-09-01 AFTER this change lands its own delivery
-# (tenant_registry_mirror) on top of current dev. It may only ever go down. Moving it UP is the one
-# edit this file rejects on sight: it converts the gate into a record of the
-# drift instead of a bound on it.
-MAX_UNDELIVERED = 40
+# The count measured on 2026-09-01 after OMN-17440 landed the first delivery
+# tranche (13 grants across 8 node lineages) on top of OMN-17374's own.
+# It may only ever go down. Moving it UP is the one edit this file rejects on
+# sight: it converts the gate into a record of the drift instead of a bound on
+# it.
+MAX_UNDELIVERED = 27
 
 TOPOLOGY_RELPATH = "src/omnibase_infra/topology/instances/local.yaml"
 CORPUS_RELPATH = "docker/migrations/forward"

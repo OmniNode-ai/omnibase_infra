@@ -389,7 +389,33 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # behind its topic at TOTAL-LAG 0. Proven live on the .201 dev lane
     # 2026-08-31 by rewinding the group to offset 94 and re-consuming 94..96 on
     # the real wired path: three errors, three quarantine records, zero rows.
-    assert len(result.declarations) == 132
+    # OMN-17440 moves this count 132 -> 140 by ADDING eight declarations, one
+    # per owning node lineage, all domain `omninode_internal` to match the
+    # migration that creates each relation:
+    #
+    #   node_contract_registry/0001                (contract_registry)
+    #   node_merge_state_projection/0002           (merge_state_transitions)
+    #   node_omnigate_projection/0001              (gate_activity, gate_metrics)
+    #   node_pr_lifecycle_state_reducer/0002       (pr_lifecycle_ledger_entries)
+    #   node_projection_baselines/0003             (breakdown, comparisons,
+    #                                               snapshots, trend)
+    #   node_projection_intent_classification/0002 (intent_classification_events)
+    #   node_projection_overnight/0002             (session_phases, sessions)
+    #   node_projection_receipt_gate/0001          (receipt_gate_rows)
+    #
+    # Thirteen relations in total, each declared for `omninode_runtime` by the
+    # generated topology since it was generated and issued by NO migration
+    # until now. Every one is a pure forward ADD next to an untouched creating
+    # file, for the same reason the OMN-17374 and OMN-17379 rows above are:
+    # those creating migrations are applied on the .201 dev lane with recorded
+    # content_sha256 values, so repairing a grant block in place would raise
+    # 'conflicting migration checksum in canonical node history'.
+    #
+    # The tranche is the BIGSERIAL/SERIAL-keyed set specifically, because those
+    # are the relations where the TABLE grant alone still cannot write -- the
+    # INSERT fails at the sequence first, which is precisely the failure
+    # OMN-17379 proved on pr_merged_events. The sequence half is OMN-17447.
+    assert len(result.declarations) == 140
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
