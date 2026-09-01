@@ -1,0 +1,7 @@
+{
+  "_README": "sha256 of each file AS DEPLOYED at ~/push-lanes/ on the .201 queue host when it was lifted into this repo (2026-08-31, OMN-17392). The versioned copies differ from these by exactly two auditable edits: the required MIT SPDX header on every file, and a missing `NoReturn` import added to queue-contract-validator.py (ruff F821 -- latent only because `from __future__ import annotations` defers evaluation, but a real defect). The host has NOT been redeployed: run scripts/push_lanes/deploy-push-lanes.sh to make host == repo, which verifies by sha256 readback.",
+  "detect_foreign_prepush.py": "4774874300cddebeb624c587f7a5e3cf22d81ca03ef114107a50cd34fb17b593",
+  "queue-contract-validator.py": "7a0911ab99d4792e084b4321d52297936c067a353e1483eb6e35b1895521ddf1",
+  "queue-runner.py": "046d865cbcc2ee149cac6b615e96abd403b5145ae0cccc1fbaa22eb0dc58032b",
+  "queue-runner.sh": "dd41384f30ed027fb2ae292549842a79303fe8a7c91817c102349527c701598d"
+}

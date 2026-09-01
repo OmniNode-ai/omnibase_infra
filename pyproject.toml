@@ -385,6 +385,21 @@ ignore = [
 # N999: Hyphenated script names are intentional (executable CLI scripts, not importable modules)
 # T201: Scripts are CLI tools with intentional print() output
 "scripts/*-*.py" = ["N999", "T201"]
+# scripts/push_lanes/ is a VENDORED MIRROR of the operational scripts deployed at
+# ~/push-lanes/ on the .201 queue host (OMN-17392, closing OMN-17221 DoD4). Its
+# value is byte-fidelity with what actually runs there, so it is not restyled to
+# repo idioms in place: rewriting security-sensitive queue code here without
+# deploying and re-proving it on the host would fork the mirror from the thing it
+# mirrors, which is the exact drift this directory exists to end. Making it
+# idiomatic is a follow-up that must land WITH a deploy + readback, not a lint fix.
+# Scoped deliberately: correctness rules still apply -- the F821 this surfaced (a
+# genuinely missing NoReturn import) was FIXED, not ignored.
+#   PTH101/105/108, PIE810, PLW1510 -- os.* vs pathlib style, no behavior delta.
+#   S506 -- StrictLoader is a yaml.SafeLoader subclass that REJECTS duplicate keys
+#           and non-string keys; it is stricter than safe_load, not looser.
+"scripts/push_lanes/*.py" = [
+    "PTH101", "PTH105", "PTH108", "PIE810", "PLW1510", "S506", "N999", "T201",
+]
 "scripts/*.py" = ["T201"]
 # CLI tools, __main__ blocks, and intentional stdout output
 "src/omnibase_infra/runtime/emit_daemon/event_registry.py" = ["T201"]
