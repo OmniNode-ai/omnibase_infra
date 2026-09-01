@@ -200,11 +200,32 @@ def test_red_control_untrusted_tenant_selection() -> None:
     the write did not make the platform safer -- it destroyed the dimension on
     every event, on every lane, because no authority is ever bound.
 
-    The invariant that actually matters survives at full strength and is what
-    is asserted here: an unsigned envelope's payload/security-context tenant
-    can NEVER mint a capability, and therefore never reaches
-    ``set_config('app.tenant_id', ...)``. It is data the producer claimed, not
-    proof of entitlement, and no RLS session is ever opened on its word.
+    OMN-16976 sharpens it a second time, and the distinction is the whole
+    point. The previous revision asserted that an unverified claim "never
+    reaches ``set_config('app.tenant_id', ...)``" -- but that conflated the two
+    things a GUC scope can do. Opening a session as a tenant in order to be
+    ENTITLED to act as them is a capability. Scoping a single statement to the
+    identity that statement is itself persisting is the isolation MECHANISM
+    reading the attribution it has already been handed; it grants nothing the
+    row did not already declare, and the write remains confined to it.
+
+    Confining the write to that scope is not optional on this platform: every
+    canonical tenant policy is
+    ``tenant_id = current_setting('app.tenant_id', true)`` under FORCE ROW
+    LEVEL SECURITY, and `check_migration_rls_policy_atomicity.py` plus
+    `application_database_domain_enforcement` together forbid the alternative
+    (an extra permissive policy admitting the writer role "widens access").
+    With the GUC unset the comparison is against NULL, so the pre-OMN-16976
+    bare INSERT was denied by the database on every tenant relation -- the
+    OMN-16831 fix removed the Python refusal and left a Postgres one.
+
+    So the invariant that actually matters survives at full strength and is
+    what is asserted here, in its sharpened form: an unsigned envelope's
+    payload/security-context tenant can NEVER mint a
+    ``VerifiedProjectionTenantAuthority``, is never verified against a dispatch
+    event, and never authorizes anything. The only scope opened on its word is
+    the one the row itself declares -- asserted below, positionally, against
+    the row's own ``tenant_id``.
     """
     tenant_id = uuid4()
     envelope = ModelEventEnvelope[dict[str, object]](
@@ -227,10 +248,19 @@ def test_red_control_untrusted_tenant_selection() -> None:
             {"event_id": uuid4(), "tenant_id": str(tenant_id)},
         )
 
-    issued = [call.args[0] for call in cursor.execute.call_args_list]
-    assert not any("set_config" in statement for statement in issued)
-    # No RLS transaction was opened on an unverified claim.
-    assert conn.commit.call_count == 0
+    # No capability was minted from the claim: the adapter holds no authority,
+    # so nothing was ever verified against a dispatch event.
+    assert adapter._optional_tenant_context() is None  # type: ignore[attr-defined]
+
+    # The one scope that IS opened is the row's own declared tenant, and it is
+    # transaction-LOCAL. Nothing widened: same value, both statements.
+    scope = next(
+        call for call in cursor.execute.call_args_list if "set_config" in call.args[0]
+    )
+    assert scope.args[1] == ("app.tenant_id", str(tenant_id))
+    insert = cursor.execute.call_args_list[-1]
+    assert insert.args[1]["tenant_id"] == str(tenant_id)
+    assert conn.autocommit is True
     assert (
         envelope.security_context is not None
     )  # proves the untrusted shape was present
@@ -642,6 +672,162 @@ def test_unbound_authority_writes_the_events_own_tenant_unmodified() -> None:
 
     insert = cursor.execute.call_args_list[-1]
     assert insert.args[1]["tenant_id"] == "beta-business-proof"
+
+
+def test_unbound_authority_scopes_the_write_to_the_recorded_tenant() -> None:
+    """OMN-16976: the unbound write is CONFINED to the tenant it records.
+
+    RED before this change: the unbound path issued a bare INSERT with no
+    ``set_config`` at all. Every tenant-classified relation carries
+    ``WITH CHECK (tenant_id = current_setting('app.tenant_id', true))`` under
+    FORCE ROW LEVEL SECURITY and the runtime connects as a NOBYPASSRLS role,
+    so an unset GUC compares against NULL and Postgres denied the row --
+    observed live on the .201 dev lane as 40 InsufficientPrivilege /3h on
+    ``projection_delegation_inference_response_text``, the one such relation
+    currently taking traffic. The OMN-16831 fix removed the Python refusal and
+    left a Postgres one in its place.
+
+    The scope value is the row's own ``tenant_id``, so this is a confinement,
+    not a grant: the statement cannot write outside the identity it declares.
+    """
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.upsert(
+            "delegation_events",
+            "event_id",
+            {"event_id": uuid4(), "tenant_id": "beta-outside-every-compiled-map"},
+        )
+
+    statements = [call.args[0] for call in cursor.execute.call_args_list]
+    assert "SELECT set_config(%s, %s, true)" in statements
+    scope = next(
+        call for call in cursor.execute.call_args_list if "set_config" in call.args[0]
+    )
+    # is_local=True -- the scope dies with the transaction, never leaks to the
+    # next event on this pooled connection.
+    assert scope.args[1] == ("app.tenant_id", "beta-outside-every-compiled-map")
+    insert = cursor.execute.call_args_list[-1]
+    assert insert.args[1]["tenant_id"] == "beta-outside-every-compiled-map"
+    conn.commit.assert_called_once_with()
+    assert conn.autocommit is True
+
+
+def test_unbound_write_opens_no_scope_for_a_tenantless_row() -> None:
+    """A row with no tenant gets NO scope, so the database denies it.
+
+    The refusal stays where OMN-16831 item 4 put it -- the producer's
+    obligation, enforced by the relation's own policy -- rather than being
+    re-imported into this seam as a Python raise. An unset GUC compares
+    against NULL, so a tenant-less row cannot pass ``WITH CHECK``.
+    """
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.upsert("delegation_events", "event_id", {"event_id": uuid4()})
+
+    assert not any(
+        "set_config" in call.args[0] for call in cursor.execute.call_args_list
+    )
+    conn.commit.assert_not_called()
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None])
+def test_unbound_write_opens_no_scope_for_a_blank_tenant(blank: object) -> None:
+    """A blank or null tenant is not a tenant; it opens no scope either."""
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.upsert(
+            "delegation_events", "event_id", {"event_id": uuid4(), "tenant_id": blank}
+        )
+
+    assert not any(
+        "set_config" in call.args[0] for call in cursor.execute.call_args_list
+    )
+
+
+def test_unbound_read_is_scoped_only_when_the_caller_named_a_tenant() -> None:
+    """Reads are scoped by the caller's own filter, and never widened.
+
+    ``_preserve_existing_evidence`` reads before every upsert. Under FORCE RLS
+    an unscoped read returns [] even when the tenant's row exists, so the
+    upsert that follows OVERWRITES accumulated evidence instead of merging it
+    -- silently, and worse than the refusal it replaced. Scoping the read to
+    the tenant the caller already filtered on fixes that without widening
+    anything: a filter naming no tenant still opens no scope and the read
+    stays blind.
+    """
+    target = projection_database_target(
+        "delegation_events", schema="tenant", access="read_write"
+    )
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.query("delegation_events", {"tenant_id": "beta-outside-the-map"})
+        scoped = [
+            call
+            for call in cursor.execute.call_args_list
+            if "set_config" in call.args[0]
+        ]
+        assert scoped and scoped[-1].args[1] == (
+            "app.tenant_id",
+            "beta-outside-the-map",
+        )
+
+        cursor.execute.reset_mock()
+        adapter.query("delegation_events", {"correlation_id": "cid-1"})
+
+    assert not any(
+        "set_config" in call.args[0] for call in cursor.execute.call_args_list
+    )
+
+
+def test_unbound_scope_is_rolled_back_and_never_leaks_on_failure() -> None:
+    """The unbound scope obeys the same leak control as the bound one."""
+    target = projection_database_target("delegation_events", schema="tenant")
+    conn, cursor = _connection("tenant_projection_writer")
+    cursor.execute.side_effect = (None, None, RuntimeError("write failed"))
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        with pytest.raises(RuntimeError, match="write failed"):
+            adapter.upsert(
+                "delegation_events",
+                "event_id",
+                {"event_id": uuid4(), "tenant_id": "beta-outside-the-map"},
+            )
+
+    conn.rollback.assert_called_once_with()
+    conn.commit.assert_not_called()
+    assert conn.autocommit is True
+
+
+def test_internal_and_catalog_domains_still_open_no_tenant_scope() -> None:
+    """OMN-16976 must not leak a tenant scope into a non-tenant domain.
+
+    Only ``TenantProjectionTableOperation`` supplies a recorded scope. The
+    INTERNAL and CATALOG operations pass none, so their statements stay
+    exactly as they were -- which their own red controls already assert, and
+    which this restates against the new seam directly.
+    """
+    target = projection_database_target("generation_events", schema="omninode_internal")
+    conn, cursor = _connection("omninode_runtime")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target)
+        adapter.upsert("generation_events", "event_id", {"event_id": uuid4()})
+
+    assert not any(
+        "set_config" in call.args[0] for call in cursor.execute.call_args_list
+    )
 
 
 def test_unbound_authority_never_invents_a_tenant() -> None:
