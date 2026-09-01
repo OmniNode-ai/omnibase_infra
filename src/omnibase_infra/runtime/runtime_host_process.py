@@ -4639,6 +4639,7 @@ class RuntimeHostProcess:
         error_response = self._create_error_response(
             error=f"Invalid JSON in message: {error}",
             correlation_id=correlation_id,
+            exception=error,
         )
         await self._publish_envelope_safe(error_response, self._output_topic)
 
@@ -4745,6 +4746,7 @@ class RuntimeHostProcess:
             error_response = self._create_error_response(
                 error=str(e),
                 correlation_id=pre_validation_correlation_id,
+                exception=e,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
             logger.warning(
@@ -4761,6 +4763,7 @@ class RuntimeHostProcess:
             error_response = self._create_error_response(
                 error=str(e),
                 correlation_id=pre_validation_correlation_id,
+                exception=e,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
             logger.warning(
@@ -4816,6 +4819,7 @@ class RuntimeHostProcess:
             error_response = self._create_error_response(
                 error=str(routing_error),
                 correlation_id=correlation_id,
+                exception=routing_error,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
 
@@ -5003,9 +5007,14 @@ class RuntimeHostProcess:
         )
         infra_error.__cause__ = error
 
+        # ``infra_error`` rather than the raw ``error``: the RuntimeHostError
+        # wrapper carries the handler/operation context AND ``__cause__`` is set
+        # to the original exception just above, so the attribution walks the
+        # chain to the real failure class instead of stopping at the wrapper.
         error_response = self._create_error_response(
             error=str(error),
             correlation_id=correlation_id,
+            exception=infra_error,
         )
         await self._publish_envelope_safe(error_response, self._output_topic)
 
@@ -5024,23 +5033,74 @@ class RuntimeHostProcess:
         self,
         error: str,
         correlation_id: UUID | None,
+        *,
+        exception: BaseException,
     ) -> dict[str, object]:
-        """Create a standardized error response envelope.
+        """Create a standardized error response envelope (OMN-17432).
+
+        The envelope carries a ``payload`` object, and that payload is a typed
+        :class:`ModelBoundaryFailureTerminal`. Both halves are load-bearing.
+
+        **Why a payload at all.** This envelope used to be four keys —
+        ``success``/``status``/``error``/``correlation_id`` — with no ``payload``.
+        A consumer that gates on payload presence before acting drops it on the
+        floor: the gateway's ``parse_session_event_envelope`` raises
+        ``"session-event envelope is missing a 'payload' object"`` *before* it
+        resolves the pending correlation, so the runtime believes it answered
+        while the caller waits out its full correlation bound and is told 503.
+        An envelope a consumer cannot parse is not an answer.
+
+        **Why the typed terminal rather than the bare ``error`` string.** The
+        string names the surface that noticed ("Handler execution failed"),
+        never the cause, and states nothing about retryability — so a caller
+        obeying it gives up on transient failures and retries permanent ones
+        forever. ``classify_boundary_failure`` is the runtime's existing
+        attribution seam (OMN-16812): it recovers the originating class and ONEX
+        code from the exception chain OR from an engine-flattened message, and
+        derives ``retryable`` from ``EnumNonRetryableErrorCategory`` — the same
+        enum DLQ replay classifies with, because "is this worth retrying" must
+        not have two answers in one runtime. Reusing it here means this surface
+        and the consume boundary emit the ONE shape, so a caller that learns to
+        read a runtime failure reads it wherever the failure was noticed.
+
+        The historical top-level keys are kept beside the payload, not replaced
+        by it: this is additive, and a reader that has not learned the typed
+        shape is not stranded by the change.
 
         Args:
             error: Error message to include.
-            correlation_id: Correlation ID to preserve for tracking.
+            correlation_id: Correlation ID to preserve for tracking. ``None``
+                only where the failure preceded reading one (a decode failure);
+                one is minted and used for BOTH the envelope and its payload, so
+                the record cannot correlate to two different things.
+            exception: The failure being reported. Required, not optional —
+                every call site holds the exception object already, and a
+                defaulted ``None`` would silently re-introduce the unattributed
+                envelope this parameter exists to eliminate.
 
         Returns:
-            Error response dict with success=False and error details.
+            Error response dict with success=False, error details, and a typed
+            ``payload`` naming the attributed cause.
         """
+        from omnibase_infra.runtime.boundary_failure_terminal import (
+            classify_boundary_failure,
+        )
+
         # Use correlation_id or generate a new one, keeping as UUID for internal use
         final_correlation_id = correlation_id or uuid4()
+        terminal = classify_boundary_failure(
+            exception,
+            topic=self._input_topic,
+            correlation_id=final_correlation_id,
+            failure_reason=error,
+            failure_code=getattr(exception, "failure_code", None),
+        )
         return {
             "success": False,
             "status": "error",
             "error": error,
             "correlation_id": final_correlation_id,
+            "payload": terminal.model_dump(mode="json"),
         }
 
     def _serialize_envelope(self, envelope: dict[str, object]) -> dict[str, object]:
