@@ -1,24 +1,24 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# Ticket: OMN-8272, OMN-10784, OMN-11050, OMN-11069, OMN-16035, OMN-16038
+# Ticket: OMN-8272, OMN-10784, OMN-11050, OMN-11069, OMN-16035, OMN-16038, OMN-17028
 name: "node_onboarding_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1
-  minor: 5
+  minor: 6
   patch: 0
-node_version: "1.5.0"
+node_version: "1.6.0"
 description: >
-  Onboarding orchestrator — supports two execution paths. DAG path (default): loads the canonical graph, resolves a policy to a minimal verification step set, executes verification for each step, and renders markdown output. Interactive path (OMN-10784): when policy_name is set and the resolved policy has policy_type=interactive, dispatches to InteractiveExecutor with an injected input adapter, optionally writing env config via ConfigWriter when dry_run=False. Emits lifecycle events on completion. No result field (Invariant I5). Overlay output path support (OMN-11069): interactive onboarding writes overlay YAML as the primary output and can optionally emit the legacy env file. Credentials artifact (OMN-16035): when credentials_output_path is set and the run produced credential-shaped entries, CredentialsWriter emits a merge-and-preserve JSON file at mode 0600. Declared credentials (OMN-16038): when the executed policy declares a credentials_output block, that declaration is authoritative and the artifact is written FLAT as {secret_ref: secret} — the shape StoreGatewayCredential (OMN-15922) reads — instead of the OMN-16035 key-name heuristic, which now applies only to policies that declare no credentials block; a live run of a credentials-declaring policy with no credentials_output_path is refused rather than silently dropping the collected secret. env_output_path is required only where it is consumed (the legacy .env write, or deriving the overlay path), matching what ModelOnboardingInput already validates.
+  Onboarding orchestrator — supports two execution paths. DAG path (default): loads the canonical graph, resolves a policy to a minimal verification step set, executes verification for each step, and renders markdown output. Interactive path (OMN-10784): when policy_name is set and the resolved policy has policy_type=interactive, dispatches to InteractiveExecutor with an injected input adapter, optionally writing env config via ConfigWriter when dry_run=False. Emits lifecycle events on completion. No result field (Invariant I5). Overlay output path support (OMN-11069): interactive onboarding writes overlay YAML as the primary output and can optionally emit the legacy env file. Credentials artifact (OMN-16035): when credentials_output_path is set and the run produced credential-shaped entries, CredentialsWriter emits a merge-and-preserve JSON file at mode 0600. Declared credentials (OMN-16038): when the executed policy declares a credentials_output block, that declaration is authoritative and the artifact is written FLAT as {secret_ref: secret} — the shape StoreGatewayCredential (OMN-15922) reads — instead of the OMN-16035 key-name heuristic, which now applies only to policies that declare no credentials block; a live run of a credentials-declaring policy with no credentials_output_path is refused rather than silently dropping the collected secret. Credential STORE handoff (OMN-17028): a policy may instead declare a credential_store_output block, which is the most-declared of the three sources and wins over both. Where the other two name a FILE to write, this one names the STORE to write THROUGH — the handler calls StoreGatewayCredential.save_api_key, which owns both ~/.onex files, so the reference-only config.yaml gateway block and the 0600 credentials.json entry are written together and what onboarding writes is by construction what the credential reader reads. This closes the writer/reader split in which connect_cloud reported success while leaving the machine unable to authenticate: credentials.json alone is a file the reader never opens on its own. credentials_output_path must name the store's own file name under the ~/.onex root, and a mismatch is refused rather than written to a path the store will never read. Overlay YAML is now written only where a destination was actually named, so a credential-only policy emits no second, unread copy of the same coordinates; correspondingly credentials_output_path alone satisfies the "some output was requested" precondition. env_output_path is required only where it is consumed (the legacy .env write, or deriving the overlay path), matching what ModelOnboardingInput already validates.
 
 input_model:
   name: "ModelOnboardingInput"
   module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input"
-  description: "Target capabilities to achieve (DAG path), optional steps to skip, failure behavior flag, and interactive-path fields (policy_name, dry_run, env_output_path, overlay_output_path, legacy_env_output, credentials_output_path) for OMN-10784/OMN-11069/OMN-16035."
+  description: "Target capabilities to achieve (DAG path), optional steps to skip, failure behavior flag, and interactive-path fields (policy_name, dry_run, env_output_path, overlay_output_path, legacy_env_output, credentials_output_path) for OMN-10784/OMN-11069/OMN-16035. OMN-17028: credentials_output_path alone now satisfies the live-run output precondition, so a credential-only policy no longer has to name an overlay destination it has no content for."
 output_model:
   name: "ModelOnboardingOutput"
   module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_output"
-  description: "Step results, success flag, counts, rendered markdown output, verification status taxonomy (status, verified_capabilities, unmet_capabilities), and interactive provenance fields (provenance, policy_name, policy_type, visited_steps, terminal_step, dry_run, env_output_path_written, overlay_output_path_written, credentials_output_path_written) for OMN-10784/OMN-11069/OMN-16035. The provenance ModelInteractiveResult additionally carries credentials_dict as SecretStr values (OMN-16038), so a model-dumped or logged output renders the mask rather than the secret."
+  description: "Step results, success flag, counts, rendered markdown output, verification status taxonomy (status, verified_capabilities, unmet_capabilities), and interactive provenance fields (provenance, policy_name, policy_type, visited_steps, terminal_step, dry_run, env_output_path_written, overlay_output_path_written, credentials_output_path_written) for OMN-10784/OMN-11069/OMN-16035. The provenance ModelInteractiveResult additionally carries credentials_dict as SecretStr values (OMN-16038), so a model-dumped or logged output renders the mask rather than the secret; OMN-17028 adds credential_store_write, also SecretStr-wrapped, carrying the credential handed to the store. overlay_output_path_written is None where no overlay destination was named. The rendered markdown names the ~/.onex root the credential was stored under and points at 'onex auth status', because the defect this path closes was an operator being told onboarding succeeded while the file the credential reader opens had never been written."
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
@@ -34,6 +34,10 @@ capabilities:
   - "onboarding.step.verify"
   - "onboarding.output.render"
   - "onboarding.overlay.write"
+  # OMN-17028. Distinct from writing a credentials FILE: this is the handoff to
+  # the credential store that owns both ~/.onex files, which is what makes the
+  # collected credential resolvable by `onex auth status` with no manual step.
+  - "onboarding.credential.store"
 event_bus:
   subscribe_topics:
     - "onex.cmd.omnibase-infra.onboarding-start.v1"
@@ -42,4 +46,4 @@ event_bus:
     - "onex.evt.omnibase-infra.onboarding-step-verified.v1"
 metadata:
   description: "Onboarding orchestrator that loads the canonical graph, resolves policy, executes verifications, renders markdown output, and writes overlay YAML for interactive onboarding."
-  ticket: "OMN-8272, OMN-10784, OMN-11050, OMN-11069"
+  ticket: "OMN-8272, OMN-10784, OMN-11050, OMN-11069, OMN-16035, OMN-16038, OMN-17028"
