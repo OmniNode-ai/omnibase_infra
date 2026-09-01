@@ -415,7 +415,27 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # are the relations where the TABLE grant alone still cannot write -- the
     # INSERT fails at the sequence first, which is precisely the failure
     # OMN-17379 proved on pr_merged_events. The sequence half is OMN-17447.
-    assert len(result.declarations) == 140
+    # OMN-17447 moves this count 140 -> 150 by ADDING ten more, the SEQUENCE
+    # half of the same defect class. A SERIAL/BIGSERIAL key is a nextval()
+    # DEFAULT over a STANDALONE sequence whose own acl PostgreSQL checks on
+    # every INSERT, so a relation can hold a complete TABLE grant and still
+    # refuse every write -- which is what kept pr_merged_events 24 days behind
+    # its topic at consumer LAG 0 (OMN-17379).
+    #
+    # Seven for omninode_runtime (contract_registry, gate_activity,
+    # intent_classification_events, merge_state_transitions,
+    # overnight_session_phases, pr_lifecycle_ledger_entries, receipt_gate_rows)
+    # and three for tenant_projection_writer (capability_scores,
+    # delegation_routing_tenant_overlay, dep_health_findings) -- the latter
+    # three found by DERIVING the requirement from declared INSERT grants plus
+    # the corpus's own column shapes, rather than from OMN-17447's hand list,
+    # which was scoped to omninode_runtime and never looked at them.
+    #
+    # Each resolves its sequence via pg_get_serial_sequence rather than
+    # spelling <table>_<column>_seq, RAISEs if the column is not sequence-backed
+    # instead of no-oping into another silent half-grant, and asserts
+    # has_sequence_privilege post-grant.
+    assert len(result.declarations) == 150
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

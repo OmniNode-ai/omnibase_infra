@@ -8,6 +8,7 @@ import pytest
 
 from omnibase_infra.topology.application_database import load_topology_profile
 from omnibase_infra.topology.physical_schema_mapping import (
+    APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
 )
 from omnibase_infra.validation.application_database_domain_enforcement import (
@@ -616,6 +617,31 @@ def test_non_allowlisted_table_in_public_still_fails(
     public/unqualified exemption -- a table absent from the shared allowlist
     must still be rejected exactly as before."""
     assert expected in "\n".join(lint_application_database_sql(statement, _TOPOLOGY))
+
+
+def test_known_physically_public_sequence_passes_static_lint() -> None:
+    """OMN-17447: sequence grants follow their owning table's physical schema."""
+    assert (
+        "capability_scores_id_seq"
+        in APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    )
+    assert (
+        lint_application_database_sql(
+            "GRANT USAGE ON SEQUENCE public.capability_scores_id_seq "
+            "TO tenant_projection_writer;",
+            _TOPOLOGY,
+        )
+        == ()
+    )
+
+
+def test_unlisted_public_sequence_still_fails_static_lint() -> None:
+    assert "public.unowned_id_seq" in "\n".join(
+        lint_application_database_sql(
+            "GRANT USAGE ON SEQUENCE public.unowned_id_seq TO omninode_runtime;",
+            _TOPOLOGY,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
