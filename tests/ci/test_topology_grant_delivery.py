@@ -22,11 +22,18 @@ from pathlib import Path
 import pytest
 
 from scripts.validation.check_topology_grant_delivery import (
+    _IDENTITY_COLUMN_RE,
+    _SERIAL_COLUMN_RE,
     MAX_UNDELIVERED,
+    MAX_UNDELIVERED_SEQUENCES,
     GrantKey,
+    SequenceKey,
     declared_grants,
     delivered_grants,
+    delivered_sequences,
+    sequence_backed_columns,
     undelivered,
+    undelivered_sequences,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -278,3 +285,144 @@ def test_grant_on_all_tables_is_not_read_as_a_named_delivery() -> None:
     delivered = delivered_grants(REPO_ROOT / "docker/migrations/forward")
     for key in delivered:
         assert key.table.upper() != "ALL"
+
+
+# ---------------------------------------------------------------------------
+# OMN-17447 -- the SEQUENCE half of the same defect class.
+# ---------------------------------------------------------------------------
+
+# The relations whose sequence-backed key had a delivered TABLE grant and no
+# sequence grant, so every INSERT failed at the sequence before reaching the
+# table. The seven omninode_runtime entries are OMN-17447's own list minus the
+# three it got wrong (see OMN_17447_NOT_SEQUENCE_BACKED); the three
+# tenant_projection_writer entries are ones its omninode_runtime-only scope
+# never looked at, found by deriving the requirement instead of hand-listing it.
+OMN_17447_DELIVERED_SEQUENCES = frozenset(
+    {
+        SequenceKey("omninode_runtime", "public", "contract_registry", "id"),
+        SequenceKey("omninode_runtime", "public", "gate_activity", "id"),
+        SequenceKey("omninode_runtime", "public", "intent_classification_events", "id"),
+        SequenceKey(
+            "omninode_runtime", "public", "merge_state_transitions", "projection_cursor"
+        ),
+        SequenceKey("omninode_runtime", "public", "overnight_session_phases", "id"),
+        SequenceKey("omninode_runtime", "public", "pr_lifecycle_ledger_entries", "id"),
+        SequenceKey("omninode_runtime", "public", "receipt_gate_rows", "id"),
+        SequenceKey("tenant_projection_writer", "public", "capability_scores", "id"),
+        SequenceKey(
+            "tenant_projection_writer",
+            "public",
+            "delegation_routing_tenant_overlay",
+            "id",
+        ),
+        SequenceKey("tenant_projection_writer", "public", "dep_health_findings", "id"),
+    }
+)
+
+# The three OMN-17447 listed as BIGSERIAL and which are NOT sequence-backed in
+# the applied end state. `node_projection_baselines/0001` does declare them
+# BIGSERIAL; `0002` then DROPs and recreates all three with `id TEXT PRIMARY
+# KEY`. A gate that read only CREATE statements would demand a sequence grant
+# for them, and the delivering migration's own fail-loud guard would then
+# RAISE on a NULL pg_get_serial_sequence -- turning the gate into a broken
+# deploy. Verified on a scratch Postgres: applying 0001 then 0002 leaves
+# `id type=text default=NONE` and pg_get_serial_sequence returning NULL.
+OMN_17447_NOT_SEQUENCE_BACKED = frozenset(
+    {"baselines_breakdown", "baselines_comparisons", "baselines_trend"}
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", sorted(OMN_17447_DELIVERED_SEQUENCES, key=str))
+def test_omn_17447_sequence_is_delivered_by_a_migration(key: SequenceKey) -> None:
+    """Each sequence-backed key behind a declared INSERT has a USAGE grant.
+
+    RED before this change: `GRANT USAGE ON SEQUENCE` is a statement shape the
+    pre-existing `_GRANT_RE` cannot parse AT ALL, so sequence grants were
+    invisible to this gate rather than merely filtered out of it -- a table
+    could pass every check here and still fail every write. That is exactly
+    what happened to `pr_merged_events`, which sat 24 days behind its topic at
+    consumer LAG 0 while every INSERT raised `InsufficientPrivilege:
+    permission denied for sequence pr_merged_events_projection_cursor_seq`.
+    """
+    delivered = delivered_sequences(REPO_ROOT / "docker/migrations/forward")
+    assert key in delivered, (
+        f"{key} is a sequence-backed column behind a declared INSERT grant "
+        "with no delivering GRANT USAGE ON SEQUENCE. A TABLE grant alone does "
+        "not make it writable."
+    )
+
+
+@pytest.mark.unit
+def test_undelivered_sequence_count_is_exactly_the_ratchet_bound() -> None:
+    """The sequence bound bites in both directions, like the table one."""
+    missing = undelivered_sequences(REPO_ROOT)
+    rendered = "\n".join(f"  {key}" for key in missing)
+    assert len(missing) == MAX_UNDELIVERED_SEQUENCES, (
+        f"{len(missing)} undelivered sequence grants, bound is "
+        f"{MAX_UNDELIVERED_SEQUENCES}. Update MAX_UNDELIVERED_SEQUENCES in the "
+        f"same change that moves the count.\n{rendered}"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("table", sorted(OMN_17447_NOT_SEQUENCE_BACKED))
+def test_recreated_tables_are_not_reported_as_sequence_backed(table: str) -> None:
+    """A later DROP+recreate wins over the original BIGSERIAL declaration.
+
+    This is the regression guard for the one thing OMN-17447's filed
+    derivation got wrong. If `sequence_backed_columns` ever reverts to reading
+    CREATE statements without honouring the DROP that precedes the recreate,
+    these three come back as gapped sequences, someone lands grant migrations
+    for them, and every lane's deploy fails on the fail-loud NULL guard.
+    """
+    columns = sequence_backed_columns(REPO_ROOT / "docker/migrations/forward")
+    assert not columns.get(("public", table)), (
+        f"{table} is reported as sequence-backed, but node_projection_baselines"
+        "/0002 recreates it with `id TEXT PRIMARY KEY`. Reading only the "
+        "CREATE in 0001 is the error this test exists to catch."
+    )
+
+
+@pytest.mark.unit
+def test_identity_columns_are_not_required_to_carry_a_sequence_grant() -> None:
+    """An IDENTITY column's sequence rides the table's own INSERT privilege.
+
+    Only SERIAL/BIGSERIAL create a STANDALONE sequence with its own ACL. Asking
+    for a separate USAGE grant on an identity column's implicit sequence would
+    be wrong, and the delivering migration would fail loud on it.
+    """
+    body = (
+        "CREATE TABLE public.example (\n"
+        "  a BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n"
+        "  b BIGSERIAL,\n"
+        "  c TEXT\n"
+        ");\n"
+    )
+    identity = {m.group("column") for m in _IDENTITY_COLUMN_RE.finditer(body)}
+    serial = {m.group("column") for m in _SERIAL_COLUMN_RE.finditer(body)}
+    assert "a" in identity
+    assert serial - identity == {"b"}
+
+
+@pytest.mark.unit
+def test_checker_fails_when_the_sequence_residual_grows() -> None:
+    """RED control for the sequence half, against the real corpus.
+
+    Proves the sequence gate can actually fail without editing the corpus or
+    the topology -- the OMN-15547 requirement that a gate be shown to bite.
+    """
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/validation/check_topology_grant_delivery.py"),
+            "--max-undelivered-sequences",
+            "-1",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 1
+    assert "sequence grant delivery" in completed.stdout
