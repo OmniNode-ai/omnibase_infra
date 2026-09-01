@@ -32,12 +32,21 @@ SECRET HANDLING
     and expiry, and never prints secret material.
 
 WHERE THE TRANSPORT COMES FROM
-    ``token`` mints over the network, so it needs a concrete
-    ``ProtocolGatewayTransport``. That adapter ships in this same distribution
+    ``token`` mints over the network, and ``status`` verifies over it, so both
+    need a concrete transport. That adapter ships in this same distribution
     (``omnibase_infra.gateway.client.gateway_transport_httpx``) and is
-    constructed directly. ``login``/``status``/``logout`` touch no network at
-    all -- they are pure local file operations over ``~/.onex`` -- so they work
-    regardless.
+    constructed directly. ``login`` and ``logout`` touch no network at all --
+    they are pure local file operations over ``~/.onex`` -- and
+    ``status --no-verify`` keeps that property for status too.
+
+WHAT ``status`` ANSWERS (OMN-17028)
+    "Am I authenticated", not "does my config parse". For an API-key
+    credential it presents the key to ``GET /v1/whoami`` and reports the tenant
+    the GATEWAY resolved, so a revoked key, a key for a different origin, or a
+    local label that disagrees with the server all surface as a non-zero exit
+    instead of a confident printout. The attach-plane credential is proven by
+    ``onex auth token`` instead, and ``status`` says so rather than implying it
+    checked.
 """
 
 from __future__ import annotations
@@ -52,6 +61,9 @@ from typing import NoReturn
 import click
 
 from omnibase_core.errors.model_onex_error import ModelOnexError
+from omnibase_infra.gateway.client.gateway_identity_verifier import (
+    GatewayIdentityVerifier,
+)
 from omnibase_infra.gateway.client.gateway_token_minter import (
     GatewayTokenMinter,
 )
@@ -61,8 +73,14 @@ from omnibase_infra.gateway.client.gateway_transport_httpx import (
 from omnibase_infra.gateway.client.store_gateway_credential import (
     StoreGatewayCredential,
 )
+from omnibase_infra.gateway.models.model_gateway_api_key import (
+    ModelGatewayApiKeyCredential,
+)
 from omnibase_infra.gateway.models.model_gateway_credential import (
     ModelGatewayCredential,
+)
+from omnibase_infra.gateway.models.model_gateway_credential_base import (
+    ModelGatewayCredentialBase,
 )
 
 __all__ = ["auth_group"]
@@ -84,10 +102,54 @@ def _fail(message: str) -> NoReturn:
 
 
 def _load_credential() -> ModelGatewayCredential:
+    """Resolve the ATTACH-plane credential specifically.
+
+    Used by ``token``, which mints against a realm this credential kind is the
+    only one to carry. ``status`` deliberately does NOT go through here: it
+    reports on whichever kind the machine holds, and routing it through the
+    client-credentials reader is what made it fail on a machine that had just
+    successfully stored an API key (OMN-17028).
+    """
     try:
         return _store().load()
     except ModelOnexError as exc:
         _fail(str(exc))
+
+
+def _load_read_credential() -> ModelGatewayCredentialBase:
+    """Resolve whichever credential kind this machine actually holds."""
+    try:
+        return _store().load_read_credential()
+    except ModelOnexError as exc:
+        _fail(str(exc))
+
+
+def _verify_api_key(credential: ModelGatewayApiKeyCredential) -> None:
+    """Ask the gateway who this key is, and refuse to report a mismatch quietly.
+
+    A stored ``tenant_slug`` that disagrees with the gateway's own answer is a
+    config that lies: the slug names the ref the key is filed under and appears
+    in every operator-facing message about this credential, so leaving the two
+    disagreeing means every later message names the wrong tenant.
+    """
+    verifier = GatewayIdentityVerifier(
+        transport=GatewayTransportHttpx(),
+        credential=credential,
+    )
+    try:
+        identity = asyncio.run(verifier.verify())
+    except ModelOnexError as exc:
+        _fail(str(exc))
+
+    if identity.tenant_slug != credential.tenant_slug:
+        _fail(
+            f"the stored key authenticates as tenant '{identity.tenant_slug}', "
+            f"but this machine has it filed under '{credential.tenant_slug}'. "
+            "Re-run onboarding with the slug the dashboard shows for this key."
+        )
+
+    click.echo(f"verified:         {credential.base_url} resolved this key")
+    click.echo(f"                  as tenant '{identity.tenant_slug}'")
 
 
 def _read_stdin_secret(what: str, example: str) -> str:
@@ -219,19 +281,71 @@ def auth_login(
 
 
 @auth_group.command("status")
-def auth_status() -> None:
+@click.option(
+    "--verify/--no-verify",
+    default=True,
+    show_default=True,
+    help=(
+        "Ask the gateway who the stored key is, instead of only printing what "
+        "the local config claims. Verification is the default because "
+        "'my config file parses' is not the question an operator asking for "
+        "status is asking. --no-verify keeps the command purely local, which "
+        "is what you want when pasting output into an issue offline."
+    ),
+)
+def auth_status(verify: bool) -> None:
     """Print the stored credential's identity and endpoints.
 
-    Never prints secret material -- not the client secret, not a token. This
-    command is what an operator pastes into an issue.
+    Never prints secret material -- not the API key, not the client secret, not
+    a token. This command is what an operator pastes into an issue.
+
+    TWO CREDENTIAL KINDS, ONE COMMAND, NO GUESSING (OMN-17028)
+        This resolves whichever kind the machine actually holds, because the
+        two surfaces are genuinely different and demanding one's fields of the
+        other is what made a successfully-onboarded machine report itself
+        unauthenticated. An API key belongs to the delegation path
+        (``POST /v1/workflows``) and carries no ``edge_instance_id``, no
+        principal and no token endpoint -- those are ATTACH-plane fields, and
+        requiring them of a key credential asked for four values that path
+        never has. The store refuses a machine holding both, so nothing here
+        picks a winner.
     """
-    credential = _load_credential()
+    credential = _load_read_credential()
+
+    if isinstance(credential, ModelGatewayApiKeyCredential):
+        click.echo("credential kind:  tenant API key (delegation path)")
+        click.echo(f"tenant_slug:      {credential.tenant_slug}")
+        click.echo(f"gateway base_url: {credential.base_url}")
+        click.echo("api_key:          stored by reference (not shown)")
+        if not verify:
+            click.echo("verified:         not attempted (--no-verify)")
+            return
+        _verify_api_key(credential)
+        return
+
+    if not isinstance(credential, ModelGatewayCredential):
+        # Not reachable through the store today, and deliberately a refusal
+        # rather than a generic printout: a third credential kind arriving here
+        # would otherwise be reported with whichever fields happened to exist,
+        # which is how a machine gets told it is authenticated for a surface
+        # nobody checked.
+        _fail(
+            "the stored credential is of a kind this command cannot report on. "
+            "Re-run 'onex auth login'."
+        )
+
+    click.echo("credential kind:  client credentials (gateway attach plane)")
     click.echo(f"tenant_slug:      {credential.tenant_slug}")
     click.echo(f"principal_id:     {credential.client_id}")
     click.echo(f"token_endpoint:   {credential.token_endpoint}")
     click.echo(f"gateway base_url: {credential.base_url}")
     click.echo(f"edge_instance_id: {credential.edge_instance_id}")
     click.echo("client_secret:    stored by reference (not shown)")
+    # Stated rather than silently skipped: an attach credential is proven by
+    # minting the attach token, which is a different call with a different
+    # audience rule. Reporting it "verified" off a whoami would claim a
+    # property this command did not check.
+    click.echo("verified:         not attempted (run 'onex auth token')")
 
 
 @auth_group.command("token")

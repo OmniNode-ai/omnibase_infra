@@ -23,6 +23,9 @@ from pathlib import Path
 from pydantic import SecretStr, ValidationError
 
 from omnibase_core.types import StrictJsonType
+from omnibase_infra.gateway.client.store_gateway_credential import (
+    StoreGatewayCredential,
+)
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.enum_onboarding_status import (
     EnumOnboardingStatus,
 )
@@ -42,6 +45,9 @@ from omnibase_infra.onboarding.credentials_writer import (
 )
 from omnibase_infra.onboarding.interactive_executor import InteractiveExecutor
 from omnibase_infra.onboarding.loader import load_canonical_graph
+from omnibase_infra.onboarding.model_credential_store_write import (
+    ModelCredentialStoreWrite,
+)
 from omnibase_infra.onboarding.model_interactive_policy import ModelInteractivePolicy
 from omnibase_infra.onboarding.model_onboarding_step import ModelOnboardingStep
 from omnibase_infra.onboarding.policy_resolver import (
@@ -87,6 +93,59 @@ def _load_interactive_policy(policy_name: str) -> ModelInteractivePolicy:
     except ValidationError as exc:
         msg = f"Built-in policy '{policy_name}' is invalid"
         raise OnboardingHandlerError(msg) from exc
+
+
+def _write_credential_store(
+    credential: ModelCredentialStoreWrite,
+    credentials_output_path: str | None,
+) -> str:
+    """Store the collected credential through the reader's own writer.
+
+    The store owns two files under one ``~/.onex`` root -- the reference-only
+    ``config.yaml`` block and the 0600 ``credentials.json`` -- and writing them
+    through it is the whole point of this path: it is what makes the credential
+    onboarding collects the credential ``onex auth status`` resolves, instead
+    of two files that merely coexist (OMN-17028).
+
+    The root is the DIRECTORY of the caller's credentials path, and the file
+    name must be the store's own. That is not a guess about the caller's
+    intent: the store defines both file names relative to one root, so a
+    caller naming ``.../my-creds.json`` is naming a file this store will never
+    read back, and writing it anyway would rebuild the exact writer/reader
+    split this function exists to close.
+
+    Raises:
+        OnboardingHandlerError: If no credentials output path was supplied, or
+            the path names a file the store does not read.
+    """
+    if credentials_output_path is None:
+        msg = (
+            "credentials_output_path is required when the policy declares "
+            "credential_store_output and dry_run=False -- refusing to discard "
+            "collected secret material"
+        )
+        raise OnboardingHandlerError(msg)
+
+    requested = Path(credentials_output_path)
+    store = StoreGatewayCredential(onex_home=requested.parent)
+    if requested.name != store.credentials_path.name:
+        msg = (
+            f"credentials_output_path names '{requested.name}', but the "
+            f"credential store reads '{store.credentials_path.name}' under the "
+            f"~/.onex root. Point it at "
+            f"'{requested.parent / store.credentials_path.name}' -- a file the "
+            f"store does not read is the writer/reader split this path closes"
+        )
+        raise OnboardingHandlerError(msg)
+
+    store.save_api_key(
+        tenant_slug=credential.tenant_slug,
+        # The one line that unwraps the key, and it goes straight to the 0600
+        # file the store writes.
+        api_key=credential.api_key.get_secret_value(),
+        base_url=credential.base_url,
+    )
+    return str(store.credentials_path)
 
 
 def _write_declared_credentials(
@@ -166,21 +225,23 @@ async def _handle_interactive(
             else None
         )
 
-        # Generate and write overlay YAML as primary output
-        overlay = overlay_from_env_dict(
-            result.env_dict, environment="dev", return_warnings=False
-        )
+        # Overlay YAML, written only where a destination was actually named.
+        # A credential-only policy names none: its whole output is the stored
+        # credential, and writing an overlay anyway would put a second,
+        # unread copy of the same coordinates on disk — which is the exact
+        # shape (a file the reader never opens) this lane exists to stop
+        # producing (OMN-17028).
+        overlay_path: Path | None = None
         if input_model.overlay_output_path is not None:
             overlay_path = Path(input_model.overlay_output_path)
         elif target_path is not None:
             overlay_path = target_path.parent / "overlay.yaml"
-        else:  # pragma: no cover - the input validator rejects this pairing
-            msg = (
-                "env_output_path or overlay_output_path is required when dry_run=False"
+        if overlay_path is not None:
+            overlay = overlay_from_env_dict(
+                result.env_dict, environment="dev", return_warnings=False
             )
-            raise OnboardingHandlerError(msg)
-        OverlayWriter().write(overlay, overlay_path)
-        overlay_output_path_written = str(overlay_path)
+            OverlayWriter().write(overlay, overlay_path)
+            overlay_output_path_written = str(overlay_path)
 
         # Legacy .env output behind flag
         if input_model.legacy_env_output:
@@ -193,7 +254,14 @@ async def _handle_interactive(
 
         # Credentials artifact: explicit invocation only — it fires only when
         # the caller named a path, so an onboarding run without secrets writes
-        # no 0600 file. Two sources, and the declared one wins:
+        # no 0600 file. Three sources, most-declared first:
+        #
+        #   result.credential_store_write (OMN-17028) — the policy named the
+        #     credential STORE, so the store writes both of its files and the
+        #     credential is readable by `onex auth status` the moment the run
+        #     ends. This is the only branch that leaves the machine
+        #     authenticated; the two below leave files on disk that the
+        #     credential reader never opens on their own.
         #
         #   result.credentials_dict (OMN-16038) — the policy said, in its
         #     credentials_output block, exactly which refs carry secrets. The
@@ -205,9 +273,13 @@ async def _handle_interactive(
         #     policies that predate credentials_output: infer secrets from env
         #     key names and nest them under the policy name.
         #
-        # A policy that declares credentials_output has stated its secrets
-        # exactly, so the name-shaped guess is not also applied to it.
-        if result.credentials_dict:
+        # A policy that declares either block has stated its secrets exactly,
+        # so the name-shaped guess is not also applied to it.
+        if result.credential_store_write is not None:
+            credentials_output_path_written = _write_credential_store(
+                result.credential_store_write, input_model.credentials_output_path
+            )
+        elif result.credentials_dict:
             credentials_output_path_written = _write_declared_credentials(
                 result.credentials_dict, input_model.credentials_output_path
             )
@@ -241,6 +313,19 @@ async def _handle_interactive(
             rendered += (
                 f"\n*Credentials written to: {credentials_output_path_written} "
                 f"(mode 0600)*\n"
+            )
+        # Naming config.yaml explicitly is not decoration: the whole defect
+        # this path closes was an operator being told onboarding succeeded
+        # while the file the credential reader opens had never been written.
+        # Saying which files now exist is what makes that visible.
+        if (
+            result.credential_store_write is not None
+            and credentials_output_path_written
+        ):
+            store_root = Path(credentials_output_path_written).parent
+            rendered += (
+                f"\n*Gateway credential stored under: {store_root} "
+                f"— verify with `onex auth status`*\n"
             )
 
     visited_steps = [sr.step_key for sr in result.step_results]
