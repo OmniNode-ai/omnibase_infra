@@ -167,6 +167,16 @@ x-runtime-env: &runtime-env
   # (projection-api, contract-resolver) explicitly set BIFROST_CONTRACT_PATH: ""
   # in their own environment blocks — those overrides remain intentional.
   BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
+  # OMN-17150: the lane's typed Bifrost overlay, resolved from this explicit
+  # pin — the renderer no longer carries a hardcoded dev.bifrost.yaml default
+  # that every lane silently fell through to. Hardcoded (no ${VAR:-} form) for
+  # the same OMN-12864 ambient-override reason as BIFROST_CONTRACT_PATH above.
+  # The dev lane runs this file alone; stability-test and prod layer it and
+  # mount the same file at this path, which is a deliberate, now-legible
+  # decision to share the dev binding rather than a silent fallthrough.
+  # Services that disable rendering (projection-api, contract-resolver) set
+  # BIFROST_LANE_OVERLAY_PATH: "" alongside their BIFROST_CONTRACT_PATH opt-out.
+  BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev.bifrost.yaml
   BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}
   # OMN-15645: Hardcoded default — same locus/reason as BIFROST_CONTRACT_PATH
   # above (OMN-12864: no ${VAR:-} ambient-override footgun). omnimarket#2000
@@ -1175,6 +1185,8 @@ services:
       # Projection API serves materialized read models and has no runtime data
       # volume for the rendered Bifrost delegation contract.
       BIFROST_CONTRACT_PATH: ""
+      # Mirrors the BIFROST_CONTRACT_PATH opt-out: no render, no overlay pin.
+      BIFROST_LANE_OVERLAY_PATH: ""
       # OMN-15645: Projection API is a read-only materialized-view server; it
       # never invokes the delegation routing reducer, so it deliberately has no
       # delegation-routing surface (mirrors the BIFROST_CONTRACT_PATH opt-out
@@ -1556,6 +1568,8 @@ services:
       # Contract resolver does not mount /app/data, so it must not render the
       # Bifrost delegation contract into the shared runtime data path.
       BIFROST_CONTRACT_PATH: ""
+      # Mirrors the BIFROST_CONTRACT_PATH opt-out: no render, no overlay pin.
+      BIFROST_LANE_OVERLAY_PATH: ""
       # OMN-15645: Contract resolver is a synchronous HTTP bridge for
       # NodeContractResolveCompute (contract *resolution*, not delegation
       # *routing*); it never invokes the delegation routing reducer, so it

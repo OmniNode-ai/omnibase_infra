@@ -31,7 +31,7 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 )
 
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
-_DEFAULT_LANE_OVERLAY_PATH = Path("/app/config/delegation/dev.bifrost.yaml")
+_LANE_OVERLAY_PATH_ENV = "BIFROST_LANE_OVERLAY_PATH"
 _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
 
@@ -82,6 +82,36 @@ def _load_lane_overlay(path: Path) -> ModelBifrostLaneOverlay:
         raise ProtocolConfigurationError(
             f"Bifrost lane overlay is invalid: {path}: {exc}"
         ) from exc
+
+
+def _resolve_overlay_path(*, overlay_path: Path | None, env: Mapping[str, str]) -> Path:
+    """Resolve the lane overlay from the explicit argument or the lane's env pin.
+
+    There is deliberately NO default path. The overlay is where a lane's
+    endpoint, model, and local operational bindings come from, so a fallback
+    to a fixed filename is a fallback to *another lane's* routing config: the
+    previous hardcoded default named the dev lane's overlay file, sending
+    every lane that did not mount its own overlay through the dev lane's file
+    — silently when the file happened to be present, and with a dev-named
+    error on lanes that never mounted it (OMN-17150, found on the first cold
+    boot of the collaborator lane). Each lane's compose contract now pins its
+    own overlay path next to the mount that provides the file, and a lane
+    that renders without a pin fails loudly here, naming the lane.
+    """
+    if overlay_path is not None:
+        return overlay_path
+    configured = env.get(_LANE_OVERLAY_PATH_ENV, "").strip()
+    if not configured:
+        lane = env.get("ONEX_ENVIRONMENT", "").strip() or "<ONEX_ENVIRONMENT unset>"
+        raise ProtocolConfigurationError(
+            f"{_LANE_OVERLAY_PATH_ENV} is not bound for lane {lane!r}: a lane "
+            "that renders the Bifrost delegation contract must pin its own "
+            "typed overlay path alongside the mount that provides the file. "
+            "There is no default — falling through to another lane's overlay "
+            "would bind this lane's delegation routing to that lane's "
+            "backends (OMN-17150)."
+        )
+    return Path(configured)
 
 
 def _resolve_target_path(
@@ -233,15 +263,19 @@ def render_bifrost_delegation_contract(
 ) -> Path | None:
     """Render the base contract merged with the required typed lane overlay.
 
-    ``environ`` is used only for the target path and endpoint-verification flag;
-    endpoint, model, and local operational bindings always come from ``overlay_path``.
+    ``environ`` is used only for the target path, the lane's overlay path pin
+    (``BIFROST_LANE_OVERLAY_PATH``), and the endpoint-verification flag;
+    endpoint, model, and local operational bindings always come from the
+    resolved overlay file, never from the environment.
     """
     env = environ if environ is not None else os.environ
     target = _resolve_target_path(target_path=target_path, env=env)
     if target is None:
         return None
     source = source_path or _resolve_canonical_source_path()
-    overlay = _load_lane_overlay(overlay_path or _DEFAULT_LANE_OVERLAY_PATH)
+    overlay = _load_lane_overlay(
+        _resolve_overlay_path(overlay_path=overlay_path, env=env)
+    )
     should_verify = (
         env.get("BIFROST_VERIFY_ENDPOINTS", "").strip().lower()
         in {"1", "true", "yes", "on"}
