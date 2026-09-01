@@ -38,6 +38,11 @@ OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS = (
     "onex.evt.omniclaude.session-ended.v1",
 )
 
+OMN17013_V2_TERMINAL_TOPICS = (
+    "onex.evt.omnibase-infra.delegation-completed.v2",
+    "onex.evt.omnibase-infra.delegation-failed.v2",
+)
+
 # Content-bearing omniclaude topics that OD-9 explicitly keeps DENIED pending
 # the scrubbing/projection-transform layer OMN-14323 still owns.
 OD9_DENIED_OMNICLAUDE_TOPICS = (
@@ -84,15 +89,43 @@ def test_contract_does_not_widen_beyond_od9_session_lifecycle_pair(
     assert topic not in outbound
 
 
-def test_contract_outbound_gains_exactly_two_new_topics() -> None:
-    """Falsifiable count check: outbound grew from the pre-OMN-16204 baseline
-    of 6 topics to exactly 8 -- proving nothing beyond the two OD-9 topics
-    was added."""
+def test_contract_outbound_contains_only_declared_additive_pairs() -> None:
+    """Falsifiable count check for the OD-9 and OMN-17013 additions.
+
+    The pre-OMN-16204 baseline had 6 outbound topics. OD-9 added two
+    session-lifecycle topics, and OMN-17013 adds the two v2 terminal topics;
+    v1 terminal topics remain in the union for overlap.
+    """
     contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
     outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
-    assert len(outbound) == 8
+    assert len(outbound) == 10
     for topic in OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS:
         assert topic in outbound
+    for topic in OMN17013_V2_TERMINAL_TOPICS:
+        assert topic in outbound
+
+
+@pytest.mark.parametrize("topic", OMN17013_V2_TERMINAL_TOPICS)
+def test_contract_declares_omn17013_v2_terminal_topic_in_outbound(
+    topic: str,
+) -> None:
+    """V2 terminal topics are mirrored additively while v1 remains declared."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
+    assert outbound.count(topic) == 1
+    assert topic.replace(".v2", ".v1") in outbound
+
+
+def test_contract_outbound_preserves_v1_and_adds_omn17013_v2_pair() -> None:
+    """The v2 readiness change must not remove either v1 terminal topic."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
+    assert len(outbound) == 10
+    assert {
+        "onex.evt.omnibase-infra.delegation-completed.v1",
+        "onex.evt.omnibase-infra.delegation-failed.v1",
+        *OMN17013_V2_TERMINAL_TOPICS,
+    }.issubset(outbound)
 
 
 def _cloud_bus() -> ModelGatewayCloudBusConfig:

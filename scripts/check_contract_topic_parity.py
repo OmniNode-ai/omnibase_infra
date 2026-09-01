@@ -392,6 +392,8 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.routing-decision.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.delegation-completed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.delegation-failed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.delegation-completed.v2": "OMN-17013 additive terminal topic; tenant mirror provisioned by omninode_infra and producer contract owned by omnimarket | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.delegation-failed.v2": "OMN-17013 additive terminal topic; tenant mirror provisioned by omninode_infra and producer contract owned by omnimarket | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.quality-gate-result.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_quality_gate_reducer | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.delegation-routing-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.invocation.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
