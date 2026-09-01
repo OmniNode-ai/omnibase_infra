@@ -110,7 +110,7 @@ jobs:
         run: >-
           docker compose
           -f docker/domain-adapter-proof/compose.yml
-          down --volumes --remove-orphans
+          down --volumes --remove-orphans --rmi local
 
   # Build and validate Docker image
   docker-build:

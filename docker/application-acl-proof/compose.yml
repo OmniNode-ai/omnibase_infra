@@ -5,6 +5,10 @@ services:
       context: ../..
       dockerfile: docker/application-acl-proof/Dockerfile
       target: postgres
+      labels:
+        org.omninode.retention: disposable
+        org.omninode.run-id: "${GITHUB_RUN_ID:-local}"
+        org.omninode.workflow: "${GITHUB_WORKFLOW:-local}"
     environment:
       POSTGRES_DB: omnidash_analytics
       POSTGRES_PASSWORD: acl-proof-admin-only # pragma: allowlist secret
@@ -20,6 +24,10 @@ services:
       context: ../..
       dockerfile: docker/application-acl-proof/Dockerfile
       target: proof
+      labels:
+        org.omninode.retention: disposable
+        org.omninode.run-id: "${GITHUB_RUN_ID:-local}"
+        org.omninode.workflow: "${GITHUB_WORKFLOW:-local}"
     depends_on:
       postgres:
         condition: service_healthy

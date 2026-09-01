@@ -1645,6 +1645,17 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_compose_required_env_coverage.py -v --tb=short
 
+      - name: Check compose proof teardown/retention policy (OMN-16367)
+        run: |
+          echo "================================================================"
+          echo "Compose Proof Teardown / Image-Retention Gate (OMN-16367)"
+          echo "Per-run 'up --build' compose images must be evicted at source"
+          echo "(always() teardown with --volumes --rmi local; the all-variant is banned)"
+          echo "and labeled org.omninode.retention=disposable; runtime-lane"
+          echo "compose files must never carry that label."
+          echo "================================================================"
+          uv run pytest tests/ci/test_compose_proof_teardown_policy.py -v --tb=short
+
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
     needs: occ-preflight
@@ -3232,7 +3243,7 @@ jobs:
         run: >-
           docker compose
           -f docker/application-domain-enforcement/compose.yml
-          down --volumes --remove-orphans
+          down --volumes --remove-orphans --rmi local
 
       - name: Rebuild and prove authenticated domain adapters
         working-directory: .proof-dependencies/domain-adapter
@@ -3251,7 +3262,7 @@ jobs:
         run: >-
           docker compose
           -f docker/domain-adapter-proof/compose.yml
-          down --volumes --remove-orphans
+          down --volumes --remove-orphans --rmi local
 
       - name: Rebuild and prove generated role and default-privilege gates
         env:
@@ -3268,7 +3279,7 @@ jobs:
         run: >-
           docker compose
           -f docker/application-acl-proof/compose.yml
-          down --volumes --remove-orphans
+          down --volumes --remove-orphans --rmi local
 
       - name: Rebuild and prove exact sanitized fresh and legacy fixture
         working-directory: .proof-dependencies/legacy-fixture
@@ -3287,7 +3298,7 @@ jobs:
         run: >-
           docker compose
           -f docker/legacy-rds-fixture/compose.yml
-          down --volumes --remove-orphans
+          down --volumes --remove-orphans --rmi local
 
   ci-summary:
     name: CI Summary
