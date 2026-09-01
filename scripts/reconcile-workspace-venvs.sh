@@ -612,7 +612,7 @@ run_repair() {
     # exact hazard plan_privileges exists to prevent -- so it is refused rather
     # than written. Silently skipping it would be the OMN-17291 condition: a
     # surface nobody reconciles and nobody is told about.
-    hook_owner="$(surface_owner "$project/.venv" || true)"
+    hook_owner="$(rp_surface_owner "$project/.venv" || true)"
     if [[ -n "$hook_owner" && "$hook_owner" != "$SURFACE_OWNER" ]]; then
       say "INDETERMINATE: hook venv $project/.venv is owned by $hook_owner, but the"
       say "  package operations are running as $SURFACE_OWNER (owner of $INFRA_DIR)."

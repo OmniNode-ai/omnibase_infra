@@ -217,6 +217,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
+    ProjectionNotMaterializedError,
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
@@ -2190,10 +2191,49 @@ class EventBusKafka(
             the DLQ write was NOT confirmed: the message then exists nowhere
             durable, so the caller must rewind rather than let the offset move
             (OMN-15232, same discipline as the OMN-14936 gate in
-            ``runtime/event_bus_subcontract_wiring.py``).
+            ``runtime/event_bus_subcontract_wiring.py``) — or when the callback
+            raised :class:`ProjectionNotMaterializedError`, which is offset-unsafe
+            unconditionally and independently of the retry budget (OMN-17379).
         """
         try:
             await callback(event_message)
+        except ProjectionNotMaterializedError:
+            # OMN-17379: a projection consumed a well-formed event and wrote no
+            # row because its WRITE PATH failed. Every other arm below decides
+            # between "DLQ it" and "retries remain", and both of those end in
+            # `return True` — the offset advances and the fact is gone. Neither
+            # is right here: the event is valid and still owed a row, and the
+            # remedy is an operator repair (a missing GRANT, a dead database),
+            # not a copy in a dead-letter topic.
+            #
+            # Return False unconditionally so the caller rewinds this partition
+            # to the failed message's own offset. Under `enable_auto_commit=True`
+            # that rewind is the ONLY action that withholds the offset — merely
+            # declining to commit does nothing, because the client commits the
+            # fetch position on its own cadence (see
+            # `_rewind_after_unpersisted_dlq`).
+            #
+            # The feed then stalls with visible lag until the write path is
+            # repaired, which is the intended outcome: `pr_merged_events` ran
+            # green at TOTAL-LAG 0 for 24 days precisely because this path
+            # returned True.
+            logger.exception(
+                "projection_not_materialized_offset_withheld topic=%s "
+                "subscription_id=%s correlation_id=%s -- a projection consumed "
+                "this event and wrote no row for a non-content reason; the "
+                "partition is rewound so the record is redelivered after the "
+                "write path is repaired (OMN-17379)",
+                topic,
+                subscription_id,
+                str(correlation_id),
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "subscription_id": subscription_id,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return False
         except Exception as e:
             retry_count = event_message.headers.retry_count
             max_retries = event_message.headers.max_retries

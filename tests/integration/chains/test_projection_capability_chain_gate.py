@@ -65,18 +65,28 @@ assertions that the failure mode is DETECTABLE, never as broken chain rows.
 
 Zero infrastructure: no broker, no database, no service container, no lane.
 
-Non-goals (see OMN-16814). This module changes no runtime behavior. In
-particular it does NOT implement inventory §7.2 — that a ``PermissionError``
-from the access seam is a *contract* defect and should fail the consumer loudly
-rather than DLQ every event forever. That finding is correct and it is
-deliberately left alone here: the quarantine router is owned by OMN-16798
-(#2949, #2951, landed 2026-08-27). This suite pins the CURRENT behavior so that
-change, when someone makes it, is a visible diff rather than a silent one.
+Non-goals (see OMN-16814). This module changes no runtime behavior. It pins
+what the runtime does so that a change to it is a visible diff rather than a
+silent one.
+
+That reservation has since been cashed. OMN-17379 implements inventory §7.2 —
+that a ``PermissionError`` from the access seam is a *contract* defect and
+should fail the consumer loudly rather than DLQ every event forever — and the
+negative rows below moved with it, from asserting a dead-letter copy to
+asserting a propagated ``ProjectionNotMaterializedError`` that withholds the
+offset. The rationale, and why the DLQ leg is not merely redundant on that path
+but actively wrong, is on
+``test_a_capability_mismatch_turns_the_chain_red_and_withholds_the_offset``.
+The live defect that forced it: ``pr_merged_events`` sat 24 days behind the
+topic it consumes at ``TOTAL-LAG 0``, because the projection arm caught the
+write-path error, logged it, DLQ'd it and returned — and a callback that
+returns normally IS an ACK.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import types
 from dataclasses import dataclass, field
@@ -105,6 +115,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.errors import ProjectionNotMaterializedError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import _prepare_handler_wiring
@@ -133,9 +144,12 @@ _THIS_MODULE = "tests.integration.chains.test_projection_capability_chain_gate"
 
 ENTRY_TOPIC = "onex.evt.omnibase-infra.capability-seam-heartbeat.v1"  # onex-topic-allow: this suite's own synthetic entry topic
 TERMINAL_TOPIC = "onex.evt.omnibase-infra.capability-seam-projected.v1"  # onex-topic-allow: this suite's own terminal topic
-# The contract-declared DLQ. The projection arm's ``except Exception`` router
-# publishes here, which is what makes a refused capability BUS-OBSERVABLE rather
-# than only a log line. Watching it is how the negative rows assert.
+# The contract-declared DLQ. The projection arm's CONTENT-failure router
+# publishes here (a malformed payload the event itself is at fault for). Since
+# OMN-17379 a capability refusal is NOT routed here — it is a write-path
+# failure, so the offset is withheld instead. The negative rows watch this topic
+# to assert that ABSENCE, which is what keeps a re-introduced DLQ leg on the
+# withheld-offset path from being an invisible regression.
 DLQ_TOPIC = "onex.dlq.omnibase-infra.capability-seam.v1"  # onex-topic-allow: this suite's own DLQ sink
 
 # A REAL table from the shipped local topology profile, chosen deliberately.
@@ -616,8 +630,11 @@ async def test_a_declaration_that_admits_the_operation_lets_the_chain_complete(
     "case",
     [pytest.param(c, id=c.case_id) for c in CAPABILITY_CASES if not c.admitted],
 )
-async def test_a_capability_mismatch_turns_the_chain_red_and_reaches_the_dlq(
-    case: CapabilityCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_a_capability_mismatch_turns_the_chain_red_and_withholds_the_offset(
+    case: CapabilityCase,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """AC2 + AC4 — the negative control, both directions.
 
@@ -625,18 +642,50 @@ async def test_a_capability_mismatch_turns_the_chain_red_and_reaches_the_dlq(
     is committed as a PASSING assertion that the failure mode is detectable,
     never as a broken chain row.
 
-    Three separate facts are asserted because any one alone is weak:
+    OMN-17379 CHANGED THE CARRIER OF THAT DETECTION, DELIBERATELY.
+
+    This module's header names the change and reserves this exact spot for it:
+    inventory §7.2 — "a ``PermissionError`` from the access seam is a *contract*
+    defect and should fail the consumer loudly rather than DLQ every event
+    forever" — was called correct and left alone so that "that change, when
+    someone makes it, is a visible diff rather than a silent one." OMN-17379 is
+    that change, and this is that diff.
+
+    The old row asserted the refused event reached ``DLQ_TOPIC``. It no longer
+    does, and must not: the projection arm now distinguishes a CONTENT failure
+    (a malformed payload — the event's own defect, which redelivery can never
+    repair, so DLQ-and-advance stays correct) from a WRITE-PATH failure (this
+    one — the runtime's defect, where the event is well-formed and still owed a
+    row). For the second class it raises ``ProjectionNotMaterializedError``,
+    which ``EventBusKafka._dispatch_to_subscriber`` classifies offset-unsafe
+    unconditionally and rewinds the partition on.
+
+    Why the dead-letter copy is not merely redundant but wrong here: a withheld
+    offset means the record is redelivered on a loop until an operator repairs
+    the declaration, and a DLQ leg on that path publishes one copy per
+    redelivery. The 8,878,932-message quarantine high-water mark in this
+    module's header is what that looks like at scale. The record's home is its
+    own topic, uncommitted.
+
+    Four separate facts are asserted because any one alone is weak:
 
     1. **No terminal.** The chain does not report success. This is the half the
        live outage got wrong at the HTTP boundary (callers saw ``202``).
-    2. **The event reaches the DLQ, carrying ``PermissionError``.** This is the
-       bus-observable evidence. Log-only detection is what let the live defect
-       run for a week.
-    3. **Zero SQL was constructed.** The refusal happened at the capability
+    2. **The refusal propagates as ``ProjectionNotMaterializedError``, naming
+       ``PermissionError``.** This is the detectable evidence, and it is
+       strictly louder than the DLQ copy it replaces: the old behavior returned
+       normally, which the consume boundary reads as an ACK, so the offset
+       advanced past an event that was never written. That silent ACK is what
+       let ``pr_merged_events`` sit 24 days behind its topic at TOTAL-LAG 0.
+    3. **No dead-letter copy.** Asserted positively, so a future re-introduction
+       of the DLQ leg on this path is a red row rather than an invisible
+       regression back toward the 8.9M sink.
+    4. **Zero SQL was constructed.** The refusal happened at the capability
        seam, before any statement existed — so this is a real gate, not a late
        check that would have already touched the database.
     """
-    run = await _run_capability_chain(case, tmp_path, monkeypatch)
+    with caplog.at_level(logging.ERROR):
+        run = await _run_capability_chain(case, tmp_path, monkeypatch)
 
     assert run.terminal_messages == [], (
         f"[{case.case_id}] the chain published a terminal event for an "
@@ -645,36 +694,52 @@ async def test_a_capability_mismatch_turns_the_chain_red_and_reaches_the_dlq(
         "refused — the OMN-16690 failure mode, un-detected."
     )
 
-    assert run.dlq_messages, (
-        f"[{case.case_id}] the refused event reached NO sink at all. The "
-        "capability refusal is invisible on the bus, which is strictly worse "
-        "than the OMN-16690 behavior this row exists to pin."
+    refusals = [
+        record.exc_info[1]
+        for record in caplog.records
+        if record.exc_info is not None
+        and isinstance(record.exc_info[1], ProjectionNotMaterializedError)
+    ]
+    assert refusals, (
+        f"[{case.case_id}] the refused event produced no "
+        "ProjectionNotMaterializedError anywhere on the chain. The capability "
+        "refusal is then undetectable AND the offset advances past it — "
+        "strictly worse than the OMN-16690 behavior this row exists to pin, "
+        f"which at least left a dead-letter copy. Records: {caplog.records!r}"
     )
 
-    dlq_record = json.loads(run.dlq_messages[0].decode("utf-8"))
-    dlq_text = json.dumps(dlq_record)
-    assert "PermissionError" in dlq_text, (
-        f"[{case.case_id}] the DLQ record does not name PermissionError, so an "
-        "operator cannot tell a capability refusal from a malformed event — the "
-        f"two need different fixes. Record: {dlq_record!r}"
+    refusal_text = str(refusals[0])
+    assert "PermissionError" in refusal_text, (
+        f"[{case.case_id}] the propagated refusal does not name "
+        "PermissionError, so an operator cannot tell a capability refusal from "
+        f"a malformed event — the two need different fixes. Text: "
+        f"{refusal_text!r}"
     )
     # MEASURED, not stylistic. Neutering `_assert_read_declared` /
     # `_assert_write_declared` on the production class does NOT make the
     # PermissionError disappear — the chain then fails a SECOND, independent
     # refusal ("Projection operation has no declared workload binding"), because
     # a write-declared table has no read binding to resolve either. So an
-    # assertion of the form `"PermissionError" in dlq_text` STAYS GREEN with the
-    # capability seam switched off, and would gate nothing.
+    # assertion of the form `"PermissionError" in refusal_text` STAYS GREEN with
+    # the capability seam switched off, and would gate nothing.
     #
     # Asserting the seam's own wording is what makes this row non-vacuous.
     # Verified by running exactly that experiment: with both assertions stubbed
     # to `lambda self: None`, these two rows go RED on this line and only this
     # line. Do not relax it to an exception-type check.
-    assert case.refusal_fragment in dlq_text, (
-        f"[{case.case_id}] the DLQ record does not carry the seam's own refusal "
+    assert case.refusal_fragment in refusal_text, (
+        f"[{case.case_id}] the propagated refusal does not carry the seam's own "
         f"wording {case.refusal_fragment!r}. Asserting the production wording "
         "rather than a re-implementation of the rule is what keeps this row "
-        f"anchored to the real seam. Record: {dlq_record!r}"
+        f"anchored to the real seam. Text: {refusal_text!r}"
+    )
+
+    assert run.dlq_messages == [], (
+        f"[{case.case_id}] the refused event was ALSO dead-lettered: "
+        f"{run.dlq_messages!r}. On a withheld-offset path that publishes one "
+        "copy per redelivery for as long as the declaration stays broken — the "
+        "shape that took the quarantine sink to 8,878,932 messages. The record "
+        "is preserved by the uncommitted offset, not by a copy (OMN-17379)."
     )
 
     assert run.recorded.statements == [], (

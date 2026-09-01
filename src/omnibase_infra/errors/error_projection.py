@@ -114,4 +114,52 @@ class ProjectionTenantContextError(ProjectionError):
     """
 
 
-__all__ = ["ProjectionError", "ProjectionTenantContextError"]
+class ProjectionNotMaterializedError(ProjectionError):
+    """A projection consumed an event and wrote no row for a NON-content reason.
+
+    OMN-17379. The auto-wired projection dispatch callback caught every handler
+    exception, logged one ERROR line, best-effort-DLQ'd, and returned ``None``.
+    A callback that returns normally IS an ACK: the consume boundary reads "no
+    exception" as success and the offset advances. The fact the event carried is
+    then gone from the projection forever while every external surface still
+    reports health.
+
+    Live proof on the ``.201`` dev lane (2026-08-31): ``pr_merged_events`` held
+    28 rows whose newest was 2026-08-03 while its consumer group sat at
+    ``Stable / TOTAL-LAG 0 / CURRENT-OFFSET 97 = LOG-END``. Rewinding the group
+    to offset 94 and letting the real wired path re-consume 94→96 produced three
+
+        InsufficientPrivilege: permission denied for sequence
+        pr_merged_events_projection_cursor_seq
+
+    errors, three quarantine records, ZERO rows, and a committed offset back at
+    97. 230 merged PRs' worth of facts were acknowledged into nothing.
+
+    The distinction this type encodes is the one the old code did not make:
+
+    * A **content** failure (a ``ValidationError`` on a malformed payload) is the
+      EVENT's defect. Redelivery can never fix it, so DLQ-and-advance stays
+      correct and this type is NOT raised.
+    * A **write-path** failure — insufficient privilege, a dead connection, a
+      missing relation, a wiring bug that denies the handler its adapter — is the
+      RUNTIME's defect. The event is valid and still owed a row, so the offset
+      must be withheld and Kafka must redeliver once the write path is repaired.
+
+    Raising it is the whole mechanism: ``EventBusKafka._dispatch_to_subscriber``
+    classifies this type as offset-unsafe unconditionally, which rewinds the fetch
+    position to the failed message's own offset (the OMN-15232
+    ``_rewind_after_unpersisted_dlq`` path). That is the only action that works
+    under ``enable_auto_commit=True``, where merely declining to commit does
+    nothing and the offset advances anyway.
+
+    The consequence is deliberate and is the point: a projection whose write path
+    is broken now STALLS with visible lag instead of running green at lag 0. A
+    stalled feed is a detectable feed.
+    """
+
+
+__all__ = [
+    "ProjectionError",
+    "ProjectionNotMaterializedError",
+    "ProjectionTenantContextError",
+]

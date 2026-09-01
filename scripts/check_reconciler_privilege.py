@@ -341,6 +341,72 @@ def check(repo_root: Path) -> list[str]:
                 f"{rel}: uses {OWNER_HELPER} without sourcing {PRIVILEGE_LIB}."
             )
 
+    # -- Part 6: library functions are called by their exported names -------- #
+    #
+    # OMN-17439. Moving the mechanics into the library renamed them with an
+    # `rp_` prefix, and one call site kept the old spelling:
+    #
+    #     hook_owner="$(surface_owner "$project/.venv" || true)"
+    #
+    # Bash resolves function names at CALL time, so this parsed cleanly, passed
+    # shellcheck, and only appeared as `command not found` on stderr of a live
+    # `.201` root tick -- inside a run that exited 0 and reported IN_SYNC.
+    #
+    # It was not a cosmetic error. The call is wrapped in `|| true`, so the
+    # failure was swallowed, `hook_owner` became empty, and the ownership guard
+    # below it skipped itself on its own `-n` test. The guard stopped guarding
+    # and said nothing, which is the defect class this whole family exists to
+    # end -- reproduced inside its own fix.
+    #
+    # Stated as the general rule rather than as a check for that one name, so
+    # the next rename cannot repeat it.
+    lib_path = repo_root / "scripts" / PRIVILEGE_LIB
+    if lib_path.is_file():
+        exported = set(
+            re.findall(
+                r"^\s*(rp_[a-z_]+)\s*\(\s*\)\s*\{",
+                lib_path.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+        )
+        for script in discover_reconcilers(repo_root):
+            if script.name == PRIVILEGE_LIB:
+                continue
+            rel = script.relative_to(repo_root)
+            text = script.read_text(encoding="utf-8")
+            if PRIVILEGE_LIB not in text:
+                continue
+            for exported_name in sorted(exported):
+                bare = exported_name[len("rp_") :]
+                # A name the script defines itself is its own, not a leftover:
+                # reconcile-workspace-venvs.sh legitimately wraps
+                # rp_plan_privileges in a local plan_privileges policy function.
+                if re.search(rf"^\s*{bare}\s*\(\s*\)\s*\{{", text, re.MULTILINE):
+                    continue
+                for number, line in logical_lines(text):
+                    # `_code`, NOT `_unquoted(_code(...))`. The offending call is
+                    # a command substitution INSIDE a quoted assignment:
+                    #
+                    #     hook_owner="$(surface_owner "$p/.venv" || true)"
+                    #
+                    # so the quote-stripper pairs `"$(surface_owner "` and
+                    # deletes the very name being looked for. Written that way
+                    # first, this part reported OK on the exact line it exists to
+                    # catch -- the same trap `_GIT_WRITE` fell into in OMN-17366.
+                    # Message lines are already excluded by `_code`.
+                    executable = _code(line)
+                    if not re.search(rf"(?<![\w.-]){bare}\b", executable):
+                        continue
+                    failures.append(
+                        f"{rel}:{number}: calls `{bare}`, but the library "
+                        f"exports it as `{exported_name}` and this script does "
+                        "not define its own. bash resolves function names at "
+                        "call time, so this is a `command not found` on a live "
+                        "host inside a run that still exits 0 -- and where the "
+                        "call is wrapped in `|| true`, the guard that reads its "
+                        "result silently stops guarding (OMN-17439)."
+                    )
+
     return failures
 
 

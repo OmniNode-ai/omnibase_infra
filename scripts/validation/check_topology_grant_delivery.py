@@ -90,10 +90,10 @@ _GRANT_RE = re.compile(
 )
 
 # The count measured on 2026-09-01 AFTER this change lands its own delivery
-# (tenant_registry_mirror). It may only ever go down. Moving it UP is the one
+# (tenant_registry_mirror) on top of current dev. It may only ever go down. Moving it UP is the one
 # edit this file rejects on sight: it converts the gate into a record of the
 # drift instead of a bound on it.
-MAX_UNDELIVERED = 41
+MAX_UNDELIVERED = 40
 
 TOPOLOGY_RELPATH = "src/omnibase_infra/topology/instances/local.yaml"
 CORPUS_RELPATH = "docker/migrations/forward"

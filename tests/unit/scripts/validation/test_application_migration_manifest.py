@@ -362,7 +362,7 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # history'. 087 is therefore a forward CREATE OR REPLACE rather than an
     # edit -- which is sound here precisely because both views hold no data.
     #
-    # OMN-17374 moves this count 130 -> 131 by ADDING one declaration,
+    # OMN-17374 moves this count 131 -> 132 by ADDING one declaration,
     # nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql,
     # domain `omninode_internal` to match 0000 on the same relation. It issues
     # the SELECT/INSERT/UPDATE grant the topology has always declared for
@@ -376,7 +376,20 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # therefore a forward ADD, which is also where it belongs under the
     # node_projection_session_replay/0002 convention (one grant, in the lineage
     # that owns the relation).
-    assert len(result.declarations) == 131
+    # +1 again, 130 -> 131, for OMN-17379's node_pr_merged_projection/
+    # 0002_grant_omninode_runtime_pr_merged_events.sql, a pure ADD next to an
+    # untouched 0001. It grants the topology-declared omninode_runtime writer
+    # on public.pr_merged_events AND on the sequence its BIGSERIAL primary key
+    # drives -- the half `GRANT INSERT ON TABLE` does not reach, because a
+    # BIGSERIAL column is a plain nextval() DEFAULT over a standalone sequence
+    # whose own acl Postgres checks on every INSERT. Without it every write
+    # failed `InsufficientPrivilege: permission denied for sequence
+    # pr_merged_events_projection_cursor_seq` while the runtime swallowed the
+    # error and committed the offset anyway, so the projection sat 24 days
+    # behind its topic at TOTAL-LAG 0. Proven live on the .201 dev lane
+    # 2026-08-31 by rewinding the group to offset 94 and re-consuming 94..96 on
+    # the real wired path: three errors, three quarantine records, zero rows.
+    assert len(result.declarations) == 132
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
