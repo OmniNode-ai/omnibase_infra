@@ -50,6 +50,8 @@ forgeable-on-disk-artifact surface OMN-16688 deliberately avoided.
 | `slots` | (OMN-17269) concurrent heavy-suite lanes this row may hold. Default `1` — identical to the pre-OMN-17269 shape. `slots=N` gives the row N independently placeable candidates (`<label>` for slot 1, `<label>.<k>` for slot k>=2), each locked at `<workroot>/LOCK` (slot 1, unchanged path) or `<workroot>/LOCK.<k>` (slot k>=2), and each re-qualified on LIVE load at pick time — never assumed fit because a sibling slot is free |
 | `repos_denied` | repos this host must not run |
 | `mode` | `authorizing` · `shadow` (runs + receipts, never authorizes) · `disabled` |
+| `heavy_local` | (OMN-17392/OMN-17485) what this row's **own** escalations do — see below |
+| `placement_tier` | (OMN-17485) `default` = ranked by live load+memory · `last_resort` = probed and verdict-bearing, but chosen only when **no** default-tier host is fit · `-` on identity-only rows |
 
 ### Current fleet (probed live 2026-08-30, non-interactive `ssh <host> '<cmd>'`)
 
@@ -167,12 +169,47 @@ the pushing**:
 |-------|---------|
 | `allowed` | pre-OMN-17392 behavior. Local probe reads fit → run here. |
 | `prefer_remote` | attempt lab placement **first**; run here only after the bounded off-box wait is spent, and then only loudly. |
-| `-` | identity-only rows, which never execute anything. |
+| `-` | identity-only rows that never execute anything. The gate-runner container row (`h201c`) is the exception: it executes as the LOCAL host of every in-container push, so it carries a real policy (OMN-17485). |
 
 `prefer_remote` is **not** a de-designation. The row keeps full identity, stays
 `authorizing`, and stays a placement target for every *other* host's escalation.
 It changes exactly one thing: the order in which its **own** escalations
 consider the local machine.
+
+## `.201` is a last-resort heavy target (OMN-17485)
+
+`.201` is not a plain lab host. It carries the **dev runtime lane** — the live
+evidence surface that runtime measurements (e.g. the OMN-16963 AC5
+`delegation_workflow_state` terminalization rate) are read from — and the
+**interactive collaborator lane** (OMN-17143). Heavy-suite load on that box
+degrades interactive work and pollutes runtime evidence at the same time.
+Measured 2026-09-01: the gate-runner slot ran heavy suites back-to-back
+08:31Z–12:02Z while a collaborator's own governed full core suite (44,464
+tests, 2h58m) ran host-side concurrently and three lanes sat held in
+`~/push-lanes/QUEUE`.
+
+Two table changes implement the demotion, both reviewed-commit-gated:
+
+1. **`placement_tier=last_resort` on `h201`.** Ranking is tier-major, load
+   ratio within a tier: every fit default-tier host is tried before `.201`,
+   however idle `.201` is. It is deliberately a *ranking* rule, not an
+   exclusion — an escalation with nowhere else to go still lands there rather
+   than dying, and the fit record says `tier=last_resort` out loud so the
+   receipt is auditable. Hard exclusion remains available as `mode: disabled`,
+   but that would also delete `.201` as an identity, which every host-side
+   push there depends on.
+2. **`heavy_local=prefer_remote` on `h201` *and* `h201c`.** A heavy escalation
+   *originating* on `.201` — host-side or inside the gate-runner container —
+   attempts lab placement first, with the identical OMN-17392 ladder, bounded
+   wait, and strictly-narrower loud local fallback that `h200` uses. For the
+   container, every off-box probe refusal is structural today (no ssh
+   reachability from inside), so the ladder falls through to the same
+   in-container slot path it used before — declared honestly, no wider.
+
+Scope limit, stated so nobody reads this as more than it is: `omnibase_core`'s
+hook has no host-table seam (OMN-17159), so core pushes neither consult this
+tier nor honor `prefer_remote` — a core push on `.201` still runs its heavy
+suite there. The core-side relief lands with the OMN-17159 port.
 
 ### Routing decision table, as shipped
 

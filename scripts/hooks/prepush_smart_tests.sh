@@ -573,7 +573,10 @@ remote_full_suite_verified() {
 REMOTE_LAB_RUN_VERDICT=0
 
 # dispatch_to_lab_host HEAVY_WHAT -- try to satisfy HEAVY_WHAT by running it on
-# a designated lab host, cheapest-loaded first.
+# a designated lab host, placement_tier-major then cheapest-loaded within a
+# tier (OMN-17485: a `last_resort` row -- `.201`, the dev-lane evidence surface
+# and interactive collaborator workspace -- is reached only when no
+# default-tier host is fit).
 # 0 = satisfied (green), 1 = no evidence (caller falls through), and it does
 # NOT return on a remote RED: a suite that genuinely failed on a designated
 # host is a failing gate, so it refuses here rather than letting the caller
