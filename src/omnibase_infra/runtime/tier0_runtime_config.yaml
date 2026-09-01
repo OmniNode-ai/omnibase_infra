@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# =============================================================================
+# ONEX Tier-0 Default Runtime Configuration (OMN-17304)
+# =============================================================================
+# The SHIPPED per-runtime configuration that answers when no other authority is
+# configured. Packaged inside the omnibase_infra wheel and resolved by
+# service_kernel.load_runtime_config() whenever a runtime's contracts directory
+# has no runtime/runtime_config.yaml, and by the `onex delegate` CLI's embedded
+# runtime when no ONEX_CONTRACTS_DIR bootstrap pointer is set.
+#
+# Per the OMN-17304 operator ruling: an unconfigured install is STILL
+# config-resolved — the default IS this shipped overlay, not a code fallback.
+# Tier 0 is fully offline: in-memory event bus; durable state degrades to the
+# local SQLite fallback (the evidence-DB overlay's own absent-overlay default).
+# Overlays compose tier 1 (self-hosted) / tier 2 (cloud) on top of this.
+#
+# ONEX_EVENT_BUS_TYPE holds NO tier in transport resolution (it was removed
+# from the ladder by OMN-17304). Env vars may bootstrap WHERE configuration is
+# found (ONEX_CONTRACTS_DIR), never WHAT the transport is.
+# NO `name` field — deliberately (OMN-17287). service_name/node_name are
+# derived from `name`, and a fabricated default identity would let an empty or
+# wrongly-targeted contracts bind-mount boot a lane under an invented service
+# name instead of failing loudly. The tier-0 default supplies the TRANSPORT
+# axis only; identity must always come from a real runtime config.
+description: "Shipped tier-0 default runtime configuration: in-memory bus, local profile"
+# Topic defaults mirror service_kernel.DEFAULT_INPUT_TOPIC / DEFAULT_OUTPUT_TOPIC /
+# DEFAULT_GROUP_ID so the absent-file behaviour is unchanged except for the
+# ruled transport flip (kafka -> inmemory). Pinned by
+# tests/unit/runtime/test_kernel_config_tier0.py.
+input_topic: "requests"
+output_topic: "responses"
+group_id: "onex-runtime"
+event_bus:
+  # The absent-authority default transport (OMN-17304): fully in-process,
+  # no broker required. 'inmemory' is a first-class configured value here —
+  # this file is configuration, not a hardcoded fallback.
+  type: "inmemory"
+  # Local validation profile: accepts the in-memory bus. Lane runtimes ship
+  # their own runtime_config.yaml with the (default) 'lane' profile, which
+  # rejects it (see ModelEventBusConfig.validate_production_safe).
+  profile: "local"
+  environment: "local"
+  max_history: 1000
+  circuit_breaker_threshold: 5

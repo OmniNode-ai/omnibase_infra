@@ -21,9 +21,16 @@ Event Bus Selection:
 
     The kernel does NOT decide which one (OMN-16693). It delegates to the single
     resolution authority, backends/auto_configure.py::resolve_bus_type, which is
-    shared with the `onex delegate` CLI path and applies one order:
+    shared with the `onex delegate` CLI path and applies one order (OMN-17304):
 
-        explicit argument > ONEX_EVENT_BUS_TYPE > config.event_bus.type > probe
+        explicit argument > config.event_bus.type > probe
+
+    ONEX_EVENT_BUS_TYPE holds NO tier (OMN-17304): env vars may bootstrap where
+    configuration is found (ONEX_CONTRACTS_DIR), never what the transport is. A
+    set-and-ignored value is warned about by the resolution authority. When no
+    runtime_config.yaml exists, the SHIPPED tier-0 default configuration
+    (tier0_runtime_config.yaml: in-memory bus, local profile) answers — an
+    unconfigured install is still config-resolved.
 
     KAFKA_BOOTSTRAP_SERVERS no longer participates in the CHOICE — it is
     validated after the fact: resolving Kafka without a broker address fails
@@ -208,6 +215,13 @@ except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
 # Default configuration
 DEFAULT_CONTRACTS_DIR = "./contracts"
 DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
+
+# OMN-17304: the SHIPPED tier-0 default runtime configuration — the
+# per-runtime authority that answers when a contracts directory has no
+# runtime_config.yaml. Packaged inside the wheel so an unconfigured install is
+# still config-resolved: the default IS this overlay (in-memory bus, local
+# profile), never a hardcoded code fallback.
+TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
@@ -846,25 +860,161 @@ def load_runtime_config(
             config_path=str(config_path),
         )
     logger.info(
-        "No runtime config found at %s, using defaults (correlation_id=%s)",
+        "No runtime config found at %s — resolving the shipped tier-0 default "
+        "runtime configuration (in-memory bus, local profile; OMN-17304) "
+        "(correlation_id=%s)",
         config_path,
         effective_correlation_id,
     )
-    config = ModelRuntimeConfig(
-        input_topic=DEFAULT_INPUT_TOPIC,
-        output_topic=DEFAULT_OUTPUT_TOPIC,
-        consumer_group=env_group_id if env_group_id is not None else DEFAULT_GROUP_ID,
+    config = _load_tier0_runtime_config(
+        correlation_id=effective_correlation_id,
+        consumer_group_override=env_group_id,
     )
     logger.debug(
-        "Runtime config constructed from environment/defaults (correlation_id=%s)",
+        "Runtime config resolved from the shipped tier-0 default (correlation_id=%s)",
         effective_correlation_id,
         extra={
             "input_topic": config.input_topic,
             "output_topic": config.output_topic,
             "consumer_group": config.consumer_group,
+            "event_bus_type": config.event_bus.type,
         },
     )
     return config
+
+
+def _load_tier0_runtime_config(
+    *,
+    correlation_id: UUID,
+    consumer_group_override: str | None = None,
+) -> ModelRuntimeConfig:
+    """Load the SHIPPED tier-0 default runtime configuration (OMN-17304).
+
+    The tier-0 default is a real packaged YAML overlay
+    (:data:`TIER0_RUNTIME_CONFIG_RESOURCE`, wheel-resident next to this
+    module), validated through the same contract + Pydantic path as any other
+    runtime config — an unconfigured install is config-resolved, not
+    code-defaulted. It declares the in-memory bus under the ``local`` profile;
+    durable state degrades to the local SQLite fallback exactly as before.
+
+    Args:
+        correlation_id: Correlation ID for the boot/config sequence.
+        consumer_group_override: The already-validated ``ONEX_GROUP_ID`` value
+            (or ``None``), applied on top of the shipped default — the same
+            override the file-based path honours.
+
+    Returns:
+        The validated tier-0 ``ModelRuntimeConfig``.
+
+    Raises:
+        ProtocolConfigurationError: the packaged tier-0 config is missing or
+            fails validation — a broken install, never a fall-through.
+    """
+    from importlib.resources import files as _resource_files
+
+    resource = _resource_files("omnibase_infra.runtime") / TIER0_RUNTIME_CONFIG_RESOURCE
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="load_tier0_config",
+        target_name=str(resource),
+        correlation_id=correlation_id,
+    )
+    try:
+        raw_config = yaml.safe_load(resource.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as e:
+        raise ProtocolConfigurationError(
+            f"Failed to read the shipped tier-0 runtime config "
+            f"({TIER0_RUNTIME_CONFIG_RESOURCE}): {e}. This file is packaged "
+            f"with omnibase_infra — its absence or corruption is a broken "
+            f"install, not a configuration choice.",
+            context=context,
+            config_path=str(resource),
+            error_details=str(e),
+        ) from e
+    if not isinstance(raw_config, dict):
+        raise ProtocolConfigurationError(
+            f"Shipped tier-0 runtime config must be a YAML mapping (dict), "
+            f"got {type(raw_config).__name__}",
+            context=context,
+            config_path=str(resource),
+        )
+    if consumer_group_override is not None:
+        raw_config = {**raw_config, "consumer_group": consumer_group_override}
+        raw_config.pop("group_id", None)
+    contract_errors = validate_runtime_config(raw_config)
+    if contract_errors:
+        raise ProtocolConfigurationError(
+            f"Shipped tier-0 runtime config failed contract validation: "
+            f"{'; '.join(contract_errors[:3])}",
+            context=context,
+            config_path=str(resource),
+            validation_errors=contract_errors,
+            error_count=len(contract_errors),
+        )
+    try:
+        return ModelRuntimeConfig.model_validate(raw_config)
+    except ValidationError as e:
+        raise ProtocolConfigurationError(
+            f"Shipped tier-0 runtime config failed model validation: "
+            f"{e.error_count()} error(s)",
+            context=context,
+            config_path=str(resource),
+        ) from e
+
+
+def resolve_embedded_runtime_config(
+    correlation_id: UUID | None = None,
+) -> tuple[ModelRuntimeConfig, str]:
+    """Resolve the per-runtime config for an EMBEDDED (CLI-hosted) runtime.
+
+    OMN-17304: the ``onex delegate`` CLI hosts a runtime instance, and a
+    runtime resolves its transport from its OWN configuration through the one
+    shared authority — never from an env var and never from a broker probe.
+    This function answers "which configuration is that?" for the embedded
+    case:
+
+    1. ``ONEX_CONTRACTS_DIR`` (a BOOTSTRAP pointer — it names where config
+       lives, never what the transport is) selects the contracts directory,
+       and :func:`load_runtime_config` loads it exactly as the kernel would.
+    2. With no pointer, the SHIPPED tier-0 default runtime configuration
+       answers (:func:`_load_tier0_runtime_config`) — in-memory bus, local
+       profile.
+
+    The kernel's cwd-relative ``./contracts`` fallback is DELIBERATELY not a
+    tier here: a deployed kernel is launched with a controlled working
+    directory, but a CLI runs from wherever the operator happens to be, and a
+    transport that flips with ``cd`` is exactly the environmental accident
+    OMN-17304 removes.
+
+    Returns:
+        ``(config, provenance)`` — the resolved config and a human-readable
+        provenance string naming WHICH authority answered, for logging and
+        receipts.
+
+    Raises:
+        ProtocolConfigurationError: the pointed-at or shipped config exists
+            but fails validation (e.g. a lane-profile config declaring the
+            in-memory bus).
+    """
+    pointer = os.environ.get(ENV_CONTRACTS_DIR, "").strip()
+    if pointer:
+        contracts_dir = Path(pointer)
+        config = load_runtime_config(contracts_dir, correlation_id=correlation_id)
+        config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
+        if config_path.exists():
+            return config, f"per-runtime config at {config_path}"
+        return config, (
+            f"shipped tier-0 default runtime config "
+            f"({ENV_CONTRACTS_DIR}={pointer} has no {DEFAULT_RUNTIME_CONFIG})"
+        )
+    config = _load_tier0_runtime_config(
+        correlation_id=correlation_id or generate_correlation_id(),
+        consumer_group_override=None,
+    )
+    return config, (
+        f"shipped tier-0 default runtime config (no {ENV_CONTRACTS_DIR} "
+        f"bootstrap pointer set)"
+    )
 
 
 def _topic_matches_pattern(topic: str, pattern: str) -> bool:
@@ -896,8 +1046,9 @@ def _resolve_event_bus_transport(
     the choice itself — that belongs to
     :func:`omnibase_infra.backends.auto_configure.resolve_bus_type`, the single
     authority shared with ``cli/cli_delegate.py::resolve_default_bus``
-    (OMN-16678), applying one order: explicit argument > ``ONEX_EVENT_BUS_TYPE``
-    > ``config.event_bus.type`` > broker probe.
+    (OMN-16678), applying one order (OMN-17304): explicit argument >
+    ``config.event_bus.type`` > broker probe. ``ONEX_EVENT_BUS_TYPE`` holds no
+    tier — set-and-ignored is warned about by the authority itself.
 
     Before OMN-16693 this file carried a SECOND ``ONEX_EVENT_BUS_TYPE`` read
     with its own ladder, including a branch that warned the override value was
@@ -942,8 +1093,10 @@ def _resolve_event_bus_transport(
             f"Kafka event bus resolved ({reason}) but KAFKA_BOOTSTRAP_SERVERS "
             f"environment variable is not set. Set KAFKA_BOOTSTRAP_SERVERS to the "
             f"broker address (e.g., 'kafka:9092'), or select the in-memory "
-            f"transport for local development. Resolution order is: explicit "
-            f"argument > ONEX_EVENT_BUS_TYPE > config.event_bus.type > broker probe.",
+            f"transport for local development (event_bus.type: inmemory with "
+            f"event_bus.profile: local in the runtime config). Resolution order "
+            f"is: explicit argument > config.event_bus.type > broker probe "
+            f"(OMN-17304 — ONEX_EVENT_BUS_TYPE holds no tier).",
             context=context,
             parameter="KAFKA_BOOTSTRAP_SERVERS",
         )
@@ -1183,23 +1336,28 @@ async def bootstrap() -> int:
             },
         )
 
-        # 2b. Assert config.event_bus.type is production-safe (OMN-4848)
-        # The ModelEventBusConfig validator already rejects non-production-safe types
-        # at model construction time. This runtime assertion is a defense-in-depth
-        # guard that catches any bypass (e.g., mock configs in tests that skip
-        # Pydantic validation). The env-var override tier below can still select
-        # inmemory for testing — that path is separate, and it outranks this
-        # declared value (see _resolve_event_bus_transport).
+        # 2b. Assert config.event_bus.type is legal for its profile (OMN-4848,
+        # profile axis OMN-17304). The ModelEventBusConfig validator already
+        # enforces this at model construction time; this runtime assertion is a
+        # defense-in-depth guard that catches any bypass (e.g., mock configs in
+        # tests that skip Pydantic validation). Lane-profile configs (the
+        # fail-closed default) reject non-production-safe transports; a
+        # local-profile config may legally declare the in-memory bus — the
+        # shipped tier-0 default does exactly that.
+        _bus_profile = getattr(config.event_bus, "profile", None)
+        _profile_is_local = getattr(_bus_profile, "value", _bus_profile) == "local"
         if hasattr(config.event_bus.type, "is_production_safe"):
-            if not config.event_bus.type.is_production_safe:
+            if not config.event_bus.type.is_production_safe and not _profile_is_local:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="validate_event_bus_config",
                     correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
-                    f"config.event_bus.type='{config.event_bus.type}' is not production-safe. "
-                    f"Use 'kafka' or 'cloud' instead.",
+                    f"config.event_bus.type='{config.event_bus.type}' is not "
+                    f"production-safe and the event_bus profile is not 'local'. "
+                    f"Lane runtimes must use 'kafka' or 'cloud'; a local runtime "
+                    f"must declare event_bus.profile: 'local' (OMN-17304).",
                     context=context,
                     parameter="event_bus.type",
                 )

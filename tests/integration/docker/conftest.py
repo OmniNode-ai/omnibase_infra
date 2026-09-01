@@ -222,7 +222,7 @@ def skip_if_no_postgres(postgres_available: bool) -> None:
 
     Intended for tests that start a runtime container which connects to Postgres
     during startup.  Without a live Postgres instance the container will fail to
-    initialise regardless of ONEX_EVENT_BUS_TYPE, causing spurious CI failures
+    initialise regardless of the configured event-bus transport, causing spurious CI failures
     on ubuntu-latest runners.
 
     Args:
@@ -242,6 +242,40 @@ def project_root() -> Path:
         Path: Absolute path to project root.
     """
     return PROJECT_ROOT
+
+
+@pytest.fixture(scope="session")
+def inmemory_runtime_config_mount(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> list[str]:
+    """``docker run`` args mounting an inmemory runtime config over the baked one.
+
+    OMN-17304: ``ONEX_EVENT_BUS_TYPE`` holds no tier in transport resolution
+    any more, so "boot this container without Kafka" is expressed the ruled
+    way — per-runtime configuration. This fixture copies the image's own
+    ``contracts/runtime/runtime_config.yaml``, flips ``event_bus.type`` to
+    ``inmemory`` under ``event_bus.profile: local`` (the first-class
+    configured form), and returns the ``-v`` arguments that bind-mount it
+    read-only over ``/app/contracts/runtime/runtime_config.yaml``. Everything
+    else in the baked config (name, topics, ingress) is preserved.
+    """
+    import yaml
+
+    baked = PROJECT_ROOT / "contracts" / "runtime" / "runtime_config.yaml"
+    data = yaml.safe_load(baked.read_text(encoding="utf-8"))
+    data["event_bus"]["type"] = "inmemory"
+    data["event_bus"]["profile"] = "local"
+    host_cfg = tmp_path_factory.mktemp("inmemory-runtime-config") / (
+        "runtime_config.yaml"
+    )
+    host_cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
+    # The container runs as a non-root user; make the mount world-readable.
+    host_cfg.chmod(0o644)
+    host_cfg.parent.chmod(0o755)
+    return [
+        "-v",
+        f"{host_cfg}:/app/contracts/runtime/runtime_config.yaml:ro",
+    ]
 
 
 @pytest.fixture(scope="session")

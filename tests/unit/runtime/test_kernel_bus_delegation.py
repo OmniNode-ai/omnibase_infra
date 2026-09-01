@@ -80,33 +80,37 @@ def _stub_probe(
 class TestTheMisleadingFallbackIsGone:
     """AC1: no second env read, no dead branch, no warning that contradicts the outcome."""
 
-    def test_typo_override_surfaces_the_authority_error_without_promising_a_fallback(
+    def test_typo_env_value_is_inert_and_config_decides(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A typo'd override fails loud — and says nothing about falling back.
+        """A typo'd env value cannot fail boot — the var holds no tier (OMN-17304).
 
         Pre-OMN-16693 this exact input logged WARNING "Falling back to
         config.event_bus.type='kafka'" and then raised anyway one call later.
-        The log recorded a recovery that never happened.
+        Pre-OMN-17304 it raised loudly from the env tier. Now the env var is
+        not a tier at all: the declared config decides, the set-and-ignored
+        state is warned about, and the old false-recovery line stays gone.
         """
         monkeypatch.setenv(BUS_TYPE_OVERRIDE_ENV, "kakfa")
         _stub_probe(monkeypatch, EnumProbeState.AUTHORITATIVE)
 
         with caplog.at_level(logging.DEBUG):
-            with pytest.raises(ValueError) as excinfo:
-                _resolve_event_bus_transport(
-                    config_bus_type="kafka",
-                    kafka_bootstrap_servers=_BROKER,
-                    correlation_id=uuid4(),
-                )
+            bus, reason = _resolve_event_bus_transport(
+                config_bus_type="kafka",
+                kafka_bootstrap_servers=_BROKER,
+                correlation_id=uuid4(),
+            )
 
-        message = str(excinfo.value)
-        assert BUS_TYPE_OVERRIDE_ENV in message
-        assert "kakfa" in message
+        assert bus == BUS_KAFKA
+        assert "config.event_bus.type" in reason
 
         emitted = "\n".join(record.getMessage() for record in caplog.records)
         assert "Falling back" not in emitted
         assert "Invalid ONEX_EVENT_BUS_TYPE" not in emitted
+        # The set-and-ignored warning names the var and its value.
+        assert BUS_TYPE_OVERRIDE_ENV in emitted
+        assert "kakfa" in emitted
+        assert "ignored" in emitted
 
     def test_kernel_source_holds_no_second_resolution_ladder(self) -> None:
         """The duplication itself is the defect — pin its absence, not just its effect.
@@ -192,28 +196,31 @@ class TestConfigIntentReachesTheDecision:
 
         assert bus == BUS_KAFKA
 
-    def test_env_override_still_beats_config(
+    def test_config_beats_the_ignored_env_var(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The CI contract, pinned.
+        """OMN-17304 inversion of the old ``test_env_override_still_beats_config``.
 
-        ``contracts/runtime/runtime_config.yaml`` ships ``event_bus.type: kafka``
-        and documents ``ONEX_EVENT_BUS_TYPE`` as its override; eight workflows
-        set ``ONEX_EVENT_BUS_TYPE: inmemory`` against those same contracts.
-        Config outranking the env var would break every one of them on the
-        missing-KAFKA_BOOTSTRAP_SERVERS guard below.
+        The pre-ruling pin protected eight CI workflows that set
+        ``ONEX_EVENT_BUS_TYPE: inmemory`` against contracts declaring
+        ``kafka``. That concern resolves structurally now: those workflows
+        configure no runtime binding at all, so the shipped tier-0 default
+        (inmemory) answers for them regardless of the now-inert env var —
+        while a runtime that DOES declare kafka gets kafka, whatever the
+        shell exported.
         """
         monkeypatch.setenv(BUS_TYPE_OVERRIDE_ENV, "inmemory")
         _stub_probe(monkeypatch, EnumProbeState.AUTHORITATIVE)
 
         bus, reason = _resolve_event_bus_transport(
             config_bus_type="kafka",
-            kafka_bootstrap_servers=None,
+            kafka_bootstrap_servers=_BROKER,
             correlation_id=uuid4(),
         )
 
-        assert bus == BUS_INMEMORY
-        assert BUS_TYPE_OVERRIDE_ENV in reason
+        assert bus == BUS_KAFKA
+        assert "config.event_bus.type" in reason
+        assert BUS_TYPE_OVERRIDE_ENV not in reason
 
 
 class TestTheKernelKeepsItsFailFastGuard:
@@ -239,11 +246,13 @@ class TestTheKernelKeepsItsFailFastGuard:
         assert "config.event_bus.type" in message
 
     def test_inmemory_needs_no_broker(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv(BUS_TYPE_OVERRIDE_ENV, "inmemory")
+        """A config-declared inmemory (local profile, e.g. the shipped tier-0
+        default) resolves without a broker and without tripping the guard."""
+        monkeypatch.delenv(BUS_TYPE_OVERRIDE_ENV, raising=False)
         _stub_probe(monkeypatch, EnumProbeState.DISCOVERED)
 
         bus, _reason = _resolve_event_bus_transport(
-            config_bus_type="kafka",
+            config_bus_type="inmemory",
             kafka_bootstrap_servers=None,
             correlation_id=uuid4(),
         )

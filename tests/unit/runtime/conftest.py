@@ -19,6 +19,7 @@ Functions:
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -205,33 +206,68 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
                 yield mock_wire
 
 
+def force_inmemory_runtime_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Path:
+    """Point the kernel at a LOCAL-PROFILE inmemory runtime config (OMN-17304).
+
+    ONEX_EVENT_BUS_TYPE holds no tier in transport resolution any more, so
+    forcing the in-memory bus is done the ruled way: a per-runtime config
+    declaring ``event_bus.type: inmemory`` under ``event_bus.profile: local``
+    (the first-class configured form of the shipped tier-0 default), reached
+    through the ``ONEX_CONTRACTS_DIR`` bootstrap pointer — an env var may name
+    WHERE config lives, never WHAT the transport is.
+
+    Also clears ``KAFKA_BOOTSTRAP_SERVERS`` and the dead
+    ``ONEX_EVENT_BUS_TYPE`` so an ambient developer shell cannot leak either a
+    broker or a set-and-ignored warning into the test.
+
+    Returns:
+        The contracts directory the pointer names (for tests that need it).
+    """
+    contracts_dir = tmp_path / "inmemory-contracts"
+    (contracts_dir / "runtime").mkdir(parents=True, exist_ok=True)
+    (contracts_dir / "runtime" / "runtime_config.yaml").write_text(
+        (
+            # name is load-bearing: bootstrap resolves service_name from it
+            # and fails closed when absent.
+            'name: "runtime_config"\n'
+            'description: "Test-local inmemory runtime config (OMN-17304)"\n'
+            'input_topic: "requests"\n'
+            'output_topic: "responses"\n'
+            'group_id: "onex-runtime"\n'
+            "event_bus:\n"
+            '  type: "inmemory"\n'
+            '  profile: "local"\n'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(contracts_dir))
+    monkeypatch.delenv("ONEX_EVENT_BUS_TYPE", raising=False)
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+    return contracts_dir
+
+
 @pytest.fixture
 def mock_inmemory_runtime_config(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> Generator[MagicMock, None, None]:
-    """Force inmemory event bus via environment variable override.
+    """Force the inmemory event bus via a configured local-profile runtime config.
 
-    This fixture uses the ONEX_EVENT_BUS_TYPE environment variable override
-    mechanism (documented in runtime_config.yaml) to force inmemory event bus.
-    This is more robust than patching load_runtime_config because:
-    1. It uses the documented environment variable override mechanism
-    2. The resolution authority ranks ONEX_EVENT_BUS_TYPE above
-       config.event_bus.type (backends/auto_configure.py::resolve_bus_type;
-       order: explicit argument > env var > config > probe). Since OMN-16693 the
-       kernel reads no bus env var itself — it delegates to that authority.
-    3. It doesn't rely on patch timing
-
-    The default runtime_config.yaml has event_bus.type='kafka', which requires
-    KAFKA_BOOTSTRAP_SERVERS env var. For unit tests that don't test Kafka
-    specifically, we use ONEX_EVENT_BUS_TYPE=inmemory to bypass this.
+    OMN-17304: the previous mechanism (``ONEX_EVENT_BUS_TYPE=inmemory``) is
+    dead — that env var holds no tier in the shared resolution order any more.
+    The ruled mechanism is per-runtime configuration: this fixture writes a
+    runtime config declaring ``event_bus.type: inmemory`` with
+    ``event_bus.profile: local`` into a tmp contracts dir and points the
+    ``ONEX_CONTRACTS_DIR`` bootstrap pointer at it, so the kernel resolves the
+    in-memory bus from its OWN configured authority — the same way every other
+    runtime resolves its transport.
 
     Yields:
         MagicMock (for backwards compatibility with tests expecting a MagicMock).
     """
-    # Use environment variable override (highest precedence per service_kernel.py)
-    monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
-    # Ensure no Kafka bootstrap servers are set
-    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+    force_inmemory_runtime_config(monkeypatch, tmp_path)
 
     # Return MagicMock for backwards compatibility with tests that
     # reference the fixture but don't actually use the mock object

@@ -514,6 +514,7 @@ class TestDockerRuntime:
         self,
         docker_available: bool,
         built_test_image: str,
+        inmemory_runtime_config_mount: list[str],
     ) -> None:
         """Verify container starts without immediate crash.
 
@@ -527,8 +528,8 @@ class TestDockerRuntime:
         container_name = f"{TEST_CONTAINER_PREFIX}-start-{os.getpid()}"
 
         try:
-            # Start container with required environment variables
-            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
+            # Start container with required environment variables; the
+            # mounted inmemory runtime config keeps Kafka out of the boot
             result = subprocess.run(
                 [
                     "docker",
@@ -544,8 +545,10 @@ class TestDockerRuntime:
                     "VALKEY_PASSWORD=test_password",
                     "-e",
                     "ONEX_LOG_LEVEL=DEBUG",
-                    "-e",
-                    "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # OMN-17304: the inmemory transport is CONFIGURED via
+                    # the mounted runtime config below; ONEX_EVENT_BUS_TYPE
+                    # no longer selects a transport.
+                    *inmemory_runtime_config_mount,
                     # Required by ModelPostgresPoolConfig.from_env() for startup;
                     # actual DB connectivity is not needed for this test.
                     "-e",
@@ -642,6 +645,7 @@ class TestDockerRuntime:
         docker_available: bool,
         built_test_image: str,
         project_root: Path,
+        inmemory_runtime_config_mount: list[str],
     ) -> None:
         """Verify container handles SIGTERM gracefully.
 
@@ -655,8 +659,8 @@ class TestDockerRuntime:
         container_name = f"{TEST_CONTAINER_PREFIX}-sigterm-{os.getpid()}"
 
         try:
-            # Start container
-            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
+            # Start container; the mounted inmemory runtime config keeps
+            # Kafka out of the boot
             subprocess.run(
                 [
                     "docker",
@@ -672,8 +676,10 @@ class TestDockerRuntime:
                     "POSTGRES_DATABASE=omnibase_infra",
                     "-e",
                     "VALKEY_PASSWORD=test",
-                    "-e",
-                    "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # OMN-17304: the inmemory transport is CONFIGURED via
+                    # the mounted runtime config below; ONEX_EVENT_BUS_TYPE
+                    # no longer selects a transport.
+                    *inmemory_runtime_config_mount,
                     # Required by ModelPostgresPoolConfig.from_env() for startup;
                     # actual DB connectivity is not needed for this test.
                     "-e",
@@ -776,6 +782,7 @@ class TestDockerHealthCheck:
         skip_if_no_postgres: None,
         built_test_image: str,
         available_port: int,
+        inmemory_runtime_config_mount: list[str],
     ) -> None:
         """Verify health endpoint is accessible from host.
 
@@ -783,8 +790,8 @@ class TestDockerHealthCheck:
         that should respond to HTTP requests.
 
         Requires Postgres to be reachable at localhost:5436 — the runtime
-        kernel attempts a Postgres connection during startup regardless of
-        ONEX_EVENT_BUS_TYPE.  On CI runners without local Docker infra (e.g.
+        kernel attempts a Postgres connection during startup regardless of the
+        configured event-bus transport.  On CI runners without local Docker infra (e.g.
         ubuntu-latest), this test is skipped gracefully via the
         skip_if_no_postgres fixture.
         """
@@ -794,7 +801,7 @@ class TestDockerHealthCheck:
         container_name = f"{TEST_CONTAINER_PREFIX}-health-{os.getpid()}"
 
         try:
-            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
+            # The mounted inmemory runtime config keeps Kafka out of the boot
             subprocess.run(
                 [
                     "docker",
@@ -810,8 +817,10 @@ class TestDockerHealthCheck:
                     "POSTGRES_DATABASE=omnibase_infra",
                     "-e",
                     "VALKEY_PASSWORD=test",
-                    "-e",
-                    "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # OMN-17304: the inmemory transport is CONFIGURED via
+                    # the mounted runtime config below; ONEX_EVENT_BUS_TYPE
+                    # no longer selects a transport.
+                    *inmemory_runtime_config_mount,
                     # Required by ModelPostgresPoolConfig.from_env() for startup;
                     # actual DB connectivity is not needed for this test.
                     "-e",
@@ -882,6 +891,7 @@ class TestDockerHealthCheck:
         skip_if_no_postgres: None,
         built_test_image: str,
         available_port: int,
+        inmemory_runtime_config_mount: list[str],
     ) -> None:
         """Verify container health status progresses from starting to healthy.
 
@@ -889,8 +899,8 @@ class TestDockerHealthCheck:
         starting -> healthy states.
 
         Requires Postgres to be reachable at localhost:5436 -- the runtime
-        kernel attempts a Postgres connection during startup regardless of
-        ONEX_EVENT_BUS_TYPE, and the health endpoint (curl localhost:8085/health)
+        kernel attempts a Postgres connection during startup regardless of the
+        configured event-bus transport, and the health endpoint (curl localhost:8085/health)
         only becomes available after the kernel fully initialises.  On CI runners
         without local Docker infra (e.g. ubuntu-latest), this test is skipped
         gracefully via the skip_if_no_postgres fixture.
@@ -901,7 +911,7 @@ class TestDockerHealthCheck:
         container_name = f"{TEST_CONTAINER_PREFIX}-healthprog-{os.getpid()}"
 
         try:
-            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
+            # The mounted inmemory runtime config keeps Kafka out of the boot
             subprocess.run(
                 [
                     "docker",
@@ -917,8 +927,10 @@ class TestDockerHealthCheck:
                     "POSTGRES_DATABASE=omnibase_infra",
                     "-e",
                     "VALKEY_PASSWORD=test",
-                    "-e",
-                    "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # OMN-17304: the inmemory transport is CONFIGURED via
+                    # the mounted runtime config below; ONEX_EVENT_BUS_TYPE
+                    # no longer selects a transport.
+                    *inmemory_runtime_config_mount,
                     # Required by ModelPostgresPoolConfig.from_env() for startup;
                     # actual DB connectivity is not needed for this test.
                     "-e",
