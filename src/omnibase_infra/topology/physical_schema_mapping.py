@@ -166,6 +166,25 @@ INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
     }
 )
 
+APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
+    {
+        # OMN-17447: these owned SERIAL/BIGSERIAL sequences follow their owning
+        # tenant/internal tables' physical location. The tables are still bare
+        # in public pending OMN-15359, so the sequence ACL migrations must grant
+        # on public.<sequence> until the family moves.
+        "capability_scores_id_seq",
+        "contract_registry_id_seq",
+        "delegation_routing_tenant_overlay_id_seq",
+        "merge_state_transitions_projection_cursor_seq",
+        "gate_activity_id_seq",
+        "pr_lifecycle_ledger_entries_id_seq",
+        "dep_health_findings_id_seq",
+        "intent_classification_events_id_seq",
+        "overnight_session_phases_id_seq",
+        "receipt_gate_rows_id_seq",
+    }
+)
+
 
 def physical_grant_schema_for_table(schema: str, table_name: str) -> str:
     """Return the schema where PostgreSQL ACLs currently apply for a table.

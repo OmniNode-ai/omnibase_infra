@@ -54,25 +54,9 @@
 -- touches RLS, ownership, or any role attribute.
 
 -- ---------------------------------------------------------------------------
--- 1. Sequence grant, resolved dynamically.
---    `pg_get_serial_sequence` rather than the literal `contract_registry_id_seq`,
---    so a sequence created under another name (a restore, a rename, an
---    out-of-band apply) still converges. A NULL return means the column is
---    not sequence-backed at all, which would contradict 0000_create_contract_registry.sql's
---    own SERIAL declaration -- fail loud rather than no-op into another
---    silent half-grant.
+-- 1. Sequence grant.
 -- ---------------------------------------------------------------------------
-DO $$
-DECLARE
-    v_seq TEXT;
-BEGIN
-    v_seq := pg_get_serial_sequence('public.contract_registry', 'id');
-    IF v_seq IS NULL THEN
-        RAISE EXCEPTION
-            'OMN-17447: public.contract_registry.id is not backed by a sequence, but 0000_create_contract_registry.sql declares it SERIAL. Refusing to grant a privilege on an object that does not exist -- reconcile the column shape first.';
-    END IF;
-    EXECUTE format('GRANT USAGE ON SEQUENCE %s TO omninode_runtime', v_seq);
-END$$;
+GRANT USAGE ON SEQUENCE public.contract_registry_id_seq TO omninode_runtime;
 
 -- ---------------------------------------------------------------------------
 -- 2. Assertion: fail the migration if the grant did not take.
@@ -84,6 +68,6 @@ END$$;
 SELECT 1 / count(*) AS contract_registry_id_sequence_usage_assertion
 WHERE has_sequence_privilege(
           'omninode_runtime',
-          pg_get_serial_sequence('public.contract_registry', 'id'),
+          'public.contract_registry_id_seq',
           'USAGE'
       );

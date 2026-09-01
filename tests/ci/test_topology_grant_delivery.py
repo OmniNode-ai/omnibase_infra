@@ -354,6 +354,21 @@ def test_omn_17447_sequence_is_delivered_by_a_migration(key: SequenceKey) -> Non
 
 
 @pytest.mark.unit
+def test_literal_sequence_name_resolves_table_and_column_with_underscores() -> None:
+    delivered = delivered_sequences(REPO_ROOT / "docker/migrations/forward")
+
+    assert (
+        SequenceKey(
+            "omninode_runtime",
+            "public",
+            "merge_state_transitions",
+            "projection_cursor",
+        )
+        in delivered
+    )
+
+
+@pytest.mark.unit
 def test_undelivered_sequence_count_is_exactly_the_ratchet_bound() -> None:
     """The sequence bound bites in both directions, like the table one."""
     missing = undelivered_sequences(REPO_ROOT)

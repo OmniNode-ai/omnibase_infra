@@ -21,6 +21,7 @@ from omnibase_core.models.core.model_deployment_topology_database import (
     ModelDeploymentTopologyDatabase,
 )
 from omnibase_infra.topology.physical_schema_mapping import (
+    APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
 )
@@ -90,6 +91,11 @@ _SYSTEM_READ_SCHEMAS = frozenset({"information_schema", "pg_catalog"})
 _PHYSICALLY_PUBLIC_APPLICATION_TABLES: frozenset[str] = (
     TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359.union(
         INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    )
+)
+_PHYSICALLY_PUBLIC_APPLICATION_OBJECTS: frozenset[str] = (
+    _PHYSICALLY_PUBLIC_APPLICATION_TABLES.union(
+        APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
     )
 )
 _RELATION_OBJECT_KINDS = frozenset(
@@ -1142,7 +1148,7 @@ def _record_sql_target(
             name in cte_names or remaining.lstrip().startswith("(")
         ):
             return
-        if name in _PHYSICALLY_PUBLIC_APPLICATION_TABLES:
+        if name in _PHYSICALLY_PUBLIC_APPLICATION_OBJECTS:
             return
         violations.append(
             f"application relation target {name!r} must be schema-qualified"
@@ -1151,7 +1157,7 @@ def _record_sql_target(
     schema = _unquote_identifier(schema_token)
     target = f"{schema}.{name}"
     if schema == "public":
-        if name in _PHYSICALLY_PUBLIC_APPLICATION_TABLES:
+        if name in _PHYSICALLY_PUBLIC_APPLICATION_OBJECTS:
             return
         violations.append(
             f"application relation target {target!r} is prohibited in public"

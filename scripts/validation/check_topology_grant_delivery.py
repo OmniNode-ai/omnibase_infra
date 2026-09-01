@@ -463,6 +463,7 @@ def delivered_sequences(corpus_root: Path) -> dict[SequenceKey, list[str]]:
     direction that fails closed.
     """
     delivered: dict[SequenceKey, list[str]] = {}
+    columns = sequence_backed_columns(corpus_root)
     for sql_path in sorted(corpus_root.rglob("*.sql")):
         text = sql_path.read_text(encoding="utf-8", errors="replace")
 
@@ -478,7 +479,17 @@ def delivered_sequences(corpus_root: Path) -> dict[SequenceKey, list[str]]:
                 bare = _unquote(sequence)
                 if not bare.endswith("_seq"):
                     continue
-                table, _, column = bare[: -len("_seq")].rpartition("_")
+                candidates = [
+                    (table, column)
+                    for candidate_schema, table in columns
+                    if candidate_schema == schema
+                    for column in columns[(candidate_schema, table)]
+                    if bare == f"{table}_{column}_seq"
+                ]
+                if len(candidates) == 1:
+                    table, column = candidates[0]
+                else:
+                    table, _, column = bare[: -len("_seq")].rpartition("_")
                 if not table or not column:
                     continue
             delivered.setdefault(
