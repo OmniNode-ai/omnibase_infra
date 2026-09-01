@@ -35,32 +35,6 @@
 # FAIL-CLOSED
 #   Missing host file, missing repo blob, failed fetch, unresolvable ref, or an
 #   unreadable path is CRITICAL. "Could not determine" is never "fine".
-#
-# THE FETCH BELOW WRITES INTO SOMEONE ELSE'S CLONE (OMN-17443)
-#   The cron unit runs this as ROOT at :37. `$INFRA_REPO_ROOT` on `.201` is
-#   owned by the OPERATOR, and `git fetch` writes objects, refs and reflogs --
-#   so every hourly tick deposited root-owned paths into an operator-owned
-#   clone, after which a plain `git pull` dies with `unpack-objects failed`.
-#   Measured: 30 minutes after OMN-17366 repaired 2010 such paths, 32 were back,
-#   all under `omnibase_infra/.git/objects`, all stamped `:37`.
-#
-#   That is OMN-17366's defect in a different job, so it takes OMN-17366's
-#   guard, not a second one: `scripts/reconcile_privilege_lib.sh` decides who
-#   the write runs as (`rp_plan_privileges`) and becomes them (`as_owner`).
-#   Two implementations of a privilege rule drift, and the half that drifts is
-#   the half nobody is watching.
-#
-#   The library is sourced FROM THE CLONE. This script is installed flat into
-#   /data/maintenance/bin with no repo beside it, and the clone it syncs is the
-#   same repository the library ships in. Sourcing from the tree under
-#   verification is a real objection and is bounded the same way
-#   omninode-workspace-reconcile.sh bounds it: this file and its cron unit are
-#   both in the MANIFEST below, so a divergence between host copy and
-#   `origin/dev` reddens this very check.
-#
-#   Only the FETCH is covered. `--install` writes /data/maintenance/bin and
-#   /etc/cron.d, which are root-owned by design; dropping privilege there would
-#   break the install and those are not the paths that broke.
 
 set -euo pipefail
 
@@ -72,8 +46,6 @@ SYNC_BRANCH=${OMNINODE_MAINTENANCE_SYNC_BRANCH:-dev}
 ENV_FILE=${OMNINODE_ALERT_ENV_FILE:-/data/omninode/omnibase_infra/.env}
 # Skip the network round-trip (tests, and any caller that already fetched).
 SKIP_FETCH=${OMNINODE_MAINTENANCE_SYNC_SKIP_FETCH:-0}
-# The one privilege rule, sourced rather than re-implemented (OMN-17443).
-PRIVILEGE_LIB="$INFRA_REPO_ROOT/scripts/reconcile_privilege_lib.sh"
 
 # repo-relative path | installed path | mode
 #
@@ -152,28 +124,7 @@ die() {
 [[ -d "$INFRA_REPO_ROOT/.git" ]] || die "no git clone at $INFRA_REPO_ROOT (set OMNINODE_INFRA_REPO_ROOT)"
 
 if [[ "$SKIP_FETCH" != "1" ]]; then
-  # The privilege plan is required only on the path that WRITES. With
-  # SKIP_FETCH the caller already fetched and this run touches no clone, so
-  # demanding a plan there would be ceremony -- and ceremony is what gets
-  # loosened later in the one script that must stay fail-closed.
-  [[ -f "$PRIVILEGE_LIB" ]] || die "privilege library missing at $PRIVILEGE_LIB; without it there is no way to know who owns $INFRA_REPO_ROOT, and fetching as whoever this process happens to be is the OMN-17443 defect (set OMNINODE_MAINTENANCE_SYNC_SKIP_FETCH=1 only if the caller already fetched)"
-  # shellcheck source=../../scripts/reconcile_privilege_lib.sh
-  source "$PRIVILEGE_LIB"
-
-  plan_rc=0
-  rp_plan_privileges "$INFRA_REPO_ROOT" || plan_rc=$?
-  case "$plan_rc" in
-    0) ;;
-    1) die "cannot read the owner of $INFRA_REPO_ROOT; the fetch below writes objects, refs and reflogs into it, and writing as the wrong user leaves a clone its owner can no longer fetch into (OMN-17443)" ;;
-    2) die "$INFRA_REPO_ROOT is owned by '${RP_OWNER}' and this process (${CURRENT_USER}) cannot become that user, so the fetch is REFUSED rather than performed as the wrong user (OMN-17443). Run this as ${RP_OWNER}, or as root on a host with runuser" ;;
-    3) die "$INFRA_REPO_ROOT is owned by '${RP_OWNER}', whose home directory cannot be resolved. Dropping to them without HOME would make git read root's .gitconfig and credentials -- a confusing failure two layers from its cause" ;;
-  esac
-  if [[ -n "$RP_OWNER" && "$RP_OWNER" != "$CURRENT_USER" ]]; then
-    # Announced, because a silent privilege drop cannot be audited from a cron log.
-    echo "writing as $RP_OWNER (owner of $INFRA_REPO_ROOT)" >&2
-  fi
-
-  as_owner git -C "$INFRA_REPO_ROOT" fetch --quiet "$SYNC_REMOTE" \
+  git -C "$INFRA_REPO_ROOT" fetch --quiet "$SYNC_REMOTE" \
     "+refs/heads/${SYNC_BRANCH}:refs/remotes/${SYNC_REMOTE}/${SYNC_BRANCH}" \
     || die "fetch of ${SYNC_REMOTE}/${SYNC_BRANCH} failed; cannot compare against $SYNC_REF"
 fi
