@@ -37,6 +37,24 @@ So every command that installs or syncs packages must go through the
 invocation lines, not a declaration about them. Adding a new ``uv sync`` without
 ``as_owner`` fails the build.
 
+**3. What the gate SCANS may not be a filename pattern (OMN-17443).**
+
+Both rules above were enforced over scripts discovered by the glob
+``scripts/reconcile*.sh``. On 2026-09-01 the `.201` clone surface was repaired
+(2010 root-owned paths, 0 -> 0 on the next root tick) and re-broke thirty
+minutes later: 32 root-owned objects, all stamped ``:37``, deposited by
+``deploy/maintenance/omninode-host-maintenance-sync.sh`` -- which fetched as
+root into an operator-owned clone for as long as it existed, and which this
+gate had never opened, because it is not called ``reconcile*.sh``.
+
+That is the OMN-17383 lesson recurring inside the same epic: a gate whose scope
+stops at a filename pattern gives false assurance about the file it never
+scanned. The answer is not a second pattern. Discovery now follows the
+INVOCATION -- every command a shipped ``deploy/**/cron.d/`` unit runs, resolved
+through the host-artifact manifest to the repo file it is installed from -- and
+a scheduled command that resolves to no repo file is a FAILURE, not a skip, so
+"install an unlisted script and schedule it" is not a way back to green.
+
 Usage:
     python scripts/check_reconciler_privilege.py [--repo-root PATH]
 """
@@ -51,7 +69,28 @@ from pathlib import Path
 # Same glob as check_reconciler_movement_proof.py, and for the same reason: a
 # hand-maintained list is a thing you forget to update, and an artifact absent
 # from a manifest is unguarded with nobody finding out (OMN-15525).
+#
+# NOT the whole discovery surface -- see discover_scheduled_host_scripts below.
+# A glob over `scripts/` was the ENTIRE scope until OMN-17443, and the file that
+# still carried the defect was the one file it never opened.
 RECONCILER_GLOBS = ("scripts/reconcile*.sh", "scripts/**/reconcile*.sh")
+
+# Cron units this repo ships for the `.201` host, and the manifest that maps the
+# paths they invoke back to the repo files those paths are installed from.
+CRON_UNIT_GLOB = "deploy/**/cron.d/*"
+HOST_ARTIFACT_MANIFEST = "deploy/maintenance/omninode-host-maintenance-sync.sh"
+
+# A crontab command line: five schedule fields, a user, then the command.
+# The user field is captured but NOT filtered on. The defect is "a scheduled job
+# writes into a tree it may not own"; narrowing to `root` would leave a dodge
+# (schedule it as any other user) for the sake of a distinction that does not
+# change the damage.
+_CRON_COMMAND = re.compile(
+    r"^\s*(?:@\w+|(?:[-\dA-Za-z*/,]+\s+){5})(?P<user>[A-Za-z_][-\w]*)\s+(?P<command>\S+)"
+)
+
+# A `relpath|hostpath|mode` row of the host-artifact MANIFEST array.
+_MANIFEST_ENTRY = re.compile(r'"([^"|]+)\|([^"|]+)\|[0-7]{3,4}"')
 
 VENV_RECONCILER = "scripts/reconcile-workspace-venvs.sh"
 OWNER_HELPER = "as_owner"
@@ -117,6 +156,92 @@ def discover_reconcilers(repo_root: Path) -> list[Path]:
     return sorted(found)
 
 
+def host_artifact_map(repo_root: Path) -> dict[str, str]:
+    """installed host path -> repo-relative path, read from the sync manifest.
+
+    That manifest already exists and is already load-bearing: an artifact absent
+    from it is not installed, not checked, and drifts invisibly (OMN-15525). So
+    it is the honest place to learn which repo file a scheduled command is
+    actually running -- rather than a second list here, which would drift from
+    it and be the same defect one layer up.
+    """
+    manifest = repo_root / HOST_ARTIFACT_MANIFEST
+    if not manifest.is_file():
+        return {}
+    text = manifest.read_text(encoding="utf-8")
+    return {host: rel for rel, host in _MANIFEST_ENTRY.findall(text)}
+
+
+def discover_scheduled_host_scripts(repo_root: Path) -> tuple[list[Path], list[str]]:
+    """Repo files that a shipped cron unit executes, plus discovery failures.
+
+    OMN-17443. `discover_reconcilers` finds scripts by NAME. The `:37` host
+    maintenance sync fetched as root into an operator-owned clone for as long as
+    it existed and was never once scanned, because it lives in
+    `deploy/maintenance/` and is not called `reconcile*.sh` -- the OMN-17383
+    lesson (a gate whose scope stops at a filename pattern gives false
+    assurance) recurring inside the same epic.
+
+    So discovery follows the INVOCATION: whatever a cron unit in this repo runs
+    is in scope, resolved through the host-artifact manifest to the repo file it
+    is installed from.
+
+    Failures are returned rather than raised, and an unresolvable command is a
+    FAILURE rather than a skip. Giving up quietly on a command that maps to no
+    repo file would reopen the original hole through a new door -- schedule an
+    unlisted script and the gate is once again reporting OK on a file it never
+    opened.
+    """
+    mapping = host_artifact_map(repo_root)
+    found: set[Path] = set()
+    failures: list[str] = []
+
+    for unit in sorted(p for p in repo_root.glob(CRON_UNIT_GLOB) if p.is_file()):
+        rel_unit = unit.relative_to(repo_root)
+        for number, raw in enumerate(
+            unit.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" in line.split()[0]:
+                continue
+            match = _CRON_COMMAND.match(line)
+            if not match:
+                failures.append(
+                    f"{rel_unit}:{number}: cannot parse the scheduled command out of "
+                    f"{line!r}. An unparseable unit is an unscanned script, which is "
+                    "the OMN-17443 condition."
+                )
+                continue
+            command = match.group("command")
+            relpath = mapping.get(command)
+            if relpath is None:
+                failures.append(
+                    f"{rel_unit}:{number}: runs {command} as '{match.group('user')}', "
+                    f"but no entry in {HOST_ARTIFACT_MANIFEST} maps that path to a "
+                    "repo file. An unmapped host artifact is neither installed by a "
+                    "sanctioned path nor scanned by this gate -- exactly the file "
+                    "that carried the defect in OMN-17443."
+                )
+                continue
+            target = repo_root / relpath
+            if not target.is_file():
+                failures.append(
+                    f"{rel_unit}:{number}: {command} maps to {relpath}, which does not "
+                    "exist in this repository. The mapping must resolve to something "
+                    "this gate can actually read."
+                )
+                continue
+            found.add(target)
+
+    return sorted(found), failures
+
+
+def discover_guarded_scripts(repo_root: Path) -> tuple[list[Path], list[str]]:
+    """Every script whose writes this gate governs: reconcilers AND scheduled hosts."""
+    scheduled, failures = discover_scheduled_host_scripts(repo_root)
+    return sorted(set(discover_reconcilers(repo_root)) | set(scheduled)), failures
+
+
 def logical_lines(text: str) -> list[tuple[int, str]]:
     """(starting line number, joined text) for each backslash-continued command.
 
@@ -171,6 +296,16 @@ def _unquoted(line: str) -> str:
 def check(repo_root: Path) -> list[str]:
     failures: list[str] = []
 
+    # -- Part 0: what this gate is allowed to say it scanned ---------------- #
+    #
+    # OMN-17443. Resolved once, up front, so every part below governs the same
+    # set and a discovery hole cannot be a silent pass in one part and not
+    # another. `guarded` is reconcilers PLUS whatever a shipped cron unit
+    # actually runs; `discovery_failures` are commands this gate could not
+    # resolve to a file, which are reported rather than skipped.
+    guarded, discovery_failures = discover_guarded_scripts(repo_root)
+    failures.extend(discovery_failures)
+
     # -- Part 1: explicit tool resolution ----------------------------------- #
     venv_reconciler = repo_root / VENV_RECONCILER
     if not venv_reconciler.is_file():
@@ -196,7 +331,7 @@ def check(repo_root: Path) -> list[str]:
             )
 
     # -- Part 2: every package operation writes as the surface owner -------- #
-    for script in discover_reconcilers(repo_root):
+    for script in guarded:
         rel = script.relative_to(repo_root)
         text = script.read_text(encoding="utf-8")
         for number, line in logical_lines(text):
@@ -279,7 +414,7 @@ def check(repo_root: Path) -> list[str]:
     #     BOTH modes -- so `--check` is a writer here too);
     #   * the clone delegate, which fetches AND checks out, and is the larger of
     #     the two.
-    for script in discover_reconcilers(repo_root):
+    for script in guarded:
         rel = script.relative_to(repo_root)
         text = script.read_text(encoding="utf-8")
         for number, line in logical_lines(text):
@@ -313,7 +448,7 @@ def check(repo_root: Path) -> list[str]:
     # there would be one of them. A script that defines its own `as_owner` again
     # has re-created the second implementation, and the copy that drifts is the
     # one nobody is watching.
-    for script in discover_reconcilers(repo_root):
+    for script in guarded:
         rel = script.relative_to(repo_root)
         text = script.read_text(encoding="utf-8")
         if OWNER_HELPER not in text:
@@ -369,7 +504,7 @@ def check(repo_root: Path) -> list[str]:
                 re.MULTILINE,
             )
         )
-        for script in discover_reconcilers(repo_root):
+        for script in guarded:
             if script.name == PRIVILEGE_LIB:
                 continue
             rel = script.relative_to(repo_root)

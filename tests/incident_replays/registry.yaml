@@ -606,3 +606,19 @@ cases:
     discriminator: tests/ci/test_omnimarket_contract_pin.py::test_the_resolver_refuses_a_mutable_ref
     why: >-
       OMN-15703 made the Application Database Domain Enforcement gate resolve omnimarket's live dev HEAD at CI-run time, so the grants derivation input was a foreign repository's moving branch tip. Because omnibase_infra dev enforces through the single required CI Summary umbrella (OMN-4497), an omnimarket merge that added a db_io.db_tables declaration turned that required check red on every open infra PR simultaneously -- none of which changed anything related, and none of which could fix it. Three times in 21 hours: OMN-17141, OMN-16930, OMN-17290, each costing a separate lane a full investigate-fix-merge cycle while every other infra PR sat blocked. The captured artifact is GitHub's own answer that dev moved 2 commits past 2f123b4c -- the exact commit omnibase_infra#3061 regenerated the open_obligations grant against -- which is the precondition of that red. The case drives the real resolver and requires it to be unmoved by that movement: the input is committed state, so an unrelated PR's verdict is a function of this repo alone. Direction is false_red, so the discriminator is required and is the fail-closed proof that a mutable ref (a branch name) is refused rather than resolved -- without it a resolver stuck open on whatever it was handed would satisfy the accept proof while quietly restoring the coupling.
+  - id: omn17443-scheduled-root-fetch-into-an-operator-owned-clone
+    guard: scripts/check_reconciler_privilege.py
+    incident: OMN-17443
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn17443/omninode-host-maintenance-sync.root-fetch.sh.captured
+      sha256: 01e16b4ab4a457f86215335a76557cecc3b9fc78c3f192b43db5c10884bab7ff
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@eddf4a9d20a294bed00a3c7e73ab14f73f2c6911:deploy/maintenance/omninode-host-maintenance-sync.sh
+      captured_at: '2026-09-01T07:50:00Z'
+    captured_by: lane replay (OMN-17443)
+    test: tests/scripts/test_maintenance_sync_clone_privilege_omn17443.py::test_the_gate_rejects_the_captured_root_fetching_sync
+    why: >-
+      This case is about the guard's SCOPE, which is the half a synthetic fixture cannot test. The artifact is the verbatim host-maintenance sync as it shipped on dev at eddf4a9d -- the file /etc/cron.d/omninode-host-maintenance-sync runs as root at :37 on `.201`. Line 127 is the whole defect, `git -C "$INFRA_REPO_ROOT" fetch ...`, into a clone owned by the operator; git fetch writes objects, refs and reflogs, so every hourly tick deposited root-owned paths and the operator's own pull then died with `fatal: unpack-objects failed`. Measured live: 30 minutes after OMN-17366 repaired 2010 such paths and a full root reconciler tick left 0 -> 0, 32 were back, all under omnibase_infra/.git/objects, all stamped 2026-08-31 23:37:02. OMN-17366 had already established the rule these bytes break, and had already shipped this very guard to enforce it -- and the guard was GREEN on this file for the whole time, because it discovered what to scan by the glob `scripts/reconcile*.sh` and this file is in deploy/maintenance/. So the one file still carrying the defect was the one file the gate never opened: the OMN-17383 lesson (a gate whose scope stops at a filename pattern gives false assurance) recurring inside the same epic, which is why the fix changes DISCOVERY to follow what a cron unit actually invokes rather than adding a second filename pattern. The case drives the real gate over these exact bytes, in a repo carrying the real cron unit, and requires it to say no -- a scope regression back to the glob turns it red. Its accept control in the same test (the fixed file, same repo shape, must pass) is what stops a guard that simply rejects every scheduled script from satisfying it.
