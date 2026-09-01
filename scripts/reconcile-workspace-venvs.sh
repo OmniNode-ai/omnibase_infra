@@ -241,85 +241,79 @@ fi
 # (pre-commit + CI), not by this comment.
 
 CURRENT_USER="$(id -un)"
-SURFACE_OWNER=""
-SURFACE_OWNER_HOME=""
 UV_BIN=""
-RUN_AS=()
 UV_SEARCHED=()
 
-# Owner of the nearest existing ancestor of a path. GNU and BSD `stat` disagree
-# on the flag, and this script runs on both Linux hosts and this Mac.
-surface_owner() {
-  local path="$1"
-  while [[ -n "$path" && "$path" != "/" && ! -e "$path" ]]; do
-    path="$(dirname "$path")"
-  done
-  [[ -e "$path" ]] || return 1
-  stat -c '%U' "$path" 2>/dev/null && return 0   # GNU
-  stat -f '%Su' "$path" 2>/dev/null && return 0  # BSD
-  return 1
-}
+# The ownership mechanics live in ONE place (OMN-17366). This script established
+# the rule for the venv surface; `reconcile-host.sh` then needed the identical
+# rule for the clone surface, and a second copy of a privilege guard is a copy
+# that drifts -- with the drifting half being the one nobody is watching. So
+# `rp_surface_owner`, `rp_user_home`, `rp_plan_privileges` and `as_owner` are
+# sourced, and what stays here is POLICY: which surface, which message, which
+# exit code.
+_VENV_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_PRIVILEGE_LIB="$_VENV_SCRIPT_DIR/reconcile_privilege_lib.sh"
+if [[ ! -f "$_PRIVILEGE_LIB" ]]; then
+  say "INDETERMINATE: privilege library missing at $_PRIVILEGE_LIB"
+  say "  Without it there is no way to know who owns the venv, and writing as"
+  say "  whoever this process happens to be is the defect it exists to prevent."
+  exit "$EXIT_INDETERMINATE"
+fi
+# shellcheck source=./reconcile_privilege_lib.sh
+source "$_PRIVILEGE_LIB"
 
-# Home directory of a user, WITHOUT the `eval echo ~user` trick (which expands
-# whatever the name happens to contain). $HOME is used only for the current
-# user, where it is authoritative and where a test can control it.
-user_home() {
-  local user="$1" home=""
-  if [[ "$user" == "$CURRENT_USER" && -n "${HOME:-}" ]]; then
-    printf '%s' "$HOME"
-    return 0
-  fi
-  home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6)"
-  if [[ -z "$home" ]]; then
-    home="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
-  fi
-  [[ -n "$home" ]] || return 1
-  printf '%s' "$home"
-}
+# Aliases for the names the rest of this script and its tests already use. The
+# library owns the mechanism; these two are this script's view of it.
+SURFACE_OWNER=""
+SURFACE_OWNER_HOME=""
 
 # Decide, once, who the package operations must run as. Sets RUN_AS to the
 # command prefix that gets there -- empty when this process already IS the
 # owner, which is the case on every developer machine.
 plan_privileges() {
-  local surface="$INFRA_DIR"
+  local surface="$INFRA_DIR" rc=0
   [[ -d "$INFRA_VENV" ]] && surface="$INFRA_VENV"
 
-  if ! SURFACE_OWNER="$(surface_owner "$surface")"; then
-    say "INDETERMINATE: cannot read the owner of $surface."
-    say "  Every package operation below writes into that tree. Without knowing"
-    say "  who owns it there is no way to write as the right user, and writing"
-    say "  as the wrong one leaves a venv its owner can no longer reconcile."
-    exit "$EXIT_INDETERMINATE"
-  fi
-  SURFACE_OWNER_HOME="$(user_home "$SURFACE_OWNER" || true)"
+  rp_plan_privileges "$surface" || rc=$?
+  SURFACE_OWNER="$RP_OWNER"
+  SURFACE_OWNER_HOME="$RP_OWNER_HOME"
 
-  if [[ "$SURFACE_OWNER" == "$CURRENT_USER" ]]; then
-    RUN_AS=()
-    return 0
-  fi
+  case "$rc" in
+    0)
+      [[ ${#RUN_AS[@]} -eq 0 ]] || \
+        say "writing as $SURFACE_OWNER (owner of $surface); this process is $CURRENT_USER"
+      return 0
+      ;;
+    1)
+      say "INDETERMINATE: cannot read the owner of $surface."
+      say "  Every package operation below writes into that tree. Without knowing"
+      say "  who owns it there is no way to write as the right user, and writing"
+      say "  as the wrong one leaves a venv its owner can no longer reconcile."
+      exit "$EXIT_INDETERMINATE"
+      ;;
+  esac
 
   # --check writes nothing, so an ownership mismatch is not an obstacle to it.
   # Refusing here would break the read-only SessionStart probe for any user who
   # can read the tree, and a read-only probe that refuses teaches people to stop
   # running it.
+  #
+  # This exemption is specific to THIS surface and must not be copied to
+  # reconcile-host.sh, whose check mode fetches -- and a fetch writes. See the
+  # note above `plan_clone_privileges` there.
   if [[ "$MODE" == "check" ]]; then
     RUN_AS=()
     return 0
   fi
 
-  if [[ "$(id -u)" -eq 0 ]] && command -v runuser >/dev/null 2>&1; then
-    # HOME is set explicitly: `runuser` without `-l` keeps root's HOME, so uv
+  if [[ "$rc" -eq 3 ]]; then
+    # HOME must be explicit: `runuser` without `-l` keeps root's HOME, so uv
     # would try to write its cache into /root/.cache as an unprivileged user and
     # fail on permissions -- a confusing failure two layers from its cause.
-    if [[ -z "$SURFACE_OWNER_HOME" ]]; then
-      say "INDETERMINATE: $surface is owned by $SURFACE_OWNER, whose home directory"
-      say "  could not be resolved. Dropping privileges without a HOME points uv's"
-      say "  cache at root's, which the dropped user cannot write."
-      exit "$EXIT_INDETERMINATE"
-    fi
-    RUN_AS=(runuser -u "$SURFACE_OWNER" -- env "HOME=$SURFACE_OWNER_HOME")
-    say "writing as $SURFACE_OWNER (owner of $surface); this process is $CURRENT_USER"
-    return 0
+    say "INDETERMINATE: $surface is owned by $SURFACE_OWNER, whose home directory"
+    say "  could not be resolved. Dropping privileges without a HOME points uv's"
+    say "  cache at root's, which the dropped user cannot write."
+    exit "$EXIT_INDETERMINATE"
   fi
 
   say "INDETERMINATE: $surface is owned by $SURFACE_OWNER, but this process runs"
@@ -369,17 +363,6 @@ resolve_uv() {
   fi
 
   return 1
-}
-
-# Run a command as the owner of the surface being written. Every package
-# operation in this script goes through here; check_reconciler_privilege.py
-# fails the build if one does not.
-as_owner() {
-  if [[ ${#RUN_AS[@]} -eq 0 ]]; then
-    "$@"
-  else
-    "${RUN_AS[@]}" "$@"
-  fi
 }
 
 plan_privileges
