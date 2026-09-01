@@ -229,6 +229,17 @@ repos:
         files: ^(\.github/workflows/.*\.ya?ml|pyproject\.toml|uv\.lock)$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-16367: per-run compose proof images must be evicted at source
+      # (always() teardown with --volumes --rmi local) and labeled
+      # org.omninode.retention=disposable. Mirrors the ci.yml step in the
+      # compose-required-env-coverage job so local and CI enforcement match.
+      - id: compose-image-retention-policy
+        name: Compose proof teardown/retention policy (OMN-16367)
+        entry: uv run --frozen pytest tests/ci/test_compose_proof_teardown_policy.py -q
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|docker/.*/compose\.ya?ml|docker/docker-compose\..*\.ya?ml|tests/ci/test_compose_proof_teardown_policy\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-16516: structural (tomllib, not regex) guard against the
       # 2026-08-23 mirror-leak incident (OMN-16162) -- a committed uv.lock
       # that resolves any package from a non-public registry/git/artifact

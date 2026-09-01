@@ -6,6 +6,10 @@ services:
       context: ../..
       dockerfile: docker/legacy-rds-fixture/Dockerfile
       target: fresh
+      labels:
+        org.omninode.retention: disposable
+        org.omninode.run-id: "${GITHUB_RUN_ID:-local}"
+        org.omninode.workflow: "${GITHUB_WORKFLOW:-local}"
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
     tmpfs:
@@ -20,6 +24,10 @@ services:
       context: ../..
       dockerfile: docker/legacy-rds-fixture/Dockerfile
       target: legacy
+      labels:
+        org.omninode.retention: disposable
+        org.omninode.run-id: "${GITHUB_RUN_ID:-local}"
+        org.omninode.workflow: "${GITHUB_WORKFLOW:-local}"
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
     tmpfs:
@@ -34,6 +42,10 @@ services:
       context: ../..
       dockerfile: docker/legacy-rds-fixture/Dockerfile
       target: proof
+      labels:
+        org.omninode.retention: disposable
+        org.omninode.run-id: "${GITHUB_RUN_ID:-local}"
+        org.omninode.workflow: "${GITHUB_WORKFLOW:-local}"
     depends_on:
       fresh-postgres:
         condition: service_healthy

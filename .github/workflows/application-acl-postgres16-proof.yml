@@ -61,4 +61,4 @@ jobs:
         run: >-
           docker compose
           -f docker/application-acl-proof/compose.yml
-          down --volumes --remove-orphans
+          down --volumes --remove-orphans --rmi local
