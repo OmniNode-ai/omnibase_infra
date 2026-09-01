@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 import subprocess
 import sys
 import tempfile
@@ -98,6 +99,12 @@ LANE_CHECKSUM = "d5eedd28f26c32f2e9d2a8554a999209c68216dc6a1ee255a973bd034164ce5
 PRIOR_REVISION = "5b904d881ba51a697e5b3d50b28460abbb2fd5aa"
 # What _ledger/application-migrations.tsv declares for the same version.
 MANIFEST_CHECKSUM = "b78acc5ba3144f9a7c7d85fd0fd5803b02b60503765fc58f8650a6a2bde27f4e"
+
+# The convergence DDL, and the only thing the node corpus is barred from doing
+# to this relation. 101 is eleven of these; an additive node migration has none.
+_RETYPE_PATTERN = re.compile(
+    r"ALTER\s+COLUMN\s+\w+\s+TYPE\b", re.IGNORECASE | re.MULTILINE
+)
 
 MIGRATION_101 = FORWARD / "101_converge_savings_estimates_to_node_declared_shape.sql"
 ROLLBACK_101 = (
@@ -308,6 +315,50 @@ def test_the_convergence_lives_in_the_flat_corpus_not_the_node_corpus() -> None:
         "Other node-owned savings_estimates follow-up migrations may still "
         "exist when they own omnidash_analytics behavior rather than this "
         "service-database convergence."
+    )
+
+    # The name guard above is kept: it is the cheap, self-documenting signal a
+    # reviewer reads first. It is not sufficient on its own, and this second
+    # assertion is the load-bearing one.
+    #
+    # Both revisions of this guard have keyed on a FILENAME. The original
+    # reserved a file NUMBER (`085_*savings_estimates*`) and went red on
+    # OMN-15533's legitimately additive
+    # nodes/node_projection_savings/085_savings_estimates_provenance.sql -- a
+    # name collision, not a violation, which is what the previous commit fixed
+    # by keying on the word "converge" instead. But a node migration named
+    # `090_fix_savings_estimates_types.sql` that retypes a column is exactly
+    # what the ruling forbids and passes a name check of any spelling.
+    #
+    # What the ruling actually forbids is CONVERGING THE SERVICE DATABASE'S
+    # COLUMN TYPES from the node corpus: node migrations run against
+    # NODE_PGDB = omnidash_analytics, which is already correct, so a retype
+    # there fixes the database that was never broken and leaves the one that
+    # was. So key on the convergence DDL itself. Flat 101 is eleven
+    # `ALTER COLUMN ... TYPE` statements (VARCHAR(255)->TEXT,
+    # NUMERIC(14,6)->NUMERIC(18,6), ...); an additive node migration has none.
+    # Additive DDL therefore stays permitted, which is the distinction neither
+    # filename could express.
+    #
+    # NON-VACUOUS, MEASURED: dropping a scratch
+    # nodes/node_projection_savings/999_scratch_retype_probe.sql containing one
+    # `ALTER TABLE public.savings_estimates ALTER COLUMN session_id TYPE TEXT;`
+    # turns this row RED and names the file; removing it turns it GREEN again.
+    # The name guard above stays green through that whole experiment, which is
+    # the gap this closes.
+    retyping = sorted(
+        path.name
+        for path in node_dir.glob("*.sql")
+        if path.name != FILENAME
+        and "savings_estimates" in path.read_text(encoding="utf-8")
+        and _RETYPE_PATTERN.search(path.read_text(encoding="utf-8")) is not None
+    )
+    assert retyping == [], (
+        "these node migrations retype a savings_estimates column: "
+        f"{retyping}. An ALTER COLUMN ... TYPE on this relation belongs in the "
+        "flat corpus (101), which is the service database's only declaring "
+        "owner (OMN-15857). A node-corpus retype runs against "
+        "omnidash_analytics, which is already correct."
     )
 
 
