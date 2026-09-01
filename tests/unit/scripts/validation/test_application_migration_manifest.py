@@ -361,7 +361,12 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # place would raise 'conflicting migration checksum in canonical node
     # history'. 087 is therefore a forward CREATE OR REPLACE rather than an
     # edit -- which is sound here precisely because both views hold no data.
-    assert len(result.declarations) == 130
+    #
+    # OMN-17374 moves this count 130 -> 131 by ADDING
+    # node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql,
+    # a topology-derived omninode_runtime grant beside the untouched 0000 that
+    # creates tenant_registry_mirror.
+    assert len(result.declarations) == 131
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
