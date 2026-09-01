@@ -903,3 +903,64 @@ class TestReceiptCorrelationJoin:
         assert str(run_one_correlation) in error_text
         # The other run's prompt text never reaches stdout.
         assert "reply with the single word: ok" not in stdout
+
+
+@pytest.mark.unit
+class TestRuntimeIdentityStamp:
+    """Every receipt-mode dispatch self-identifies (OMN-17310, epic OMN-17306).
+
+    Before this, a receipt printed by a stale local venv was byte-identical in
+    shape to one printed by a deployed lane. That indistinguishability is what
+    let the 2026-08-31T08:10:54Z probe be read as a `.201` statement while its
+    orchestrator ran on the operator's laptop (OMN-17295).
+    """
+
+    def test_receipt_carries_the_stamp_with_every_required_package(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_core.validation.validator_receipt_runtime_identity import (
+            DEFAULT_REQUIRED_PACKAGES,
+        )
+
+        result, _ = _invoke_receipt(tmp_path, monkeypatch)
+        assert result.exit_code == 0, result.output
+        payload = _parse_single_receipt(result.stdout)
+        identity = payload["runtime_identity"]
+        assert isinstance(identity, dict)
+        assert set(DEFAULT_REQUIRED_PACKAGES) <= set(identity["packages"])
+        assert identity["host"] and identity["interpreter"]
+
+    def test_config_source_names_the_contract_that_actually_ran(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The field that would have shown OMN-17295's local site-packages."""
+        result, _ = _invoke_receipt(tmp_path, monkeypatch)
+        payload = _parse_single_receipt(result.stdout)
+        identity = payload["runtime_identity"]
+        assert isinstance(identity, dict)
+        assert str(identity["config_source"]).endswith(".yaml")
+
+    def test_the_one_line_render_goes_to_stderr_not_stdout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stdout stays exactly one receipt JSON — this module's invariant."""
+        result, _ = _invoke_receipt(tmp_path, monkeypatch)
+        assert "identity: host=" in result.stderr
+        assert "identity: host=" not in result.stdout
+        _parse_single_receipt(result.stdout)
+
+    def test_a_failing_dispatch_still_says_what_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The failure branch matters most: a red receipt still self-identifies.
+
+        A receipt that failed is still evidence about a process, and the first
+        question about a red run is which build produced it.
+        """
+        result, _ = _invoke_receipt(
+            tmp_path, monkeypatch, contract_text=_BROKEN_CONTRACT
+        )
+        assert result.exit_code != 0
+        payload = _parse_single_receipt(result.stdout)
+        assert payload["runtime_identity"] is not None
+        assert "identity: host=" in result.stderr

@@ -84,6 +84,10 @@ from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_core.runtime.runtime_local import RuntimeLocal
 from omnibase_infra.cli.model_receipt_runtime_summary import ModelReceiptRuntimeSummary
+from omnibase_infra.runtime_identity import (
+    collect_runtime_identity,
+    render_identity_line,
+)
 from omnibase_infra.topics import (
     SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
     SUFFIX_OMNICLAUDE_SKILL_STARTED,
@@ -851,6 +855,16 @@ def run_receipt_mode(
     metrics: dict[str, float] = {
         "capture_log_bytes": float(len(capture_text.encode("utf-8"))),
     }
+    # OMN-17310 (epic OMN-17306): every evidence-producing execution
+    # self-identifies. Collected ONCE and attached to BOTH branches below --
+    # the failure branch especially, because a receipt that failed still has to
+    # say what failed. ``config_source`` is the resolved contract this dispatch
+    # actually ran, which is the field that would have shown the OMN-17295
+    # probe resolving its orchestrator out of the local venv's site-packages
+    # rather than out of the lane. Required at receipt schema >= 1.1.0: the
+    # core model REFUSES to construct an unstamped receipt, so this is not an
+    # enrichment that can quietly regress.
+    runtime_identity = collect_runtime_identity(config_source=str(contract_path))
     receipt: ModelSkillResult[JsonValue] | ModelSkillResult[ModelReceiptRuntimeSummary]
     if (
         status.is_success_like
@@ -869,6 +883,7 @@ def run_receipt_mode(
             result_model=handler_result_model_name,
             metrics=metrics,
             artifact_refs=artifact_refs,
+            runtime_identity=runtime_identity,
         )
     else:
         summary = ModelReceiptRuntimeSummary(
@@ -896,7 +911,16 @@ def run_receipt_mode(
             result_model=_fully_qualified_name(summary),
             metrics=metrics,
             artifact_refs=artifact_refs,
+            runtime_identity=runtime_identity,
         )
+
+    # One line, stderr, never stdout: stdout carries exactly ONE receipt JSON
+    # and that invariant is what this whole module is built around. This is the
+    # glance-check -- the line that would have made the 08:10Z OMN-17295 probe
+    # self-evidently local ("locus=venv:...") at the terminal, instead of
+    # requiring a `docker logs | grep <correlation>` two hours later to
+    # discover it had never touched the lane.
+    click.echo(render_identity_line(runtime_identity), err=True)
 
     try:
         click.echo(receipt.model_dump_json())
