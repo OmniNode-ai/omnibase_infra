@@ -66,6 +66,19 @@ _API_KEY_REMEDIATION: Final[str] = (
     "run 'onex auth login --tenant-slug <slug> --base-url <gateway-origin> "
     "--api-key-stdin'"
 )
+# Named when the machine holds NO credential of either kind, which is the one
+# case where the store cannot know which surface the operator is heading for.
+# The single-kind remediation was wrong here and wrong in the direction that
+# costs most (OMN-17028): a beta customer arriving at the delegation path was
+# handed the ATTACH-plane login and its four arguments -- a principal id, a
+# realm token endpoint and a machine-client secret they do not have and cannot
+# obtain -- for a path whose whole credential is a dashboard key and an origin.
+_NO_CREDENTIAL_REMEDIATION: Final[str] = (
+    "store a dashboard API key with 'onex auth login --tenant-slug <slug> "
+    "--base-url <gateway-origin> --api-key-stdin' (the delegation path), or an "
+    "attach-plane client secret with 'onex auth login --tenant-slug <slug> "
+    "--client-id <principal_id> --client-secret-stdin'"
+)
 # Field name -> config key. tenant_slug/client_id/token_endpoint/base_url are
 # the four the mint and the attach both need; edge_instance_id is bookkeeping
 # only and so is the one key with a defensible default (the hostname is not
@@ -200,7 +213,8 @@ class StoreGatewayCredential:
         if block is None:
             raise ModelOnexError(
                 f"{self.config_path} has no '{_GATEWAY_BLOCK}:' block -- this "
-                f"machine holds no gateway credential. To create one, {_REMEDIATION}.",
+                f"machine holds no gateway credential. To create one, "
+                f"{_NO_CREDENTIAL_REMEDIATION}.",
                 error_code=EnumCoreErrorCode.CONFIGURATION_NOT_FOUND,
             )
         if not isinstance(block, dict):
@@ -217,7 +231,8 @@ class StoreGatewayCredential:
                 return {}
             raise ModelOnexError(
                 f"no ONEX config at {self.config_path} -- this machine holds no "
-                f"gateway credential. To create one, {_REMEDIATION}.",
+                f"gateway credential. To create one, "
+                f"{_NO_CREDENTIAL_REMEDIATION}.",
                 error_code=EnumCoreErrorCode.CONFIGURATION_NOT_FOUND,
             )
         # yaml-ok: user-authored config file with two divergent writers

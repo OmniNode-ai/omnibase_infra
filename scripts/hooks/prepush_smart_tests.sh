@@ -254,6 +254,41 @@ PREPUSH_LOAD_THRESHOLD="${PREPUSH_LOAD_THRESHOLD:-1.0}"
 #      no single quotes (it is itself a single-quoted assignment here).
 # shellcheck disable=SC2016  # intentionally unexpanded: evaluated by the local
 # `sh -c` / the remote login shell, not by this script.
+#
+# THIRD FIELD: AVAILABLE MEMORY IN MiB (OMN-17392, the OMN-17271 memory
+# dimension). load1 is a CPU-time proxy and says nothing about the resource
+# that actually killed a suite: on 2026-08-31 an OMN-17316 landing lost hours
+# to the `.201` gate-runner OOM-killing full suites at its 8 GiB cap while this
+# picker -- reading CPU only -- kept ranking `.201` FIRST. Measured live while
+# building this change, one second apart:
+#
+#   .201 HOST:      load 3.27 / 32 cores = 0.10x   mem_avail 49771 MiB
+#   gate-runner:    load 3.27 / 32 cores = 0.10x   mem_avail  2562 MiB
+#                   (/sys/fs/cgroup/memory.max 8589934592
+#                    - memory.current 5902548992)
+#
+# Identical load, 19x difference in the resource that OOMs. A CPU-only probe
+# cannot tell those two apart, which is exactly why the picker kept
+# recommending a saturated target.
+#
+# CGROUP-AWARE ON PURPOSE: inside a memory-capped container the machine's
+# MemAvailable is not the headroom the suite gets, so the probe reports
+# min(MemAvailable, memory.max - memory.current) and a capped container
+# advertises its OWN cap. Both cgroup v2 (memory.max/current) and v1
+# (memory.limit_in_bytes/usage_in_bytes) are read; an uncapped v1 limit is a
+# huge sentinel, hence the 1e12 guard.
+#
+# `-1` means COULD NOT READ, and the picker treats it as unfit -- never as
+# ample. Silence is not headroom (the posture the load probe already had).
+#
+# awk is deliberately NOT used for the memory read even though it is used
+# below: every awk program here would need single quotes, and this snippet is
+# itself a single-quoted assignment. POSIX arithmetic + cut/grep/tr carry no
+# single quotes and need no second quoting level. Verified live on all four
+# lab hosts plus the capped container (macOS vm_stat path and Linux
+# /proc/meminfo path both).
+# shellcheck disable=SC2016  # intentionally unexpanded: evaluated by the local
+# `sh -c` / the remote login shell, not by this script.
 _PREPUSH_LOAD_PROBE_SH='n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)
 [ "$n" -gt 0 ] || exit 1
 if [ -r /proc/loadavg ]; then
@@ -262,7 +297,37 @@ else
   l=$(sysctl -n vm.loadavg 2>/dev/null | cut -d" " -f2)
 fi
 [ -n "$l" ] || exit 1
-printf "%s %s\n" "$l" "$n"'
+m=-1
+if [ -r /proc/meminfo ]; then
+  k=$(grep MemAvailable /proc/meminfo | tr -s " " | cut -d" " -f2)
+  [ -n "$k" ] && m=$((k / 1024))
+  if [ -r /sys/fs/cgroup/memory.max ] && [ -r /sys/fs/cgroup/memory.current ]; then
+    x=$(cat /sys/fs/cgroup/memory.max)
+    c=$(cat /sys/fs/cgroup/memory.current)
+    if [ "$x" != max ] && [ -n "$c" ]; then
+      h=$(((x - c) / 1048576))
+      [ "$h" -lt "$m" ] && m=$h
+    fi
+  elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ] && [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then
+    x=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+    c=$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes)
+    if [ -n "$x" ] && [ -n "$c" ] && [ "$x" -lt 1000000000000 ]; then
+      h=$(((x - c) / 1048576))
+      [ "$h" -lt "$m" ] && m=$h
+    fi
+  fi
+else
+  v=$(vm_stat 2>/dev/null) || v=""
+  if [ -n "$v" ]; then
+    p=$(printf "%s\n" "$v" | grep "page size of" | tr -dc "0-9")
+    f=$(printf "%s\n" "$v" | grep "Pages free" | tr -dc "0-9")
+    i=$(printf "%s\n" "$v" | grep "Pages inactive" | tr -dc "0-9")
+    s=$(printf "%s\n" "$v" | grep "Pages speculative" | tr -dc "0-9")
+    u=$(printf "%s\n" "$v" | grep "Pages purgeable" | tr -dc "0-9")
+    [ -n "$p" ] && [ -n "$f" ] && m=$(((f + ${i:-0} + ${s:-0} + ${u:-0}) * p / 1048576))
+  fi
+fi
+printf "%s %s %s\n" "$l" "$n" "$m"'
 
 # Prefer GNU coreutils timeout(1); fall back to gtimeout(1) (Homebrew name on
 # macOS); fall back to no wrapper at all (ssh -o ConnectTimeout already bounds
@@ -289,7 +354,7 @@ _prepush_timeout_cmd() {
 #   PREPUSH_LOAD_OVERRIDE_LOCAL   overrides the direct (TARGET="") read
 #   PREPUSH_LOAD_OVERRIDE_REMOTE  overrides every ssh-target read
 host_load_ratio() {
-  local target="$1" raw load1 ncpu timeout_cmd
+  local target="$1" raw load1 ncpu memmb timeout_cmd
   # OMN-16995: REAP FIRST, MEASURE SECOND. A leaked `sh -c while :; do :; done`
   # orphan is indistinguishable from real work in load1, and 19 of them once
   # put `.200` at 1.64x-core and refused every heavy escalation in the lab. The
@@ -321,19 +386,66 @@ host_load_ratio() {
   set -- $raw
   load1="${1:-}"
   ncpu="${2:-}"
+  # Third field is available MiB (OMN-17392). An override that supplies only
+  # the historical "<load1> <nproc>" pair reports -1, i.e. "could not read",
+  # and is therefore treated as UNFIT rather than ample -- the same posture the
+  # real probe takes when /proc/meminfo and vm_stat are both unreadable. An
+  # override is a test seam, not an exemption from the memory floor.
+  memmb="${3:--1}"
+  case "$memmb" in '' | *[!0-9-]*) memmb=-1 ;; esac
   [ -n "$load1" ] && [ -n "$ncpu" ] && [ "$ncpu" != "0" ] || return 1
-  awk -v l="$load1" -v n="$ncpu" 'BEGIN { if (n + 0 <= 0) exit 1; printf "%s %s %.3f\n", l, n, (l / n) }'
+  awk -v l="$load1" -v n="$ncpu" -v m="$memmb" \
+    'BEGIN { if (n + 0 <= 0) exit 1; printf "%s %s %.3f %s\n", l, n, (l / n), m }'
 }
 
-# host_is_fit TARGET -- 0 if measured load1/nproc is at/under
-# PREPUSH_LOAD_THRESHOLD, 1 if over threshold, 2 if the read itself failed
-# (unreachable/unresolvable). Callers must not conflate 1 and 2 anywhere the
-# difference is user-visible ("over capacity" vs "could not check").
+# The floor, in MiB, of available memory a host must PROVE before it may take a
+# heavy suite (OMN-17392). A DELIBERATE CONSTANT, not `${VAR:-4096}`: an env
+# indirection here would be a one-word bypass of the exact admission control
+# this adds (`PREPUSH_MIN_FREE_MEM_MB=0` restores the blind picker), and the
+# operator directive is explicit that PREPUSH_* overrides stay forbidden.
+# Tests drive the MEASUREMENT through PREPUSH_MEM_OVERRIDE_MAP, never the floor.
+#
+# 4096 is chosen against the measured OOM, not picked round: the `.201`
+# gate-runner OOM-killed full suites at a 8 GiB cap (OMN-17247), and its
+# headroom while running one measured 2562 MiB. A 4 GiB floor refuses that
+# container while it is saturated and re-admits it once the suite drains,
+# while keeping every host the lab actually uses in the fleet -- measured the
+# same minute: h200 77564, h201 49771, h105 14664, h101 7459. A floor at 8192
+# would have excluded h101, shrinking the fleet and pushing work back onto the
+# Mac, which is the opposite of what this change is for.
+PREPUSH_MIN_FREE_MEM_MB=4096
+
+# host_is_fit TARGET -- 0 if the host proved BOTH capacity dimensions, 1 if it
+# is measurably over on either, 2 if the read itself failed
+# (unreachable/unresolvable/unreadable memory). Callers must not conflate 1 and
+# 2 anywhere the difference is user-visible ("over capacity" vs "could not
+# check"). Sets PREPUSH_LAST_FIT_DETAIL so a caller can say WHICH dimension
+# refused instead of reporting a bare "unfit".
 host_is_fit() {
-  local target="$1" ratio
-  ratio="$(host_load_ratio "$target" | awk '{print $3}')" || return 2
+  local target="$1" reading ratio memmb
+  PREPUSH_LAST_FIT_DETAIL=""
+  reading="$(host_load_ratio "$target")" || return 2
+  ratio="$(printf '%s' "$reading" | awk '{print $3}')"
+  memmb="$(printf '%s' "$reading" | awk '{print $4}')"
   [ -n "$ratio" ] || return 2
-  awk -v r="$ratio" -v thr="$PREPUSH_LOAD_THRESHOLD" 'BEGIN { exit !(r <= thr + 0) }'
+  if ! awk -v r="$ratio" -v thr="$PREPUSH_LOAD_THRESHOLD" 'BEGIN { exit !(r <= thr + 0) }'; then
+    PREPUSH_LAST_FIT_DETAIL="load ${ratio}x > ${PREPUSH_LOAD_THRESHOLD}x"
+    return 1
+  fi
+  # Memory is checked AFTER load and reported separately: a host that is idle
+  # but memory-starved is the case the CPU-only picker got wrong, and calling
+  # it "over capacity" without naming memory would send the reader hunting for
+  # CPU load that is not there.
+  if [ -z "$memmb" ] || [ "$memmb" = "-1" ]; then
+    PREPUSH_LAST_FIT_DETAIL="memory unreadable"
+    return 2
+  fi
+  if [ "$memmb" -lt "$PREPUSH_MIN_FREE_MEM_MB" ] 2> /dev/null; then
+    PREPUSH_LAST_FIT_DETAIL="mem ${memmb}MiB < ${PREPUSH_MIN_FREE_MEM_MB}MiB"
+    return 1
+  fi
+  PREPUSH_LAST_FIT_DETAIL="load ${ratio}x, mem ${memmb}MiB"
+  return 0
 }
 
 # =============================================================================
@@ -473,8 +585,133 @@ dispatch_to_lab_host() {
   return 1
 }
 
+# =============================================================================
+# Off-box-by-default routing (OMN-17392)
+# =============================================================================
+# Operator directive 2026-08-31, verbatim: "we should move prepush off this box
+# if possible". The box is `.200` (row h200), and the reason the directive was
+# needed is a single short-circuit below: the guard ran the heavy suite LOCALLY
+# the moment the local host was a designated capacity row and its load probe
+# read under threshold. Lab dispatch was only ever reached once the local host
+# was already over threshold -- i.e. the fleet was consulted only after this
+# machine was too loaded to be worth consulting it about. Measured that day:
+# load1 96.58 / 24 cores = 4.02x during landings, with h105 at 0.12x and h201
+# at 0.10x sitting idle.
+#
+# The budget and interval are CONSTANTS, not `${VAR:-...}`. An env indirection
+# would be a one-word bypass of exactly this policy (`..._BUDGET=0` collapses
+# straight through to the local fallback), and the directive is explicit that
+# PREPUSH_* overrides stay forbidden. Tests pass the budget positionally.
+PREPUSH_OFFBOX_WAIT_BUDGET_SECONDS=900
+PREPUSH_OFFBOX_WAIT_INTERVAL_SECONDS=60
+
+# prepush_try_local_heavy_slot -- 0 when this host has PROVEN both capacity and
+# an exclusive heavy-suite slot (and now holds it), 1 otherwise. Factored out of
+# guard_full_suite_host unchanged in substance so the `allowed` path and the
+# post-wait fallback share one implementation and cannot drift into two
+# different notions of "may run here".
+#
+# It records WHY it said no in PREPUSH_LOCAL_HEAVY_REASON. Before this function
+# existed the refusal was logged from inside an `if host_is_fit ""` branch, so
+# "this host is fit but its slot is held" was necessarily true wherever it
+# printed. Hoisting the check into here made that sentence reachable for an
+# over-loaded or memory-starved host too, where it is measurably false and
+# sends the reader hunting for a held lock that does not exist.
+prepush_try_local_heavy_slot() {
+  local lw lock_rc=0
+  PREPUSH_LOCAL_HEAVY_REASON=""
+  if ! host_is_fit ""; then
+    PREPUSH_LOCAL_HEAVY_REASON="this host is not fit (${PREPUSH_LAST_FIT_DETAIL:-unmeasured})"
+    return 1
+  fi
+  lw="$(prepush_local_workroot "$PREPUSH_LC_HOST" || true)"
+  [ -n "$lw" ] || lw="${REPO_ROOT}/.onex_state/prepush_distribution"
+  prepush_lock_acquire "$lw" || lock_rc=$?
+  if [ "$lock_rc" -eq 0 ]; then
+    # No `trap ... EXIT` here: prepush_hook_cleanup (installed once, below)
+    # already releases the lock. Installing a second EXIT trap would drop the
+    # temp-file cleanup this hook installed first.
+    return 0
+  fi
+  if [ "$lock_rc" -eq 2 ]; then
+    # The workroot is unusable, which says nothing about this host's capacity.
+    # Proceed exactly as the hook did before this lock existed rather than
+    # inventing a refusal out of an infrastructural failure.
+    log "WARNING: could not create the heavy-suite slot lock under '${lw}' -- running unserialized on this host (pre-OMN-16991 behavior). Fix the workroot to restore serialization (OMN-16174)."
+    return 0
+  fi
+  PREPUSH_LOCAL_HEAVY_REASON="this host is fit (${PREPUSH_LAST_FIT_DETAIL:-unmeasured}) but its heavy-suite slot is already held"
+  return 1
+}
+
+# prepush_lab_has_transient_capacity -- 0 when the last probe refused at least
+# one candidate for a reason that CAN resolve on its own, 1 when every refusal
+# is structural.
+#
+# The bounded wait below exists to catch a lab slot freeing up. That premise
+# holds for `busy` (a suite finishes), `over` (load drains) and `mem-over` (the
+# suite holding the memory exits). It does NOT hold for `unreachable`,
+# `repo-denied`, `disabled`, `uv-unfit` or `mode-*-not-eligible`: none of those
+# change because a pusher waited, so spending the budget on them buys nothing
+# and costs 900s of silence before the fallback the push was always going to
+# reach. The concrete case is a Mac off the lab LAN -- every remote row probes
+# `unreachable`, and without this gate EVERY heavy push there pays the full
+# budget before running locally anyway.
+#
+# This can only SHORTEN a wait, never skip a gate: the caller still returns "no
+# placement", and the local fallback it falls through to still has to prove
+# measured capacity AND an exclusive slot. It matches on the probe-log tokens
+# pick_capacity_host writes, so a new refusal reason defaults to STRUCTURAL --
+# a reason we have not classified does not silently earn a 15-minute wait.
+prepush_lab_has_transient_capacity() {
+  case "${PREPUSH_PROBE_LOG:-}" in
+    *"=busy("* | *"=over("* | *"=mem-over("*) return 0 ;;
+  esac
+  return 1
+}
+
+# prepush_wait_for_lab_capacity HEAVY_WHAT BUDGET INTERVAL -- retry lab
+# placement until a host takes the work or BUDGET seconds elapse. 0 = a lab host
+# produced a green verdict, 1 = the budget is exhausted with no placement.
+#
+# This is the "queue and wait" rung the directive asks for, and it is VISIBLE by
+# construction: every attempt logs the probe trail it just took, how much of the
+# budget it has spent, and when it will re-probe. A push that waits looks like a
+# push that is waiting, not like a hung hook.
+#
+# It re-probes the WHOLE ranked list each round rather than re-trying one host:
+# the thing being waited on is a slot freeing up ANYWHERE in the lab, and by the
+# next round the ranking has usually changed.
+#
+# It does NOT catch a remote RED: dispatch_to_lab_host die()s on a genuine
+# failure, so a red suite still refuses the push immediately instead of being
+# retried until the budget runs out.
+prepush_wait_for_lab_capacity() {
+  local heavy_what="$1" budget="$2" interval="$3" waited=0 attempt=1
+  while :; do
+    if dispatch_to_lab_host "$heavy_what"; then
+      return 0
+    fi
+    [ "$waited" -lt "$budget" ] || break
+    if ! prepush_lab_has_transient_capacity; then
+      log "OFF-BOX QUEUE-AND-WAIT: not waiting -- every lab refusal cannot resolve on its own."
+      log "  probed: ${PREPUSH_PROBE_LOG:-none}"
+      log "  No host is merely busy/over/memory-starved, so re-probing would return the same answer for the full ${budget}s. Falling through to the refusal ladder now."
+      return 1
+    fi
+    log "OFF-BOX QUEUE-AND-WAIT (attempt ${attempt}): no lab host has headroom for ${heavy_what} yet."
+    log "  probed: ${PREPUSH_PROBE_LOG:-none}"
+    log "  waited ${waited}s of a ${budget}s budget; re-probing the whole ranked list in ${interval}s. Ctrl-C aborts the push."
+    sleep "$interval"
+    waited=$((waited + interval))
+    attempt=$((attempt + 1))
+  done
+  log "OFF-BOX QUEUE-AND-WAIT: ${budget}s budget exhausted after ${attempt} attempt(s); no lab host took ${heavy_what}."
+  return 1
+}
+
 guard_full_suite_host() {
-  local host lc_host label heavy_what designated
+  local host lc_host label heavy_what designated policy
   # OMN-15408: the caller names WHICH heavyweight run is being guarded, so the
   # refusal names the real cause. Default preserves the OMN-15059 wording for
   # the flag-driven escalation call sites, which pass no argument.
@@ -510,32 +747,55 @@ guard_full_suite_host() {
   designated="$(prepush_designated_hostnames)"
 
   if [ -n "$label" ]; then
-    # OMN-16295: identity alone is not enough -- this known-good host must
-    # also have capacity right now.
-    if host_is_fit ""; then
+    policy="$(prepush_heavy_local_policy "$lc_host" || true)"
+    [ -n "$policy" ] || policy="allowed"
+
+    if [ "$policy" = "prefer_remote" ]; then
+      # OFF-BOX BY DEFAULT (OMN-17392). This host is a designated, authorizing
+      # gate host and could very well be fit right now -- and that is exactly
+      # the case the directive retires. Being ABLE to run the suite here is no
+      # longer a reason to. The local run is still reachable, but only as the
+      # LAST rung, after the lab has been asked and asked again.
+      log "OFF-BOX ROUTING: '${host}' (${label}) is heavy_local=prefer_remote, so ${heavy_what} looks for a lab host BEFORE running here (OMN-17392)."
+      if remote_full_suite_verified "$heavy_what"; then
+        return 0
+      fi
+      if prepush_wait_for_lab_capacity "$heavy_what" \
+        "$PREPUSH_OFFBOX_WAIT_BUDGET_SECONDS" "$PREPUSH_OFFBOX_WAIT_INTERVAL_SECONDS"; then
+        return 0
+      fi
+      # The bounded wait is spent. Running here is now permitted -- but ONLY on
+      # the same proof any other host must produce: measured capacity AND an
+      # exclusive slot. A local host over threshold still refuses below exactly
+      # as it did before this change, so this fallback is strictly narrower
+      # than the pre-OMN-17392 behavior it replaces, never wider.
+      if prepush_try_local_heavy_slot; then
+        log "=============================================================================="
+        log "LOCAL FALLBACK IN EFFECT -- ${heavy_what} is running ON THIS BOX ('${host}')."
+        log "  This host is heavy_local=prefer_remote: off-box was tried FIRST and did not"
+        log "  place. Waited the full ${PREPUSH_OFFBOX_WAIT_BUDGET_SECONDS}s off-box budget before falling back."
+        log "  last probe: ${PREPUSH_PROBE_LOG:-none}"
+        log "  local capacity accepted on: ${PREPUSH_LAST_FIT_DETAIL:-unknown}"
+        log "  This is NOT a bypass: the full escalation runs here, unmodified. It is a"
+        log "  capacity event -- if you are seeing it often, the lab is undersized or a"
+        log "  host is wedged (docs/runbooks/lab-prepush-host-table.md)."
+        log "=============================================================================="
+        return 0
+      fi
+      log "off-box placement failed and this host cannot take the work either -- ${PREPUSH_LOCAL_HEAVY_REASON:-no local capacity measured}; refusing rather than running a suite this host cannot support"
+    else
+      # OMN-16295: identity alone is not enough -- this known-good host must
+      # also have capacity right now.
+      #
       # OMN-16174/OMN-16991: the LOCAL heavy path took no lock of any kind
-      # before this change, which is why five concurrent full suites once ran
+      # before that change, which is why five concurrent full suites once ran
       # on one host with one of them taking 97+ minutes. It is the busiest
       # path in the hook and was the only unserialized one. Take the same
       # exclusive slot a remote host would have to take.
-      local lw lock_rc=0
-      lw="$(prepush_local_workroot "$lc_host" || true)"
-      [ -n "$lw" ] || lw="${REPO_ROOT}/.onex_state/prepush_distribution"
-      prepush_lock_acquire "$lw" || lock_rc=$?
-      if [ "$lock_rc" -eq 0 ]; then
-        # No `trap ... EXIT` here: prepush_hook_cleanup (installed once, below)
-        # already releases the lock. Installing a second EXIT trap would drop
-        # the temp-file cleanup this hook installed first.
+      if prepush_try_local_heavy_slot; then
         return 0
       fi
-      if [ "$lock_rc" -eq 2 ]; then
-        # The workroot is unusable, which says nothing about this host's
-        # capacity. Proceed exactly as the hook did before this lock existed
-        # rather than inventing a refusal out of an infrastructural failure.
-        log "WARNING: could not create the heavy-suite slot lock under '${lw}' -- running unserialized on this host (pre-OMN-16991 behavior). Fix the workroot to restore serialization (OMN-16174)."
-        return 0
-      fi
-      log "this host is fit but its heavy-suite slot is already held; looking for another lab host before refusing"
+      log "${PREPUSH_LOCAL_HEAVY_REASON:-this host cannot take the work}; looking for another lab host before refusing"
     fi
     # Precedence, in order of EVIDENCE STRENGTH -- not convenience:
     #   1. GitHub-hosted sha-pinned FULL-suite pass (OMN-16688). Strongest:
@@ -549,6 +809,14 @@ guard_full_suite_host() {
     #   3. Single-use receipted degraded-capacity grant. Weakest: it runs a
     #      contended suite here and says so.
     #   4. die().
+    #
+    # OMN-17392 did NOT reorder this ladder -- it changed only WHEN a
+    # `prefer_remote` host is allowed to skip it by running locally. On an
+    # `allowed` host the ladder is reached exactly as before (local unfit or
+    # slot held). On a `prefer_remote` host rungs 1 and 2 have already been
+    # walked, and a bounded wait spent on rung 2, before control arrives here;
+    # re-walking them costs two read-only probes and is worth it, because the
+    # lab's state may well have changed during a 900s wait.
     if remote_full_suite_verified "$heavy_what"; then
       return 0
     fi

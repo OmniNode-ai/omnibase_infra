@@ -20,6 +20,9 @@ from omnibase_infra.onboarding.condition_evaluator import (
     ConditionEvaluationError,
     evaluate_condition,
 )
+from omnibase_infra.onboarding.model_credential_store_write import (
+    ModelCredentialStoreWrite,
+)
 from omnibase_infra.onboarding.model_interactive_policy import ModelInteractivePolicy
 from omnibase_infra.onboarding.model_transition import ModelTransition
 from omnibase_infra.onboarding.model_transition_branch import ModelTransitionBranch
@@ -313,7 +316,7 @@ class TransitionReducer:
         result: dict[str, str] = {}
 
         for env_key, env_template in template.items():
-            result[env_key] = self._interpolate(env_template, state)
+            result[env_key] = _interpolate(env_template, state)
 
         return result
 
@@ -348,36 +351,76 @@ class TransitionReducer:
             return {}
 
         return {
-            self._interpolate(ref_template, state): SecretStr(
-                self._interpolate(value_template, state)
+            _interpolate(ref_template, state): SecretStr(
+                _interpolate(value_template, state)
             )
             for ref_template, value_template in template.items()
         }
 
-    @staticmethod
-    def _interpolate(template: str, state: StateDict) -> str:
-        """Interpolate ``{state.key}`` / ``{state.key|}`` / ``{state.key|default}``."""
+    def get_credential_store_output(
+        self, terminal_step_id: str, state: StateDict
+    ) -> ModelCredentialStoreWrite | None:
+        """Collect the credential-store write for a terminal step.
 
-        def _replacer(match: re.Match[str]) -> str:
-            key = match.group(1)
-            default_group = match.group(2)  # None if no pipe, "" if pipe with no value
+        Same interpolation grammar as the other two output blocks, but the
+        result is a MODEL rather than a dict: the fields are the store's write
+        signature, so returning them typed means a policy that drifts from that
+        signature fails here instead of producing a store call with a wrong
+        keyword argument.
 
-            if default_group is not None:
-                # Has a pipe — optional key with default
-                value = state.get(key)
-                if value is None:
-                    return default_group
-                return str(value)
-            else:
-                # No pipe — required key
-                if key not in state:
-                    msg = f"Required state key '{key}' not found during interpolation"
-                    raise InterpolationError(msg)
-                return str(state[key])
+        Returns:
+            The populated ``ModelCredentialStoreWrite``, or None when the
+            policy declares no ``credential_store_output`` for this step.
 
-        # Check for unknown interpolation syntax (e.g. {bad.syntax} without state. prefix)
-        # We allow literal strings to pass through unchanged.
-        return _INTERPOLATION_RE.sub(_replacer, template)
+        Raises:
+            TransitionError: If ``terminal_step_id`` is not a terminal step.
+            InterpolationError: If a required state key is missing.
+        """
+        if terminal_step_id not in self._terminal_steps:
+            msg = f"Step '{terminal_step_id}' is not a terminal step"
+            raise TransitionError(msg)
+
+        template = self._policy.credential_store_output.get(terminal_step_id)
+        if template is None:
+            return None
+
+        return ModelCredentialStoreWrite.model_validate(
+            {
+                field: _interpolate(value_template, state)
+                for field, value_template in template.items()
+            }
+        )
+
+
+def _interpolate(template: str, state: StateDict) -> str:
+    """Interpolate ``{state.key}`` / ``{state.key|}`` / ``{state.key|default}``.
+
+    A module-level function, not a method: it reads nothing off the reducer and
+    is shared by all three terminal-output resolvers, so binding it to the class
+    only made the state machine look like it owned a text-substitution concern
+    it does not.
+    """
+
+    def _replacer(match: re.Match[str]) -> str:
+        key = match.group(1)
+        default_group = match.group(2)  # None if no pipe, "" if pipe with no value
+
+        if default_group is not None:
+            # Has a pipe — optional key with default
+            value = state.get(key)
+            if value is None:
+                return default_group
+            return str(value)
+        else:
+            # No pipe — required key
+            if key not in state:
+                msg = f"Required state key '{key}' not found during interpolation"
+                raise InterpolationError(msg)
+            return str(state[key])
+
+    # Check for unknown interpolation syntax (e.g. {bad.syntax} without state. prefix)
+    # We allow literal strings to pass through unchanged.
+    return _INTERPOLATION_RE.sub(_replacer, template)
 
 
 __all__ = [

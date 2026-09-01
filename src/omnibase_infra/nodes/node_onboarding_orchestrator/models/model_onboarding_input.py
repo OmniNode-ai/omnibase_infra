@@ -89,10 +89,19 @@ class ModelOnboardingInput(BaseModel):
         if self.legacy_env_output and not has_env_path:
             msg = "env_output_path is required when legacy_env_output=True"
             raise ValueError(msg)
-        if not has_env_path and not has_overlay_path:
+        # A credentials path IS a requested output. Requiring an overlay
+        # destination on top of it forced a credential-only policy
+        # (``connect_cloud``) to name a file it has no content for, and the
+        # overlay it then wrote was a second copy of coordinates nothing reads
+        # back — the same writer/reader split this lane exists to close
+        # (OMN-17028).
+        has_credentials_path = self.credentials_output_path is not None and bool(
+            self.credentials_output_path.strip()
+        )
+        if not has_env_path and not has_overlay_path and not has_credentials_path:
             msg = (
-                "overlay_output_path is required when dry_run=False and "
-                "legacy_env_output=False"
+                "one of env_output_path, overlay_output_path or "
+                "credentials_output_path is required when dry_run=False"
             )
             raise ValueError(msg)
         return self

@@ -47,6 +47,7 @@ Every test below fails on the shipped-before version, which resolved uv as
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -464,14 +465,25 @@ def test_the_gate_does_not_flag_a_command_quoted_inside_an_error_message(
 
     Without this the gate would punish the very messages that make a refusal
     actionable, and the cheapest way to make it quiet would be to delete them.
+
+    The fixture SOURCES the privilege library rather than defining its own
+    ``as_owner``: since OMN-17366 the mechanics live in exactly one file, and a
+    script that redefines the helper is itself a finding. Keeping the old inline
+    definition here would have made this test assert that the second
+    implementation is acceptable, which is the opposite of what it is for.
     """
     scratch = tmp_path / "repo"
     (scratch / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        _REPO_ROOT / "scripts" / "reconcile_privilege_lib.sh",
+        scratch / "scripts" / "reconcile_privilege_lib.sh",
+    )
     (scratch / "scripts" / "reconcile-workspace-venvs.sh").write_text(
         "#!/usr/bin/env bash\n"
         'ONEX_RECONCILE_UV_BIN="${ONEX_RECONCILE_UV_BIN:-}"\n'
         "resolve_uv() { :; }\n"
-        'as_owner() { "$@"; }\n'
+        'source "$SCRIPT_DIR/reconcile_privilege_lib.sh"\n'
+        "as_owner true\n"
         'fail "run by hand:" \\\n'
         '  "  cd $DIR && env -u PYTHONPATH uv sync --frozen --inexact"\n',
         encoding="utf-8",

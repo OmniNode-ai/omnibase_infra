@@ -11,6 +11,17 @@
 #   credentials, point OMNI_HOME at the deploy-source tree, and exec
 #   `scripts/reconcile-host.sh` from that tree.
 #
+#   Arguments are FORWARDED to the reconciler (OMN-17336), so the modes an
+#   operator is told to reach for actually work through this entry point:
+#
+#     omninode-workspace-reconcile.sh              # what cron runs: full repair
+#     omninode-workspace-reconcile.sh --check      # observe only, mutate nothing
+#     omninode-workspace-reconcile.sh --verbose
+#
+#   The single exception is `--omni-home`, which is refused -- see the guard
+#   above the exec for why. Everything else is the reconciler's own argument
+#   surface, unfiltered: this wrapper does not maintain a second copy of it.
+#
 #   All reconciliation logic and all movement verification live in
 #   `scripts/reconcile-host.sh` (OMN-17307), which is the SAME script the Mac
 #   runs from its plugin tick. There is one reconciler; this file is a
@@ -119,6 +130,39 @@ fi
 # this file and fails if RECONCILER is ever assigned before the sourcing block
 # again. That is the check that can actually go red.
 
+# OMN-17336: the root is this wrapper's to decide, so an argument that contradicts
+# it is refused rather than honoured.
+#
+# The wrapper execs the reconciler FROM the root it resolved above. Honouring a
+# caller's --omni-home would therefore run one checkout against a different tree
+# -- precisely the OMN-17365 split, arriving through a new door -- while dropping
+# it quietly would be the OMN-17336 defect itself. Refusing is the only answer
+# that is neither. An operator who genuinely wants another root should invoke
+# reconcile-host.sh directly, which is not a scheduler adapter and has no root of
+# its own to contradict.
+for _arg in "$@"; do
+  case "$_arg" in
+    --omni-home | --omni-home=*)
+      echo "[workspace-reconcile] REFUSED: --omni-home is not accepted here." >&2
+      echo "[workspace-reconcile]   This wrapper resolves the root itself (env file, then \$OMNI_HOME)" >&2
+      echo "[workspace-reconcile]   and execs the reconciler FROM it, so a second root would run one" >&2
+      echo "[workspace-reconcile]   checkout against another tree (OMN-17365)." >&2
+      echo "[workspace-reconcile]   resolved root : $OMNI_HOME" >&2
+      echo "[workspace-reconcile]   For another root, call the reconciler directly:" >&2
+      echo "[workspace-reconcile]     bash <root>/omnibase_infra/scripts/reconcile-host.sh --omni-home <root>" >&2
+      exit 3
+      ;;
+  esac
+done
+unset _arg
+
+# "$@" goes LAST so an explicitly-passed flag beats the default beside it:
+# reconcile-host.sh parses left to right and lets the last occurrence win, so
+# `--branch main` overrides the RECONCILE_BRANCH default rather than being
+# overridden by it. It also rejects an unknown argument with exit 3 instead of
+# ignoring it, which is what makes blanket forwarding safe -- a typo stays loud
+# rather than silently becoming the full repair that `--check` used to become.
 exec env OMNI_HOME="$OMNI_HOME" bash "$RECONCILER" \
   --omni-home "$OMNI_HOME" \
-  --branch "${RECONCILE_BRANCH:-dev}"
+  --branch "${RECONCILE_BRANCH:-dev}" \
+  "$@"

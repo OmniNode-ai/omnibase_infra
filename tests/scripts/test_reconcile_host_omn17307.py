@@ -34,6 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "reconcile-host.sh"
 _VERIFIER = _REPO_ROOT / "scripts" / "reconcile_verify_movement.py"
 _MANIFEST = _REPO_ROOT / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
+_PRIVILEGE_LIB = _REPO_ROOT / "scripts" / "reconcile_privilege_lib.sh"
 
 EXIT_OK = 0
 EXIT_FAILED = 2
@@ -144,8 +145,14 @@ def _stub(path: Path, witness: Path, body: str = "") -> None:
     path.chmod(0o755)
 
 
-@pytest.fixture
-def ws(tmp_path: Path) -> Workspace:
+def build_workspace(tmp_path: Path) -> Workspace:
+    """The workspace construction, as a plain function.
+
+    Split out from the fixture so a sibling test module can build the same tree
+    without importing a fixture (which would shadow its own ``ws`` parameters
+    and make the shared name ambiguous). OMN-17366's clone-privilege tests are
+    the first caller.
+    """
     root = tmp_path / "omni_home"
     infra = root / "omnibase_infra"
     scripts = infra / "scripts"
@@ -154,6 +161,10 @@ def ws(tmp_path: Path) -> Workspace:
     shutil.copy2(_SCRIPT, scripts / "reconcile-host.sh")
     (scripts / "reconcile-host.sh").chmod(0o755)
     shutil.copy2(_VERIFIER, scripts / "reconcile_verify_movement.py")
+    # OMN-17366: the script refuses without its privilege library, because
+    # writing without knowing who owns the surface is the defect that library
+    # exists to prevent.
+    shutil.copy2(_PRIVILEGE_LIB, scripts / _PRIVILEGE_LIB.name)
     (scripts / "runtime_build").mkdir()
     shutil.copy2(_MANIFEST, scripts / "runtime_build" / "sibling_clone_manifest.sh")
 
@@ -168,6 +179,11 @@ def ws(tmp_path: Path) -> Workspace:
         alert_witness=tmp_path / "alerts.log",
         delegate_witness=tmp_path / "delegates.log",
     )
+
+
+@pytest.fixture
+def ws(tmp_path: Path) -> Workspace:
+    return build_workspace(tmp_path)
 
 
 def _lock(ws: Workspace, **versions: str) -> None:

@@ -148,6 +148,122 @@ which is why five concurrent full suites once ran on one host with one taking
 97+ minutes (OMN-16174). It was the busiest path in the hook and the only
 unserialized one.
 
+## Off-box by default: `heavy_local` (OMN-17392)
+
+Operator directive, 2026-08-31, verbatim: *"we should move prepush off this box
+if possible."* The box is `.200` (`h200`).
+
+Before this, the guard ran the heavy suite **locally** the moment the local host
+was a designated capacity row whose load probe read under threshold. Lab
+dispatch was reached only once the local host was already *over* threshold — the
+fleet was consulted only after this machine was too loaded to be worth
+consulting it about. Measured that day: `h200` at load1 96.58 / 24 cores =
+**4.02x** during landings, while `h105` sat at 0.12x and `h201` at 0.10x.
+
+Column 13, `heavy_local`, decides what happens when a row **is the host doing
+the pushing**:
+
+| value | meaning |
+|-------|---------|
+| `allowed` | pre-OMN-17392 behavior. Local probe reads fit → run here. |
+| `prefer_remote` | attempt lab placement **first**; run here only after the bounded off-box wait is spent, and then only loudly. |
+| `-` | identity-only rows, which never execute anything. |
+
+`prefer_remote` is **not** a de-designation. The row keeps full identity, stays
+`authorizing`, and stays a placement target for every *other* host's escalation.
+It changes exactly one thing: the order in which its **own** escalations
+consider the local machine.
+
+### Routing decision table, as shipped
+
+Read top to bottom; the first row that matches wins.
+
+| local host | condition | what happens |
+|---|---|---|
+| `heavy_local=allowed` | local fit **and** slot free | runs locally (unchanged) |
+| `heavy_local=allowed` | local unfit or slot held | falls to the precedence ladder below |
+| `heavy_local=prefer_remote` | sha-pinned green full-suite run on GitHub-hosted CI | accepted, nothing runs locally |
+| `heavy_local=prefer_remote` | any lab host fit (load **and** memory) with a free slot | dispatched off-box; hook reports the host that ran it |
+| `heavy_local=prefer_remote` | no lab host fit, ≥1 host `busy`/`over`/`mem-over` | **queue-and-wait**: re-probe the whole ranked list every 60s, up to a 900s budget, logging each attempt |
+| `heavy_local=prefer_remote` | no lab host fit, **every** refusal structural (`unreachable`, `repo-denied`, `disabled`, `uv-unfit`) | **no wait** — falls through immediately, saying so |
+| `heavy_local=prefer_remote` | budget spent, local fit **and** slot free | runs locally behind a loud `LOCAL FALLBACK IN EFFECT` banner naming the budget waited and every host probed |
+| `heavy_local=prefer_remote` | budget spent, local **unfit** or slot held | refuses — falls to the precedence ladder below, exactly as before |
+| any | remote suite goes RED | refuses immediately; never shops for a greener host |
+
+The budget and interval are **constants in the hook**, not
+`${PREPUSH_...:-900}`. An env indirection would be a one-word bypass of the
+whole policy: `=0` collapses the wait and lands every push straight on the local
+fallback. `test_the_off_box_budget_is_a_constant_not_an_env_override` pins that.
+
+### The budget is only spent on refusals that can drain
+
+`prepush_lab_has_transient_capacity` gates the wait. `busy`, `over` and
+`mem-over` all resolve on their own — a suite finishes, load drains, memory is
+released — so they earn the budget. `unreachable`, `repo-denied`, `disabled`,
+`uv-unfit` and `mode-*-not-eligible` do not change because a pusher waited, so
+the hook falls through immediately and prints why instead of going quiet for
+15 minutes.
+
+The case that forced this: a Mac **off the lab LAN**. Every remote row probes
+`unreachable`, and without the gate every heavy push there pays the full 900s
+before running locally anyway. Skipping a wait that cannot succeed is not a
+weakening — the caller still gets "no placement", and the local fallback still
+has to prove measured capacity **and** an exclusive slot. Classification is by
+the probe-log tokens `pick_capacity_host` writes, and an **unrecognised reason
+defaults to structural**, so a new refusal kind never silently earns a wait.
+
+The local fallback is **narrower** than the behavior it replaces, never wider:
+it calls the same `prepush_try_local_heavy_slot` the `allowed` path calls, so a
+host over threshold refuses exactly as it did before. What changed is that a
+*fit* host no longer short-circuits the lab.
+
+## Memory-aware placement (OMN-17392, the OMN-17271 memory dimension)
+
+`load1` is a CPU-time proxy and says nothing about the resource that actually
+kills a suite. Measured live on 2026-08-31, one second apart:
+
+| target | load | cores | ratio | available memory |
+|---|---|---|---|---|
+| `.201` **host** | 3.27 | 32 | 0.10x | 49771 MiB |
+| `.201` **gate-runner container** | 3.27 | 32 | 0.10x | **2562 MiB** |
+
+Identical load; a 19x difference in the resource that OOMs. The container is at
+5.9 GiB of an 8 GiB cgroup cap. A CPU-only picker cannot tell those two apart —
+which is exactly how it kept ranking a saturated, OOM-killing target *first*,
+costing an OMN-17316 landing hours (OMN-17247).
+
+So the probe now returns a third number, and the picker admits on it:
+
+* **Cgroup-aware.** Inside a memory-capped container the machine's
+  `MemAvailable` is not the headroom the suite gets, so the probe reports
+  `min(MemAvailable, memory.max − memory.current)`. Both cgroup v2
+  (`memory.max`/`memory.current`) and v1
+  (`memory.limit_in_bytes`/`memory.usage_in_bytes`) are read.
+* **macOS hosts too** — `vm_stat` free + inactive + speculative + purgeable.
+  Three of the four lab hosts are Macs; a Linux-only probe would have marked
+  them all unreadable.
+* **Floor is 4096 MiB**, a constant. Chosen against the measured OOM, not picked
+  round: it refuses the gate-runner while it is saturated and re-admits it once
+  the suite drains, while keeping every host the lab actually uses. A floor at
+  8192 would have excluded `h101` (7459 MiB free that minute), shrinking the
+  fleet and pushing work back onto the Mac — the opposite of the point.
+* **`load1` RANKS, memory ADMITS.** Ordering is still cheapest-load-first;
+  memory is a veto applied to each candidate, not a sort key.
+* **Unreadable memory is `mem-unknown` and the host is SKIPPED** — never assumed
+  ample. Same fail-closed rule `unreachable` and `slot-unknown` already carry.
+  Silence is not headroom.
+
+The probe snippet **must not contain a single quote**. It is itself a
+single-quoted assignment and is handed to `ssh(1)` for a remote login shell to
+execute; one single quote truncates the assignment and every remote probe
+silently stops working. That is why the memory read uses POSIX arithmetic +
+`grep`/`cut`/`tr` rather than `awk`, which would need quotes.
+`test_the_probe_snippet_carries_no_single_quotes` pins it.
+
+The fit record carries the measurement, not just the verdict —
+`h105=fit(0.21,authorizing,14664MiB)` — so a placement can be audited from the
+receipt rather than believed (OMN-17271 item 4).
+
 ## Precedence — strongest evidence first
 
 1. **GitHub-hosted sha-pinned FULL-suite pass** (OMN-16688). Uncontended,

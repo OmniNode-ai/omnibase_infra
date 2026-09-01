@@ -96,9 +96,13 @@ class InteractiveExecutor:
                 credentials_dict = self._reducer.get_credentials_output(
                     current_step_id, state
                 )
+                credential_store_write = self._reducer.get_credential_store_output(
+                    current_step_id, state
+                )
                 return ModelInteractiveResult(
                     env_dict=env_dict,
                     credentials_dict=credentials_dict,
+                    credential_store_write=credential_store_write,
                     step_results=step_results,
                     policy_name=self._policy.policy_name,
                     completed=True,

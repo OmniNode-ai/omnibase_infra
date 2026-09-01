@@ -55,6 +55,36 @@ RECONCILER_GLOBS = ("scripts/reconcile*.sh", "scripts/**/reconcile*.sh")
 
 VENV_RECONCILER = "scripts/reconcile-workspace-venvs.sh"
 OWNER_HELPER = "as_owner"
+# The one file allowed to define OWNER_HELPER. Everything else sources it.
+PRIVILEGE_LIB = "reconcile_privilege_lib.sh"
+
+# A git subcommand that WRITES into the repository it is pointed at. `fetch`
+# earns its place here despite reading from the remote: it writes objects, refs
+# and reflogs locally, which is exactly what accumulated as root on `.201`.
+# Read-only plumbing (`rev-parse`, `cat-file`, `config --get`) is deliberately
+# absent -- guarding a read would be noise, and noise is what gets allowlisted.
+#
+# The intervening-token allowance matters: this runs on the UNQUOTED line, so
+# `git -C "$OMNI_HOME/$repo" fetch` arrives as `git -C   fetch` with the path
+# already stripped. A pattern that insisted on a concrete argument after `-C`
+# matched nothing at all -- the gate reported OK on the exact line it exists to
+# catch.
+_GIT_WRITE = re.compile(
+    r"(?<![\w./$-])git\s+(?:-[A-Za-z-]+\s+|\S+\s+){0,2}?"
+    r"(?:fetch|pull|checkout|reset|clone|switch|merge|gc|prune|remote)\b"
+)
+
+# Wherever the clone delegate is EXECUTED. Followed by invocation rather than by
+# filename, the OMN-17383 lesson: a gate whose scope stops at a filename pattern
+# gives false assurance about the file it never scanned.
+#
+# An interpreter must appear before the variable, because the script also tests
+# the delegate for existence (`[[ ! -f "$CLONE_DELEGATE" ]]`) and names it in the
+# UNCOVERED record. Neither runs anything, and flagging them would train the next
+# reader to reach for an allowlist -- which is how a gate stops meaning anything.
+_CLONE_DELEGATE_INVOCATION = re.compile(
+    r"(?:bash|sh|exec|source)\s[^\n]*\$\{?CLONE_DELEGATE\}?"
+)
 
 _RESOLVE_UV_DEF = re.compile(r"^\s*resolve_uv\s*\(\s*\)\s*\{", re.MULTILINE)
 _UV_OVERRIDE = "ONEX_RECONCILE_UV_BIN"
@@ -77,7 +107,7 @@ _QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
 # by content: a message is an ARGUMENT to one of these helpers, or a quoted
 # continuation of one, so it starts with the helper name or with a quote --
 # while a real invocation starts with `if`, `bash`, `(cd`, `env`, and friends.
-_MESSAGE_LINE = re.compile(r"^\s*(?:say|trace|fail|echo|printf)\b|^\s*[\"']")
+_MESSAGE_LINE = re.compile(r"^\s*(?:say|trace|fail|echo|printf|record)\b|^\s*[\"']")
 
 
 def discover_reconcilers(repo_root: Path) -> list[Path]:
@@ -235,18 +265,81 @@ def check(repo_root: Path) -> list[str]:
                 '(OMN-17383). Pass PATH="$(dirname "$UV_BIN"):$PATH".'
             )
 
-        if OWNER_HELPER in text and f"{OWNER_HELPER}()" not in text:
-            # Used but not defined here: only acceptable if this script IS the
-            # definer. Nothing sources across these scripts today, so a use
-            # without a definition is a typo that bash would only find at runtime
-            # on the host, in cron, at 03:00.
-            if not re.search(
-                rf"^\s*{OWNER_HELPER}\s*\(\s*\)\s*\{{", text, re.MULTILINE
-            ):
+    # -- Part 4: the clone surface obeys the same rule (OMN-17366) ---------- #
+    #
+    # Parts 1-3 govern package operations. They said nothing about `git`, and the
+    # clone surface had the identical defect for as long as it existed: the root
+    # `:19` cron fetched and checked out into operator-owned clones, leaving 1118
+    # root-owned paths across `.201`'s five deploy-source trees. A plain operator
+    # `git fetch` then fails intermittently with "insufficient permission for
+    # adding an object to repository database".
+    #
+    # Two write paths, and guarding either alone fixes nothing:
+    #   * the reconciler's own `git fetch` (it fetches to establish targets, in
+    #     BOTH modes -- so `--check` is a writer here too);
+    #   * the clone delegate, which fetches AND checks out, and is the larger of
+    #     the two.
+    for script in discover_reconcilers(repo_root):
+        rel = script.relative_to(repo_root)
+        text = script.read_text(encoding="utf-8")
+        for number, line in logical_lines(text):
+            executable = _code(line)
+            if not executable.strip():
+                continue
+
+            writes_a_clone = bool(_GIT_WRITE.search(_unquoted(executable)))
+            runs_clone_delegate = bool(_CLONE_DELEGATE_INVOCATION.search(executable))
+            if not (writes_a_clone or runs_clone_delegate):
+                continue
+            if OWNER_HELPER in executable:
+                continue
+
+            what = (
+                "a git fetch/checkout into a clone"
+                if writes_a_clone
+                else "the clone delegate"
+            )
+            failures.append(
+                f"{rel}:{number}: runs {what} without {OWNER_HELPER}. `git fetch` "
+                "writes objects, refs and reflogs, so a root cron writing into "
+                "an operator-owned clone leaves objects its owner cannot write "
+                "past -- an intermittent, later failure instead of a loud one "
+                "(OMN-17366)."
+            )
+
+    # -- Part 5: the owner helper is defined exactly once, and shared ------- #
+    #
+    # OMN-17366 moved the mechanics into reconcile_privilege_lib.sh precisely so
+    # there would be one of them. A script that defines its own `as_owner` again
+    # has re-created the second implementation, and the copy that drifts is the
+    # one nobody is watching.
+    for script in discover_reconcilers(repo_root):
+        rel = script.relative_to(repo_root)
+        text = script.read_text(encoding="utf-8")
+        if OWNER_HELPER not in text:
+            continue
+        defines = bool(
+            re.search(rf"^\s*{OWNER_HELPER}\s*\(\s*\)\s*\{{", text, re.MULTILINE)
+        )
+        if script.name == PRIVILEGE_LIB:
+            if not defines:
                 failures.append(
-                    f"{rel}: uses {OWNER_HELPER} but never defines it. bash would "
-                    "only discover that on the host, inside cron."
+                    f"{rel}: is the privilege library but does not define "
+                    f"{OWNER_HELPER}."
                 )
+            continue
+        if defines:
+            failures.append(
+                f"{rel}: defines its own {OWNER_HELPER} instead of sourcing "
+                f"{PRIVILEGE_LIB}. Two copies of a privilege rule drift, and the "
+                "half that drifts is the half nobody is looking at (OMN-17366)."
+            )
+        elif PRIVILEGE_LIB not in text:
+            # Used, not defined, and not sourced: bash would only discover that
+            # on the host, inside cron, at 03:00.
+            failures.append(
+                f"{rel}: uses {OWNER_HELPER} without sourcing {PRIVILEGE_LIB}."
+            )
 
     return failures
 
