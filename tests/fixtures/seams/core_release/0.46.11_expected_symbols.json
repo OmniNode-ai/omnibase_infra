@@ -8,7 +8,7 @@
     "Update procedure: bump core, re-run the seam test, and record the new",
     "surface here only after confirming every consumer still type-checks."
   ],
-  "core_version": "0.47.1",
+  "core_version": "0.47.2",
   "source": "pypi",
   "modules": {
     "omnibase_core.models.delegation.wire": [
@@ -37,6 +37,18 @@
     ],
     "omnibase_core.models.ticket.model_contract_dod_item": [
       "ModelContractDodItem"
+    ],
+    "omnibase_core.models.runtime.model_runtime_identity": [
+      "ModelRuntimeIdentity"
+    ],
+    "omnibase_core.models.runtime.model_package_identity": [
+      "ModelPackageIdentity"
+    ],
+    "omnibase_core.enums.enum_package_source_kind": [
+      "EnumPackageSourceKind"
+    ],
+    "omnibase_core.enums.enum_execution_locus_kind": [
+      "EnumExecutionLocusKind"
     ]
   },
   "typed_fields": [
@@ -62,6 +74,23 @@
         "Infra's delegation terminalization readback classifies failures off a",
         "typed cause; an untyped str here silently re-opens stringly-typed",
         "failure routing."
+      ]
+    },
+    {
+      "module": "omnibase_core.models.dispatch.model_skill_result",
+      "model": "ModelSkillResult",
+      "field": "runtime_identity",
+      "expected_type": "ModelRuntimeIdentity",
+      "optional": true,
+      "why": [
+        "OMN-17310 made this a REQUIRED field in practice: core's own model",
+        "validator refuses to construct a receipt at schema_version >= 1.1.0",
+        "with runtime_identity=None, and receipt_mode.py stamps both branches.",
+        "The annotation stays optional only so pre-1.1.0 receipts remain",
+        "constructable (grandfathering). If a later core release drops the",
+        "field or retypes it, infra's ENTIRE receipt path stops constructing --",
+        "the exists-but-wrong case this seam exists to catch, and the exact",
+        "shape that made the 0.47.1 -> 0.47.2 pin move a 13-test outage."
       ]
     }
   ]
