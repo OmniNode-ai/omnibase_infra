@@ -475,6 +475,15 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # POST_FIXTURE_WINDOW_CONTEXTS rather than by having synthetic rows invented
     # for merged PRs that never ran it.
     "exposure-reader-coverage",  # exposure-reader-coverage.yml
+    # OMN-17172. The KB doc gate (omniclaude kb-doc-gate-reusable.yml, called
+    # from .github/workflows/kb-doc-gate.yml, landed in this same PR under Rule
+    # 5) blocks adding or modifying markdown outside the allowed set stated by
+    # the 2026-09-01 operator ruling. It is registered here rather than in
+    # branch protection for the reason the OMN-16878 note above gives: `dev`
+    # requires exactly ONE context, so this tuple IS the external enforcement
+    # surface on this repo. Admitted under POST_FIXTURE_WINDOW_CONTEXTS — it
+    # postdates both fixture windows by construction.
+    "kb-doc-gate / kb-doc-gate",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -500,6 +509,10 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         # Landed with its validator in the same PR (Rule 5) on 2026-08-30; both
         # fixture windows (#2546…#2567, #2705…#2720) close well before that.
         "exposure-reader-coverage",
+        # OMN-17172: the caller workflow lands in this same PR on 2026-09-01,
+        # so no merged PR in either fixture window could have produced this
+        # check-run. Comes out at the next fixture re-capture.
+        "kb-doc-gate / kb-doc-gate",
     }
 )
 
