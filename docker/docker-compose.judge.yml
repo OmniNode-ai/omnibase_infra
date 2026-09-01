@@ -105,6 +105,15 @@ x-judge-runtime-env: &judge-runtime-env
   ONEX_STATE_DIR: /app/data/.onex_state_judge
   ONEX_BOX_ID: judge-local
   BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  # OMN-17150: THIS lane's typed Bifrost overlay, resolved from the lane pin.
+  # The judge lane rendered via the renderer's old hardcoded default (which
+  # named the dev lane's overlay file) while mounting no overlay at all — its
+  # next cold boot would have crash-looped exactly like the collaborator
+  # lane's first one (the latent same-class instance OMN-17150 names). The
+  # runtime services now mount
+  # ./lane-overlays/judge.bifrost.yaml at exactly this path, and the renderer
+  # fails fast, naming this lane, if the pin or the file is absent.
+  BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/judge.bifrost.yaml
   # OMN-15628: judge redefines its own x-runtime-env anchor, so it must carry
   # the routing-tiers pin explicitly alongside BIFROST_CONTRACT_PATH. Same
   # in-image path and same fail-closed consumer as the base infra anchor
@@ -411,6 +420,7 @@ services:
       - judge_runtime_logs:/app/logs
       - judge_runtime_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ./lane-overlays/judge.bifrost.yaml:/app/config/delegation/judge.bifrost.yaml:ro
       - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     tmpfs:
       - /run/onex-runtime:uid=1000,gid=1000,mode=0770
@@ -455,6 +465,7 @@ services:
       - judge_effects_logs:/app/logs
       - judge_effects_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ./lane-overlays/judge.bifrost.yaml:/app/config/delegation/judge.bifrost.yaml:ro
       - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
@@ -483,6 +494,8 @@ services:
       RUNTIME_PROFILE: projection-api
       OTEL_SERVICE_NAME: omnimarket-judge-projection-api
       BIFROST_CONTRACT_PATH: ""
+      # Mirrors the BIFROST_CONTRACT_PATH opt-out: no render, no overlay pin.
+      BIFROST_LANE_OVERLAY_PATH: ""
       # Projection API serves materialized read models and does not invoke the
       # delegation routing reducer. Keep the judge overlay opt-out explicit so
       # layered base+judge renders cannot inherit the runtime anchor's routing

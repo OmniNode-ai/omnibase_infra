@@ -1,0 +1,44 @@
+# OMN-17150: Typed Bifrost delegation overlay for the judge lane.
+#
+# The judge lane's runtime services set a non-empty BIFROST_CONTRACT_PATH, so
+# entrypoint-runtime.sh renders the Bifrost delegation contract at boot — but
+# docker-compose.judge.yml never mounted ANY overlay, and the renderer's old
+# hardcoded dev.bifrost.yaml default meant the judge lane's next cold boot
+# would have died exactly the way the collaborator lane's did (the latent
+# same-class instance called out in OMN-17150). The renderer now fails fast
+# without a lane pin, and this file is what the judge lane's
+# BIFROST_LANE_OVERLAY_PATH pin names.
+#
+# CONTENT IS NOT A LANE CHOICE. Every binding below is mechanically pinned by
+# the _AUTHORIZED_BINDINGS table in
+# src/omnibase_infra/runtime/models/model_bifrost_lane_backend_binding.py:
+# the schema requires exactly the active backend set with the exact authorized
+# lab host/port/model/context-window per backend. These are the lab's SHARED
+# local inference servers, not services of any compose lane. The lane-scoped
+# facts are the `lane:` attribution and which file the lane mounts.
+# onex-allow-internal-ip OMN-17150 reason="typed judge-lane delegation contract; values pinned by the authorized lab binding table"
+schema_version: "bifrost_lane_overlay.v2"
+lane: judge
+backends:
+  - backend_id: local-coder
+    endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
+    served_model_id: "qwen3.8"
+    parameter_count: "27B"
+    context_window: 122880
+    max_tokens: 65536
+    timeout_ms: 300000
+  - backend_id: local-heavy-reasoning
+    endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
+    served_model_id: "qwen3.8"
+    parameter_count: "27B"
+    context_window: 122880
+    max_tokens: 65536
+    timeout_ms: 300000
+  # onex-allow-internal-ip OMN-17150 reason="typed judge-lane delegation contract; values pinned by the authorized lab binding table"
+  - backend_id: local-ds-v4-flash
+    endpoint_url: "http://192.168.86.200:8101/v1/chat/completions"
+    served_model_id: "deepseek-v4-flash"
+    parameter_count: "284B"
+    context_window: 131072
+    max_tokens: 65536
+    timeout_ms: 300000

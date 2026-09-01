@@ -114,6 +114,73 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
 
 
 @pytest.mark.unit
+def test_missing_lane_overlay_pin_fails_naming_the_lane(tmp_path: Path) -> None:
+    """OMN-17150: no pin means fail loudly — never another lane's overlay.
+
+    The old hardcoded ``dev.bifrost.yaml`` default sent every lane without its
+    own mounted overlay through the dev lane's routing config. A lane that
+    renders without ``BIFROST_LANE_OVERLAY_PATH`` must abort with an error that
+    names the lane, before any overlay is read.
+    """
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source)
+
+    with pytest.raises(
+        ProtocolConfigurationError,
+        match=r"BIFROST_LANE_OVERLAY_PATH is not bound for lane 'lakshman'",
+    ):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=target,
+            environ={"ONEX_ENVIRONMENT": "lakshman"},
+        )
+    assert not target.exists()
+
+    # A blank pin is the same defect as an absent one, and the lane name still
+    # surfaces even when ONEX_ENVIRONMENT is itself unset.
+    with pytest.raises(
+        ProtocolConfigurationError,
+        match=r"BIFROST_LANE_OVERLAY_PATH is not bound for lane "
+        r"'<ONEX_ENVIRONMENT unset>'",
+    ):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=target,
+            environ={"BIFROST_LANE_OVERLAY_PATH": "   "},
+        )
+    assert not target.exists()
+
+
+@pytest.mark.unit
+def test_lane_overlay_pin_resolves_from_the_environment(tmp_path: Path) -> None:
+    """The per-lane env pin is the production path (compose sets it per lane)."""
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source)
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"BIFROST_LANE_OVERLAY_PATH": str(_OVERLAY)},
+    )
+    assert rendered == target
+
+    # A pinned-but-absent lane file fails naming exactly that lane's file.
+    with pytest.raises(
+        ProtocolConfigurationError,
+        match=r"overlay not found: .*lakshman\.bifrost\.yaml",
+    ):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=tmp_path / "rendered2.yaml",
+            environ={
+                "BIFROST_LANE_OVERLAY_PATH": str(tmp_path / "lakshman.bifrost.yaml")
+            },
+        )
+
+
+@pytest.mark.unit
 def test_missing_or_malformed_overlay_fails_before_dispatch(tmp_path: Path) -> None:
     source = tmp_path / "base.yaml"
     invalid_overlay = tmp_path / "invalid-overlay.yaml"

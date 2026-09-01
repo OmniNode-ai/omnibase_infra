@@ -1,0 +1,45 @@
+# OMN-17150: Typed Bifrost delegation overlay for the Lakshman collaborator lane.
+#
+# This lane previously had NO overlay of its own and the renderer fell through
+# to a hardcoded dev.bifrost.yaml path — every lane inherited the dev lane's
+# routing config, silently when the file was present and with a dev-named
+# crash-loop where it was not (this lane's first cold boot). The renderer now
+# resolves the overlay from the lane's own BIFROST_LANE_OVERLAY_PATH pin, and
+# this file is what that pin names for compose project omnibase-infra-lakshman.
+#
+# CONTENT IS NOT A LANE CHOICE. Every binding below is mechanically pinned by
+# the _AUTHORIZED_BINDINGS table in
+# src/omnibase_infra/runtime/models/model_bifrost_lane_backend_binding.py:
+# the schema requires exactly the active backend set, and for each backend the
+# exact authorized lab host/port/model/context-window. A schema-valid overlay
+# cannot bind anything else. These endpoints are the lab's SHARED local
+# inference servers (host-level model servers, not services of any compose
+# lane), so routing this lane at them does not couple it to the dev lane. The
+# lane-scoped facts are the `lane:` attribution below and WHICH file the lane
+# mounts — both now name this lane explicitly.
+# onex-allow-internal-ip OMN-17150 reason="typed collaborator-lane delegation contract; values pinned by the authorized lab binding table"
+schema_version: "bifrost_lane_overlay.v2"
+lane: lakshman
+backends:
+  - backend_id: local-coder
+    endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
+    served_model_id: "qwen3.8"
+    parameter_count: "27B"
+    context_window: 122880
+    max_tokens: 65536
+    timeout_ms: 300000
+  - backend_id: local-heavy-reasoning
+    endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
+    served_model_id: "qwen3.8"
+    parameter_count: "27B"
+    context_window: 122880
+    max_tokens: 65536
+    timeout_ms: 300000
+  # onex-allow-internal-ip OMN-17150 reason="typed collaborator-lane delegation contract; values pinned by the authorized lab binding table"
+  - backend_id: local-ds-v4-flash
+    endpoint_url: "http://192.168.86.200:8101/v1/chat/completions"
+    served_model_id: "deepseek-v4-flash"
+    parameter_count: "284B"
+    context_window: 131072
+    max_tokens: 65536
+    timeout_ms: 300000
