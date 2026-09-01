@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from omnibase_infra.onboarding.model_credential_store_write import (
+    ModelCredentialStoreWrite,
+)
 from omnibase_infra.onboarding.model_step_result import ModelStepResult
 
 
@@ -29,6 +32,17 @@ class ModelInteractiveResult(BaseModel):
             "returned as onboarding provenance and is therefore repr'd, "
             "logged, and model-dumped into receipts (OMN-16038); only the "
             "credentials writer unwraps it."
+        ),
+    )
+    credential_store_write: ModelCredentialStoreWrite | None = Field(
+        default=None,
+        description=(
+            "The credential the terminal step collected for the ~/.onex "
+            "credential store (OMN-17028). None when the policy declares no "
+            "credential_store_output. Distinct from credentials_dict: that one "
+            "names a file to write, this one names a STORE to write through, "
+            "which is what makes the value readable by the credential reader "
+            "rather than merely present on disk."
         ),
     )
     step_results: list[ModelStepResult] = Field(
