@@ -302,9 +302,12 @@ def test_the_convergence_lives_in_the_flat_corpus_not_the_node_corpus() -> None:
     )
     assert ROLLBACK_101.is_file(), "a flat forward migration ships with its rollback"
     node_dir = FORWARD / "nodes" / NODE
-    assert not list(node_dir.glob("085_*savings_estimates*")), (
+    assert not list(node_dir.glob("*converge_savings_estimates*")), (
         "converging the SERVICE database from the node corpus would run the "
-        "migration against omnidash_analytics, which is already correct"
+        "migration against omnidash_analytics, which is already correct. "
+        "Other node-owned savings_estimates follow-up migrations may still "
+        "exist when they own omnidash_analytics behavior rather than this "
+        "service-database convergence."
     )
 
 
