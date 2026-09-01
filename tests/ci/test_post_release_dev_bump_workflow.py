@@ -75,6 +75,18 @@ def test_job_runs_after_the_release_job() -> None:
     assert _job()["needs"] == "release"
 
 
+def test_main_sync_app_token_can_write_tagged_workflows() -> None:
+    """The release tag may include .github/workflows changes (OMN-17272)."""
+    release_steps = _load_release_workflow()["jobs"]["release"]["steps"]
+    mint_step = next(
+        step
+        for step in release_steps
+        if step.get("name")
+        == "Mint onexbot-occ-writer app token (release main-sync push identity)"
+    )
+    assert mint_step["with"]["permission-workflows"] == "write"
+
+
 def test_job_is_gated_on_publish_output_not_on_overall_job_success() -> None:
     condition = " ".join(_job()["if"].split())
     # The published-version output is the publish proof.
