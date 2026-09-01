@@ -3836,6 +3836,21 @@ jobs:
       - name: Check node migration RLS policy atomicity
         run: uv run python scripts/validation/check_migration_rls_policy_atomicity.py
 
+      # OMN-17374: the topology's per-principal TABLE grant blocks are
+      # GENERATED from node contract db_io declarations, so they state what the
+      # platform intends. Nothing checked that a migration ISSUES them, and the
+      # two halves drift silently until a relation takes traffic and its writer
+      # starts refusing — OMN-15701, OMN-16436, OMN-16993, OMN-17290 and now
+      # OMN-17374, five instances of one class in a fortnight. On the .201 dev
+      # lane 38 of the 40 declared public-schema grants for `omninode_runtime`
+      # exist ONLY because they were granted out of band by hand, so a fresh
+      # lane does not have them at all. Ratchet, not zero: each residual grant
+      # belongs in its own node's migration lineage (the
+      # node_projection_session_replay/0002 convention), and the bound may only
+      # ever go DOWN. Detection that is not a gate does not hold (Rule 5).
+      - name: Check topology grant delivery
+        run: uv run python scripts/validation/check_topology_grant_delivery.py
+
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:

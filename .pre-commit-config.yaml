@@ -473,6 +473,27 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-17374: a TABLE grant the topology declares and no migration issues
+      # is an outage waiting for its relation to take traffic. The topology's
+      # principal grant blocks are GENERATED from node contract db_io
+      # declarations, so the declaration is the platform's intent — but nothing
+      # ever checked that a migration DELIVERS it against a real database, and
+      # the two halves drift silently. Five instances in a fortnight
+      # (OMN-15701, OMN-16436, OMN-16993, OMN-17290, OMN-17374); the last one
+      # refused BOTH the delegation writer's tenant lookup and the registry
+      # projection's own INSERT, which is why tenant_registry_mirror sat at
+      # zero rows while its consumer group reported Stable at LAG 0. Ratcheted
+      # rather than zero-based because each residual grant belongs in its own
+      # node's migration lineage; the bound may only ever go DOWN.
+      # always_run because the subject is the whole topology + the whole
+      # corpus, not the staged file list.
+      - id: onex-check-topology-grant-delivery
+        name: ONEX Topology Grant Delivery
+        entry: python3 scripts/validation/check_topology_grant_delivery.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-14086: wire run_duplication_sweep.py (D1 Drizzle table dupes /
       # D2 omniclaude-vs-occ topic-producer conflicts) as an ENFORCED gate —
       # it had a full pytest fixture suite but zero CI/pre-commit caller,

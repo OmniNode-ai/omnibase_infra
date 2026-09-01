@@ -361,7 +361,22 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # place would raise 'conflicting migration checksum in canonical node
     # history'. 087 is therefore a forward CREATE OR REPLACE rather than an
     # edit -- which is sound here precisely because both views hold no data.
-    assert len(result.declarations) == 130
+    #
+    # OMN-17374 moves this count 130 -> 131 by ADDING one declaration,
+    # nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql,
+    # domain `omninode_internal` to match 0000 on the same relation. It issues
+    # the SELECT/INSERT/UPDATE grant the topology has always declared for
+    # `omninode_runtime` on `tenant_registry_mirror` and that no migration ever
+    # issued -- the absence that refused BOTH the delegation writer's identity
+    # lookup and this node's own INSERT, which is why the mirror sat at zero
+    # rows at consumer LAG 0. 0000's bytes are untouched: it is applied on the
+    # .201 dev lane with a recorded content_sha256, so repairing its grant
+    # block in place would raise 'conflicting migration checksum in canonical
+    # node history' -- the same constraint 083/087 hit above. The grant is
+    # therefore a forward ADD, which is also where it belongs under the
+    # node_projection_session_replay/0002 convention (one grant, in the lineage
+    # that owns the relation).
+    assert len(result.declarations) == 131
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
