@@ -296,7 +296,13 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "ONEX_ACTIVE_RUNTIME_PACKAGES",
         # Bifrost contract rendering knobs. k8s ConfigMap parity belongs with
         # the sibling omninode_infra ConfigMap update; tracked by OMN-10943.
+        # BIFROST_LANE_OVERLAY_PATH (OMN-17150) is the per-lane overlay pin the
+        # renderer resolves instead of its former hardcoded dev-lane default;
+        # the render itself only runs where BIFROST_CONTRACT_PATH is bound, so
+        # the pin travels with these knobs as one debt item — the cluster
+        # binding lands together with BIFROST_CONTRACT_PATH's or not at all.
         "BIFROST_CONTRACT_PATH",
+        "BIFROST_LANE_OVERLAY_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
         # OMN-15425 (compose half) / OMN-16953 (k8s half). Tenant-projection
