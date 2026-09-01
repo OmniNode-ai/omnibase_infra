@@ -17,8 +17,13 @@
 # local inference servers, not services of any compose lane. The lane-scoped
 # facts are the `lane:` attribution and which file the lane mounts.
 # onex-allow-internal-ip OMN-17150 reason="typed judge-lane delegation contract; values pinned by the authorized lab binding table"
-schema_version: "bifrost_lane_overlay.v2"
+# OMN-17502: `locale: lab` states what the schema used to assume — this lane's
+# runtime sits on the lab network, so it declares the exact authorized local
+# backend set. A lane that runs elsewhere declares `locale: cloud` and zero
+# backends instead of mounting bindings it cannot reach.
+schema_version: "bifrost_lane_overlay.v3"
 lane: judge
+locale: lab
 backends:
   - backend_id: local-coder
     endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
