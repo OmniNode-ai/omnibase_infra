@@ -132,6 +132,23 @@ readonly RUNTIME_SERVICES=(
     omninode-contract-resolver
 )
 
+# OMN-17448: services declared ONLY in docker/docker-compose.dev-lane.yml, so
+# they exist on the dev lane and on no other. They cannot join RUNTIME_SERVICES
+# above: that array is lane-agnostic, and a prod or stability-test
+# `up -d --no-deps <service>` naming a service absent from that lane's merged
+# compose fails the whole deploy.
+#
+# These are the standalone projection writers. A handler with the runner shape
+# is deliberately NOT dispatched by the shared kernel (OMN-15905/OMN-16874) --
+# the kernel still SUBSCRIBES its topics, so without a dedicated process it
+# consumes every message, commits every offset, and writes nothing, silently.
+# The onex-dev k8s overlay has run these as Deployments since OMN-15905; the
+# compose lane ran zero of them until this ticket.
+readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
+    projection-tenant-registry-writer
+    projection-delegation-writer
+)
+
 # OMN-14873: optional scoped-build/restart override. When RUNTIME_BUILD_SERVICES_OVERRIDE
 # is set (a space-separated service-name list), build_images() and restart_services()
 # operate on ONLY that subset instead of the full RUNTIME_SERVICES fan-out. Unset (the
@@ -152,6 +169,39 @@ if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
 else
     RUNTIME_BUILD_SERVICES=("${RUNTIME_SERVICES[@]}")
 fi
+
+resolve_lane_runtime_services() {
+    # Populate a caller-provided array (by name) with the runtime services to
+    # build/restart for one lane: the lane-agnostic set, plus the dev-lane-only
+    # additions when (and only when) the target IS the dev lane. Lane identity
+    # is read the same way every other function here reads it -- an empty
+    # overlay filename means the bare `omnibase-infra` dev project -- so this
+    # cannot drift from resolve_compose_file_args().
+    local _out_args_name="$1"
+    local compose_project="$2"
+
+    eval "${_out_args_name}=()"
+    local svc
+    for svc in "${RUNTIME_BUILD_SERVICES[@]}"; do
+        eval "${_out_args_name}+=( $(printf '%q' "${svc}") )"
+    done
+
+    # A scoped-build override is an explicit operator instruction to touch ONLY
+    # the named services; silently appending to it would defeat the point.
+    if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
+        return 0
+    fi
+
+    local overlay_filename
+    overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
+    if [[ -n "${overlay_filename}" ]]; then
+        return 0
+    fi
+
+    for svc in "${DEV_LANE_ONLY_RUNTIME_SERVICES[@]}"; do
+        eval "${_out_args_name}+=( $(printf '%q' "${svc}") )"
+    done
+}
 readonly RUNTIME_BUILD_SERVICES
 # Migration services refreshed (one-shot) before the --no-deps runtime restart.
 # Order matters: forward-migration applies the omnibase_infra schema, then
@@ -2548,6 +2598,9 @@ build_images() {
 
     log_step "Build Images"
 
+    local -a build_scope
+    resolve_lane_runtime_services build_scope "${compose_project}"
+
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     # OMN-12965: stamp org.opencontainers.image.version from pyproject so the
@@ -2601,11 +2654,13 @@ build_images() {
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
         # OMN-14873: scope the build to RUNTIME_BUILD_SERVICES (defaults to the full
         # RUNTIME_SERVICES fan-out; see the override comment above its declaration).
-        "${RUNTIME_BUILD_SERVICES[@]}"
+        # OMN-17448: plus the dev-lane-only standalone projection writers, which
+        # are declared in that lane's overlay and must be built for it.
+        "${build_scope[@]}"
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
-    log_info "Build scope: ${RUNTIME_BUILD_SERVICES[*]}"
+    log_info "Build scope: ${build_scope[*]}"
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} PROMOTION_CLASS=${promotion_class} NON_MAIN_LINEAGE=${non_main_lineage} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
@@ -2977,16 +3032,21 @@ restart_services() {
 
     log_step "Restart Runtime Services"
 
+    # OMN-17448: the dev lane additionally recreates the standalone projection
+    # writers, which are declared only in its own overlay.
+    local -a lane_services
+    resolve_lane_runtime_services lane_services "${compose_project}"
+
     local cmd=(
         docker compose
         -p "${compose_project}"
         "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
-        "${RUNTIME_BUILD_SERVICES[@]}"
+        "${lane_services[@]}"
     )
 
-    log_info "Restarting services: ${RUNTIME_BUILD_SERVICES[*]}"
+    log_info "Restarting services: ${lane_services[*]}"
     log_cmd "${cmd[*]}"
 
     # OMN-15718: bounded (not guarded -- a real failure here must still abort
@@ -3196,10 +3256,15 @@ readback_deployed_ref() {
         expected_versions="${expected_versions},${READBACK_EXPECTED_VERSIONS}"
     fi
 
-    log_info "Verifying in-scope service(s): ${RUNTIME_BUILD_SERVICES[*]}"
+    # OMN-17448: the readback's in-scope set must match what was actually built
+    # and restarted, or a dev-lane writer would be created and never verified.
+    local -a readback_scope
+    resolve_lane_runtime_services readback_scope "${compose_project}"
+
+    log_info "Verifying in-scope service(s): ${readback_scope[*]}"
 
     local service
-    for service in "${RUNTIME_BUILD_SERVICES[@]}"; do
+    for service in "${readback_scope[@]}"; do
         local container_name=""
         if [[ "${service}" == "omninode-runtime" ]]; then
             # Keep the pre-existing, individually-tested resolver for the
@@ -3239,7 +3304,7 @@ readback_deployed_ref() {
         log_info "Deploy readback passed: ${service} (${container_name}) revision == ${git_sha} (RT-6)."
     done
 
-    log_info "Deploy readback passed for all ${#RUNTIME_BUILD_SERVICES[@]} in-scope service(s) (RT-6)."
+    log_info "Deploy readback passed for all ${#readback_scope[@]} in-scope service(s) (RT-6)."
 }
 
 # =============================================================================

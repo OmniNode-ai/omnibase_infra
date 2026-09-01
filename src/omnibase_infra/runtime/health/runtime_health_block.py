@@ -105,6 +105,10 @@ def build_runtime_health_block(
         "projection_count": event.projection_count,
         "unattached_projection_count": event.unattached_projection_count,
         "dlq_saturated_projection_count": event.dlq_saturated_projection_count,
+        # OMN-17448: the third fact. A projection can be attached, lag-0, and
+        # DLQ-free while persisting nothing, because the kernel deliberately
+        # does not dispatch a standalone-runner-shaped handler.
+        "nonwriting_projection_count": event.nonwriting_projection_count,
         "dimensions": cast(
             "JsonType",
             [

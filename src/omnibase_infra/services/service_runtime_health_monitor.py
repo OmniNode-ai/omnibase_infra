@@ -51,10 +51,14 @@ from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
 from omnibase_infra.runtime.health.projection_liveness import (
     describe_dlq_saturation,
     describe_projection_attachment,
+    describe_projection_write_path,
     evaluate_projection_liveness,
     select_projection_contracts,
 )
 from omnibase_infra.runtime.observability import get_consumer_flow_counters
+from omnibase_infra.runtime.projection_dispatch_ledger import (
+    dispatch_skipped_projections,
+)
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.utils import (
     apply_instance_discriminator,
@@ -706,6 +710,7 @@ class ServiceRuntimeHealthMonitor:
             projections=projections,
             attached_topics=attached_topics,
             flow_windows=get_consumer_flow_counters().retained_windows.snapshot(),
+            dispatch_skipped=dispatch_skipped_projections(),
         )
         dimensions.append(
             ModelRuntimeHealthDimension(
@@ -719,6 +724,21 @@ class ServiceRuntimeHealthMonitor:
                 name="projection_dlq_saturation",
                 status="DEGRADED" if liveness.dlq_saturated_projections else "HEALTHY",
                 detail=describe_dlq_saturation(liveness),
+            )
+        )
+        # --- Dimension 6: Projection write path (OMN-17448) -----------------
+        # The third way to persist nothing. Dimensions 4 and 5 both read green
+        # through it by construction: the topic IS attached (only the dispatch
+        # is a no-op), and nothing raises so nothing reaches a DLQ. Measured
+        # live on the .201 dev lane 2026-09-01 -- this monitor logged
+        # `status=HEALTHY ... projections=13 unattached_projections=0` while
+        # node_projection_tenant_registry had no writer on ANY lane and
+        # tenant_registry_mirror held 0 rows.
+        dimensions.append(
+            ModelRuntimeHealthDimension(
+                name="projection_write_path",
+                status="DEGRADED" if liveness.nonwriting_projections else "HEALTHY",
+                detail=describe_projection_write_path(liveness),
             )
         )
 
@@ -738,12 +758,14 @@ class ServiceRuntimeHealthMonitor:
             projection_count=liveness.projection_count,
             unattached_projection_count=len(liveness.unattached_projections),
             dlq_saturated_projection_count=len(liveness.dlq_saturated_projections),
+            nonwriting_projection_count=len(liveness.nonwriting_projections),
         )
 
         logger.info(
             "Runtime health check: status=%s contracts=%d errors=%d "
             "consumer_groups=%d empty=%d uncovered_topics=%d "
-            "projections=%d unattached_projections=%d dlq_saturated_projections=%d",
+            "projections=%d unattached_projections=%d dlq_saturated_projections=%d "
+            "nonwriting_projections=%d",
             aggregate_status,
             contract_count,
             discovery_error_count,
@@ -753,6 +775,7 @@ class ServiceRuntimeHealthMonitor:
             liveness.projection_count,
             len(liveness.unattached_projections),
             len(liveness.dlq_saturated_projections),
+            len(liveness.nonwriting_projections),
         )
 
         if aggregate_status != "HEALTHY":

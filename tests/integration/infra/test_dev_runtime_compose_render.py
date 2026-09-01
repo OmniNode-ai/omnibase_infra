@@ -36,6 +36,11 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
+# OMN-17448: the dev lane's SECOND `-f` file. `resolve_compose_file_args()` in
+# scripts/deploy-runtime.sh appends this for the bare `omnibase-infra` project
+# and never for a lane with its own overlay, so a service declared here reaches
+# the dev lane and provably no other.
+DEV_LANE_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
 _DEFAULT_POLICY_ENV_FILE = "docker/runtime-policy.env"
 POLICY_ENV_PATH = REPO_ROOT / "docker" / "runtime-policy.env"
 
@@ -141,6 +146,10 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "OMNIMEMORY_ENABLED": "false",
     "OMNIMEMORY_MEMGRAPH_PORT": "7687",
     "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
+    # `:?`-required by docker-compose.dev-lane.yml (OMN-15363), not by the base
+    # file. Supplied here so the overlay-layered renders below can run; harmless
+    # to the base-only renders, which never read it.
+    "ROLE_OMNIDASH_PASSWORD": "test",
 }
 
 # RFC 5737 TEST-NET-2 documentation address — never a real host, avoids
@@ -176,6 +185,7 @@ def _run_compose_config(
     *,
     policy_env_file: str = _DEFAULT_POLICY_ENV_FILE,
     profile: str = "",
+    with_dev_lane_overlay: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     # NOTE: the default arm keeps the literal "--env-file",
     # "docker/runtime-policy.env" pair on the command line, because
@@ -194,6 +204,8 @@ def _run_compose_config(
         "-f",
         str(COMPOSE_FILE),
     ]
+    if with_dev_lane_overlay:
+        command += ["-f", str(DEV_LANE_OVERLAY)]
     if profile:
         command += ["--profile", profile]
     command.append("config")
@@ -354,3 +366,126 @@ def test_dev_worker_replicas_fails_closed_when_policy_value_unset(
     )
     assert "DEV_WORKER_REPLICAS" in result.stderr
     assert "replicas: 0" not in result.stdout
+
+
+# =============================================================================
+# OMN-17448 — standalone projection writers exist on the dev lane, and ONLY there
+# =============================================================================
+#
+# The defect these assertions close: every `*ProjectionRunner` node on the .201
+# compose dev lane was a no-op. The shared kernel subscribes their topics and
+# its dispatch callback returns `None` before any handler runs (deliberate,
+# OMN-15905 / OMN-16874 — a runner owns its own pool and its own consume loop,
+# so the sanctioned way to run it is a dedicated process). OMN-15905 shipped
+# that dedicated process for onex-dev k8s as five writer Deployments; nothing
+# mirrored it onto compose, so `.201` ran ZERO standalone writers and every
+# such projection consumed to LAG 0 and wrote nothing, silently.
+#
+# Measured live 2026-09-01: a well-formed TENANT_CREATED at offset 37 on
+# `onex.tenant.events` advanced the consumer group to LAG 0 and left
+# `tenant_registry_mirror` at 0 rows, with HWM 0 on both the DLQ and the
+# terminal-event topic.
+
+_WRITER_SERVICES: tuple[str, ...] = (
+    "projection-tenant-registry-writer",
+    "projection-delegation-writer",
+)
+
+
+@pytest.mark.integration
+def test_dev_lane_renders_the_standalone_projection_writers() -> None:
+    """OMN-17448 AC2: the dev lane has a real write path for these two nodes."""
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    for name in _WRITER_SERVICES:
+        assert name in services, (
+            f"dev lane must declare {name!r}: without it the shared kernel "
+            "subscribes this projection's topics, commits every offset, and "
+            "writes nothing (OMN-17448)"
+        )
+
+
+@pytest.mark.integration
+def test_writers_invoke_the_runner_module_entrypoint() -> None:
+    """The command must be the handler module's own ``__main__``.
+
+    This is the whole point of a standalone writer: it runs the runner class
+    OUTSIDE the kernel. A command that started the kernel instead would
+    reproduce the defect exactly — the process would come up healthy, join the
+    group, and dispatch nothing.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    expected = {
+        "projection-tenant-registry-writer": (
+            "omnimarket.nodes.node_projection_tenant_registry.handlers"
+            ".handler_tenant_registry_projection"
+        ),
+        "projection-delegation-writer": (
+            "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation"
+        ),
+    }
+    for name, module in expected.items():
+        command = services[name]["command"]
+        assert command[:3] == ["python", "-m", module], (
+            f"{name} must run {module} as a module entrypoint; got {command!r}"
+        )
+
+
+@pytest.mark.integration
+def test_each_writer_holds_its_own_consumer_group() -> None:
+    """Two writers sharing a group would split partitions and lose half the rows.
+
+    A shared group is worse than no writer at all: the topic's partitions would
+    be divided between two processes that project DIFFERENT relations, so each
+    would silently drop whatever the other was assigned — and it would look like
+    it was working.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    groups = [
+        services[name]["environment"]["KAFKA_CONSUMER_GROUP"]
+        for name in _WRITER_SERVICES
+    ]
+    assert len(set(groups)) == len(groups), (
+        f"each standalone writer needs its own consumer group; got {groups!r}"
+    )
+    assert all(g for g in groups), (
+        "an unset KAFKA_CONSUMER_GROUP falls back to BaseProjectionRunner's "
+        "DEFAULT_GROUP_ID, which every writer would then share"
+    )
+
+
+@pytest.mark.integration
+def test_writers_are_absent_from_the_base_file_every_other_lane_merges() -> None:
+    """Fail-closed containment: stability-test, prod and judge must not inherit these.
+
+    The base file is merged by EVERY lane; only the dev lane layers the overlay
+    (``resolve_compose_file_args()``). Declaring the writers in the base would
+    add them to prod and to any lane created later by someone who has never
+    read this file — the same fail-open shape the migration-lane indicator at
+    the top of the overlay exists to prevent.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=False)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    for name in _WRITER_SERVICES:
+        assert name not in services, (
+            f"{name!r} leaked into docker-compose.infra.yml — every non-dev "
+            "lane merges that file and would inherit this service"
+        )
