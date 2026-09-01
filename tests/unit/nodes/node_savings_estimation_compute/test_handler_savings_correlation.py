@@ -36,13 +36,33 @@ from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_c
 )
 
 
+def rls_probe_answer(
+    sql: str, *, rls_enforced: bool = False, tenant_scope: str | None = None
+) -> dict[str, object] | None:
+    """Answer the OMN-16770 tenant-scope probe, or ``None`` if this isn't it.
+
+    ``_find_ready_sessions`` refuses outright when it cannot establish whether
+    row-level security applies to ``savings_estimates`` on its connection, so
+    every ``fetchrow`` fake in this module has to answer that probe. The
+    default here is the ordinary unit-test connection: RLS does not apply, so
+    the anti-join is answered truthfully and nothing is refused. The refusal
+    branches are pinned in
+    ``test_savings_estimates_rls_guc_seam_omn16770.py``.
+    """
+    if "row_security_active" not in sql:
+        return None
+    return {"rls_enforced": rls_enforced, "tenant_scope": tenant_scope}
+
+
 @pytest.fixture
 def mock_pool() -> MagicMock:
     """Mock asyncpg.Pool with a connection supporting acquire()."""
     pool = MagicMock()
     conn = AsyncMock()
     conn.fetch = AsyncMock(return_value=[])
-    conn.fetchrow = AsyncMock(return_value=None)
+    conn.fetchrow = AsyncMock(
+        side_effect=lambda sql, *args: rls_probe_answer(sql),
+    )
     conn.execute = AsyncMock(return_value="INSERT 0 1")
 
     ctx = AsyncMock()
@@ -240,6 +260,9 @@ class TestRunCorrelationBatch:
         async def fetchrow_side_effect(
             sql: str, *args: object
         ) -> dict[str, object] | None:
+            probe = rls_probe_answer(sql)
+            if probe is not None:
+                return probe
             if "session_outcomes" in sql:
                 return {"outcome": "success"}
             return None

@@ -6,9 +6,14 @@
 
 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation import (
     HandlerSavingsCorrelation,
+    SavingsCorrelationUnscopedReadError,
 )
 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation import (
     HandlerSavingsEstimation,
 )
 
-__all__: list[str] = ["HandlerSavingsCorrelation", "HandlerSavingsEstimation"]
+__all__: list[str] = [
+    "HandlerSavingsCorrelation",
+    "HandlerSavingsEstimation",
+    "SavingsCorrelationUnscopedReadError",
+]

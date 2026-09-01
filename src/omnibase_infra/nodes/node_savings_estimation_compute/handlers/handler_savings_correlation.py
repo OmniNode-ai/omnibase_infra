@@ -44,7 +44,26 @@ savings from delegate-skill dispatch evaluation) is intentionally OUT of
 scope here — it is covered by the active OMN-15800 savings.v1 dashboard
 workstream.
 
-Ticket: OMN-16293
+The one cross-domain read, and why it is guarded (OMN-16770)
+------------------------------------------------------------
+Four of the five relations ``_find_ready_sessions`` joins are INTERNAL-domain
+and granted to this pool's principal. The fifth, ``savings_estimates``, is
+not: it is TENANT-domain, under ``FORCE ROW LEVEL SECURITY`` with a policy
+predicated on the ``app.tenant_id`` GUC, and this pool connects as
+``omninode_runtime`` — NOSUPERUSER, NOBYPASSRLS, non-owner by design
+(OMN-16843). Because the handler takes a RAW injected ``asyncpg`` pool rather
+than a contract-declared table operation, that read never passes through
+``ProjectionTableOperation._assert_read_declared``, the seam that fails closed
+on an undeclared relation. Nothing could refuse it at declaration time, so it
+was only ever going to surface at runtime.
+
+``_assert_idempotency_read_is_scoped`` is that missing refusal, moved to the
+last place it can still be made: the connection itself, immediately before the
+statement that depends on it. See
+:class:`SavingsCorrelationUnscopedReadError` for why a ``GRANT`` is not the
+fix.
+
+Ticket: OMN-16293, OMN-16770
 """
 
 from __future__ import annotations
@@ -59,6 +78,7 @@ from uuid import UUID
 import asyncpg
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation import (
     HandlerSavingsEstimation,
@@ -98,6 +118,128 @@ DEFAULT_SESSION_TIMEOUT_SECONDS: float = 3600.0
 DEFAULT_LOOKBACK_HOURS: int = 48
 DEFAULT_BATCH_SIZE: int = 50
 DEFAULT_QUERY_TIMEOUT: float = 10.0
+
+
+# ---------------------------------------------------------------------------
+# OMN-16770: the tenant-scope seam on the one cross-domain read this handler
+# makes. Everything below exists because a GRANT is NOT the fix here.
+# ---------------------------------------------------------------------------
+
+#: The transaction-local setting every canonical tenant policy on this
+#: platform compares ``tenant_id`` against.
+TENANT_GUC: str = "app.tenant_id"
+
+#: The one relation ``_find_ready_sessions`` reads that this node neither owns
+#: nor writes. It is TENANT-domain, written cross-repo by omnibase_infra's
+#: vendored ``node_projection_savings`` over the tenant binding, and put under
+#: ``ENABLE`` + ``FORCE ROW LEVEL SECURITY`` by
+#: ``081_savings_estimates_rls_tenant_isolation.sql`` with the policy
+#: ``tenant_id = current_setting('app.tenant_id', true)``.
+IDEMPOTENCY_RELATION: str = "savings_estimates"
+
+#: Both premises in ONE round trip, so they are answered at the same instant,
+#: on the same pooled connection that is about to run the anti-join. Reading
+#: them separately, or on a different connection, would prove nothing about
+#: the statement that actually matters.
+_TENANT_SCOPE_PROBE_SQL = """
+    SELECT
+        row_security_active($1::regclass) AS rls_enforced,
+        nullif(current_setting($2, true), '') AS tenant_scope
+"""
+
+
+class SavingsCorrelationUnscopedReadError(RuntimeHostError):
+    """The idempotency read cannot be trusted, so the batch refuses to run.
+
+    OMN-16770. ``_find_ready_sessions`` closes its candidate query with
+
+        ``AND NOT EXISTS (SELECT 1 FROM savings_estimates se WHERE ...)``
+
+    an anti-join over a FORCE-RLS relation whose policy is predicated on the
+    ``app.tenant_id`` GUC. The pool that runs it is built from
+    ``OMNINODE_INTERNAL_DB_URL``, whose principal ``omninode_runtime`` is
+    pinned NOSUPERUSER / NOBYPASSRLS / non-owner (OMN-16843,
+    ``docker/docker-compose.infra.yml``).
+
+    Postgres row-level security fails OPEN from the caller's point of view.
+    With the GUC unset, ``tenant_id = current_setting('app.tenant_id', true)``
+    evaluates to NULL for every row, so the subquery matches nothing and
+    raises nothing. ``NOT EXISTS`` becomes universally true: every candidate
+    session reads as "never finalized" and the batch re-publishes an estimate
+    for every session on every 60s tick, forever.
+
+    That is why the obvious remediation for the live
+    ``InsufficientPrivilegeError`` — ``GRANT SELECT ON savings_estimates TO
+    omninode_runtime`` — is the WRONG fix. It does not make the read correct;
+    it makes the read silently, unboundedly wrong, and converts a visible
+    error into no error at all. This class is what a grant would run into
+    instead.
+
+    Refusing is the honest outcome, not a degradation: this handler carries no
+    tenant attribution of its own (its ``savings_injection_signals`` /
+    ``savings_validator_catch_signals`` tables have no ``tenant_id`` column),
+    so there is no scope for it to bind that would not be invented — and
+    inventing one is exactly what the OMN-16831 ruling forbids. The durable
+    close is to stop reading a TENANT relation for INTERNAL idempotency at
+    all; until that lands, this refusal is what keeps the anti-join from
+    inverting.
+    """
+
+
+async def _assert_idempotency_read_is_scoped(conn: asyncpg.Connection) -> None:
+    """Refuse the candidate query unless its anti-join can answer truthfully.
+
+    Two outcomes are legitimate and are allowed through:
+
+    * ``row_security_active`` is FALSE — the connection is the table owner
+      without FORCE, a BYPASSRLS role, or a superuser. It sees every tenant's
+      rows, so the anti-join is answered truthfully. This is the compose-lane
+      case ``081``'s own header calls out.
+    * RLS applies AND a non-blank ``app.tenant_id`` is bound — the read is
+      scoped, and the anti-join is answered truthfully for that scope.
+
+    Everything else refuses, including an unreadable premise: a probe that
+    answers nothing must not be read as "no RLS here", or a permission or
+    driver change that silences it would re-open the inversion with no signal.
+    """
+    row = await conn.fetchrow(_TENANT_SCOPE_PROBE_SQL, IDEMPOTENCY_RELATION, TENANT_GUC)
+    if row is None:
+        raise SavingsCorrelationUnscopedReadError(
+            f"Savings correlation refused: could not read whether row-level "
+            f"security applies to {IDEMPOTENCY_RELATION} on this connection. "
+            f"The {IDEMPOTENCY_RELATION} anti-join is only sound when the "
+            f"answer is known, so an unanswerable probe fails closed "
+            f"(OMN-16770)."
+        )
+
+    rls_enforced = row["rls_enforced"]
+    if not isinstance(rls_enforced, bool):
+        raise SavingsCorrelationUnscopedReadError(
+            f"Savings correlation refused: row_security_active("
+            f"{IDEMPOTENCY_RELATION}) returned "
+            f"{type(rls_enforced).__name__}, not a boolean. The anti-join's "
+            f"visibility premise is unresolved, so the batch fails closed "
+            f"(OMN-16770)."
+        )
+
+    if not rls_enforced:
+        return
+
+    tenant_scope = row["tenant_scope"]
+    if isinstance(tenant_scope, str) and tenant_scope.strip():
+        return
+
+    raise SavingsCorrelationUnscopedReadError(
+        f"Savings correlation refused: row-level security applies to "
+        f"{IDEMPOTENCY_RELATION} on this connection and no {TENANT_GUC} is "
+        f"bound, so its policy would filter every row and the "
+        f"`NOT EXISTS ({IDEMPOTENCY_RELATION})` anti-join would report every "
+        f"session as un-finalized — re-publishing an estimate for every "
+        f"session on every tick. Granting SELECT does not fix this; it is "
+        f"what produces it. Either read as a role row-level security does not "
+        f"apply to, or bind {TENANT_GUC} for the scope being read "
+        f"(OMN-16770)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +608,12 @@ class HandlerSavingsCorrelation:
         """
         async with self._pool.acquire() as conn:
             await set_statement_timeout(conn, self._query_timeout * 1000)
+            # OMN-16770: the anti-join above reads savings_estimates, a
+            # FORCE-RLS tenant relation this node neither owns nor writes. The
+            # probe runs FIRST, on this same connection: a refusal raised
+            # after the query would already have executed the inverted
+            # anti-join, and its all-sessions answer is the whole harm.
+            await _assert_idempotency_read_is_scoped(conn)
             rows = await conn.fetch(
                 sql,
                 self._lookback_hours,
@@ -662,8 +810,11 @@ def decode_event_message(message: ModelEventMessage) -> tuple[str, dict[str, obj
 
 
 __all__: list[str] = [
+    "IDEMPOTENCY_RELATION",
+    "TENANT_GUC",
     "EnumCatchSeverity",
     "HandlerSavingsCorrelation",
     "ProtocolPublisher",
+    "SavingsCorrelationUnscopedReadError",
     "decode_event_message",
 ]
