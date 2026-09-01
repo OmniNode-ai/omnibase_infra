@@ -159,7 +159,7 @@ class TestDispatchEngineRoutesIntrospection:
             route_id="introspection-route",
             topic_pattern="onex.evt.platform.node-introspection.v1",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id=dispatcher.dispatcher_id,
+            handler_id=dispatcher.dispatcher_id,
         )
         engine.register_route(route)
 

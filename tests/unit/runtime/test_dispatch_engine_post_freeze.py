@@ -76,7 +76,7 @@ class TestPostFreezeRegistration:
             route_id="dynamic-route",
             topic_pattern="*.evt.test.dynamic-event.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="dynamic-dispatcher",
+            handler_id="dynamic-dispatcher",
         )
         engine._register_route_dynamic(route)
         assert "dynamic-route" in engine._routes
@@ -119,7 +119,7 @@ class TestPostFreezeRegistration:
             route_id="dup-route",
             topic_pattern="*.evt.test.dup.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="dup-route-dispatcher",
+            handler_id="dup-route-dispatcher",
         )
         engine._register_route_dynamic(route)
 
@@ -135,7 +135,7 @@ class TestPostFreezeRegistration:
             route_id="orphan-route",
             topic_pattern="*.evt.test.orphan.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="nonexistent-dispatcher",
+            handler_id="nonexistent-dispatcher",
         )
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -174,7 +174,7 @@ class TestPostFreezeRegistration:
             route_id="blocked-route",
             topic_pattern="*.evt.test.blocked.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="pre",
+            handler_id="pre",
         )
         with pytest.raises(ModelOnexError) as exc_info:
             engine.register_route(route)
@@ -201,7 +201,7 @@ class TestPostFreezeRegistration:
             route_id="live-route",
             topic_pattern="onex.evt.platform.dynamic-test.v1",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="live-handler",
+            handler_id="live-handler",
         )
         engine._register_route_dynamic(route)
 
@@ -224,7 +224,7 @@ class TestPostFreezeRegistration:
             route_id="test-route",
             topic_pattern="*.evt.test.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="test-dispatcher",
+            handler_id="test-dispatcher",
         )
 
         prepared = PreparedWiring(
@@ -253,7 +253,7 @@ class TestPostFreezeRegistration:
             route_id="auth-route",
             topic_pattern="*.evt.test.authorized.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="auth-dispatcher",
+            handler_id="auth-dispatcher",
         )
 
         prepared = PreparedWiring(

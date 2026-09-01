@@ -343,10 +343,8 @@ def _register_corpus(
                 if route_id in registered_route_ids:
                     continue
                 topic_pattern = _derive_topic_pattern_from_topic(topic)
-                # Core ModelDispatchRoute renamed the field to ``handler_id``
-                # (``dispatcher_id`` remains an input alias + read property). Pass
-                # the canonical field name so mypy --strict is satisfied; the engine
-                # reads it via _get_route_dispatcher_id.
+                # Routes use Core's sole canonical ``handler_id`` field. The
+                # dispatch engine resolves this identifier directly.
                 route = ModelDispatchRoute(
                     route_id=route_id,
                     topic_pattern=topic_pattern,

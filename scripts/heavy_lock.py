@@ -126,6 +126,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -618,6 +619,7 @@ def supervise(
     started: float,
     max_hold: float,
     heartbeat_every: float,
+    termination_requested: Callable[[], bool],
 ) -> int:
     """Wait out the wrapped command, publishing progress and honouring the cap.
 
@@ -633,6 +635,10 @@ def supervise(
             return returncode
         now = time.monotonic()
         held = now - started
+        if termination_requested():
+            _log("TERMINATION REQUESTED: aborting wrapped command before unlock")
+            abort_wrapped_command(proc)
+            return EXIT_MAX_HOLD_EXCEEDED
         if max_hold > 0 and held >= max_hold:
             _log(
                 f"MAX-HOLD EXCEEDED: the wrapped command {command!r} has held "
@@ -686,7 +692,17 @@ def main(argv: list[str] | None = None) -> int:
 
     acquired_at = write_holder(lock, command, args.label)
     started = time.monotonic()
+    termination_requested = False
+    previous_handlers: dict[int, Any] = {}
+
+    def _request_termination(signum: int, frame: Any) -> None:
+        del signum, frame
+        nonlocal termination_requested
+        termination_requested = True
+
     try:
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            previous_handlers[sig] = signal.signal(sig, _request_termination)
         try:
             proc = subprocess.Popen(command)
         except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
@@ -709,8 +725,11 @@ def main(argv: list[str] | None = None) -> int:
             started,
             args.max_hold,
             args.heartbeat_every,
+            lambda: termination_requested,
         )
     finally:
+        for sig, previous in previous_handlers.items():
+            signal.signal(sig, previous)
         clear_holder(lock)
         # Releasing the descriptor releases the kernel lock. The kernel would
         # do this for us if we died, which is why no peer is ever signalled.

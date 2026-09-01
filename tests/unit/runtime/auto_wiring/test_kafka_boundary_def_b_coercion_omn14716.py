@@ -146,7 +146,7 @@ def _frozen_engine_for(handler: object) -> MessageDispatchEngine:
             route_id="seam-route",
             topic_pattern="*.cmd.omninode.finding-aggregate.*",
             message_category=EnumMessageCategory.COMMAND,
-            dispatcher_id="seam-dispatcher",
+            handler_id="seam-dispatcher",
         )
     )
     engine.freeze()

@@ -190,7 +190,7 @@ def _make_engine(
             route_id=route_id,
             topic_pattern=topic_pattern,
             message_category=category,
-            dispatcher_id=dispatcher_id,
+            handler_id=dispatcher_id,
         )
     )
     engine.freeze()

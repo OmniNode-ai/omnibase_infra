@@ -111,7 +111,7 @@ def setup_engine_with_dispatcher(
             route_id=f"route-{dispatcher_id}",
             topic_pattern=topic_pattern,
             message_category=category,
-            dispatcher_id=dispatcher_id,
+            handler_id=dispatcher_id,
         )
     )
     engine.freeze()
@@ -713,7 +713,7 @@ class TestMultipleDispatchersWithDifferentNodeKinds:
                 route_id="route-reducer",
                 topic_pattern="test.*.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="reducer",
+                handler_id="reducer",
             )
         )
 
@@ -729,7 +729,7 @@ class TestMultipleDispatchersWithDifferentNodeKinds:
                 route_id="route-orchestrator",
                 topic_pattern="test.*.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="orchestrator",
+                handler_id="orchestrator",
             )
         )
 

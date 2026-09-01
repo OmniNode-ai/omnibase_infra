@@ -57,7 +57,7 @@ Usage:
     >>>
     >>> # Register a dispatcher
     >>> dispatcher = ModelDispatcherRegistration(
-    ...     dispatcher_id="user-dispatcher",
+    ...     handler_id="user-dispatcher",
     ...     dispatcher_name="User Event Dispatcher",
     ...     node_kind=EnumNodeKind.REDUCER,
     ...     supported_categories=[EnumMessageCategory.EVENT],
@@ -69,7 +69,7 @@ Usage:
     ...     route_id="user-route",
     ...     topic_pattern="*.user.events.*",
     ...     message_category=EnumMessageCategory.EVENT,
-    ...     dispatcher_id="user-dispatcher",
+    ...     handler_id="user-dispatcher",
     ... )
     >>>
     >>> # Check if route matches

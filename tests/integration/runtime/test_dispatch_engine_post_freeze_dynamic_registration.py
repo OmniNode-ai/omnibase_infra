@@ -37,7 +37,7 @@ async def test_dynamic_handler_wiring_dispatches_after_engine_freeze() -> None:
             route_id="omn-11246-route",
             topic_pattern="onex.evt.omnibase-infra.dynamic-registration.v1",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="omn-11246-handler",
+            handler_id="omn-11246-handler",
         )
     )
 

@@ -130,7 +130,7 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
             route_id="tenant-projection-proof",
             topic_pattern=TOPIC,
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="tenant-projection-proof",
+            handler_id="tenant-projection-proof",
         )
     )
     engine.freeze()

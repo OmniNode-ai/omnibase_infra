@@ -423,7 +423,7 @@ class TestTopicPatternMatching:
             route_id="user-events-route",
             topic_pattern="*.user.events.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="user-event-dispatcher",
+            handler_id="user-event-dispatcher",
         )
 
         assert route.matches_topic("dev.user.events.v1")
@@ -441,7 +441,7 @@ class TestTopicPatternMatching:
             topic_pattern="*.user.events.*",
             message_category=EnumMessageCategory.EVENT,
             message_type="UserCreatedEvent",
-            dispatcher_id="user-created-dispatcher",
+            handler_id="user-created-dispatcher",
         )
 
         # Full match with message_type
@@ -468,7 +468,7 @@ class TestTopicPatternMatching:
             route_id="disabled-route",
             topic_pattern="*.user.events.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="disabled-dispatcher",
+            handler_id="disabled-dispatcher",
             enabled=False,
         )
 

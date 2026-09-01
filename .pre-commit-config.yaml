@@ -146,6 +146,13 @@ repos:
   # Note: ruff replaces both black and isort (10-100x faster)
   - repo: local
     hooks:
+      - id: verified-grant-ingress-boundary
+        name: Verified-grant ingress boundary
+        entry: uv run --frozen python scripts/validation/validate_verified_grant_ingress_boundary.py
+        language: system
+        files: ^src/omnibase_infra/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ruff-format
         name: ruff format (auto-format)
         entry: uv run --frozen ruff format

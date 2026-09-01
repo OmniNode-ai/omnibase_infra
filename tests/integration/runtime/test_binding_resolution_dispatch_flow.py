@@ -141,7 +141,7 @@ def create_test_route(
         route_id=f"route-{dispatcher_id}",
         topic_pattern=topic_pattern,
         message_category=EnumMessageCategory.EVENT,
-        dispatcher_id=dispatcher_id,
+        handler_id=dispatcher_id,
     )
 
 

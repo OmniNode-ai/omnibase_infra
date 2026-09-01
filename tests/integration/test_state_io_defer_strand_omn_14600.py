@@ -348,7 +348,7 @@ def test_boundary_level_engine_dispatch_reports_success_after_inline_recovery() 
             route_id="state-io-seam-route",
             topic_pattern=TOPIC_INBOUND,
             message_category=EnumMessageCategory.COMMAND,
-            dispatcher_id="state-io-seam-dispatcher",
+            handler_id="state-io-seam-dispatcher",
         )
     )
     engine.freeze()

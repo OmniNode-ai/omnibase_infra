@@ -121,18 +121,18 @@ def _kill_group(pgid: int) -> None:
 
 
 def _reap(*procs: subprocess.Popen[str]) -> None:
-    """Kill each proc's ENTIRE process group, then wait for the leader.
-
-    This is the fix for the leak: the group contains the wrapped ``sh -c``
-    grandchild, which ``proc.kill()`` never touched.
-    """
+    """Request holder cleanup, escalating only when its bounded TERM path fails."""
     for proc in procs:
-        _kill_group(proc.pid)
+        if proc.poll() is None:
+            try:
+                os.kill(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
     for proc in procs:
         try:
-            proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:  # pragma: no cover - defense in depth
-            proc.kill()
+            proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc.pid)
             proc.wait(timeout=10)
 
 
@@ -953,6 +953,39 @@ def test_an_aborted_test_body_leaves_no_cpu_burning_descendant(
     assert survivors == [], f"LEAKED across an exception: {survivors}"
 
 
+def test_sigterm_aborts_wrapped_descendants_before_unlock(tmp_path: Path) -> None:
+    """A terminated holder reaps its own payload tree before releasing the lock."""
+    lock = tmp_path / "term.lock"
+    marker, script = _marked(BUSY_SPIN_SCRIPT)
+    proc = _spawn_group(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "--lock",
+            str(lock),
+            "--heartbeat-every",
+            "1s",
+            "--max-hold",
+            "0",
+            "--",
+            "sh",
+            "-c",
+            script,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert _wait_for(lambda: bool(_pids_matching(marker)), timeout=25)
+        os.kill(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=20)
+    finally:
+        _kill_group(proc.pid)
+    assert _group_is_gone(proc.pid)
+    assert _pids_matching(marker) == []
+
+
 def test_the_cpu_burner_carries_its_own_deadline(tmp_path: Path) -> None:
     """OMN-16995 defense 3 -- a runaway is bounded even with NO cleanup at all.
 
@@ -988,7 +1021,7 @@ def test_the_cpu_burner_carries_its_own_deadline(tmp_path: Path) -> None:
 def test_this_module_never_spawns_outside_a_process_group() -> None:
     """OMN-16995 -- a ratchet, not a comment.
 
-    A `subprocess.Popen(` or a `proc.kill()` cleanup added to this file later
+    A `subprocess.Popen(` or a bare `proc.kill()` cleanup added to this file later
     would silently reintroduce the leak: the new test would still pass and the
     orphan would still peg a core on the shared gate host. Every spawn must go
     through `_spawn_group` and every cleanup through `_reap`; the only
@@ -1009,10 +1042,10 @@ def test_this_module_never_spawns_outside_a_process_group() -> None:
     )
 
     kills = [line.strip() for line in lines if re.search(r"\.kill\(\)\s*$", line)]
-    assert kills == ["proc.kill()"], (
-        "cleanup outside _reap -- a bare kill() signals the wrapper only and "
-        f"leaves the wrapped command burning a core: {kills}"
-    )
+    assert kills == [], f"bare kill() bypasses group cleanup: {kills}"
+    source = "\n".join(lines)
+    assert "os.kill(proc.pid, signal.SIGTERM)" in source
+    assert "_kill_group(proc.pid)" in source
 
     assert "start_new_session=True" in "\n".join(lines), (
         "_spawn_group stopped creating a new session, so os.killpg can no "

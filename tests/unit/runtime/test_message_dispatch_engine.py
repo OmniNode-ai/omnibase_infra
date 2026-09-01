@@ -22,6 +22,7 @@ OMN-934: Message dispatch engine implementation
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -36,6 +37,7 @@ from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.runtime import message_dispatch_engine
 from omnibase_infra.runtime.dispatch_envelope_context import (
     bind_projection_tenant_authority,
     current_dispatch_envelope,
@@ -154,13 +156,20 @@ def intent_envelope() -> ModelEventEnvelope[ProvisionUserIntent]:
 class TestRouteRegistration:
     """Tests for route registration functionality."""
 
+    def test_route_resolution_has_no_legacy_dispatcher_compatibility(self) -> None:
+        """Infra consumes Core routes through handler_id without a legacy shim."""
+        source = inspect.getsource(message_dispatch_engine)
+
+        assert "_get_route_dispatcher_id" not in source
+        assert "route.dispatcher_id" not in source
+
     def test_register_route_valid(self, dispatch_engine: MessageDispatchEngine) -> None:
         """Test successful route registration."""
         route = ModelDispatchRoute(
             route_id="user-events-route",
             topic_pattern="*.user.events.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="user-handler",
+            handler_id="user-handler",
         )
 
         dispatch_engine.register_route(route)
@@ -176,7 +185,7 @@ class TestRouteRegistration:
                 route_id=f"route-{i}",
                 topic_pattern=f"*.domain{i}.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id=f"handler-{i}",
+                handler_id=f"handler-{i}",
             )
             for i in range(5)
         ]
@@ -194,7 +203,7 @@ class TestRouteRegistration:
             route_id="duplicate-route",
             topic_pattern="*.user.events.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="handler",
+            handler_id="handler",
         )
 
         dispatch_engine.register_route(route)
@@ -204,7 +213,7 @@ class TestRouteRegistration:
             route_id="duplicate-route",  # Same ID
             topic_pattern="*.order.events.*",  # Different pattern
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="other-handler",
+            handler_id="other-handler",
         )
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -232,7 +241,7 @@ class TestRouteRegistration:
             route_id="late-route",
             topic_pattern="*.user.events.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="handler",
+            handler_id="handler",
         )
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -492,7 +501,7 @@ class TestFreezePattern:
             route_id="orphan-route",
             topic_pattern="*.user.events.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="nonexistent-handler",
+            handler_id="nonexistent-handler",
         )
         dispatch_engine.register_route(route)
 
@@ -520,7 +529,7 @@ class TestFreezePattern:
                 route_id="user-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="user-handler",
+                handler_id="user-handler",
             )
         )
 
@@ -571,7 +580,7 @@ class TestDispatchSuccess:
                 route_id="event-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="event-handler",
+                handler_id="event-handler",
             )
         )
         dispatch_engine.freeze()
@@ -606,7 +615,7 @@ class TestDispatchSuccess:
                 route_id="sync-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="sync-handler",
+                handler_id="sync-handler",
             )
         )
         dispatch_engine.freeze()
@@ -650,7 +659,7 @@ class TestDispatchSuccess:
                 route_id="route-1",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler-1",
+                handler_id="handler-1",
             )
         )
         dispatch_engine.register_route(
@@ -658,7 +667,7 @@ class TestDispatchSuccess:
                 route_id="route-2",
                 topic_pattern="dev.**",  # Also matches
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler-2",
+                handler_id="handler-2",
             )
         )
         dispatch_engine.freeze()
@@ -692,7 +701,7 @@ class TestDispatchSuccess:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="multi-output-handler",
+                handler_id="multi-output-handler",
             )
         )
         dispatch_engine.freeze()
@@ -725,7 +734,7 @@ class TestDispatchSuccess:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="void-handler",
+                handler_id="void-handler",
             )
         )
         dispatch_engine.freeze()
@@ -770,7 +779,7 @@ class TestDispatchSuccess:
                 route_id="created-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="created-handler",
+                handler_id="created-handler",
             )
         )
         dispatch_engine.register_route(
@@ -778,7 +787,7 @@ class TestDispatchSuccess:
                 route_id="updated-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="updated-handler",
+                handler_id="updated-handler",
             )
         )
         dispatch_engine.freeze()
@@ -811,7 +820,7 @@ class TestDispatchSuccess:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         dispatch_engine.freeze()
@@ -1002,7 +1011,7 @@ class TestDispatchErrors:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="failing-handler",
+                handler_id="failing-handler",
             )
         )
         dispatch_engine.freeze()
@@ -1046,7 +1055,7 @@ class TestDispatchErrors:
                 route_id="success-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="success-handler",
+                handler_id="success-handler",
             )
         )
         dispatch_engine.register_route(
@@ -1054,7 +1063,7 @@ class TestDispatchErrors:
                 route_id="failing-route",
                 topic_pattern="dev.**",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="failing-handler",
+                handler_id="failing-handler",
             )
         )
         dispatch_engine.freeze()
@@ -1096,7 +1105,7 @@ class TestDispatchErrors:
                 route_id="disabled-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
                 enabled=False,  # Disabled
             )
         )
@@ -1144,7 +1153,7 @@ class TestDispatchErrors:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="failing-handler",
+                handler_id="failing-handler",
             )
         )
         dispatch_engine.freeze()
@@ -1199,7 +1208,7 @@ class TestDispatchErrors:
                 route_id="success-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="success-handler",
+                handler_id="success-handler",
             )
         )
         dispatch_engine.register_route(
@@ -1207,7 +1216,7 @@ class TestDispatchErrors:
                 route_id="failing-route",
                 topic_pattern="dev.**",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="failing-handler",
+                handler_id="failing-handler",
             )
         )
         dispatch_engine.freeze()
@@ -1253,7 +1262,7 @@ class TestAsyncHandlers:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="async-handler",
+                handler_id="async-handler",
             )
         )
         dispatch_engine.freeze()
@@ -1309,7 +1318,7 @@ class TestMetrics:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         dispatch_engine.freeze()
@@ -1345,7 +1354,7 @@ class TestMetrics:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         dispatch_engine.freeze()
@@ -1415,7 +1424,7 @@ class TestMetrics:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         dispatch_engine.freeze()
@@ -1467,7 +1476,7 @@ class TestDeterministicRouting:
                 route_id="route-1",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler-1",
+                handler_id="handler-1",
             )
         )
         dispatch_engine.register_route(
@@ -1475,7 +1484,7 @@ class TestDeterministicRouting:
                 route_id="route-2",
                 topic_pattern="dev.**",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler-2",
+                handler_id="handler-2",
             )
         )
         dispatch_engine.freeze()
@@ -1521,7 +1530,7 @@ class TestDeterministicRouting:
                 route_id="user-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="user-handler",
+                handler_id="user-handler",
             )
         )
         dispatch_engine.register_route(
@@ -1529,7 +1538,7 @@ class TestDeterministicRouting:
                 route_id="order-route",
                 topic_pattern="*.order.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="order-handler",
+                handler_id="order-handler",
             )
         )
         dispatch_engine.freeze()
@@ -1586,7 +1595,7 @@ class TestPureRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="generic-handler",
+                handler_id="generic-handler",
             )
         )
         dispatch_engine.freeze()
@@ -1636,7 +1645,7 @@ class TestPureRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         dispatch_engine.freeze()
@@ -1687,7 +1696,7 @@ class TestStringRepresentation:
                 route_id="route",
                 topic_pattern="*.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         dispatch_engine.freeze()
@@ -1722,7 +1731,7 @@ class TestProperties:
                 route_id="route-1",
                 topic_pattern="*.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         assert dispatch_engine.route_count == 1
@@ -1732,7 +1741,7 @@ class TestProperties:
                 route_id="route-2",
                 topic_pattern="*.commands.*",
                 message_category=EnumMessageCategory.COMMAND,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         assert dispatch_engine.route_count == 2
@@ -1979,7 +1988,7 @@ class TestMessageDispatchEngineConcurrency:
                 route_id="concurrent-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="concurrent-handler",
+                handler_id="concurrent-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2071,7 +2080,7 @@ class TestMessageDispatchEngineConcurrency:
                 route_id="route-1",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler-1",
+                handler_id="handler-1",
             )
         )
         dispatch_engine.register_route(
@@ -2079,7 +2088,7 @@ class TestMessageDispatchEngineConcurrency:
                 route_id="route-2",
                 topic_pattern="dev.**",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler-2",
+                handler_id="handler-2",
             )
         )
         dispatch_engine.freeze()
@@ -2169,7 +2178,7 @@ class TestMessageDispatchEngineConcurrency:
                 route_id="success-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="success-handler",
+                handler_id="success-handler",
             )
         )
         dispatch_engine.register_route(
@@ -2177,7 +2186,7 @@ class TestMessageDispatchEngineConcurrency:
                 route_id="failing-route",
                 topic_pattern="dev.**",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="failing-handler",
+                handler_id="failing-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2257,7 +2266,7 @@ class TestMessageDispatchEngineConcurrency:
                 route_id="metrics-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="metrics-handler",
+                handler_id="metrics-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2355,7 +2364,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="variable-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="variable-handler",
+                handler_id="variable-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2426,7 +2435,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="fast-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="fast-handler",
+                handler_id="fast-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2510,7 +2519,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="created-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="created-handler",
+                handler_id="created-handler",
             )
         )
         dispatch_engine.register_route(
@@ -2518,7 +2527,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="updated-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="updated-handler",
+                handler_id="updated-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2603,7 +2612,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="stable-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="stable-handler",
+                handler_id="stable-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2698,7 +2707,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="sync-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="sync-handler",
+                handler_id="sync-handler",
             )
         )
         dispatch_engine.register_route(
@@ -2706,7 +2715,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="async-route",
                 topic_pattern="dev.**",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="async-handler",
+                handler_id="async-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2776,7 +2785,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="tracking-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="tracking-handler",
+                handler_id="tracking-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2853,7 +2862,7 @@ class TestConcurrentDispatchAdvanced:
                 route_id="verifying-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="verifying-handler",
+                handler_id="verifying-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2927,7 +2936,7 @@ class TestCommandAndIntentDispatch:
                 route_id="command-route",
                 topic_pattern="*.user.commands.*",
                 message_category=EnumMessageCategory.COMMAND,
-                dispatcher_id="command-handler",
+                handler_id="command-handler",
             )
         )
         dispatch_engine.freeze()
@@ -2963,7 +2972,7 @@ class TestCommandAndIntentDispatch:
                 route_id="intent-route",
                 topic_pattern="*.user.intents.*",
                 message_category=EnumMessageCategory.INTENT,
-                dispatcher_id="intent-handler",
+                handler_id="intent-handler",
             )
         )
         dispatch_engine.freeze()
@@ -3033,7 +3042,7 @@ class TestErrorSanitization:
                 route_id="db-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="db-handler",
+                handler_id="db-handler",
             )
         )
         sanitization_engine.freeze()
@@ -3071,7 +3080,7 @@ class TestErrorSanitization:
                 route_id="auth-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="auth-handler",
+                handler_id="auth-handler",
             )
         )
         sanitization_engine.freeze()
@@ -3109,7 +3118,7 @@ class TestErrorSanitization:
                 route_id="api-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="api-handler",
+                handler_id="api-handler",
             )
         )
         sanitization_engine.freeze()
@@ -3147,7 +3156,7 @@ class TestErrorSanitization:
                 route_id="user-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="user-handler",
+                handler_id="user-handler",
             )
         )
         sanitization_engine.freeze()
@@ -3186,7 +3195,7 @@ class TestErrorSanitization:
                 route_id="long-error-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="long-error-handler",
+                handler_id="long-error-handler",
             )
         )
         sanitization_engine.freeze()
@@ -3228,7 +3237,7 @@ class TestErrorSanitization:
                 route_id="mongo-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="mongo-handler",
+                handler_id="mongo-handler",
             )
         )
         sanitization_engine.freeze()
@@ -3265,7 +3274,7 @@ class TestErrorSanitization:
                 route_id="redis-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="redis-handler",
+                handler_id="redis-handler",
             )
         )
         sanitization_engine.freeze()
@@ -3588,7 +3597,7 @@ class TestContextAwareDispatch:
                 route_id="reducer-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="reducer-handler",
+                handler_id="reducer-handler",
             )
         )
         context_engine.freeze()
@@ -3648,7 +3657,7 @@ class TestContextAwareDispatch:
                 route_id="compute-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="compute-handler",
+                handler_id="compute-handler",
             )
         )
         context_engine.freeze()
@@ -3703,7 +3712,7 @@ class TestContextAwareDispatch:
                 route_id="orchestrator-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="orchestrator-handler",
+                handler_id="orchestrator-handler",
             )
         )
         context_engine.freeze()
@@ -3761,7 +3770,7 @@ class TestContextAwareDispatch:
                 route_id="effect-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="effect-handler",
+                handler_id="effect-handler",
             )
         )
         context_engine.freeze()
@@ -3820,7 +3829,7 @@ class TestContextAwareDispatch:
                 route_id="runtime-host-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="runtime-host-handler",
+                handler_id="runtime-host-handler",
             )
         )
         context_engine.freeze()
@@ -3874,7 +3883,7 @@ class TestContextAwareDispatch:
                 route_id="legacy-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="legacy-handler",
+                handler_id="legacy-handler",
             )
         )
         context_engine.freeze()
@@ -3923,7 +3932,7 @@ class TestContextAwareDispatch:
                 route_id="sync-effect-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="sync-effect-handler",
+                handler_id="sync-effect-handler",
             )
         )
         context_engine.freeze()
@@ -3967,7 +3976,7 @@ class TestContextAwareDispatch:
                 route_id="corr-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="corr-handler",
+                handler_id="corr-handler",
             )
         )
         context_engine.freeze()
@@ -4019,7 +4028,7 @@ class TestContextAwareDispatch:
                 route_id="auto-corr-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="auto-corr-handler",
+                handler_id="auto-corr-handler",
             )
         )
         context_engine.freeze()
@@ -4450,7 +4459,7 @@ class TestEventTypeRouting:
                 route_id="event-type-route",
                 topic_pattern="*.node.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="event-type-handler",
+                handler_id="event-type-handler",
             )
         )
         engine.freeze()
@@ -4507,7 +4516,7 @@ class TestEventTypeRouting:
                 route_id="class-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="class-name-handler",
+                handler_id="class-name-handler",
             )
         )
         engine.register_route(
@@ -4515,7 +4524,7 @@ class TestEventTypeRouting:
                 route_id="event-type-route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="event-type-handler",
+                handler_id="event-type-handler",
             )
         )
         engine.freeze()
@@ -4559,7 +4568,7 @@ class TestEventTypeRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="class-handler",
+                handler_id="class-handler",
             )
         )
         engine.freeze()
@@ -4603,7 +4612,7 @@ class TestEventTypeRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         engine.freeze()
@@ -4640,7 +4649,7 @@ class TestEventTypeRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         engine.freeze()
@@ -4680,7 +4689,7 @@ class TestEventTypeRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         engine.freeze()
@@ -4719,7 +4728,7 @@ class TestEventTypeRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         engine.freeze()
@@ -4758,7 +4767,7 @@ class TestEventTypeRouting:
                 route_id="route",
                 topic_pattern="*.node.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="wildcard-handler",
+                handler_id="wildcard-handler",
             )
         )
         engine.freeze()
@@ -4798,7 +4807,7 @@ class TestEventTypeRouting:
                 route_id="route",
                 topic_pattern="*.node.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         engine.freeze()
@@ -4923,7 +4932,7 @@ class TestDispatchDlqRouting:
                 route_id="route",
                 topic_pattern="*.user.events.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id="handler",
+                handler_id="handler",
             )
         )
         engine.freeze()
@@ -5118,7 +5127,7 @@ async def test_sync_dispatcher_receives_copied_typed_context() -> None:
             route_id="context-copy-proof",
             topic_pattern=topic,
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id="context-copy-proof",
+            handler_id="context-copy-proof",
         )
     )
     engine.freeze()

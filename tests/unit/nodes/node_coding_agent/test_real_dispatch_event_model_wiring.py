@@ -184,7 +184,7 @@ class TestRealDispatchRehydratesTypedEnvelope:
                 route_id="route.coding-agent-orchestrator",
                 topic_pattern="*.cmd.omnibase-infra.coding-agent-invoke.*",
                 message_category=EnumMessageCategory.COMMAND,
-                dispatcher_id="coding-agent-orchestrator",
+                handler_id="coding-agent-orchestrator",
             )
         )
         engine.freeze()

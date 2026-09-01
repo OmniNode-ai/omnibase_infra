@@ -118,7 +118,7 @@ def _frozen_engine_for(handler: object, dispatcher_id: str) -> MessageDispatchEn
             route_id=f"{dispatcher_id}-route",
             topic_pattern="*.evt.platform.node-heartbeat.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id=dispatcher_id,
+            handler_id=dispatcher_id,
         )
     )
     engine.freeze()

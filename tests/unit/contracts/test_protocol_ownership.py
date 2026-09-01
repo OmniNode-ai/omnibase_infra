@@ -147,6 +147,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolApplicationDatabaseRoleAttributeState": "validation/application_database_acl.py",  # [DI] OMN-15355 shared read-only role-attribute shape for generated ACL policy and observed catalog state
     "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
     "ProtocolDelegationDispatchPort": "runtime/protocols/protocol_delegation_dispatch_port.py",  # [RUNTIME] OMN-E0 delegation dispatch port interface — infra-internal, narrows dispatch surface for handler injection
+    "ProtocolFirstEffectLedger": "runtime/first_effect_ledger/protocol.py",  # [RUNTIME] durable observation-ledger boundary; it cannot publish or authorize an effect
+    "ProtocolTransactionalFirstEffectOutbox": "runtime/first_effect_ledger/composition.py",  # [RUNTIME] injected atomic outbox stager required for first-effect composition; Infra remains observation-only
     # OMN-13445: the 5 ProtocolLocalRuntime* protocols relocated to
     # omnibase_core.protocols.runtime (Phase 1b, OMN-13444 / core #1296). Infra's
     # copies were deleted, so they are no longer infra-owned protocols.

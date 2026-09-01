@@ -83,6 +83,8 @@ IS_CI = is_ci_environment()
 pytestmark = [
     pytest.mark.performance,
     pytest.mark.llm,
+    pytest.mark.slow,
+    pytest.mark.asyncio(loop_scope="class"),
     pytest.mark.skipif(
         IS_CI, reason="Requires real LLM inference endpoints on local network"
     ),

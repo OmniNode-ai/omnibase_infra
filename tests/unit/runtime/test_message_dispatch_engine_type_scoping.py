@@ -63,7 +63,7 @@ def _register_shared_topic_route(
             route_id=f"route.{dispatcher_id}",
             topic_pattern="*.cmd.test-service.shared-command.*",
             message_category=EnumMessageCategory.COMMAND,
-            dispatcher_id=dispatcher_id,
+            handler_id=dispatcher_id,
         )
     )
 

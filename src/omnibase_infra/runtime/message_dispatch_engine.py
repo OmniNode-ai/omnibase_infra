@@ -281,28 +281,6 @@ DispatcherOutput = str | list[str] | None | ModelDispatchResult
 _module_logger = logging.getLogger(__name__)
 
 
-def _get_route_dispatcher_id(route: object) -> str:
-    """Return the dispatcher/handler ID from a route model.
-
-    OMN-4057: omnibase_core's ``ModelDispatchRoute`` uses ``handler_id`` while
-    omnibase_infra's uses ``dispatcher_id``.  This helper resolves either field
-    so that both old and new omniclaude plugin releases work correctly.
-
-    Once omnibase_core publishes a release with a ``dispatcher_id`` property
-    this shim can be removed.
-    """
-    # Prefer dispatcher_id (infra model), fall back to handler_id (core model)
-    dispatcher_id: str | None = getattr(route, "dispatcher_id", None)
-    if dispatcher_id is not None:
-        return dispatcher_id
-    handler_id: str | None = getattr(route, "handler_id", None)
-    if handler_id is not None:
-        return handler_id
-    route_id: str = getattr(route, "route_id", "<unknown>")
-    msg = f"Route '{route_id}' has neither dispatcher_id nor handler_id"
-    raise AttributeError(msg)
-
-
 def _find_duplicate_identifiers(values: Collection[str]) -> frozenset[str]:
     """Return identifiers repeated within one claimed registration boundary."""
     seen: set[str] = set()
@@ -555,7 +533,7 @@ class MessageDispatchEngine:
         ...     route_id="user-route",
         ...     topic_pattern="*.user.events.*",
         ...     message_category=EnumMessageCategory.EVENT,
-        ...     dispatcher_id="user-dispatcher",
+        ...     handler_id="user-dispatcher",
         ... ))
         >>> engine.freeze()
         >>>
@@ -653,7 +631,7 @@ class MessageDispatchEngine:
             ModelOnexError: If engine is frozen (INVALID_STATE)
             ModelOnexError: If route is None (INVALID_PARAMETER)
             ModelOnexError: If route with same route_id exists (DUPLICATE_REGISTRATION)
-            ModelOnexError: If route.dispatcher_id references non-existent dispatcher
+            ModelOnexError: If route.handler_id references non-existent dispatcher
                 (ITEM_NOT_REGISTERED) - only checked after freeze
 
         Example:
@@ -661,7 +639,7 @@ class MessageDispatchEngine:
             ...     route_id="order-events",
             ...     topic_pattern="*.order.events.*",
             ...     message_category=EnumMessageCategory.EVENT,
-            ...     dispatcher_id="order-dispatcher",
+            ...     handler_id="order-dispatcher",
             ... ))
 
         Note:
@@ -696,7 +674,7 @@ class MessageDispatchEngine:
                 route.route_id,
                 route.topic_pattern,
                 route.message_category,
-                _get_route_dispatcher_id(route),
+                route.handler_id,
             )
 
     # --- @overload stubs for static type safety ---
@@ -823,7 +801,7 @@ class MessageDispatchEngine:
 
         Note:
             Dispatchers are NOT automatically linked to routes. You must register
-            routes separately that reference the dispatcher_id.
+            routes separately that reference the handler_id.
 
         .. versionchanged:: 0.5.0
             Added ``node_kind`` parameter for time injection context support.
@@ -987,7 +965,7 @@ class MessageDispatchEngine:
 
             # Validate all routes reference existing dispatchers
             for route in self._routes.values():
-                rid = _get_route_dispatcher_id(route)
+                rid = route.handler_id
                 if rid not in self._dispatchers:
                     raise ModelOnexError(
                         message=f"Route '{route.route_id}' references dispatcher "
@@ -1086,7 +1064,7 @@ class MessageDispatchEngine:
                     "Cannot register duplicate route ID.",
                     error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
                 )
-            rid = _get_route_dispatcher_id(route)
+            rid = route.handler_id
             if rid not in self._dispatchers:
                 raise ModelOnexError(
                     message=f"Route '{route.route_id}' references dispatcher "
@@ -1712,7 +1690,7 @@ class MessageDispatchEngine:
         for route in self._routes.values():
             if (
                 dispatcher_scope is not None
-                and _get_route_dispatcher_id(route) not in dispatcher_scope
+                and route.handler_id not in dispatcher_scope
             ):
                 continue
             if route.matches(topic, topic_category, message_type):
@@ -2039,7 +2017,7 @@ class MessageDispatchEngine:
                 continue
 
             # Get the dispatcher for this route
-            dispatcher_id = _get_route_dispatcher_id(route)
+            dispatcher_id = route.handler_id
             if (
                 allowed_dispatcher_ids is not None
                 and dispatcher_id not in allowed_dispatcher_ids

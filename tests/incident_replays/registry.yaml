@@ -32,6 +32,9 @@ scope:
   # obligation. An entry whose file does not exist yet reports PENDING rather
   # than failing, which is how a requirement is armed BEFORE the guard lands.
   required_guards:
+    # omnibase_infra#3087: an internal projection/recorder-shaped grant path
+    # could mint VERIFIED authority without verifier ingress or pin equality.
+    - scripts/validation/validate_verified_grant_ingress_boundary.py
     # The .201 system-health alert. Incident OMN-15525: a 63-byte synthetic
     # HEALTHY_BODY hid a 180-byte pre-parse truncation, so a 654-line suite was
     # green while the deployed artifact paged CRITICAL on a healthy fleet.
@@ -171,6 +174,22 @@ cases:
     captured_by: lane replay (OMN-17335)
     test: tests/scripts/test_reconcile_uv_privilege_omn17335.py::test_the_shipped_reconciler_that_resolved_uv_from_path_only_is_rejected
     why: 'The artifact is the verbatim venv reconciler as it shipped on dev at 1b66d58f -- the code the `.201` maintenance cron actually ran. Line 210 is the whole defect: `UV_BIN="$(command -v uv 2>/dev/null || true)"`, then INDETERMINATE on an empty result. The cron.d unit pins PATH to /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, which cannot reach a user-local install by construction, so the reconciler refused every hour on a host where uv 0.11.5 was installed the whole time at ~/.local/bin/uv (verified live: `sudo /home/<owner>/.local/bin/uv --version` -> uv 0.11.5, and the venv''s own pyvenv.cfg records `uv = 0.11.5`). The ticket filed against the refusal then re-ran the same PATH-shaped probe over ssh, got the same empty answer, and concluded the tool was not installed on the machine at all -- an empty result promoted to evidence of absence, twice, inside the family of scripts built to stop exactly that. This file was reviewed, merged and scheduled with nothing objecting. The case drives the real gate over these exact bytes and requires it to say no.'
+  - id: omn3087-verified-grant-projection-recorder-bypass
+    guard: scripts/validation/validate_verified_grant_ingress_boundary.py
+    incident: OmniNode-ai/omnibase_infra#3087
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn3087/issue-3087.gh-api.json.captured
+      sha256: 4f51200d71c18ca9177ee221684ebe8a940b8ccd73c75ec9bd3777c6673f5885
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omnibase_infra/issues/3087
+      captured_at: "2026-08-31T22:12:55Z"
+      captured_by: omnibase_infra#3087 incident replay
+    test: tests/ci/test_incident_replay_omn3087.py::test_captured_projection_recorder_bypass_is_rejected_by_the_real_boundary_guard
+    why: >-
+      During the RSD durable first-effect integration, review found that an internal projection/recorder-shaped construction path could create a VERIFIED authority record without accepting the raw signed wire at the trusted ingress and checking its exact deployment output pin. That is a false-green boundary failure: route and ledger checks can be green while an internal capability still mints authority outside verifier composition. The artifact is GitHub's verbatim public incident record, fetched from the immutable issue endpoint at capture time; it identifies the observed capability identifiers without publishing executable bypass code or any runtime data. The replay reads those identifiers from the capture, builds the corresponding source-level capability shape, and drives the actual AST boundary validator. It must reject every identifier. The current production source is separately scanned by the same validator, so a blanket-accepting implementation fails this replay and a reintroduced capability fails the pre-commit boundary.
   - id: omn17320-slug-reintroduced-with-every-gate-green
     guard: scripts/validation/check_exposed_identifiers.py
     incident: OMN-17288
