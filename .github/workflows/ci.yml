@@ -1493,6 +1493,18 @@ jobs:
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
+          until uv pip install -e ../omnibase_compat -e ../omnimarket; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install schema-handshake local sibling deps failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            delay=$((attempt * 10))
+            echo "::warning::uv pip install schema-handshake local sibling deps attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            attempt=$((attempt + 1))
+            sleep "${delay}"
+          done
+          attempt=1
           until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
@@ -3607,6 +3619,17 @@ jobs:
           echo "omnimarket @ file://$(pwd)/../omnimarket" >> /tmp/sibling-overrides.txt
           attempt=1
           max_attempts=5
+          until uv pip install -e ../omnibase_compat -e ../omnimarket; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install local sibling deps failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            echo "::warning::uv pip install local sibling deps attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in 10s"
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          attempt=1
           until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
