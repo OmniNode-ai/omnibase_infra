@@ -163,7 +163,7 @@ cases:
     guard_verdict_on_artifact: reject
     artifact:
       fixture: tests/fixtures/omn17534/deploy-onex-staging-33609666720.rollout-diagnostics.log.captured
-      sha256: 4dd041f6654137e47a6d65b3775b05ee57536a765fb4a89e6c2748654ddf881c
+      sha256: 199d6cbc891c15838e37f2482868bd6c87d011a688a795116759f73c4b8dd9ea
     capture:
       method: gh-api
       source: gh-api:repos/OmniNode-ai/omninode_infra/actions/jobs/100181796582/logs
