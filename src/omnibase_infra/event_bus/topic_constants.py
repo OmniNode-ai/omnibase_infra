@@ -117,7 +117,7 @@ DLQ_CATEGORY_SUFFIXES: Final[dict[str, str]] = {
 # - version: v followed by digits (e.g., v1, v2)
 
 DLQ_TOPIC_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^(?P<prefix>[\w-]+)\.dlq\.(?:(?P<producer>omnibase-infra)\.)?(?P<category>[a-z][a-z0-9_-]*)\.(?P<version>v\d+)$",
+    r"^(?P<prefix>[\w-]+)\.dlq\.(?:(?P<producer>[a-z][a-z0-9_-]*)\.)?(?P<category>[a-z][a-z0-9_-]*)\.(?P<version>v\d+)$",
     re.IGNORECASE,
 )
 """
@@ -126,8 +126,8 @@ Regex pattern for validating DLQ topic names.
 Groups:
     - prefix: Topic prefix (canonical: 'onex'; legacy env prefixes also matched
       for backward-compatible parsing)
-    - producer: DLQ producer segment (canonical: 'omnibase-infra'; absent for
-      legacy four-segment topics)
+    - producer: DLQ producer segment (e.g. 'omnibase-infra', 'omnimarket';
+      absent for legacy four-segment topics)
     - category: DLQ category (intents, events, commands, intelligence, platform, etc.)
     - version: Topic version (e.g., 'v1')
 
@@ -137,6 +137,7 @@ Example matches:
     - onex.dlq.omnibase-infra.commands.v2
     - onex.dlq.omnibase-infra.intelligence.v1
     - onex.dlq.omnibase-infra.platform.v1
+    - onex.dlq.omnimarket.adversarial-pipeline.v1
 
 .. versionchanged:: 0.7.0
     Expanded category pattern from ``intents|events|commands`` to any
@@ -145,6 +146,16 @@ Example matches:
 .. versionchanged:: 0.21.0
     OMN-5189: DLQ topics now use fixed ``onex`` prefix. Pattern still accepts
     any alphanumeric prefix for backward-compatible parsing of legacy topics.
+
+.. versionchanged:: 0.38.17
+    OMN-17497: the ``producer`` group accepts ANY producer segment, not only
+    the ``omnibase-infra`` literal. Hardcoding one repo's name made
+    ``is_dlq_topic()`` answer ``False`` for every ``onex.dlq.omnimarket.*``
+    sink -- 15+ of which are declared live in omnimarket contracts -- so any
+    caller keyed on "is this a DLQ topic" silently excluded most of the
+    platform's real DLQ traffic. The ``dlq`` DOMAIN segment is what makes a
+    topic a DLQ topic; the producer segment names its owner and was never
+    meant to be an allowlist of one.
 """
 
 # ==============================================================================
