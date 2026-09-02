@@ -31,7 +31,6 @@ EMIT_ACTION = REPO_ROOT / ".github" / "actions" / "emit-runner-identity" / "acti
 SETUP_ACTION = REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
-CANARY_DOC = REPO_ROOT / "docs" / "ci" / "versioned-ci-env-canary.md"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -228,12 +227,3 @@ def test_release_workflow_verifies_or_bumps_runner_image_identity() -> None:
     assert "runner_image_identity.py" in blob, (
         "release must verify/bump the bound runner image identity"
     )
-
-
-def test_canary_doc_enumerates_mutating_jobs_and_zero_sync_happy_path() -> None:
-    doc = CANARY_DOC.read_text(encoding="utf-8")
-    assert "versioned **runner image contract**" in doc
-    # Mutating jobs are enumerated and must opt out explicitly.
-    assert "compliance" in doc
-    assert 'shared-env-enabled: "false"' in doc
-    assert "zero `uv sync`" in doc or "zero uv sync" in doc

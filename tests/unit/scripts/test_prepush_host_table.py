@@ -40,6 +40,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
 LIB = REPO_ROOT / "scripts" / "hooks" / "prepush_dispatch.sh"
 TABLE = REPO_ROOT / "scripts" / "hooks" / "prepush_hosts.tsv"
+#: Where the host-table runbook lives after OMN-16607 moved this repo's prose
+#: into the knowledge bases. Operator-facing surfaces cite it by this exact
+#: reference; see test_the_dangling_runbook_pointer_is_gone.
+KB_HOST_TABLE_RUNBOOK = (
+    "knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md"
+)
 
 pytestmark = pytest.mark.unit
 
@@ -1025,16 +1031,38 @@ def test_the_escalation_argv_stays_a_superset_of_the_narrow_selection() -> None:
 
 def test_the_dangling_runbook_pointer_is_gone() -> None:
     """The die() text cited docs/runbooks/200-build-lane-execution-pattern.md
-    for months; that file has never existed in this repo (OMN-16446)."""
-    for path in (
+    for months; that file has never existed in this repo (OMN-16446).
+
+    The replacement pointer must still resolve. OMN-16607 moved this repo's
+    prose into the knowledge bases, so the host table's runbook now lives at
+    knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md
+    and every surface that tells an operator where to go must cite it by that
+    exact reference -- a half-renamed citation is the same dangling pointer
+    this test was written to catch, just spelled differently.
+    """
+    surfaces = (
         HOOK,
         LIB,
         REPO_ROOT / "scripts" / "hooks" / "pytest_full_suite_host_guard.py",
-    ):
+    )
+    for path in surfaces:
         assert "200-build-lane-execution-pattern" not in path.read_text(
             encoding="utf-8"
         ), f"{path} still cites a runbook that does not exist"
-    assert (REPO_ROOT / "docs" / "runbooks" / "lab-prepush-host-table.md").is_file()
+        assert "docs/runbooks/lab-prepush-host-table.md" not in path.read_text(
+            encoding="utf-8"
+        ), f"{path} still cites the pre-OMN-16607 in-repo path"
+
+    cited = [
+        path
+        for path in surfaces
+        if KB_HOST_TABLE_RUNBOOK in path.read_text(encoding="utf-8")
+    ]
+    assert cited, (
+        "no operator-facing surface cites "
+        f"{KB_HOST_TABLE_RUNBOOK}; an operator told to 'see the runbook' has "
+        "nowhere to go"
+    )
 
 
 def test_an_unusable_workroot_is_reported_as_infrastructural_not_contention(

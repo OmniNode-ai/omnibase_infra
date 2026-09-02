@@ -15,7 +15,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 BASE_COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 OVERLAY_FILE = REPO_ROOT / "docker" / "docker-compose.stability-test.yml"
 RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
-RUNBOOK_FILE = REPO_ROOT / "docs" / "runbooks" / "stability-test-runtime-lane.md"
 
 # OMN-14013: the durable, committed partition-cap value for the stability-test
 # lane. This is deliberately ABOVE the base redpanda.yaml default (7000) --
@@ -611,24 +610,3 @@ def test_stability_lane_volumes_do_not_reuse_production_names() -> None:
         assert "stability-test" in concrete_name, volume_name
 
     assert len(concrete_names) == len(set(concrete_names))
-
-
-@pytest.mark.unit
-def test_stability_runbook_is_validation_only() -> None:
-    """OMN-16307 (commit eee34b5c2, PR #2891) thinned this runbook to a
-    knowledge-base pointer stub. The validation-only prose this test used to
-    check line-by-line now lives in knowledge-base, out of this repo's test
-    authority (OMN-16556). What this repo can still assert: the legacy
-    operational claims the original runbook explicitly disclaimed must never
-    resurface locally, and the stub must genuinely point somewhere real
-    rather than just being empty or broken.
-    """
-    runbook = RUNBOOK_FILE.read_text(encoding="utf-8")
-
-    assert "install-infra-watchdog" not in runbook
-    assert "systemctl" not in runbook
-    assert "`.201`" not in runbook
-
-    assert "knowledge base" in runbook.lower()
-    assert "https://github.com/OmniNode-ai/knowledge-base" in runbook
-    assert "stability-test-runtime-lane" in runbook
