@@ -226,6 +226,36 @@ x-lakshman-runtime-env: &lakshman-runtime-env
   QDRANT_PORT: "6333"
   QDRANT_API_KEY: ""
   KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+# =============================================================================
+# STRICT AUTO-WIRING (OMN-17531)
+# =============================================================================
+# `ONEX_WIRING_STRICT_MODE` is `${ONEX_WIRING_STRICT_MODE:-0}` in
+# docker-compose.infra.yml, and until OMN-17531 NO lane overlay bound it. This
+# lane is standalone (it does not merge that base), so before this block it had
+# no binding for the key at all and the runtime read it as absent, i.e. the
+# quarantining semantics. At `0`/absent a handler the resolver cannot construct
+# is quarantined and the runtime still reports healthy; at `1` it re-raises and
+# kills boot. onex-dev (staging) binds `"1"` on all three runtime Deployments.
+#
+# Three defects of exactly one class reached staging before anyone saw them for
+# that reason -- OMN-15623, OMN-17502, OMN-17510 -- each then diagnosed from pod
+# logs over an SSM port-forward, serialized on the one staging cluster.
+#
+# Literal `"1"`, NOT `${ONEX_WIRING_STRICT_MODE:-1}`: an interpolated form lets
+# an exported shell variable silently return the lane to the quarantining
+# semantics, which is the failure mode this binding exists to remove.
+#
+# Bound on the two runtime services (main/effects), mirroring onex-dev. This
+# lane runs no runtime-worker. It is NOT merged into the shared
+# `x-lakshman-runtime-env` anchor because projection-api merges that anchor too
+# and is a uvicorn read-model server that never runs the auto-wiring kernel.
+#
+# LANE OWNERSHIP: this lane is Lakshman's and is mutable by him alone
+# (OMN-17150 / OMN-17143). This commit changes the committed source only; the
+# lane is NOT restarted by whoever lands this. The apply recipe is handed to
+# its owner on OMN-17150.
+x-lakshman-strict-wiring-env: &lakshman-strict-wiring-env
+  ONEX_WIRING_STRICT_MODE: "1"
 services:
   postgres:
     image: postgres:16-alpine
@@ -451,7 +481,7 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      !!merge <<: *lakshman-runtime-env
+      !!merge <<: [*lakshman-runtime-env, *lakshman-strict-wiring-env]
       RUNTIME_PROFILE: main
       OTEL_SERVICE_NAME: omninode-lakshman-runtime-main
       ONEX_RUNTIME_ID: lakshman-main
@@ -495,7 +525,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      !!merge <<: *lakshman-runtime-env
+      !!merge <<: [*lakshman-runtime-env, *lakshman-strict-wiring-env]
       RUNTIME_PROFILE: effects
       OTEL_SERVICE_NAME: omninode-lakshman-runtime-effects
       ONEX_RUNTIME_ID: lakshman-effects
