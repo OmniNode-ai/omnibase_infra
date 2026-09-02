@@ -1270,9 +1270,10 @@ class TestDocsOnlySkipTierOmn16661:
 
     Operator ruling: a Markdown / badge / README PR must not pay for the heavy
     code-verification suite, while the doc gates keep running. Measured on the
-    real merged docs-only PR #2906 (head ``0c86fd00``, files = ``knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md``
-    + ``docs/**``): **350 runner-minutes**, the heaviest docs-only PR cost in the
-    registry. The five jobs in this tier are Pydantic-round-trip / DB-schema /
+    real merged docs-only PR #2906 (head ``0c86fd00``, files = ``docker/README.md``
+    + ``docs/**`` — the paths as they existed then; both trees were migrated out of
+    this repo by OMN-16607): **350 runner-minutes**, the heaviest docs-only PR cost
+    in the registry. The five jobs in this tier are Pydantic-round-trip / DB-schema /
     effect-shape proofs over ``src/`` + Docker — none can change verdict when only
     Markdown moved.
 
