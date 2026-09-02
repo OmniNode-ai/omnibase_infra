@@ -665,17 +665,21 @@ _SYNTHETIC_TABLE_MULTISLOT = (
 
 
 def test_the_shipped_slots_column_is_pinned(table_repo: Path) -> None:
-    """h105 alone declares a second slot; every other row stays slots=1.
+    """h105 and h101 declare a second slot; every other row stays slots=1.
 
     Widening a row's capacity is exactly the kind of change this file exists
     to force through a reviewed, deliberate test edit (same reasoning as the
-    mode-promotion pins above)."""
+    mode-promotion pins above). h101 went 1 -> 2 under OMN-17561: measured
+    load1 3.37/12 = 0.28x with six lanes queued for a placement host while
+    h105 (slots=2) was unreachable, h200 was over threshold, and hcloud was
+    stopped -- the same conservative doubling already proven on h105
+    (OMN-17269)."""
     slots = {r[0]: r[9] for r in _rows()}
     assert slots == {
         "h200": "1",
         "h201": "1",
         "h201c": "1",
-        "h101": "1",
+        "h101": "2",
         "h105": "2",
         "hcloud": "1",
     }
@@ -695,6 +699,21 @@ def test_slot_one_keeps_the_bare_label_not_a_dot_one_suffix(
     )
     assert "PICK=h105" in out, out
     assert "PICK=h105.1" not in out, out
+
+
+def test_h101_second_slot_places_while_first_slot_is_busy(table_repo: Path) -> None:
+    """OMN-17561: h101's second slot must be independently placeable on the
+    REAL shipped table while slot 1 is held, mirroring the h105 slots=2
+    coverage above but proving it for h101's own row and cores (12, not
+    h105's 10), not only the generic synthetic `hm` fixture."""
+    out = _pick(
+        table_repo,
+        load="h101.2=0.30",
+        slot="h101=busy,h101.2=free",
+        uv="h101.2=0.12.7",
+    )
+    assert "PICK=h101.2" in out, out
+    assert "h101=busy" in out, out
 
 
 def test_both_slots_busy_is_a_placement_miss(tmp_path: Path) -> None:
