@@ -64,6 +64,7 @@ import json
 import logging
 import os
 import socket
+import threading
 import time
 import traceback
 import uuid
@@ -122,6 +123,32 @@ ARTIFACT_STORE_DIR_NAME = "artifacts"
 _EMIT_TIMEOUT_SECONDS = 2.0
 
 _MAX_EMIT_RESPONSE_BYTES = 65536
+
+
+# Receipt mode intentionally owns process-global logging, environment, and
+# stdout for the duration of a dispatch.  A process-local lock makes that
+# ownership exclusive when callers dispatch more than one receipt in-process.
+class ReceiptModeLockState:
+    """Mutable holder so an after-fork hook can replace the inherited lock."""
+
+    lock = threading.RLock()
+
+
+_RECEIPT_MODE_LOCK_STATE = ReceiptModeLockState()
+
+
+def _reset_receipt_mode_lock_after_fork() -> None:
+    """Give a forked child a lock not held by a vanished parent thread."""
+    _RECEIPT_MODE_LOCK_STATE.lock = threading.RLock()
+
+
+def _register_receipt_mode_lock_at_fork(registrar: object) -> None:
+    """Register the child-lock reset when the platform exposes a registrar."""
+    if callable(registrar):
+        registrar(after_in_child=_reset_receipt_mode_lock_after_fork)
+
+
+_register_receipt_mode_lock_at_fork(getattr(os, "register_at_fork", None))
 
 _WORKFLOW_TO_STATUS: dict[EnumWorkflowResult, EnumSkillResultStatus] = {
     EnumWorkflowResult.COMPLETED: EnumSkillResultStatus.SUCCESS,
@@ -299,23 +326,31 @@ def _skill_completed_payload(
     }
 
 
-def _configure_capture_logging(capture_path: Path, *, verbose: bool) -> None:
+def _configure_capture_logging(capture_path: Path, *, verbose: bool) -> logging.Handler:
     """Route ALL logging to ``capture_path``; install no console handlers.
 
-    ``force=True`` removes any pre-existing root handlers so the runtime
-    INFO stream can never leak to stdout/stderr in receipt mode (F7).
+    Existing root handlers are detached, not closed: the receipt-mode wrapper
+    restores them after this invocation.  That preserves a host process's
+    logging configuration while still ensuring runtime INFO cannot leak to
+    stdout/stderr in receipt mode (F7).
     """
     capture_path.parent.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
-        datefmt="%H:%M:%S",
-        handlers=[logging.FileHandler(capture_path, encoding="utf-8")],
-        force=True,
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    capture_handler = logging.FileHandler(capture_path, encoding="utf-8")
+    capture_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+            datefmt="%H:%M:%S",
+        )
     )
+    root.setLevel(logging.DEBUG if verbose else logging.INFO)
+    root.addHandler(capture_handler)
+    return capture_handler
 
 
-def _close_capture_logging() -> None:
+def _close_capture_logging(capture_handler: logging.Handler) -> None:
     """Flush and close all root handlers, then install a ``NullHandler``.
 
     The ``NullHandler`` prevents Python's ``lastResort`` handler from leaking
@@ -324,10 +359,9 @@ def _close_capture_logging() -> None:
     their own ``spool_reason``, so the dropped log line loses nothing.
     """
     root = logging.getLogger()
-    for handler in list(root.handlers):
-        handler.flush()
-        handler.close()
-        root.removeHandler(handler)
+    root.removeHandler(capture_handler)
+    capture_handler.flush()
+    capture_handler.close()
     root.addHandler(logging.NullHandler())
 
 
@@ -370,6 +404,25 @@ def _format_dispatch_target(decision: ModelDelegateLocusDecision) -> str:
         f"{decision.command_topic} via {decision.broker}; live consumers: "
         + ", ".join(decision.lane_consumer_groups)
     )
+
+
+def _restore_root_logging_state(
+    original_handlers: list[logging.Handler],
+    original_level: int,
+    original_disabled: bool,
+) -> None:
+    """Restore root logging without closing handlers owned by the host process."""
+    root = logging.getLogger()
+    original_handler_ids = {id(handler) for handler in original_handlers}
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        if id(handler) not in original_handler_ids:
+            handler.flush()
+            handler.close()
+    for handler in original_handlers:
+        root.addHandler(handler)
+    root.setLevel(original_level)
+    root.disabled = original_disabled
 
 
 def _fully_qualified_name(obj: object) -> str:
@@ -655,6 +708,85 @@ def run_receipt_mode(
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
 ) -> int:
+    """Serialize receipt mode and restore its process-global state on exit."""
+    with _RECEIPT_MODE_LOCK_STATE.lock:
+        root = logging.getLogger()
+        original_handlers = list(root.handlers)
+        original_level = root.level
+        original_disabled = root.disabled
+        previous_onex_state_dir = os.environ.get("ONEX_STATE_DIR")
+        previous_artifact_store_root = os.environ.get(ARTIFACT_STORE_ROOT_ENV)
+        operation_error: BaseException | None = None
+        try:
+            return _run_receipt_mode(
+                node_name=node_name,
+                contract_path=contract_path,
+                input_path=input_path,
+                state_root=state_root,
+                backend_overrides=backend_overrides,
+                timeout=timeout,
+                verbose=verbose,
+                emit_socket=emit_socket,
+                expected_correlation_id=expected_correlation_id,
+                receipt_callback=receipt_callback,
+                host_handlers=host_handlers,
+                locus_decision=locus_decision,
+            )
+        except BaseException as exc:
+            operation_error = exc
+            raise
+        finally:
+            cleanup_errors: list[BaseException] = []
+            cleanup_actions: tuple[Callable[[], None], ...] = (
+                lambda: _restore_root_logging_state(
+                    original_handlers, original_level, original_disabled
+                ),
+                lambda: _restore_environment_value(
+                    "ONEX_STATE_DIR", previous_onex_state_dir
+                ),
+                lambda: _restore_environment_value(
+                    ARTIFACT_STORE_ROOT_ENV, previous_artifact_store_root
+                ),
+            )
+            for cleanup_action in cleanup_actions:
+                try:
+                    cleanup_action()
+                except BaseException as exc:  # noqa: BLE001 - preserve the operation error
+                    cleanup_errors.append(exc)
+            if cleanup_errors:
+                if operation_error is not None:
+                    for cleanup_error in cleanup_errors:
+                        operation_error.add_note(
+                            "receipt-mode cleanup failed after the operation "
+                            f"raised: {type(cleanup_error).__name__}: {cleanup_error}"
+                        )
+                else:
+                    raise cleanup_errors[0]
+
+
+def _restore_environment_value(name: str, previous_value: str | None) -> None:
+    """Restore one receipt-mode environment variable to its exact prior state."""
+    if previous_value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = previous_value
+
+
+def _run_receipt_mode(
+    *,
+    node_name: str,
+    contract_path: Path,
+    input_path: Path | None,
+    state_root: Path,
+    backend_overrides: dict[str, str],
+    timeout: int,
+    verbose: bool,
+    emit_socket: Path,
+    expected_correlation_id: uuid.UUID | None = None,
+    receipt_callback: Callable[[object], None] | None = None,
+    host_handlers: bool = True,
+    locus_decision: ModelDelegateLocusDecision | None = None,
+) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
 
     ``host_handlers`` (OMN-17304) selects the runtime's role. ``True`` (the
@@ -692,7 +824,7 @@ def run_receipt_mode(
     session_id = os.environ.get(_SESSION_ID_ENV) or None
     capture_path = state_root / CAPTURE_DIR_NAME / f"{node_name}-{run_id}.log"
     spool_dir = state_root / SPOOL_DIR_NAME
-    _configure_capture_logging(capture_path, verbose=verbose)
+    capture_handler = _configure_capture_logging(capture_path, verbose=verbose)
 
     # --- Skill lifecycle: skill-started (before the body runs) -------------
     # Emitted through the SAME emit daemon socket as the capture events; the
@@ -769,7 +901,7 @@ def run_receipt_mode(
             os.environ["ONEX_STATE_DIR"] = previous_onex_state_dir
     duration_ms = int((time.monotonic() - started) * 1000)
 
-    _close_capture_logging()
+    _close_capture_logging(capture_handler)
     capture_text = (
         capture_path.read_text(encoding="utf-8") if capture_path.exists() else ""
     )
