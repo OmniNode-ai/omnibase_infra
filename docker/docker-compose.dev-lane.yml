@@ -130,6 +130,41 @@ x-dev-lane-logging: &dev_lane_logging
     max-file: "3"
 x-dev-lane-analytics-env: &dev_lane_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set — the lab lane connects to omnidash_analytics as the non-BYPASSRLS role_omnidash (OMN-15363), never as the postgres superuser}@postgres:5432/omnidash_analytics"
+# =============================================================================
+# STRICT AUTO-WIRING (OMN-17531)
+# =============================================================================
+# `ONEX_WIRING_STRICT_MODE` is `${ONEX_WIRING_STRICT_MODE:-0}` in
+# docker-compose.infra.yml, and until OMN-17531 NO lane overlay bound it. At `0`
+# a handler the resolver cannot construct is quarantined and the runtime still
+# reports healthy; at `1` it re-raises and kills boot. onex-dev (staging) binds
+# `"1"` on all three runtime Deployments, so every lab lane was running the
+# weaker of the two semantics and could not reproduce a staging boot failure.
+#
+# Three defects of exactly one class reached staging before anyone saw them for
+# that reason -- OMN-15623, OMN-17502, OMN-17510 -- each then diagnosed from pod
+# logs over an SSM port-forward, serialized on the one staging cluster.
+#
+# Literal `"1"`, NOT `${ONEX_WIRING_STRICT_MODE:-1}`: same reason as
+# BIFROST_CONTRACT_PATH (OMN-12864). An interpolated form lets an operator who
+# exported the variable in their shell silently return this lane to the
+# quarantining semantics, which is the failure mode this binding exists to
+# remove. Downgrading the flag, allowlisting a contract or widening a
+# quarantine branch to make a lane green is explicitly forbidden by
+# OMN-17531 AC-4 -- a lane that fails here has found a real defect and the
+# failure is filed as its own ticket.
+#
+# WHY THE LANE OVERLAY AND NOT THE BASE
+# -------------------------------------
+# The base file's `:-0` stays as it is. prod and judge merge that base and are
+# out of OMN-17531's scope (judge is declared read-only, prod is not touched),
+# so flipping the base default would silently move two lanes this ticket has no
+# mandate over. Each in-scope lane opts in explicitly, here.
+#
+# Bound on the runtime services only (main/effects/worker), mirroring onex-dev.
+# projection-api and omninode-contract-resolver are uvicorn servers that never
+# run the auto-wiring kernel, so the flag would be inert there.
+x-dev-lane-strict-wiring-env: &dev_lane_strict_wiring_env
+  ONEX_WIRING_STRICT_MODE: "1"
 services:
   forward-migration:
     environment:
@@ -143,16 +178,16 @@ services:
       - "com.omninode.ticket=OMN-15379"
   omninode-runtime:
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
   runtime-effects:
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
   projection-api:
     environment:
       !!merge <<: *dev_lane_analytics_env
   runtime-worker:
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
   omninode-contract-resolver:
     environment:
       !!merge <<: *dev_lane_analytics_env

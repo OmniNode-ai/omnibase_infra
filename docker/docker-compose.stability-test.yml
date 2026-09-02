@@ -24,6 +24,34 @@ x-omninode-contract-overlay:
     advertised_pandaproxy_addr: &stability_test_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://100.109.203.94:28082"
     kafka_port_publish: &stability_test_redpanda_kafka_port_publish "39092:19092"
     admin_port_publish: &stability_test_redpanda_admin_port_publish "29644:9644"
+# =============================================================================
+# STRICT AUTO-WIRING (OMN-17531)
+# =============================================================================
+# `ONEX_WIRING_STRICT_MODE` is `${ONEX_WIRING_STRICT_MODE:-0}` in
+# docker-compose.infra.yml, and until OMN-17531 NO lane overlay bound it. At `0`
+# a handler the resolver cannot construct is quarantined and the runtime still
+# reports healthy; at `1` it re-raises and kills boot. onex-dev (staging) binds
+# `"1"` on all three runtime Deployments, so every lab lane was running the
+# weaker of the two semantics and could not reproduce a staging boot failure.
+#
+# Three defects of exactly one class reached staging before anyone saw them for
+# that reason -- OMN-15623, OMN-17502, OMN-17510 -- each then diagnosed from pod
+# logs over an SSM port-forward, serialized on the one staging cluster.
+#
+# Literal `"1"`, NOT `${ONEX_WIRING_STRICT_MODE:-1}`: same reason as
+# BIFROST_CONTRACT_PATH (OMN-12864). An interpolated form lets an operator who
+# exported the variable in their shell silently return this lane to the
+# quarantining semantics, which is the failure mode this binding exists to
+# remove. Downgrading the flag, allowlisting a contract or widening a
+# quarantine branch to make a lane green is explicitly forbidden by
+# OMN-17531 AC-4 -- a lane that fails here has found a real defect and the
+# failure is filed as its own ticket.
+#
+# Bound on the runtime services only (main/effects/worker), mirroring onex-dev.
+# projection-api and omninode-contract-resolver are uvicorn servers that never
+# run the auto-wiring kernel, so the flag would be inert there.
+x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
+  ONEX_WIRING_STRICT_MODE: "1"
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -128,6 +156,7 @@ services:
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
+      !!merge <<: *stability_test_strict_wiring_env
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
@@ -212,6 +241,7 @@ services:
       migration-gate:
         condition: service_healthy
     environment:
+      !!merge <<: *stability_test_strict_wiring_env
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
@@ -307,6 +337,7 @@ services:
       migration-gate:
         condition: service_healthy
     environment:
+      !!merge <<: *stability_test_strict_wiring_env
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
