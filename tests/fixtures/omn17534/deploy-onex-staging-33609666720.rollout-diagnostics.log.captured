@@ -1,0 +1,851 @@
+2026-09-02T08:42:46.0876791Z [36;1m    # --request-timeout=30s on each: these three calls otherwise[0m
+2026-09-02T08:42:46.0877240Z [36;1m    # inherit kubectl's default of 0 (no timeout), so an[0m
+2026-09-02T08:42:46.0877667Z [36;1m    # unresponsive API server would block the job until the[0m
+2026-09-02T08:42:46.0878107Z [36;1m    # workflow's own 45-minute ceiling instead of failing fast.[0m
+2026-09-02T08:42:46.0878948Z [36;1m    kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s describe pods \[0m
+2026-09-02T08:42:46.0879462Z [36;1m      -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev || true[0m
+2026-09-02T08:42:46.0879949Z [36;1m    kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s logs \[0m
+2026-09-02T08:42:46.0880449Z [36;1m      -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev --tail=30 || true[0m
+2026-09-02T08:42:46.0880956Z [36;1m    kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s logs \[0m
+2026-09-02T08:42:46.0881509Z [36;1m      -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev --tail=30 --previous || true[0m
+2026-09-02T08:42:46.0881969Z [36;1m    FAIL=1[0m
+2026-09-02T08:42:46.0882204Z [36;1m  fi[0m
+2026-09-02T08:42:46.0882410Z [36;1mdone[0m
+2026-09-02T08:42:46.0882612Z [36;1m[0m
+2026-09-02T08:42:46.0882823Z [36;1mif [ "$WARNED" -eq 1 ]; then[0m
+2026-09-02T08:42:46.0883097Z [36;1m  echo[0m
+2026-09-02T08:42:46.0883499Z [36;1m  echo "::warning::One or more deployments had pre-existing ProgressDeadlineExceeded" \[0m
+2026-09-02T08:42:46.0884147Z [36;1m    "and were skipped. These need investigation but are not regressions from this commit."[0m
+2026-09-02T08:42:46.0884603Z [36;1mfi[0m
+2026-09-02T08:42:46.0884806Z [36;1m[0m
+2026-09-02T08:42:46.0885000Z [36;1mexit $FAIL[0m
+2026-09-02T08:42:46.0920671Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-02T08:42:46.0921043Z env:
+2026-09-02T08:42:46.0921255Z   AWS_REGION: us-east-1
+2026-09-02T08:42:46.0921553Z   SYSTEM_INSTANCE_TAG_NAME: omninode-k3s-dev-system
+2026-09-02T08:42:46.0921909Z   KUBECONFIG: /tmp/omninode_kubeconfig
+2026-09-02T08:42:46.0922422Z   DEV_KUBECONFIG_SSM_PARAMETER: /omninode/k3s/dev/kubeconfig
+2026-09-02T08:42:46.0922788Z   LOCAL_KUBE_API_HOST: localhost
+2026-09-02T08:42:46.0923059Z   LOCAL_KUBE_API_PORT: 6443
+2026-09-02T08:42:46.0923375Z   ECR_REGISTRY: 272493677981.dkr.ecr.us-east-1.amazonaws.com
+2026-09-02T08:42:46.0923729Z   ECR_REPOSITORY: omnicloud/core
+2026-09-02T08:42:46.0923999Z   DEPLOY_TIMEOUT_SECONDS: 1500
+2026-09-02T08:42:46.0924255Z   RUNTIME_REPIN_RELEASED: true
+2026-09-02T08:42:46.0924513Z   AWS_DEFAULT_REGION: us-east-1
+2026-09-02T08:42:46.0924840Z   AWS_ACCESS_KEY_ID: ***
+2026-09-02T08:42:46.0925178Z   AWS_SECRET_ACCESS_KEY: ***
+2026-09-02T08:42:46.0930048Z   AWS_SESSION_TOKEN: ***
+2026-09-02T08:42:46.0930351Z   SYSTEM_INSTANCE_ID: i-0REDACTEDOMN17534
+2026-09-02T08:42:46.0930657Z   SSM_PORT_FORWARD_PID: 2105
+2026-09-02T08:42:46.0931522Z   OMNIBASE_INFRA_MIGRATE_IMAGE: 272493677981.dkr.ecr.us-east-1.amazonaws.com/omnibase-infra-migrate:5e079d3b552ffc55e80926680822788c96147679@sha256:05e424d880d872b3872845cc6351df188e72bd0c2047e6af458145ac2dc6b9d8
+2026-09-02T08:42:46.0932575Z   IMAGE_WAS_PINNED: true
+2026-09-02T08:42:46.0932817Z ##[endgroup]
+2026-09-02T08:42:46.0989041Z Checking rollout state for: omninode-runtime...
+2026-09-02T08:42:46.7976845Z   Progressing reason : ProgressDeadlineExceeded
+2026-09-02T08:42:46.7977933Z   metadata.generation: 104  observedGeneration: 104
+2026-09-02T08:42:46.7979026Z Waiting for rollout: omninode-runtime...
+2026-09-02T08:42:47.1949614Z error: deployment "omninode-runtime" exceeded its progress deadline
+2026-09-02T08:42:47.1963735Z ##[error]Rollout failed or timed out: omninode-runtime
+2026-09-02T08:42:47.7129475Z Name:               omninode-runtime
+2026-09-02T08:42:47.7130053Z Namespace:          onex-dev
+2026-09-02T08:42:47.7130546Z CreationTimestamp:  Mon, 11 May 2026 18:20:36 +0000
+2026-09-02T08:42:47.7131234Z Labels:             app.kubernetes.io/component=runtime-main
+2026-09-02T08:42:47.7131948Z                     app.kubernetes.io/name=omninode-runtime
+2026-09-02T08:42:47.7132536Z                     omninode/env=dev
+2026-09-02T08:42:47.7133058Z                     omninode/managed=true
+2026-09-02T08:42:47.7133544Z                     omninode/plane=runtime
+2026-09-02T08:42:47.7134050Z                     omninode/tier=kernel
+2026-09-02T08:42:47.7134635Z Annotations:        deployment.kubernetes.io/revision: 83
+2026-09-02T08:42:47.7135496Z                     omninode/omnibase-infra-source-sha: 5e079d3b552ffc55e80926680822788c96147679
+2026-09-02T08:42:47.7136735Z Selector:           app.kubernetes.io/name=omninode-runtime,omninode/env=dev,omninode/managed=true,omninode/plane=runtime
+2026-09-02T08:42:47.7137890Z Replicas:           1 desired | 1 updated | 1 total | 0 available | 1 unavailable
+2026-09-02T08:42:47.7138860Z StrategyType:       Recreate
+2026-09-02T08:42:47.7139304Z MinReadySeconds:    0
+2026-09-02T08:42:47.7139759Z Pod Template:
+2026-09-02T08:42:47.7140261Z   Labels:       app.kubernetes.io/component=runtime-main
+2026-09-02T08:42:47.7141026Z                 app.kubernetes.io/name=omninode-runtime
+2026-09-02T08:42:47.7141579Z                 omninode/env=dev
+2026-09-02T08:42:47.7142029Z                 omninode/managed=true
+2026-09-02T08:42:47.7142506Z                 omninode/plane=runtime
+2026-09-02T08:42:47.7142968Z                 omninode/tier=kernel
+2026-09-02T08:42:47.7143579Z   Annotations:  kubectl.kubernetes.io/restartedAt: 2026-08-30T09:31:45Z
+2026-09-02T08:42:47.7144193Z   Containers:
+2026-09-02T08:42:47.7144510Z    omninode-runtime:
+2026-09-02T08:42:47.7145544Z     Image:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:47.7146689Z     Port:       8085/TCP
+2026-09-02T08:42:47.7147067Z     Host Port:  0/TCP
+2026-09-02T08:42:47.7147397Z     Limits:
+2026-09-02T08:42:47.7147704Z       cpu:     1
+2026-09-02T08:42:47.7148017Z       memory:  2Gi
+2026-09-02T08:42:47.7148547Z     Requests:
+2026-09-02T08:42:47.7148845Z       cpu:      100m
+2026-09-02T08:42:47.7149175Z       memory:   256Mi
+2026-09-02T08:42:47.7150140Z     Liveness:   tcp-socket :8085 delay=300s timeout=3s period=10s #success=1 #failure=3
+2026-09-02T08:42:47.7152701Z     Readiness:  http-get http://:http/ready delay=20s timeout=3s period=5s #success=1 #failure=3
+2026-09-02T08:42:47.7154189Z     Startup:    tcp-socket :http delay=0s timeout=1s period=10s #success=1 #failure=60
+2026-09-02T08:42:47.7154994Z     Environment Variables from:
+2026-09-02T08:42:47.7155538Z       onex-runtime-config  ConfigMap  Optional: false
+2026-09-02T08:42:47.7156076Z     Environment:
+2026-09-02T08:42:47.7156411Z       RUNTIME_PROFILE:                         main
+2026-09-02T08:42:47.7156988Z       OTEL_SERVICE_NAME:                       omninode-runtime-main
+2026-09-02T08:42:47.7157838Z       BIFROST_CONTRACT_PATH:                   /app/data/delegation/bifrost_delegation.yaml
+2026-09-02T08:42:47.7159632Z       BIFROST_LANE_OVERLAY_PATH:               /etc/onex/bifrost/onex-dev.bifrost.yaml
+2026-09-02T08:42:47.7160897Z       DELEGATION_ROUTING_TIERS_PATH:           /app/config/delegation/routing_tiers.yaml
+2026-09-02T08:42:47.7161721Z       ONEX_TOPIC_ENFORCEMENT_MODE:             reject
+2026-09-02T08:42:47.7162317Z       ONEX_BOUNDARY_DLQ_ENABLED:               1
+2026-09-02T08:42:47.7163530Z       ONEX_WIRING_STRICT_MODE:                 1
+2026-09-02T08:42:47.7164454Z       ONEX_SINGLE_OWNER_COMMAND_TOPICS:        0
+2026-09-02T08:42:47.7165078Z       ONEX_GROUP_ID:                           onex-runtime-main
+2026-09-02T08:42:47.7166013Z       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION:  true
+2026-09-02T08:42:47.7167327Z       POSTGRES_PASSWORD:                       <set to the key 'POSTGRES_PASSWORD' in secret 'onex-runtime-credentials'>          Optional: true
+2026-09-02T08:42:47.7169385Z       POSTGRES_USER:                           <set to the key 'POSTGRES_USER' in secret 'onex-runtime-credentials'>              Optional: true
+2026-09-02T08:42:47.7171147Z       OMNIBASE_INFRA_DB_URL:                   <set to the key 'OMNIBASE_INFRA_DB_URL' in secret 'onex-runtime-credentials'>      Optional: true
+2026-09-02T08:42:47.7173096Z       OMNINODE_INTERNAL_DB_URL:                <set to the key 'OMNINODE_INTERNAL_DB_URL' in secret 'onex-runtime-credentials'>   Optional: false
+2026-09-02T08:42:47.7175241Z       OMNIDASH_ANALYTICS_DB_URL:               <set to the key 'OMNIDASH_ANALYTICS_DB_URL' in secret 'onex-runtime-credentials'>  Optional: false
+2026-09-02T08:42:47.7176441Z       OMNIINTELLIGENCE_DB_URL:                 
+2026-09-02T08:42:47.7177553Z       VALKEY_PASSWORD:                         <set to the key 'password' in secret 'onex-valkey-credentials'>                         Optional: false
+2026-09-02T08:42:47.7179639Z       INFISICAL_CLIENT_ID:                     <set to the key 'INFISICAL_CLIENT_ID' in secret 'onex-store-resolver-credentials'>      Optional: false
+2026-09-02T08:42:47.7181274Z       INFISICAL_CLIENT_SECRET:                 <set to the key 'INFISICAL_CLIENT_SECRET' in secret 'onex-store-resolver-credentials'>  Optional: false
+2026-09-02T08:42:47.7182895Z       INFISICAL_PROJECT_ID:                    <set to the key 'INFISICAL_PROJECT_ID' in secret 'onex-store-resolver-credentials'>     Optional: false
+2026-09-02T08:42:47.7183983Z     Mounts:
+2026-09-02T08:42:47.7184363Z       /app/data from app-data (rw)
+2026-09-02T08:42:47.7184867Z       /app/logs from app-logs (rw)
+2026-09-02T08:42:47.7185450Z       /etc/onex/bifrost from bifrost-lane-overlay (ro)
+2026-09-02T08:42:47.7186057Z       /run/onex-runtime from run-onex (rw)
+2026-09-02T08:42:47.7186620Z       /tmp from tmp (rw)
+2026-09-02T08:42:47.7187005Z   Volumes:
+2026-09-02T08:42:47.7187331Z    tmp:
+2026-09-02T08:42:47.7187877Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:47.7189071Z     Medium:     
+2026-09-02T08:42:47.7189461Z     SizeLimit:  <unset>
+2026-09-02T08:42:47.7190193Z    app-logs:
+2026-09-02T08:42:47.7190829Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:47.7191825Z     Medium:     
+2026-09-02T08:42:47.7192739Z     SizeLimit:  <unset>
+2026-09-02T08:42:47.7193161Z    app-data:
+2026-09-02T08:42:47.7193939Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:47.7194815Z     Medium:     
+2026-09-02T08:42:47.7195174Z     SizeLimit:  <unset>
+2026-09-02T08:42:47.7195554Z    run-onex:
+2026-09-02T08:42:47.7196275Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:47.7197190Z     Medium:     
+2026-09-02T08:42:47.7197636Z     SizeLimit:  <unset>
+2026-09-02T08:42:47.7198325Z    bifrost-lane-overlay:
+2026-09-02T08:42:47.7198917Z     Type:               ConfigMap (a volume populated by a ConfigMap)
+2026-09-02T08:42:47.7200263Z     Name:               onex-dev-bifrost-lane-overlay-kmm989kg8t
+2026-09-02T08:42:47.7201190Z     Optional:           false
+2026-09-02T08:42:47.7202259Z   Priority Class Name:  omninode-standard
+2026-09-02T08:42:47.7202896Z   Node-Selectors:       <none>
+2026-09-02T08:42:47.7203636Z   Tolerations:          <none>
+2026-09-02T08:42:47.7204123Z Conditions:
+2026-09-02T08:42:47.7204778Z   Type           Status  Reason
+2026-09-02T08:42:47.7205232Z   ----           ------  ------
+2026-09-02T08:42:47.7206055Z   Available      False   MinimumReplicasUnavailable
+2026-09-02T08:42:47.7207080Z   Progressing    False   ProgressDeadlineExceeded
+2026-09-02T08:42:47.7213384Z OldReplicaSets:  omninode-runtime-849bf7486c (0/0 replicas created), omninode-runtime-75955cddb6 (0/0 replicas created), omninode-runtime-d9b5fbf78 (0/0 replicas created), omninode-runtime-5f77b857b4 (0/0 replicas created), omninode-runtime-5dc474f96d (0/0 replicas created), omninode-runtime-5f977c489b (0/0 replicas created), omninode-runtime-7c55979f58 (0/0 replicas created), omninode-runtime-6fb4fc55dd (0/0 replicas created), omninode-runtime-6fff747f78 (0/0 replicas created), omninode-runtime-6485897c47 (0/0 replicas created), omninode-runtime-5c9dfbdff5 (0/0 replicas created), omninode-runtime-6b88c995c (0/0 replicas created), omninode-runtime-64c45fc46 (0/0 replicas created), omninode-runtime-cb7467dd (0/0 replicas created)
+2026-09-02T08:42:47.7220228Z NewReplicaSet:   omninode-runtime-6b95fbcbff (1/1 replicas created)
+2026-09-02T08:42:47.7220934Z Events:          <none>
+2026-09-02T08:42:48.1240237Z Name:                 omninode-runtime-6b95fbcbff-ks9sv
+2026-09-02T08:42:48.1264584Z Namespace:            onex-dev
+2026-09-02T08:42:48.1265342Z Priority:             100000
+2026-09-02T08:42:48.1266088Z Priority Class Name:  omninode-standard
+2026-09-02T08:42:48.1266797Z Service Account:      default
+2026-09-02T08:42:48.1267443Z Node:                 ip-10-40-204-249/10.40.204.249
+2026-09-02T08:42:48.1268533Z Start Time:           Wed, 02 Sep 2026 06:20:42 +0000
+2026-09-02T08:42:48.1269406Z Labels:               app.kubernetes.io/component=runtime-main
+2026-09-02T08:42:48.1270282Z                       app.kubernetes.io/name=omninode-runtime
+2026-09-02T08:42:48.1271324Z                       omninode/env=dev
+2026-09-02T08:42:48.1272599Z                       omninode/managed=true
+2026-09-02T08:42:48.1273557Z                       omninode/plane=runtime
+2026-09-02T08:42:48.1274271Z                       omninode/tier=kernel
+2026-09-02T08:42:48.1274995Z                       pod-template-hash=6b95fbcbff
+2026-09-02T08:42:48.1275938Z Annotations:          kubectl.kubernetes.io/restartedAt: 2026-08-30T09:31:45Z
+2026-09-02T08:42:48.1276827Z Status:               Running
+2026-09-02T08:42:48.1277467Z SeccompProfile:       RuntimeDefault
+2026-09-02T08:42:48.1278101Z IP:                   10.42.0.104
+2026-09-02T08:42:48.1278998Z IPs:
+2026-09-02T08:42:48.1279610Z   IP:           10.42.0.104
+2026-09-02T08:42:48.1280330Z Controlled By:  ReplicaSet/omninode-runtime-6b95fbcbff
+2026-09-02T08:42:48.1281109Z Containers:
+2026-09-02T08:42:48.1281656Z   omninode-runtime:
+2026-09-02T08:42:48.1282672Z     Container ID:   containerd://948eab08439f7c970a4adcc347d270e049aa08554e32a1e4185ab98fa056ccca
+2026-09-02T08:42:48.1284789Z     Image:          272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:48.1286913Z     Image ID:       272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:48.1288625Z     Port:           8085/TCP
+2026-09-02T08:42:48.1289251Z     Host Port:      0/TCP
+2026-09-02T08:42:48.1289864Z     State:          Running
+2026-09-02T08:42:48.1290475Z       Started:      Wed, 02 Sep 2026 08:41:53 +0000
+2026-09-02T08:42:48.1291215Z     Last State:     Terminated
+2026-09-02T08:42:48.1291850Z       Reason:       Error
+2026-09-02T08:42:48.1292457Z       Exit Code:    143
+2026-09-02T08:42:48.1293067Z       Started:      Wed, 02 Sep 2026 08:40:25 +0000
+2026-09-02T08:42:48.1293814Z       Finished:     Wed, 02 Sep 2026 08:41:52 +0000
+2026-09-02T08:42:48.1294772Z     Ready:          False
+2026-09-02T08:42:48.1295394Z     Restart Count:  23
+2026-09-02T08:42:48.1296014Z     Limits:
+2026-09-02T08:42:48.1296576Z       cpu:     1
+2026-09-02T08:42:48.1297176Z       memory:  2Gi
+2026-09-02T08:42:48.1297731Z     Requests:
+2026-09-02T08:42:48.1298496Z       cpu:      100m
+2026-09-02T08:42:48.1299122Z       memory:   256Mi
+2026-09-02T08:42:48.1299981Z     Liveness:   tcp-socket :8085 delay=300s timeout=3s period=10s #success=1 #failure=3
+2026-09-02T08:42:48.1301285Z     Readiness:  http-get http://:http/ready delay=20s timeout=3s period=5s #success=1 #failure=3
+2026-09-02T08:42:48.1302564Z     Startup:    tcp-socket :http delay=0s timeout=1s period=10s #success=1 #failure=60
+2026-09-02T08:42:48.1303560Z     Environment Variables from:
+2026-09-02T08:42:48.1304337Z       onex-runtime-config  ConfigMap  Optional: false
+2026-09-02T08:42:48.1305112Z     Environment:
+2026-09-02T08:42:48.1305829Z       RUNTIME_PROFILE:                         main
+2026-09-02T08:42:48.1306748Z       OTEL_SERVICE_NAME:                       omninode-runtime-main
+2026-09-02T08:42:48.1307791Z       BIFROST_CONTRACT_PATH:                   /app/data/delegation/bifrost_delegation.yaml
+2026-09-02T08:42:48.1309285Z       BIFROST_LANE_OVERLAY_PATH:               /etc/onex/bifrost/onex-dev.bifrost.yaml
+2026-09-02T08:42:48.1310543Z       DELEGATION_ROUTING_TIERS_PATH:           /app/config/delegation/routing_tiers.yaml
+2026-09-02T08:42:48.1311606Z       ONEX_TOPIC_ENFORCEMENT_MODE:             reject
+2026-09-02T08:42:48.1312429Z       ONEX_BOUNDARY_DLQ_ENABLED:               1
+2026-09-02T08:42:48.1313203Z       ONEX_WIRING_STRICT_MODE:                 1
+2026-09-02T08:42:48.1314012Z       ONEX_SINGLE_OWNER_COMMAND_TOPICS:        0
+2026-09-02T08:42:48.1314853Z       ONEX_GROUP_ID:                           onex-runtime-main
+2026-09-02T08:42:48.1315737Z       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION:  true
+2026-09-02T08:42:48.1317049Z       POSTGRES_PASSWORD:                       <set to the key 'POSTGRES_PASSWORD' in secret 'onex-runtime-credentials'>          Optional: true
+2026-09-02T08:42:48.1319050Z       POSTGRES_USER:                           <set to the key 'POSTGRES_USER' in secret 'onex-runtime-credentials'>              Optional: true
+2026-09-02T08:42:48.1320815Z       OMNIBASE_INFRA_DB_URL:                   <set to the key 'OMNIBASE_INFRA_DB_URL' in secret 'onex-runtime-credentials'>      Optional: true
+2026-09-02T08:42:48.1322622Z       OMNINODE_INTERNAL_DB_URL:                <set to the key 'OMNINODE_INTERNAL_DB_URL' in secret 'onex-runtime-credentials'>   Optional: false
+2026-09-02T08:42:48.1324463Z       OMNIDASH_ANALYTICS_DB_URL:               <set to the key 'OMNIDASH_ANALYTICS_DB_URL' in secret 'onex-runtime-credentials'>  Optional: false
+2026-09-02T08:42:48.1325830Z       OMNIINTELLIGENCE_DB_URL:                 
+2026-09-02T08:42:48.1327086Z       VALKEY_PASSWORD:                         <set to the key 'password' in secret 'onex-valkey-credentials'>                         Optional: false
+2026-09-02T08:42:48.1329511Z       INFISICAL_CLIENT_ID:                     <set to the key 'INFISICAL_CLIENT_ID' in secret 'onex-store-resolver-credentials'>      Optional: false
+2026-09-02T08:42:48.1331524Z       INFISICAL_CLIENT_SECRET:                 <set to the key 'INFISICAL_CLIENT_SECRET' in secret 'onex-store-resolver-credentials'>  Optional: false
+2026-09-02T08:42:48.1333493Z       INFISICAL_PROJECT_ID:                    <set to the key 'INFISICAL_PROJECT_ID' in secret 'onex-store-resolver-credentials'>     Optional: false
+2026-09-02T08:42:48.1334814Z     Mounts:
+2026-09-02T08:42:48.1335396Z       /app/data from app-data (rw)
+2026-09-02T08:42:48.1336096Z       /app/logs from app-logs (rw)
+2026-09-02T08:42:48.1336839Z       /etc/onex/bifrost from bifrost-lane-overlay (ro)
+2026-09-02T08:42:48.1337648Z       /run/onex-runtime from run-onex (rw)
+2026-09-02T08:42:48.1338568Z       /tmp from tmp (rw)
+2026-09-02T08:42:48.1339203Z Conditions:
+2026-09-02T08:42:48.1339886Z   Type                        Status
+2026-09-02T08:42:48.1340856Z   PodReadyToStartContainers   True 
+2026-09-02T08:42:48.1341585Z   Initialized                 True 
+2026-09-02T08:42:48.1342373Z   Ready                       False 
+2026-09-02T08:42:48.1343032Z   ContainersReady             False 
+2026-09-02T08:42:48.1343746Z   PodScheduled                True 
+2026-09-02T08:42:48.1344391Z Volumes:
+2026-09-02T08:42:48.1344934Z   tmp:
+2026-09-02T08:42:48.1345663Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:48.1346556Z     Medium:     
+2026-09-02T08:42:48.1347160Z     SizeLimit:  <unset>
+2026-09-02T08:42:48.1347778Z   app-logs:
+2026-09-02T08:42:48.1348799Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:48.1349701Z     Medium:     
+2026-09-02T08:42:48.1350238Z     SizeLimit:  <unset>
+2026-09-02T08:42:48.1350805Z   app-data:
+2026-09-02T08:42:48.1351501Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:48.1352329Z     Medium:     
+2026-09-02T08:42:48.1352846Z     SizeLimit:  <unset>
+2026-09-02T08:42:48.1353398Z   run-onex:
+2026-09-02T08:42:48.1354104Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:48.1354921Z     Medium:     
+2026-09-02T08:42:48.1355451Z     SizeLimit:  <unset>
+2026-09-02T08:42:48.1356022Z   bifrost-lane-overlay:
+2026-09-02T08:42:48.1356688Z     Type:        ConfigMap (a volume populated by a ConfigMap)
+2026-09-02T08:42:48.1357531Z     Name:        onex-dev-bifrost-lane-overlay-kmm989kg8t
+2026-09-02T08:42:48.1358464Z     Optional:    false
+2026-09-02T08:42:48.1359060Z QoS Class:       Burstable
+2026-09-02T08:42:48.1359642Z Node-Selectors:  <none>
+2026-09-02T08:42:48.1360417Z Tolerations:     node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+2026-09-02T08:42:48.1361472Z                  node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+2026-09-02T08:42:48.1362314Z Events:
+2026-09-02T08:42:48.1362916Z   Type     Reason     Age                    From     Message
+2026-09-02T08:42:48.1363638Z   ----     ------     ----                   ----     -------
+2026-09-02T08:42:48.1365662Z   Normal   Pulled     42m (x2 over 113m)     kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 161ms (161ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:48.1369114Z   Warning  BackOff    6m5s (x279 over 127m)  kubelet  Back-off restarting failed container omninode-runtime in pod omninode-runtime-6b95fbcbff-ks9sv_onex-dev(00000000-0000-4000-8000-000000000001)
+2026-09-02T08:42:48.1371814Z   Normal   Pulling    2m24s (x23 over 142m)  kubelet  Pulling image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
+2026-09-02T08:42:48.1375345Z   Normal   Pulled     2m23s (x11 over 84m)   kubelet  (combined from similar events): Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 211ms (211ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:48.1378509Z   Warning  Unhealthy  56s (x480 over 141m)   kubelet  Startup probe failed: dial tcp 10.42.0.104:8085: connect: connection refused
+2026-09-02T08:42:48.1380171Z   Normal   Killing    56s (x8 over 131m)     kubelet  Container omninode-runtime failed startup probe, will be restarted
+2026-09-02T08:42:48.4702571Z === OmniNode Runtime ===
+2026-09-02T08:42:48.4703287Z RUNTIME_SOURCE_HASH=5e079d3b552ffc55e80926680822788c96147679
+2026-09-02T08:42:48.4703952Z COMPOSE_PROJECT=unknown
+2026-09-02T08:42:48.4704398Z SOURCE_DIR=/app/src
+2026-09-02T08:42:48.4704825Z BUILD_TIMESTAMP=2026-09-02T08:41:53Z
+2026-09-02T08:42:48.4705317Z ========================
+2026-09-02T08:42:48.4706496Z [entrypoint] Stamping schema fingerprint for omnibase_infra (db: omninode-postgres.data-plane.svc.cluster.local:5432/omnibase_infra, required)...
+2026-09-02T08:42:48.4710247Z <frozen runpy>:128: RuntimeWarning: 'omnibase_infra.runtime.util_schema_fingerprint' found in sys.modules after import of package 'omnibase_infra.runtime', but prior to execution of 'omnibase_infra.runtime.util_schema_fingerprint'; this may result in unpredictable behaviour
+2026-09-02T08:42:48.4712728Z fingerprint: b1007d9123ca409d83756c45d8bf45e74c58b2531436b1581ff92937ef3f090e
+2026-09-02T08:42:48.4713454Z table_count: 23
+2026-09-02T08:42:48.4714155Z column_count: 320
+2026-09-02T08:42:48.4714514Z constraint_count: 77
+2026-09-02T08:42:48.4714729Z 
+2026-09-02T08:42:48.4714962Z db_metadata.expected_schema_fingerprint updated
+2026-09-02T08:42:48.4720578Z [entrypoint] Schema fingerprint stamped for omnibase_infra.
+2026-09-02T08:42:48.4721441Z [entrypoint] OMNIINTELLIGENCE_DB_URL not set -- skipping omniintelligence fingerprint stamp
+2026-09-02T08:42:48.4722352Z [entrypoint] Rendering Bifrost delegation contract from typed overlay...
+2026-09-02T08:42:48.4723351Z [entrypoint] Bifrost delegation contract ready: /app/data/delegation/bifrost_delegation.yaml
+2026-09-02T08:42:48.4726373Z [entrypoint] config_provenance config=bifrost_delegation status=DRIFT deployed_path=/app/data/delegation/bifrost_delegation.yaml deployed_sha256=92900d82346c04baa51b61fe4bf7f3117a7285d16b99321330ca2457c73ed6cc source_path=/app/.venv/lib/python3.12/site-packages/omnimarket/configs/bifrost_delegation.yaml source_sha256=9872b0ba63e5fcc7ecdaabed1168f20a82edf78d7f24757d5406b66dff59bdad
+2026-09-02T08:42:48.4729877Z [entrypoint] Rendering secret resolver config...
+2026-09-02T08:42:48.7827988Z === OmniNode Runtime ===
+2026-09-02T08:42:48.7836985Z RUNTIME_SOURCE_HASH=5e079d3b552ffc55e80926680822788c96147679
+2026-09-02T08:42:48.7837845Z COMPOSE_PROJECT=unknown
+2026-09-02T08:42:48.7838526Z SOURCE_DIR=/app/src
+2026-09-02T08:42:48.7839005Z BUILD_TIMESTAMP=2026-09-02T08:40:25Z
+2026-09-02T08:42:48.7839485Z ========================
+2026-09-02T08:42:48.7840556Z [entrypoint] Stamping schema fingerprint for omnibase_infra (db: omninode-postgres.data-plane.svc.cluster.local:5432/omnibase_infra, required)...
+2026-09-02T08:42:48.7843074Z <frozen runpy>:128: RuntimeWarning: 'omnibase_infra.runtime.util_schema_fingerprint' found in sys.modules after import of package 'omnibase_infra.runtime', but prior to execution of 'omnibase_infra.runtime.util_schema_fingerprint'; this may result in unpredictable behaviour
+2026-09-02T08:42:48.7845416Z fingerprint: b1007d9123ca409d83756c45d8bf45e74c58b2531436b1581ff92937ef3f090e
+2026-09-02T08:42:48.7846148Z table_count: 23
+2026-09-02T08:42:48.7846522Z column_count: 320
+2026-09-02T08:42:48.7846923Z constraint_count: 77
+2026-09-02T08:42:48.7847175Z 
+2026-09-02T08:42:48.7847407Z db_metadata.expected_schema_fingerprint updated
+2026-09-02T08:42:48.7848113Z [entrypoint] Schema fingerprint stamped for omnibase_infra.
+2026-09-02T08:42:48.7849380Z [entrypoint] OMNIINTELLIGENCE_DB_URL not set -- skipping omniintelligence fingerprint stamp
+2026-09-02T08:42:48.7850437Z [entrypoint] Rendering Bifrost delegation contract from typed overlay...
+2026-09-02T08:42:48.7851792Z [entrypoint] Bifrost delegation contract ready: /app/data/delegation/bifrost_delegation.yaml
+2026-09-02T08:42:48.7854726Z [entrypoint] config_provenance config=bifrost_delegation status=DRIFT deployed_path=/app/data/delegation/bifrost_delegation.yaml deployed_sha256=92900d82346c04baa51b61fe4bf7f3117a7285d16b99321330ca2457c73ed6cc source_path=/app/.venv/lib/python3.12/site-packages/omnimarket/configs/bifrost_delegation.yaml source_sha256=9872b0ba63e5fcc7ecdaabed1168f20a82edf78d7f24757d5406b66dff59bdad
+2026-09-02T08:42:48.7857508Z [entrypoint] Rendering secret resolver config...
+2026-09-02T08:42:48.7858572Z [entrypoint] Secret resolver config ready: /app/data/delegation/secret_resolver.yaml
+2026-09-02T08:42:48.7859427Z [entrypoint] Starting runtime kernel...
+2026-09-02T08:42:48.7860167Z Checking rollout state for: omnimarket-projection-api...
+2026-09-02T08:42:49.4403938Z   Progressing reason : ProgressDeadlineExceeded
+2026-09-02T08:42:49.4409850Z   metadata.generation: 47  observedGeneration: 47
+2026-09-02T08:42:49.4410900Z Waiting for rollout: omnimarket-projection-api...
+2026-09-02T08:42:49.8381461Z error: deployment "omnimarket-projection-api" exceeded its progress deadline
+2026-09-02T08:42:49.8394391Z ##[error]Rollout failed or timed out: omnimarket-projection-api
+2026-09-02T08:42:50.4789922Z Name:                   omnimarket-projection-api
+2026-09-02T08:42:50.4790671Z Namespace:              onex-dev
+2026-09-02T08:42:50.4791295Z CreationTimestamp:      Wed, 29 Jul 2026 10:19:56 +0000
+2026-09-02T08:42:50.4792200Z Labels:                 app.kubernetes.io/component=projection-api
+2026-09-02T08:42:50.4793043Z                         app.kubernetes.io/name=omnimarket-projection-api
+2026-09-02T08:42:50.4793748Z                         omninode/env=dev
+2026-09-02T08:42:50.4794340Z                         omninode/managed=true
+2026-09-02T08:42:50.4795022Z                         omninode/plane=runtime
+2026-09-02T08:42:50.4795765Z                         omninode/tier=projection
+2026-09-02T08:42:50.4796563Z Annotations:            deployment.kubernetes.io/revision: 40
+2026-09-02T08:42:50.4797554Z                         omninode/omnibase-infra-source-sha: 5e079d3b552ffc55e80926680822788c96147679
+2026-09-02T08:42:50.4799760Z Selector:               app.kubernetes.io/name=omnimarket-projection-api,omninode/env=dev,omninode/managed=true,omninode/plane=runtime
+2026-09-02T08:42:50.4801160Z Replicas:               1 desired | 1 updated | 1 total | 0 available | 1 unavailable
+2026-09-02T08:42:50.4801918Z StrategyType:           RollingUpdate
+2026-09-02T08:42:50.4802434Z MinReadySeconds:        0
+2026-09-02T08:42:50.4803067Z RollingUpdateStrategy:  1 max unavailable, 0 max surge
+2026-09-02T08:42:50.4803752Z Pod Template:
+2026-09-02T08:42:50.4804363Z   Labels:       app.kubernetes.io/component=projection-api
+2026-09-02T08:42:50.4805179Z                 app.kubernetes.io/name=omnimarket-projection-api
+2026-09-02T08:42:50.4805901Z                 omninode/env=dev
+2026-09-02T08:42:50.4806463Z                 omninode/managed=true
+2026-09-02T08:42:50.4807122Z                 omninode/plane=runtime
+2026-09-02T08:42:50.4807787Z                 omninode/tier=projection
+2026-09-02T08:42:50.4808855Z   Annotations:  kubectl.kubernetes.io/restartedAt: 2026-08-19T15:49:27-04:00
+2026-09-02T08:42:50.4810140Z                 omninode.ai/restarted-for: OMN-15876-registration-writer-verify
+2026-09-02T08:42:50.4810970Z   Containers:
+2026-09-02T08:42:50.4811474Z    omnimarket-projection-api:
+2026-09-02T08:42:50.4812702Z     Image:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:50.4813962Z     Port:       3002/TCP
+2026-09-02T08:42:50.4814479Z     Host Port:  0/TCP
+2026-09-02T08:42:50.4814941Z     Command:
+2026-09-02T08:42:50.4815399Z       omnimarket-projection-api
+2026-09-02T08:42:50.4815926Z     Limits:
+2026-09-02T08:42:50.4816356Z       cpu:     500m
+2026-09-02T08:42:50.4817064Z       memory:  1Gi
+2026-09-02T08:42:50.4817527Z     Requests:
+2026-09-02T08:42:50.4817980Z       cpu:      100m
+2026-09-02T08:42:50.4819206Z       memory:   256Mi
+2026-09-02T08:42:50.4820128Z     Liveness:   http-get http://:http/health delay=60s timeout=3s period=10s #success=1 #failure=3
+2026-09-02T08:42:50.4821460Z     Readiness:  http-get http://:http/ready delay=20s timeout=3s period=5s #success=1 #failure=6
+2026-09-02T08:42:50.4822740Z     Startup:    http-get http://:http/health delay=0s timeout=3s period=5s #success=1 #failure=60
+2026-09-02T08:42:50.4823654Z     Environment Variables from:
+2026-09-02T08:42:50.4824320Z       onex-runtime-config  ConfigMap  Optional: false
+2026-09-02T08:42:50.4824975Z     Environment:
+2026-09-02T08:42:50.4825893Z       ONEX_ENVIRONMENT:                         <set to the key 'ONEX_ENVIRONMENT' of config map 'onex-runtime-config'>   Optional: false
+2026-09-02T08:42:50.4827315Z       USE_EVENT_ROUTING:                        <set to the key 'USE_EVENT_ROUTING' of config map 'onex-runtime-config'>  Optional: false
+2026-09-02T08:42:50.4829392Z       KEYCLOAK_ISSUER:                          <set to the key 'KEYCLOAK_ISSUER' of config map 'onex-runtime-config'>    Optional: false
+2026-09-02T08:42:50.4830607Z       RUNTIME_PROFILE:                          projection-api
+2026-09-02T08:42:50.4831450Z       OTEL_SERVICE_NAME:                        omnimarket-projection-api
+2026-09-02T08:42:50.4832267Z       BIFROST_CONTRACT_PATH:                    
+2026-09-02T08:42:50.4833509Z       OMNIDASH_ANALYTICS_DB_URL:                <set to the key 'OMNIDASH_ANALYTICS_DB_URL' in secret 'onex-runtime-credentials'>               Optional: false
+2026-09-02T08:42:50.4835316Z       INFISICAL_CLIENT_ID:                      <set to the key 'INFISICAL_CLIENT_ID' in secret 'onex-store-resolver-credentials'>              Optional: false
+2026-09-02T08:42:50.4837172Z       INFISICAL_CLIENT_SECRET:                  <set to the key 'INFISICAL_CLIENT_SECRET' in secret 'onex-store-resolver-credentials'>          Optional: false
+2026-09-02T08:42:50.4839207Z       INFISICAL_PROJECT_ID:                     <set to the key 'INFISICAL_PROJECT_ID' in secret 'onex-store-resolver-credentials'>             Optional: false
+2026-09-02T08:42:50.4840978Z       INFISICAL_ADDR:                           <set to the key 'INFISICAL_ADDR' of config map 'onex-runtime-config'>                           Optional: false
+2026-09-02T08:42:50.4842712Z       INFISICAL_ENVIRONMENT_SLUG:               <set to the key 'INFISICAL_ENVIRONMENT_SLUG' of config map 'onex-runtime-config'>               Optional: false
+2026-09-02T08:42:50.4844595Z       INFISICAL_TENANT_CREDENTIAL_SECRET_PATH:  <set to the key 'INFISICAL_TENANT_CREDENTIAL_SECRET_PATH' of config map 'onex-runtime-config'>  Optional: false
+2026-09-02T08:42:50.4845882Z     Mounts:
+2026-09-02T08:42:50.4846369Z       /app/data from app-data (rw)
+2026-09-02T08:42:50.4846937Z       /tmp from tmp (rw)
+2026-09-02T08:42:50.4847434Z   Volumes:
+2026-09-02T08:42:50.4847880Z    tmp:
+2026-09-02T08:42:50.4848892Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:50.4849841Z     Medium:     
+2026-09-02T08:42:50.4850590Z     SizeLimit:  <unset>
+2026-09-02T08:42:50.4851106Z    app-data:
+2026-09-02T08:42:50.4851754Z     Type:               EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:50.4852538Z     Medium:             
+2026-09-02T08:42:50.4853059Z     SizeLimit:          <unset>
+2026-09-02T08:42:50.4853672Z   Priority Class Name:  omninode-standard
+2026-09-02T08:42:50.4854296Z   Node-Selectors:       <none>
+2026-09-02T08:42:50.4854858Z   Tolerations:          <none>
+2026-09-02T08:42:50.4855390Z Conditions:
+2026-09-02T08:42:50.4855851Z   Type           Status  Reason
+2026-09-02T08:42:50.4856394Z   ----           ------  ------
+2026-09-02T08:42:50.4857032Z   Available      True    MinimumReplicasAvailable
+2026-09-02T08:42:50.4857757Z   Progressing    False   ProgressDeadlineExceeded
+2026-09-02T08:42:50.4864090Z OldReplicaSets:  omnimarket-projection-api-7b75785d4d (0/0 replicas created), omnimarket-projection-api-78dbd6f496 (0/0 replicas created), omnimarket-projection-api-6c77f85fb7 (0/0 replicas created), omnimarket-projection-api-75596cc695 (0/0 replicas created), omnimarket-projection-api-7d8d5966f (0/0 replicas created), omnimarket-projection-api-7fbd8b4cdf (0/0 replicas created), omnimarket-projection-api-58c6d76d86 (0/0 replicas created), omnimarket-projection-api-69958c6b48 (0/0 replicas created), omnimarket-projection-api-7bf67b7c7d (0/0 replicas created), omnimarket-projection-api-745d89d54d (0/0 replicas created), omnimarket-projection-api-579555b58d (0/0 replicas created), omnimarket-projection-api-749947599d (0/0 replicas created), omnimarket-projection-api-757f57f759 (0/0 replicas created)
+2026-09-02T08:42:50.4870349Z NewReplicaSet:   omnimarket-projection-api-6b65b9b688 (1/1 replicas created)
+2026-09-02T08:42:50.4871306Z Events:          <none>
+2026-09-02T08:42:50.8908681Z Name:                 omnimarket-projection-api-6b65b9b688-67rzj
+2026-09-02T08:42:50.8913125Z Namespace:            onex-dev
+2026-09-02T08:42:50.8913904Z Priority:             100000
+2026-09-02T08:42:50.8914515Z Priority Class Name:  omninode-standard
+2026-09-02T08:42:50.8915234Z Service Account:      default
+2026-09-02T08:42:50.8915911Z Node:                 ip-10-40-204-249/10.40.204.249
+2026-09-02T08:42:50.8916730Z Start Time:           Wed, 02 Sep 2026 06:20:30 +0000
+2026-09-02T08:42:50.8917579Z Labels:               app.kubernetes.io/component=projection-api
+2026-09-02T08:42:50.8918752Z                       app.kubernetes.io/name=omnimarket-projection-api
+2026-09-02T08:42:50.8919624Z                       omninode/env=dev
+2026-09-02T08:42:50.8920695Z                       omninode/managed=true
+2026-09-02T08:42:50.8921684Z                       omninode/plane=runtime
+2026-09-02T08:42:50.8922545Z                       omninode/tier=projection
+2026-09-02T08:42:50.8923300Z                       pod-template-hash=6b65b9b688
+2026-09-02T08:42:50.8924259Z Annotations:          kubectl.kubernetes.io/restartedAt: 2026-08-19T15:49:27-04:00
+2026-09-02T08:42:50.8925381Z                       omninode.ai/restarted-for: OMN-15876-registration-writer-verify
+2026-09-02T08:42:50.8926282Z Status:               Running
+2026-09-02T08:42:50.8926903Z SeccompProfile:       RuntimeDefault
+2026-09-02T08:42:50.8927566Z IP:                   10.42.0.92
+2026-09-02T08:42:50.8928163Z IPs:
+2026-09-02T08:42:50.8928977Z   IP:           10.42.0.92
+2026-09-02T08:42:50.8929768Z Controlled By:  ReplicaSet/omnimarket-projection-api-6b65b9b688
+2026-09-02T08:42:50.8930647Z Containers:
+2026-09-02T08:42:50.8931280Z   omnimarket-projection-api:
+2026-09-02T08:42:50.8932589Z     Container ID:  containerd://b132ccb094c1da81c2c2e51122979f431394691dfb15aa6d55ef6ea9869df452
+2026-09-02T08:42:50.8934518Z     Image:         272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:50.8936651Z     Image ID:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:50.8938192Z     Port:          3002/TCP
+2026-09-02T08:42:50.8939287Z     Host Port:     0/TCP
+2026-09-02T08:42:50.8939945Z     Command:
+2026-09-02T08:42:50.8940602Z       omnimarket-projection-api
+2026-09-02T08:42:50.8941247Z     State:          Waiting
+2026-09-02T08:42:50.8941861Z       Reason:       CrashLoopBackOff
+2026-09-02T08:42:50.8942572Z     Last State:     Terminated
+2026-09-02T08:42:50.8943254Z       Reason:       Error
+2026-09-02T08:42:50.8943917Z       Exit Code:    3
+2026-09-02T08:42:50.8944655Z       Started:      Wed, 02 Sep 2026 08:37:06 +0000
+2026-09-02T08:42:50.8945449Z       Finished:     Wed, 02 Sep 2026 08:38:57 +0000
+2026-09-02T08:42:50.8946235Z     Ready:          False
+2026-09-02T08:42:50.8946914Z     Restart Count:  29
+2026-09-02T08:42:50.8947551Z     Limits:
+2026-09-02T08:42:50.8948486Z       cpu:     500m
+2026-09-02T08:42:50.8949145Z       memory:  1Gi
+2026-09-02T08:42:50.8949719Z     Requests:
+2026-09-02T08:42:50.8950314Z       cpu:      100m
+2026-09-02T08:42:50.8951283Z       memory:   256Mi
+2026-09-02T08:42:50.8952286Z     Liveness:   http-get http://:http/health delay=60s timeout=3s period=10s #success=1 #failure=3
+2026-09-02T08:42:50.8953624Z     Readiness:  http-get http://:http/ready delay=20s timeout=3s period=5s #success=1 #failure=6
+2026-09-02T08:42:50.8954942Z     Startup:    http-get http://:http/health delay=0s timeout=3s period=5s #success=1 #failure=60
+2026-09-02T08:42:50.8955958Z     Environment Variables from:
+2026-09-02T08:42:50.8956662Z       onex-runtime-config  ConfigMap  Optional: false
+2026-09-02T08:42:50.8957427Z     Environment:
+2026-09-02T08:42:50.8958765Z       ONEX_ENVIRONMENT:                         <set to the key 'ONEX_ENVIRONMENT' of config map 'onex-runtime-config'>   Optional: false
+2026-09-02T08:42:50.8960442Z       USE_EVENT_ROUTING:                        <set to the key 'USE_EVENT_ROUTING' of config map 'onex-runtime-config'>  Optional: false
+2026-09-02T08:42:50.8962402Z       KEYCLOAK_ISSUER:                          <set to the key 'KEYCLOAK_ISSUER' of config map 'onex-runtime-config'>    Optional: false
+2026-09-02T08:42:50.8963737Z       RUNTIME_PROFILE:                          projection-api
+2026-09-02T08:42:50.8964728Z       OTEL_SERVICE_NAME:                        omnimarket-projection-api
+2026-09-02T08:42:50.8965670Z       BIFROST_CONTRACT_PATH:                    
+2026-09-02T08:42:50.8967132Z       OMNIDASH_ANALYTICS_DB_URL:                <set to the key 'OMNIDASH_ANALYTICS_DB_URL' in secret 'onex-runtime-credentials'>               Optional: false
+2026-09-02T08:42:50.8969408Z       INFISICAL_CLIENT_ID:                      <set to the key 'INFISICAL_CLIENT_ID' in secret 'onex-store-resolver-credentials'>              Optional: false
+2026-09-02T08:42:50.8971450Z       INFISICAL_CLIENT_SECRET:                  <set to the key 'INFISICAL_CLIENT_SECRET' in secret 'onex-store-resolver-credentials'>          Optional: false
+2026-09-02T08:42:50.8973547Z       INFISICAL_PROJECT_ID:                     <set to the key 'INFISICAL_PROJECT_ID' in secret 'onex-store-resolver-credentials'>             Optional: false
+2026-09-02T08:42:50.8975532Z       INFISICAL_ADDR:                           <set to the key 'INFISICAL_ADDR' of config map 'onex-runtime-config'>                           Optional: false
+2026-09-02T08:42:50.8977510Z       INFISICAL_ENVIRONMENT_SLUG:               <set to the key 'INFISICAL_ENVIRONMENT_SLUG' of config map 'onex-runtime-config'>               Optional: false
+2026-09-02T08:42:50.8979869Z       INFISICAL_TENANT_CREDENTIAL_SECRET_PATH:  <set to the key 'INFISICAL_TENANT_CREDENTIAL_SECRET_PATH' of config map 'onex-runtime-config'>  Optional: false
+2026-09-02T08:42:50.8981475Z     Mounts:
+2026-09-02T08:42:50.8982264Z       /app/data from app-data (rw)
+2026-09-02T08:42:50.8983058Z       /tmp from tmp (rw)
+2026-09-02T08:42:50.8983697Z Conditions:
+2026-09-02T08:42:50.8984288Z   Type                        Status
+2026-09-02T08:42:50.8985038Z   PodReadyToStartContainers   True 
+2026-09-02T08:42:50.8985839Z   Initialized                 True 
+2026-09-02T08:42:50.8986572Z   Ready                       False 
+2026-09-02T08:42:50.8987286Z   ContainersReady             False 
+2026-09-02T08:42:50.8988037Z   PodScheduled                True 
+2026-09-02T08:42:50.8989037Z Volumes:
+2026-09-02T08:42:50.8989574Z   tmp:
+2026-09-02T08:42:50.8990344Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:50.8991289Z     Medium:     
+2026-09-02T08:42:50.8991888Z     SizeLimit:  <unset>
+2026-09-02T08:42:50.8992583Z   app-data:
+2026-09-02T08:42:50.8993409Z     Type:        EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:50.8994580Z     Medium:      
+2026-09-02T08:42:50.8995345Z     SizeLimit:   <unset>
+2026-09-02T08:42:50.8996170Z QoS Class:       Burstable
+2026-09-02T08:42:50.8996854Z Node-Selectors:  <none>
+2026-09-02T08:42:50.8997725Z Tolerations:     node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+2026-09-02T08:42:50.8999290Z                  node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+2026-09-02T08:42:50.9000261Z Events:
+2026-09-02T08:42:50.9000892Z   Type     Reason     Age                     From     Message
+2026-09-02T08:42:50.9001740Z   ----     ------     ----                    ----     -------
+2026-09-02T08:42:50.9004002Z   Normal   Pulled     30m (x3 over 109m)      kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 163ms (163ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:50.9006752Z   Normal   Killing    22m (x9 over 136m)      kubelet  Container omnimarket-projection-api failed startup probe, will be restarted
+2026-09-02T08:42:50.9009272Z   Normal   Pulling    7m18s (x29 over 142m)   kubelet  Pulling image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
+2026-09-02T08:42:50.9012499Z   Normal   Pulled     7m18s (x15 over 102m)   kubelet  (combined from similar events): Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 161ms (161ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:50.9015215Z   Warning  Unhealthy  5m39s (x601 over 141m)  kubelet  Startup probe failed: Get "http://10.42.0.92:3002/health": dial tcp 10.42.0.92:3002: connect: connection refused
+2026-09-02T08:42:50.9021221Z   Warning  BackOff    62s (x419 over 133m)    kubelet  Back-off restarting failed container omnimarket-projection-api in pod omnimarket-projection-api-6b65b9b688-67rzj_onex-dev(00000000-0000-4000-8000-000000000002)
+2026-09-02T08:42:51.2007461Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2009124Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2010528Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2011901Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2013055Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2014295Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2015675Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2016811Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2017954Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2019090Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.2019629Z ERROR:    Traceback (most recent call last):
+2026-09-02T08:42:51.2020195Z   File "/app/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+2026-09-02T08:42:51.2020804Z     async with self.lifespan_context(app) as maybe_state:
+2026-09-02T08:42:51.2021187Z                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-09-02T08:42:51.2021612Z   File "/usr/local/lib/python3.12/contextlib.py", line 210, in __aenter__
+2026-09-02T08:42:51.2022060Z     return await anext(self.gen)
+2026-09-02T08:42:51.2022346Z            ^^^^^^^^^^^^^^^^^^^^^
+2026-09-02T08:42:51.2022898Z   File "/app/.venv/lib/python3.12/site-packages/omnimarket/projection/api_server.py", line 408, in _lifespan
+2026-09-02T08:42:51.2023490Z     await cache.start()
+2026-09-02T08:42:51.2024016Z   File "/app/.venv/lib/python3.12/site-packages/omnimarket/projection/snapshot_cache.py", line 418, in start
+2026-09-02T08:42:51.2024540Z     await self._consumer.start()
+2026-09-02T08:42:51.2025011Z   File "/app/.venv/lib/python3.12/site-packages/aiokafka/consumer/consumer.py", line 365, in start
+2026-09-02T08:42:51.2025516Z     await self._wait_topics()
+2026-09-02T08:42:51.2026344Z   File "/app/.venv/lib/python3.12/site-packages/aiokafka/consumer/consumer.py", line 433, in _wait_topics
+2026-09-02T08:42:51.2026938Z     await self._client._wait_on_metadata(topic)
+2026-09-02T08:42:51.2027438Z   File "/app/.venv/lib/python3.12/site-packages/aiokafka/client.py", line 509, in _wait_on_metadata
+2026-09-02T08:42:51.2027944Z     raise UnknownTopicOrPartitionError()
+2026-09-02T08:42:51.2028873Z aiokafka.errors.UnknownTopicOrPartitionError: [Error 3] UnknownTopicOrPartitionError
+2026-09-02T08:42:51.2029559Z 
+2026-09-02T08:42:51.2029802Z ERROR:    Application startup failed. Exiting.
+2026-09-02T08:42:51.5068711Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5069893Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5070901Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5072740Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5073992Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5078822Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5080021Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5081052Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5082055Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5083036Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
+2026-09-02T08:42:51.5083801Z ERROR:    Traceback (most recent call last):
+2026-09-02T08:42:51.5084494Z   File "/app/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+2026-09-02T08:42:51.5085310Z     async with self.lifespan_context(app) as maybe_state:
+2026-09-02T08:42:51.5085897Z                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-09-02T08:42:51.5086520Z   File "/usr/local/lib/python3.12/contextlib.py", line 210, in __aenter__
+2026-09-02T08:42:51.5087193Z     return await anext(self.gen)
+2026-09-02T08:42:51.5087620Z            ^^^^^^^^^^^^^^^^^^^^^
+2026-09-02T08:42:51.5090658Z   File "/app/.venv/lib/python3.12/site-packages/omnimarket/projection/api_server.py", line 408, in _lifespan
+2026-09-02T08:42:51.5091949Z     await cache.start()
+2026-09-02T08:42:51.5092831Z   File "/app/.venv/lib/python3.12/site-packages/omnimarket/projection/snapshot_cache.py", line 418, in start
+2026-09-02T08:42:51.5093782Z     await self._consumer.start()
+2026-09-02T08:42:51.5094581Z   File "/app/.venv/lib/python3.12/site-packages/aiokafka/consumer/consumer.py", line 365, in start
+2026-09-02T08:42:51.5095418Z     await self._wait_topics()
+2026-09-02T08:42:51.5096238Z   File "/app/.venv/lib/python3.12/site-packages/aiokafka/consumer/consumer.py", line 433, in _wait_topics
+2026-09-02T08:42:51.5097166Z     await self._client._wait_on_metadata(topic)
+2026-09-02T08:42:51.5098037Z   File "/app/.venv/lib/python3.12/site-packages/aiokafka/client.py", line 509, in _wait_on_metadata
+2026-09-02T08:42:51.5099169Z     raise UnknownTopicOrPartitionError()
+2026-09-02T08:42:51.5100023Z aiokafka.errors.UnknownTopicOrPartitionError: [Error 3] UnknownTopicOrPartitionError
+2026-09-02T08:42:51.5101722Z 
+2026-09-02T08:42:51.5101966Z ERROR:    Application startup failed. Exiting.
+2026-09-02T08:42:51.5103126Z Checking rollout state for: omnimarket-projection-live-events-writer...
+2026-09-02T08:42:52.1522427Z   Progressing reason : NewReplicaSetAvailable
+2026-09-02T08:42:52.1523876Z   metadata.generation: 25  observedGeneration: 25
+2026-09-02T08:42:52.1525214Z Waiting for rollout: omnimarket-projection-live-events-writer...
+2026-09-02T08:42:52.4684983Z deployment "omnimarket-projection-live-events-writer" successfully rolled out
+2026-09-02T08:42:52.5374085Z Checking rollout state for: omnimarket-projection-registration-writer...
+2026-09-02T08:42:53.1979229Z   Progressing reason : NewReplicaSetAvailable
+2026-09-02T08:42:53.1980837Z   metadata.generation: 22  observedGeneration: 22
+2026-09-02T08:42:53.1981876Z Waiting for rollout: omnimarket-projection-registration-writer...
+2026-09-02T08:42:53.5151346Z deployment "omnimarket-projection-registration-writer" successfully rolled out
+2026-09-02T08:42:53.5829691Z Checking rollout state for: omnimarket-projection-delegation-writer...
+2026-09-02T08:42:54.2356325Z   Progressing reason : NewReplicaSetAvailable
+2026-09-02T08:42:54.2369440Z   metadata.generation: 21  observedGeneration: 21
+2026-09-02T08:42:54.2371619Z Waiting for rollout: omnimarket-projection-delegation-writer...
+2026-09-02T08:42:54.5485242Z deployment "omnimarket-projection-delegation-writer" successfully rolled out
+2026-09-02T08:42:54.6157568Z Checking rollout state for: omnimarket-projection-tenant-credentials-writer...
+2026-09-02T08:42:55.2804301Z   Progressing reason : NewReplicaSetAvailable
+2026-09-02T08:42:55.2805826Z   metadata.generation: 10  observedGeneration: 10
+2026-09-02T08:42:55.2806984Z Waiting for rollout: omnimarket-projection-tenant-credentials-writer...
+2026-09-02T08:42:55.6059388Z deployment "omnimarket-projection-tenant-credentials-writer" successfully rolled out
+2026-09-02T08:42:55.6757757Z Checking rollout state for: omnimarket-projection-savings-writer...
+2026-09-02T08:42:56.3438823Z   Progressing reason : NewReplicaSetAvailable
+2026-09-02T08:42:56.3440112Z   metadata.generation: 4  observedGeneration: 4
+2026-09-02T08:42:56.3441115Z Waiting for rollout: omnimarket-projection-savings-writer...
+2026-09-02T08:42:56.6456107Z deployment "omnimarket-projection-savings-writer" successfully rolled out
+2026-09-02T08:42:56.7155468Z Checking rollout state for: omnimarket-projection-tenant-registry-writer...
+2026-09-02T08:42:57.3638136Z   Progressing reason : NewReplicaSetAvailable
+2026-09-02T08:42:57.3639424Z   metadata.generation: 8  observedGeneration: 8
+2026-09-02T08:42:57.3640634Z Waiting for rollout: omnimarket-projection-tenant-registry-writer...
+2026-09-02T08:42:57.6732069Z deployment "omnimarket-projection-tenant-registry-writer" successfully rolled out
+2026-09-02T08:42:57.7412661Z Checking rollout state for: omninode-runtime-effects...
+2026-09-02T08:42:58.4487824Z   Progressing reason : ProgressDeadlineExceeded
+2026-09-02T08:42:58.4489566Z   metadata.generation: 106  observedGeneration: 106
+2026-09-02T08:42:58.4490775Z Waiting for rollout: omninode-runtime-effects...
+2026-09-02T08:42:58.8492382Z error: deployment "omninode-runtime-effects" exceeded its progress deadline
+2026-09-02T08:42:58.8501428Z ##[error]Rollout failed or timed out: omninode-runtime-effects
+2026-09-02T08:42:59.3855596Z Name:                   omninode-runtime-effects
+2026-09-02T08:42:59.3856841Z Namespace:              onex-dev
+2026-09-02T08:42:59.3857683Z CreationTimestamp:      Mon, 11 May 2026 18:20:37 +0000
+2026-09-02T08:42:59.3858625Z Labels:                 app.kubernetes.io/component=runtime-effects
+2026-09-02T08:42:59.3859759Z                         app.kubernetes.io/name=omninode-runtime-effects
+2026-09-02T08:42:59.3860486Z                         omninode/env=dev
+2026-09-02T08:42:59.3861072Z                         omninode/managed=true
+2026-09-02T08:42:59.3861593Z                         omninode/plane=runtime
+2026-09-02T08:42:59.3862203Z                         omninode/tier=effects
+2026-09-02T08:42:59.3862944Z Annotations:            deployment.kubernetes.io/revision: 88
+2026-09-02T08:42:59.3863949Z                         omninode/omnibase-infra-source-sha: 5e079d3b552ffc55e80926680822788c96147679
+2026-09-02T08:42:59.3865395Z Selector:               app.kubernetes.io/name=omninode-runtime-effects,omninode/env=dev,omninode/managed=true,omninode/plane=runtime
+2026-09-02T08:42:59.3866993Z Replicas:               1 desired | 1 updated | 1 total | 0 available | 1 unavailable
+2026-09-02T08:42:59.3867943Z StrategyType:           RollingUpdate
+2026-09-02T08:42:59.3868935Z MinReadySeconds:        0
+2026-09-02T08:42:59.3869653Z RollingUpdateStrategy:  1 max unavailable, 0 max surge
+2026-09-02T08:42:59.3870395Z Pod Template:
+2026-09-02T08:42:59.3871384Z   Labels:       app.kubernetes.io/component=runtime-effects
+2026-09-02T08:42:59.3872240Z                 app.kubernetes.io/name=omninode-runtime-effects
+2026-09-02T08:42:59.3872939Z                 omninode/env=dev
+2026-09-02T08:42:59.3873496Z                 omninode/managed=true
+2026-09-02T08:42:59.3874087Z                 omninode/plane=runtime
+2026-09-02T08:42:59.3874643Z                 omninode/tier=effects
+2026-09-02T08:42:59.3875393Z   Annotations:  kubectl.kubernetes.io/restartedAt: 2026-08-30T09:31:45Z
+2026-09-02T08:42:59.3876163Z   Containers:
+2026-09-02T08:42:59.3876657Z    omninode-runtime-effects:
+2026-09-02T08:42:59.3877878Z     Image:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:59.3879552Z     Port:       8085/TCP
+2026-09-02T08:42:59.3880109Z     Host Port:  0/TCP
+2026-09-02T08:42:59.3880835Z     Limits:
+2026-09-02T08:42:59.3881291Z       cpu:     1
+2026-09-02T08:42:59.3881739Z       memory:  2Gi
+2026-09-02T08:42:59.3882227Z     Requests:
+2026-09-02T08:42:59.3882691Z       cpu:      100m
+2026-09-02T08:42:59.3883188Z       memory:   256Mi
+2026-09-02T08:42:59.3883933Z     Liveness:   tcp-socket :8085 delay=300s timeout=3s period=10s #success=1 #failure=3
+2026-09-02T08:42:59.3885089Z     Readiness:  http-get http://:http/ready delay=20s timeout=3s period=5s #success=1 #failure=3
+2026-09-02T08:42:59.3886203Z     Startup:    tcp-socket :http delay=0s timeout=1s period=10s #success=1 #failure=60
+2026-09-02T08:42:59.3887061Z     Environment Variables from:
+2026-09-02T08:42:59.3887701Z       onex-runtime-config  ConfigMap  Optional: false
+2026-09-02T08:42:59.3888870Z     Environment:
+2026-09-02T08:42:59.3889606Z       RUNTIME_PROFILE:                   effects
+2026-09-02T08:42:59.3890393Z       OTEL_SERVICE_NAME:                 omninode-runtime-effects
+2026-09-02T08:42:59.3891347Z       BIFROST_CONTRACT_PATH:             /app/data/delegation/bifrost_delegation.yaml
+2026-09-02T08:42:59.3892399Z       BIFROST_LANE_OVERLAY_PATH:         /etc/onex/bifrost/onex-dev.bifrost.yaml
+2026-09-02T08:42:59.3893442Z       DELEGATION_ROUTING_TIERS_PATH:     /app/config/delegation/routing_tiers.yaml
+2026-09-02T08:42:59.3894306Z       ONEX_TOPIC_ENFORCEMENT_MODE:       reject
+2026-09-02T08:42:59.3894933Z       ONEX_BOUNDARY_DLQ_ENABLED:         1
+2026-09-02T08:42:59.3895529Z       ONEX_WIRING_STRICT_MODE:           1
+2026-09-02T08:42:59.3896155Z       ONEX_SINGLE_OWNER_COMMAND_TOPICS:  0
+2026-09-02T08:42:59.3896823Z       ONEX_GROUP_ID:                     onex-runtime-effects
+2026-09-02T08:42:59.3897961Z       POSTGRES_PASSWORD:                 <set to the key 'POSTGRES_PASSWORD' in secret 'onex-runtime-credentials'>         Optional: true
+2026-09-02T08:42:59.3899963Z       POSTGRES_USER:                     <set to the key 'POSTGRES_USER' in secret 'onex-runtime-credentials'>             Optional: true
+2026-09-02T08:42:59.3901612Z       OMNIBASE_INFRA_DB_URL:             <set to the key 'OMNIBASE_INFRA_DB_URL' in secret 'onex-runtime-credentials'>     Optional: true
+2026-09-02T08:42:59.3903286Z       OMNINODE_INTERNAL_DB_URL:          <set to the key 'OMNINODE_INTERNAL_DB_URL' in secret 'onex-runtime-credentials'>  Optional: false
+2026-09-02T08:42:59.3904497Z       OMNIINTELLIGENCE_DB_URL:           
+2026-09-02T08:42:59.3905673Z       VALKEY_PASSWORD:                   <set to the key 'password' in secret 'onex-valkey-credentials'>                         Optional: false
+2026-09-02T08:42:59.3907403Z       INFISICAL_CLIENT_ID:               <set to the key 'INFISICAL_CLIENT_ID' in secret 'onex-store-resolver-credentials'>      Optional: false
+2026-09-02T08:42:59.3909378Z       INFISICAL_CLIENT_SECRET:           <set to the key 'INFISICAL_CLIENT_SECRET' in secret 'onex-store-resolver-credentials'>  Optional: false
+2026-09-02T08:42:59.3911163Z       INFISICAL_PROJECT_ID:              <set to the key 'INFISICAL_PROJECT_ID' in secret 'onex-store-resolver-credentials'>     Optional: false
+2026-09-02T08:42:59.3913068Z       KEYCLOAK_CLIENT_ID:                <set to the key 'KEYCLOAK_CLIENT_ID' in secret 'onex-runtime-credentials'>              Optional: false
+2026-09-02T08:42:59.3914864Z       KEYCLOAK_CLIENT_SECRET:            <set to the key 'KEYCLOAK_CLIENT_SECRET' in secret 'onex-runtime-credentials'>          Optional: false
+2026-09-02T08:42:59.3916618Z       OMNIDASH_ANALYTICS_DB_URL:         <set to the key 'OMNIDASH_ANALYTICS_DB_URL' in secret 'onex-runtime-credentials'>       Optional: false
+2026-09-02T08:42:59.3917941Z       ONEX_ACTIVE_RUNTIME_PACKAGES:      omnibase_infra,omnimarket
+2026-09-02T08:42:59.3919596Z       LOCAL_LLM_SHARED_SECRET:           <set to the key 'LOCAL_LLM_SHARED_SECRET' in secret 'onex-runtime-credentials'>  Optional: false
+2026-09-02T08:42:59.3920709Z     Mounts:
+2026-09-02T08:42:59.3921232Z       /app/data from app-data (rw)
+2026-09-02T08:42:59.3922085Z       /app/logs from app-logs (rw)
+2026-09-02T08:42:59.3922767Z       /etc/onex/bifrost from bifrost-lane-overlay (ro)
+2026-09-02T08:42:59.3923528Z       /run/onex-runtime from run-onex (rw)
+2026-09-02T08:42:59.3924188Z       /tmp from tmp (rw)
+2026-09-02T08:42:59.3924736Z   Volumes:
+2026-09-02T08:42:59.3925180Z    tmp:
+2026-09-02T08:42:59.3925847Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.3926649Z     Medium:     
+2026-09-02T08:42:59.3927130Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.3927629Z    app-logs:
+2026-09-02T08:42:59.3928535Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.3929348Z     Medium:     
+2026-09-02T08:42:59.3929857Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.3930408Z    app-data:
+2026-09-02T08:42:59.3931069Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.3931901Z     Medium:     
+2026-09-02T08:42:59.3932391Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.3932945Z    run-onex:
+2026-09-02T08:42:59.3933588Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.3934385Z     Medium:     
+2026-09-02T08:42:59.3934864Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.3935403Z    bifrost-lane-overlay:
+2026-09-02T08:42:59.3936045Z     Type:               ConfigMap (a volume populated by a ConfigMap)
+2026-09-02T08:42:59.3936900Z     Name:               onex-dev-bifrost-lane-overlay-kmm989kg8t
+2026-09-02T08:42:59.3937690Z     Optional:           false
+2026-09-02T08:42:59.3938580Z   Priority Class Name:  omninode-standard
+2026-09-02T08:42:59.3939260Z   Node-Selectors:       <none>
+2026-09-02T08:42:59.3939846Z   Tolerations:          <none>
+2026-09-02T08:42:59.3940558Z Conditions:
+2026-09-02T08:42:59.3941150Z   Type           Status  Reason
+2026-09-02T08:42:59.3941712Z   ----           ------  ------
+2026-09-02T08:42:59.3942331Z   Available      True    MinimumReplicasAvailable
+2026-09-02T08:42:59.3943073Z   Progressing    False   ProgressDeadlineExceeded
+2026-09-02T08:42:59.3949233Z OldReplicaSets:  omninode-runtime-effects-585985d46f (0/0 replicas created), omninode-runtime-effects-54dd6bf77b (0/0 replicas created), omninode-runtime-effects-79d896d544 (0/0 replicas created), omninode-runtime-effects-65847b5fb6 (0/0 replicas created), omninode-runtime-effects-66b6985bb8 (0/0 replicas created), omninode-runtime-effects-68cb7d9f76 (0/0 replicas created), omninode-runtime-effects-849bcb486 (0/0 replicas created), omninode-runtime-effects-5df8b7bcbf (0/0 replicas created), omninode-runtime-effects-6fbc987fc5 (0/0 replicas created), omninode-runtime-effects-6fbf65d4b (0/0 replicas created), omninode-runtime-effects-8cb46dcf4 (0/0 replicas created), omninode-runtime-effects-57b75cf676 (0/0 replicas created), omninode-runtime-effects-cbc4bd987 (0/0 replicas created), omninode-runtime-effects-66f48866bc (0/0 replicas created)
+2026-09-02T08:42:59.3955356Z NewReplicaSet:   omninode-runtime-effects-746db55788 (1/1 replicas created)
+2026-09-02T08:42:59.3999489Z Events:          <none>
+2026-09-02T08:42:59.8236715Z Name:                 omninode-runtime-effects-746db55788-98j7j
+2026-09-02T08:42:59.8237893Z Namespace:            onex-dev
+2026-09-02T08:42:59.8239003Z Priority:             100000
+2026-09-02T08:42:59.8239940Z Priority Class Name:  omninode-standard
+2026-09-02T08:42:59.8240569Z Service Account:      default
+2026-09-02T08:42:59.8241150Z Node:                 ip-10-40-204-249/10.40.204.249
+2026-09-02T08:42:59.8241784Z Start Time:           Wed, 02 Sep 2026 06:20:40 +0000
+2026-09-02T08:42:59.8242426Z Labels:               app.kubernetes.io/component=runtime-effects
+2026-09-02T08:42:59.8243279Z                       app.kubernetes.io/name=omninode-runtime-effects
+2026-09-02T08:42:59.8244009Z                       omninode/env=dev
+2026-09-02T08:42:59.8244637Z                       omninode/managed=true
+2026-09-02T08:42:59.8245257Z                       omninode/plane=runtime
+2026-09-02T08:42:59.8245875Z                       omninode/tier=effects
+2026-09-02T08:42:59.8246767Z                       pod-template-hash=746db55788
+2026-09-02T08:42:59.8247639Z Annotations:          kubectl.kubernetes.io/restartedAt: 2026-08-30T09:31:45Z
+2026-09-02T08:42:59.8248742Z Status:               Running
+2026-09-02T08:42:59.8249365Z SeccompProfile:       RuntimeDefault
+2026-09-02T08:42:59.8250109Z IP:                   10.42.0.100
+2026-09-02T08:42:59.8250777Z IPs:
+2026-09-02T08:42:59.8251251Z   IP:           10.42.0.100
+2026-09-02T08:42:59.8252090Z Controlled By:  ReplicaSet/omninode-runtime-effects-746db55788
+2026-09-02T08:42:59.8252888Z Containers:
+2026-09-02T08:42:59.8253378Z   omninode-runtime-effects:
+2026-09-02T08:42:59.8254315Z     Container ID:   containerd://1b63fab94ed51f926b350905fd5a46499737f57231eb5fd7c0a5f7ff6b328992
+2026-09-02T08:42:59.8255967Z     Image:          272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:59.8257929Z     Image ID:       272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:59.8260738Z     Port:           8085/TCP
+2026-09-02T08:42:59.8261892Z     Host Port:      0/TCP
+2026-09-02T08:42:59.8262469Z     State:          Running
+2026-09-02T08:42:59.8263048Z       Started:      Wed, 02 Sep 2026 08:39:59 +0000
+2026-09-02T08:42:59.8263691Z     Last State:     Terminated
+2026-09-02T08:42:59.8264237Z       Reason:       Error
+2026-09-02T08:42:59.8264746Z       Exit Code:    1
+2026-09-02T08:42:59.8265282Z       Started:      Wed, 02 Sep 2026 08:30:31 +0000
+2026-09-02T08:42:59.8265966Z       Finished:     Wed, 02 Sep 2026 08:34:44 +0000
+2026-09-02T08:42:59.8266566Z     Ready:          False
+2026-09-02T08:42:59.8267081Z     Restart Count:  24
+2026-09-02T08:42:59.8267535Z     Limits:
+2026-09-02T08:42:59.8267951Z       cpu:     1
+2026-09-02T08:42:59.8268834Z       memory:  2Gi
+2026-09-02T08:42:59.8269305Z     Requests:
+2026-09-02T08:42:59.8269753Z       cpu:      100m
+2026-09-02T08:42:59.8270246Z       memory:   256Mi
+2026-09-02T08:42:59.8270998Z     Liveness:   tcp-socket :8085 delay=300s timeout=3s period=10s #success=1 #failure=3
+2026-09-02T08:42:59.8272172Z     Readiness:  http-get http://:http/ready delay=20s timeout=3s period=5s #success=1 #failure=3
+2026-09-02T08:42:59.8273365Z     Startup:    tcp-socket :http delay=0s timeout=1s period=10s #success=1 #failure=60
+2026-09-02T08:42:59.8274238Z     Environment Variables from:
+2026-09-02T08:42:59.8274888Z       onex-runtime-config  ConfigMap  Optional: false
+2026-09-02T08:42:59.8275550Z     Environment:
+2026-09-02T08:42:59.8276080Z       RUNTIME_PROFILE:                   effects
+2026-09-02T08:42:59.8276889Z       OTEL_SERVICE_NAME:                 omninode-runtime-effects
+2026-09-02T08:42:59.8277842Z       BIFROST_CONTRACT_PATH:             /app/data/delegation/bifrost_delegation.yaml
+2026-09-02T08:42:59.8279276Z       BIFROST_LANE_OVERLAY_PATH:         /etc/onex/bifrost/onex-dev.bifrost.yaml
+2026-09-02T08:42:59.8280386Z       DELEGATION_ROUTING_TIERS_PATH:     /app/config/delegation/routing_tiers.yaml
+2026-09-02T08:42:59.8281472Z       ONEX_TOPIC_ENFORCEMENT_MODE:       reject
+2026-09-02T08:42:59.8282151Z       ONEX_BOUNDARY_DLQ_ENABLED:         1
+2026-09-02T08:42:59.8282778Z       ONEX_WIRING_STRICT_MODE:           1
+2026-09-02T08:42:59.8283397Z       ONEX_SINGLE_OWNER_COMMAND_TOPICS:  0
+2026-09-02T08:42:59.8284123Z       ONEX_GROUP_ID:                     onex-runtime-effects
+2026-09-02T08:42:59.8285359Z       POSTGRES_PASSWORD:                 <set to the key 'POSTGRES_PASSWORD' in secret 'onex-runtime-credentials'>         Optional: true
+2026-09-02T08:42:59.8286961Z       POSTGRES_USER:                     <set to the key 'POSTGRES_USER' in secret 'onex-runtime-credentials'>             Optional: true
+2026-09-02T08:42:59.8288873Z       OMNIBASE_INFRA_DB_URL:             <set to the key 'OMNIBASE_INFRA_DB_URL' in secret 'onex-runtime-credentials'>     Optional: true
+2026-09-02T08:42:59.8290843Z       OMNINODE_INTERNAL_DB_URL:          <set to the key 'OMNINODE_INTERNAL_DB_URL' in secret 'onex-runtime-credentials'>  Optional: false
+2026-09-02T08:42:59.8292045Z       OMNIINTELLIGENCE_DB_URL:           
+2026-09-02T08:42:59.8293179Z       VALKEY_PASSWORD:                   <set to the key 'password' in secret 'onex-valkey-credentials'>                         Optional: false
+2026-09-02T08:42:59.8294801Z       INFISICAL_CLIENT_ID:               <set to the key 'INFISICAL_CLIENT_ID' in secret 'onex-store-resolver-credentials'>      Optional: false
+2026-09-02T08:42:59.8296542Z       INFISICAL_CLIENT_SECRET:           <set to the key 'INFISICAL_CLIENT_SECRET' in secret 'onex-store-resolver-credentials'>  Optional: false
+2026-09-02T08:42:59.8298562Z       INFISICAL_PROJECT_ID:              <set to the key 'INFISICAL_PROJECT_ID' in secret 'onex-store-resolver-credentials'>     Optional: false
+2026-09-02T08:42:59.8300447Z       KEYCLOAK_CLIENT_ID:                <set to the key 'KEYCLOAK_CLIENT_ID' in secret 'onex-runtime-credentials'>              Optional: false
+2026-09-02T08:42:59.8302193Z       KEYCLOAK_CLIENT_SECRET:            <set to the key 'KEYCLOAK_CLIENT_SECRET' in secret 'onex-runtime-credentials'>          Optional: false
+2026-09-02T08:42:59.8303929Z       OMNIDASH_ANALYTICS_DB_URL:         <set to the key 'OMNIDASH_ANALYTICS_DB_URL' in secret 'onex-runtime-credentials'>       Optional: false
+2026-09-02T08:42:59.8305329Z       ONEX_ACTIVE_RUNTIME_PACKAGES:      omnibase_infra,omnimarket
+2026-09-02T08:42:59.8306674Z       LOCAL_LLM_SHARED_SECRET:           <set to the key 'LOCAL_LLM_SHARED_SECRET' in secret 'onex-runtime-credentials'>  Optional: false
+2026-09-02T08:42:59.8307799Z     Mounts:
+2026-09-02T08:42:59.8308476Z       /app/data from app-data (rw)
+2026-09-02T08:42:59.8309123Z       /app/logs from app-logs (rw)
+2026-09-02T08:42:59.8309786Z       /etc/onex/bifrost from bifrost-lane-overlay (ro)
+2026-09-02T08:42:59.8310494Z       /run/onex-runtime from run-onex (rw)
+2026-09-02T08:42:59.8311123Z       /tmp from tmp (rw)
+2026-09-02T08:42:59.8311643Z Conditions:
+2026-09-02T08:42:59.8312107Z   Type                        Status
+2026-09-02T08:42:59.8312760Z   PodReadyToStartContainers   True 
+2026-09-02T08:42:59.8313383Z   Initialized                 True 
+2026-09-02T08:42:59.8314006Z   Ready                       False 
+2026-09-02T08:42:59.8314623Z   ContainersReady             False 
+2026-09-02T08:42:59.8315242Z   PodScheduled                True 
+2026-09-02T08:42:59.8315801Z Volumes:
+2026-09-02T08:42:59.8316243Z   tmp:
+2026-09-02T08:42:59.8316873Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.8317664Z     Medium:     
+2026-09-02T08:42:59.8318157Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.8319030Z   app-logs:
+2026-09-02T08:42:59.8319701Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.8320583Z     Medium:     
+2026-09-02T08:42:59.8321118Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.8321649Z   app-data:
+2026-09-02T08:42:59.8322285Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.8323081Z     Medium:     
+2026-09-02T08:42:59.8323734Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.8324258Z   run-onex:
+2026-09-02T08:42:59.8324897Z     Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+2026-09-02T08:42:59.8325685Z     Medium:     
+2026-09-02T08:42:59.8326152Z     SizeLimit:  <unset>
+2026-09-02T08:42:59.8326676Z   bifrost-lane-overlay:
+2026-09-02T08:42:59.8327327Z     Type:        ConfigMap (a volume populated by a ConfigMap)
+2026-09-02T08:42:59.8328189Z     Name:        onex-dev-bifrost-lane-overlay-kmm989kg8t
+2026-09-02T08:42:59.8329895Z     Optional:    false
+2026-09-02T08:42:59.8330548Z QoS Class:       Burstable
+2026-09-02T08:42:59.8330996Z Node-Selectors:  <none>
+2026-09-02T08:42:59.8331861Z Tolerations:     node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+2026-09-02T08:42:59.8332960Z                  node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+2026-09-02T08:42:59.8334042Z Events:
+2026-09-02T08:42:59.8334480Z   Type     Reason     Age                     From     Message
+2026-09-02T08:42:59.8335390Z   ----     ------     ----                    ----     -------
+2026-09-02T08:42:59.8337783Z   Normal   Pulled     53m                     kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 159ms (159ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8342036Z   Normal   Pulled     43m (x2 over 52m)       kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 157ms (157ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8346329Z   Normal   Pulled     14m (x4 over 126m)      kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 164ms (164ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8350248Z   Warning  BackOff    6m11s (x255 over 127m)  kubelet  Back-off restarting failed container omninode-runtime-effects in pod omninode-runtime-effects-746db55788-98j7j_onex-dev(00000000-0000-4000-8000-000000000003)
+2026-09-02T08:42:59.8353553Z   Normal   Pulling    3m1s (x25 over 142m)    kubelet  Pulling image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
+2026-09-02T08:42:59.8357395Z   Normal   Pulled     3m1s (x4 over 33m)      kubelet  (combined from similar events): Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 159ms (159ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8360881Z   Warning  Unhealthy  69s (x517 over 141m)    kubelet  Startup probe failed: dial tcp 10.42.0.100:8085: connect: connection refused
+2026-09-02T08:43:00.1722431Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Skipping contract 'pattern_b_broker' from 'omnimarket' because it targets an inactive runtime package domain
+2026-09-02T08:43:00.1731159Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Skipping contract 'node_persona_builder_compute' from 'omnimarket' because it targets an inactive runtime package domain
+2026-09-02T08:43:00.1734698Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Skipping contract 'node_persona_lifecycle_orchestrator' from 'omnimarket' because it targets an inactive runtime package domain
+2026-09-02T08:43:00.1737260Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Skipping contract 'node_persona_retrieval_effect' from 'omnimarket' because it targets an inactive runtime package domain
+2026-09-02T08:43:00.1740739Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Skipping contract 'node_persona_storage_effect' from 'omnimarket' because it targets an inactive runtime package domain
+2026-09-02T08:43:00.1744211Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pipeline_audit_orchestrator (orchestrator) from omnimarket 0.4.16
+2026-09-02T08:43:00.1746460Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pipeline_cache_effect (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.1748782Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pipeline_fill (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.1750966Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_plan_audit_compute (compute) from omnimarket 0.4.16
+2026-09-02T08:43:00.1752911Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_plan_to_tickets (compute) from omnimarket 0.4.16
+2026-09-02T08:43:00.1755161Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: platform_diagnostics (orchestrator) from omnimarket 0.4.16
+2026-09-02T08:43:00.1757036Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: platform_readiness (compute) from omnimarket 0.4.16
+2026-09-02T08:43:00.1759491Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_polish_task_classifier (compute) from omnimarket 0.4.16
+2026-09-02T08:43:00.1761732Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_post_merge_knowledge_sync_orchestrator (orchestrator) from omnimarket 0.4.16
+2026-09-02T08:43:00.1764003Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pr_arm_gate_compute (COMPUTE_GENERIC) from omnimarket 0.4.16
+2026-09-02T08:43:00.1766099Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_delegated_fix_effect (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.1768081Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_health_monitor (compute) from omnimarket 0.4.16
+2026-09-02T08:43:00.1770390Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_lifecycle_fix_effect (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.1772533Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pr_lifecycle_inventory_compute (COMPUTE_GENERIC) from omnimarket 0.4.16
+2026-09-02T08:43:00.1774676Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_lifecycle_merge_effect (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.1776777Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_lifecycle_orchestrator (orchestrator) from omnimarket 0.4.16
+2026-09-02T08:43:00.1779296Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pr_lifecycle_state_reducer (reducer) from omnimarket 0.4.16
+2026-09-02T08:43:00.1781445Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pr_lifecycle_triage_compute (COMPUTE_GENERIC) from omnimarket 0.4.16
+2026-09-02T08:43:00.1783694Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_lifecycle_worktree_prune_effect (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.1785750Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_merged_projection (reducer) from omnimarket 0.4.16
+2026-09-02T08:43:00.1787692Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_polish (compute) from omnimarket 0.4.16
+2026-09-02T08:43:00.1789923Z 2026-09-02 08:43:00 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pr_review_fsm_reducer (reducer) from omnimarket 0.4.16
+2026-09-02T08:43:00.1792308Z 2026-09-02 08:43:00 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: node_pr_review_orchestrator (orchestrator) from omnimarket 0.4.16
+2026-09-02T08:43:00.1794468Z 2026-09-02 08:43:00 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_semantic_grader_llm_effect (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.1796559Z 2026-09-02 08:43:00 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Discovered contract: pr_snapshot_effect (effect) from omnimarket 0.4.16
+2026-09-02T08:43:00.4862957Z omnibase_core.errors.model_onex_error.ModelOnexError: Auto-wiring failed for 2 contract(s): node_hook_event_capture: ModelOnexError: Auto-wiring contract 'node_hook_event_capture' failed: handler=HandlerHookEventCapture: ValueError: Projection handler requires topology bindings with configured DSNs: tenant_projection:ONEX_TENANT_DB; projection_delegation: ModelOnexError: Auto-wiring contract 'projection_delegation' failed: handler=HandlerProjectionDelegation: ValueError: Projection handler requires topology bindings with configured DSNs: tenant_projection:ONEX_TENANT_
+2026-09-02T08:43:00.4867281Z 2026-09-02 08:34:42 [ERROR] aiokafka.consumer.fetcher: Failed fetch messages from 6: [Error 7] RequestTimedOutError
+2026-09-02T08:43:00.4869282Z 2026-09-02 08:34:42 [WARNING] aiokafka.consumer.group_coordinator: Heartbeat failed: local member_id was not recognized; resetting and re-joining group
+2026-09-02T08:43:00.4870956Z 2026-09-02 08:34:42 [ERROR] aiokafka.consumer.group_coordinator: Heartbeat session expired - marking coordinator dead
+2026-09-02T08:43:00.4873013Z 2026-09-02 08:34:42 [WARNING] aiokafka.consumer.group_coordinator: Marking the coordinator dead (node 1)for group onex-dev.runtime_config.node_savings_estimation_compute.consume.v1.__t.onex.evt.omniclaude.context-injected.v1.
+2026-09-02T08:43:00.4874648Z 2026-09-02 08:34:42 [WARNING] aiokafka.consumer.group_coordinator: Heartbeat failed: local member_id was not recognized; resetting and re-joining group
+2026-09-02T08:43:00.4875821Z 2026-09-02 08:34:42 [ERROR] aiokafka.consumer.group_coordinator: Heartbeat session expired - marking coordinator dead
+2026-09-02T08:43:00.4877277Z 2026-09-02 08:34:42 [WARNING] aiokafka.consumer.group_coordinator: Marking the coordinator dead (node 1)for group onex-dev.runtime_config.node_savings_estimation_compute.consume.v1.__t.onex.evt.omniclaude.validator-catch.v1.
+2026-09-02T08:43:00.4887027Z 2026-09-02 08:34:42 [ERROR] aiokafka.consumer.group_coordinator: OffsetCommit failed for group onex-dev.runtime_config.node_savings_estimation_compute.consume.v1.__t.onex.evt.omniclaude.pattern-enforcement.v1 due to group error ([Error 25] UnknownMemberIdError: onex-dev.runtime_config.node_savings_estimation_compute.consume.v1.__t.onex.evt.omniclaude.pattern-enforcement.v1), will rejoin
+2026-09-02T08:43:00.4891445Z 2026-09-02 08:34:42 [WARNING] aiokafka.consumer.group_coordinator: Auto offset commit failed: [Error 25] UnknownMemberIdError: onex-dev.runtime_config.node_savings_estimation_compute.consume.v1.__t.onex.evt.omniclaude.pattern-enforcement.v1
+2026-09-02T08:43:00.4902402Z 2026-09-02 08:34:42 [WARNING] aiokafka.consumer.group_coordinator: Heartbeat failed: local member_id was not recognized; resetting and re-joining group
+2026-09-02T08:43:00.4904224Z 2026-09-02 08:34:42 [ERROR] aiokafka.consumer.group_coordinator: Heartbeat session expired - marking coordinator dead

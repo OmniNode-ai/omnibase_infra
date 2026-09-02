@@ -120,9 +120,329 @@ jobs:
       # explicitly here because this workflow has no other way to infer it.
       git-ref: ${{ github.sha }}
 
+  candidate-boot-gate:
+    # OMN-17534. Between "the image built" and "staging runs it" there was
+    # nothing. Three times in two days a candidate was announced on the strength
+    # of unit and integration tests, applied to onex-dev, and took the runtime
+    # plane down -- OMN-17502 (BIFROST_LANE_OVERLAY_PATH bound nowhere, three
+    # Deployments to CrashLoopBackOff), OMN-17510 (HandlerSavingsCorrelation
+    # TypeError, unregistered pool), OMN-17519 (strict-mode auto-wiring
+    # ValueError: projection handlers require tenant_projection:ONEX_TENANT_DB_URL,
+    # which no onex-dev manifest binds). Each was diagnosed AFTERWARDS from pod
+    # logs over an SSM port-forward, hours per incident, serialized on the one
+    # staging cluster everybody shares.
+    #
+    # All three are boot failures against the REAL manifests, so all three are
+    # catchable before the announcement by booting the candidate against the real
+    # manifests. That is the whole of what this job does.
+    #
+    # WHY THE REAL MANIFESTS AND NOT A COMPOSE LANE: the compose lanes have a
+    # different shape, and the difference is exactly where these defects live.
+    # ONEX_WIRING_STRICT_MODE is ${ONEX_WIRING_STRICT_MODE:-0} in
+    # docker-compose.infra.yml and no lane overlay sets it, while onex-dev sets
+    # "1" on all three runtime Deployments -- at 0 an unwireable handler is
+    # quarantined, at 1 it kills boot, so a compose lane cannot see OMN-17510 or
+    # OMN-17519 at all. The Bifrost overlay is bind-mounted from the repo in
+    # compose and must be a ConfigMap in k8s, which is the whole of OMN-17502.
+    # omninode_infra's k8s/onex-lab (OMN-17533) is a thin overlay over
+    # k8s/onex-dev/runtime for precisely this reason: a manifest defect reaches
+    # this gate by construction. Its parity_exclusions.yaml records what each
+    # substitution costs, and this job uploads that file with the logs so a green
+    # run is never read in isolation from what it excluded.
+    #
+    # GITHUB-HOSTED, not the self-hosted omnibase-ci fleet: this job creates and
+    # destroys a Kubernetes cluster and side-loads a multi-gigabyte image. The
+    # .201 fleet runs the lab lanes; a per-candidate kind cluster does not belong
+    # on the same Docker daemon.
+    name: Boot the candidate on an ephemeral cluster
+    needs: [build-runtime-candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-east-1
+      # Both pinned to an exact version. An unpinned kind is an unpinned
+      # Kubernetes version, and "the gate went red because kind moved" is
+      # indistinguishable from "the candidate is broken" when you are reading it
+      # at 3am. Pinned by TAG and not by digest: kindest/node tags are immutable
+      # per kind release, and a digest here would have to be re-derived by hand
+      # on every kind bump -- a pin nobody can verify is worse than a pin
+      # everybody can read.
+      KIND_VERSION: "v0.24.0"
+      KIND_NODE_IMAGE: "kindest/node:v1.31.0"
+      LAB_NAMESPACE: onex-dev
+      LAB_OVERLAY: k8s/onex-lab
+      # 15 minutes of readiness wait, per OMN-17534 scope item 6. The runtime
+      # Deployments carry a startupProbe with failureThreshold 60 at period 10s
+      # (600s) precisely because contract discovery is slow, so a shorter wait
+      # would report a healthy candidate as a failure.
+      BOOT_WAIT_SECONDS: "900"
+    steps:
+      - name: Checkout omnibase_infra (this repo, at the candidate's own commit)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: omnibase_infra
+          persist-credentials: false
+
+      # OMN-17534 AC-6: the gate READS the staging pin and never writes it. This
+      # token is minted contents:READ for exactly that reason -- the capability
+      # to write the pin is not withheld by convention, it is not granted.
+      - name: Mint a read-only omninode_infra token
+        id: infra-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: read
+
+      - name: Checkout omninode_infra at dev (the manifests staging applies)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omninode_infra
+          ref: dev
+          path: omninode_infra
+          token: ${{ steps.infra-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Record which manifest revision this gate is proving
+        run: |
+          set -euo pipefail
+          MANIFEST_SHA="$(git -C omninode_infra rev-parse HEAD)"
+          echo "MANIFEST_SHA=${MANIFEST_SHA}" >> "$GITHUB_ENV"
+          echo "omninode_infra@dev = ${MANIFEST_SHA}"
+
+      - name: Install kind
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/kind \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          kind version
+
+      - name: Create the ephemeral cluster
+        run: |
+          set -euo pipefail
+          kind create cluster \
+            --name onex-lab-boot-gate \
+            --image "${KIND_NODE_IMAGE}" \
+            --wait 120s
+          kubectl cluster-info
+          kubectl get nodes -o wide
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@d45db47bd94e3a7d50b9c36da4cfe07ceca89d74 # v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/omninode-github-actions-role
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
+
+      - name: Pull the candidate and side-load it into the cluster
+        env:
+          IMAGE_REF: ${{ needs.build-runtime-candidate.outputs.image-ref }}
+          IMAGE_DIGEST: ${{ needs.build-runtime-candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Pull ONCE, here, where the OIDC identity is, and side-load the result
+          # so fourteen pods do not each drag two gigabytes back through an
+          # in-cluster credential.
+          #
+          # The side-load is a WARM CACHE, not the correctness mechanism. The
+          # render pins the announced DIGEST -- that is the identity under test --
+          # while `kind load docker-image` names an image in containerd from a
+          # repo:TAG, and a digest-only reference has no tag to name it by. So the
+          # image enters under a local alias; if containerd does not resolve the
+          # digest reference to it, kubelet falls back to pulling from ECR with
+          # the `ecr-cred` Secret created in the next step. Either way the pods
+          # run the pinned digest. The alias can only make that faster, and it is
+          # VERIFIED against the announced digest below rather than trusted,
+          # because an alias silently pointing at a different image would make
+          # this entire gate a lie.
+          docker pull "${IMAGE_REF}"
+
+          BOOT_TAG="${IMAGE_REF%@*}:boot-gate-${GITHUB_RUN_ID}"
+          docker tag "${IMAGE_REF}" "${BOOT_TAG}"
+
+          RESOLVED="$(docker image inspect "${BOOT_TAG}" \
+            --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            | grep -F "${IMAGE_DIGEST}" || true)"
+          if [ -z "${RESOLVED}" ]; then
+            echo "::error::${BOOT_TAG} does not resolve to ${IMAGE_DIGEST}." \
+              "Refusing to boot an image whose identity cannot be proven."
+            exit 1
+          fi
+          echo "verified: ${BOOT_TAG} == ${IMAGE_DIGEST}"
+          echo "BOOT_TAG=${BOOT_TAG}" >> "$GITHUB_ENV"
+
+          kind load docker-image --name onex-lab-boot-gate "${BOOT_TAG}"
+
+      - name: Create the in-cluster ECR pull secret from the runner's identity
+        run: |
+          set -euo pipefail
+          # The base manifests reference imagePullSecrets: ecr-cred, so the
+          # reference is exercised structurally. The credential behind it is a
+          # short-lived token minted for this run from the runner's OIDC role --
+          # never a stored one, and never a staging credential. If containerd
+          # resolves the pinned digest to the side-loaded alias this is never
+          # used; if it does not, this is what makes the pull work.
+          kubectl create namespace "${LAB_NAMESPACE}" --dry-run=client -o yaml \
+            | kubectl apply -f -
+          PASSWORD="$(aws ecr get-login-password --region "${AWS_REGION}")"
+          kubectl create secret docker-registry ecr-cred \
+            --namespace "${LAB_NAMESPACE}" \
+            --docker-server="${{ steps.ecr.outputs.registry }}" \
+            --docker-username=AWS \
+            --docker-password="${PASSWORD}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Render the onex-lab overlay with the candidate pinned
+        env:
+          IMAGE_REF: ${{ needs.build-runtime-candidate.outputs.image-ref }}
+          IMAGE_DIGEST: ${{ needs.build-runtime-candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cd omninode_infra
+
+          # Materialise the CI-only Secret values. --forbid-github-secrets makes
+          # "no real staging credential reaches a throwaway cluster"
+          # (OMN-17534 AC-5) a hard error rather than a convention: every value
+          # is generated for this run, derived from one generated for this run,
+          # or an inert literal the contract names in the tree.
+          python3 "${LAB_OVERLAY}/render_ci_secrets.py" --forbid-github-secrets
+
+          # Pin the announced DIGEST, not a tag. OMN-17533 AC-4 requires the
+          # overlay's runtime image to be overridable by digest from the caller
+          # and AC-5 forbids the overlay committing one, so the pin arrives from
+          # here or not at all. ONE override retargets all seventeen runtime
+          # containers (14 Deployments, both CronJobs, the seed Job), which
+          # omninode_infra's tests/k8s/test_onex_lab_overlay_omn17533.py proves
+          # rather than assumes.
+          python3 ../omnibase_infra/scripts/ci/boot_gate.py pin-image \
+            --kustomization "${LAB_OVERLAY}/kustomization.yaml" \
+            --name "${IMAGE_REF%@*}" \
+            --digest "${IMAGE_DIGEST}"
+
+          kubectl kustomize "${LAB_OVERLAY}" > /tmp/onex-lab-render.yaml
+          wc -l /tmp/onex-lab-render.yaml
+
+      - name: Apply
+        run: |
+          set -euo pipefail
+          kubectl apply -f /tmp/onex-lab-render.yaml
+          # Read strict mode back OFF THE CLUSTER, not out of the render. A lane
+          # running 0 quarantines an unwireable handler instead of dying on it,
+          # so this gate would go green on exactly the defect class it exists to
+          # catch. That is worth one jsonpath.
+          STRICT="$(kubectl get deploy omninode-runtime -n "${LAB_NAMESPACE}" \
+            -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ONEX_WIRING_STRICT_MODE")].value}')"
+          echo "ONEX_WIRING_STRICT_MODE on the applied Deployment: ${STRICT}"
+          if [ "${STRICT}" != "1" ]; then
+            echo "::error::the applied lane is not running strict wiring mode;" \
+              "this gate would prove nothing"
+            exit 1
+          fi
+
+      - name: Wait for every runtime-family Deployment and the projection topic
+        id: boot-wait
+        run: |
+          set -euo pipefail
+          python3 omnibase_infra/scripts/ci/boot_gate.py wait \
+            --namespace "${LAB_NAMESPACE}" \
+            --timeout-seconds "${BOOT_WAIT_SECONDS}"
+
+      - name: Collect diagnostics
+        # always(): the failure case is the one the artifact exists for.
+        if: always()
+        run: |
+          set +e
+          OUT=/tmp/boot-gate-diagnostics
+          mkdir -p "$OUT"
+
+          kubectl get pods -n "${LAB_NAMESPACE}" -o wide > "$OUT/pods-wide.txt" 2>&1
+          kubectl get deploy -n "${LAB_NAMESPACE}" -o wide > "$OUT/deployments.txt" 2>&1
+          kubectl get events -n "${LAB_NAMESPACE}" --sort-by=.lastTimestamp \
+            > "$OUT/events.txt" 2>&1
+
+          # FULL logs. OMN-17534 AC-2: the staging deploy's own rollout
+          # diagnostics use `kubectl logs --tail=30`, and OMN-17519's fatal
+          # traceback sat behind several hundred contract-discovery WARNING
+          # lines -- so the first deploy run produced no usable error at all and
+          # a SECOND deploy run was needed just to read the message. No --tail
+          # here, ever.
+          for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+              -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl logs -n "${LAB_NAMESPACE}" "$POD" --all-containers --timestamps \
+              > "$OUT/logs-${POD}.txt" 2>&1
+            # --previous is where a CrashLoopBackOff pod's actual death is; the
+            # current container is usually still starting when it is read.
+            kubectl logs -n "${LAB_NAMESPACE}" "$POD" --all-containers --timestamps \
+              --previous > "$OUT/logs-previous-${POD}.txt" 2>&1
+            [ -s "$OUT/logs-previous-${POD}.txt" ] || rm -f "$OUT/logs-previous-${POD}.txt"
+            kubectl describe pod -n "${LAB_NAMESPACE}" "$POD" \
+              > "$OUT/describe-${POD}.txt" 2>&1
+          done
+
+          # The render, with every Secret payload stripped (AC-5). "We generated
+          # it ourselves" is not a reason to publish a credential-shaped value.
+          python3 omnibase_infra/scripts/ci/boot_gate.py redact \
+            --source /tmp/onex-lab-render.yaml \
+            --destination "$OUT/onex-lab-render.redacted.yaml"
+
+          # The parity ledger travels with the logs so nobody reads a green run
+          # as a claim about MSK IAM, RDS, real Infisical or the migration
+          # bundle -- none of which this lane substitutes in.
+          cp "omninode_infra/${LAB_OVERLAY}/parity_exclusions.yaml" "$OUT/"
+
+          {
+            echo "manifest_revision=omninode_infra@dev ${MANIFEST_SHA:-unknown}"
+            echo "candidate_image=${{ needs.build-runtime-candidate.outputs.image-ref }}"
+            echo "source_commit=${GITHUB_SHA}"
+            echo "kind=${KIND_VERSION} node=${KIND_NODE_IMAGE}"
+          } > "$OUT/identity.txt"
+          exit 0
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-boot-gate-${{ github.run_id }}
+          path: /tmp/boot-gate-diagnostics
+          retention-days: 14
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Candidate boot gate (OMN-17534)"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| result | ${{ steps.boot-wait.outcome }} |"
+            echo "| candidate | ${{ needs.build-runtime-candidate.outputs.image-ref }} |"
+            echo "| manifests | omninode_infra@dev ${MANIFEST_SHA:-unknown} |"
+            echo "| overlay | k8s/onex-lab (OMN-17533) |"
+            echo "| readiness wait | ${BOOT_WAIT_SECONDS}s |"
+            echo ""
+            echo "Untruncated pod logs, previous-container logs, describes, events, the"
+            echo "redacted render and the lane's parity_exclusions.yaml are in the"
+            echo "candidate-boot-gate-${{ github.run_id }} artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   dispatch-to-staging:
     name: Announce the bundle to omninode_infra
-    needs: [build-runtime-candidate, build-migrate-bundle]
+    # OMN-17534: the boot gate is a HARD dependency, not an advisory signal. A
+    # candidate that cannot boot against the real manifests must not be
+    # announced -- announcing one anyway is how onex-dev went down three times
+    # in two days. GitHub's default success() is exactly the wanted semantics:
+    # a gate that fails, is skipped, or is cancelled leaves the dispatch
+    # unfired, so "skipped" can never read as "passed".
+    needs: [build-runtime-candidate, build-migrate-bundle, candidate-boot-gate]
     # No `if:` override. GitHub's default `success()` is exactly the wanted
     # semantics -- either build failing, or being cancelled by the concurrency
     # group above, must leave the dispatch unfired. An `always()` here would
