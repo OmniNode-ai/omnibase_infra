@@ -241,9 +241,10 @@ SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
 #
 # Operator ruling: a Markdown / badge / README PR must not pay for the heavy
 # code-verification suite, while the doc gates keep running. Measured on the
-# real merged docs-only PR #2906 (head ``0c86fd00``, files = ``knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md``
-# + ``docs/**``): 172 check-runs, 157 non-skipped, **350 runner-minutes** — the
-# heaviest docs-only PR cost in the registry.
+# real merged docs-only PR #2906 (head ``0c86fd00``, files = ``docker/README.md``
+# + ``docs/**`` — the paths as they existed then; both trees were migrated out of
+# this repo by OMN-16607): 172 check-runs, 157 non-skipped, **350 runner-minutes**
+# — the heaviest docs-only PR cost in the registry.
 #
 # The heavy TEST matrix was already quiet: ``test-parallel`` / ``detect-changes``
 # / ``CI Tests Gate`` have gated on ``needs.zone-filter.outputs.docs_only`` for a
