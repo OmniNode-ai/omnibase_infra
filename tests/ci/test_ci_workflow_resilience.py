@@ -561,11 +561,21 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
         )
         run_script = install_step["run"]
         assert "max_attempts=5" in run_script
-        assert (
-            "until uv pip install --overrides /tmp/sibling-overrides.txt" in run_script
-        )
+        assert "until uv pip install --no-deps" in run_script
+        assert "-e ../omnibase_compat" in run_script
+        assert "-e ../omnimarket" in run_script
+        assert "-e ../omnimemory" in run_script
+        assert "-e ../omniintelligence" in run_script
         assert "sibling deps attempt" in run_script
         assert "sibling deps failed after" in run_script
+
+        checkout_paths = {
+            step.get("with", {}).get("path")
+            for step in job["steps"]
+            if step.get("uses")
+            == "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        }
+        assert "omnimarket" in checkout_paths
 
 
 def test_heavy_cross_repo_jobs_use_cpu_torch_for_sibling_install() -> None:
