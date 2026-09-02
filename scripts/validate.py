@@ -32,10 +32,62 @@ Usage:
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+
+def resolve_canonical_repo_identity(repo_root: Path) -> str:
+    """Return the canonical repository identity for a Git worktree.
+
+    Ratchet baselines are keyed by the canonical clone name, not by a linked
+    worktree's arbitrary directory name. Git's common directory is shared by
+    the canonical checkout and every linked worktree, so its parent is the
+    only accepted source of that identity.
+
+    Args:
+        repo_root: Root of the checkout executing the validator.
+
+    Raises:
+        RuntimeError: If Git cannot prove a canonical common-directory
+            topology for ``repo_root``.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(
+            f"Cannot establish canonical Git identity for {repo_root}"
+        ) from error
+
+    common_dir = Path(result.stdout.strip())
+    if (
+        result.returncode != 0
+        or not common_dir.is_absolute()
+        or common_dir.name != ".git"
+        or not common_dir.is_dir()
+        or not common_dir.parent.name
+    ):
+        raise RuntimeError(f"Cannot establish canonical Git identity for {repo_root}")
+
+    return common_dir.parent.name
 
 
 def run_architecture(verbose: bool = False) -> bool:
@@ -227,8 +279,8 @@ def run_contracts(verbose: bool = False) -> bool:
 
     # Phase 2: Infrastructure contract linting
     try:
+        from omnibase_infra.validation.enums import EnumContractViolationSeverity
         from omnibase_infra.validation.linter_contract import (
-            EnumContractViolationSeverity,
             lint_contracts_in_directory,
         )
 
@@ -574,10 +626,7 @@ def run_imperative_orchestrators(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
-    # Derive the repo key from the working tree (worktrees nest the repo name in
-    # a ticket dir, so the immediate dir name is authoritative) instead of
-    # hardcoding it; baseline entries are keyed by repo::node.
-    repo_name = repo_root.name
+    repo_name = resolve_canonical_repo_identity(repo_root)
     baseline = load_baseline(
         repo_root / "architecture-handshakes" / "imperative-orchestrator-baseline.yaml"
     )
@@ -663,10 +712,7 @@ def run_orchestration_monoliths(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
-    # Derive the repo key from the working tree (worktrees nest the repo name in
-    # a ticket dir, so the immediate dir name is authoritative); baseline entries
-    # are keyed by repo::node.
-    repo_name = repo_root.name
+    repo_name = resolve_canonical_repo_identity(repo_root)
     baseline = load_monolith_baseline(
         repo_root / "architecture-handshakes" / "orchestration-monolith-baseline.yaml"
     )
@@ -742,7 +788,7 @@ def run_orchestrator_reducer_state(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
-    repo_name = repo_root.name
+    repo_name = resolve_canonical_repo_identity(repo_root)
 
     if files:
         node_dirs = node_dirs_for_changed_files(repo_root, files)
@@ -836,7 +882,7 @@ def run_migration_freeze(verbose: bool = False) -> bool:
             report = module.generate_report(result, repo_path)
             print(report)
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Migration Freeze: ERROR ({type(e).__name__}: {e})")
@@ -882,7 +928,7 @@ def run_migration_sequence(verbose: bool = False) -> bool:
         if verbose or not result.is_valid or result.has_staged_migrations:
             print(report)
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except RuntimeError as e:
         print(f"Migration Sequence: ERROR ({e})", file=sys.stderr)
@@ -933,7 +979,7 @@ def run_clean_root(verbose: bool = False) -> bool:
             report = module.generate_report(result, repo_path)
             print(report)
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Clean Root: ERROR ({type(e).__name__}: {e})")
@@ -1145,7 +1191,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
                     f"{aggregated_result.links_checked} links checked)"
                 )
 
-            return aggregated_result.is_valid
+            return cast("bool", aggregated_result.is_valid)
 
         else:
             # Validate entire repository (original behavior)
@@ -1165,7 +1211,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
                     f"{result.links_checked} links checked)"
                 )
 
-            return result.is_valid
+            return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Markdown Links: ERROR ({type(e).__name__}: {e})")
@@ -1215,7 +1261,7 @@ def run_db_quality_gate(verbose: bool = False) -> bool:
         else:
             print(f"DB Quality Gate: PASS ({result.files_checked} files checked)")
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"DB Quality Gate: ERROR ({type(e).__name__}: {e})")
@@ -1332,7 +1378,7 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    validator_map = {
+    validator_map: dict[str, Callable[[bool], bool]] = {
         "architecture": run_architecture,
         "architecture_layers": run_architecture_layers,
         "migration_freeze": run_migration_freeze,
