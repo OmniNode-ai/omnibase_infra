@@ -1264,6 +1264,30 @@ scrub_prepush_override_env() {
   unset ENABLE_SMART_TESTS || true
 }
 
+# =============================================================================
+# PATH parity with the remote leg (OMN-17549)
+# =============================================================================
+# Every pytest invocation below this line runs LOCALLY -- on the pusher's own
+# machine, or on a lab host taking the OMN-17280 same-host route. The remote
+# leg has restored a developer-shell PATH before running the transplanted suite
+# since OMN-16989; this leg never did, so the same tree returned a different
+# verdict depending on which leg ran it.
+#
+# Measured 2026-09-02 (OMN-17549): a governed same-host push of `omnimarket` on
+# `.201` returned six reds in tests/scripts/test_shell_hygiene_gate.py because
+# the non-interactive PATH there omits `~/.local/bin`, which is where that
+# host's `shellcheck` lives. The tool was installed the whole time. Six
+# guaranteed false reds hard-block a push, so this is part of the verdict
+# meaning anything -- not a convenience.
+#
+# Set here, once, AFTER every placement decision and BEFORE any pytest run, so
+# it covers the fail-closed escalation and the impacted-subset run alike. The
+# list is single-sourced with the remote wrapper in prepush_dispatch.sh
+# (prepush_developer_shell_path) and the caller's own `${PATH}` stays last, so
+# this can only add resolution.
+PATH="$(prepush_developer_shell_path)"
+export PATH
+
 if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
   guard_full_suite_host
   if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ] || [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
