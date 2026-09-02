@@ -473,12 +473,44 @@ def _build_runtime_handler_dependencies(
     postgres_pool: object | None,
     kafka_bootstrap_servers: str | None = None,
     gateway_secret_resolver_config_path: Path | None = None,
+    *,
+    savings_correlation_pool: object | None = None,
+    savings_correlation_publisher: object | None = None,
 ) -> dict[str, dict[str, object]] | None:
     """Build constructor dependencies for runtime-owned handlers.
+
+    This map is ``ServiceHandlerResolver`` **Step 2** — the materialized
+    explicit-dependency map, and the only precedence step that can satisfy a
+    constructor parameter the resolver has no provider for. Steps 3-5 cover
+    the container, the three known injectables (``event_bus`` / ``container`` /
+    ``ownership_query``) and the zero-arg case; a required ``pool`` matches
+    none of them, so an EFFECT handler that a contract's ``handler_routing``
+    declares and that takes a pool MUST appear here or ``resolve()`` reaches
+    Step 6 and raises. Under ``ONEX_WIRING_STRICT_MODE`` (onex-dev) that
+    TypeError is re-raised rather than quarantined and takes down the whole
+    runtime boot (OMN-13203 containment is deliberately disabled there).
 
     Gateway session handlers must share one session store and one resolver.
     The resolver is built from the deploy-rendered, typed configuration artifact;
     no handler may infer secret names or read secret values directly.
+
+    Args:
+        postgres_pool: The ``OMNIBASE_INFRA_DB_URL``-bound pool owned by the
+            registration plugin.
+        kafka_bootstrap_servers: Broker list for the DLQ replay transports.
+        gateway_secret_resolver_config_path: Deploy-rendered secret-resolver
+            config for the gateway session handlers.
+        savings_correlation_pool: The ``OMNINODE_INTERNAL_DB_URL``-bound pool
+            built in §3.9. It is a SEPARATE argument from ``postgres_pool`` on
+            purpose: ``HandlerSavingsCorrelation`` reads the ``application``
+            database (physical ``omnidash_analytics``), and handing it
+            ``postgres_pool`` would reinstate OMN-16770 verbatim —
+            ``UndefinedTableError: relation
+            "omninode_internal.savings_injection_signals" does not exist`` on
+            every tick.
+        savings_correlation_publisher: The §3.9 publisher callback, so a
+            bus-triggered batch emits ``savings-estimated.v1`` exactly as the
+            periodic tick does instead of computing an estimate and dropping it.
     """
     dependencies: dict[str, dict[str, object]] = {}
     if postgres_pool is not None:
@@ -488,6 +520,19 @@ def _build_runtime_handler_dependencies(
                 "HandlerBaselinesBatchCompute": {"pool": postgres_pool},
             }
         )
+
+    # OMN-17510: the missing half of OMN-16293. That change declared
+    # HandlerSavingsCorrelation in the node's handler_routing — which is what
+    # makes wire_from_manifest resolve it — and wired it for its own use by
+    # constructing it directly in the §3.9 periodic loop, but never registered
+    # its pool here, where the auto-wiring path reads. Same shape as
+    # HandlerBaselinesBatchCompute above; different pool, for the reason in
+    # the Args block.
+    if savings_correlation_pool is not None:
+        savings_dependencies: dict[str, object] = {"pool": savings_correlation_pool}
+        if savings_correlation_publisher is not None:
+            savings_dependencies["publisher"] = savings_correlation_publisher
+        dependencies["HandlerSavingsCorrelation"] = savings_dependencies
 
     if kafka_bootstrap_servers:
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
@@ -1210,6 +1255,11 @@ async def bootstrap() -> int:
     _baselines_pool = None  # asyncpg.Pool | None, assigned inside try block
     savings_correlation_task: asyncio.Task[None] | None = None
     _savings_correlation_pool = None  # asyncpg.Pool | None, assigned inside try block
+    # OMN-17510: the same pool/publisher pair the §3.9 periodic loop builds is
+    # handed to _build_runtime_handler_dependencies below, so the auto-wired
+    # instance of the SAME handler resolves through ServiceHandlerResolver
+    # Step 2 instead of exhausting the precedence chain.
+    _savings_correlation_publisher: Callable[..., Awaitable[bool]] | None = None
     runtime_health_monitor = None  # ServiceRuntimeHealthMonitor | None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
@@ -2021,6 +2071,11 @@ async def bootstrap() -> int:
                             topic=topic or SUFFIX_SAVINGS_ESTIMATED,
                         )
                         return True
+
+                    # OMN-17510: hoisted to the enclosing scope so
+                    # _build_runtime_handler_dependencies can hand the SAME
+                    # publisher to the auto-wired instance of this handler.
+                    _savings_correlation_publisher = _savings_publish
 
                     _savings_correlation_handler = HandlerSavingsCorrelation(
                         pool=_savings_correlation_pool,
@@ -3227,6 +3282,14 @@ async def bootstrap() -> int:
                         if gateway_secret_resolver_config_path_raw
                         else None
                     ),
+                    # OMN-17510: §3.9 already built both, and it runs earlier in
+                    # this same bootstrap. Passing the application-database pool
+                    # (never registration_service.postgres_pool — that is
+                    # OMNIBASE_INFRA_DB_URL, the wrong database per OMN-16770)
+                    # is what lets the resolver satisfy HandlerSavingsCorrelation
+                    # at Step 2 instead of exhausting the chain and raising.
+                    savings_correlation_pool=_savings_correlation_pool,
+                    savings_correlation_publisher=_savings_correlation_publisher,
                 )
 
                 # 5. Wire handlers into dispatch engine
