@@ -284,3 +284,16 @@ class TestBuildReview:
         comment = payload["comments"][0]
         assert comment["subject_type"] == "file"
         assert "line" not in comment
+
+
+class TestMainMissingResult:
+    def test_missing_review_json_is_a_noop_after_degraded_review(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("GITHUB_TOKEN", "unused")
+        monkeypatch.setenv("REPO", "OmniNode-ai/omnibase_infra")
+        monkeypatch.setenv("PR_NUMBER", "3141")
+        monkeypatch.setenv("REVIEW_JSON_PATH", str(tmp_path / "missing.json"))
+        monkeypatch.setenv("HOSTILE_REVIEW_IS_FORK", "false")
+
+        assert poster.main() == 0

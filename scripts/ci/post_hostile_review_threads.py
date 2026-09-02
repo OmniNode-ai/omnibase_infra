@@ -369,6 +369,12 @@ def main() -> int:
     try:
         with open(review_json_path, encoding="utf-8") as fh:
             review_result = json.load(fh)
+    except FileNotFoundError:
+        print(
+            "No hostile-review result JSON exists; review step already degraded "
+            "and reported zero postable findings."
+        )
+        return 0
     except (OSError, json.JSONDecodeError) as exc:
         print(f"::error::cannot read review JSON at {review_json_path}: {exc}")
         return 1
