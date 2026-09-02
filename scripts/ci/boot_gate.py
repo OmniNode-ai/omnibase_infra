@@ -215,12 +215,28 @@ def wait_for_boot(
                 file=sys.stderr,
             )
             return 1
-        runtime_ready = all(
-            ready == desired and desired > 0 for _n, ready, desired, _r in runtime_rows
-        )
-        lane_ready = all(
-            ready == desired and desired > 0 for _n, ready, desired, _r in lane_rows
-        )
+        # A Deployment the manifests scale to zero is Ready by definition --
+        # there is nothing to run. Four of the onex-dev runtime family are
+        # `replicas: 0` in the committed manifests (omnibase-intelligence-api,
+        # omninode-agent-actions-consumer, omninode-contract-resolver,
+        # omninode-skill-lifecycle-consumer), so requiring `desired > 0` per row
+        # made this gate structurally un-passable: those four report 0/0 forever
+        # and no candidate could satisfy it. Found by the first real run
+        # (33674463837), which is what a first run is for.
+        #
+        # The `desired > 0` guard is not deleted, only moved: it applies ONCE to
+        # the roster as a whole below, so a render that scaled the entire plane
+        # to zero still fails rather than passing vacuously.
+        if not any(desired > 0 for _n, _ready, desired, _r in runtime_rows):
+            print(
+                "error: every runtime-family Deployment in namespace "
+                f"{namespace} declares zero replicas. Nothing was booted, so "
+                "there is nothing for this gate to have proven.",
+                file=sys.stderr,
+            )
+            return 1
+        runtime_ready = all(ready == desired for _n, ready, desired, _r in runtime_rows)
+        lane_ready = all(ready == desired for _n, ready, desired, _r in lane_rows)
         if runtime_ready and lane_ready:
             if not require_topic:
                 topic_seen = True
@@ -278,7 +294,12 @@ def _print_table(rows: list[tuple[str, int, int, str]], topic_seen: bool) -> Non
     width = max((len(name) for name, *_ in rows), default=10)
     print("\n" + "DEPLOYMENT".ljust(width) + "  READY  STATE")
     for name, ready, desired, reason in rows:
-        state = "Ready" if ready == desired and desired > 0 else "NOT READY"
+        if ready != desired:
+            state = "NOT READY"
+        elif desired == 0:
+            state = "Ready (scaled to zero by the manifests)"
+        else:
+            state = "Ready"
         print(f"{name.ljust(width)}  {ready}/{desired}    {state}")
         if reason:
             print(" " * (width + 2) + f"       {reason}")

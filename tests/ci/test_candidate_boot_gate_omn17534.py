@@ -205,6 +205,34 @@ def test_gate_renders_the_onex_lab_overlay_and_not_a_local_copy(
     assert "kubectl apply" in run
 
 
+def test_gate_applies_the_cluster_scoped_prerequisites(gate: dict[str, Any]) -> None:
+    """The runtime family declares a cluster-scoped PriorityClass it cannot supply.
+
+    All 14 pod specs carry ``priorityClassName: omninode-standard``. A
+    PriorityClass is cluster-scoped, so it lives in omninode_infra's
+    ``k8s/base`` and is outside the namespace-scoped kustomization the lab
+    overlay bases on. Without it every ReplicaSet is refused with ``no
+    PriorityClass with name omninode-standard was found`` and ZERO runtime pods
+    are created -- 14 Deployments at 0/1 for a reason that has nothing to do
+    with the candidate. The first real run of this gate (33674463837) failed
+    exactly that way.
+
+    The file must be applied from omninode_infra's own tree, never re-authored
+    here: a second copy of a PriorityClass is a value that can silently drift
+    from the one staging schedules against.
+    """
+    run = _run_commands(gate)
+    assert "k8s/base/priority-classes.yaml" in run, (
+        "the gate does not apply the cluster-scoped PriorityClass set, so no "
+        "runtime pod can be scheduled and every Deployment fails for a lane "
+        "reason rather than a candidate reason"
+    )
+    assert "omninode_infra/k8s/base/priority-classes.yaml" in run, (
+        "the PriorityClass manifest must come from the checked-out "
+        "omninode_infra tree, not from a copy in this repo"
+    )
+
+
 def test_gate_proves_strict_mode_off_the_cluster(gate: dict[str, Any]) -> None:
     """Strict mode is half the gate's value; assert it, do not assume it.
 
@@ -515,6 +543,73 @@ def test_wait_passes_only_when_both_conditions_hold(
         )
         == 0
     )
+
+
+def test_a_deployment_the_manifests_scale_to_zero_counts_as_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Four of the onex-dev runtime family are `replicas: 0` in the manifests.
+
+    omnibase-intelligence-api, omninode-agent-actions-consumer,
+    omninode-contract-resolver and omninode-skill-lifecycle-consumer all declare
+    zero replicas. A readiness predicate of `ready == desired and desired > 0`
+    marks each of them NOT READY forever, which makes this gate structurally
+    un-passable -- no candidate, however healthy, could satisfy it.
+
+    The first real run (33674463837) reported exactly that: four rows at 0/0.
+    This test is the RED that fix is held to.
+    """
+    rows = [
+        ("omnibase-intelligence-api", 0, 0, ""),
+        ("omninode-agent-actions-consumer", 0, 0, ""),
+        ("omninode-contract-resolver", 0, 0, ""),
+        ("omninode-skill-lifecycle-consumer", 0, 0, ""),
+        ("omninode-runtime", 1, 1, ""),
+        ("onex-lab-redpanda", 1, 1, ""),
+    ]
+    monkeypatch.setattr(boot_gate, "_deployment_rows", lambda namespace: rows)
+    monkeypatch.setattr(boot_gate, "_topic_exists", lambda *a, **k: True)
+    assert (
+        boot_gate.wait_for_boot(
+            namespace="onex-dev",
+            timeout_seconds=60,
+            poll_seconds=1,
+            lane_prefix="onex-lab-",
+            broker_deployment="onex-lab-redpanda",
+            require_topic=True,
+        )
+        == 0
+    ), "a Deployment the manifests scale to zero must not block the gate forever"
+
+
+def test_a_plane_scaled_entirely_to_zero_still_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The `desired > 0` guard is moved, not deleted.
+
+    Treating 0/0 as Ready per row would otherwise let a render that scaled the
+    WHOLE runtime plane to zero pass vacuously -- every row Ready, nothing
+    running, nothing proven. The guard now applies once to the roster.
+    """
+    rows = [
+        ("omninode-runtime", 0, 0, ""),
+        ("omninode-runtime-effects", 0, 0, ""),
+        ("onex-lab-redpanda", 1, 1, ""),
+    ]
+    monkeypatch.setattr(boot_gate, "_deployment_rows", lambda namespace: rows)
+    monkeypatch.setattr(boot_gate, "_topic_exists", lambda *a, **k: True)
+    assert (
+        boot_gate.wait_for_boot(
+            namespace="onex-dev",
+            timeout_seconds=60,
+            poll_seconds=1,
+            lane_prefix="onex-lab-",
+            broker_deployment="onex-lab-redpanda",
+            require_topic=True,
+        )
+        == 1
+    )
+    assert "zero replicas" in "".join(capsys.readouterr())
 
 
 def test_a_slow_lane_stand_in_is_not_reported_as_a_candidate_defect(
