@@ -1477,24 +1477,16 @@ jobs:
 
       - name: Install sibling repos as editable (boundary pair deps)
         working-directory: omnibase_infra
-        # Use --overrides to install siblings with their full transitive deps while
-        # forcing omnibase-infra to the locally-installed editable version from uv sync.
-        # This avoids the cascade-window version conflict (siblings pin a released version
-        # of omnibase-infra that may lag behind the current PR) while ensuring transitive
-        # deps like adaptive-classifier are properly installed.
-        # Prior approach (--no-deps) skipped transitive deps entirely, causing
-        # ModuleNotFoundError for packages like adaptive_classifier at collection time.
+        # Install checked-out sibling packages without re-solving their transitive
+        # release pins. The infra venv is already synced; resolving
+        # omniintelligence -> omnimarket through package metadata wedges while
+        # omnimarket requires an unpublished omnibase-compat release.
         run: |
           set -eu
-          INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
-          echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
-          echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
-          echo "omnimarket @ file://$(pwd)/../omnimarket" >> /tmp/sibling-overrides.txt
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
-          uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket
           attempt=1
           max_attempts=5
-          until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install schema-handshake sibling deps failed after ${attempt} attempt(s)"
@@ -3598,18 +3590,13 @@ jobs:
 
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra
-        # Use --overrides to install siblings with their full transitive deps while
-        # forcing omnibase-infra to the locally-installed editable version from uv sync.
-        # Same rationale as schema-handshake job above.
+        # Same resolver-avoidance rationale as schema-handshake above.
         run: |
-          INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
-          echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
-          echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
-          echo "omnimarket @ file://$(pwd)/../omnimarket" >> /tmp/sibling-overrides.txt
-          uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket
+          set -eu
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
-          until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"
