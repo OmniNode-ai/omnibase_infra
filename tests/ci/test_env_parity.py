@@ -311,6 +311,9 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         # fail-closed on the unbound per-lane pin and put omninode-runtime,
         # -effects and -worker into CrashLoopBackOff on onex-dev.
         #
+        # This branch does not bind BIFROST_LANE_OVERLAY_PATH in the
+        # onex-dev runtime family, so it remains parity debt here.
+        "BIFROST_LANE_OVERLAY_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
         # OMN-15425 (compose half) / OMN-16953 (k8s half). Tenant-projection
