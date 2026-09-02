@@ -15,6 +15,24 @@
 #   free and the lane is STILL unbuilt at the moment this PR declares its services. This PR is
 #   the REPO-side enablement only (compose file, lane Literal, topology profile, renderer);
 #   bring-up remains the lane owner's Task 0 and was deliberately not performed.
+# verified: 2026-09-02 via read-only ssh jonah@192.168.86.201 `docker ps -a --filter
+#   label=com.docker.compose.project=omnibase-infra-lakshman --format '{{.Names}}|{{.Status}}|{{.Image}}|{{.Ports}}'`,
+#   `docker network ls | grep lakshman`, `ss -ltn` and `curl -s http://localhost:58085/health` — OMN-17532.
+#   SUPERSEDES the 2026-08-30 and 2026-08-31 lines above where they say the lakshman lane is
+#   unbuilt with zero containers. It IS BUILT and RUNNING as of this line: 7 containers up
+#   (6 `service` + the `migration-gate` keepalive, all reporting `(healthy)`) plus the 3
+#   run-to-completion oneshots Exited (0) — exactly the 10 entries declared below, no more and
+#   no fewer. Network `omnibase-infra-lakshman-network` exists. Every port in the reserved block
+#   now has a listener and it is this lane's: 58085 runtime main, 58086 runtime effects,
+#   45436 postgres, 46379 valkey, 55092 redpanda kafka (external), 55644 redpanda admin,
+#   53002 projection-api. 58080 (keycloak) is still unbound — this lane runs no keycloak, which
+#   matches the compose file, so the reservation of that port stands unused by design.
+#   `GET :58085/health` returns HTTP 200 with `version: 0.38.17`, `environment: lakshman`,
+#   `bootstrap_servers: redpanda:9092` (lane-internal), `status: degraded`. The DEGRADED value is
+#   the projection_write_path dimension only — 14 of 37 declared projections are subscribed here
+#   but dispatch nothing in-process (the standalone-runner shape, the OMN-17448 class), which is a
+#   lane-content observation, NOT lane-census drift: no container is absent, extra or mis-tagged
+#   and `lane_census_plan.py` reports zero findings for this lane on the same inventory.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -262,11 +280,14 @@ lanes:
       - name: omnimarket-projection-delegation-writer
         kind: service
         replicas: 1
-  # OMN-17143: COLLABORATOR lane reserved for Lakshman Patel (operator decision
-  # 2026-08-30). This entry is a RESERVATION, not a running lane — there is no
-  # docker/docker-compose.lakshman.yml yet and no containers exist. It is
-  # declared here first, deliberately, so the port block and the compose project
-  # name are claimed in the desired-state authority BEFORE anything is stood up.
+  # OMN-17143: COLLABORATOR lane for Lakshman Patel (operator decision
+  # 2026-08-30). It ENTERED this file as a pure RESERVATION — no compose file,
+  # no containers — declared here first, deliberately, so the port block and the
+  # compose project name were claimed in the desired-state authority BEFORE
+  # anything was stood up. The compose file landed in OMN-17150 and the lane was
+  # brought up on 2026-09-02 (see the OMN-17532 note below); it is a running
+  # lane now, and the reservation-era wording is kept only as the reason the
+  # port block looks the way it does.
   # The failure mode this prevents is a collaborator picking ports ad hoc and
   # displacing a governed lane (the OMN-13581 cross-lane displacement class) or
   # standing up an undocumented-but-running project (the OMN-13034 judge-lane
@@ -279,7 +300,10 @@ lanes:
   #
   # RESERVED PORT BLOCK — every port below was verified FREE on 192.168.86.201
   # by read-only `ss -ltn` on 2026-08-30 (see the verified: line at the top of
-  # this file). The obvious-looking 48085/48086 block is NOT free: it is the
+  # this file). As of the 2026-09-02 verified: line every one of them except
+  # 58080 is now BOUND, and bound by this lane — the reservation was consumed
+  # exactly as written, with no ad-hoc port drift. The obvious-looking
+  # 48085/48086 block is NOT free: it is the
   # judge lane's runtime main/effects (docker/runtime-policy.env
   # JUDGE_RUNTIME_MAIN_PORT / JUDGE_RUNTIME_EFFECTS_PORT), and 49092 is the prod
   # broker's external Kafka port. Do not reuse either.
@@ -309,13 +333,25 @@ lanes:
   # tests/unit/scripts/test_lane_census_manifest_parity.py so the parity ratchet
   # now polices this lane exactly as it polices stability-test/prod/judge.
   #
-  # STILL `optional: true`, and that is not a leftover. The lane is declared but
-  # NOT built — repo-side enablement and bring-up were deliberately separated
-  # (bring-up is the lane owner's own task). An optional lane that is entirely
-  # down is not drift (scripts/lane_census_plan.py), so a declared-but-unbuilt
-  # collaborator lane cannot emit a census ticket every tick. The moment ANY of
-  # the services below is running, the lane reconciles normally and a partial
-  # bring-up IS drift — which is the behaviour we want the day it comes up.
+  # OMN-17532 (2026-09-02): THE LANE IS NOW BUILT AND RUNNING. The 2026-08-31
+  # revision of this block said "declared but NOT built"; that sentence was true
+  # when written and is false now, which is the phantom-lane direction this file
+  # exists to prevent — so it is corrected here rather than left to age. Live
+  # state at the verified: line above: 7 containers up and healthy (the 6
+  # `service` entries below plus the `migration-gate` keepalive), the 3 oneshots
+  # Exited (0), the declared network present, all 7 declared ports bound, and
+  # `GET :58085/health` -> 200 / version 0.38.17 / environment `lakshman`.
+  # Bring-up was performed by the lane owner, not by this PR — this PR mutates
+  # no lane, it only stops the manifest lying about one.
+  #
+  # STILL `optional: true`, and that is not a leftover either. `optional` does
+  # not mean "unbuilt"; it means an ENTIRELY-down lane is not drift
+  # (scripts/lane_census_plan.py). That is the right posture for a collaborator
+  # lane the owner may stop at any time, and it costs nothing now that the lane
+  # is up: the planner reconciles a present lane normally either way, so a
+  # PARTIAL bring-up here is drift today — verified on the same inventory that
+  # produced the committed census-snapshot.json, which reports zero findings for
+  # this lane.
   #
   # No worker service, matching the judge lane's shape: the compose file runs
   # main + effects + projection-api only. The runtime-policy contract still pins
