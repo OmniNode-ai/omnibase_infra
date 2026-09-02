@@ -561,6 +561,9 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
             for step in job["steps"]
             if str(step.get("name", "")).startswith("Install sibling repos as editable")
         )
+        checkout_names = {str(step.get("name", "")) for step in job["steps"]}
+        assert "Checkout omnimarket (sibling)" in checkout_names
+
         run_script = install_step["run"]
         assert "max_attempts=5" in run_script
         assert "until uv pip install --no-deps" in run_script
