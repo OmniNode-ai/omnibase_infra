@@ -3,13 +3,14 @@
   "event_type": "lane-census-drift",
   "topic": "onex.evt.infra.lane-census-drift.v1",
   "host": "omninode-pc",
-  "emitted_at": "2026-08-29T06:50:04.768415+00:00",
+  "emitted_at": "2026-09-02T12:28:09.943586+00:00",
   "severity": "critical",
   "lanes_checked": [
     "stability-test",
     "prod",
     "judge",
-    "dev"
+    "dev",
+    "lakshman"
   ],
   "drift_count": 2,
   "findings": [
@@ -29,6 +30,6 @@
     }
   ],
   "alert_key": "lane-census-drift:omninode-pc:b6127966f3696f12",
-  "ticket_title": "fix(infra): lane drift [dev, prod] — 1x container_absent, 1x unexpected_container",
-  "ticket_body": "## Lane census drift detected\n\nHost: `omninode-pc`\nLanes checked: stability-test, prod, judge, dev\n\nThe desired-state lane census (deploy/lane-census/lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch — it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n- **[critical] container_absent** `omninode-prod-runtime-worker` (prod): required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded\n- **[warning] unexpected_container** `omnibase-infra-forward-migration` (dev): container 'omnibase-infra-forward-migration' carries com.omninode.lane='dev' but is not declared in the lane manifest\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
+  "ticket_title": "fix(infra): lane drift [dev, prod] \u2014 1x container_absent, 1x unexpected_container",
+  "ticket_body": "## Lane census drift detected\n\nHost: `omninode-pc`\nLanes checked: stability-test, prod, judge, dev, lakshman\n\nThe desired-state lane census (deploy/lane-census/lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch \u2014 it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n- **[critical] container_absent** `omninode-prod-runtime-worker` (prod): required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded\n- **[warning] unexpected_container** `omnibase-infra-forward-migration` (dev): container 'omnibase-infra-forward-migration' carries com.omninode.lane='dev' but is not declared in the lane manifest\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
 }

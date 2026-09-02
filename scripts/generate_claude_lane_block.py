@@ -60,8 +60,9 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     "stability-test": {"main": "18085", "effects": "18086"},
     "prod": {"main": "28085", "effects": "28086"},
     "judge": {"main": "—", "effects": "—"},
-    # OMN-17143 — collaborator lane RESERVED for Lakshman Patel. Verified free
-    # on .201 by read-only `ss -ltn` on 2026-08-30. Note the near-miss: the
+    # OMN-17143 — collaborator lane for Lakshman Patel. This block was verified free
+    # on .201 by read-only `ss -ltn` on 2026-08-30 and is BOUND by that lane as of
+    # 2026-09-02 (OMN-17532 — the lane is built and running). Note the near-miss: the
     # adjacent 48085/48086 pair is the JUDGE lane's runtime main/effects
     # (docker/runtime-policy.env), and 49092 is the prod broker's external Kafka
     # port — the reserved block deliberately avoids both.
