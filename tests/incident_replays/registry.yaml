@@ -156,6 +156,22 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn17534-candidate-announced-with-nothing-booting-it
+    guard: scripts/ci/boot_gate.py
+    incident: OMN-17519
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn17534/deploy-onex-staging-33609666720.rollout-diagnostics.log.captured
+      sha256: 4dd041f6654137e47a6d65b3775b05ee57536a765fb4a89e6c2748654ddf881c
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omninode_infra/actions/jobs/100181796582/logs
+      captured_at: '2026-09-02T13:40:00Z'
+      captured_by: lane replay (OMN-17534)
+    test: tests/ci/test_incident_replay_omn17534.py::test_the_real_guard_rejects_the_roster_the_incident_produced
+    why: >-
+      This guard is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green being replaced is the ABSENCE of any guard at all: nothing booted a candidate before it was announced to omninode_infra, so on 2026-09-02 candidate candidate-5e079d3-20260902060932 was built, announced, applied to onex-dev, and took three of fifteen Deployments down -- the THIRD such incident in two days (OMN-17502, OMN-17510, OMN-17519). Every enforced gate was green; nothing was looking. The artifact is the deploy that did it, Deploy onex-staging run 33609666720 job 100181796582, fired by the merge of omninode_infra#1140 (e113446ab) at 08:37:04Z. It records verbatim `error: deployment "omninode-runtime" exceeded its progress deadline` and the same for -effects and omnimarket-projection-api, and further down the cause: `ModelOnexError: Auto-wiring failed for 2 contract(s) ... ValueError: Projection handler requires topology bindings with configured DSNs: tenant_projection:ONEX_TENANT_DB...`. That is a BOOT failure under strict wiring mode against the real manifests, which is exactly and only what the new gate reproduces. The replay parses the roster OUT OF the artifact -- every rollout-waited Deployment, with exactly the ones it recorded as failed marked 0/1 -- and requires the real guard to fail closed AND to name all three, because a gate that named one would have cost a second run to find the rest, which is the cost this incident actually paid. WHY A JOB LOG AND NOT A CLUSTER CAPTURE: `kubectl get deployments -o json` would be the more direct input, but onex-dev is reachable only over the SSM port-forward path and this lane holds no live AWS session; a capture that cannot be taken must not be invented, and R2 exists to make that distinction machine-visible. MODIFICATIONS, recorded because R1 is about honesty and not ceremony: the fixture is lines 2550-3400 of the job log (the rollout-wait step through the runtime pod's diagnostic block); the full 349601-byte log is sha256 a481eb9a4b7111291b9723ad9a174383cd96718a72c4d7857481f4f72d8caa5a and the un-redacted excerpt is sha256 9c7683190c225681deb4efa2a2e7391fe5f487c96ee0cbc9281bcbe4bb9060af, both recorded so a re-fetch can verify exactly what was taken. The full log is not committed because this repository is PUBLIC and its remainder carries a live RDS endpoint, MSK broker DNS and 32 occurrences of an EC2 instance id -- a disclosure this repo's own guards exist to prevent, and the same reasoning the omn17320 case in this registry already set. Four length-preserving redactions inside the excerpt (one EC2 instance id, three UUIDs) leave every byte offset unchanged, and none of them appears in any line the test reads. The deployment names, the `--tail=30` invocation and the auto-wiring traceback are the bytes GitHub recorded. Direction is false_green so guard_verdict_on_artifact is reject; an accept control in the same module (test_the_same_guard_accepts_the_healthy_roster) drives the same roster with every Deployment Ready and requires the guard to pass, so a guard that simply rejects everything cannot satisfy this case.
   - id: omn17335-uv-resolved-from-path-only
     guard: scripts/check_reconciler_privilege.py
     incident: OMN-17335
