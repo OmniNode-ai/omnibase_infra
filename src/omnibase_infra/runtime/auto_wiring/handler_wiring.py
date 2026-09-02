@@ -3456,6 +3456,60 @@ class ProjectionDispatchSinks:
     dlq_topics: tuple[str, ...] = ()
 
 
+def _make_undispatched_projection_callback(
+    handler_name: str,
+    target: ProjectionDatabaseTarget,
+    contract_name: str,
+    topic_owning_handlers: tuple[str, ...],
+) -> DispatcherFunc:
+    """Dispatch callback for a projection entry this process can never reach.
+
+    OMN-17519. Selected by :func:`_projection_dispatch_owned_elsewhere`. It
+    deliberately does NOT go through :func:`_make_projection_dispatch_callback`:
+    that factory resolves a workload DSN per topology binding and raises when one
+    is unset, which is correct for an entry that IS dispatched and was fatal for
+    an entry that never is. Nothing here is softened — the requirement is simply
+    never reached, because no database is needed to dispatch nothing.
+
+    The registration is kept (dispatcher, zero routes, un-scoped exactly as the
+    projection arm registered it before) so this changes only whether a pool is
+    opened, never which routes exist.
+    """
+    record_dispatch_skipped_projection(contract_name)
+    logger.warning(
+        "Projection %r wires handler %s with ZERO routes, so this process "
+        "cannot dispatch it and does NOT open a projection database for it "
+        "(OMN-17519). Topic-owning sibling entries on this contract: %s. A "
+        "non-empty list is the OMN-15905 shape, where a dedicated writer "
+        "process runs the owning runner and holds the workload credential. An "
+        "EMPTY list means NO entry owns a topic — the contract is orphaned in "
+        "this process and persists nothing here, and this warning is the only "
+        "signal of it. db_tables=%s",
+        contract_name or "<unnamed contract>",
+        handler_name,
+        list(topic_owning_handlers),
+        [table.name for table in target.tables],
+    )
+
+    async def _callback(
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchResult | None:
+        # Unreachable by construction (no routes). Kept explicit rather than
+        # omitted so a future routing change surfaces here instead of calling a
+        # handler with no ``_db``.
+        logger.warning(
+            "Undispatchable projection handler %s received an envelope for "
+            "contract %r — a route now reaches an entry OMN-17519 proved had "
+            "none. Nothing was written. topic=%s",
+            handler_name,
+            contract_name or "<unnamed contract>",
+            _extract_projection_topic(envelope) or "unknown",
+        )
+        return None
+
+    return _callback
+
+
 def _make_projection_dispatch_callback(
     handler_instance: object,
     target: ProjectionDatabaseTarget,
@@ -6860,6 +6914,78 @@ def _topics_for_handler_entry(
     return ()
 
 
+def _projection_dispatch_owned_elsewhere(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+) -> bool:
+    """Whether THIS process will never dispatch *entry*, so it owns no database.
+
+    OMN-17519. A multi-handler contract routes each subscribe topic to exactly
+    one entry; :func:`_topics_for_handler_entry` is that assignment, and it
+    returns ``()`` for an entry that competes for topics another entry already
+    owns unambiguously. An entry assigned zero topics registers a dispatcher
+    with zero routes: no message can reach it in this process.
+
+    That is precisely the shape OMN-15905 created. A projection contract whose
+    writes a dedicated writer Deployment owns declares TWO handler entries — the
+    standalone ``*ProjectionRunner`` the writer process runs (``command:
+    [python, -m, <runner module>]``), which declares no ``event_model`` and so
+    takes every subscribe topic, and an in-process sibling left with none. Live
+    on onex-dev: ``projection_delegation``'s nine topics all route to
+    ``DelegationProjectionRunner`` and ``HandlerProjectionDelegation`` gets zero;
+    ``projection_savings``'s five all route to ``SavingsProjectionRunner``.
+
+    Opening a projection database for such an entry is not merely waste. The
+    workload identity resolved for a TENANT-domain table is ``tenant_projection``
+    (``ONEX_TENANT_DB_URL``), so the SHARED runtime was made to demand the
+    tenant-domain credential for rows the dedicated writer owns — the OMN-15905
+    separation in reverse, and under ``ONEX_WIRING_STRICT_MODE`` the missing DSN
+    took the whole boot down (``omninode-runtime`` and ``omninode-runtime-effects``
+    in CrashLoopBackOff on candidate ``sha256:349225be``).
+
+    Single-entry contracts are deliberately out of scope: that entry owns every
+    subscribe topic, so it IS dispatched here and its database requirement is
+    real. ``node_hook_event_capture`` is exactly that case and keeps requiring
+    its binding.
+
+    The predicate is "this process will never dispatch this entry", NOT "a
+    dedicated writer exists". Those coincide on the OMN-15905 contracts, but a
+    contract where NO entry owns a topic (``projection_overnight``: three
+    ``event_model``-typed entries, three subscribe topics, zero routes for every
+    one of them) is a pre-existing orphan, not the sanctioned pattern. It is
+    caught here too — correctly, since an undispatchable entry needs no database
+    either way — and :func:`_topic_owning_handler_names` puts the difference into
+    the warning so the orphan is reported as an orphan.
+    """
+    if contract.handler_routing is None:
+        return False
+    if len(contract.handler_routing.handlers) < 2:
+        return False
+    return not _topics_for_handler_entry(contract, entry)
+
+
+def _topic_owning_handler_names(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+) -> tuple[str, ...]:
+    """Names of the SIBLING entries that do own subscribe topics on *contract*.
+
+    OMN-17519. Reported verbatim in the zero-route warning so an operator can
+    tell the two cases apart without reading the contract: a non-empty list is
+    the OMN-15905 dedicated-writer shape (the standalone runner took every
+    topic); an EMPTY list means no entry owns a topic at all, i.e. the contract
+    is orphaned in this process — a real defect this warning must not dress up
+    as the sanctioned pattern.
+    """
+    if contract.handler_routing is None:
+        return ()
+    return tuple(
+        sibling.handler.name
+        for sibling in contract.handler_routing.handlers
+        if sibling is not entry and _topics_for_handler_entry(contract, sibling)
+    )
+
+
 def _literal_event_type_aliases_from_topics(
     subscribe_topics: tuple[str, ...],
 ) -> set[str]:
@@ -9311,25 +9437,33 @@ def _prepare_handler_wiring(
             if typed_dlq_topics
             else _read_dlq_topics(contract.contract_path)
         )
-        callback = _make_projection_dispatch_callback(
-            handler_instance,
-            target,
-            subscribe_topics,
-            sinks=ProjectionDispatchSinks(
-                event_bus=event_bus,
-                terminal_event=projection_terminal_event,
-                dlq_topics=tuple(projection_dlq_topics),
-            ),
-            contract_name=contract.name,
-        )
-        logger.info(
-            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s "
-            "terminal_event=%s dlq_topics=%s",
-            handler_ref.name,
-            [table.name for table in target.tables],
-            projection_terminal_event,
-            projection_dlq_topics,
-        )
+        if _projection_dispatch_owned_elsewhere(contract, entry):
+            callback = _make_undispatched_projection_callback(
+                handler_ref.name,
+                target,
+                contract.name,
+                _topic_owning_handler_names(contract, entry),
+            )
+        else:
+            callback = _make_projection_dispatch_callback(
+                handler_instance,
+                target,
+                subscribe_topics,
+                sinks=ProjectionDispatchSinks(
+                    event_bus=event_bus,
+                    terminal_event=projection_terminal_event,
+                    dlq_topics=tuple(projection_dlq_topics),
+                ),
+                contract_name=contract.name,
+            )
+            logger.info(
+                "Auto-wired projection handler with DB injection: handler=%s "
+                "db_tables=%s terminal_event=%s dlq_topics=%s",
+                handler_ref.name,
+                [table.name for table in target.tables],
+                projection_terminal_event,
+                projection_dlq_topics,
+            )
         # Projection handlers route by topic/db_io, not event_model; leave
         # them untyped so the projection dispatch path is unchanged.
         payload_type_matcher: Callable[[object], bool] | None = None
