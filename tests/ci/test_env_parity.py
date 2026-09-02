@@ -311,14 +311,8 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         # fail-closed on the unbound per-lane pin and put omninode-runtime,
         # -effects and -worker into CrashLoopBackOff on onex-dev.
         #
-        # The TRUE invariant, held mechanically by
-        # ``test_bifrost_render_knobs_are_classified_by_live_cluster_state``:
-        # BIFROST_LANE_OVERLAY_PATH is a LIVE crashing gap on a lane that
-        # renders, not a dormant parity item, and it is listed here for exactly
-        # as long as the cluster does not bind it. The omninode_infra manifest
-        # half of OMN-17502 binds it alongside the mount that provides
-        # docker/lane-overlays/onex-dev.bifrost.yaml, and deletes this entry in
-        # the same change.
+        # This branch does not bind BIFROST_LANE_OVERLAY_PATH in the
+        # onex-dev runtime family, so it remains parity debt here.
         "BIFROST_LANE_OVERLAY_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",

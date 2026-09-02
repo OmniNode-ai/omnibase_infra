@@ -569,6 +569,14 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
         assert "sibling deps attempt" in run_script
         assert "sibling deps failed after" in run_script
 
+        checkout_paths = {
+            step.get("with", {}).get("path")
+            for step in job["steps"]
+            if step.get("uses")
+            == "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        }
+        assert "omnimarket" in checkout_paths
+
 
 def test_heavy_cross_repo_jobs_use_cpu_torch_for_sibling_install() -> None:
     ci_workflow = _load_yaml(CI_WORKFLOW)

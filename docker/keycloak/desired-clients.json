@@ -79,6 +79,40 @@
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
+      "clientId": "omnidash-spa",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": [
+        "https://dash.omninode.ai/*",
+        "https://dev.dash.omninode.ai/*",
+        "http://localhost:3000/*",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "https://dash.omninode.ai",
+        "https://dev.dash.omninode.ai",
+        "http://localhost:3000",
+        "http://localhost:8080"
+      ],
+      "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "onex-api-audience",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "onex-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "redpanda-events",
       "publicClient": false,
       "serviceAccountsEnabled": true,
