@@ -103,7 +103,7 @@
 # which is why it may not be ambient.
 #
 # ALSO not an env override (OMN-17441): the per-host PLACEMENT maps
-# `PREPUSH_*_OVERRIDE_MAP` (LOAD / SLOT / MEM / UV), which prepush_dispatch.sh
+# `PREPUSH_*_OVERRIDE_MAP` (LOAD / SLOT / MEM / UV / REACH), which prepush_dispatch.sh
 # consults instead of the live ssh probe. They are a test-injection seam, they
 # are rejected at entry outside pytest's own harness, and they can only steer
 # WHERE work runs -- never whether it passed.
@@ -184,7 +184,8 @@ reject_inherited_env_overrides
 # collapsing them would either overstate this risk or understate that one.
 #
 # `PREPUSH_LOAD_OVERRIDE_MAP` / `PREPUSH_SLOT_OVERRIDE_MAP` (and, alongside them
-# in prepush_dispatch.sh, `PREPUSH_MEM_OVERRIDE_MAP` / `PREPUSH_UV_OVERRIDE_MAP`)
+# in prepush_dispatch.sh, `PREPUSH_MEM_OVERRIDE_MAP` / `PREPUSH_UV_OVERRIDE_MAP`,
+# and `PREPUSH_REACH_OVERRIDE_MAP` as of OMN-17280)
 # are consulted by prepush_map_lookup INSTEAD of the live ssh probe. They exist
 # purely as a test-injection seam. An inherited value cannot manufacture a PASS
 # -- the verdict is still a real pytest exit bound to the tree by a completion
@@ -606,9 +607,16 @@ dispatch_to_lab_host() {
   while [ "$idx" -le "$total" ]; do
     prepush_select_candidate "$idx" || break
     if [ -z "$PREPUSH_PICK_SSH" ]; then
-      # This candidate IS this host: nothing to distribute. The local branch
-      # already measured it unfit or its slot held, so this is no evidence --
-      # but the ranked hosts after it still are.
+      # This candidate IS this host: there is nothing to DISTRIBUTE, so the
+      # remote leg cannot answer for it and the ranked hosts after it still
+      # can. Skipping it here is correct -- but it used to be SILENT, and that
+      # silence is how OMN-17280 stayed invisible: for an actor who can reach
+      # no other host, this was the only fit candidate in the lab, and the walk
+      # dropped it without a word before falling through to die(). The
+      # same-host route now lives in prepush_local_actor_route, one rung below
+      # this call in guard_full_suite_host; naming the skip makes the transcript
+      # explain how control got there.
+      log "lab placement: ${PREPUSH_PICK_LABEL} IS this host, so it carries no remote leg; the same-host route is evaluated after the lab walk (OMN-17280)"
       idx=$((idx + 1))
       continue
     fi
@@ -872,6 +880,17 @@ guard_full_suite_host() {
       return 0
     fi
     if dispatch_to_lab_host "$heavy_what"; then
+      return 0
+    fi
+    # OMN-17280 -- SAME-HOST ROUTE, above the grant on evidence strength.
+    # Placed here, and only here, so it can fire ONLY after the lab has been
+    # asked and answered nothing. It refuses itself the moment any capacity row
+    # is reachable for this actor, which is every one of the owner's own
+    # pushes, so the OMN-17392 / OMN-17485 off-box preference is untouched. It
+    # is above consume_override_grant because it produces a real full suite on
+    # a designated authorizing host -- strictly stronger evidence than a
+    # receipted degraded-capacity grant, and it burns no grant to get there.
+    if prepush_local_actor_route "$heavy_what" "$label"; then
       return 0
     fi
     if consume_override_grant "degraded-capacity: ${heavy_what} on '${host}' at/over the ${PREPUSH_LOAD_THRESHOLD}x-core load threshold"; then

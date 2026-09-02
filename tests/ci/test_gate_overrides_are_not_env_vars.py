@@ -247,6 +247,15 @@ _PLACEMENT_MAP_NAMES = (
     "PREPUSH_SLOT_OVERRIDE_MAP",
     "PREPUSH_MEM_OVERRIDE_MAP",
     "PREPUSH_UV_OVERRIDE_MAP",
+    # OMN-17280. Fakes per-host ssh REACHABILITY for the same-host route, which
+    # is the only input deciding whether that route may open. Same risk profile
+    # as its four siblings and no wider: an inherited value can only steer
+    # WHERE the suite runs -- here, this host instead of a lab host, or the
+    # reverse -- never whether it passed. The hook already refuses an inherited
+    # value of it without any change, because the runtime matcher keys on the
+    # `PREPUSH_*_OVERRIDE_MAP` SHAPE rather than on this tuple; the tuple is
+    # what makes adding one a reviewed decision instead of a quiet one.
+    "PREPUSH_REACH_OVERRIDE_MAP",
 )
 
 
