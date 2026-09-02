@@ -10,20 +10,40 @@
 # through any omnibase_infra handler -- OMN-15959 corrected this stale
 # doc-comment, which named a since-deleted HandlerLlmCliSubprocess class that
 # omniintelligence.review_pairing.cli_review never actually imported) with
-# the two currently-live local models (qwen3-review on the 5090,
-# qwen3-review-b on the 4090 --
-# OMN-14176; deepseek-r1 no longer serves on the local fleet). Codex is
-# excluded from the initial pilot -- add --model codex once non-interactive
-# OAuth auth is confirmed on the omnibase-ci runner (OMN-8524).
+# three models (OMN-17492): the two local keys (qwen3-review /
+# qwen3-review-b -- both currently resolve to the ONE remaining GPU on
+# .201:8000 since the 4090 RMA, see OMN-16481) plus glm-review, an
+# authenticated cloud reviewer on the z.ai GLM Coding Plan -- an
+# independent quota domain AND independent hardware, so the roster
+# survives a total local-fleet outage. Codex is excluded from the initial
+# pilot -- add --model codex once non-interactive OAuth auth is confirmed
+# on the omnibase-ci runner (OMN-8524).
 #
-# Gate semantics (pilot phase, mirrors omnimarket/omniclaude OMN-8524 rollout):
-#   blocked  — critical/error findings from at least one succeeded model → exit 1
-#   degraded — all models failed (infra unavailable) → exit 0 (informational, pilot)
-#   passed   — no critical/error findings → exit 0
+# Semantics (OMN-17492 -- the model is the FINDER, never the gate):
+#   - Findings post as resolvable PR review threads
+#     (scripts/ci/post_hostile_review_threads.py; REQUEST_CHANGES posture
+#     when critical/major findings exist).
+#   - The DETERMINISTIC merge surface is "Hostile Review Thread Gate": it
+#     fails while unresolved hostile-reviewer threads exist and passes when
+#     they are resolved. No job exits nonzero on a model's opinion.
+#   - degraded — fewer than 2 models succeeded (infra) → informational.
+#   The pre-OMN-17492 "blocked on critical findings → exit 1" path was DEAD
+#   CODE: it parsed merged_findings / total_input_findings, fields
+#   ModelMultiReviewResult never had, so blocking was always 0 and finding
+#   content was discarded entirely. Replaced, not regressed.
 #
-# Required status check name added by this workflow: "Hostile Review Gate".
+# Status check names added by this workflow: "Hostile Review Gate"
+# (pipeline-ran integrity) and "Hostile Review Thread Gate" (thread
+# resolution). NEITHER is a required context in this pass (OMN-17492
+# canary; promote-to-required is a recorded follow-up on the ticket).
 #
-# Reference: OMN-8468 (W6.1 mandatory CI gate), OMN-8524 (pilot rollout), OMN-14176 (model fix)
+# Credential: LLM_GLM_API_KEY is a repo Actions secret (same sanctioned
+# pattern as LOCAL_LLM_SHARED_SECRET, OMN-14176) resolved from the platform
+# secret store; never committed, never printed. Fork PRs get no secrets --
+# glm-review fails closed per-model and the local models still review.
+#
+# Reference: OMN-8468 (W6.1 mandatory CI gate), OMN-8524 (pilot rollout),
+# OMN-14176 (model fix), OMN-17492 (GLM reviewer + thread gate)
 
 name: Hostile Reviewer
 
@@ -73,7 +93,14 @@ jobs:
     # direct required context on dev or main) -- gating it off draft/ci:ready
     # is a pure runner-cost win with no fail-closed exposure to design
     # around. Main-boundary carve-out unchanged.
-    if: github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready')
+    # OMN-17492 noise/cost control: bot PRs (dependabot, the OCC writer app)
+    # are skipped outright -- dependabot PRs cannot see the LLM_GLM_API_KEY
+    # secret anyway, and adversarial review of automated lock/evidence bumps
+    # is pure token burn.
+    if: >-
+      (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
+      && github.event.pull_request.user.login != 'dependabot[bot]'
+      && github.event.pull_request.user.login != 'onexbot-occ-writer[bot]'
     name: Hostile Reviewer (adversarial gate)
     # self-hosted runner on .201 required -- qwen3-review(-b) are LAN-only  # onex-allow-internal-ip
     runs-on: >-
@@ -149,11 +176,13 @@ jobs:
         env:
           # Resolve the SAME registry the reviewer loads (model_registry_loader)
           # for the SAME models the review step runs
-          # (`--model qwen3-review --model qwen3-review-b`). We flip
-          # reachable=false ONLY when EVERY requested model is unreachable AND the
-          # codex api-fallback is unavailable — the exact condition under which the
-          # reviewer itself yields verdict=degraded + exit 0.
-          REVIEW_MODEL_KEYS: "qwen3-review qwen3-review-b"
+          # (`--model qwen3-review --model qwen3-review-b --model glm-review`).
+          # We flip reachable=false ONLY when EVERY requested model is
+          # unreachable AND the codex api-fallback is unavailable — the exact
+          # condition under which the reviewer itself yields verdict=degraded
+          # + exit 0. glm-review (OMN-17492) is an HTTPS cloud endpoint —
+          # probed as api.z.ai:443 (scheme-aware port default below).
+          REVIEW_MODEL_KEYS: "qwen3-review qwen3-review-b glm-review"
           REGISTRY_PATH: "src/omniintelligence/review_pairing/model_registry.yaml"
           # Wired from a GitHub Actions secret (mirrors OMN-14176): the LLM HTTP
           # transport HMAC-signs every call with LOCAL_LLM_SHARED_SECRET and
@@ -216,7 +245,10 @@ jobs:
               url = os.environ.get(cfg["env_var"], cfg["default_url"]).strip()
               parsed = urllib.parse.urlparse(url)
               host = parsed.hostname or ""
-              port = parsed.port or 80
+              # OMN-17492: scheme-aware port default — the cloud reviewer's
+              # registry URL is https with no explicit port; the old
+              # `or 80` default would TCP-probe api.z.ai:80 instead of 443.
+              port = parsed.port or (443 if parsed.scheme == "https" else 80)
               if url and host:
                   print(f"TARGET|{host}|{port}|{url}")
           PYEOF
@@ -306,72 +338,116 @@ jobs:
           REPO: ${{ github.repository }}
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
           LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint host 192.168.86.201; transport fail-closes if unset"
+          # OMN-17492: glm-review — authenticated cloud reviewer on the z.ai
+          # GLM Coding Plan. The Bearer key is a repo Actions secret (same
+          # sanctioned pattern as LOCAL_LLM_SHARED_SECRET); the transport
+          # additionally requires the HTTPS host to be declared here. On
+          # fork PRs the secret is absent → glm-review fails closed
+          # per-model and the local models still review.
+          LLM_GLM_API_KEY: ${{ secrets.LLM_GLM_API_KEY }}
+          LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: "api.z.ai"
+          REVIEW_JSON_PATH: ${{ github.workspace }}/hostile-review-result.json
         working-directory: ../omniintelligence
         run: |
           set -euo pipefail
 
-          # Two models (mirrors OMN-14176): qwen3-review (5090 :8000) + qwen3-review-b
-          # (4090 :8001). Running >=2 models makes cli_review exit 0 ("at least 2
-          # succeeded") reachable — avoids the single-model exit-2 collapse where a
-          # successful review is misreported as "all models failed".
-          REVIEW_JSON=$(uv run python -m omniintelligence.review_pairing.cli_review \
+          # Three models (OMN-17492): qwen3-review + qwen3-review-b (both on
+          # the one remaining .201 GPU — OMN-16481) + glm-review (z.ai GLM
+          # Coding Plan; independent hardware AND quota domain). Running >=2
+          # models keeps cli_review's exit-0 "at least 2 succeeded" path
+          # reachable even when the whole local fleet is down.
+          uv run python -m omniintelligence.review_pairing.cli_review \
             --pr "$PR_NUMBER" \
             --repo "$REPO" \
             --model qwen3-review \
             --model qwen3-review-b \
-            2> >(tee hostile-reviewer-stderr.log >&2)) || REVIEW_EXIT=$?
+            --model glm-review \
+            --output "$REVIEW_JSON_PATH" \
+            2> >(tee hostile-reviewer-stderr.log >&2) || REVIEW_EXIT=$?
 
-          if [ "${REVIEW_EXIT:-0}" -ne 0 ]; then
+          # cli_review writes the JSON before computing its exit code, so a
+          # degraded run (exit 2: one model) and even a total outage (exit 1)
+          # still leave a parseable result when the file exists.
+          if [ ! -s "$REVIEW_JSON_PATH" ]; then
             {
               echo "verdict=degraded"
-              echo "blocking_count=0"
+              echo "error_count=0"
+              echo "warning_count=0"
               echo "total_findings=0"
               echo "models_succeeded="
-              echo "error=cli_review exited non-zero (fewer than 2 models succeeded — partial/total outage — or binary error)"
+              echo "error=cli_review produced no result JSON (exit ${REVIEW_EXIT:-0} — binary error before review)"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          VERDICT_DATA=$(REVIEW_JSON="$REVIEW_JSON" python3 - <<'PYEOF'
-          import json, os
+          # OMN-17492: read the REAL ModelMultiReviewResult fields. The
+          # previous parser read merged_findings / total_input_findings —
+          # fields that model never had — so blocking was always 0 and the
+          # "blocked" exit-1 was dead code. Per the finder-never-gate
+          # doctrine this step now ALWAYS exits 0 on a completed pipeline;
+          # findings surface as review threads and the deterministic
+          # "Hostile Review Thread Gate" owns blocking.
+          VERDICT_DATA=$(python3 - "$REVIEW_JSON_PATH" <<'PYEOF'
+          import json, sys
 
-          data = json.loads(os.environ["REVIEW_JSON"])
+          with open(sys.argv[1], encoding="utf-8") as fh:
+              data = json.load(fh)
+
           models_succeeded = list(data.get("models_succeeded", []))
-          total_findings = data.get("total_input_findings", 0)
+          total_findings = int(data.get("total_findings", 0))
 
-          blocking = 0
-          for f in data.get("merged_findings", []):
-              if f.get("severity") == "critical":
-                  blocking += 1
+          severity_counts: dict[str, int] = {}
+          for model_result in data.get("results", []):
+              if not model_result.get("success"):
+                  continue
+              for finding in model_result.get("findings", []):
+                  sev = str(finding.get("severity", "info"))
+                  severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-          if not models_succeeded:
-              verdict = "degraded"
-          elif blocking > 0:
-              verdict = "blocked"
-          else:
-              verdict = "passed"
+          verdict = "passed" if len(models_succeeded) >= 2 else "degraded"
 
           print(f"verdict={verdict}")
-          print(f"blocking_count={blocking}")
+          print(f"error_count={severity_counts.get('error', 0)}")
+          print(f"warning_count={severity_counts.get('warning', 0)}")
           print(f"total_findings={total_findings}")
           print(f"models_succeeded={','.join(models_succeeded)}")
           PYEOF
           )
 
           echo "$VERDICT_DATA" >> "$GITHUB_OUTPUT"
-          echo "error=" >> "$GITHUB_OUTPUT"
-
-          VERDICT=$(echo "$VERDICT_DATA" | grep '^verdict=' | cut -d= -f2)
-          if [ "$VERDICT" = "blocked" ]; then
-            exit 1
+          if [ "${REVIEW_EXIT:-0}" -ne 0 ]; then
+            echo "error=cli_review exit ${REVIEW_EXIT} (fewer than 2 models succeeded — partial/total outage)" >> "$GITHUB_OUTPUT"
+          else
+            echo "error=" >> "$GITHUB_OUTPUT"
           fi
+
+      # OMN-17492: publish findings as resolvable PR review threads. This is
+      # the surface the deterministic thread gate reads. Same-repo PRs only —
+      # fork PRs get a read-only GITHUB_TOKEN (OMN-16235), which the script
+      # detects via HOSTILE_REVIEW_IS_FORK and skips cleanly. Uses the infra
+      # checkout's own script (stdlib-only; no uv env needed).
+      - name: Post findings as PR review threads
+        if: >-
+          steps.preflight.outputs.reachable != 'false' &&
+          steps.review.outcome == 'success' &&
+          github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_JSON_PATH: ${{ github.workspace }}/hostile-review-result.json
+          HOSTILE_REVIEW_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        working-directory: ${{ github.workspace }}
+        run: python3 scripts/ci/post_hostile_review_threads.py
 
       - name: Post review summary as PR comment
         if: always()
         uses: actions/github-script@v9
         env:
           REVIEW_VERDICT: ${{ steps.review.outputs.verdict || steps.preflight.outputs.verdict }}
-          REVIEW_BLOCKING: ${{ steps.review.outputs.blocking_count || steps.preflight.outputs.blocking_count }}
+          REVIEW_ERRORS: ${{ steps.review.outputs.error_count || '0' }}
+          REVIEW_WARNINGS: ${{ steps.review.outputs.warning_count || '0' }}
           REVIEW_TOTAL: ${{ steps.review.outputs.total_findings || steps.preflight.outputs.total_findings }}
           REVIEW_MODELS: ${{ steps.review.outputs.models_succeeded || steps.preflight.outputs.models_succeeded }}
           REVIEW_ERROR: ${{ steps.review.outputs.error || steps.preflight.outputs.error }}
@@ -379,51 +455,53 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const verdict = process.env.REVIEW_VERDICT || 'unknown';
-            const blocking = parseInt(process.env.REVIEW_BLOCKING || '0');
+            const errors = parseInt(process.env.REVIEW_ERRORS || '0');
+            const warnings = parseInt(process.env.REVIEW_WARNINGS || '0');
             const total = parseInt(process.env.REVIEW_TOTAL || '0');
             const models = process.env.REVIEW_MODELS || '';
             const error = process.env.REVIEW_ERROR || '';
 
             const icon = {
               passed: '✅',
-              blocked: '🚫',
               degraded: '⚠️',
             }[verdict] || '❓';
 
             const label = {
-              passed: 'PASSED',
-              blocked: 'BLOCKED',
+              passed: 'REVIEWED',
               degraded: 'DEGRADED (informational)',
             }[verdict] || verdict.toUpperCase();
 
             let note = '';
             if (verdict === 'degraded') {
-              note = '\n\n> **Note**: All reviewer models failed or were unavailable. ' +
-                'Degraded results are informational during the pilot phase (OMN-8468/OMN-8524) and do not block merge.';
+              note = '\n\n> **Note**: Fewer than 2 reviewer models succeeded. ' +
+                'Degraded results are informational (OMN-8468/OMN-8524) and do not block merge.';
               if (error) note += ` Error: \`${error}\``;
-            } else if (verdict === 'blocked') {
-              note = '\n\n> **Action required**: Resolve CRITICAL findings before merge.';
+            } else if (errors + warnings > 0) {
+              note = '\n\n> **Action required**: findings were posted as review threads. ' +
+                'Address or reject each one, then resolve its thread — the ' +
+                '`Hostile Review Thread Gate` fails while hostile-reviewer threads are unresolved (OMN-17492).';
             }
 
             const body = [
               `## ${icon} Hostile Reviewer — ${label}`,
               '',
-              `**Blocking findings** (critical): ${blocking}  `,
+              `**Critical findings**: ${errors}  `,
+              `**Major findings**: ${warnings}  `,
               `**Total findings**: ${total}  `,
               `**Models succeeded**: ${models || 'none'}`,
               note,
               '',
               '---',
               '',
-              '**Gate semantics (pilot phase)**',
+              '**Semantics (OMN-17492 — the model finds, thread resolution gates)**',
               '',
-              '| Verdict | Meaning | Blocks merge? |',
+              '| Surface | Meaning | Blocks merge? |',
               '|---------|---------|---------------|',
-              '| `passed` | No critical findings | No |',
-              '| `blocked` | CRITICAL findings found | **Yes** |',
-              '| `degraded` | All models unavailable (infra) | No (pilot) |',
+              '| Review threads | Per-finding, posted by the reviewer | No (informational) |',
+              '| `Hostile Review Thread Gate` | Deterministic: unresolved hostile-reviewer threads exist | Fails until resolved (not yet a required context) |',
+              '| `degraded` verdict | Fewer than 2 models succeeded (infra) | No |',
               '',
-              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review (OMN-8468/OMN-8524)_',
+              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review, qwen3-review-b, glm-review (OMN-8468/OMN-8524/OMN-17492)_',
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
@@ -478,7 +556,48 @@ jobs:
             exit 1
           fi
           if [ "$RESULT" = "failure" ]; then
-            echo "::error::Hostile reviewer found CRITICAL findings — resolve before merge."
+            # OMN-17492: hostile-review no longer exits nonzero on findings
+            # (finder-never-gate) — a failure here is a pipeline/infra error
+            # (install, script, or posting failure), not a model opinion.
+            echo "::error::hostile-review job failed (pipeline error — findings never fail it since OMN-17492)."
             exit 1
           fi
           echo "Hostile Review Gate PASSED"
+
+  # OMN-17492: the DETERMINISTIC merge surface for hostile-review findings.
+  # post_hostile_review_threads.py publishes findings as resolvable review
+  # threads; this job fails while unresolved hostile-reviewer threads exist
+  # and passes when they are resolved. It consults ONLY GitHub thread state —
+  # never a model verdict. Runs even when the reviewer itself was skipped
+  # (draft) or degraded: threads from earlier runs still deserve the gate.
+  # NOT a required context in this pass (canary; promote-to-required is a
+  # recorded follow-up on OMN-17492).
+  hostile-review-thread-gate:
+    name: Hostile Review Thread Gate
+    # always() so a skipped (draft/bot) or failed reviewer job does not
+    # needs-cascade this into a skip — existing unresolved threads outlive
+    # any single run and still deserve the deterministic check.
+    if: always() && github.event_name == 'pull_request'
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    needs: [hostile-review]
+    # always(): a skipped/degraded reviewer must not vacuously skip the
+    # thread check (OMN-15315 lineage: the absence of a verdict is not a
+    # passing one — and existing unresolved threads outlive any single run).
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (gate script)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Check unresolved hostile-reviewer threads
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 scripts/ci/check_hostile_review_threads.py

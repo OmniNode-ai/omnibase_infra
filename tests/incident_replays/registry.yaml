@@ -622,3 +622,36 @@ cases:
     test: tests/scripts/test_maintenance_sync_clone_privilege_omn17443.py::test_the_gate_rejects_the_captured_root_fetching_sync
     why: >-
       This case is about the guard's SCOPE, which is the half a synthetic fixture cannot test. The artifact is the verbatim host-maintenance sync as it shipped on dev at eddf4a9d -- the file /etc/cron.d/omninode-host-maintenance-sync runs as root at :37 on `.201`. Line 127 is the whole defect, `git -C "$INFRA_REPO_ROOT" fetch ...`, into a clone owned by the operator; git fetch writes objects, refs and reflogs, so every hourly tick deposited root-owned paths and the operator's own pull then died with `fatal: unpack-objects failed`. Measured live: 30 minutes after OMN-17366 repaired 2010 such paths and a full root reconciler tick left 0 -> 0, 32 were back, all under omnibase_infra/.git/objects, all stamped 2026-08-31 23:37:02. OMN-17366 had already established the rule these bytes break, and had already shipped this very guard to enforce it -- and the guard was GREEN on this file for the whole time, because it discovered what to scan by the glob `scripts/reconcile*.sh` and this file is in deploy/maintenance/. So the one file still carrying the defect was the one file the gate never opened: the OMN-17383 lesson (a gate whose scope stops at a filename pattern gives false assurance) recurring inside the same epic, which is why the fix changes DISCOVERY to follow what a cron unit actually invokes rather than adding a second filename pattern. The case drives the real gate over these exact bytes, in a repo carrying the real cron unit, and requires it to say no -- a scope regression back to the glob turns it red. Its accept control in the same test (the fixed file, same repo shape, must pass) is what stops a guard that simply rejects every scheduled script from satisfying it.
+  - id: omn17492-hostile-review-findings-discarded
+    guard: scripts/ci/post_hostile_review_threads.py
+    incident: OMN-17492
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn17492/cli-review-glm-infra-pr3121.result.json.captured
+      sha256: 0339f941c500374269e88a5458a119d1692c2ad17710346c8bc9b4b00f987d82
+    capture:
+      method: live-http
+      source: live-http:api.z.ai:443/api/coding/paas/v4/chat/completions
+      captured_at: '2026-09-01T18:35:00Z'
+    captured_by: lane replay (OMN-17492)
+    test: tests/ci/test_incident_replay_omn17492.py::test_the_real_poster_surfaces_the_findings_the_shipped_parser_discarded
+    why: >-
+      This poster is newly wired, so default-deny demands a real case rather than a baseline exemption. The false_green it replaces was total: hostile-reviewer.yml's shipped verdict step parsed data.get("merged_findings", []) and data.get("total_input_findings", 0) -- fields ModelMultiReviewResult has NEVER had (its real fields are results[].findings and total_findings) -- so on every run since OMN-8468 the PR comment said "Total findings: 0", the "blocked" exit-1 was dead code, and every finding the models produced was discarded unread. The reviewer reviewed into the void, and nothing was red. The artifact is a VERBATIM ModelMultiReviewResult: the real omniintelligence.review_pairing.cli_review (worktree at omniintelligence#875 head 7ff591bc, which adds the glm-review registry entry) driving the real glm-review model on the z.ai GLM Coding Plan surface against the real, merged omnibase_infra PR #3121, captured 2026-09-01; it carries 10 findings (1 warning, 7 info, 2 hint). Re-fetch: run `cli_review --pr 3121 --repo OmniNode-ai/omnibase_infra --model glm-review --no-fallback --output <f>` with LLM_GLM_API_KEY resolved from the platform secret store. Disclosed limitation of the locator, stated rather than hidden: the origin is a LIVE generative endpoint, so a re-fetch produces a fresh review of the same PR, not these exact bytes -- the sha256 pins the committed capture, and the incident-defining property (real field names of a real cli_review result) holds for every re-fetch. The replay first pins the defect (the shipped parser's exact reads return empty/0 on these bytes while total_findings is 10), then drives the REAL poster over them and requires a non-empty REQUEST_CHANGES review payload carrying all 8 non-nit findings -- the verdict that did not exist when findings were being discarded.
+  - id: omn17492-thread-gate-scoped-to-its-own-threads
+    guard: scripts/ci/check_hostile_review_threads.py
+    incident: OMN-16823
+    regression_class: false_red
+    guard_verdict_on_artifact: accept
+    discriminator: tests/ci/test_check_hostile_review_threads.py::TestClassifyThreads::test_unresolved_marker_thread_blocks
+    artifact:
+      fixture: tests/fixtures/omn17492/omnibase-core-pr1604-review-threads.graphql.json.captured
+      sha256: d1f89dd5eed372dde8ccb67e5f9816283ddf8412f2cb27c8d83a956c8ed2e3d1
+    capture:
+      method: gh-api
+      source: gh-api:graphql/repository/OmniNode-ai/omnibase_core/pullRequest/1604/reviewThreads
+      captured_at: '2026-09-01T18:30:00Z'
+    captured_by: lane replay (OMN-17492)
+    test: tests/ci/test_incident_replay_omn17492.py::test_the_thread_gate_accepts_the_real_pr1604_threads_that_wedged_omn16823
+    why: >-
+      This gate is newly wired enforcement (the deterministic merge surface for hostile-review findings under OMN-17492's finder-never-gate doctrine), so default-deny demands a real regression case. The incident is OMN-16823: the CodeRabbit-era thread gate (check-unresolved-threads.sh) kept omnibase_core PR #1604 merge-BLOCKED after CodeRabbit had conceded in-thread, because it inferred "still blocking" by parsing concession PROSE ("agreed... deferring to OMN-XXXXX is reasonable" was not in its phrase list) instead of reading thread state -- a live false_red on a real good input. The artifact is the VERBATIM GraphQL reviewThreads connection for that exact PR (its 3 real threads), captured 2026-09-01. Locator note, disclosed rather than hidden: reviewThreads has NO REST surface, so the source is a gh-api pseudo-path pinning the one resource; re-fetch with `gh api graphql` using the _QUERY constant in the guard itself with owner=OmniNode-ai name=omnibase_core pr=1604 (thread state is live state, so a re-fetch reflects today's resolution flags; the sha256 pins the committed capture). The new gate's verdict on these bytes is accept for a STRUCTURAL reason the old gate lacked: it gates ONLY threads carrying the hostile-reviewer marker, and it reads isResolved -- prose never enters the verdict, so the entire OMN-16823 concession-phrase class is unrepresentable, on these real CodeRabbit-authored thread bodies, not a synthetic imitation. The discriminator drives the same guard over an unresolved marker thread and requires it to still say NO, so a stuck-open gate cannot satisfy this case.
