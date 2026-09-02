@@ -696,6 +696,18 @@ prepush_try_local_heavy_slot() {
     # The workroot is unusable, which says nothing about this host's capacity.
     # Proceed exactly as the hook did before this lock existed rather than
     # inventing a refusal out of an infrastructural failure.
+    # OMN-17280. Before degrading to an UNSERIALIZED run, ask whether this is
+    # the actor case: a workroot we cannot write is the signature of running as
+    # someone other than whoever provisioned this host, and when NO capacity row
+    # is reachable for that actor the same-host route is the governed answer --
+    # it takes a per-actor slot under $HOME instead of running with no lock at
+    # all, and it writes the receipt that names why the suite ran here. It
+    # declines the moment any lab host is reachable, so an OWNER whose workroot
+    # is genuinely broken still gets exactly the warning below.
+    if prepush_local_actor_route "${heavy_what:-heavy fail-closed full-suite escalation}" \
+      "$(prepush_identity_label "$PREPUSH_LC_HOST" || true)"; then
+      return 0
+    fi
     log "WARNING: could not create the heavy-suite slot lock under '${lw}' -- running unserialized on this host (pre-OMN-16991 behavior). Fix the workroot to restore serialization (OMN-16174)."
     return 0
   fi

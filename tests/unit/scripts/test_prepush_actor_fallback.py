@@ -472,3 +472,25 @@ def test_the_route_is_opened_by_no_prepush_override() -> None:
         assert forbidden not in body, (
             f"prepush_local_actor_route must not consult {forbidden}"
         )
+
+
+def test_the_unserialized_degradation_consults_the_route_first() -> None:
+    """The path a non-owner actually lands on.
+
+    A workroot this process cannot write is the signature of running as
+    someone other than whoever provisioned the host. Before OMN-17280 that
+    read as CONTENDED and refused; with the rc=2 fix alone it would read as
+    "run unserialized" and produce no receipt at all. The route is consulted
+    first so the run is serialized under a per-actor slot AND carries the
+    receipt naming why it ran here. It declines whenever a lab host is
+    reachable, so an owner whose workroot is genuinely broken still gets the
+    unserialized warning unchanged.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    warn = text.index("could not create the heavy-suite slot lock under")
+    route = text.rindex("prepush_local_actor_route", 0, warn)
+    # Same `if [ "$lock_rc" -eq 2 ]` block, not somewhere far above it.
+    assert "lock_rc" in text[text.rindex("lock_rc", 0, route) : warn]
+    assert warn - route < 900, (
+        "the route call must sit immediately before the unserialized warning"
+    )
