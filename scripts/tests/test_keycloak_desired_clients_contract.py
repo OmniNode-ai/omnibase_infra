@@ -46,3 +46,26 @@ def test_omniweb_user_identity_claim_contract() -> None:
         mapper.get("config", {}).get("included.custom.audience") != "gateway-attach"
         for mapper in mappers.values()
     )
+
+
+def test_omnidash_spa_mints_onex_api_audience() -> None:
+    """OMN-17512 (finding F10 on OMN-17281): omnidash-spa minted `aud: account`
+    (Keycloak's built-in default) with no onex-api audience at all, so
+    POST /v1/auth/provision 401'd on a valid, freshly minted token.
+
+    Ruling (OMN-17281 comment 10db4a5a): the fix is a narrow audience mapper
+    on the SPA client, not widening the accepted audience in auth_oidc.py.
+    This asserts the mapper exists and mints exactly `onex-api` as an access
+    token audience.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    omnidash_spa = _client(config, "omnidash-spa")
+
+    assert omnidash_spa["publicClient"] is True
+    assert omnidash_spa["directAccessGrantsEnabled"] is True
+
+    mappers = {mapper["name"]: mapper for mapper in omnidash_spa["protocolMappers"]}
+    audience_mapper = mappers["onex-api-audience"]
+    assert audience_mapper["protocolMapper"] == "oidc-audience-mapper"
+    assert audience_mapper["config"]["included.client.audience"] == "onex-api"
+    assert audience_mapper["config"]["access.token.claim"] == "true"
