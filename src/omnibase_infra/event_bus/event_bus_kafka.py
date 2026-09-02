@@ -197,14 +197,18 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Final
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import (
     BrokerNotAvailableError,
     InvalidPartitionsError,
+    InvalidProducerEpoch,
     KafkaError,
     MessageSizeTooLargeError,
+    OutOfOrderSequenceNumber,
+    UnknownProducerId,
     UnknownTopicOrPartitionError,
 )
 from aiokafka.structs import TopicPartition
@@ -239,6 +243,7 @@ from omnibase_infra.event_bus.models import (
     ModelPublishReceipt,
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
@@ -261,6 +266,33 @@ from omnibase_infra.utils.util_onex_topic_format import (
 from omnibase_infra.utils.util_topic_validation import validate_topic_name
 
 logger = logging.getLogger(__name__)
+
+# OMN-17497: the idempotent-producer fatal error family.
+#
+# With ``enable_idempotence=True`` the broker tracks a (producer id, epoch,
+# partition) -> next-expected-sequence triple. When a produce request arrives
+# carrying a sequence the broker does not expect, it rejects it and the
+# producer instance's sequence state is unrecoverable: aiokafka does not
+# re-init the producer id in place, so EVERY subsequent send from that same
+# instance carries a sequence the broker still refuses. Retrying on the same
+# producer therefore cannot succeed -- which is exactly the observed live
+# signature on onex-dev, ``[Error 45] OutOfOrderSequenceNumber`` failing all
+# four attempts against ``onex.dlq.omnibase-infra.quarantine.v1``.
+#
+# The only recovery is a NEW producer: ``InitProducerId`` mints a fresh
+# (pid, epoch) whose sequences start at 0 again. So this family destroys the
+# producer and lets the retry loop mint a replacement, rather than burning
+# the retry budget against permanently-broken local state.
+#
+# It also says nothing about broker reachability -- the broker answered, and
+# answered with a producer-state verdict -- so it must NOT be counted as a
+# connection-health failure. Same rationale as the ``UnknownTopicOrPartitionError``
+# (OMN-9553) and ``MessageSizeTooLargeError`` (OMN-16267) exemptions below.
+_IDEMPOTENT_PRODUCER_FATAL_ERRORS: Final[tuple[type[KafkaError], ...]] = (
+    OutOfOrderSequenceNumber,
+    UnknownProducerId,
+    InvalidProducerEpoch,
+)
 
 # OMN-15232: pause between fail-closed rewinds so a persistently unreachable DLQ
 # does not turn the consume loop into a hot spin over the same offset. The
@@ -1096,6 +1128,59 @@ class EventBusKafka(
                 ),
             ) from e
 
+    async def _record_publish_circuit_failure(
+        self, topic: str, correlation_id: UUID
+    ) -> bool:
+        """Charge one publish failure to the shared connection breaker, or don't.
+
+        OMN-17497. The breaker this bus owns is keyed on the CONNECTION
+        (``kafka.<environment>``), so every failure recorded against it is a
+        verdict about the whole broker connection and blocks every publisher on
+        this instance while it is open. That is the correct shape for a real
+        connectivity failure and the wrong shape for a failure that is already
+        somebody else's error path.
+
+        A publish to a DLQ / quarantine sink is by construction the failure
+        path: something upstream already failed, and this publish exists only to
+        make that failure durable. Letting it vote on connection health inverts
+        the blast radius -- one poison event on one low-value topic gets to
+        decide that the broker is unavailable for the gateway session path on
+        the same pod. That is the live onex-dev incident this method closes:
+        ``HandlerRendererCapabilityProjection`` raising on every event ->
+        quarantine fallback publish -> that publish failing -> breaker opened
+        108 times in two hours, taking gateway attach/heartbeat/detach
+        envelopes with it.
+
+        Excluding these publishes does not hide the failure: the retry loop
+        still retries, the caller still gets ``InfraConnectionError`` when the
+        retries are exhausted, and the DLQ-publish failure is still logged at
+        ERROR by the caller that requested it. Only the connection-wide verdict
+        is withheld, because a DLQ publish failure is not evidence about the
+        connection that the primary path shares.
+
+        Returns:
+            ``True`` when the failure was charged to the breaker, ``False``
+            when it was withheld because the target is a failure-path sink.
+        """
+        if is_dlq_topic(topic):
+            logger.warning(
+                "Publish to failure-path sink %s failed — NOT recording a "
+                "circuit failure: a DLQ/quarantine publish is already an error "
+                "path and must not open the connection-wide breaker (OMN-17497)",
+                topic,
+                extra={
+                    "topic": topic,
+                    "correlation_id": str(correlation_id),
+                    "service_name": self.service_name,
+                },
+            )
+            return False
+        async with self._circuit_breaker_lock:
+            await self._record_circuit_failure(
+                operation="publish", correlation_id=correlation_id
+            )
+        return True
+
     async def _publish_with_retry(
         self,
         topic: str,
@@ -1248,10 +1333,9 @@ class EventBusKafka(
                             )
                     self._producer = None
                 last_exception = e
-                async with self._circuit_breaker_lock:
-                    await self._record_circuit_failure(
-                        operation="publish", correlation_id=headers.correlation_id
-                    )
+                await self._record_publish_circuit_failure(
+                    topic, headers.correlation_id
+                )
                 logger.warning(
                     f"Publish timeout (attempt {attempt + 1}/{self._max_retry_attempts + 1})",
                     extra={
@@ -1304,12 +1388,59 @@ class EventBusKafka(
                 )
                 break  # No retry benefit; fall through to error raise
 
-            except KafkaError as e:  # NOTE: UnknownTopicOrPartitionError IS-A KafkaError, MessageSizeTooLargeError IS-A KafkaError — both handlers MUST appear before this block
+            except _IDEMPOTENT_PRODUCER_FATAL_ERRORS as e:
+                # OMN-17497: the broker rejected this send on the idempotent
+                # producer's OWN sequence/epoch state, not on connectivity.
+                # See _IDEMPOTENT_PRODUCER_FATAL_ERRORS for the full rationale.
+                #
+                # Two consequences, both handled here:
+                #
+                # 1. Retrying on the same producer can never succeed — the
+                #    sequence the broker refused is the sequence this instance
+                #    will keep sending. Destroy the producer so the next
+                #    attempt's ``_ensure_producer`` mints a fresh (pid, epoch)
+                #    whose sequences restart at 0. The retry budget is then
+                #    spent on something that can actually work, instead of
+                #    four guaranteed-identical rejections.
+                # 2. Do NOT record a circuit failure. The broker answered; it
+                #    answered with a verdict about producer-local state. That
+                #    is not evidence the connection is unavailable, and on
+                #    onex-dev it was the whole mechanism by which one poison
+                #    event opened the shared breaker 108 times in two hours.
                 last_exception = e
-                async with self._circuit_breaker_lock:
-                    await self._record_circuit_failure(
-                        operation="publish", correlation_id=headers.correlation_id
-                    )
+                async with self._producer_lock:
+                    if self._producer is not None:
+                        try:
+                            await self._producer.stop()
+                        except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                            logger.warning(
+                                "Cleanup failed for Kafka producer stop during "
+                                "idempotent-producer state reset: %s",
+                                cleanup_err,
+                                exc_info=True,
+                            )
+                    self._producer = None
+                logger.warning(
+                    "Idempotent producer state rejected by broker on publish "
+                    "(attempt %d/%d) — discarding the producer so the next "
+                    "attempt mints a fresh producer id, and skipping the "
+                    "circuit failure record (producer-local state is not "
+                    "broker health): %s",
+                    attempt + 1,
+                    self._max_retry_attempts + 1,
+                    sanitize_error_message(e),
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(headers.correlation_id),
+                        "error_type": type(e).__name__,
+                    },
+                )
+
+            except KafkaError as e:  # NOTE: UnknownTopicOrPartitionError, MessageSizeTooLargeError and every member of _IDEMPOTENT_PRODUCER_FATAL_ERRORS are KafkaError subclasses — all those handlers MUST appear before this block
+                last_exception = e
+                await self._record_publish_circuit_failure(
+                    topic, headers.correlation_id
+                )
                 logger.warning(
                     f"Kafka error on publish (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
                     extra={
@@ -1320,10 +1451,9 @@ class EventBusKafka(
 
             except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 last_exception = e
-                async with self._circuit_breaker_lock:
-                    await self._record_circuit_failure(
-                        operation="publish", correlation_id=headers.correlation_id
-                    )
+                await self._record_publish_circuit_failure(
+                    topic, headers.correlation_id
+                )
                 logger.warning(
                     f"Publish error (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
                     extra={

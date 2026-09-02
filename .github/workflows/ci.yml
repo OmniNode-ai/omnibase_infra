@@ -1444,6 +1444,13 @@ jobs:
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Checkout omnimarket (sibling)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          path: omnimarket
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup Python and uv
         uses: ./omnibase_infra/.github/actions/setup-python-uv
         with:
@@ -3555,6 +3562,13 @@ jobs:
         with:
           repository: OmniNode-ai/omnibase_compat
           path: omnibase_compat
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout omnimarket (sibling)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python and uv

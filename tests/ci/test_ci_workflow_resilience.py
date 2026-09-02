@@ -553,6 +553,8 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
     for job_name in ("schema-handshake", "kafka-boundary-compat"):
         job = ci_workflow["jobs"][job_name]
         assert job["timeout-minutes"] >= 45
+        checkout_names = {step.get("name") for step in job["steps"]}
+        assert "Checkout omnimarket (sibling)" in checkout_names
 
         install_step = next(
             step
