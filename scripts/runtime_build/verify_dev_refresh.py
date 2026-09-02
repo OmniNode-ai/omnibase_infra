@@ -20,7 +20,11 @@ Every check is required (fail-closed AND-of-all-checks):
      ID differs from the pre-refresh snapshot.
   2. **Manifest count** -- ``/v1/introspection/manifest`` contract count is
      >= ``--min-contracts``.
-  3. **Health endpoint** -- ``/health`` returns HTTP 200 with a healthy body.
+  3. **Health endpoint** [strictness fixed in OMN-17563] -- ``/health``
+     returns HTTP 200 with a body whose top-level ``status`` is exactly
+     ``healthy``; ``degraded``/``unhealthy``/absent fail closed. Shares the
+     verdict with the stability gate via ``health_payload.py`` -- the
+     permissive ``details.healthy`` OR had been copied into both.
   4. **Cluster health** -- ``rpk cluster health`` inside the broker container
      reports healthy.
   5. **Revision readback** -- the ``org.opencontainers.image.revision``
@@ -51,6 +55,18 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
+
+# Sibling module in this same directory. These verifiers are executed as
+# scripts (``python scripts/runtime_build/verify_*.py`` or ``uv run python
+# <path>``), so ``sys.path[0]`` is this directory and the plain import
+# resolves. Sharing the verdict rather than re-copying it is the point:
+# OMN-17563 was one defect that had already been duplicated into both files.
+from health_payload import (
+    HEALTH_POLICY_STATUS_ONLY_STRICT,
+    HealthVerdict,
+    evaluate_health_body,
+    unreachable_verdict,
+)
 
 _REVISION_LABEL = "org.opencontainers.image.revision"
 
@@ -87,6 +103,11 @@ class HealthGateReport:
     manifest_ok: bool = False
     health_ok: bool = False
     health_detail: str | None = None
+    # OMN-17563 AC-3: the receipt names the policy that produced ``health_ok``
+    # and the raw status it saw, so a later reader can tell a strict PASS from
+    # a lenient one without re-deriving the whole probe.
+    health_status: str | None = None
+    health_policy: str = HEALTH_POLICY_STATUS_ONLY_STRICT
     cluster_healthy: bool = False
     cluster_detail: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -125,6 +146,8 @@ class HealthGateReport:
             "manifest_ok": self.manifest_ok,
             "health_ok": self.health_ok,
             "health_detail": self.health_detail,
+            "health_status": self.health_status,
+            "health_policy": self.health_policy,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "revision_readback_ok": self.revisions_match,
@@ -263,25 +286,17 @@ def check_manifest_count(
     return len(contracts), None
 
 
-def check_health(health_url: str, *, opener: object | None = None) -> tuple[bool, str]:
+def check_health(health_url: str, *, opener: object | None = None) -> HealthVerdict:
     open_fn = opener or urllib.request.urlopen
     try:
         with open_fn(health_url, timeout=10) as resp:  # type: ignore[operator]
             status_code = getattr(resp, "status", 200)
             raw = resp.read()
     except (urllib.error.URLError, OSError) as exc:
-        return False, f"health fetch failed: {exc}"
+        return unreachable_verdict(f"health fetch failed: {exc}")
     if status_code and status_code != 200:
-        return False, f"health endpoint returned HTTP {status_code}"
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return False, "health payload not valid JSON"
-    status = str(payload.get("status", "")).lower()
-    details_healthy = bool(payload.get("details", {}).get("healthy", False))
-    if status == "healthy" or details_healthy:
-        return True, f"status={status}"
-    return False, f"status={status!r} details.healthy={details_healthy}"
+        return unreachable_verdict(f"health endpoint returned HTTP {status_code}")
+    return evaluate_health_body(raw)
 
 
 def check_cluster_health(
@@ -358,9 +373,11 @@ def run_health_gate(
     else:
         report.manifest_ok = count is not None and count >= min_contracts
 
-    healthy, detail = check_health(health_url, opener=opener)
-    report.health_ok = healthy
-    report.health_detail = detail
+    health_verdict = check_health(health_url, opener=opener)
+    report.health_ok = health_verdict.ok
+    report.health_detail = health_verdict.detail
+    report.health_status = health_verdict.status
+    report.health_policy = health_verdict.policy
 
     cluster_healthy, cluster_detail = check_cluster_health(
         broker_container, runner=runner

@@ -11,8 +11,13 @@ required (fail-closed AND-of-all-checks, not best-effort):
      leaves the same image running would otherwise silently "pass").
   2. **Manifest count** -- ``/v1/introspection/manifest`` contract count is
      >= ``--min-contracts`` (a floor, never silently lowered).
-  3. **Health endpoint** -- ``/health`` returns HTTP 200 with a JSON body
-     whose ``status`` (or ``details.healthy``) indicates healthy.
+  3. **Health endpoint** [strictness fixed in OMN-17563] -- ``/health``
+     returns HTTP 200 with a JSON body whose top-level ``status`` is exactly
+     ``healthy``. ``degraded``/``unhealthy`` FAIL regardless of any nested
+     ``details.healthy`` flag, and a body with no readable ``status`` fails
+     closed. Until OMN-17563 this check ORed ``details.healthy`` in, so it
+     signed off a lane the lane's own ``--degraded-policy fail`` container
+     probe called unhealthy ten minutes later -- see ``health_payload.py``.
   4. **Cluster health** -- ``rpk cluster health`` inside the broker container
      reports healthy.
   5. **Consumer groups Stable** -- every group declared in
@@ -61,6 +66,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+
+# Sibling module in this same directory. These verifiers are executed as
+# scripts (``python scripts/runtime_build/verify_*.py`` or ``uv run python
+# <path>``), so ``sys.path[0]`` is this directory and the plain import
+# resolves. Sharing the verdict rather than re-copying it is the point:
+# OMN-17563 was one defect that had already been duplicated into both files.
+from health_payload import (
+    HEALTH_POLICY_STATUS_ONLY_STRICT,
+    HealthVerdict,
+    evaluate_health_body,
+    unreachable_verdict,
+)
 
 # OCI label stamped from VCS_REF/GIT_SHA at build time (Dockerfile.runtime).
 _REVISION_LABEL = "org.opencontainers.image.revision"
@@ -150,6 +167,11 @@ class HealthGateReport:
     manifest_ok: bool = False
     health_ok: bool = False
     health_detail: str | None = None
+    # OMN-17563 AC-3: the receipt names the policy that produced ``health_ok``
+    # and the raw status it saw, so a later reader can tell a strict PASS from
+    # a lenient one without re-deriving the whole probe.
+    health_status: str | None = None
+    health_policy: str = HEALTH_POLICY_STATUS_ONLY_STRICT
     cluster_healthy: bool = False
     cluster_detail: str | None = None
     consumer_groups: list[ConsumerGroupCheck] = field(default_factory=list)
@@ -212,6 +234,8 @@ class HealthGateReport:
             "manifest_ok": self.manifest_ok,
             "health_ok": self.health_ok,
             "health_detail": self.health_detail,
+            "health_status": self.health_status,
+            "health_policy": self.health_policy,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "consumer_groups": {g.group: g.state for g in self.consumer_groups},
@@ -356,25 +380,17 @@ def check_manifest_count(
     return len(contracts), None
 
 
-def check_health(health_url: str, *, opener: object | None = None) -> tuple[bool, str]:
+def check_health(health_url: str, *, opener: object | None = None) -> HealthVerdict:
     open_fn = opener or urllib.request.urlopen
     try:
         with open_fn(health_url, timeout=10) as resp:  # type: ignore[operator]
             status_code = getattr(resp, "status", 200)
             raw = resp.read()
     except (urllib.error.URLError, OSError) as exc:
-        return False, f"health fetch failed: {exc}"
+        return unreachable_verdict(f"health fetch failed: {exc}")
     if status_code and status_code != 200:
-        return False, f"health endpoint returned HTTP {status_code}"
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return False, "health payload not valid JSON"
-    status = str(payload.get("status", "")).lower()
-    details_healthy = bool(payload.get("details", {}).get("healthy", False))
-    if status == "healthy" or details_healthy:
-        return True, f"status={status}"
-    return False, f"status={status!r} details.healthy={details_healthy}"
+        return unreachable_verdict(f"health endpoint returned HTTP {status_code}")
+    return evaluate_health_body(raw)
 
 
 def check_cluster_health(
@@ -711,9 +727,11 @@ def run_health_gate(
     else:
         report.manifest_ok = count is not None and count >= min_contracts
 
-    healthy, detail = check_health(health_url, opener=opener)
-    report.health_ok = healthy
-    report.health_detail = detail
+    health_verdict = check_health(health_url, opener=opener)
+    report.health_ok = health_verdict.ok
+    report.health_detail = health_verdict.detail
+    report.health_status = health_verdict.status
+    report.health_policy = health_verdict.policy
 
     cluster_healthy, cluster_detail = check_cluster_health(
         broker_container, runner=runner
@@ -819,7 +837,12 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Fraction of topic_partitions_per_shard in use that triggers a "
             "visible (non-blocking) partition-headroom WARN [OMN-14013]. "
-            f"Default {DEFAULT_PARTITION_WARN_THRESHOLD:.0%}."
+            # argparse runs `help % params` when rendering, so a literal
+            # percent must be escaped or `--help` dies with
+            # "ValueError: incomplete format" (it did, on every invocation,
+            # until OMN-17563 -- an operator could not read this gate's own
+            # usage text).
+            f"Default {DEFAULT_PARTITION_WARN_THRESHOLD * 100:.0f}%%."
         ),
     )
     parser.add_argument("--json", action="store_true", dest="json_output")
