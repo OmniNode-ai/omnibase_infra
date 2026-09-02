@@ -1437,6 +1437,13 @@ jobs:
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Checkout omnimarket (sibling)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          path: omnimarket
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup Python and uv
         uses: ./omnibase_infra/.github/actions/setup-python-uv
         with:
@@ -1482,7 +1489,9 @@ jobs:
           INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
           echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
+          echo "omnimarket @ file://$(pwd)/../omnimarket" >> /tmp/sibling-overrides.txt
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket
           attempt=1
           max_attempts=5
           until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
@@ -3549,6 +3558,13 @@ jobs:
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Checkout omnimarket (sibling)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          path: omnimarket
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup Python and uv
         uses: ./omnibase_infra/.github/actions/setup-python-uv
         with:
@@ -3589,6 +3605,8 @@ jobs:
           INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
           echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
+          echo "omnimarket @ file://$(pwd)/../omnimarket" >> /tmp/sibling-overrides.txt
+          uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket
           attempt=1
           max_attempts=5
           until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do

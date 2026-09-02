@@ -559,10 +559,18 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
             for step in job["steps"]
             if str(step.get("name", "")).startswith("Install sibling repos as editable")
         )
+        checkout_names = {str(step.get("name", "")) for step in job["steps"]}
+        assert "Checkout omnimarket (sibling)" in checkout_names
+
         run_script = install_step["run"]
         assert "max_attempts=5" in run_script
         assert (
             "until uv pip install --overrides /tmp/sibling-overrides.txt" in run_script
+        )
+        assert 'echo "omnimarket @ file://$(pwd)/../omnimarket"' in run_script
+        assert (
+            "uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket"
+            in run_script
         )
         assert "sibling deps attempt" in run_script
         assert "sibling deps failed after" in run_script
