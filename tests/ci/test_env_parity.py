@@ -311,9 +311,19 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         # fail-closed on the unbound per-lane pin and put omninode-runtime,
         # -effects and -worker into CrashLoopBackOff on onex-dev.
         #
-        # This branch does not bind BIFROST_LANE_OVERLAY_PATH in the
-        # onex-dev runtime family, so it remains parity debt here.
-        "BIFROST_LANE_OVERLAY_PATH",
+        # BIFROST_LANE_OVERLAY_PATH IS NOW BOUND AND IS NO LONGER LISTED HERE.
+        # The manifest half of OMN-17502 landed in omninode_infra: the key is
+        # bound inline on all three onex-dev runtime Deployments
+        # (deployment-omninode-runtime.yaml:135, -effects.yaml:131,
+        # -worker.yaml:151, verified against omninode_infra@origin/dev
+        # d3c99dd2 on 2026-09-02). Leaving the entry in place made
+        # test_bifrost_render_knobs_are_classified_by_live_cluster_state fail
+        # with bound=True, recorded_as_debt=True -- which is exactly what that
+        # test exists to do, so the allowlist cannot outlive the gap it
+        # describes. Deleted here rather than re-justified. Removed as part of
+        # OMN-17531 because that lane was the first compose-touching PR after
+        # the manifest half merged and therefore the first to run this
+        # path-filtered gate; the debt itself belongs to OMN-17502.
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
         # OMN-15425 (compose half) / OMN-16953 (k8s half). Tenant-projection
