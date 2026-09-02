@@ -553,6 +553,8 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
     for job_name in ("schema-handshake", "kafka-boundary-compat"):
         job = ci_workflow["jobs"][job_name]
         assert job["timeout-minutes"] >= 45
+        checkout_names = {step.get("name") for step in job["steps"]}
+        assert "Checkout omnimarket (sibling)" in checkout_names
 
         install_step = next(
             step
@@ -563,6 +565,11 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
         assert "max_attempts=5" in run_script
         assert (
             "until uv pip install --overrides /tmp/sibling-overrides.txt" in run_script
+        )
+        assert 'echo "omnimarket @ file://$(pwd)/../omnimarket"' in run_script
+        assert (
+            "uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket"
+            in run_script
         )
         assert "sibling deps attempt" in run_script
         assert "sibling deps failed after" in run_script
