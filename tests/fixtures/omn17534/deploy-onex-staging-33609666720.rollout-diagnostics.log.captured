@@ -1,24 +1,24 @@
-2026-09-02T08:42:46.0876791Z [36;1m    # --request-timeout=30s on each: these three calls otherwise[0m
-2026-09-02T08:42:46.0877240Z [36;1m    # inherit kubectl's default of 0 (no timeout), so an[0m
-2026-09-02T08:42:46.0877667Z [36;1m    # unresponsive API server would block the job until the[0m
-2026-09-02T08:42:46.0878107Z [36;1m    # workflow's own 45-minute ceiling instead of failing fast.[0m
-2026-09-02T08:42:46.0878948Z [36;1m    kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s describe pods \[0m
-2026-09-02T08:42:46.0879462Z [36;1m      -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev || true[0m
-2026-09-02T08:42:46.0879949Z [36;1m    kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s logs \[0m
-2026-09-02T08:42:46.0880449Z [36;1m      -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev --tail=30 || true[0m
-2026-09-02T08:42:46.0880956Z [36;1m    kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s logs \[0m
-2026-09-02T08:42:46.0881509Z [36;1m      -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev --tail=30 --previous || true[0m
-2026-09-02T08:42:46.0881969Z [36;1m    FAIL=1[0m
-2026-09-02T08:42:46.0882204Z [36;1m  fi[0m
-2026-09-02T08:42:46.0882410Z [36;1mdone[0m
-2026-09-02T08:42:46.0882612Z [36;1m[0m
-2026-09-02T08:42:46.0882823Z [36;1mif [ "$WARNED" -eq 1 ]; then[0m
-2026-09-02T08:42:46.0883097Z [36;1m  echo[0m
-2026-09-02T08:42:46.0883499Z [36;1m  echo "::warning::One or more deployments had pre-existing ProgressDeadlineExceeded" \[0m
-2026-09-02T08:42:46.0884147Z [36;1m    "and were skipped. These need investigation but are not regressions from this commit."[0m
-2026-09-02T08:42:46.0884603Z [36;1mfi[0m
-2026-09-02T08:42:46.0884806Z [36;1m[0m
-2026-09-02T08:42:46.0885000Z [36;1mexit $FAIL[0m
+2026-09-02T08:42:46.0876791Z     # --request-timeout=30s on each: these three calls otherwise
+2026-09-02T08:42:46.0877240Z     # inherit kubectl's default of 0 (no timeout), so an
+2026-09-02T08:42:46.0877667Z     # unresponsive API server would block the job until the
+2026-09-02T08:42:46.0878107Z     # workflow's own 45-minute ceiling instead of failing fast.
+2026-09-02T08:42:46.0878948Z     kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s describe pods \
+2026-09-02T08:42:46.0879462Z       -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev || true
+2026-09-02T08:42:46.0879949Z     kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s logs \
+2026-09-02T08:42:46.0880449Z       -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev --tail=30 || true
+2026-09-02T08:42:46.0880956Z     kubectl --kubeconfig "$KUBECONFIG" --request-timeout=30s logs \
+2026-09-02T08:42:46.0881509Z       -l "app.kubernetes.io/name=${DEPLOY}" -n onex-dev --tail=30 --previous || true
+2026-09-02T08:42:46.0881969Z     FAIL=1
+2026-09-02T08:42:46.0882204Z   fi
+2026-09-02T08:42:46.0882410Z done
+2026-09-02T08:42:46.0882612Z 
+2026-09-02T08:42:46.0882823Z if [ "$WARNED" -eq 1 ]; then
+2026-09-02T08:42:46.0883097Z   echo
+2026-09-02T08:42:46.0883499Z   echo "::warning::One or more deployments had pre-existing ProgressDeadlineExceeded" \
+2026-09-02T08:42:46.0884147Z     "and were skipped. These need investigation but are not regressions from this commit."
+2026-09-02T08:42:46.0884603Z fi
+2026-09-02T08:42:46.0884806Z 
+2026-09-02T08:42:46.0885000Z exit $FAIL
 2026-09-02T08:42:46.0920671Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
 2026-09-02T08:42:46.0921043Z env:
 2026-09-02T08:42:46.0921255Z   AWS_REGION: us-east-1

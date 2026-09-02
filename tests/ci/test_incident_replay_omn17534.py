@@ -44,9 +44,22 @@ WHAT WAS MODIFIED, because R1 is about honesty and not about ceremony:
   live RDS endpoint, MSK broker DNS and 32 occurrences of an EC2 instance id --
   a disclosure the repo's own guards exist to prevent.
 * FOUR LENGTH-PRESERVING REDACTIONS inside the excerpt: one EC2 instance id and
-  three UUIDs. Every byte offset in the file is therefore unchanged, and none of
-  them appears in any line this test reads. Same precedent and same reasoning as
-  the omn17320 case in this registry.
+  three UUIDs. Every byte offset up to that point is therefore unchanged, and
+  none of them appears in any line this test reads. Same precedent and same
+  reasoning as the omn17320 case in this registry.
+* ANSI SGR SEQUENCES STRIPPED. 42 of them -- 21 ``ESC[36;1m`` and 21 ``ESC[0m``,
+  GitHub's own colouring of the echoed step script. Post-redaction the file was
+  sha256 4dd041f6654137e47a6d65b3775b05ee57536a765fb4a89e6c2748654ddf881c and
+  83,459 bytes; stripping leaves 83,228. This was NOT cosmetic tidying: with the
+  escapes present, ``gh pr diff`` refuses to emit the PR diff at all ("the diff
+  contains terminal escape sequences"), which starved the OMN-17492 hostile
+  reviewer of its input and failed that gate with ``cannot read review JSON``.
+  A committed artifact that breaks every downstream tool reading the diff is
+  not a better capture, it is an unusable one. Terminal colouring carries no
+  evidentiary content -- the incident is in the deployment names, the error
+  strings and the ``--tail=30`` invocation, all of which are byte-identical
+  before and after, as ``test_the_artifact_records_the_incident_it_claims_to``
+  and ``test_the_artifact_shows_why_the_new_gate_forbids_tail`` assert.
 
 Nothing else was touched. The deployment names, the ``--tail=30`` invocation and
 the auto-wiring traceback are the bytes GitHub recorded.
@@ -72,7 +85,7 @@ FIXTURE = (
     / "omn17534"
     / "deploy-onex-staging-33609666720.rollout-diagnostics.log.captured"
 )
-FIXTURE_SHA256 = "4dd041f6654137e47a6d65b3775b05ee57536a765fb4a89e6c2748654ddf881c"
+FIXTURE_SHA256 = "199d6cbc891c15838e37f2482868bd6c87d011a688a795116759f73c4b8dd9ea"
 
 _FAILED_RE = re.compile(r'deployment "([a-z0-9-]+)" exceeded its progress deadline')
 _WAITED_RE = re.compile(r"Checking rollout state for: ([a-z0-9-]+)")
@@ -102,6 +115,21 @@ def _roster_from(captured: str) -> tuple[list[str], list[str]]:
     assert failed, "the artifact records no failed rollout"
     assert set(failed) <= set(waited)
     return waited, failed
+
+
+def test_the_artifact_carries_no_terminal_escape_sequence(captured: str) -> None:
+    """A committed artifact must not break the tools that read the diff.
+
+    ``gh pr diff`` refuses to emit a diff containing terminal escape sequences,
+    which starved the OMN-17492 hostile reviewer of its input and failed that
+    gate. A future re-capture that pastes the raw coloured log back in would
+    reintroduce that, silently, on a PR that has nothing to do with this file.
+    """
+    assert "\x1b" not in captured, (
+        "the captured artifact carries ANSI escape sequences; `gh pr diff` will "
+        "refuse to emit the PR diff and every tool that consumes it fails. Strip "
+        "SGR sequences on re-capture and move FIXTURE_SHA256 with them."
+    )
 
 
 def test_the_artifact_records_the_incident_it_claims_to(captured: str) -> None:

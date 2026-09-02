@@ -301,6 +301,37 @@ jobs:
             --docker-password="${PASSWORD}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Apply the cluster-scoped prerequisites the runtime family declares
+        run: |
+          set -euo pipefail
+          # All 14 runtime-family pod specs carry
+          # `priorityClassName: omninode-standard`. A PriorityClass is
+          # CLUSTER-scoped, so it lives in omninode_infra's k8s/base and is not
+          # part of the namespace-scoped k8s/onex-dev/runtime kustomization the
+          # lab overlay bases on. Without it every ReplicaSet is refused
+          # outright --
+          #
+          #   Error creating: pods "omninode-runtime-6f9d75f4b5-" is forbidden:
+          #   no PriorityClass with name omninode-standard was found
+          #
+          # -- so ZERO runtime pods are created and all 14 Deployments sit at
+          # 0/1 for a reason that has nothing to do with the candidate. That is
+          # exactly what the first real run of this gate reported (33674463837),
+          # and it is why the gate uploads its event log.
+          #
+          # Applied HERE and not added to the overlay, on purpose. This is a
+          # cluster prerequisite, the same class of thing as the namespace and
+          # the ecr-cred Secret created above -- not a lane substitution. The
+          # overlay stays a pure namespace-scoped render of the real onex-dev
+          # manifests, and the file applied here is omninode_infra's own, byte
+          # for byte, never a copy. Referencing it from the overlay's
+          # `resources:` is not possible anyway: kustomize refuses a file path
+          # outside the kustomization root, and the enclosing `k8s/base`
+          # directory would drag in seven Namespaces, ~20 NetworkPolicies, RBAC
+          # and the ECR refresh CronJob.
+          kubectl apply -f omninode_infra/k8s/base/priority-classes.yaml
+          kubectl get priorityclass -l omninode/managed=true
+
       - name: Render the onex-lab overlay with the candidate pinned
         env:
           IMAGE_REF: ${{ needs.build-runtime-candidate.outputs.image-ref }}
