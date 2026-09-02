@@ -329,7 +329,7 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     )
 
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
-    assert len(loaded.forwarder.mirror_topics.outbound) == 8
+    assert len(loaded.forwarder.mirror_topics.outbound) == 10
     # OMN-16204: the bare omniclaude session-lifecycle pair, and only that
     # pair, must resolve from the real node contract.yaml -- per-topic proof
     # that config.gateway_forwarder.mirror_topics.outbound is correctly
@@ -345,6 +345,13 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
         "onex.evt.omniclaude.session-ended.v1"
         in loaded.forwarder.mirror_topics.outbound
     )
+    # OMN-17013: both v2 terminal topics are additive to the v1 mirror union;
+    # the producer cutover remains owned by the delegation orchestrator.
+    for topic in (
+        "onex.evt.omnibase-infra.delegation-completed.v2",
+        "onex.evt.omnibase-infra.delegation-failed.v2",
+    ):
+        assert topic in loaded.forwarder.mirror_topics.outbound
     denied_omniclaude_topics = (
         "onex.evt.omniclaude.prompt-submitted.v1",
         "onex.evt.omniclaude.tool-executed.v1",

@@ -17,18 +17,21 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayMirrorTopics,
     ModelGatewayTenantIdentity,
 )
+from omnibase_infra.topics.platform_topic_suffixes import ALL_OMNIBASE_INFRA_TOPIC_SPECS
 
 BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
 PRINCIPAL_ID = "t-33333333333333333333333333333333"
 
+REPO_ROOT = Path(__file__).parents[4]
 CONTRACT_PATH = (
-    Path(__file__).parents[4]
+    REPO_ROOT
     / "src"
     / "omnibase_infra"
     / "nodes"
     / "node_bus_forwarder_effect"
     / "contract.yaml"
 )
+PARITY_SCRIPT_PATH = REPO_ROOT / "scripts" / "check_contract_topic_parity.py"
 
 # OMN-16204: operator OD-9 ruling 2026-08-18 ~12:40Z allows EXACTLY this bare
 # session-lifecycle pair (session id + timestamps, content-free) to cross to
@@ -36,6 +39,11 @@ CONTRACT_PATH = (
 OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS = (
     "onex.evt.omniclaude.session-started.v1",
     "onex.evt.omniclaude.session-ended.v1",
+)
+
+OMN17013_V2_TERMINAL_TOPICS = (
+    "onex.evt.omnibase-infra.delegation-completed.v2",
+    "onex.evt.omnibase-infra.delegation-failed.v2",
 )
 
 # Content-bearing omniclaude topics that OD-9 explicitly keeps DENIED pending
@@ -84,15 +92,63 @@ def test_contract_does_not_widen_beyond_od9_session_lifecycle_pair(
     assert topic not in outbound
 
 
-def test_contract_outbound_gains_exactly_two_new_topics() -> None:
-    """Falsifiable count check: outbound grew from the pre-OMN-16204 baseline
-    of 6 topics to exactly 8 -- proving nothing beyond the two OD-9 topics
-    was added."""
+def test_contract_outbound_contains_only_declared_additive_pairs() -> None:
+    """Falsifiable count check for the OD-9 and OMN-17013 additions.
+
+    The pre-OMN-16204 baseline had 6 outbound topics. OD-9 added two
+    session-lifecycle topics, and OMN-17013 adds the two v2 terminal topics;
+    v1 terminal topics remain in the union for overlap.
+    """
     contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
     outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
-    assert len(outbound) == 8
+    assert len(outbound) == 10
     for topic in OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS:
         assert topic in outbound
+    for topic in OMN17013_V2_TERMINAL_TOPICS:
+        assert topic in outbound
+
+
+@pytest.mark.parametrize("topic", OMN17013_V2_TERMINAL_TOPICS)
+def test_contract_declares_omn17013_v2_terminal_topic_in_outbound(
+    topic: str,
+) -> None:
+    """V2 terminal topics are mirrored additively while v1 remains declared."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
+    assert outbound.count(topic) == 1
+    assert topic.replace(".v2", ".v1") in outbound
+
+
+def test_contract_outbound_preserves_v1_and_adds_omn17013_v2_pair() -> None:
+    """The v2 readiness change must not remove either v1 terminal topic."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
+    assert len(outbound) == 10
+    assert {
+        "onex.evt.omnibase-infra.delegation-completed.v1",
+        "onex.evt.omnibase-infra.delegation-failed.v1",
+        *OMN17013_V2_TERMINAL_TOPICS,
+    }.issubset(outbound)
+
+
+def test_omn17013_v2_topics_are_not_static_registry_or_allowlist_authority() -> None:
+    """The forwarder may consume v2, but its producer contract owns authority."""
+    static_suffixes = {spec.suffix for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS}
+    parity_source = PARITY_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    for topic in OMN17013_V2_TERMINAL_TOPICS:
+        assert topic not in static_suffixes
+        assert f'"{topic}":' not in parity_source
+
+
+def test_contract_preserves_only_the_intentional_heartbeat_direction_overlap() -> None:
+    """The v2 outbound pair must not widen the deliberate bidirectional overlap."""
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    mirror_topics = contract["config"]["gateway_forwarder"]["mirror_topics"]
+
+    assert set(mirror_topics["inbound"]) & set(mirror_topics["outbound"]) == {
+        "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+    }
 
 
 def _cloud_bus() -> ModelGatewayCloudBusConfig:
