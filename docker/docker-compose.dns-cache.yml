@@ -20,7 +20,7 @@
 # additive (forwards to the same router + public fallback); it does not
 # replace or reconfigure the router.
 #
-# Rollout / rollback (do NOT run now): docs/runbooks/runner-dns-cache-rollout.md
+# Rollout / rollback (do NOT run now): knowledge-base:runbooks/runner-dns-cache-rollout.md
 #   Bring up:  docker compose -f docker/docker-compose.dns-cache.yml up -d --build
 #   Tear down: docker compose -f docker/docker-compose.dns-cache.yml down
 services:

@@ -51,7 +51,7 @@
 #
 # OMN-15395 (D2) — why this script shares the runtime's policy seam:
 #   This is the SECOND live CreateTopics path in the repository, and it is the
-#   one docs/operations/README.md tells operators to run and the one
+#   one the operations documentation tells operators to run and the one
 #   compare_environments.py names in its fix_hint for cloud/local topic parity.
 #   It previously created every topic with a flat `--replication-factor` whose
 #   default was 1, discarding each contract's declared

@@ -74,7 +74,7 @@
 # an operator-gated action (the live container also carries the OMN-13915
 # zombie). Until that recreate, the live container still runs its old
 # hand-edited config. See docker/docker-compose.runners.yml and
-# docs/runbooks/release-train-lab.md.
+# knowledge-base-internal:runbooks/omnibase-infra-release-train-lab.md.
 #
 # The cut-tag job creates the GitHub tag ref via `gh api` with the job's own
 # GITHUB_TOKEN (job-level `permissions: contents: write`) -- the runner's

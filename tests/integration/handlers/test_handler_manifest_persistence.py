@@ -21,7 +21,7 @@ Circuit Breaker Tests (TestCircuitBreakerBehavior):
     - Operations blocked when circuit is open (raises InfraUnavailableError)
     - Circuit resets on successful operation
     - Half-open state allows test request after timeout
-    See: docs/patterns/circuit_breaker_implementation.md for implementation details.
+    See: knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md for implementation details.
 
 Related:
     - OMN-1163: Manifest persistence handler implementation

@@ -9,7 +9,7 @@ transition events.
 Related:
     - TransitionNotificationOutbox: The outbox implementation
     - ModelTransitionNotificationOutboxMetrics: Metrics model for observability
-    - docs/patterns/retry_backoff_compensation_strategy.md: Outbox pattern docs
+    - knowledge-base-internal:reference/omnibase-infra-retry-backoff-compensation.md: Outbox pattern docs
 
 .. versionadded:: 0.8.0
 """

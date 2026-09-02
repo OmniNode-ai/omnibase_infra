@@ -37,7 +37,7 @@
 #   ./scripts/deploy-gateway.sh --print-compose-cmd # Show the exact build command
 #   ./scripts/deploy-gateway.sh --help              # Full usage
 #
-# Runbook: docs/runbooks/gateway-lane-deploy.md
+# Runbook: knowledge-base-internal:runbooks/omnibase-infra-gateway-lane-deploy.md
 
 set -euo pipefail
 
@@ -189,7 +189,7 @@ ROLLBACK
 
     (mirrors the omnibase-infra lane's manual rollback-via-registry.json
     pattern -- deploy-runtime.sh has no automated --rollback flag either.)
-    Full procedure: docs/runbooks/gateway-lane-deploy.md
+    Full procedure: knowledge-base-internal:runbooks/omnibase-infra-gateway-lane-deploy.md
 
 EXAMPLES
     # Preview what would be built and deployed

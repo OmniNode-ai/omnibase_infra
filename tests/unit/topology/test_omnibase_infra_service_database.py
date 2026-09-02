@@ -126,7 +126,7 @@ def test_delegation_workflow_state_resolves_to_the_service_binding_and_dsn_key(
 def test_declared_dsn_key_matches_the_per_service_db_url_contract() -> None:
     """The topology DSN key must be the one wiring and docs already agree on.
 
-    ``docs/patterns/db_url_contract.md`` documents ``OMNIBASE_INFRA_DB_URL`` /
+    ``knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md`` documents ``OMNIBASE_INFRA_DB_URL`` /
     ``omnibase_infra`` / ``role_omnibase_infra`` as the per-service contract
     row; this is the first typed, validated home for that row.
     """

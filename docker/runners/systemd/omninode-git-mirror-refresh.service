@@ -5,7 +5,7 @@
 # guarantees the "N jobs, 1 upstream transfer" property the mirror exists for.
 [Unit]
 Description=OmniNode runner-fleet git mirror refresh (OMN-14027 C2)
-Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/dev/docs/runbooks/c2-git-mirror-egress-rollout.md
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/dev/knowledge-base:runbooks/c2-git-mirror-egress-rollout.md
 After=network-online.target
 Wants=network-online.target
 

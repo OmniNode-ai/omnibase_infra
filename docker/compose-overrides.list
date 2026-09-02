@@ -11,7 +11,7 @@
 #
 # WHY: before this list existed, auto-repair recreated containers from
 # docker-compose.runners.yml alone and silently stripped canary wiring mid-soak,
-# with no log line and no alert. See docs/runbooks/pypi-cache-egress-rollout.md
+# with no log line and no alert. See knowledge-base:runbooks/pypi-cache-egress-rollout.md
 # ("Durability trap") and the header of docker/docker-compose.pypi-canary.yml.
 #
 # REMOVE the canary entry below when the C1 canary ends — either because the

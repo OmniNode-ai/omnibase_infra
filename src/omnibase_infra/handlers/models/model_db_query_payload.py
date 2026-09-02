@@ -50,7 +50,7 @@ JsonType Recursion Fix (OMN-1274):
       from ``omnibase_core.types`` (now fixed via TypeAlias pattern)
 
 See Also:
-    - ADR: ``docs/decisions/adr-any-type-pydantic-workaround.md`` (historical)
+    - ADR: ``knowledge-base:reference/omnibase-infra-adr-any-type-pydantic-workaround.md`` (historical)
     - Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 """
 

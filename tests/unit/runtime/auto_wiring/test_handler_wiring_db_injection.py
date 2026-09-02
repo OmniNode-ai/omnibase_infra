@@ -1100,13 +1100,13 @@ def test_projection_callback_terminal_event_publish_failure_does_not_propagate(
 
 # ---------------------------------------------------------------------------
 # Tests: _DB_URL_ENV_MAP parity with the Per-Service Database URL Contract
-# (docs/patterns/db_url_contract.md). OMN-13158 / F3.
+# (knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md). OMN-13158 / F3.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_db_url_env_map_matches_per_service_db_url_contract() -> None:
-    """_DB_URL_ENV_MAP must mirror docs/patterns/db_url_contract.md table.
+    """_DB_URL_ENV_MAP must mirror knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md table.
 
     The canonical contract lists six per-service databases, each owning its own
     database, dedicated role, and single ``*_DB_URL`` env var. A stale subset

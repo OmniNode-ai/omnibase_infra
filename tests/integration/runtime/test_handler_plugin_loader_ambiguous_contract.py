@@ -21,7 +21,7 @@ load_from_directory() which scans directories comprehensively.
 Related:
     - OMN-1132: Handler Plugin Loader implementation
     - PR #134: Security enhancements and ambiguous contract handling
-    - docs/patterns/handler_plugin_loader.md#contract-file-precedence
+    - knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md#contract-file-precedence
 
 Design Decision (from handler_plugin_loader.md):
     When BOTH handler_contract.yaml AND contract.yaml exist in the same directory,
@@ -63,7 +63,7 @@ class TestAmbiguousContractDetectionIntegration:
     """Integration tests for ambiguous contract detection behavior.
 
     These tests verify the fail-fast behavior documented in
-    docs/patterns/handler_plugin_loader.md when both handler_contract.yaml
+    knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md when both handler_contract.yaml
     and contract.yaml exist in the same directory.
     """
 

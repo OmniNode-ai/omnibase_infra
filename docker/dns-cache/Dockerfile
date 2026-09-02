@@ -4,7 +4,7 @@
 # STATUS: SHOVEL-READY / INERT. Nothing builds this image until an operator runs
 # `docker compose -f docker/docker-compose.dns-cache.yml up -d` at rollout, which
 # is operator-gated exactly like the OMN-14027 pypi-cache pattern. See
-# docs/runbooks/runner-dns-cache-rollout.md.
+# knowledge-base:runbooks/runner-dns-cache-rollout.md.
 #
 # Why unbound (not dnsmasq): the fleet's DNS failure class (OMN-15733,
 # `files.pythonhosted.org` resolution failures under a 64+ concurrent cold-start

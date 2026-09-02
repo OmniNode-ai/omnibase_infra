@@ -524,7 +524,7 @@ def test_markdown_under_tests_does_not_force_a_test_selection() -> None:
     # The coverage invariant is about executable test modules. A .md file under
     # tests/ is still provably inert (OMN-14753 docs-only exemption).
     selection = compute_selection(
-        changed_files=["tests/replay/README.md"],
+        changed_files=["knowledge-base:guides/omnibase-infra-replay-tests.md"],
         adjacency_path=ADJ,
         ref_name="pr-branch",
     )

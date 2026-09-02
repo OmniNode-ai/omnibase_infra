@@ -227,7 +227,10 @@ def test_not_installed_refusal_names_the_running_interpreter() -> None:
     message = str(exc_info.value)
     assert sys.executable in message
     assert "scripts/onex" in message
-    assert "docs/runbooks/onex-cli-invocation.md" in message
+    assert (
+        "knowledge-base-internal:runbooks/omnibase-infra-onex-cli-invocation.md"
+        in message
+    )
 
 
 def test_drift_check_fails_open_when_no_canonical_clone() -> None:

@@ -47,7 +47,7 @@ dependencies = [
     #   1. Package is from established maintainers (PyPA, major OSS projects)
     #   2. uv.lock captures exact resolved versions for reproducibility
     # - To update: 1) Review changelog for security fixes, 2) Update version, 3) Run tests
-    # - See docs/decisions/adr-cryptography-upgrade-46.md for upgrade rationale examples
+    # - See knowledge-base:reference/omnibase-infra-adr-cryptography-upgrade-46.md for upgrade rationale examples
     #
     # Git Dependencies (FUTURE guidance - not currently used):
     # - If git-sourced external deps are added in the future, prefer commit SHAs over tags:
@@ -89,7 +89,7 @@ dependencies = [
     # Explicitly declared here to enforce minimum version for security compliance.
     # Constraint: >=46.0.3,<47.0.0 (compatible release within the 46.x series).
     # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
-    # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
+    # See knowledge-base:reference/omnibase-infra-adr-cryptography-upgrade-46.md for full rationale.
     # OMN-15688 (2026-08-04): this ceiling is KNOWINGLY one major BELOW what the
     # runtime image ships. Trivy flags cryptography 48.0.1 for CVE-2026-69247
     # (PKCS#7 EnvelopedData Bleichenbacher oracle, fixed 50.0.0) and

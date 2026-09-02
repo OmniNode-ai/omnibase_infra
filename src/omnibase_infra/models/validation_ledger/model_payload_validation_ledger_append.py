@@ -38,7 +38,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 # NOTE: This infra-local payload DTO extends pydantic.BaseModel directly (repo
-# convention; see docs/standards/ONEX_TERMINOLOGY.md), mirroring
+# convention; see knowledge-base-internal:reference/omnibase-infra-onex-terminology.md), mirroring
 # ModelPayloadLedgerAppend. omnibase_core's ModelIntentPayloadBase was never
 # removed — it still exists and bases core's closed-set intent payloads.
 

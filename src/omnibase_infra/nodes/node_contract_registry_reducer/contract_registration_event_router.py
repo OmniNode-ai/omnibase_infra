@@ -158,7 +158,7 @@ class ContractRegistrationEventRouter:
     See Also:
         - IntrospectionEventRouter: Reference implementation for event routing
         - ContractRegistryReducer: Pure reducer for contract events
-        - docs/patterns/container_dependency_injection.md for DI patterns
+        - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md for DI patterns
     """
 
     def __init__(
@@ -197,7 +197,7 @@ class ContractRegistrationEventRouter:
             ... )
 
         See Also:
-            - docs/patterns/container_dependency_injection.md for DI patterns.
+            - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md for DI patterns.
         """
         self._container = container
         self._reducer = reducer

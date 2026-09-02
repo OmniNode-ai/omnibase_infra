@@ -119,7 +119,7 @@ error_handling:
       retry_strategy: "exponential_backoff"
 # ============================================================================
 # Quarantine ownership semantics (OMN-12619) — net-new, no prior pattern.
-# These are authored here AND in docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
+# These are authored here AND in knowledge-base:reference/omnibase-infra-dlq-quarantine-ownership.md.
 # ============================================================================
 quarantine:
   topic: "onex.dlq.omnibase-infra.quarantine.v1"

@@ -68,7 +68,7 @@
 --   (OMN-15426/OMN-15360), not this P2-P4 schema-build ticket. This file
 --   builds the empty target the family-by-family copy will land in; it does
 --   not perform that copy. See the companion transformation-receipt note at
---   `docs/migrations/2026-08-06-omninode-internal-schema-transformation-receipt.md`
+--   the dated build receipt (retired from this repo by OMN-16607; see git history)
 --   for the full disposition and explicit deferred-work list (physical table
 --   copy, `owner_omninode_internal`/`omninode_runtime` role creation, and
 --   the full reconciliation proof).

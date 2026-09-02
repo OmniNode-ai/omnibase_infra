@@ -15,7 +15,7 @@ Test coverage:
     - Wildcard semantics for secret scopes and domain allowlists
 
 See Also:
-    - docs/patterns/security_patterns.md
+    - knowledge-base-internal:reference/omnibase-infra-security-patterns.md
     - OMN-1098 Linear ticket for implementation details
 """
 

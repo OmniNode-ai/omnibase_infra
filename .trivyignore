@@ -29,7 +29,7 @@
 #   has no fix (bump `# expires:` under the same ticket) or a fix has
 #   shipped since (remove the entry and let Trivy's normal gate apply).
 #
-# Full policy: docs/patterns/security_patterns.md#container-image-cve-ignore-policy
+# Full policy: knowledge-base-internal:reference/omnibase-infra-security-patterns.md#container-image-cve-ignore-policy
 #
 # No entries below are currently exempted -- this file ships empty on
 # purpose (OMN-16229 DoD: do not pre-populate an ignore for any current

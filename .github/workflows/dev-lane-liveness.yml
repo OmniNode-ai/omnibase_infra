@@ -107,5 +107,5 @@ jobs:
             echo ""
             echo "RED here means the lab lane is down or degraded. It is KEEP-ALIVE"
             echo "by operator ruling — recovery path:"
-            echo "\`docs/runbooks/cold-lane-full-bringup.md\`."
+            echo "\`knowledge-base:runbooks/cold-lane-full-bringup.md\`."
           } >> "${GITHUB_STEP_SUMMARY}"

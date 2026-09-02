@@ -35,7 +35,7 @@ Test Strategy:
 Related:
     - OMN-955: Data Integrity Tests Under Chaos
     - OMN-951: Correlation Chain Validation
-    - docs/patterns/correlation_id_tracking.md
+    - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
 """
 
 from __future__ import annotations

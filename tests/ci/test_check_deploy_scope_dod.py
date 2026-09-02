@@ -32,7 +32,9 @@ from scripts.ci.check_deploy_scope_dod import (
 # (src/omnibase_infra/runtime/**/*.py) -- deploy-scoped by construction.
 _RUNTIME_FILE = "src/omnibase_infra/runtime/service_kernel.py"
 # A non-deploy-scoped path (docs) -- matches no runtime pattern.
-_NON_RUNTIME_FILE = "docs/patterns/error_handling_patterns.md"
+_NON_RUNTIME_FILE = (
+    "knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md"
+)
 
 
 @pytest.fixture(scope="module")

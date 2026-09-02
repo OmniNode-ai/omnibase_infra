@@ -2,4 +2,4 @@
 # The contracts directory contains runtime configuration files:
 #   - runtime/runtime_config.yaml - Runtime kernel configuration
 #
-# See docker/README.md for how contracts are used in Docker deployment.
+# See knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md for how contracts are used in Docker deployment.

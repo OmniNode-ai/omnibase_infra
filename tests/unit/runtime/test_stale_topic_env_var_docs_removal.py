@@ -13,8 +13,8 @@ paths: uncommented `ONEX_*_TOPIC=...` assignments in env-example files, and
 test helpers. Either would re-introduce the banned env var on the next
 deploy and trigger the crash loop documented in OMN-9409.
 
-Scope note: operator-facing docs (e.g. `docker/README.md`,
-`docs/testing/INTEGRATION_TESTING.md`) are NOT enforced here — they were
+Scope note: operator-facing docs (e.g. `knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md`,
+`knowledge-base:guides/omnibase-infra-integration-testing.md`) are NOT enforced here — they were
 updated manually as part of OMN-9409 and are reviewed per-PR. This test
 guards only the machine-readable surfaces that flow into running containers.
 

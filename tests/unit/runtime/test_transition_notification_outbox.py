@@ -29,7 +29,7 @@ Test Organization:
     - TestTransitionNotificationOutboxConfiguration: Config options
 
 Related:
-    - docs/patterns/retry_backoff_compensation_strategy.md (Outbox Pattern)
+    - knowledge-base-internal:reference/omnibase-infra-retry-backoff-compensation.md (Outbox Pattern)
     - OMN-6655: State Transition Notifications via Outbox Pattern
 """
 

@@ -8,7 +8,7 @@
 #
 #
 # Usage (prefer `make up` / `make up-runtime` from the repo root, or
-# scripts/deploy-runtime.sh -- see docker/README.md Quick Start):
+# scripts/deploy-runtime.sh -- see knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md Quick Start):
 #   # Core infrastructure -- postgres, valkey, redpanda, keycloak, infisical.
 #   # Infisical is always-on (OMN-5831), not a separate profile: INFISICAL_ENCRYPTION_KEY
 #   # and INFISICAL_AUTH_SECRET must be set in .env before this succeeds.

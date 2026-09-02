@@ -105,7 +105,7 @@ TOPIC_SUFFIXES: dict[MessageOutputCategory, str] = {
 # - REDUCER is unique: it consumes EVENTs (message category) and produces PROJECTIONs
 #   (node output type that is NOT routed as a message)
 #
-# See ADR: docs/decisions/adr-enum-message-category-vs-node-output-type.md
+# See ADR: knowledge-base:reference/omnibase-infra-adr-enum-message-category-vs-node-output-type.md
 NODE_ARCHETYPE_EXPECTED_CATEGORIES: dict[
     EnumNodeArchetype, list[MessageOutputCategory]
 ] = {

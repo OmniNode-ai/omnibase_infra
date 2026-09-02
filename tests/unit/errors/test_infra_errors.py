@@ -1472,7 +1472,7 @@ class TestErrorContextSecretSanitization:
 
     Related:
         - PR #57: Error handling security review
-        - docs/patterns/error_handling_patterns.md
+        - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     """
 
     # Common secret patterns that should NEVER appear in error context

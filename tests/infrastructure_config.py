@@ -77,7 +77,7 @@ For environment-aware configuration with fallbacks:
 Related Files
 
     - tests/integration/handlers/conftest.py: Uses these constants for fixtures
-    - tests/integration/handlers/README.md: Documents infrastructure setup
+    - knowledge-base:guides/omnibase-infra-handler-integration-tests.md: Documents infrastructure setup
     - .env.example: Template for environment configuration
 """
 

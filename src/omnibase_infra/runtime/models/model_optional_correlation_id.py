@@ -26,7 +26,7 @@ Design Decision (PR #47 Review):
 
     See Also:
         - ModelOptionalUUID: Similar pattern for generic optional UUIDs
-        - docs/patterns/correlation_id_tracking.md: Correlation ID best practices
+        - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md: Correlation ID best practices
 """
 
 from uuid import UUID, uuid4

@@ -37,7 +37,7 @@ APPLICATION_DATABASE_PHYSICAL_NAME = "omnidash_analytics"
 # one physical database and explicitly left "identity-plane and independently
 # service-owned databases ... separate". omniintelligence is one of those: its
 # own physical database, its own migration runner, its own DSN key
-# (docs/patterns/db_url_contract.md). It is declared here so a node contract
+# (knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md). It is declared here so a node contract
 # that names ``database_ref: omniintelligence`` resolves through the same typed
 # authority as an application relation instead of hard-failing strict-mode
 # auto-wiring at boot.
@@ -56,7 +56,7 @@ _OMNIINTELLIGENCE_BINDING_DSN_ENVS = {
 
 # OMN-15337 (operator ruling R-q, 2026-08-05): the flat forward-migration set
 # (POSTGRES_DB=omnibase_infra in docker-compose.infra.yml's forward-migration
-# service, docs/patterns/db_url_contract.md's OMNIBASE_INFRA_DB_URL row) is
+# service, knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md's OMNIBASE_INFRA_DB_URL row) is
 # omnibase_infra's own runtime database -- distinct from the "application"
 # pair and from omniintelligence. delegation_workflow_state
 # (docker/migrations/forward/090_create_delegation_workflow_state.sql) is
@@ -71,7 +71,7 @@ OMNIBASE_INFRA_DATABASE_PHYSICAL_NAME = "omnibase_infra"
 _OMNIBASE_INFRA_SCHEMAS = {"public": EnumDatabaseSchemaDomain.OMNINODE_INTERNAL}
 _OMNIBASE_INFRA_SCHEMA_OWNERS = {"public": "owner_omnibase_infra"}
 _OMNIBASE_INFRA_BINDING_PRINCIPALS = {"omninode_runtime_service": "role_omnibase_infra"}
-# One DSN key across every instance, per docs/patterns/db_url_contract.md.
+# One DSN key across every instance, per knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md.
 _OMNIBASE_INFRA_BINDING_DSN_ENVS = {"omninode_runtime_service": "OMNIBASE_INFRA_DB_URL"}
 
 _EXPECTED_PROFILE_INSTANCE_MAP = {

@@ -253,8 +253,8 @@ def test_script_exists_and_is_executable() -> None:
 @pytest.mark.unit
 def test_runbook_exists_alongside_cold_lane_bringup() -> None:
     assert RUNBOOK.is_file(), (
-        "docs/runbooks/gateway-lane-deploy.md must exist alongside "
-        "docs/runbooks/cold-lane-full-bringup.md (AC1)"
+        "knowledge-base-internal:runbooks/omnibase-infra-gateway-lane-deploy.md must exist alongside "
+        "knowledge-base:runbooks/cold-lane-full-bringup.md (AC1)"
     )
 
 
@@ -278,7 +278,7 @@ def test_help_rollback_reads_registry_command_not_hand_reconstructed() -> None:
     `previous_digest`.
 
     The hand-reconstruction recipe this replaces was the exact hazard
-    docs/runbooks/gateway-lane-deploy.md now warns against: `rollback_command`
+    knowledge-base-internal:runbooks/omnibase-infra-gateway-lane-deploy.md now warns against: `rollback_command`
     (and `previous_digest`) are JSON `null` when there is no rollback target,
     and a `null` printed through `jq -r` renders as the literal 4-character
     string "null", which a hand-written `sed` substitution writes straight

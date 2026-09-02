@@ -16,7 +16,7 @@ Test Coverage:
 Related:
     - OMN-1132: Handler Plugin Loader implementation
     - src/omnibase_infra/runtime/handler_plugin_loader.py
-    - docs/patterns/handler_plugin_loader.md
+    - knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md
 
 Note:
     These tests create temporary handler contract YAML files that point to

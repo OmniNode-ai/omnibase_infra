@@ -29,7 +29,7 @@ Circuit Breaker Overview:
 
 See Also:
     - MixinAsyncCircuitBreaker: The mixin that uses this configuration
-    - docs/patterns/circuit_breaker_implementation.md: Implementation details
+    - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md: Implementation details
 """
 
 from __future__ import annotations

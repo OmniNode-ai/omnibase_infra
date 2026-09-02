@@ -23,7 +23,7 @@ node_type: "REDUCER_GENERIC"
 #   - Reducer outputs are PROJECTION type (state + intents) via EnumNodeOutputType
 #   - Incoming messages are routed via EnumMessageCategory (EVENT/COMMAND)
 #   - PROJECTION exists only in EnumNodeOutputType and is only valid for REDUCER nodes
-#   - See: docs/decisions/adr-enum-message-category-vs-node-output-type.md
+#   - See: knowledge-base:reference/omnibase-infra-adr-enum-message-category-vs-node-output-type.md
 description: |
   Reducer node that consumes contract registration events from Kafka
   and materializes them to Postgres for discovery and observability.

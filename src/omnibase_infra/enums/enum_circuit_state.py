@@ -7,7 +7,7 @@ used in infrastructure components for fault tolerance.
 
 See Also:
     - MixinAsyncCircuitBreaker: Mixin implementing the circuit breaker pattern
-    - docs/patterns/circuit_breaker_implementation.md: Implementation guide
+    - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md: Implementation guide
 """
 
 from __future__ import annotations

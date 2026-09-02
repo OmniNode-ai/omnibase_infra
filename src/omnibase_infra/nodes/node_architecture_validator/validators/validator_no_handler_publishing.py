@@ -11,7 +11,7 @@ Related:
     - Ticket: OMN-1099 (Architecture Validator)
     - PR: #124 (Protocol-Compliant Rule Classes)
     - Rule: ARCH-002 (No Handler Publishing)
-    - See also: docs/patterns/dispatcher_resilience.md
+    - See also: knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md
 
 Detection Patterns:
     1. **Constructor parameters**: event_bus, bus, or publisher in __init__ signature

@@ -30,7 +30,7 @@ Design Rationale:
 See Also:
     - MixinAsyncCircuitBreaker: Implementation of circuit breaker functionality
     - MixinRetryExecution: Consumer of this protocol for retry logic
-    - docs/patterns/circuit_breaker_implementation.md: Full implementation details
+    - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md: Full implementation details
 
 .. versionadded:: 0.4.1
 """

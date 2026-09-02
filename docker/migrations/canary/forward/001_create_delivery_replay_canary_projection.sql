@@ -29,7 +29,7 @@
 --   docker/migrations/forward/ set and is NEVER auto-applied via
 --   docker-entrypoint-initdb.d — it is applied MANUALLY, one operator-gated step
 --   at a time, per the provisioning runbook:
---       docs/runbooks/managed-staging-canary-postgres-provisioning.md
+--       knowledge-base-internal:runbooks/omnibase-infra-managed-staging-canary-postgres-provisioning.md
 --
 -- PROVISIONING SAFETY:
 --   This file is HELD FOR OPERATOR. Authoring or reading it authorizes no live

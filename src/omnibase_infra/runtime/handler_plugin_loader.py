@@ -1843,7 +1843,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):  # ai-slop-ok: pre-exist
 
             Best practice: Use only ONE contract file per handler directory.
 
-            See: docs/patterns/handler_plugin_loader.md#contract-file-precedence
+            See: knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md#contract-file-precedence
 
         Args:
             directory: Directory to search recursively.

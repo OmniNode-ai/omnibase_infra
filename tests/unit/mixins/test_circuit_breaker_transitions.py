@@ -52,7 +52,7 @@ Related Test Files:
 
 See Also:
     - src/omnibase_infra/mixins/mixin_async_circuit_breaker.py
-    - docs/patterns/circuit_breaker_implementation.md
+    - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md
 """
 
 from __future__ import annotations

@@ -117,7 +117,7 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     "onex.evt.steel-onslaught.match-terminal.v1": "Published by steel_onslaught's KafkaTerminalEventForwarder (STEEL_MATCH_TERMINAL_TOPIC, OMN-15167), cross-repo (private personal repo) | owner: jonah | expiry: 2026-12-01",
     # OMN-16265: node_fault_inject_fixture_compute's command topic is
     # deliberately published only by an external fault-injection caller
-    # (a manual run per docs/runbooks/fault-inject-fixture-dlq-offset-withholding.md,
+    # (a manual run per knowledge-base:runbooks/fault-inject-fixture-dlq-offset-withholding.md,
     # or a future automated boundary-regression script), never by another
     # contract-declared node — same external-CLI-trigger shape as the
     # baselines-batch-compute entry above.

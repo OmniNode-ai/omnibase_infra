@@ -11,7 +11,7 @@
 --
 -- This is table-level teardown only. Dropping the canary logical DB itself and
 -- rotating/revoking its runtime creds is the B13 teardown step (T-5) — see
--- docs/runbooks/managed-staging-canary-teardown-rollback.md. Per B13, the
+-- knowledge-base-internal:runbooks/omnibase-infra-managed-staging-canary-teardown-rollback.md. Per B13, the
 -- DEFAULT is to RETAIN the DB read-only as forensic evidence until the OCC
 -- receipt is durable, then drop.
 --

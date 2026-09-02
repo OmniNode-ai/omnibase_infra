@@ -14,7 +14,7 @@ The seam has three sides and this test matches them field-by-field:
    ``REQUIRED_STAGES``, transcribed from the ticket bodies. This side is the
    contract; it does not read the manifest, so a field silently dropped from the
    manifest fails here rather than passing vacuously.
-2. **The manifest** -- ``docs/runbooks/managed-staging-proof-kit/fields.yaml``:
+2. **The manifest** -- ``tests/ci/fixtures/managed_staging_proof_kit/fields.yaml``:
    every required field present, every field carrying a real evidence source
    (a placeholder such as ``TBD`` is a failure, because "the evidence source is
    named" is exactly what the tickets ask for).
@@ -41,7 +41,12 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = (
-    REPO_ROOT / "docs" / "runbooks" / "managed-staging-proof-kit" / "fields.yaml"
+    REPO_ROOT
+    / "tests"
+    / "ci"
+    / "fixtures"
+    / "managed_staging_proof_kit"
+    / "fields.yaml"
 )
 
 # Placeholder tokens that mean "the evidence source is not actually named".

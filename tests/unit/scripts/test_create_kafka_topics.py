@@ -161,7 +161,7 @@ def test_discover_exits_on_error_in_strict_mode(
 # ---------------------------------------------------------------------------
 # OMN-15395 (D2): the operator CLI is the SECOND live CreateTopics path
 #
-# ``docs/operations/README.md`` tells operators to run this script, and
+# the operations documentation tells operators to run this script, and
 # ``scripts/compare_environments.py`` names it in the ``fix_hint`` for the
 # kafka_topic_parity finding — i.e. it is the documented way to reconcile
 # topics against the cloud broker. It created every topic with a flat

@@ -35,7 +35,7 @@ See Also
 - ``omnibase_infra.validation.any_type_validator``: The AST validator that
   recognizes this decorator
 - CLAUDE.md: Documentation of Any type policy and enforcement levels
-- ``docs/decisions/adr-any-type-pydantic-workaround.md``: ADR for Pydantic Any usage
+- ``knowledge-base:reference/omnibase-infra-adr-any-type-pydantic-workaround.md``: ADR for Pydantic Any usage
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 name: fault-inject-fixture
 description: >
-  Permanent fault-injection fixture (OMN-16265, OMN-14498 follow-on). Runs NodeFaultInjectFixtureCompute in its own dedicated consumer group with a private, deliberately-unprovisioned dead_letter_topic override (onex.dlq.omnibase-infra.fault-inject-fixture.v1), so a caller can drive both the primary-publish failure AND the DLQ-leg failure on demand (BoundaryApplyPublishError / offset withholding) with zero effect on any other contract's traffic or DLQ topic. See docs/runbooks/fault-inject-fixture-dlq-offset-withholding.md.
+  Permanent fault-injection fixture (OMN-16265, OMN-14498 follow-on). Runs NodeFaultInjectFixtureCompute in its own dedicated consumer group with a private, deliberately-unprovisioned dead_letter_topic override (onex.dlq.omnibase-infra.fault-inject-fixture.v1), so a caller can drive both the primary-publish failure AND the DLQ-leg failure on demand (BoundaryApplyPublishError / offset withholding) with zero effect on any other contract's traffic or DLQ topic. See knowledge-base:runbooks/fault-inject-fixture-dlq-offset-withholding.md.
 
 image: runtime:latest
 layer: runtime

@@ -12,7 +12,7 @@ Tests the HandlerContractSource functionality including:
 Related:
     - OMN-1097: HandlerContractSource + Filesystem Discovery
     - src/omnibase_infra/runtime/handler_contract_source.py
-    - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
 
 Expected Behavior:
     HandlerContractSource implements ProtocolContractSource from omnibase_infra.

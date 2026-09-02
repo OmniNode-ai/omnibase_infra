@@ -50,7 +50,7 @@ Error Mapping:
 See Also:
     - MixinAsyncCircuitBreaker for circuit breaker state management
     - MixinRetryExecution for retry pattern abstractions
-    - docs/patterns/error_recovery_patterns.md for retry documentation
+    - knowledge-base-internal:reference/omnibase-infra-error-recovery-patterns.md for retry documentation
 
 .. versionadded:: 0.7.0
     Part of OMN-2104 LLM HTTP transport.

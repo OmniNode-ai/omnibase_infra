@@ -1049,7 +1049,7 @@ def test_api_get_does_not_crash_on_a_negative_retry_after_header(
 # -- left unchanged for this job (see the ci.yml ``pin-reachability`` job
 # comment: this repo's self-hosted CI already replaced the per-job uv cache
 # with a shared dependency-environment canary, and
-# ``docs/ci/versioned-ci-env-canary.md`` forbids enabling setup-uv cache save
+# ``knowledge-base-internal:runbooks/omnibase-infra-versioned-ci-env-canary.md`` forbids enabling setup-uv cache save
 # on jobs that intentionally run ``uv sync --no-cache``, which
 # ``test_ci_workflow_resilience.py::test_short_gates_can_disable_uv_cache_cleanup``
 # enforces uniformly). This is the fleet-measured MAX, not a typical/median

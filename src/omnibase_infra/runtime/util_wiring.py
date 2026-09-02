@@ -37,7 +37,7 @@ Design Principles:
 - Fail-fast: Missing contracts raise FileNotFoundError immediately
 - Idempotent: Re-wiring the same handler is safe (overwrites previous)
 - Security: Namespace allowlisting is recommended for production deployments
-  (see docs/patterns/handler_plugin_loader.md#optional-security-controls)
+  (see knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md#optional-security-controls)
 
 Adding New Handlers:
     To add a new handler to the system, follow these steps:
@@ -234,9 +234,9 @@ def _load_handler_from_contract(
            sources with code review.
 
         See Also:
-            - ``docs/patterns/handler_plugin_loader.md#optional-security-controls``
-            - ``docs/patterns/security_patterns.md``
-            - ``docs/decisions/adr-handler-plugin-loader-security.md``
+            - ``knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md#optional-security-controls``
+            - ``knowledge-base-internal:reference/omnibase-infra-security-patterns.md``
+            - ``knowledge-base:reference/omnibase-infra-adr-handler-plugin-loader-security.md``
     """
     if not contract_path.exists():
         raise FileNotFoundError(

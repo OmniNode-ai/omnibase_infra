@@ -4,7 +4,7 @@
 # STATUS: SHOVEL-READY / INERT. Nothing builds this image until an operator runs
 # `docker compose -f docker/docker-compose.pypi-cache.yml up -d` at rollout, which
 # is soak-gated (OMN-14027 is DESIGN-ONLY until the execution gate trips). See
-# docs/runbooks/pypi-cache-egress-rollout.md.
+# knowledge-base:runbooks/pypi-cache-egress-rollout.md.
 #
 # devpi's built-in `root/pypi` index is an on-demand pull-through mirror: the first
 # runner to request a wheel fetches it from PyPI once; the cache then serves all 64

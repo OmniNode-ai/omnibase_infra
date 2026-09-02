@@ -137,4 +137,4 @@ metadata:
     how_to_drive_double_failure: >
       Publish ModelFaultInjectFixtureCommand to onex.cmd.omnibase-infra.fault-inject-fixture.v1 with inflate_result_bytes tuned past the live broker's message.max.bytes / producer max_request_size (OMN-14498 measured ~1,048,588 bytes on onex-dev; re-probe live before reuse, it is broker-config-dependent). The primary publish to onex.evt.omnibase-infra.fault-inject-fixture-completed.v1 fails; the runtime's _route_apply_publish_failure DLQ write then also fails because dead_letter_topic_override is unprovisioned, producing BoundaryApplyPublishError and observable offset withholding.
 
-    runbook: "docs/runbooks/fault-inject-fixture-dlq-offset-withholding.md"
+    runbook: "knowledge-base:runbooks/fault-inject-fixture-dlq-offset-withholding.md"

@@ -258,7 +258,7 @@ def full_suite_host_violation_message(
         "guard (scripts/hooks/prepush_smart_tests.sh) entirely, so the .200-default "
         "host-check was never consulted. Run from .200 instead "
         "(ssh jonah@stickybeatz-studio.tail75df5e.ts.net; see "
-        "docs/runbooks/lab-prepush-host-table.md), OR mint a single-use "
+        "knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md), OR mint a single-use "
         "override grant to run the full suite on this host anyway (visible, "
         "receipted, degraded-evidence -- do not use as a routine bypass): "
         "`uv run python scripts/hooks/prepush_override_grant.py mint "

@@ -311,7 +311,7 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         See Also:
             - handler_category: Behavioral classification (EFFECT/COMPUTE)
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return EnumHandlerType.INFRA_HANDLER
 
@@ -336,7 +336,7 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         See Also:
             - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return EnumHandlerTypeCategory.EFFECT
 
@@ -1037,7 +1037,7 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         See Also:
             - handler_type property: Full documentation of architectural role
             - handler_category property: Full documentation of behavioral classification
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         # Get circuit breaker state if initialized
         cb_state: dict[str, JsonType] | None = None

@@ -51,7 +51,7 @@ Related:
     - OMN-888: Registration Orchestrator
     - OMN-892: 2-way Registration E2E Integration Test
     - OMN-1346: Registration Code Extraction
-    - docs/patterns/dispatcher_resilience.md
+    - knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
         self._handler = handler
 
         # Initialize circuit breaker using mixin pattern
-        # Configuration follows docs/patterns/dispatcher_resilience.md guidelines
+        # Configuration follows knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md guidelines
         self._init_circuit_breaker(
             threshold=3,  # Open after 3 failures (KAFKA is critical)
             reset_timeout=20.0,  # 20 seconds recovery window

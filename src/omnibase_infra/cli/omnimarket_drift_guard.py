@@ -248,7 +248,7 @@ def check_omnimarket_drift(
             f"$OMNI_HOME/omnibase_infra/.venv/bin/python, the CLI was invoked "
             f"through something that resolved 'onex' from PATH -- use "
             f"$OMNI_HOME/omnibase_infra/scripts/onex (see "
-            f"docs/runbooks/onex-cli-invocation.md). Otherwise repair with: "
+            f"knowledge-base-internal:runbooks/omnibase-infra-onex-cli-invocation.md). Otherwise repair with: "
             f"{install_cmd} --execute (or {repair_cmd} --repair)."
         )
     else:
@@ -339,5 +339,5 @@ def check_omnimarket_drift(
     raise OmnimarketDriftError(
         f"{detail} To dispatch anyway despite the drift (results are NOT "
         f"evidence), set {DRIFT_OVERRIDE_ENV}=1. "
-        "See docs/runbooks/node-skill-package-install.md."
+        "See knowledge-base:runbooks/node-skill-package-install.md."
     )

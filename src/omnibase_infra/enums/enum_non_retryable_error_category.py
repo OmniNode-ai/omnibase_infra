@@ -14,7 +14,7 @@ Design Rationale:
     - Configuration/validation errors (input is malformed)
     - Schema mismatches (requires code changes)
 
-    See docs/patterns/retry_backoff_compensation_strategy.md for the complete retry
+    See knowledge-base-internal:reference/omnibase-infra-retry-backoff-compensation.md for the complete retry
     decision logic and rationale for each category.
 
 Thread Safety:
@@ -23,7 +23,7 @@ Thread Safety:
 
 Related:
     - OMN-1032: Centralize NON_RETRYABLE_ERRORS into shared enum
-    - docs/patterns/retry_backoff_compensation_strategy.md
+    - knowledge-base-internal:reference/omnibase-infra-retry-backoff-compensation.md
     - docs/dlq/DLQ_ARCHITECTURE.md
 """
 

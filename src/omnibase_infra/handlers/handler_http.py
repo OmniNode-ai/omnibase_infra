@@ -149,7 +149,7 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
         See Also:
             - handler_category: Behavioral classification (EFFECT/COMPUTE)
             - transport_type: Specific transport protocol (HTTP/DATABASE/etc.)
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return EnumHandlerType.INFRA_HANDLER
 
@@ -175,7 +175,7 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
         See Also:
             - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
             - transport_type: Specific transport protocol (HTTP/DATABASE/etc.)
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return EnumHandlerTypeCategory.EFFECT
 
@@ -200,7 +200,7 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
         See Also:
             - handler_type: Architectural role
             - handler_category: Behavioral classification
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return EnumInfraTransportType.HTTP
 
@@ -926,7 +926,7 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
             - handler_type property: Full documentation of architectural role
             - handler_category property: Full documentation of behavioral classification
             - transport_type property: Full documentation of transport identifier
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return {
             "handler_type": self.handler_type.value,

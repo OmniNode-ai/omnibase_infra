@@ -435,12 +435,12 @@ case "${verdict}" in
   cpu)
     refuse "${RC_REFUSED_LOAD}" REFUSED_LOAD \
       "container '${GATE_RUNNER_CONTAINER}' is at ${cpu_ratio}x its ${cpu_quota}/${cpu_period} CPU quota, over the ${PREPUSH_LOAD_THRESHOLD}x admission threshold" \
-      "wait for the in-flight run to finish (poll its receipt), or run on another lab host per docs/runbooks/lab-prepush-host-table.md. Nothing is queued here — this refusal is immediate and typed by design"
+      "wait for the in-flight run to finish (poll its receipt), or run on another lab host per knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md. Nothing is queued here — this refusal is immediate and typed by design"
     ;;
   mem)
     refuse "${RC_REFUSED_LOAD}" REFUSED_LOAD \
       "container '${GATE_RUNNER_CONTAINER}' is at ${mem_ratio} of its memory limit, over the ${GATE_RUNNER_MEM_THRESHOLD} admission threshold" \
-      "wait for the in-flight run to finish (poll its receipt), or run on another lab host per docs/runbooks/lab-prepush-host-table.md"
+      "wait for the in-flight run to finish (poll its receipt), or run on another lab host per knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md"
     ;;
   fit) : ;;
   *)

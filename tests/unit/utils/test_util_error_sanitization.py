@@ -6,8 +6,8 @@ These tests verify that sensitive data is properly redacted from error messages
 before they are logged, published to DLQ, or included in API responses.
 
 See Also:
-    docs/patterns/error_sanitization_patterns.md - Sanitization guidelines
-    docs/architecture/DLQ_MESSAGE_FORMAT.md - DLQ security considerations
+    knowledge-base-internal:reference/omnibase-infra-error-sanitization-patterns.md - Sanitization guidelines
+    knowledge-base:architecture/dlq-message-format.md - DLQ security considerations
 """
 
 from __future__ import annotations

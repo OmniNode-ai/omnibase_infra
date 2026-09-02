@@ -31,7 +31,7 @@ Implementation:
 See Also:
     - test_handler_bootstrap_source.py: Tests for bootstrap source
     - test_handler_contract_source.py: Tests for contract source
-    - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
 """
 
 from __future__ import annotations

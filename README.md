@@ -27,24 +27,37 @@ on `omnibase_spi` for protocol boundaries. Core must not import this package.
 | Area | Current source |
 |------|----------------|
 | Runtime host process and service kernel | `src/omnibase_infra/runtime/` |
-| Kafka event bus and DLQ support | `src/omnibase_infra/event_bus/`, [event bus guide](docs/architecture/EVENT_BUS_INTEGRATION_GUIDE.md) |
-| Contract-driven handler discovery | `src/omnibase_infra/runtime/handler_plugin_loader.py`, [handler architecture](docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md) |
-| Registration orchestration and storage effects | `src/omnibase_infra/nodes/node_registration_*`, [registration workflow](docs/architecture/REGISTRATION_WORKFLOW.md) |
-| Infrastructure handlers for DB, HTTP, Consul, Infisical, Kafka, LLM, graph, vector, and filesystem integrations | `src/omnibase_infra/handlers/`, [handler guide](docs/guides/HANDLER_AUTHORING_GUIDE.md) |
-| Infisical config discovery and prefetch | `src/omnibase_infra/runtime/config_discovery/`, [config discovery](docs/architecture/CONFIG_DISCOVERY.md) |
-| Operational scripts and CLIs | `scripts/`, [operations index](docs/operations/README.md) |
+| Kafka event bus and DLQ support | `src/omnibase_infra/event_bus/` |
+| Contract-driven handler discovery | `src/omnibase_infra/runtime/handler_plugin_loader.py` |
+| Registration orchestration and storage effects | `src/omnibase_infra/nodes/node_registration_*` |
+| Infrastructure handlers for DB, HTTP, Consul, secrets, Kafka, LLM, graph, vector, and filesystem integrations | `src/omnibase_infra/handlers/` |
+| Config discovery and prefetch | `src/omnibase_infra/runtime/config_discovery/` |
+| Operational scripts and CLIs | `scripts/` |
 
-## Start Here
+Prose for every row above lives in the knowledge base — see [Documentation](#documentation).
 
-| Need | Document |
-|------|----------|
-| Understand the repo boundary | [Documentation index](docs/index.md) |
-| Run locally | [Quick start](docs/getting-started/quickstart.md) |
-| Understand the architecture | [Architecture overview](docs/architecture/overview.md) |
-| Work on nodes | [Current node architecture](docs/architecture/CURRENT_NODE_ARCHITECTURE.md) |
-| Work on contracts | [Contract reference](docs/reference/contracts.md) |
-| Operate Kafka/DLQ/runtime services | [Operations index](docs/operations/README.md) |
-| Validate changes | [Validation framework](docs/validation/README.md) |
+## Documentation
+
+**This repository holds code, not prose.** Every architecture note, pattern,
+decision record, guide, reference page, and runbook that used to live under
+`docs/` now lives in one of the two knowledge bases. There are no pointer stubs
+in the tree — this section is the pointer, and the `kb-doc-gate` check
+(`.kb-doc-gate.yaml`, `mode: strict`) keeps it that way.
+
+| Home | What is there |
+|------|---------------|
+| [`OmniNode-ai/knowledge-base`](https://github.com/OmniNode-ai/knowledge-base) (public) | Platform documentation anyone can read: `architecture/`, `reference/`, `guides/`, `runbooks/`, and the ADR ledger. This repository's pages are prefixed `omnibase-infra-`. |
+| [`OmniNode-ai/knowledge-base-internal`](https://github.com/OmniNode-ai/knowledge-base-internal) (private, teammates) | Documentation that names real internal topology, the lab and CI fleet, deploy lanes, or the secrets manager — same `omnibase-infra-` prefix under `reference/` and `runbooks/`. |
+
+| Need | Where |
+|------|-------|
+| Run locally / first-time bootstrap | `runbooks/omnibase-infra-quickstart.md`, `runbooks/omnibase-infra-full-platform-setup.md` (internal) |
+| Understand the handler architecture | `reference/omnibase-infra-handler-protocol-driven-architecture.md` (internal) |
+| Work on contracts | `reference/omnibase-infra-contract-yaml-reference.md` (public) |
+| Node archetypes and registration | `reference/omnibase-infra-node-archetypes.md` (internal), `reference/omnibase-infra-node-registration-orchestrator.md` (public) |
+| Operate Kafka / DLQ / the event bus | `runbooks/omnibase-infra-event-bus-operations.md`, `runbooks/omnibase-infra-dlq-replay.md` (public) |
+| Validate changes | `reference/omnibase-infra-validation-framework.md` (internal) |
+| Decision records for this repo | `reference/omnibase-infra-adr-*.md` (public) |
 
 ## Install
 
@@ -106,8 +119,8 @@ make help
 `make` targets detect a missing/stopped Docker daemon and emit an actionable
 error before doing anything destructive. They also detect a missing
 `~/.omnibase/.env` and point at remediation rather than failing with a stack
-trace. See [`docs/getting-started/full-platform.md`](docs/getting-started/full-platform.md)
-for the full first-time bootstrap sequence.
+trace. The full first-time bootstrap sequence is
+`runbooks/omnibase-infra-full-platform-setup.md` in the internal knowledge base.
 
 ### Development and testing
 
@@ -118,9 +131,6 @@ uv run pytest tests/unit
 # Run the infra validation suite
 uv run python scripts/validate.py all --verbose
 
-# Run markdown link validation
-uv run python scripts/validation/validate_markdown_links.py
-
 # Start the runtime CLI entrypoint
 uv run onex-runtime
 
@@ -129,8 +139,8 @@ uv run onex-status
 ```
 
 Some operational flows require Docker, Kafka/Redpanda, PostgreSQL, Valkey, and
-Infisical. See [full platform setup](docs/getting-started/full-platform.md) and
-[Infisical secrets guide](docs/guides/INFISICAL_SECRETS_GUIDE.md).
+the secrets manager. See `runbooks/omnibase-infra-full-platform-setup.md` and
+`runbooks/omnibase-infra-infisical-secrets.md` in the internal knowledge base.
 
 ## Runtime Shape
 
@@ -149,13 +159,18 @@ runtime host.
 
 ## Documentation Policy
 
-Current runtime, architecture, operations, and reference guidance belongs in
-this repository. Historical plans, one-off verification reports, and design
-investigations are not primary docs and are preserved outside this public docs
-tree when they still need retention.
+Documentation does not live in this repository. The allowed markdown set is
+this `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `SECURITY.md`, anything under
+`.claude/` or `.github/`, and test fixtures a test actually opens as data. The
+`kb-doc-gate` required check enforces that list in `strict` mode, so a new
+document under `docs/` fails CI rather than quietly re-growing the tree.
 
-Definition-of-done evidence for documentation refresh work is tracked in the
-change-control evidence system, not in this repository.
+New prose goes to [the public knowledge base](https://github.com/OmniNode-ai/knowledge-base) by default, and to
+[the internal knowledge base](https://github.com/OmniNode-ai/knowledge-base-internal) when it names real internal topology, the
+lab or CI fleet, deploy lanes, or the secrets manager. Dated point-in-time
+artifacts — evidence bundles, audit snapshots, run transcripts — are not
+documentation and are not migrated; definition-of-done evidence is tracked in
+the change-control evidence system.
 
 ## License
 

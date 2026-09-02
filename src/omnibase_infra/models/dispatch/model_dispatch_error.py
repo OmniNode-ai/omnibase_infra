@@ -83,7 +83,7 @@ Example:
 See Also:
     omnibase_infra.models.dispatch.ModelDispatchResult: Uses this for error info
     omnibase_core.enums.EnumCoreErrorCode: Error code enumeration
-    ADR: ``docs/decisions/adr-any-type-pydantic-workaround.md`` (historical)
+    ADR: ``knowledge-base:reference/omnibase-infra-adr-any-type-pydantic-workaround.md`` (historical)
     Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 
 .. versionadded:: 0.7.0
