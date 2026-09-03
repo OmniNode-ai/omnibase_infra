@@ -213,10 +213,10 @@ def test_onex_customer_admits_no_loopback_redirect_or_origin() -> None:
     `localhost:3000`/`localhost:8080` because a developer runs those SPAs
     locally. No customer ever does -- there is no documented customer flow
     that lands on a loopback host -- so a loopback entry here is an
-    unjustified widening, and a widening that matters: `webOrigins` grants
-    CORS to the token endpoint, and this client has `directAccessGrants`
-    enabled, so any page served from that origin could post credentials to
-    it.
+    unjustified widening, and one that matters even now that
+    `directAccessGrantsEnabled` is off: `webOrigins` grants CORS to the
+    realm's token endpoint, so every listed origin is a browser context
+    allowed to run the code exchange against it.
 
     Asserted in the negative on purpose. The natural next edit is someone
     copying the host list off `omniweb`, which would silently reintroduce it.
