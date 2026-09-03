@@ -155,7 +155,7 @@ jobs:
     # .201 fleet runs the lab lanes; a per-candidate kind cluster does not belong
     # on the same Docker daemon.
     name: Boot the candidate on an ephemeral cluster
-    needs: [build-runtime-candidate]
+    needs: [build-runtime-candidate, build-migrate-bundle]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -174,6 +174,20 @@ jobs:
       KIND_NODE_IMAGE: "kindest/node:v1.31.0"
       LAB_NAMESPACE: onex-dev
       LAB_OVERLAY: k8s/onex-lab
+      # OMN-17702. The lane's in-cluster Postgres stand-in, and the Job the
+      # migration bundle ships as. Both are omninode_infra's -- named here only
+      # because a workflow step cannot read them out of a manifest.
+      LAB_DB_SERVICE: onex-lab-postgres
+      MIGRATE_JOB_NAME: omnibase-infra-migrate
+      # Separate budgets keep the job's worst case below timeout-minutes: 45.
+      # The Postgres rollout is not part of the migration Job's own deadline, so
+      # it cannot share the same fifteen-minute budget.
+      DB_WAIT_SECONDS: "300"
+      # The Job carries activeDeadlineSeconds 600. A wait shorter than the Job's
+      # own deadline would report a slow migration as a failed one, but a larger
+      # wait would let the gate spend too much of its job timeout before
+      # readiness diagnostics can run.
+      MIGRATE_WAIT_SECONDS: "600"
       # 15 minutes of readiness wait, per OMN-17534 scope item 6. The runtime
       # Deployments carry a startupProbe with failureThreshold 60 at period 10s
       # (600s) precisely because contract discovery is slow, so a shorter wait
@@ -379,6 +393,171 @@ jobs:
             exit 1
           fi
 
+      # OMN-17702: MIGRATE THE LANE BEFORE WAITING ON THE RUNTIME FAMILY.
+      #
+      # WHAT THIS CLOSES. The lane created three empty databases and applied no
+      # migrations, and its parity ledger called that a soft gap -- "a handler
+      # that queries a table fails at first use, not at boot". It was not soft.
+      # The runtime image's ENTRYPOINT stamps a schema fingerprint into
+      # `public.db_metadata` in omnibase_infra and treats that database as
+      # PRIMARY/owned, so every runtime-family pod died in a shell script,
+      # before Python:
+      #
+      #   [entrypoint] Stamping schema fingerprint for omnibase_infra ...
+      #   ERROR:  relation "public.db_metadata" does not exist
+      #   [entrypoint] omnibase_infra stamp attempt 5/5 failed (exit 1)
+      #   [entrypoint] ERROR: omnibase_infra (PRIMARY/owned DB) fingerprint
+      #   stamp failed -- aborting boot
+      #
+      # Byte-identical in runtime, -effects and -worker, and byte-identical
+      # across two candidates built from two different commits (runs
+      # 33686311428 and 33719871544). There was no execution path in which this
+      # gate could pass, so nothing was announced for ~17 hours -- and the gate
+      # never once reached the OMN-17502/17510/17519 auto-wiring class it exists
+      # to catch, because the process exits upstream of all of it.
+      #
+      # WHY THE REAL JOB AND NOT A SEED. The two cheaper options were both
+      # refused on the ticket. A lane-scoped opt-out on the fingerprint stamp
+      # makes the gate green while leaving it blind to exactly the DB-shaped
+      # boot failures it stands in front of. Hand-seeding `public.db_metadata`
+      # is a hand-maintained shadow of a migration, which is the drift shape
+      # this repo keeps paying for. Running the real
+      # `k8s/migrations/omnibase-infra-migrate.yaml`, on the digest THIS run
+      # just built, is the only option that also makes the lane able to prove
+      # what it claims -- and it immediately proved something new: the corpus
+      # had never been applied to a database that had never been migrated, and
+      # a from-scratch apply exposed a real ordering defect
+      # (node_gateway_link_health_write_effect asserts the omninode_internal
+      # schema, which no deliverable migration creates; omninode_infra's lane
+      # bootstrap now provisions it, as its own comment says provisioning must).
+      #
+      # WHY HERE AND NOT IN THE OVERLAY. `kustomize` renders one document set
+      # and `kubectl apply` has no ordering: the Job would race the Deployments
+      # and the runtime pods would crash-loop until it finished. Applied here it
+      # is a barrier -- the readiness wait below does not start until the
+      # migration has COMPLETED, so a `0/1` in that step means the candidate,
+      # not the schema. The manifest is still omninode_infra's own, byte for
+      # byte apart from the four values its own renderer rewrites; nothing is
+      # copied into this repo.
+      #
+      # FAIL-CLOSED. A failed, timed-out or unschedulable migration fails the
+      # gate. It does NOT fall through to the readiness wait: that would report
+      # the schema failure as a candidate defect fifteen minutes later, which is
+      # the misreading this whole ticket is about.
+      - name: Apply the candidate's migration bundle to the lane
+        env:
+          MIGRATE_IMAGE_REF: ${{ needs.build-migrate-bundle.outputs.image-ref }}
+        run: |
+          set -euo pipefail
+
+          # Digest-pinned or nothing. The announce job makes the same check on
+          # the same value; making it here as well means a malformed bundle
+          # fails on the side that can still say which build produced it.
+          case "${MIGRATE_IMAGE_REF}" in
+            *@sha256:*) ;;
+            "")
+              echo "::error::build-migrate-bundle reported success without" \
+                "publishing an image reference. Refusing to boot a candidate" \
+                "against an unmigrated lane."
+              exit 1
+              ;;
+            *)
+              echo "::error::MIGRATE_IMAGE_REF='${MIGRATE_IMAGE_REF}' is not" \
+                "digest-pinned. A mutable tag is not a migratable identity."
+              exit 1
+              ;;
+          esac
+
+          # The Job's first act is to connect, and its readiness loop gives up
+          # after MAX_RETRIES. Waiting for the server here keeps a slow initdb
+          # from being reported as a migration failure.
+          kubectl rollout status "deployment/${LAB_DB_SERVICE}" \
+            -n "${LAB_NAMESPACE}" --timeout="${DB_WAIT_SECONDS}s"
+
+          # A rerun can reach a cluster where an earlier attempt already created
+          # this fixed-name Job. Deleting it here keeps the verdict tied to this
+          # run's digest, not to stale Complete/Failed conditions.
+          kubectl delete "job/${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" \
+            --ignore-not-found --wait=true
+
+          # omninode_infra's own renderer, on omninode_infra's own manifest, in
+          # the gate's ephemeral checkout. It rewrites exactly four values --
+          # metadata.namespace (data-plane -> this lane; `kubectl apply -n`
+          # loses to an explicit namespace, so this cannot be a flag), DB_HOST,
+          # PGSSLMODE, POSTGRES_TARGET -- and re-pins the copy-migrations
+          # initContainer to the bundle this run built. sslmode=disable is the
+          # onex-lab threat model only: single-tenant ephemeral cluster, generated
+          # credentials, no shared or persistent database path.
+          python3 omninode_infra/scripts/render_migration_manifest_for_target.py \
+            "omninode_infra/k8s/migrations/${MIGRATE_JOB_NAME}.yaml" \
+            --namespace "${LAB_NAMESPACE}" \
+            --db-host "${LAB_DB_SERVICE}.${LAB_NAMESPACE}.svc.cluster.local" \
+            --db-port 5432 \
+            --pgsslmode disable \
+            --postgres-target in-cluster \
+            --migrate-image "${MIGRATE_IMAGE_REF}" \
+            -o /tmp/onex-lab-migrate.yaml
+
+          kubectl apply -f /tmp/onex-lab-migrate.yaml
+
+          # Polled rather than `kubectl wait --for=condition=complete`: that
+          # blocks for the whole timeout on a Job that has already failed, so a
+          # broken bundle would cost fifteen minutes of runner time and report
+          # "timed out" instead of "failed". Both terminal conditions are read.
+          DEADLINE=$(( $(date +%s) + MIGRATE_WAIT_SECONDS ))
+          while true; do
+            SUCCEEDED="$(kubectl get job "${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" \
+              -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+            if [ "${SUCCEEDED:-0}" != "0" ] && [ -n "${SUCCEEDED:-}" ]; then
+              echo "migration bundle complete."
+              break
+            fi
+            CONDITION="$(kubectl get job "${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" \
+              -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+            if [ "${CONDITION}" = "True" ]; then
+              echo "::error::the ${MIGRATE_JOB_NAME} Job FAILED. The candidate was" \
+                "never booted against a migrated schema, so this gate proves" \
+                "nothing about it. Job describe and full logs follow, and are" \
+                "also in the uploaded artifact."
+              kubectl describe "job/${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" || true
+              for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+                  -l "job-name=${MIGRATE_JOB_NAME}" \
+                  -o jsonpath='{.items[*].metadata.name}'); do
+                kubectl logs -n "${LAB_NAMESPACE}" "${POD}" \
+                  --all-containers --timestamps || true
+              done
+              exit 1
+            fi
+            if [ "$(date +%s)" -ge "${DEADLINE}" ]; then
+              echo "::error::the ${MIGRATE_JOB_NAME} Job neither completed nor" \
+                "failed within ${MIGRATE_WAIT_SECONDS}s."
+              kubectl describe "job/${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" || true
+              for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+                  -l "job-name=${MIGRATE_JOB_NAME}" \
+                  -o jsonpath='{.items[*].metadata.name}'); do
+                kubectl logs -n "${LAB_NAMESPACE}" "${POD}" \
+                  --all-containers --timestamps || true
+              done
+              exit 1
+            fi
+            sleep 5
+          done
+
+          # The summary line the bundle prints last, surfaced in the step log so
+          # "applied=N" is readable without opening the artifact -- run
+          # 31328815070's `applied=0` is the precedent for why that number
+          # deserves to be visible. SELECTED BY CONTENT, never truncated: the
+          # log is read in full and one named line is matched out of it, so this
+          # is not the `--tail` the diagnostics step below refuses (and the full
+          # log still reaches the artifact either way).
+          for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+              -l "job-name=${MIGRATE_JOB_NAME}" \
+              -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl logs -n "${LAB_NAMESPACE}" "${POD}" --all-containers \
+              | grep -E "^(== omnibase_infra migration|  Flat migrations:|== Migration complete)" \
+              || true
+          done
+
       - name: Wait for every runtime-family Deployment and the projection topic
         id: boot-wait
         run: |
@@ -397,6 +576,13 @@ jobs:
 
           kubectl get pods -n "${LAB_NAMESPACE}" -o wide > "$OUT/pods-wide.txt" 2>&1
           kubectl get deploy -n "${LAB_NAMESPACE}" -o wide > "$OUT/deployments.txt" 2>&1
+          # OMN-17702: the migration bundle is a Job, so it is invisible in the
+          # Deployment table above, and its pod is the one that says whether the
+          # schema the runtime booted against actually exists. The pod loop
+          # below captures its logs (the Job's ttlSecondsAfterFinished is 3600,
+          # so it is still there); this is the row that says which Job they
+          # belong to.
+          kubectl get jobs -n "${LAB_NAMESPACE}" -o wide > "$OUT/jobs.txt" 2>&1
           kubectl get events -n "${LAB_NAMESPACE}" --sort-by=.lastTimestamp \
             > "$OUT/events.txt" 2>&1
 
@@ -456,7 +642,10 @@ jobs:
             echo "| --- | --- |"
             echo "| result | ${{ steps.boot-wait.outcome }} |"
             echo "| candidate | ${{ needs.build-runtime-candidate.outputs.image-ref }} |"
+            echo "| migrate bundle | ${{ needs.build-migrate-bundle.outputs.image-ref }} |"
             echo "| manifests | omninode_infra@dev ${MANIFEST_SHA:-unknown} |"
+            echo "| database wait | ${DB_WAIT_SECONDS}s |"
+            echo "| migration wait | ${MIGRATE_WAIT_SECONDS}s |"
             echo "| overlay | k8s/onex-lab (OMN-17533) |"
             echo "| readiness wait | ${BOOT_WAIT_SECONDS}s |"
             echo ""

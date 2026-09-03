@@ -63,54 +63,35 @@ EXCLUDE_PATHS=(
 EXCLUDE_SELF="check_no_cloud_bus"
 EXCLUDE_E2E="docker-compose.e2e"
 
+pathspecs=("${PATTERNS[@]}")
+for excl in "${EXCLUDE_PATHS[@]}"; do
+    pathspecs+=(":!${excl}**")
+    pathspecs+=(":!**/${excl}**")
+done
+pathspecs+=(":!*${EXCLUDE_SELF}*")
+pathspecs+=(":!*${EXCLUDE_E2E}*")
+
 violations=0
-violation_files=()
+matches="$(git grep -n '29092' -- "${pathspecs[@]}" 2>/dev/null || true)"
 
-# Get git-tracked files matching our extensions
-tracked_files=$(git ls-files -- "${PATTERNS[@]}" 2>/dev/null) || true
-
-if [ -z "$tracked_files" ]; then
+if [ -z "$matches" ]; then
     exit 0
 fi
 
-while IFS= read -r file; do
-    # Skip excluded paths
-    skip=false
-    for excl in "${EXCLUDE_PATHS[@]}"; do
-        case "$file" in
-            "$excl"*|*/"$excl"*) skip=true; break ;;
-        esac
-    done
-    $skip && continue
+while IFS= read -r line_content; do
+    file="${line_content%%:*}"
+    rest="${line_content#*:}"
+    line_num="${rest%%:*}"
+    line_text="${rest#*:}"
 
-    # Skip self
-    case "$file" in
-        *"$EXCLUDE_SELF"*) continue ;;
-    esac
+    # Check for valid suppression: "# cloud-bus-ok OMN-" followed by digits
+    if echo "$line_text" | grep -qE '#\s*cloud-bus-ok\s+OMN-[0-9]+'; then
+        continue
+    fi
 
-    # Skip e2e compose files
-    case "$file" in
-        *"$EXCLUDE_E2E"*) continue ;;
-    esac
-
-    # Search for 29092 in the file
-    while IFS= read -r line_content; do
-        line_num="${line_content%%:*}"
-        line_text="${line_content#*:}"
-
-        # Check for valid suppression: "# cloud-bus-ok OMN-" followed by digits
-        if echo "$line_text" | grep -qE '#\s*cloud-bus-ok\s+OMN-[0-9]+'; then
-            continue
-        fi
-
-        # This is an unsuppressed violation
-        violations=$((violations + 1))
-        violation_files+=("$file:$line_num")
-        echo "VIOLATION: $file:$line_num: $line_text"
-
-    done < <(grep -n '29092' "$file" 2>/dev/null || true)
-
-done <<< "$tracked_files"
+    violations=$((violations + 1))
+    echo "VIOLATION: $file:$line_num: $line_text"
+done <<< "$matches"
 
 if [ "$violations" -gt 0 ]; then
     echo ""
