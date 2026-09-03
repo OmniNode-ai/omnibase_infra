@@ -167,6 +167,41 @@ def test_the_migration_waits_for_the_lane_postgres_first(gate: dict[str, Any]) -
         "the step does not wait for the lane's Postgres. A slow initdb would be "
         "reported as a failed migration."
     )
+    assert '--timeout="${DB_WAIT_SECONDS}s"' in commands, (
+        "the Postgres rollout wait must have its own smaller budget. Sharing the "
+        "migration Job budget lets the gate spend too much of timeout-minutes "
+        "before readiness diagnostics can run."
+    )
+
+
+def test_wait_budgets_fit_inside_the_gate_timeout(gate: dict[str, Any]) -> None:
+    env = gate.get("env") or {}
+    timeout_seconds = int(gate["timeout-minutes"]) * 60
+    known_waits = (
+        int(env["DB_WAIT_SECONDS"]),
+        int(env["MIGRATE_WAIT_SECONDS"]),
+        int(env["BOOT_WAIT_SECONDS"]),
+    )
+    assert sum(known_waits) <= timeout_seconds - 600, (
+        "the explicit gate waits leave less than ten minutes for cluster setup, "
+        "image pull/load, diagnostics and summary before timeout-minutes kills "
+        f"the job. waits={known_waits}, timeout_seconds={timeout_seconds}"
+    )
+
+
+def test_the_migration_job_is_not_reused_from_an_earlier_attempt(
+    gate: dict[str, Any],
+) -> None:
+    commands = _commands(_step(gate, MIGRATE_STEP))
+    assert 'kubectl delete "job/${MIGRATE_JOB_NAME}"' in commands, (
+        "reruns must delete the fixed-name migration Job before apply; otherwise "
+        "the poll loop can read a stale Complete/Failed condition for the wrong "
+        "bundle."
+    )
+    assert "--ignore-not-found --wait=true" in commands, (
+        "deleting the stale Job must be idempotent and complete before the new "
+        "manifest is applied."
+    )
 
 
 def test_the_job_is_rendered_for_the_lane_and_not_applied_as_shipped(
@@ -229,6 +264,21 @@ def test_the_migration_logs_reach_the_diagnostics_artifact(
         "the diagnostics do not record the Jobs in the namespace, so a failed "
         "migration's pod logs arrive with nothing naming which Job they came "
         "from."
+    )
+
+
+def test_migration_failure_logs_are_collected_from_every_job_pod(
+    gate: dict[str, Any],
+) -> None:
+    commands = _commands(_step(gate, MIGRATE_STEP))
+    assert commands.count('-l "job-name=${MIGRATE_JOB_NAME}"') >= 3, (
+        "the migration step must collect logs by Job label in each failure and "
+        "summary path. `kubectl logs job/name` can pick one retry attempt and "
+        "hide the pod that actually explains the failure."
+    )
+    assert '"job/${MIGRATE_JOB_NAME}" --all-containers' not in commands, (
+        "the step still logs through the Job shortcut, which can select the wrong "
+        "pod when backoffLimit creates multiple attempts."
     )
 
 

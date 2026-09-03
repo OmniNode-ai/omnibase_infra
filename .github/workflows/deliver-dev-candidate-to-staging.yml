@@ -179,11 +179,15 @@ jobs:
       # because a workflow step cannot read them out of a manifest.
       LAB_DB_SERVICE: onex-lab-postgres
       MIGRATE_JOB_NAME: omnibase-infra-migrate
-      # The Job carries activeDeadlineSeconds 600 and backoffLimit 3, so a
-      # retrying run can legitimately take most of ten minutes. A wait shorter
-      # than the Job's own deadline would report a slow migration as a failed
-      # one.
-      MIGRATE_WAIT_SECONDS: "900"
+      # Separate budgets keep the job's worst case below timeout-minutes: 45.
+      # The Postgres rollout is not part of the migration Job's own deadline, so
+      # it cannot share the same fifteen-minute budget.
+      DB_WAIT_SECONDS: "300"
+      # The Job carries activeDeadlineSeconds 600. A wait shorter than the Job's
+      # own deadline would report a slow migration as a failed one, but a larger
+      # wait would let the gate spend too much of its job timeout before
+      # readiness diagnostics can run.
+      MIGRATE_WAIT_SECONDS: "600"
       # 15 minutes of readiness wait, per OMN-17534 scope item 6. The runtime
       # Deployments carry a startupProbe with failureThreshold 60 at period 10s
       # (600s) precisely because contract discovery is slow, so a shorter wait
@@ -468,14 +472,22 @@ jobs:
           # after MAX_RETRIES. Waiting for the server here keeps a slow initdb
           # from being reported as a migration failure.
           kubectl rollout status "deployment/${LAB_DB_SERVICE}" \
-            -n "${LAB_NAMESPACE}" --timeout="${MIGRATE_WAIT_SECONDS}s"
+            -n "${LAB_NAMESPACE}" --timeout="${DB_WAIT_SECONDS}s"
+
+          # A rerun can reach a cluster where an earlier attempt already created
+          # this fixed-name Job. Deleting it here keeps the verdict tied to this
+          # run's digest, not to stale Complete/Failed conditions.
+          kubectl delete "job/${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" \
+            --ignore-not-found --wait=true
 
           # omninode_infra's own renderer, on omninode_infra's own manifest, in
           # the gate's ephemeral checkout. It rewrites exactly four values --
           # metadata.namespace (data-plane -> this lane; `kubectl apply -n`
           # loses to an explicit namespace, so this cannot be a flag), DB_HOST,
           # PGSSLMODE, POSTGRES_TARGET -- and re-pins the copy-migrations
-          # initContainer to the bundle this run built.
+          # initContainer to the bundle this run built. sslmode=disable is the
+          # onex-lab threat model only: single-tenant ephemeral cluster, generated
+          # credentials, no shared or persistent database path.
           python3 omninode_infra/scripts/render_migration_manifest_for_target.py \
             "omninode_infra/k8s/migrations/${MIGRATE_JOB_NAME}.yaml" \
             --namespace "${LAB_NAMESPACE}" \
@@ -508,16 +520,24 @@ jobs:
                 "nothing about it. Job describe and full logs follow, and are" \
                 "also in the uploaded artifact."
               kubectl describe "job/${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" || true
-              kubectl logs -n "${LAB_NAMESPACE}" "job/${MIGRATE_JOB_NAME}" \
-                --all-containers --timestamps || true
+              for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+                  -l "job-name=${MIGRATE_JOB_NAME}" \
+                  -o jsonpath='{.items[*].metadata.name}'); do
+                kubectl logs -n "${LAB_NAMESPACE}" "${POD}" \
+                  --all-containers --timestamps || true
+              done
               exit 1
             fi
             if [ "$(date +%s)" -ge "${DEADLINE}" ]; then
               echo "::error::the ${MIGRATE_JOB_NAME} Job neither completed nor" \
                 "failed within ${MIGRATE_WAIT_SECONDS}s."
               kubectl describe "job/${MIGRATE_JOB_NAME}" -n "${LAB_NAMESPACE}" || true
-              kubectl logs -n "${LAB_NAMESPACE}" "job/${MIGRATE_JOB_NAME}" \
-                --all-containers --timestamps || true
+              for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+                  -l "job-name=${MIGRATE_JOB_NAME}" \
+                  -o jsonpath='{.items[*].metadata.name}'); do
+                kubectl logs -n "${LAB_NAMESPACE}" "${POD}" \
+                  --all-containers --timestamps || true
+              done
               exit 1
             fi
             sleep 5
@@ -530,10 +550,13 @@ jobs:
           # log is read in full and one named line is matched out of it, so this
           # is not the `--tail` the diagnostics step below refuses (and the full
           # log still reaches the artifact either way).
-          kubectl logs -n "${LAB_NAMESPACE}" "job/${MIGRATE_JOB_NAME}" \
-            --all-containers \
-            | grep -E "^(== omnibase_infra migration|  Flat migrations:|== Migration complete)" \
-            || true
+          for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+              -l "job-name=${MIGRATE_JOB_NAME}" \
+              -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl logs -n "${LAB_NAMESPACE}" "${POD}" --all-containers \
+              | grep -E "^(== omnibase_infra migration|  Flat migrations:|== Migration complete)" \
+              || true
+          done
 
       - name: Wait for every runtime-family Deployment and the projection topic
         id: boot-wait
@@ -621,6 +644,8 @@ jobs:
             echo "| candidate | ${{ needs.build-runtime-candidate.outputs.image-ref }} |"
             echo "| migrate bundle | ${{ needs.build-migrate-bundle.outputs.image-ref }} |"
             echo "| manifests | omninode_infra@dev ${MANIFEST_SHA:-unknown} |"
+            echo "| database wait | ${DB_WAIT_SECONDS}s |"
+            echo "| migration wait | ${MIGRATE_WAIT_SECONDS}s |"
             echo "| overlay | k8s/onex-lab (OMN-17533) |"
             echo "| readiness wait | ${BOOT_WAIT_SECONDS}s |"
             echo ""
