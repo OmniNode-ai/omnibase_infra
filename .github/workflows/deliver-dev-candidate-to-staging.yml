@@ -157,7 +157,12 @@ jobs:
     name: Boot the candidate on an ephemeral cluster
     needs: [build-runtime-candidate, build-migrate-bundle]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # OMN-17778: raised with BOOT_WAIT_SECONDS 900 -> 1800. Run 33771560584 used
+    # ~21 minutes end to end on the old budget, so the extra 15 minutes of
+    # readiness wait would land at ~36 and leave diagnostics racing this ceiling
+    # -- and a job killed by timeout uploads NO diagnostics at all, which is the
+    # one failure mode that costs a whole candidate build to re-learn.
+    timeout-minutes: 60
     permissions:
       id-token: write
       contents: read
@@ -188,11 +193,35 @@ jobs:
       # wait would let the gate spend too much of its job timeout before
       # readiness diagnostics can run.
       MIGRATE_WAIT_SECONDS: "600"
-      # 15 minutes of readiness wait, per OMN-17534 scope item 6. The runtime
-      # Deployments carry a startupProbe with failureThreshold 60 at period 10s
-      # (600s) precisely because contract discovery is slow, so a shorter wait
-      # would report a healthy candidate as a failure.
-      BOOT_WAIT_SECONDS: "900"
+      # OMN-17778. This was 900s, justified by the runtime Deployments'
+      # startupProbe (failureThreshold 60 at period 10s = 600s). That number
+      # measures the wrong thing: the startupProbe bounds how long kubelet
+      # tolerates an unready container, not how long a cold runtime takes to
+      # finish wiring. omninode_infra's own deploy-onex-staging.yml has carried
+      # the measured figure all along --
+      #
+      #   DEPLOY_TIMEOUT_SECONDS: "1500"   # OMN-14974 proof ... reached stable
+      #                                    # readiness after 20m55s
+      #
+      # -- so the gate was failing candidates on a budget 40% under the number
+      # the deploy that follows it already uses.
+      #
+      # Run 33771560584 measured it here, on this lane, for the first time (it
+      # is the first run that ever got past the entrypoint blocker OMN-17702
+      # closed). omninode-runtime sat 0/1 Running with ZERO restarts for 18
+      # minutes, dispatching real work throughout, while wire_from_manifest
+      # walked the contract list alphabetically: `c`/`d` contracts at 15:30,
+      # `m`/`n` at 15:36, `node_readiness_scorer_compute` at 15:41:54. One
+      # forward pass, still progressing, killed at 15:42:17 by this budget.
+      #
+      # AND THIS LANE IS SYSTEMATICALLY SLOWER THAN THE PLANE 1500s WAS
+      # MEASURED ON, which is why matching it exactly is not enough. The lane's
+      # redpanda starts empty, so every consumed topic that does not yet exist
+      # costs a metadata-convergence timeout that the real plane -- where the
+      # topics already exist -- never pays. 108 contracts paid it in that run at
+      # ~7.2s each. 1800s keeps the measured 20m55s inside the budget with
+      # margin for that lane-only cost, rather than landing on top of it.
+      BOOT_WAIT_SECONDS: "1800"
     steps:
       - name: Checkout omnibase_infra (this repo, at the candidate's own commit)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

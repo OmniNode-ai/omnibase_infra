@@ -248,17 +248,76 @@ def test_gate_proves_strict_mode_off_the_cluster(gate: dict[str, Any]) -> None:
     )
 
 
-def test_readiness_wait_is_at_least_fifteen_minutes(gate: dict[str, Any]) -> None:
-    """Scope item 6 says up to 15 minutes, and the probes need it.
+# omninode_infra `.github/workflows/deploy-onex-staging.yml`, env
+# `DEPLOY_TIMEOUT_SECONDS`. Its own comment records the provenance: "Live
+# OMN-14974 proof remained truthfully unready beyond the Deployment controller's
+# 600s default and reached stable readiness after 20m55s."
+#
+# Restated here rather than read across the repo boundary because these tests
+# run on an omnibase_infra checkout with no omninode_infra tree. That makes this
+# a copy, and a copy can rot -- so it is a NAMED constant with its source on the
+# line above, not an anonymous integer buried in an assertion.
+STAGING_DEPLOY_TIMEOUT_SECONDS = 1500
 
-    The runtime Deployments carry a startupProbe with failureThreshold 60 at
-    period 10s -- 600 seconds -- precisely because contract discovery is slow.
-    A shorter wait would report a healthy candidate as broken, and the fix for
-    THAT is always to loosen the gate, which is how gates die.
+# The measured convergence itself (20m55s), which is what the budget must
+# actually clear. Kept separate from the deploy's rounded-up 1500s so a future
+# change to either one cannot silently absorb the other.
+MEASURED_COLD_START_SECONDS = 20 * 60 + 55
+
+
+def test_readiness_wait_clears_the_measured_cold_start(gate: dict[str, Any]) -> None:
+    """The gate must not fail a candidate the deploy after it would have passed.
+
+    OMN-17778. This assertion used to read ``>= 900``, sourced from the runtime
+    Deployments' startupProbe (failureThreshold 60 at period 10s = 600s). That
+    bounds how long kubelet tolerates an unready container; it says nothing
+    about how long a cold runtime needs to finish ``wire_from_manifest``. The
+    two were conflated, and the gate spent its whole life with a budget 40%
+    under the figure the staging deploy already used.
+
+    Run 33771560584 is the live counter-example: ``omninode-runtime`` at 0/1
+    Running, ZERO restarts, dispatching real work, wiring contracts in one
+    forward alphabetical pass -- and failed at 900s as NOT READY.
+
+    A gate that fails healthy candidates gets loosened until it proves nothing,
+    which is how gates die. The fix is the correct number, not a softer verdict.
     """
     wait_seconds = int(gate["env"]["BOOT_WAIT_SECONDS"])
-    assert wait_seconds >= 900, (
-        f"BOOT_WAIT_SECONDS={wait_seconds} is under the 900s the ticket scopes"
+    assert wait_seconds >= MEASURED_COLD_START_SECONDS, (
+        f"BOOT_WAIT_SECONDS={wait_seconds} is under the measured cold-start "
+        f"convergence of {MEASURED_COLD_START_SECONDS}s (OMN-14974), so this "
+        "gate can fail a runtime that was still making forward progress."
+    )
+    assert wait_seconds >= STAGING_DEPLOY_TIMEOUT_SECONDS, (
+        f"BOOT_WAIT_SECONDS={wait_seconds} is under omninode_infra's "
+        f"DEPLOY_TIMEOUT_SECONDS={STAGING_DEPLOY_TIMEOUT_SECONDS}. The gate "
+        "would then refuse candidates that the deploy immediately after it "
+        "would have rolled out successfully -- the two budgets must not diverge."
+    )
+
+
+def test_job_timeout_accommodates_every_wait_it_declares(
+    gate: dict[str, Any],
+) -> None:
+    """A job killed by ``timeout-minutes`` uploads no diagnostics at all.
+
+    OMN-17778. Every failure this gate reports is only actionable because the
+    diagnostics step runs after it. That step is reached on the failure path
+    only while the JOB is still alive, so the job ceiling has to clear the sum
+    of the waits the job itself declares, with room left for cluster creation,
+    the image side-load, and the diagnostics collection and upload.
+    """
+    env = gate["env"]
+    declared_waits = (
+        int(env["DB_WAIT_SECONDS"])
+        + int(env["MIGRATE_WAIT_SECONDS"])
+        + int(env["BOOT_WAIT_SECONDS"])
+    )
+    timeout_seconds = int(gate["timeout-minutes"]) * 60
+    assert timeout_seconds > declared_waits, (
+        f"timeout-minutes={gate['timeout-minutes']} ({timeout_seconds}s) does "
+        f"not clear the {declared_waits}s this job's own waits can consume; a "
+        "job killed by the ceiling uploads no diagnostics."
     )
 
 
