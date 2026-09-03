@@ -567,6 +567,23 @@ find_omnibase_core_path() {
         fi
     fi
 
+    # Try common local paths before installed packages. In workspace worktrees,
+    # the installed package can resolve through a venv/site-packages tree and
+    # make this grep-based pre-push validator exceed its timeout.
+    local local_paths=(
+        "${OMNI_HOME:-}/omnibase_core/src/omnibase_core"
+        "./src/omnibase_core"
+        "../omnibase_core/src/omnibase_core"
+        "../omnibase_core"
+    )
+
+    for path in "${local_paths[@]}"; do
+        if [[ -n "${path}" && -d "${path}" ]]; then
+            (cd "${path}" && pwd)
+            return 0
+        fi
+    done
+
     # Try to find installed package using Python
     local python_path
     python_path=$(python3 -c "import omnibase_core; import os; print(os.path.dirname(omnibase_core.__file__))" 2>/dev/null) || true
@@ -575,20 +592,6 @@ find_omnibase_core_path() {
         echo "${python_path}"
         return 0
     fi
-
-    # Try common local paths
-    local local_paths=(
-        "./src/omnibase_core"
-        "../omnibase_core/src/omnibase_core"
-        "../omnibase_core"
-    )
-
-    for path in "${local_paths[@]}"; do
-        if [[ -d "${path}" ]]; then
-            (cd "${path}" && pwd)
-            return 0
-        fi
-    done
 
     echo "ERROR: Could not find omnibase_core. Use --path to specify location." >&2
     return 2
