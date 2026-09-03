@@ -1463,6 +1463,10 @@ def remote_run_env(tmp_path: Path) -> dict[str, Path]:
     fake_uv = tmp_path / "uv"
     fake_uv.write_text(
         "#!/bin/sh\n"
+        # OMN-17741: record the workspace root the wrapper handed us. Written
+        # on BOTH the `sync` and the pytest invocation, so a wrapper that
+        # establishes the registry too late (after `uv sync`) is still caught.
+        'printf "%s\\n" "${OMNI_HOME:-<unset>}" > "$OMNI_HOME_WITNESS"\n'
         'if [ "$1" = "sync" ]; then exit 0; fi\n'
         # Proof that the target-host slot is held for the DURATION of the run,
         # not merely acquired and dropped before the expensive part.
@@ -1478,6 +1482,7 @@ def remote_run_env(tmp_path: Path) -> dict[str, Path]:
         "rundir": rundir,
         "uv": fake_uv,
         "witness": witness,
+        "omni_home_witness": tmp_path / "omni_home_witness",
         "head": head,  # type: ignore[dict-item]
     }
 
@@ -1487,13 +1492,28 @@ def _run_wrapper(
     *,
     extra_env: dict[str, str] | None = None,
     extra_argv: list[str] | None = None,
+    repo: str = "omnibase_infra",
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "LOCK_PROBE": str(env_info["workroot"] / "LOCK"),
         "LOCK_WITNESS": str(env_info["witness"]),
+        "OMNI_HOME_WITNESS": str(env_info["omni_home_witness"]),
     }
+    # FIDELITY, not tidiness (OMN-17741): `ssh` forwards no environment, so on
+    # a real target host the wrapper starts with OMNI_HOME UNSET. This pytest
+    # process inherits a developer shell where it IS set, and leaking that in
+    # would let a wrapper that establishes nothing pass the registry assertions
+    # on the launcher's value.
+    env.pop("OMNI_HOME", None)
     env.update(extra_env or {})
+    # The wrapper's trailing positionals are optional on the remote side but
+    # POSITIONAL, so they are padded here rather than appended: a caller that
+    # passes only BASE_REF/BASE_SHA must still land the repo name in slot 10.
+    tail = list(extra_argv or [])
+    base_ref = tail[0] if len(tail) > 0 else ""
+    base_sha = tail[1] if len(tail) > 1 else ""
+    slot = tail[2] if len(tail) > 2 and tail[2] else "1"
     return subprocess.run(
         [
             "bash",
@@ -1504,7 +1524,10 @@ def _run_wrapper(
             "argvsha",
             "origin-host:1",
             str(env_info["workroot"]),
-            *(extra_argv or []),
+            base_ref,
+            base_sha,
+            slot,
+            repo,
         ],
         capture_output=True,
         text=True,
@@ -1541,6 +1564,100 @@ def test_the_remote_leg_holds_the_target_hosts_lock_for_the_whole_run(
     )
 
 
+# =============================================================================
+# The transplanted tree needs a registry root (OMN-17741)
+# =============================================================================
+# `ssh` forwards no environment, so the wrapper starts with OMNI_HOME unset on
+# every target host. Code the suite runs that resolves a workspace then either
+# fails, or -- the case actually measured -- falls back to a home-relative
+# default that EXISTS on the lab Macs and is TCC-denied to `sshd`. OMN-17459
+# recorded that shape: a real omnimarket full suite on h101, 17,883 tests in
+# 13m58s, 12 failures, all 12 green locally, one root cause.
+#
+# A false red here HARD-BLOCKS a push (`dispatch_to_lab_host` rc=3 -> `die`,
+# "a remote red is never satisfied by minting an override grant"), so this is
+# part of the verdict meaning anything -- the same standing the PATH-parity
+# block already has.
+
+
+def test_the_remote_wrapper_gives_the_transplanted_tree_a_registry_root(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """The value must be a REAL registry the remote process can write, holding
+    the transplanted repo under its own name -- not an unset variable and not a
+    bare rundir, which contains no directory named for the repo at all."""
+    result = _run_wrapper(remote_run_env, repo="omnimarket")
+    assert result.returncode == 0, result.stderr
+
+    recorded = remote_run_env["omni_home_witness"].read_text().strip()
+    assert recorded != "<unset>", (
+        "the suite ran with no OMNI_HOME: every workspace-resolving call site "
+        "in the transplanted tree is left to guess, and the lab Macs have a "
+        "TCC-denied ~/Code/omni_home for it to guess wrong onto"
+    )
+    registry = Path(recorded)
+    assert registry == remote_run_env["rundir"] / "omni_home", recorded
+    assert registry.is_dir()
+
+    linked = registry / "omnimarket"
+    assert linked.is_symlink(), "the repo must be reachable under its own name"
+    assert linked.resolve() == (remote_run_env["rundir"] / "tree").resolve()
+    assert (linked / "tests" / "test_a.py").is_file(), (
+        "the registry entry must resolve to the tree that was actually cloned"
+    )
+
+    # Writability is the whole point: the measured failure was PermissionError
+    # on mkdir, not a missing path.
+    (registry / ".onex_state" / "probe").mkdir(parents=True)
+
+
+def test_the_registry_root_is_established_on_target_never_inherited(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """Forwarding the LAUNCHER's OMNI_HOME is strictly worse than leaving it
+    unset: `/Users/jonah/Code/omni_home` exists on every lab Mac and is
+    TCC-denied to `sshd`, so forwarding converts a fail-fast into a
+    PermissionError deep inside a test. Pin that an inherited value loses."""
+    launcher_value = "/nonexistent/launcher/Code/omni_home"
+    result = _run_wrapper(
+        remote_run_env,
+        repo="omnibase_core",
+        extra_env={"OMNI_HOME": launcher_value},
+    )
+    assert result.returncode == 0, result.stderr
+    recorded = remote_run_env["omni_home_witness"].read_text().strip()
+    assert recorded != launcher_value, (
+        "the wrapper forwarded the launcher's workspace path to the target host"
+    )
+    assert recorded == str(remote_run_env["rundir"] / "omni_home")
+    assert (Path(recorded) / "omnibase_core").is_symlink()
+
+
+def test_the_registry_root_is_named_by_the_dispatch_not_hardcoded() -> None:
+    """One wrapper serves omnibase_infra, omnibase_core and omnimarket, so the
+    repo name has to travel with the dispatch. `prepush_remote_run` already
+    computes it as `basename "$REPO_ROOT"`; assert it is passed through."""
+    lib = LIB.read_text(encoding="utf-8")
+    idx = lib.index('remote_cmd="cd ')
+    invocation = lib[idx : lib.index("\n", idx)]
+    assert "'${repo}'" in invocation, (
+        "the remote command does not pass the repo name to the wrapper: " + invocation
+    )
+    remote = _remote_wrapper_text()
+    assert "REPO_NAME=" in remote, "the wrapper does not bind a repo name positional"
+    for hardcoded in ("omni_home/omnimarket", "omni_home/omnibase_core"):
+        assert hardcoded not in remote
+
+
+def test_the_registry_root_lives_under_the_gc_swept_workroot() -> None:
+    """It must not become a new class of stranded state. `prepush_remote_gc`
+    sweeps `<workroot>/runs`, so the registry belongs inside the rundir."""
+    remote = _remote_wrapper_text()
+    idx = remote.index("OMNI_HOME=")
+    assignment = remote[idx : remote.index("\n", idx)]
+    assert "$RUNDIR/" in assignment, assignment
+
+
 def test_the_remote_leg_releases_the_lock_even_when_the_suite_fails(
     remote_run_env: dict[str, Path],
 ) -> None:
@@ -1567,7 +1684,9 @@ def test_the_remote_wrapper_locks_a_numbered_lockdir_for_slot_two(
         **os.environ,
         "LOCK_PROBE": str(slot2_probe),
         "LOCK_WITNESS": str(remote_run_env["witness"]),
+        "OMNI_HOME_WITNESS": str(remote_run_env["omni_home_witness"]),
     }
+    env.pop("OMNI_HOME", None)
     result = subprocess.run(
         [
             "bash",
@@ -1581,6 +1700,7 @@ def test_the_remote_wrapper_locks_a_numbered_lockdir_for_slot_two(
             "",
             "",
             "2",
+            "omnibase_infra",
         ],
         capture_output=True,
         text=True,
