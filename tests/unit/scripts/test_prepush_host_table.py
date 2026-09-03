@@ -1738,53 +1738,6 @@ def test_the_remote_wrapper_path_covers_linux_hosts_too() -> None:
     ), "the measured entries must keep precedence over the added ones"
 
 
-# `${HOME:-}` and `${PATH}` both contain a `:`, so a naive split on the
-# separator shreds them. Substitute them out, split, then put them back.
-_PATH_TOKENS = (("${HOME:-}", "\x01HOME\x01"), ("${PATH}", "\x01PATH\x01"))
-
-
-def _path_entries(assignment: str) -> list[str]:
-    """The entries of a `"a:b:c"` PATH literal, in order, after the uv prefix."""
-    body = assignment[assignment.index('"') + 1 : assignment.rindex('"')]
-    for real, token in _PATH_TOKENS:
-        body = body.replace(real, token)
-    entries = body.split(":")
-    for real, token in _PATH_TOKENS:
-        entries = [e.replace(token, real) for e in entries]
-    return entries
-
-
-def _remote_path_entries() -> list[str]:
-    """The remote wrapper's PATH entries, with its uv entry dropped."""
-    remote = _remote_wrapper_text()
-    line = next(
-        ln for ln in remote.splitlines() if ln.startswith('PATH="$(dirname "$UV")')
-    )
-    entries = _path_entries(line)
-    assert entries[0] == '$(dirname "$UV")'
-    return entries[1:]
-
-
-def _local_path_entries() -> list[str]:
-    """prepush_developer_shell_path's entries, with both uv entries dropped.
-
-    The local leg splices its two uv directories in as `${uvdir}${rowdir}`
-    PREFIXES rather than as their own entries, precisely so a host with no
-    resolvable uv and no capacity row contributes nothing instead of an empty
-    element.
-    """
-    lib = LIB.read_text(encoding="utf-8")
-    body = lib[lib.index("prepush_developer_shell_path() {") :]
-    line = next(
-        ln.strip() for ln in body.splitlines() if ln.strip().startswith("printf '%s' ")
-    )
-    entries = _path_entries(line[len("printf '%s' ") :])
-    prefix = "${uvdir}${rowdir}"
-    assert entries[0].startswith(prefix)
-    entries[0] = entries[0][len(prefix) :]
-    return entries
-
-
 def test_the_local_leg_restores_a_developer_shell_path_too() -> None:
     """OMN-17549. The remote leg has restored a developer-shell PATH since
     OMN-16989; the local leg never did, and that asymmetry is the defect -- the
@@ -1799,50 +1752,94 @@ def test_the_local_leg_restores_a_developer_shell_path_too() -> None:
     push."""
     hook = HOOK.read_text(encoding="utf-8")
     assert 'PATH="$(prepush_developer_shell_path)"' in hook
-    assert "export PATH" in hook
-
     export_at = hook.index('PATH="$(prepush_developer_shell_path)"')
+    export_line = hook.index("export PATH", export_at)
     first_pytest = hook.index("exec uv run pytest")
-    assert export_at < first_pytest, (
+    assert export_at < export_line < first_pytest, (
         "PATH must be exported before any local pytest invocation, not after"
     )
 
 
-def test_the_local_leg_and_the_remote_leg_agree_on_path() -> None:
-    """The two lists are single-sourced by assertion, not by hope.
+def test_the_local_leg_developer_path_is_behavioral_and_fallback_ordered(
+    tmp_path: Path,
+) -> None:
+    """The emitted PATH preserves the defect fix without letting table data
+    shadow measured/system entries.
 
-    A PATH entry added to one leg and not the other reintroduces exactly the
-    defect OMN-17549 closes: a tool that resolves on the transplanted run and
-    not on the same-host run, or the reverse, with the difference showing up as
-    a test failure about the tree rather than about the host."""
-    remote = _remote_path_entries()
-    local = _local_path_entries()
-
-    # The only sanctioned difference is HOW each leg names the uv directory:
-    # the remote leg is handed the target's uv path as `$UV` (the host table
-    # declares it per row), the local leg resolves whatever `uv` is on this
-    # machine. Both helpers above drop that entry, so what remains must match
-    # entry for entry, in order.
-    assert remote == local, (
-        f"the two legs' PATHs have drifted:\n  remote={remote}\n   local={local}"
+    The row-derived directory is still present for the non-owner actor case,
+    but it is a fallback after the system/search entries rather than a prefix
+    that can replace `/usr/local/bin/shellcheck` or `/opt/homebrew/bin/uv`.
+    """
+    table = (
+        "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
+        "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local"
+        "\tplacement_tier\tnote\n"
+        "hcap\tcapacity\tHostA.EXAMPLE.com\tjonah@hosta\t24"
+        "\t/owner/tools/uv\t0.1.0\t/tmp/w\tlockdir\t1\t-"
+        "\tauthorizing\tallowed\tdefault\ttooling fallback\n"
     )
-    assert remote[-1] == "${PATH}", (
-        "the caller's own PATH must stay last, so this can only ADD resolution"
+    repo = _repo_with_table(tmp_path, table, name="path-order")
+    result = _run_driver(
+        repo,
+        """
+hostname() { printf 'hosta'; }
+HOME=/actor
+PATH=/usr/bin:/bin:/ambient/bin
+prepush_developer_shell_path /trusted/uv
+""",
     )
+    assert result.returncode == 0, result.stderr
+    entries = result.stdout.strip().split(":")
+
+    assert entries == [
+        "/trusted",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/actor/.local/bin",
+        "/home/linuxbrew/.linuxbrew/bin",
+        "/snap/bin",
+        "/actor/.cargo/bin",
+        "/owner/tools",
+        "/usr/bin",
+        "/bin",
+        "/ambient/bin",
+    ]
 
 
-def test_the_local_leg_path_never_contributes_an_empty_entry() -> None:
+def test_the_local_leg_path_never_contributes_an_empty_entry(
+    tmp_path: Path,
+) -> None:
     """An empty PATH element is `.` to execvp, so a missing `uv` must drop the
     entry rather than leave a bare separator -- otherwise the fix for a false
     red would put the repo working directory on the PATH of every governed
     suite run."""
-    lib = LIB.read_text(encoding="utf-8")
-    start = lib.index("prepush_developer_shell_path() {")
-    body = lib[start : lib.index("\n}", start)]
-    assert 'uvdir="$(dirname "$uvbin"):"' in body
-    assert 'uvdir=""' in body, "uvdir must default to empty, contributing no entry"
-    assert 'rowdir="$(dirname "$rowuv"):"' in body
-    assert 'rowdir=""' in body, "rowdir must default to empty, contributing no entry"
+    repo = _repo_with_table(tmp_path, _SYNTHETIC_TABLE, name="path-empty")
+    result = _run_driver(
+        repo,
+        """
+hostname() { printf 'missing-host'; }
+HOME=
+PATH=
+prepush_developer_shell_path ''
+""",
+    )
+    assert result.returncode == 0, result.stderr
+    entries = result.stdout.strip().split(":")
+    assert "" not in entries
+    assert entries == [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/home/linuxbrew/.linuxbrew/bin",
+        "/snap/bin",
+    ]
 
 
 def test_the_local_leg_uses_the_table_uv_dir_not_only_the_actors_home() -> None:
@@ -1863,6 +1860,10 @@ def test_the_local_leg_uses_the_table_uv_dir_not_only_the_actors_home() -> None:
     assert "prepush_local_row_uv" in body, (
         "the local PATH must include the committed table's uv directory for "
         "this host, not only the invoking actor's $HOME"
+    )
+    assert "PREPUSH_LC_HOST" not in body, (
+        "the local PATH helper must use the actual local hostname, not a "
+        "placement-target env value inherited from another leg"
     )
     # An absolute path is the only shape accepted: a relative uv_abs_path would
     # put a relative directory on the PATH of every governed suite run.

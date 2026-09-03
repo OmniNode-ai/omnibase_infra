@@ -721,7 +721,7 @@ prepush_heavy_local_policy() {
       capacity | identity) ;;
       *) continue ;;
     esac
-    if [ "$(prepush_row_hostname "$row")" = "$lc_host" ]; then
+    if [ "$(prepush_row_hostname "$row" | sed 's/[.].*$//')" = "$lc_host" ]; then
       v="$(prepush_field "$row" 13)"
       case "$v" in
         prefer_remote) printf 'prefer_remote' ;;
@@ -759,7 +759,7 @@ prepush_local_row_uv() {
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     [ "$(prepush_field "$row" 2)" = "capacity" ] || continue
-    if [ "$(prepush_row_hostname "$row")" = "$lc_host" ]; then
+    if [ "$(prepush_row_hostname "$row" | sed 's/[.].*$//')" = "$lc_host" ]; then
       uv="$(prepush_field "$row" 6)"
       case "$uv" in
         /*)
@@ -940,33 +940,64 @@ PREPUSH_REACH_CONNECT_TIMEOUT=4
 # never shadow a tool that already resolves. `${PATH}` stays last, so nothing
 # already on the caller's PATH is dropped.
 #
+# prepush_path_append PATH DIR -- append DIR to PATH when DIR is an absolute,
+# non-empty directory. Relative or empty entries are omitted because both would
+# put caller-controlled working-directory semantics into a governed test run.
+prepush_path_append() {
+  local current dir
+  current="$1"; dir="$2"
+  case "$dir" in
+    /*) ;;
+    *) printf '%s' "$current"; return 0 ;;
+  esac
+  [ -n "$current" ] || { printf '%s' "$dir"; return 0; }
+  printf '%s:%s' "$current" "$dir"
+}
+
 # prepush_developer_shell_path [UV_BIN] -- print that PATH. UV_BIN defaults to
 # whatever `uv` resolves to now; when it resolves to nothing the entry is
 # omitted rather than contributing an empty path element (an empty element is
 # `.` to execvp, which would put the repo working directory on PATH). The
-# committed table's uv directory for this host is added alongside it, because
-# `$HOME` is the wrong answer for a NON-OWNER actor: on h201 the row declares
-# `/home/jonah/.local/bin/uv` and `shellcheck` lives beside it, while a
-# collaborator's `${HOME}/.local/bin` holds neither.
+# committed table's uv directory for this host is added as a fallback, after
+# measured/system entries, because `$HOME` is the wrong answer for a NON-OWNER
+# actor: on h201 the row declares `/home/jonah/.local/bin/uv` and `shellcheck`
+# lives beside it, while a collaborator's `${HOME}/.local/bin` holds neither.
 prepush_developer_shell_path() {
-  local uvbin uvdir lc rowuv rowdir
+  local uvbin uvdir lc rowuv rowdir out
   uvbin="${1:-}"
   [ -n "$uvbin" ] || uvbin="$(command -v uv 2> /dev/null || true)"
   uvdir=""
-  [ -n "$uvbin" ] && uvdir="$(dirname "$uvbin"):"
+  [ -n "$uvbin" ] && uvdir="${uvbin%/*}"
   # The committed table's uv directory for THIS host, which is the local
   # analogue of the remote leg's `$(dirname "$UV")` and the only entry that
   # covers a NON-OWNER actor: their `$HOME` is not where the host's tooling was
   # provisioned. Absent for a host with no capacity row, which contributes
   # nothing rather than an empty element.
   rowdir=""
-  lc="${PREPUSH_LC_HOST:-}"
-  [ -n "$lc" ] || lc="$(hostname -s 2> /dev/null | tr '[:upper:]' '[:lower:]')"
+  lc="$(hostname -s 2> /dev/null | sed 's/[.].*$//' | tr '[:upper:]' '[:lower:]')"
   if [ -n "$lc" ]; then
     rowuv="$(prepush_local_row_uv "$lc" 2> /dev/null || true)"
-    [ -n "$rowuv" ] && rowdir="$(dirname "$rowuv"):"
+    [ -n "$rowuv" ] && rowdir="${rowuv%/*}"
   fi
-  printf '%s' "${uvdir}${rowdir}/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:/home/linuxbrew/.linuxbrew/bin:/snap/bin:${HOME:-}/.cargo/bin:${PATH}"
+  out=""
+  out="$(prepush_path_append "$out" "$uvdir")"
+  out="$(prepush_path_append "$out" "/opt/homebrew/bin")"
+  out="$(prepush_path_append "$out" "/usr/local/bin")"
+  out="$(prepush_path_append "$out" "/usr/bin")"
+  out="$(prepush_path_append "$out" "/bin")"
+  out="$(prepush_path_append "$out" "/usr/sbin")"
+  out="$(prepush_path_append "$out" "/sbin")"
+  if [ -n "${HOME:-}" ]; then
+    out="$(prepush_path_append "$out" "${HOME}/.local/bin")"
+  fi
+  out="$(prepush_path_append "$out" "/home/linuxbrew/.linuxbrew/bin")"
+  out="$(prepush_path_append "$out" "/snap/bin")"
+  if [ -n "${HOME:-}" ]; then
+    out="$(prepush_path_append "$out" "${HOME}/.cargo/bin")"
+  fi
+  out="$(prepush_path_append "$out" "$rowdir")"
+  [ -n "${PATH:-}" ] && out="${out}:${PATH}"
+  printf '%s' "$out"
 }
 
 # prepush_remote_reachability LC_HOST REPO -- how many capacity rows THIS ACTOR
