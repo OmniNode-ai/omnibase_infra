@@ -61,7 +61,9 @@ def _load_seam() -> JSONDict:
 def _extract_create_table_body(sql: str, table_name: str) -> str:
     """Return the raw column-list text between the outer CREATE TABLE parens."""
     pattern = re.compile(
-        rf"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?{re.escape(table_name)}\s*\(",
+        rf"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+        rf'(?:(?:"?[A-Za-z_][A-Za-z0-9_]*"?\.)?)'
+        rf"{re.escape(table_name)}\s*\(",
         re.IGNORECASE,
     )
     match = pattern.search(sql)

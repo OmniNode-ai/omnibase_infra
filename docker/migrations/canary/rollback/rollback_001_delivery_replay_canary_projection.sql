@@ -20,8 +20,8 @@
 -- =============================================================================
 
 DROP TRIGGER IF EXISTS trg_delivery_replay_canary_projection_updated_at
-    ON delivery_replay_canary_projection;
+    ON omninode_internal.delivery_replay_canary_projection;
 
-DROP FUNCTION IF EXISTS refresh_delivery_replay_canary_projection_updated_at();
+DROP FUNCTION IF EXISTS omninode_internal.refresh_delivery_replay_canary_projection_updated_at();
 
-DROP TABLE IF EXISTS delivery_replay_canary_projection;
+DROP TABLE IF EXISTS omninode_internal.delivery_replay_canary_projection;
