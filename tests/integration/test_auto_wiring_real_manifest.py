@@ -19,13 +19,17 @@ the kind of breakage that OMN-8735 introduced and that must never reach prod aga
 
 from __future__ import annotations
 
+import importlib
+import inspect
 from pathlib import Path
-from unittest.mock import MagicMock
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models import (
@@ -40,10 +44,14 @@ from omnibase_infra.runtime.auto_wiring.models import (
 from omnibase_infra.runtime.auto_wiring.models.model_discovery_error import (
     ModelDiscoveryError,
 )
-from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.message_dispatch_engine import (
+    DispatcherFunc,
+    MessageDispatchEngine,
+)
 from omnibase_infra.runtime.service_intent_routing_loader import (
     load_intent_routing_table,
 )
+from omnibase_infra.runtime.service_kernel import _build_runtime_handler_dependencies
 
 _KNOWN_DELETED_OCC_STUBS = {
     "node_contract_dependency_compute",
@@ -76,6 +84,62 @@ class _StubResultApplier:
 
     async def apply(self, *args: object, correlation_id: UUID | None = None) -> None:
         return None
+
+
+class _PoolSentinel:
+    """Offline stand-in for a pool resolved by the runtime dependency map."""
+
+
+async def _noop_savings_correlation_publisher(
+    event_type: str,
+    payload: object,
+    topic: str | None,
+    correlation_id: object,
+    **kwargs: object,
+) -> bool:
+    """Keep the real kernel dependency builder offline for this gate."""
+    return True
+
+
+def _handler_requires_pool(handler_cls: type) -> bool:
+    """Return whether a handler has a required concrete ``pool`` parameter."""
+    try:
+        parameter = inspect.signature(handler_cls).parameters.get("pool")
+    except (TypeError, ValueError):  # pragma: no cover - uninspectable handler
+        return False
+    return (
+        parameter is not None
+        and parameter.default is inspect.Parameter.empty
+        and parameter.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    )
+
+
+def _pool_taking_contracts() -> list[ModelDiscoveredContract]:
+    """Discover every real-manifest contract with a required pool handler."""
+    selected: list[ModelDiscoveredContract] = []
+    for contract in discover_contracts().contracts:
+        if contract.handler_routing is None:
+            continue
+        for entry in contract.handler_routing.handlers:
+            module = importlib.import_module(entry.handler.module)
+            handler_cls = getattr(module, entry.handler.name)
+            if _handler_requires_pool(handler_cls):
+                selected.append(contract)
+                break
+    return selected
+
+
+def _strict_pool_dependencies(
+    *,
+    savings_correlation_pool: object | None,
+) -> dict[str, dict[str, object]] | None:
+    """Build the same explicit dependencies the runtime passes to wiring."""
+    return _build_runtime_handler_dependencies(
+        _PoolSentinel(),
+        savings_correlation_pool=savings_correlation_pool,
+        savings_correlation_publisher=_noop_savings_correlation_publisher,
+    )
 
 
 def _actionable_manifest_errors(
@@ -122,10 +186,10 @@ def test_real_manifest_discovery_has_no_errors() -> None:
 async def test_real_manifest_wiring_has_no_failures() -> None:
     """wire_from_manifest() against the real onex.nodes manifest must produce zero failures.
 
-    This is the wiring-phase gate: every handler module must be importable and
-    every handler class must be instantiable with no constructor arguments.  A
-    failure here means a handler that was working before has broken — exactly the
-    OMN-8735 regression pattern (14 handlers silently broke without this gate).
+    This is the non-strict wiring-phase gate: every handler module must be
+    importable and the real manifest must produce no unexpected failures. A
+    separate strict pool-dependency gate below exercises constructor resolution
+    with the runtime's actual explicit-dependency map.
 
     OMN-14516: raw audit/projection consumers are FAILED (not SKIPPED) when they
     have no result applier. The kernel DERIVES an applier for every such consumer
@@ -134,8 +198,8 @@ async def test_real_manifest_wiring_has_no_failures() -> None:
     set. The remaining failures must be EXACTLY the shrink-only, ticketed
     ``_KNOWN_UNWIRED_RAW_PROJECTIONS`` set — anything else is a real regression.
 
-    The dispatch engine is mocked to avoid Kafka/DB dependencies; event_bus=None
-    skips topic subscriptions so the test runs fully offline.
+    A real dispatch engine and container avoid mock auto-attribute resolution;
+    event_bus=None skips topic subscriptions so the test runs fully offline.
     """
     manifest = discover_contracts()
 
@@ -148,13 +212,11 @@ async def test_real_manifest_wiring_has_no_failures() -> None:
         if load_intent_routing_table(Path(contract.contract_path))
     }
 
-    dispatch_engine = MagicMock()
-    dispatch_engine.is_frozen = False
-
     report = await wire_from_manifest(
         manifest=manifest,
-        dispatch_engine=dispatch_engine,
+        dispatch_engine=MessageDispatchEngine(),
         event_bus=None,
+        container=ModelONEXContainer(),
         subscribe_immediately=False,
         result_appliers_by_contract=derived_appliers,
     )
@@ -189,6 +251,66 @@ async def test_real_manifest_wiring_has_no_failures() -> None:
     assert not error_results, "ModelOnexError found in wiring results:\n" + "\n".join(
         f"  {r.contract_name}: {r.reason}" for r in error_results
     )
+
+
+@pytest.mark.integration
+def test_real_manifest_declares_pool_taking_handlers() -> None:
+    """The strict constructor-dependency subject set must not be empty."""
+    names = {contract.name for contract in _pool_taking_contracts()}
+    assert names, (
+        "No discovered contract declares a handler requiring `pool`; discovery "
+        "is broken or the strict constructor-dependency gate is vacuous."
+    )
+    assert "node_savings_estimation_compute" in names, (
+        "The OMN-17510 regression contract left the pool-taking subject set: "
+        f"{sorted(names)}"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pool_taking_handlers_resolve_under_strict_real_manifest_wiring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every discovered required-pool handler resolves under strict wiring."""
+    monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
+    report = await wire_from_manifest(
+        manifest=ModelAutoWiringManifest(contracts=_pool_taking_contracts()),
+        dispatch_engine=MessageDispatchEngine(),
+        event_bus=None,
+        container=ModelONEXContainer(),
+        subscribe_immediately=False,
+        materialized_explicit_dependencies=_strict_pool_dependencies(
+            savings_correlation_pool=_PoolSentinel()
+        ),
+    )
+
+    failed = [
+        result for result in report.results if str(result.outcome).endswith("FAILED")
+    ]
+    assert not failed, "\n".join(
+        f"{result.contract_name}: {result.reason}" for result in failed
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_strict_pool_gate_is_red_without_the_application_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deleting the runtime pool binding reproduces the OMN-17510 TypeError."""
+    monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
+    with pytest.raises(TypeError, match=r"HandlerSavingsCorrelation.*\['pool'\]"):
+        await wire_from_manifest(
+            manifest=ModelAutoWiringManifest(contracts=_pool_taking_contracts()),
+            dispatch_engine=MessageDispatchEngine(),
+            event_bus=None,
+            container=ModelONEXContainer(),
+            subscribe_immediately=False,
+            materialized_explicit_dependencies=_strict_pool_dependencies(
+                savings_correlation_pool=None
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -351,9 +473,13 @@ async def test_real_manifest_wiring_preserves_registered_envelope_shaped_input_m
     assert len(probe_result.dispatchers_registered) == 1
 
     dispatcher_id = probe_result.dispatchers_registered[0]
-    dispatcher = engine._dispatchers[dispatcher_id].dispatcher
+    dispatcher = cast("DispatcherFunc", engine._dispatchers[dispatcher_id].dispatcher)
+    dispatch_result = dispatcher(
+        ModelEventEnvelope[object].model_validate(_omn16050_published_bytes())
+    )
+    assert inspect.isawaitable(dispatch_result)
 
-    await dispatcher(_omn16050_published_bytes())
+    await dispatch_result
 
     assert len(HandlerOmn16050EmitProbe.received) == 1, (
         "the wired dispatcher did not deliver to the handler — pre-fix this "
