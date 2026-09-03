@@ -33,6 +33,43 @@ REQUIRED_RUNTIME_SERVICES = {
 _BIFROST_CONTRACT_PATH = "/app/data/delegation/bifrost_delegation.yaml"
 _BIFROST_OVERLAY_TARGET = "/app/config/delegation/dev.bifrost.yaml"
 _BIFROST_OVERLAY_SOURCE = REPO_ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
+# OMN-17562: the standalone projection writers, mirrored onto the PROOF lane.
+#
+# The stability lane is where the `stability-proven` premise of every live
+# prod-promotion grant is resolved from (OMN-15243), and until this change it
+# ran ZERO writers while the throwaway dev lane ran two — the proof lane weaker
+# than the mutable one, which inverts what the two lanes are for. The shared
+# kernel subscribes each of these contracts' topics and its dispatch callback
+# returns before any handler runs (OMN-15905 / OMN-16874), so on a lane with no
+# writer process the events are consumed, acked and destroyed.
+#
+# Service name -> the runner module its `__main__` block starts. Held here and
+# in tests/integration/infra/test_dev_runtime_compose_render.py per lane;
+# tests/ci/test_lane_projection_writer_coverage_omn17562.py is what stops the
+# two lanes' lists from drifting apart or away from the omnimarket contracts.
+_WRITER_MODULES = {
+    "projection-tenant-registry-writer": (
+        "omnimarket.nodes.node_projection_tenant_registry.handlers"
+        ".handler_tenant_registry_projection"
+    ),
+    "projection-delegation-writer": (
+        "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation"
+    ),
+    "projection-registration-writer": (
+        "omnimarket.nodes.node_projection_registration.handlers.handler_registration"
+    ),
+    "projection-savings-writer": (
+        "omnimarket.nodes.node_projection_savings.handlers.handler_savings"
+    ),
+    "projection-tenant-credentials-writer": (
+        "omnimarket.nodes.node_projection_tenant_credentials.handlers"
+        ".handler_tenant_credentials_projection"
+    ),
+    "projection-live-events-writer": (
+        "omnimarket.nodes.node_projection_live_events.handlers.handler_live_events"
+    ),
+}
+WRITER_SERVICES = frozenset(_WRITER_MODULES)
 EXPECTED_RENDERED_SERVICES = {
     "postgres",
     "redpanda",
@@ -44,6 +81,7 @@ EXPECTED_RENDERED_SERVICES = {
     "keycloak",
     "projection-api",
     *REQUIRED_RUNTIME_SERVICES,
+    *WRITER_SERVICES,
 }
 OUT_OF_LANE_SERVICES = {
     "agent-actions-consumer",
@@ -68,6 +106,11 @@ EXPECTED_PUBLISHED_PORTS = {
     "migration-gate": set(),
     "redpanda-partition-cap": set(),
     "keycloak": {"38080"},
+    # Every writer publishes NOTHING. `PROJECTION_RUNNER_HEALTH_PORT` is
+    # container-internal: the service's own healthcheck curls localhost, and
+    # publishing it would put six processes with no host-side reader into the
+    # lane port map, where a future lane would have to route around them.
+    **{name: set() for name in WRITER_SERVICES},
 }
 PRODUCTION_PUBLISHED_PORTS = {
     "5436",
@@ -298,6 +341,91 @@ def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
 
     assert rendered_services == EXPECTED_RENDERED_SERVICES
     assert rendered_services.isdisjoint(OUT_OF_LANE_SERVICES)
+
+
+@pytest.mark.integration
+def test_stability_lane_renders_the_standalone_projection_writers() -> None:
+    """OMN-17562: the proof lane runs a real write path, not just the dev lane.
+
+    Each service must invoke the runner module's own ``__main__`` entrypoint and
+    hold its own consumer group. A command that started the kernel instead would
+    reproduce the defect exactly — the process would come up healthy, join the
+    group, and dispatch nothing. A SHARED group is worse than no writer at all:
+    the topic's partitions would be split between two processes that project
+    different relations, so each would silently drop whatever the other was
+    assigned, and it would look like it was working.
+    """
+    services = cast("dict[str, Any]", _compose_config_json()["services"])
+
+    groups: list[str] = []
+    for name, module in sorted(_WRITER_MODULES.items()):
+        assert name in services, (
+            f"the stability-test lane must declare {name!r}: without it the "
+            "shared kernel subscribes this projection's topics, commits every "
+            "offset, and writes nothing (OMN-17562)"
+        )
+        command = [str(part) for part in services[name]["command"]]
+        assert command[:3] == ["python", "-m", module], (
+            f"{name} must run {module} as a module entrypoint; got {command!r}"
+        )
+        group = services[name]["environment"]["KAFKA_CONSUMER_GROUP"]
+        assert group, (
+            f"{name} has no KAFKA_CONSUMER_GROUP, so it falls back to "
+            "BaseProjectionRunner's DEFAULT_GROUP_ID, which every writer shares"
+        )
+        assert group.startswith("stability-test."), (
+            f"{name} joins {group!r}. A lane-agnostic group name lets this lane's "
+            "writer and another lane's answer to the same identity the moment "
+            "two lanes ever share a broker."
+        )
+        groups.append(group)
+
+    assert len(set(groups)) == len(groups), (
+        f"each standalone writer needs its own consumer group; got {groups!r}"
+    )
+
+
+@pytest.mark.integration
+def test_stability_writers_use_the_lane_base_analytics_dsn_and_no_new_variable() -> (
+    None
+):
+    """Exactly one DB variable per writer, and it is the one this lane already has.
+
+    ``BaseProjectionRunner`` resolves its DSN through
+    ``ModelProjectionRuntimeBinding.from_legacy_settings()``, which prefers
+    ``OMNIDASH_ANALYTICS_DB_URL``; ``bind_projection_database_url()`` is only
+    called on the in-process dispatch path, which by construction never runs for
+    these. So one variable is the whole credential.
+
+    The dev lane spells that DSN with ``ROLE_OMNIDASH_PASSWORD`` (OMN-15363's
+    non-BYPASSRLS ``role_omnidash`` identity). That variable does not exist on
+    this lane, and introducing it here would be a NEW credential variable —
+    forbidden while OMN-17556 is moving this whole surface to store-resolved
+    ``secret_ref`` values. These services therefore carry the form this lane
+    already inherits from ``docker-compose.infra.yml``, and nothing else.
+    """
+    services = cast("dict[str, Any]", _compose_config_json()["services"])
+
+    for name in sorted(WRITER_SERVICES):
+        environment = cast("dict[str, Any]", services[name]["environment"])
+        db_keys = sorted(key for key in environment if key.endswith("_DB_URL"))
+        assert db_keys == ["OMNIDASH_ANALYTICS_DB_URL"], (
+            f"{name} declares {db_keys!r}. A standalone writer needs exactly one "
+            "DSN — the analytics one it projects into. Any second DB variable is "
+            "an unresolved binding this process never reads."
+        )
+        assert "omnidash_analytics" in environment["OMNIDASH_ANALYTICS_DB_URL"]
+        forbidden = sorted(
+            key
+            for key in environment
+            if key in {"ROLE_OMNIDASH_PASSWORD", "ONEX_TENANT_DB_URL"}
+        )
+        assert not forbidden, (
+            f"{name} introduces {forbidden!r} on the stability lane. Neither "
+            "exists here today; adding one is a new credential variable, which "
+            "the OMN-17562 ruling forbids while OMN-17556 lands store-resolved "
+            "credentials."
+        )
 
 
 @pytest.mark.integration

@@ -52,6 +52,41 @@ x-omninode-contract-overlay:
 # run the auto-wiring kernel, so the flag would be inert there.
 x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
   ONEX_WIRING_STRICT_MODE: "1"
+# =============================================================================
+# STANDALONE PROJECTION WRITER CONFIG (OMN-17562)
+# =============================================================================
+# YAML anchors do NOT cross compose files, so the writer services at the bottom
+# of this file cannot reference `x-logging-defaults` or `x-runtime-env` in
+# docker-compose.infra.yml. Same values, declared locally -- the same reason
+# docker-compose.dev-lane.yml carries its own pair.
+#
+# ONE DATABASE VARIABLE, AND IT IS THE ONE THIS LANE ALREADY HAS
+# --------------------------------------------------------------
+# `BaseProjectionRunner` resolves its DSN through
+# `ModelProjectionRuntimeBinding.from_legacy_settings()`, which prefers
+# `OMNIDASH_ANALYTICS_DB_URL`. It is never handed the topology-resolved binding:
+# `bind_projection_database_url()` is called only on the in-process dispatch
+# path, and by construction the runtime does not dispatch these. So one variable
+# is the entire credential -- no topology binding, no secret-resolver config.
+#
+# The value is byte-identical to the form this lane already inherits from
+# docker-compose.infra.yml, and it keeps the `${POSTGRES_USER` identity that
+# OMN-15363's `test_no_other_lane_is_repointed` requires of every non-dev
+# overlay. The DEV lane spells the same variable with `ROLE_OMNIDASH_PASSWORD`
+# instead -- its own non-BYPASSRLS application-role identity, deliberately
+# scoped to the one overlay that repoints it and named nowhere else, this file
+# included. That variable does not exist on this lane and introducing it here
+# would be a NEW credential variable on top of repointing a lane this ticket
+# holds no grant for. OMN-17556 is moving this entire surface to a typed
+# `secret_ref` resolved from the store; these services adopt whatever it lands,
+# and until then they must not add a variable it would have to remove.
+x-stability-test-logging: &stability_test_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+x-stability-test-analytics-env: &stability_test_analytics_env
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -440,6 +475,400 @@ services:
     profiles: !override ["stability-test-disabled"]
   autoheal:
     profiles: !override ["stability-test-disabled"]
+  # ===========================================================================
+  # STANDALONE PROJECTION WRITERS (OMN-17562)
+  # ===========================================================================
+  # The proof lane's write path. Until this change the stability lane ran ZERO
+  # standalone writers while the throwaway dev lane ran two -- the lane that
+  # `stability-proven` is resolved from for every live prod-promotion grant
+  # (OMN-15243) was the weaker of the two, which inverts what the lanes are for.
+  #
+  # THE DEFECT
+  # ----------
+  # A handler with the `BaseProjectionRunner` shape is deliberately NOT
+  # dispatched by the shared kernel (OMN-15905 / OMN-16874): a runner owns its
+  # own pool and its own consume loop, so the sanctioned way to run it is a
+  # dedicated process. The kernel still SUBSCRIBES its topics, so on a lane with
+  # no writer the consumer joins, takes every message, and commits every offset
+  # while the callback returns before any handler runs: consume -> ack ->
+  # nothing written -> no DLQ record -> no terminal event -> no ERROR log.
+  # A committed offset on a topic no process re-reads cannot be backfilled by
+  # deploying the writer later, which is why these land now.
+  #
+  # Measured on this lane 2026-09-03T01:08Z, before this change:
+  #   projection_write_path | DEGRADED | 15/37 declared projection(s) are
+  #   subscribed here but dispatch NOTHING in this process
+  # byte-identical to the dev lane's own detail string.
+  #
+  # SIX, AND WHICH SIX
+  # ------------------
+  # Exactly the contracts with a checked-in writer Deployment under
+  # `omninode_infra` `k8s/onex-dev/runtime/` on origin/dev -- a runner already
+  # proven to run as its own process. `projection_pattern_learning` and
+  # `projection_routing_decision` are deliberately absent: omninode_infra#1147
+  # removed their Deployments on 2026-09-02 as a prohibited rollout direction,
+  # and their real blocker is a store-resolved credential (OMN-17557 /
+  # OMN-17556), not a missing container. Four further runner-shaped contracts
+  # were ruled out of the served set entirely and the kernel stops subscribing
+  # them instead (omnibase_infra#3156).
+  # tests/ci/test_lane_projection_writer_coverage_omn17562.py holds both sets
+  # frozen and fails if this file drifts from either.
+  #
+  # NO `autoheal=true` LABEL, UNLIKE THE DEV LANE'S COPIES
+  # -----------------------------------------------------
+  # `autoheal` is `profiles: !override ["stability-test-disabled"]` on this lane
+  # -- there is no autoheal container here to act on the label. Carrying it
+  # would be a claim this lane does not honour.
+  #
+  # MINIMAL BY CONSTRUCTION
+  # -----------------------
+  # A `BaseProjectionRunner` subclass is a bare Kafka consumer with a DB pool.
+  # No HTTP surface beyond its own readiness server, no Bifrost rendering, no
+  # delegation routing, no contract discovery, no secret resolver -- so none of
+  # the runtime kernel's env is wired here, and `ONEX_WIRING_STRICT_MODE` is
+  # deliberately NOT bound: these processes never run the auto-wiring kernel, so
+  # the flag would be inert, exactly as it is on projection-api.
+  #
+  # `KAFKA_ENVIRONMENT` is omitted here for the same reason, even though every
+  # other service on this lane carries it. It is read by
+  # `service_kernel.py` as the event-bus environment/topic-prefix authority, and
+  # a `BaseProjectionRunner` never reaches that code: `run()` constructs an
+  # `AIOKafkaConsumer(*self.topics, ...)` on the contract's topic names verbatim.
+  # Setting it would be an inert variable that reads as configuration, and the
+  # dev lane's writers -- the pattern these copy -- do not carry it either. The
+  # OMN-17562 ruling is explicit that these services copy the existing writer
+  # shape and add no new variable; `ONEX_ENVIRONMENT` is kept because the dev
+  # writers do carry it (as `${ONEX_ENVIRONMENT:-local}`), pinned to the lane
+  # value here rather than left to a host default.
+  projection-tenant-registry-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-stability-test-projection-tenant-registry-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_tenant_registry.handlers.handler_tenant_registry_projection
+    environment:
+      !!merge <<: *stability_test_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      # Its OWN consumer group, distinct from the shared kernel's subscription
+      # to the same topic and from every sibling writer's. Two processes reading
+      # one topic under one group would split the partitions between a writer
+      # and a no-op consumer, so half the events would silently never land -- a
+      # worse failure than the one this service fixes, because it would look
+      # like it worked. Canonical {env}.{service}.{node}.{purpose}.{version}
+      # shape, lane-scoped so this lane's writer and another lane's can never
+      # answer to the same identity.
+      KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.tenant-registry-writer.consume.v1"
+      # Opt-in readiness/liveness HTTP server. Container-internal only: the
+      # healthcheck below curls localhost, and publishing a host port would put
+      # this service into the lane port map for no reader.
+      PROJECTION_RUNNER_HEALTH_PORT: "8098"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: stability-test
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8098/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *stability_test_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-tenant-registry-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-17562"
+  projection-delegation-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-stability-test-projection-delegation-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
+    environment:
+      !!merge <<: *stability_test_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.delegation-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8099"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: stability-test
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8099/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *stability_test_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1024M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-delegation-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-17562"
+  projection-registration-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-stability-test-projection-registration-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_registration.handlers.handler_registration
+    environment:
+      !!merge <<: *stability_test_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.registration-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8100"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: stability-test
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *stability_test_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-registration-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-17562"
+  projection-savings-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-stability-test-projection-savings-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_savings.handlers.handler_savings
+    environment:
+      !!merge <<: *stability_test_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.savings-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8101"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: stability-test
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8101/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *stability_test_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-savings-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-17562"
+  projection-tenant-credentials-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-stability-test-projection-tenant-credentials-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection
+    environment:
+      !!merge <<: *stability_test_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.tenant-credentials-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8102"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: stability-test
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8102/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *stability_test_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-tenant-credentials-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-17562"
+  projection-live-events-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-stability-test-projection-live-events-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_live_events.handlers.handler_live_events
+    environment:
+      !!merge <<: *stability_test_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.live-events-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8103"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: stability-test
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8103/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *stability_test_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1024M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-live-events-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-17562"
 volumes:
   postgres_data:
     name: omnibase-infra-stability-test-postgres-data

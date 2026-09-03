@@ -159,6 +159,10 @@ readonly REFRESH_BUILD_SERVICES=(
     "${CORE_SERVICES[@]}"
     projection-tenant-registry-writer
     projection-delegation-writer
+    projection-registration-writer
+    projection-savings-writer
+    projection-tenant-credentials-writer
+    projection-live-events-writer
 )
 readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
 

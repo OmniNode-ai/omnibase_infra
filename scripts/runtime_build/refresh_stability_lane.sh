@@ -179,6 +179,38 @@ readonly COMPOSE_PROJECT="${STABILITY_TEST_COMPOSE_PROJECT}"
 # correct home for them, out of scope for this config-duplication kill.
 readonly REDPANDA_CONTAINER="omnibase-infra-stability-test-redpanda"
 readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
+# OMN-17562: the six standalone projection writers this lane introduces.
+#
+# BUILD SCOPE, NOT VERIFICATION SCOPE. This array is handed to
+# RUNTIME_BUILD_SERVICES_OVERRIDE and nothing else. CORE_SERVICES stays the
+# narrow four because it also drives the health gate, the pre-image-id capture,
+# the rollback anchors and CORE_CONTAINERS, and verify_stability_refresh.py
+# carries its own CORE_SERVICE_NAMES that must stay matched to it. Widening the
+# VERIFICATION surface is a separate change with its own live proof; widening
+# the BUILD surface is what stops the drift, and it is the half provable here.
+# Same split, same reason, as refresh_dev_lane.sh.
+#
+# Without this the writers would be declared in the overlay, censused by
+# lane-manifest.yaml, and NEVER BUILT: this script has always exported a scoped
+# override (to route around the open OMN-14262 BUILD_SOURCE selector mismatch on
+# the four release-only services), and deploy-runtime.sh treats an explicit
+# override as an instruction to touch ONLY the named services. A writer left out
+# keeps running on last-release code behind `restart: unless-stopped`, which
+# reads as healthy -- a slower version of the silent-loss defect these services
+# exist to end, on the lane `stability-proven` is resolved from.
+#
+# The OMN-14262 defect does not reach these: they build from
+# docker/Dockerfile.runtime, the same image the four core services build from,
+# not the release-only selector path that is still broken in workspace mode.
+readonly REFRESH_BUILD_SERVICES=(
+    "${CORE_SERVICES[@]}"
+    projection-tenant-registry-writer
+    projection-delegation-writer
+    projection-registration-writer
+    projection-savings-writer
+    projection-tenant-credentials-writer
+    projection-live-events-writer
+)
 # service -> lane-scoped container_name (docker-compose.stability-test.yml).
 # projection-api's container_name is prefixed "omnimarket-", not "omninode-" --
 # resolve by explicit map, never assume a pattern (OMN-13826-class lesson).
@@ -334,6 +366,7 @@ log "lane            : ${LANE} (compose project ${COMPOSE_PROJECT})"
 log "ref             : ${REF}"
 log "min contracts   : ${MIN_CONTRACTS}"
 log "core services   : ${CORE_SERVICES[*]}"
+log "build scope     : ${REFRESH_BUILD_SERVICES[*]}"
 log "mode            : ${MODE}"
 
 # =============================================================================
@@ -387,7 +420,7 @@ if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no fetch/checkout/build/restart performed. Re-run with --execute."
     log "would run: OMNI_HOME=${OMNI_HOME} OMNIBASE_INFRA_COMPOSE_PROJECT=${COMPOSE_PROJECT} \\"
     log "  BUILD_SOURCE=workspace DEPLOY_REF=${REF} \\"
-    log "  RUNTIME_BUILD_SERVICES_OVERRIDE=\"${CORE_SERVICES[*]}\" \\"
+    log "  RUNTIME_BUILD_SERVICES_OVERRIDE=\"${REFRESH_BUILD_SERVICES[*]}\" \\"
     log "  ${DEPLOY_RUNTIME} --execute --force --restart"
     exit 0
 fi
@@ -477,14 +510,14 @@ log "  omnibase_infra now at ${NEW_INFRA_SHA_SHORT} (full: ${NEW_INFRA_SHA})"
 # =============================================================================
 # 4. Build + restart (scoped to the 4 core services) via deploy-runtime.sh
 # =============================================================================
-log "=== Build + restart (scoped to: ${CORE_SERVICES[*]}) ==="
+log "=== Build + restart (scoped to: ${REFRESH_BUILD_SERVICES[*]}) ==="
 DEPLOY_EXIT=0
 (
     export OMNI_HOME
     export OMNIBASE_INFRA_COMPOSE_PROJECT="${COMPOSE_PROJECT}"
     export BUILD_SOURCE="workspace"
     export DEPLOY_REF="${REF}"
-    export RUNTIME_BUILD_SERVICES_OVERRIDE="${CORE_SERVICES[*]}"
+    export RUNTIME_BUILD_SERVICES_OVERRIDE="${REFRESH_BUILD_SERVICES[*]}"
     bash "${DEPLOY_RUNTIME}" --execute --force --restart
 ) || DEPLOY_EXIT=$?
 
@@ -762,7 +795,7 @@ fi
 PRIOR_REFS_JSON="$(for r in "${ALL_TRACKED_REPOS[@]}"; do printf '%s\t%s\n' "${r}" "${PRIOR_REFS[${r}]}"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')"
 NEW_REFS_JSON="$(for r in "${ALL_TRACKED_REPOS[@]}"; do printf '%s\t%s\n' "${r}" "${NEW_REFS[${r}]:-${PRIOR_REFS[${r}]}}"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')"
 ANCESTRY_COMMANDS_JSON="$(printf '%s\n' "${ANCESTRY_COMMANDS[@]}" | jq -Rn '[inputs]')"
-BUILD_SCOPE_JSON="$(printf '%s\n' "${CORE_SERVICES[@]}" | jq -Rn '[inputs]')"
+BUILD_SCOPE_JSON="$(printf '%s\n' "${REFRESH_BUILD_SERVICES[@]}" | jq -Rn '[inputs]')"
 ROLLBACK_GATE_JSON="null"
 if [[ -n "${GATE2_JSON}" && -f "${GATE2_JSON}" ]]; then
     ROLLBACK_GATE_JSON="$(cat "${GATE2_JSON}")"
