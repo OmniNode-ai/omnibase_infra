@@ -339,6 +339,7 @@ from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_core.models.projectors.model_projection_intent import (
@@ -351,6 +352,7 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
         ProtocolPatternBBrokerTransport,
     )
+    from omnibase_infra.runtime.secret_resolver import SecretResolver
     from omnibase_infra.runtime.service_terminal_event_consumer import (
         TerminalEventConsumer,
     )
@@ -2078,13 +2080,31 @@ _DB_URL_ENV_MAP: dict[str, str] = {
 
 @dataclass(frozen=True)
 class ProjectionDatabaseBindingTarget:
-    """One topology-declared workload identity and its secret-free DSN key."""
+    """One topology-declared workload identity and its secret-free DSN carrier.
+
+    Exactly one of ``dsn_env`` / ``secret_ref`` is set, mirroring the
+    exactly-one-carrier invariant ``ModelDeploymentTopologyDatabaseBinding``
+    enforces at topology-load time (OMN-17556). Neither field ever holds a DSN
+    *value*: ``dsn_env`` names a process environment variable, ``secret_ref``
+    names a logical secret the runtime resolves through ``SecretResolver`` at
+    the binding boundary. ``carrier_description`` renders whichever is set for
+    operator-facing errors, so a wiring refusal names the thing that is
+    actually missing instead of a null env var.
+    """
 
     binding_ref: str
     database_ref: str
     physical_database: str
     principal: str
-    dsn_env: str
+    dsn_env: str | None = None
+    secret_ref: str | None = None
+
+    @property
+    def carrier_description(self) -> str:
+        """Name this binding's credential carrier for an operator-facing error."""
+        if self.secret_ref is not None:
+            return f"secret_ref={self.secret_ref}"
+        return f"{self.dsn_env}"
 
 
 @dataclass(frozen=True)
@@ -2157,8 +2177,22 @@ class ProjectionDatabaseTarget:
 
     @property
     def dsn_envs(self) -> tuple[str, ...]:
-        """Return every required DSN environment key in stable order."""
-        return tuple(sorted({binding.dsn_env for binding in self.bindings}))
+        """Return every required DSN environment key in stable order.
+
+        Store-resolved bindings (``secret_ref``) contribute no env key by
+        construction and are omitted (OMN-17556) -- they are not "missing" env
+        vars, they are deliberately not carried in the process environment.
+        Callers wanting every binding regardless of carrier read ``bindings``.
+        """
+        return tuple(
+            sorted(
+                {
+                    binding.dsn_env
+                    for binding in self.bindings
+                    if binding.dsn_env is not None
+                }
+            )
+        )
 
 
 _TENANT_PROJECTION_BINDING = "tenant_projection"
@@ -2198,6 +2232,7 @@ def _resolve_projection_binding(
         physical_database=database.physical_name,
         principal=binding.principal,
         dsn_env=binding.dsn_env,
+        secret_ref=binding.secret_ref,
     )
 
 
@@ -3449,19 +3484,33 @@ async def _route_projection_error_to_dlq(
     frozen=True
 )  # internal-dataclass-ok: wiring-internal sink bundle; event_bus is a non-serializable publishable object
 class ProjectionDispatchSinks:
-    """Bus-side output sinks for a projection dispatch callback.
+    """Wiring-time collaborators for a projection dispatch callback.
 
     Bundles the optional bus, terminal-event topic, and DLQ topics so the
-    callback factory stays within the parameter-count budget while each sink
-    remains an explicitly named, typed field. A frozen dataclass (not a Pydantic
+    callback factory stays within the parameter-count budget while each field
+    remains explicitly named and typed. A frozen dataclass (not a Pydantic
     model) keeps this wiring-internal value object out of the model layer:
     ``event_bus`` is an arbitrary publishable object (in-memory bus, Kafka
     wiring, or a test double), so no schema validation is wanted here.
+
+    OMN-17556 added ``secret_resolver``, which is an INPUT rather than a sink,
+    so the class name is now slightly narrower than its contents -- said
+    plainly rather than papered over. It lives here anyway for the reason this
+    bundle exists at all, stated in the original docstring above: it is the
+    parameter-budget bundle for this one factory, and the alternative was a
+    sixth positional parameter that the ONEX parameter-count gate rejects.
+    Renaming the class would churn ten test modules owned by other tickets for
+    no behavioral gain.
     """
 
     event_bus: object | None = None
     terminal_event: str | None = None
     dlq_topics: tuple[str, ...] = ()
+    # Serves bindings whose credential is store-carried (`secret_ref`). None is
+    # correct and common: a lane whose bindings are all env-carried needs no
+    # store. A store-carried binding wired in a process holding no resolver is
+    # REFUSED by _resolve_binding_dsn, so this default is never load-bearing.
+    secret_resolver: SecretResolver | None = None
 
 
 def _make_undispatched_projection_callback(
@@ -3518,6 +3567,94 @@ def _make_undispatched_projection_callback(
     return _callback
 
 
+def _resolve_binding_dsn(
+    binding: ProjectionDatabaseBindingTarget,
+    secret_resolver: SecretResolver | None,
+) -> str:
+    """Resolve one binding's DSN from whichever carrier the topology declares.
+
+    OMN-17556. The topology declares exactly one carrier per binding and this
+    is the single place either is read -- the *binding boundary*. Neither
+    branch defaults: an unresolvable carrier returns the empty string and the
+    caller raises, naming the binding and its carrier. That preserves the
+    pre-existing fail-closed contract exactly (a blank ``dsn_env`` was already
+    fatal under ``ONEX_WIRING_STRICT_MODE``); it does not soften it for the new
+    carrier, and it does not invent a fallback between the two.
+
+    ``secret_ref`` bindings deliberately have no environment representation.
+    Falling back to ``os.environ`` for one would re-create the exact defect the
+    store carrier exists to remove -- a credential materialized into a
+    container env -- and would let a stale env var silently shadow the store,
+    so a missing resolver is a refusal, never an env read.
+    """
+    if binding.secret_ref is not None:
+        if secret_resolver is None:
+            # Not a soft skip: returning "" routes into the caller's refusal
+            # with the binding named, which is the only honest outcome when a
+            # store-carried binding is wired in a process holding no resolver.
+            logger.error(
+                "Topology binding %r declares secret_ref %r but this process "
+                "wired no secret resolver, so its DSN cannot be resolved at the "
+                "binding boundary",
+                binding.binding_ref,
+                binding.secret_ref,
+            )
+            return ""
+        resolved = secret_resolver.get_secret(binding.secret_ref, required=False)
+        return "" if resolved is None else resolved.get_secret_value()
+    if binding.dsn_env is None:
+        return ""
+    return os.environ.get(binding.dsn_env, "")
+
+
+async def build_topology_secret_resolver(
+    container: object | None,
+) -> SecretResolver | None:
+    """Build the resolver that serves ``secret_ref`` topology bindings.
+
+    OMN-17556. Returns ``None`` when this lane renders no secret-resolver
+    config -- which is correct and common: a process whose bindings all carry
+    ``dsn_env`` needs no store at all, and manufacturing an empty resolver for
+    it would turn a clean "no store here" into a store that answers nothing.
+    A process that *does* wire a ``secret_ref`` binding without a resolver is
+    refused by :func:`_resolve_binding_dsn`, so the ``None`` is never silently
+    load-bearing.
+
+    The Infisical handler is resolved from the container when present, which is
+    what makes ``source_type: infisical`` mappings live; without it the
+    resolver still serves ``env``/``file`` mappings and reports the Infisical
+    miss rather than guessing.
+    """
+    import yaml
+
+    from omnibase_infra.errors import ProtocolConfigurationError
+    from omnibase_infra.runtime.models.model_secret_resolver_config import (
+        ModelSecretResolverConfig,
+    )
+    from omnibase_infra.runtime.runtime_profile import (
+        resolve_secret_resolver_config_path,
+    )
+    from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+    config_path_raw = resolve_secret_resolver_config_path()
+    if not config_path_raw:
+        return None
+    config_path = Path(config_path_raw)
+    try:
+        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config = ModelSecretResolverConfig.model_validate(raw_config)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ProtocolConfigurationError(
+            "Topology binding resolution requires a valid rendered "
+            f"secret-resolver config at {config_path}"
+        ) from exc
+    if container is None:
+        return SecretResolver(config=config)
+    return await SecretResolver.from_container(
+        cast("ModelONEXContainer", container), config
+    )
+
+
 def _make_projection_dispatch_callback(
     handler_instance: object,
     target: ProjectionDatabaseTarget,
@@ -3549,6 +3686,7 @@ def _make_projection_dispatch_callback(
     only when a handler happens to catch it internally.
     """
     sinks = sinks or ProjectionDispatchSinks()
+    secret_resolver = sinks.secret_resolver
     event_bus = sinks.event_bus
     terminal_event = sinks.terminal_event
     dlq_topics = list(sinks.dlq_topics)
@@ -3574,7 +3712,7 @@ def _make_projection_dispatch_callback(
         {}
         if is_projection_runner
         else {
-            binding.binding_ref: os.environ.get(binding.dsn_env, "")
+            binding.binding_ref: _resolve_binding_dsn(binding, secret_resolver)
             for binding in target.bindings
         }
     )
@@ -3587,7 +3725,7 @@ def _make_projection_dispatch_callback(
         raise ValueError(
             "Projection handler requires topology bindings with configured DSNs: "
             + ", ".join(
-                f"{binding.binding_ref}:{binding.dsn_env}"
+                f"{binding.binding_ref}:{binding.carrier_description}"
                 for binding in missing_bindings
             )
         )
@@ -7582,6 +7720,12 @@ async def wire_from_manifest(
 
     # Phase 1: Validate and prepare ALL contracts — no engine/bus side effects yet.
     # Failures are collected; if any exist, we raise before touching anything (OMN-8735).
+    # OMN-17556: built ONCE for the whole manifest, before any contract is
+    # prepared. Per-contract construction would re-read the rendered config and
+    # re-authenticate to the store for every projection, and would make the
+    # store's availability a per-contract accident rather than a lane fact.
+    topology_secret_resolver = await build_topology_secret_resolver(container)
+
     prepared_contracts: list[PreparedContractWiring] = []
     failed_results: list[ModelContractWiringResult] = []
     dispatcher_coverage_failed_gaps: list[str] = []
@@ -7602,6 +7746,7 @@ async def wire_from_manifest(
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
                 topology=topology,
                 catalog_binding_policy=catalog_binding_policy,
+                secret_resolver=topology_secret_resolver,
             )
             prepared_contracts.append(prepared)
         except TypeError:
@@ -8404,6 +8549,7 @@ def _prepare_contract_wiring(
     | None = None,
     topology: ModelDeploymentTopology | None = None,
     catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
+    secret_resolver: SecretResolver | None = None,
 ) -> PreparedContractWiring:
     """Prepare one contract for wiring — NO side effects.
 
@@ -8507,6 +8653,7 @@ def _prepare_contract_wiring(
                 pre_resolved_handlers=pre_resolved_handlers,
                 topology=topology,
                 catalog_binding_policy=catalog_binding_policy,
+                secret_resolver=secret_resolver,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -9211,6 +9358,7 @@ def _prepare_handler_wiring(
     pre_resolved_handlers: dict[str, object] | None = None,
     topology: ModelDeploymentTopology | None = None,
     catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
+    secret_resolver: SecretResolver | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -9562,6 +9710,7 @@ def _prepare_handler_wiring(
                     event_bus=event_bus,
                     terminal_event=projection_terminal_event,
                     dlq_topics=tuple(projection_dlq_topics),
+                    secret_resolver=secret_resolver,
                 ),
                 contract_name=contract.name,
             )
