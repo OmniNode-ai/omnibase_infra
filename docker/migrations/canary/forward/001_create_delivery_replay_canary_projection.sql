@@ -42,6 +42,8 @@
 -- Idempotent: all statements use IF NOT EXISTS / OR REPLACE; safe to re-apply.
 -- =============================================================================
 
+CREATE SCHEMA IF NOT EXISTS omninode_internal;
+
 CREATE TABLE IF NOT EXISTS omninode_internal.delivery_replay_canary_projection (
     -- ModelReplayProjection.correlation_id (UUID | None in the pure-compute
     -- model). The canary readback is *correlation-linked*, so for the landing
