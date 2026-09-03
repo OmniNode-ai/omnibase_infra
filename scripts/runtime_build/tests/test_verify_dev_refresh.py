@@ -10,6 +10,13 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+_SCRIPT_DIR = Path(__file__).resolve().parents[1]
+# The verifier imports its sibling ``health_payload`` module the way it does
+# when executed as a script (``sys.path[0]`` is the script's own directory).
+# ``spec_from_file_location`` does not set that up, so the test must.
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "verify_dev_refresh.py"
 _spec = importlib.util.spec_from_file_location("verify_dev_refresh", _SCRIPT_PATH)
 assert _spec is not None and _spec.loader is not None

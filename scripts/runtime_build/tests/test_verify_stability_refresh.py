@@ -20,6 +20,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+_SCRIPT_DIR = Path(__file__).resolve().parents[1]
+# The verifier imports its sibling ``health_payload`` module the way it does
+# when executed as a script (``sys.path[0]`` is the script's own directory).
+# ``spec_from_file_location`` does not set that up, so the test must.
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "verify_stability_refresh.py"
 _spec = importlib.util.spec_from_file_location("verify_stability_refresh", _SCRIPT_PATH)
 assert _spec is not None and _spec.loader is not None
@@ -182,15 +189,20 @@ def test_revision_mismatch_is_exists_but_wrong_not_silent_pass():
 
 def test_health_ok_status_healthy():
     opener = _opener({"status": "healthy", "details": {"healthy": True}})
-    ok, detail = check_health("http://x/health", opener=opener)
-    assert ok is True
-    assert "healthy" in detail
+    verdict = check_health("http://x/health", opener=opener)
+    assert verdict.ok is True
+    assert verdict.status == "healthy"
+    assert "healthy" in verdict.detail
 
 
-def test_health_not_ok_status_unhealthy():
+def test_health_not_ok_status_degraded():
     opener = _opener({"status": "degraded", "details": {"healthy": False}})
-    ok, _detail = check_health("http://x/health", opener=opener)
-    assert ok is False
+    verdict = check_health("http://x/health", opener=opener)
+    assert verdict.ok is False
+
+
+# The full strict verdict table -- including the payloads that passed before
+# OMN-17563 -- lives in test_health_payload_omn17563.py.
 
 
 def test_cluster_health_ok():
