@@ -259,20 +259,28 @@ class TestLlmEndpointsContract:
             )
 
     def test_live_slots_record_their_probed_served_identity(self) -> None:
-        """OMN-16442: the running slots carry the identities probed 2026-08-28.
+        """The running slots carry their last live-probed identities.
 
         Pinned so a silent hardware/model swap (the exact failure mode behind
         OMN-16419 and OMN-16407) shows up as a red test rather than as silent
         mis-attribution to a model that is not running.
+
+        coder-5090 re-pinned 2026-09-03 (OMN-14379); the other two remain on
+        their 2026-08-28 probe (OMN-16442).
         """
         by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
 
-        # GET .201:8000/v1/models -> id "qwen3.8", max_model_len 122880.
+        # GET .201:8000/v1/models, 2026-09-03T16:07Z -> id "Qwen3.6-35B-A3B",
+        # owned_by "vllm", max_model_len 131072. The SGLang "qwen3.8" backend
+        # this replaces was not running at all: :8000 had no listener until
+        # vllm-gpu0.service was resized off its unstartable 0.92 GPU fraction.
+        # vLLM, unlike SGLang, rejects an unknown model id -- the old pin
+        # "qwen3.8" now returns HTTP 404 against this endpoint.
         coder = by_slot["coder-5090"]
         assert coder["status"] == "running"
         assert coder["endpoint_url"] == "http://192.168.86.201:8000"
-        assert coder["model_hf_id"] == "Qwen/Qwen3.8-27B"
-        assert coder["context_window_budgeted"] == 122880
+        assert coder["model_hf_id"] == "Qwen/Qwen3.6-35B-A3B"
+        assert coder["context_window_budgeted"] == 131072
 
         # GET .201:8002/v1/models -> id "text-embedding-qwen3",
         # artifact Qwen/Qwen3-Embedding-0.6B, 1024-dim output.
