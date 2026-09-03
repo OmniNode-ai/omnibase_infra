@@ -169,7 +169,9 @@ control, since ruling 15 released the registration trio and nothing else.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import math
 import os
 import re
 import shutil
@@ -1516,6 +1518,181 @@ def _runner_env(
     return env
 
 
+# --------------------------------------------------------------------------
+# OMN-17639 — the live runner's budget is MEASURED on the host in front of it.
+# --------------------------------------------------------------------------
+# This helper used to pass a bare ``timeout=180``. That number was never
+# measured and it is not a property of the runner; it is a bet about the host.
+# The bet lost. Both virgin-tree proofs
+# (``test_virgin_database_applies_the_full_real_vendored_tree`` and
+# ``test_virgin_database_still_refuses_a_new_unfenced_force_rls_migration``)
+# raised ``subprocess.TimeoutExpired ... after 180 seconds`` on two consecutive
+# governed pre-push runs (OMN-17549, 2026-09-02, logs push2.log/push3.log),
+# blocking a push whose diff touched neither migrations nor this module.
+#
+# WHY A FIXED WALL CLOCK CANNOT WORK HERE. The shipped runner is a POSIX ``sh``
+# loop that spawns ``psql`` several times per migration file, so its cost is
+# (number of SQL files) x (cost of a psql round trip on this host right now).
+# The second factor is the one a constant cannot see. Measured on this repo's
+# tree against the ephemeral cluster the harness itself starts (arm64 macOS
+# 26.6, 24 logical cores, 1-minute load average ~60-76 -- i.e. the ~3x
+# oversubscription a governed full-suite escalation actually produces):
+#
+#   tree                       SQL files   probe(8 round trips)   _run wall
+#   real_registration_tree             6                2.360 s      18.899 s
+#   real_registration_tree             6                2.616 s       6.238 s
+#   real_registration_tree             6                1.230 s       7.944 s
+#   node_tree                         15                1.145 s      13.612 s
+#   node_tree                         15                0.711 s      15.229 s
+#   node_tree                         15                1.385 s      13.959 s
+#   docker/migrations/forward        239                2.072 s     457.479 s
+#   docker/migrations/forward        239                1.670 s     503.305 s
+#   docker/migrations/forward        239                3.663 s     344.785 s
+#   docker/migrations/forward        239                2.332 s     888.00  s   (*)
+#
+# (*) taken separately, on the same host at 1-minute load average 123 falling
+#     to 100, by a paired probe+run harness outside pytest
+#     (.claude_scratch/omn17639/measure_run.py); rc=0, ending "Sentinel set.
+#     Migration gate will report HEALTHY." Its probe was 10 single round trips,
+#     mean 0.2915 s, restated above as an 8-trip total for one comparable
+#     column. Every other row is from the in-pytest harness at load ~60-76.
+#
+# The four 239-file rows are what the two virgin proofs drive. All four are
+# over the old 180 s bound -- by 2.5x, 2.8x, 1.9x and 4.9x. That is not a flake
+# to be waited out; on a loaded host it is deterministic, which is exactly what
+# the two governed pre-push runs showed. Reproduced live in this branch's own
+# session, at load ~66-80, before the fix:
+#
+#   subprocess.TimeoutExpired: Command '['/bin/sh', '.../run-forward-migrations.sh']'
+#   timed out after 180 seconds
+#     test_virgin_database_applies_the_full_real_vendored_tree           180.03s
+#     test_virgin_database_still_refuses_a_new_unfenced_force_rls_...    180.87s
+#
+# THE MODEL, AND ITS HONEST ACCURACY. The runner's cost factors into (number of
+# SQL files) x (psql round trips it shells out per file) x (what one round trip
+# costs on this host right now). Files are counted at call time; the round trip
+# is probed at call time; only the middle term is committed. Normalising each
+# 239-file row to round trips per file gives:
+#
+#   probe8 2.072 s -> 0.259 s/trip -> 457.479 / (239 x 0.259)  =  7.39
+#   probe8 1.670 s -> 0.209 s/trip -> 503.305 / (239 x 0.209)  = 10.09
+#   probe8 3.663 s -> 0.458 s/trip -> 344.785 / (239 x 0.458)  =  3.15
+#   probe8 2.332 s -> 0.291 s/trip -> 888.00  / (239 x 0.291)  = 12.75
+#
+# Those disagree by 4x, and row three is anti-correlated outright: the SLOWEST
+# probe of the four produced the FASTEST run. So the ratio is NOT a
+# load-invariant property of the runner, and a constant fitted to any single
+# row is another unmeasured number wearing a measurement's clothes -- the first
+# revision of this block committed 7.4 from row one and asserted it to +/-5%,
+# which rows two through four already falsified.
+#
+# What survives the data is weaker and true: the probe bounds the run, it does
+# not predict it. The committed constant is therefore an ENVELOPE over every
+# measured row (12.75, the worst, plus ~10%), and the margin on top absorbs
+# drift between the probe and the end of a run that outlives it. The invariant
+# the tests below enforce is "never optimistic about any row we measured", not
+# "reproduces the row we happened to measure first".
+#
+# The derivation is clamped at BOTH ends. The floor is the old 180 s exactly,
+# so this change cannot make any leg tighter than it already was -- and every
+# small-tree row above lands on it. The ceiling keeps a genuinely hung runner
+# failing in bounded time: past 2400 s the probe is claiming a host slower than
+# anything in the table, and that is a hang, not a load story.
+#
+# Same class of defect as OMN-17239 (test_heavy_lock's fixed 10 s SIGKILL
+# budget) and OMN-14833; same measured-baseline discipline as OMN-15836.
+
+# One trivial round trip per iteration; 8 is enough to average out scheduler
+# noise while costing ~0.5 s idle and ~2 s at the load measured above.
+_BUDGET_PROBE_ROUND_TRIPS = 8
+# Per round trip. A cluster this far gone is not something a bigger migration
+# budget would rescue, so the probe gives up and the floor applies.
+_BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS = 30.0
+# NOT a fitted mean -- an upper envelope over the four measured 239-file rows
+# (worst observed 12.75, plus ~10% so the worst row is bounded rather than
+# merely touched). Named for what it is: the ratio is not load-invariant and
+# must not be re-fitted to a single fresh measurement.
+_PSQL_ROUND_TRIPS_PER_MIGRATION_ENVELOPE = 14.1
+# On top of the envelope: drift between the probe and the end of a run that
+# outlives it, plus per-file cost variance the flat model does not carry
+# (larger SQL bodies, index builds).
+_RUN_BUDGET_MARGIN = 2.0
+# Exactly the pre-OMN-17639 constant: the derivation may only ever widen.
+_RUN_BUDGET_FLOOR_SECONDS = 180.0
+# Above every measured row's derived budget, so no measured row is capped here;
+# past this the probe is describing a hang, not a slow host.
+_RUN_BUDGET_CEILING_SECONDS = 2400.0
+
+
+def _psql_round_trip_seconds(target: PgTarget) -> float | None:
+    """Wall time for ``_BUDGET_PROBE_ROUND_TRIPS`` trivial ``psql`` calls, now.
+
+    Deliberately NOT ``_psql``: that helper is ``check=True`` with no timeout,
+    so a wedged cluster would hang the probe forever and replace a bounded
+    false red with an unbounded one. Returns ``None`` on any failure, which the
+    caller reads as "no measurement" and falls back to the floor.
+    """
+    psql = _find_pg_binary("psql") or "psql"
+    argv = [
+        psql,
+        "-h",
+        target.host,
+        "-p",
+        str(target.port),
+        "-U",
+        target.user,
+        "-d",
+        target.dbname,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-tAc",
+        "SELECT 1",
+    ]
+    start = time.monotonic()
+    for _ in range(_BUDGET_PROBE_ROUND_TRIPS):
+        try:
+            probe = subprocess.run(
+                argv,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=_BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS,
+                env=target.env(),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if probe.returncode != 0:
+            return None
+    return time.monotonic() - start
+
+
+def _sql_file_count(migrations: Path) -> int:
+    """How many SQL files the runner will actually iterate over this tree."""
+    return sum(1 for _ in migrations.rglob("*.sql"))
+
+
+def _runner_budget_seconds(probe_seconds: float | None, sql_files: int) -> float:
+    """Seconds to allow the shipped runner, derived from a live host probe.
+
+    ``probe_seconds`` is the cost of ``_BUDGET_PROBE_ROUND_TRIPS`` psql round
+    trips measured moments ago; ``sql_files`` is the size of the tree. Any
+    degenerate input (no measurement, non-finite, non-positive, empty tree)
+    yields the floor rather than a nonsense budget -- the floor is the old
+    behaviour, so falling back can only ever restore it.
+    """
+    if (
+        probe_seconds is None
+        or not math.isfinite(probe_seconds)
+        or probe_seconds <= 0.0
+        or sql_files <= 0
+    ):
+        return _RUN_BUDGET_FLOOR_SECONDS
+    per_round_trip = probe_seconds / _BUDGET_PROBE_ROUND_TRIPS
+    expected = sql_files * _PSQL_ROUND_TRIPS_PER_MIGRATION_ENVELOPE * per_round_trip
+    budget = expected * _RUN_BUDGET_MARGIN
+    return min(_RUN_BUDGET_CEILING_SECONDS, max(_RUN_BUDGET_FLOOR_SECONDS, budget))
+
+
 def _run(
     runner: Path,
     target: PgTarget,
@@ -1523,13 +1700,312 @@ def _run(
     node_db_name: str,
     lane: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    budget = _runner_budget_seconds(
+        _psql_round_trip_seconds(target), _sql_file_count(migrations)
+    )
     return subprocess.run(
         ["/bin/sh", str(runner)],
         check=False,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=budget,
         env=_runner_env(target, migrations, node_db_name, lane),
+    )
+
+
+# --------------------------------------------------------------------------
+# OMN-17639 — the budget derivation, proved without a database.
+# --------------------------------------------------------------------------
+# Every (probe, files, run) row measured for this ticket, verbatim from the
+# harness logs quoted in the writeup above `_psql_round_trip_seconds`. They are
+# ASSERTED against, not merely cited, so a future re-fit of
+# `_PSQL_ROUND_TRIPS_PER_MIGRATION_ENVELOPE` that stops bounding the runner
+# fails here rather than silently re-arming the false red.
+#
+# probe_seconds is the wall time of `_BUDGET_PROBE_ROUND_TRIPS` round trips, so
+# these are directly `_runner_budget_seconds` inputs — no restating at use.
+_MEASURED_RUNS: tuple[tuple[str, float, int, float], ...] = (
+    ("real_registration_tree rep0", 2.360, 6, 18.899),
+    ("real_registration_tree rep1", 2.616, 6, 6.238),
+    ("real_registration_tree rep2", 1.230, 6, 7.944),
+    ("node_tree rep0", 1.145, 15, 13.612),
+    ("node_tree rep1", 0.711, 15, 15.229),
+    ("node_tree rep2", 1.385, 15, 13.959),
+    ("forward tree rep0 (load ~60-76)", 2.072, 239, 457.479),
+    ("forward tree rep1 (load ~60-76)", 1.670, 239, 503.305),
+    ("forward tree rep2 (load ~60-76)", 3.663, 239, 344.785),
+    ("forward tree, load 123 (paired harness)", 2.332, 239, 888.00),
+)
+_MEASURED_FULL_TREE_SQL_FILES = 239
+
+
+@pytest.mark.unit
+def test_the_committed_envelope_is_never_optimistic_about_a_measured_run() -> None:
+    """The envelope must BOUND every row measured, not fit any one of them.
+
+    The first revision of this block committed 7.4 — the ratio of the first row
+    alone — and asserted it to +/-5%. Rows two through four of the same harness
+    already falsified that, so the assertion here is the weaker true one: for
+    every row, the modelled cost is at least the cost actually observed.
+    """
+    optimistic: list[str] = []
+    for label, probe, files, run in _MEASURED_RUNS:
+        per_round_trip = probe / _BUDGET_PROBE_ROUND_TRIPS
+        modelled = files * _PSQL_ROUND_TRIPS_PER_MIGRATION_ENVELOPE * per_round_trip
+        if modelled < run:
+            optimistic.append(
+                f"{label}: modelled {modelled:.1f}s < measured {run:.1f}s"
+            )
+    assert not optimistic, (
+        "_PSQL_ROUND_TRIPS_PER_MIGRATION_ENVELOPE no longer bounds every "
+        "measured run — it is an envelope, not a fit, so raise it to cover the "
+        "row(s) below rather than widening a tolerance:\n" + "\n".join(optimistic)
+    )
+
+
+@pytest.mark.unit
+def test_every_measured_run_fits_its_derived_budget_with_2x_headroom() -> None:
+    """The regression this ticket exists for, stated as an assertion over the
+    whole corpus rather than one row of it."""
+    tight: list[str] = []
+    for label, probe, files, run in _MEASURED_RUNS:
+        budget = _runner_budget_seconds(probe, files)
+        if budget < run * 2.0:
+            tight.append(f"{label}: budget {budget:.1f}s < 2x measured {run:.1f}s")
+    assert not tight, (
+        "a measured run no longer sits inside its derived budget with 2x "
+        "headroom:\n" + "\n".join(tight)
+    )
+
+
+@pytest.mark.unit
+def test_the_old_constant_failed_every_full_tree_run_that_was_measured() -> None:
+    """Guards against the corpus going vacuous.
+
+    If every measured row ever drops back under 180s, these assertions stop
+    describing a defect and the whole derivation is unmotivated — that should
+    surface as a red test demanding a re-measure, not as quiet decoration.
+    """
+    full_tree = [
+        (label, run)
+        for label, _probe, files, run in _MEASURED_RUNS
+        if files == _MEASURED_FULL_TREE_SQL_FILES
+    ]
+    assert len(full_tree) >= 4, "the full-tree corpus lost rows"
+    for label, run in full_tree:
+        assert run > _RUN_BUDGET_FLOOR_SECONDS, (
+            f"{label} ({run:.1f}s) no longer exceeds the old 180s constant, so "
+            "the corpus no longer demonstrates the defect — re-measure"
+        )
+
+
+@pytest.mark.unit
+def test_the_round_trip_ratio_is_not_load_invariant() -> None:
+    """The finding that forced an envelope instead of a fit, pinned.
+
+    Across the four full-tree rows the implied round-trips-per-file ratio spans
+    more than 3x, and the row with the SLOWEST probe produced the FASTEST run.
+    A future author who re-fits the constant to one fresh measurement should
+    fail here and read the writeup, not ship a tighter number.
+    """
+    ratios = [
+        run / (files * (probe / _BUDGET_PROBE_ROUND_TRIPS))
+        for _label, probe, files, run in _MEASURED_RUNS
+        if files == _MEASURED_FULL_TREE_SQL_FILES
+    ]
+    assert max(ratios) / min(ratios) > 3.0, (
+        "the full-tree rows now agree closely enough that a fitted constant "
+        f"would be defensible ({min(ratios):.2f}..{max(ratios):.2f}) — that is "
+        "a real change in the data, so re-read the writeup before acting on it"
+    )
+    assert max(ratios) < _PSQL_ROUND_TRIPS_PER_MIGRATION_ENVELOPE, (
+        "the envelope must sit strictly above the worst observed ratio "
+        f"({max(ratios):.2f}), otherwise it is a fit wearing an envelope's name"
+    )
+
+
+@pytest.mark.unit
+def test_budget_scales_with_host_slowness() -> None:
+    """Twice as slow a host buys twice the budget — that is the whole point."""
+    files = 100
+    fast = _runner_budget_seconds(2.0, files)
+    slow = _runner_budget_seconds(4.0, files)
+    assert _RUN_BUDGET_FLOOR_SECONDS < fast < slow < _RUN_BUDGET_CEILING_SECONDS, (
+        f"both budgets must land strictly inside the clamps for this to test "
+        f"scaling, got fast={fast} slow={slow}"
+    )
+    assert slow == pytest.approx(fast * 2.0)
+
+
+@pytest.mark.unit
+def test_budget_scales_with_tree_size() -> None:
+    """A tree that grows gets a budget that grows with it.
+
+    The old constant did not: every node migration added to
+    ``docker/migrations/forward`` silently ate margin until there was none.
+    """
+    probe = 2.0
+    small = _runner_budget_seconds(probe, 60)
+    large = _runner_budget_seconds(probe, 120)
+    assert _RUN_BUDGET_FLOOR_SECONDS < small < large < _RUN_BUDGET_CEILING_SECONDS
+    assert large == pytest.approx(small * 2.0)
+
+
+@pytest.mark.unit
+def test_a_fast_host_never_dips_below_the_pre_ticket_constant() -> None:
+    """The derivation may only ever widen. An idle host that models out to a
+    couple of seconds still gets the old 180s, so no leg becomes tighter than
+    it was before this change."""
+    assert _runner_budget_seconds(0.05, 6) == _RUN_BUDGET_FLOOR_SECONDS
+    assert _runner_budget_seconds(0.001, 1) == _RUN_BUDGET_FLOOR_SECONDS
+
+
+@pytest.mark.unit
+def test_an_absurd_probe_is_clamped_so_a_hung_runner_still_fails() -> None:
+    """A derived budget that can run away is a hang that never surfaces."""
+    assert _runner_budget_seconds(100.0, 239) == _RUN_BUDGET_CEILING_SECONDS
+    assert _runner_budget_seconds(1e9, 1) == _RUN_BUDGET_CEILING_SECONDS
+    assert math.isfinite(_RUN_BUDGET_CEILING_SECONDS)
+    assert _RUN_BUDGET_CEILING_SECONDS > _RUN_BUDGET_FLOOR_SECONDS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "probe",
+    [None, 0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+)
+def test_a_degenerate_probe_falls_back_to_the_floor(probe: float | None) -> None:
+    """No measurement is not a licence to invent one. ``None`` (probe failed),
+    zero (impossibly fast — a broken clock), negative, and the non-finite
+    values all resolve to the pre-ticket behaviour rather than to 0, inf, or a
+    ZeroDivisionError."""
+    assert _runner_budget_seconds(probe, 239) == _RUN_BUDGET_FLOOR_SECONDS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("files", [0, -1])
+def test_an_empty_tree_falls_back_to_the_floor(files: int) -> None:
+    assert _runner_budget_seconds(2.0, files) == _RUN_BUDGET_FLOOR_SECONDS
+
+
+@pytest.mark.unit
+def test_the_floor_is_exactly_the_pre_ticket_constant() -> None:
+    """Pinned deliberately: the floor's job is to make this change incapable of
+    regressing any leg, which only holds while it equals the old literal."""
+    assert _RUN_BUDGET_FLOOR_SECONDS == 180.0
+
+
+@pytest.mark.unit
+def test_sql_file_count_sees_nested_node_migrations(tmp_path: Path) -> None:
+    """The count must reach into ``nodes/<node>/`` — that subtree is 150 of the
+    239 files in the real corpus, so a non-recursive count would under-budget
+    the very legs that time out."""
+    (tmp_path / "001_flat.sql").write_text("SELECT 1;\n")
+    node_dir = tmp_path / "nodes" / "node_example"
+    node_dir.mkdir(parents=True)
+    (node_dir / "0000_create.sql").write_text("SELECT 1;\n")
+    (node_dir / "0001_alter.sql").write_text("SELECT 1;\n")
+    (tmp_path / "notes.md").write_text("not sql\n")
+    assert _sql_file_count(tmp_path) == 3
+
+
+@pytest.mark.unit
+def test_the_probe_reports_no_measurement_rather_than_hanging() -> None:
+    """Aimed at a port nothing is listening on. ``_psql`` would have raised
+    ``CalledProcessError`` from ``check=True``; the probe must instead return
+    ``None`` so the caller lands on the floor."""
+    dead = PgTarget(
+        host="127.0.0.1",
+        port=_free_port(),
+        user="postgres",
+        password="postgres",
+        dbname="postgres",
+    )
+    started = time.monotonic()
+    assert _psql_round_trip_seconds(dead) is None
+    assert time.monotonic() - started < _BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS, (
+        "a refused connection must fail fast, not burn the per-round-trip timeout"
+    )
+
+
+@pytest.mark.unit
+def test_no_runner_invocation_carries_a_bare_wall_clock_timeout() -> None:
+    """Ratchet. ``timeout=180`` is one edit away from coming back, and it would
+    come back GREEN — the virgin proofs only fail on a loaded host.
+
+    Parsed rather than grepped, and scoped to every ``subprocess`` call in this
+    module that names the runner rather than to ``_run``'s source text alone:
+    the defect is "a runner invocation carries a wall-clock literal", and a
+    second invocation added beside ``_run`` would carry it just as well. The
+    ``check_migrations_complete.sh`` healthcheck below is deliberately out of
+    scope — nothing in this ticket measured it, and extending the rule to it
+    unmeasured would install exactly the guessed number this change removes.
+    """
+    module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr in {"run", "Popen"}
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "subprocess"
+        ):
+            continue
+        if not {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} & {
+            "RUNNER",
+            "runner",
+        }:
+            continue
+        timeout = next((kw.value for kw in node.keywords if kw.arg == "timeout"), None)
+        if timeout is None:
+            offenders.append(f"line {node.lineno}: runner invocation with no timeout=")
+        elif isinstance(timeout, ast.Constant) and isinstance(
+            timeout.value, (int, float)
+        ):
+            offenders.append(
+                f"line {node.lineno}: bare timeout={timeout.value!r} — the budget "
+                "must come from _runner_budget_seconds(), which measures the host"
+            )
+    assert not offenders, (
+        "a runner invocation regained a hardcoded wall-clock budget, which is "
+        "the OMN-17639 defect: it measures the host, not the runner, and turns "
+        "host load into a push-blocking false red.\n" + "\n".join(offenders)
+    )
+
+
+@pytest.mark.unit
+def test_the_live_runner_call_actually_uses_the_measured_path() -> None:
+    """The ratchet above proves the literal is gone. This proves what replaced
+    it is the MEASURED path — that the budget is derived from a probe taken
+    against this cluster and a count taken of this tree, and not from a helper
+    that quietly returns a constant. Those are two different regressions and
+    both have to be shut."""
+    module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    run_fn = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_run"
+    )
+    derivations = [
+        call
+        for call in ast.walk(run_fn)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "_runner_budget_seconds"
+    ]
+    assert len(derivations) == 1, "_run must derive exactly one budget"
+    called = {
+        inner.func.id
+        for inner in ast.walk(derivations[0])
+        if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
+    }
+    assert {"_psql_round_trip_seconds", "_sql_file_count"} <= called, (
+        "the budget must be derived from a probe of the cluster this invocation "
+        "is about to drive AND a count of the tree it is about to walk; got "
+        f"{sorted(called)}"
     )
 
 
