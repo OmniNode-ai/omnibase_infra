@@ -665,7 +665,7 @@ _SYNTHETIC_TABLE_MULTISLOT = (
 
 
 def test_the_shipped_slots_column_is_pinned(table_repo: Path) -> None:
-    """h105 and h101 declare a second slot; every other row stays slots=1.
+    """h201 declares three slots, h105 and h101 two; every other row stays 1.
 
     Widening a row's capacity is exactly the kind of change this file exists
     to force through a reviewed, deliberate test edit (same reasoning as the
@@ -673,16 +673,63 @@ def test_the_shipped_slots_column_is_pinned(table_repo: Path) -> None:
     load1 3.37/12 = 0.28x with six lanes queued for a placement host while
     h105 (slots=2) was unreachable, h200 was over threshold, and hcloud was
     stopped -- the same conservative doubling already proven on h105
-    (OMN-17269)."""
+    (OMN-17269).
+
+    h201 went 1 -> 3 under OMN-17743, and it is the only row whose count was
+    ever sized from a measurement rather than doubled. `.201` is 32 cores
+    against h101's 12 and h105's 10, so holding it at the same ABSOLUTE count
+    as a 10-core laptop was the waste. Measured live 2026-09-03T10:57Z-11:03Z:
+    `/proc/loadavg` sampled 5x/4s read a mean load1 of 7.03/32 = 0.22x with one
+    heavy leg in flight, `docker stats --no-stream` over all 147 containers
+    totalled 2.46 cores (the 90-runner CI fleet contributing 0.11 of it, idle
+    since OMN-16688 moved trusted CI to GitHub-hosted runners), and subtracting
+    the in-flight leg leaves a ~6.0-core baseline. A leg costs
+    min(cores, PREPUSH_REMOTE_XDIST_WORKER_CAP) = min(32, 4) = 4 xdist workers
+    plus an idle controller, budgeted at 5.0 cores, so a full complement lands
+    at 0.50x/0.66x/0.81x/0.97x for 2/3/4/5 slots against the 1.0x threshold.
+    Three is the largest count that still leaves a THIRD of the box (11 cores)
+    for what OMN-17485 says this host must never starve -- five live
+    runtime-evidence lanes, an interactive collaborator workspace (OMN-17280),
+    and a CI wave that can burst past 6 cores the moment work routes back.
+
+    Note what did NOT change with it: `slot_mode` stays `queue` and
+    `placement_tier` stays `last_resort`. Widening slots is not a promotion,
+    and the `~/push-lanes/QUEUE` serializer still gates every slot on this row
+    (`_PREPUSH_SLOT_PROBE_SH` reads busy on ALL slots while `q != 0`)."""
     slots = {r[0]: r[9] for r in _rows()}
     assert slots == {
         "h200": "1",
-        "h201": "1",
+        "h201": "3",
         "h201c": "1",
         "h101": "2",
         "h105": "2",
         "hcloud": "1",
     }
+
+
+def test_widening_h201_slots_did_not_promote_its_tier_or_change_its_slot_mode(
+    table_repo: Path,
+) -> None:
+    """OMN-17743 widened h201's slot COUNT and nothing else.
+
+    Both of these are load-bearing and neither follows from the other, so a
+    future edit that quietly rides along on a capacity change fails here:
+
+    * `slot_mode=queue` -- `.201` runs the separate `~/push-lanes/QUEUE`
+      serializer, and `_PREPUSH_SLOT_PROBE_SH` returns busy on EVERY slot of
+      this row while that queue is non-empty. Three slots therefore widen
+      concurrency only while the queue is drained; they do not retire the
+      serializer (OMN-16968/OMN-17419 own that).
+    * `placement_tier=last_resort` -- OMN-17485 demoted this row because it
+      carries the dev runtime lane's live evidence surface and a collaborator's
+      interactive workspace. More slots do not make it a default-tier target:
+      `.201` is still chosen only when no default-tier host is fit, however
+      idle it reads."""
+    row = {r[0]: r for r in _rows()}["h201"]
+    assert row[8] == "queue", row
+    assert row[13] == "last_resort", row
+    assert row[11] == "authorizing", row
+    assert row[12] == "prefer_remote", row
 
 
 def test_slot_one_keeps_the_bare_label_not_a_dot_one_suffix(
@@ -714,6 +761,50 @@ def test_h101_second_slot_places_while_first_slot_is_busy(table_repo: Path) -> N
     )
     assert "PICK=h101.2" in out, out
     assert "h101=busy" in out, out
+
+
+def test_h201_third_slot_places_while_the_first_two_are_busy(
+    table_repo: Path,
+) -> None:
+    """OMN-17743: h201's THIRD slot must be independently placeable on the REAL
+    shipped table while slots 1 and 2 are both held.
+
+    This is the row's whole point and it is not covered by the h101/h105
+    two-slot tests: those prove `LABEL.2`, and only a three-slot row can prove
+    the suffix generalises past `.2`. It also proves it for a `slot_mode=queue`
+    row -- every other multi-slot row in the table is `lockdir` -- and for a
+    `placement_tier=last_resort` row, which is only reachable at all because no
+    default-tier host is fit here (h200/h101/h105/hcloud are absent from the
+    override maps and are skipped unreachable, exactly the lab-saturated state
+    that sends work to `.201`)."""
+    out = _pick(
+        table_repo,
+        load="h201.3=0.22",
+        slot="h201=busy,h201.2=busy,h201.3=free",
+        uv="h201.3=0.11.5",
+    )
+    assert "PICK=h201.3" in out, out
+    assert "h201=busy" in out, out
+    assert "h201.2=busy" in out, out
+
+
+def test_h201_offers_exactly_three_slots_and_never_a_phantom_fourth(
+    table_repo: Path,
+) -> None:
+    """A fourth concurrent lane targeting `.201` gets no placement, not an
+    `h201.4`. The candidate count is the declared `slots` value and nothing
+    else -- this is the guard that keeps a widening from becoming unbounded,
+    and it is why the sizing measurement in
+    `test_the_shipped_slots_column_is_pinned` is the whole argument for 3."""
+    out = _pick(
+        table_repo,
+        load="h201=0.22,h201.2=0.22,h201.3=0.22",
+        slot="h201=busy,h201.2=busy,h201.3=busy",
+        uv="h201=0.11.5,h201.2=0.11.5,h201.3=0.11.5",
+    )
+    assert "PICK=none" in out, out
+    assert "h201.3=busy" in out, out
+    assert "h201.4" not in out, out
 
 
 def test_both_slots_busy_is_a_placement_miss(tmp_path: Path) -> None:
