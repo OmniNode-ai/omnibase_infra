@@ -113,6 +113,78 @@
       ]
     },
     {
+      "clientId": "onex-customer",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": [
+        "https://omninode.ai/*",
+        "https://app.omninode.ai/*",
+        "https://dev.omninode.ai/*",
+        "https://dev.app.omninode.ai/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "https://omninode.ai",
+        "https://app.omninode.ai",
+        "https://dev.omninode.ai",
+        "https://dev.app.omninode.ai",
+        "http://localhost:3000"
+      ],
+      "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant_slug",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_slug",
+            "claim.name": "tenant_slug",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "principal_id",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "principal_id",
+            "claim.name": "principal_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "onex-api-audience",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "onex-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "redpanda-events",
       "publicClient": false,
       "serviceAccountsEnabled": true,
