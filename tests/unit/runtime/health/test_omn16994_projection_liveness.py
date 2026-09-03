@@ -58,6 +58,7 @@ from omnibase_infra.runtime.health.projection_liveness import (
     describe_dlq_saturation,
     describe_projection_attachment,
     evaluate_projection_liveness,
+    select_kernel_nonwriting_projections,
     select_projection_contracts,
 )
 from omnibase_infra.runtime.observability import (
@@ -228,6 +229,75 @@ class TestSelectProjectionContracts:
             contracts=(_projection_contract(requires_cloud_gateway=True),), errors=()
         )
         assert select_projection_contracts(manifest) == ()
+
+    def test_a_kernel_nonwriting_contract_leaves_select_projection_contracts_scope(
+        self,
+    ) -> None:
+        """The fourth documented exclusion (OMN-17562).
+
+        Once the kernel stops SUBSCRIBING a projection it will never dispatch,
+        that projection's topics correctly leave the live bus registry. This
+        selector is manifest-derived while ``attached_topics`` is the live
+        registry, so leaving the contract in scope would simply trade
+        ``projection_write_path`` DEGRADED for ``projection_attachment``
+        DEGRADED on every one of them — a fleet-wide false outage reported by a
+        different dimension.
+        """
+        manifest = ModelAutoWiringManifest(
+            contracts=(_projection_contract(),), errors=()
+        )
+        assert (
+            select_projection_contracts(
+                manifest,
+                kernel_nonwriting=frozenset({"node_projection_session_replay"}),
+            )
+            == ()
+        )
+
+    def test_the_excluded_half_is_still_selectable_by_name(self) -> None:
+        """Excluded is not invisible: the write-path leg still names them.
+
+        The exclusion removes them from the ATTACHMENT scope, not from the
+        health surface. An operator must still be able to read which
+        projections this kernel deliberately does not serve.
+        """
+        manifest = ModelAutoWiringManifest(
+            contracts=(_projection_contract(),), errors=()
+        )
+        selected = select_kernel_nonwriting_projections(
+            manifest, frozenset({"node_projection_session_replay"})
+        )
+        assert [p.name for p in selected] == ["node_projection_session_replay"]
+        assert selected[0].subscribe_topics == (PROJECTION_TOPIC,)
+
+    def test_a_name_that_is_not_a_declared_projection_is_never_selected(self) -> None:
+        """A stale or foreign ledger entry cannot manufacture an unlookupable name.
+
+        The narrowing that used to live inside ``evaluate_projection_liveness``
+        (``in_scope & dispatch_skipped``) moves here, to the point where a name
+        is resolved to a contract.
+        """
+        manifest = ModelAutoWiringManifest(
+            contracts=(_projection_contract(),), errors=()
+        )
+        assert (
+            select_kernel_nonwriting_projections(
+                manifest, frozenset({"node_projection_from_another_process"})
+            )
+            == ()
+        )
+
+    def test_a_non_projection_contract_is_never_selected_as_nonwriting(self) -> None:
+        """The two selectors share one discriminator; neither can drift."""
+        manifest = ModelAutoWiringManifest(
+            contracts=(_non_projection_contract(),), errors=()
+        )
+        assert (
+            select_kernel_nonwriting_projections(
+                manifest, frozenset({"node_contract_sweep"})
+            )
+            == ()
+        )
 
 
 # =============================================================================

@@ -11,11 +11,17 @@ signal missed, because each of them measures *connectedness* rather than
 * **DLQ-saturated** — a consumer IS attached and IS consuming, and routes 100%
   of what it takes to a DLQ/quarantine sink. Offsets commit on the DLQ route, so
   consumer lag reads 0 and every lag-based check reads green over a total loss.
-* **non-writing** (OMN-17448) — a consumer IS attached and IS consuming, and its
-  in-process dispatch is a deliberate no-op because the handler has the
-  standalone-runner shape (OMN-15905). Offsets commit, nothing raises, nothing
-  is DLQ'd, and the rows exist only if a dedicated writer process is deployed
-  elsewhere. Both fields above read green through this by construction.
+* **non-writing** (OMN-17448) — every handler entry the kernel wired for the
+  contract has a deliberate no-op dispatch, because each has the standalone-
+  runner shape (OMN-15905) or was assigned zero routes (OMN-17519). Nothing
+  raises and nothing is DLQ'd, so both fields above read green through it by
+  construction, and the rows exist only if a dedicated writer process is
+  deployed elsewhere.
+* **non-writing AND still attached** (OMN-17562) — the same contract, still
+  consuming. Offsets commit over a total loss: the events are destroyed, not
+  merely unwritten, so deploying the writer later cannot backfill them. This is
+  the half that is a runtime defect; the half above is a deployment fact a
+  kernel process cannot observe.
 
 The projection unit itself lives in
 :mod:`omnibase_infra.models.health.model_projection_contract_ref`.
@@ -76,13 +82,27 @@ class ModelProjectionLivenessVerdict(BaseModel):
     nonwriting_projections: tuple[str, ...] = Field(
         default_factory=tuple,
         description=(
-            "OMN-17448. Projections this process SUBSCRIBES and deliberately "
-            "does not dispatch: the standalone-runner branch returns None "
-            "before any handler runs, so the consumer takes every message and "
-            "commits every offset while persisting nothing here. Not a defect "
-            "on its own -- the rows depend on a dedicated writer process this "
-            "one cannot see -- but invisible to both fields above, because the "
-            "topic IS attached and nothing raises so nothing reaches a DLQ."
+            "OMN-17448. Declared projections EVERY handler entry of which this "
+            "process wires with a no-op dispatch: the standalone-runner branch "
+            "returns None before any handler runs. Not a defect on its own -- "
+            "the rows depend on a dedicated writer process this one cannot see "
+            "-- and invisible to both fields above, because nothing raises so "
+            "nothing reaches a DLQ. A contract with a live sibling entry is NOT "
+            "listed here (OMN-17562): it dispatches and writes, and naming it "
+            "was six of the fifteen names the .201 lanes reported."
+        ),
+    )
+    nonwriting_attached_projections: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "OMN-17562. The subset of ``nonwriting_projections`` whose topics "
+            "are STILL attached on this runtime's bus registry -- the silent-"
+            "loss state itself: the consumer takes every message and commits "
+            "every offset while no handler runs, so the events are destroyed "
+            "rather than merely unwritten, and deploying the writer later "
+            "cannot backfill a committed offset. Empty is the fixed state (the "
+            "kernel withholds the subscription), and is only meaningful when "
+            "``attachment_evaluated`` is True."
         ),
     )
 

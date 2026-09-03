@@ -53,11 +53,12 @@ from omnibase_infra.runtime.health.projection_liveness import (
     describe_projection_attachment,
     describe_projection_write_path,
     evaluate_projection_liveness,
+    select_kernel_nonwriting_projections,
     select_projection_contracts,
 )
 from omnibase_infra.runtime.observability import get_consumer_flow_counters
 from omnibase_infra.runtime.projection_dispatch_ledger import (
-    dispatch_skipped_projections,
+    projections_with_no_live_dispatcher,
 )
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.utils import (
@@ -502,6 +503,13 @@ class ServiceRuntimeHealthMonitor:
         # failure leaves them at "unobservable" (empty) rather than at a
         # fabricated all-clear.
         projections: tuple[ModelProjectionContractRef, ...] = ()
+        # OMN-17562. Bound alongside ``projections`` because discovery raising
+        # leaves BOTH halves unresolved, and the liveness evaluation below still
+        # runs so the remaining dimensions are reported. An empty tuple is the
+        # honest value there: with no manifest, nothing is known to be
+        # kernel-nonwriting, and the discovery dimension already carries the
+        # failure.
+        nonwriting_projections: tuple[ModelProjectionContractRef, ...] = ()
         attached_topics: frozenset[str] = frozenset()
         try:
             manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
@@ -511,7 +519,22 @@ class ServiceRuntimeHealthMonitor:
             expected_groups = _expected_consumer_groups_from_manifest(
                 manifest, os.environ.get("KAFKA_INSTANCE_ID")
             )
-            projections = select_projection_contracts(manifest)
+            # OMN-17562. The kernel withholds the Kafka subscription for a
+            # contract EVERY handler entry of which wires a no-op dispatch, so
+            # its topics correctly leave the live bus registry. This selector is
+            # manifest-derived while ``attached_topics`` is that registry, so
+            # keeping those contracts in the attachment scope would report a
+            # fleet-wide false outage on ``projection_attachment`` in place of
+            # the one this change removed from ``projection_write_path``. The
+            # excluded half is resolved back to refs so the write-path leg can
+            # still name it and can still detect one that is STILL attached.
+            kernel_nonwriting = projections_with_no_live_dispatcher()
+            projections = select_projection_contracts(
+                manifest, kernel_nonwriting=kernel_nonwriting
+            )
+            nonwriting_projections = select_kernel_nonwriting_projections(
+                manifest, kernel_nonwriting
+            )
             live_expected_groups = _expected_consumer_groups_from_event_bus(
                 self._event_bus
             )
@@ -710,7 +733,7 @@ class ServiceRuntimeHealthMonitor:
             projections=projections,
             attached_topics=attached_topics,
             flow_windows=get_consumer_flow_counters().retained_windows.snapshot(),
-            dispatch_skipped=dispatch_skipped_projections(),
+            kernel_nonwriting=nonwriting_projections,
         )
         dimensions.append(
             ModelRuntimeHealthDimension(
@@ -726,7 +749,7 @@ class ServiceRuntimeHealthMonitor:
                 detail=describe_dlq_saturation(liveness),
             )
         )
-        # --- Dimension 6: Projection write path (OMN-17448) -----------------
+        # --- Dimension 6: Projection write path (OMN-17448/OMN-17562) -------
         # The third way to persist nothing. Dimensions 4 and 5 both read green
         # through it by construction: the topic IS attached (only the dispatch
         # is a no-op), and nothing raises so nothing reaches a DLQ. Measured
@@ -734,10 +757,24 @@ class ServiceRuntimeHealthMonitor:
         # `status=HEALTHY ... projections=13 unattached_projections=0` while
         # node_projection_tenant_registry had no writer on ANY lane and
         # tenant_registry_mirror held 0 rows.
+        #
+        # OMN-17562 splits the fact the status is taken from. DEGRADED is
+        # reserved for the half this process can actually observe AND is
+        # actually doing wrong: still SUBSCRIBED while dispatching nothing, so
+        # offsets commit over destroyed events. Merely having no in-process
+        # dispatcher is a deployment fact -- whether a dedicated writer runs on
+        # this lane is a corpus-level claim over the deployment manifests
+        # (OMN-17448 AC5) that a kernel process cannot see, and asserting it
+        # here would be a permanent DEGRADED no operator action could clear.
+        # The names stay on the detail either way.
         dimensions.append(
             ModelRuntimeHealthDimension(
                 name="projection_write_path",
-                status="DEGRADED" if liveness.nonwriting_projections else "HEALTHY",
+                status=(
+                    "DEGRADED"
+                    if liveness.nonwriting_attached_projections
+                    else "HEALTHY"
+                ),
                 detail=describe_projection_write_path(liveness),
             )
         )

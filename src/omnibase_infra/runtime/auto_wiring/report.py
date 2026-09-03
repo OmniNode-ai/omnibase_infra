@@ -166,6 +166,37 @@ class ModelContractWiringResult(BaseModel):
             "reports SKIPPED with reason='all handlers quarantined'."
         ),
     )
+    nonwriting_handlers: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "OMN-17562. Handler class names on this contract whose dispatcher "
+            "is a no-op by construction -- the standalone-runner branch "
+            "(OMN-15905) or the zero-route branch (OMN-17519). One name per "
+            "prepared handler entry, so the count is comparable to ``wirings``. "
+            "Carried here because the deferred subscribe seam "
+            "(``subscribe_wired_contract_topics``) re-derives eligibility from "
+            "this report rather than from the prepared wiring, and must not "
+            "read the process-global dispatch ledger to do it: the ledger "
+            "describes every wiring pass in the process, while this decision is "
+            "about one contract in one pass."
+        ),
+    )
+
+    @property
+    def has_no_live_dispatcher(self) -> bool:
+        """True when EVERY wired handler entry dispatches nothing in this process.
+
+        The contract is then not consumable here: subscribing would take every
+        message, commit every offset and destroy the events. One live sibling
+        entry is enough to keep consuming -- ``projection_pattern_learning`` and
+        ``projection_routing_decision`` each pair a standalone runner with an
+        in-process handler that writes rows on every message.
+
+        ``wirings`` carries one row per prepared handler entry and
+        ``nonwriting_handlers`` one name per no-op entry, both appended in the
+        same loop, so the comparison is exact rather than a name-set overlap.
+        """
+        return bool(self.wirings) and len(self.nonwriting_handlers) == len(self.wirings)
 
 
 class ModelDuplicateTopicOwnership(BaseModel):
