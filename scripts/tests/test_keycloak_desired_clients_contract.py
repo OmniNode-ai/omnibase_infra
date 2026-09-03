@@ -78,17 +78,15 @@ def test_onex_customer_is_a_dedicated_public_customer_client() -> None:
     registration path moves to a dedicated customer client and stops
     borrowing `omnidash-spa`, which is an internal dashboard SPA client.
 
-    `omnidash-spa` is public with direct access grants, which is why the
-    customer path could borrow it at all -- so the replacement has to carry
-    the same two properties or the guide's token command (OMN-17302 D2)
-    regresses to `unauthorized_client` the way `omniweb` does.
+    The replacement must be public and PKCE-only. Resource-owner password
+    credentials are not part of the browser sign-on path.
     """
     config = json.loads(_CONFIG_PATH.read_text())
     customer = _client(config, "onex-customer")
 
     assert customer["publicClient"] is True
     assert customer["standardFlowEnabled"] is True
-    assert customer["directAccessGrantsEnabled"] is True
+    assert customer["directAccessGrantsEnabled"] is False
     assert customer["serviceAccountsEnabled"] is False
     assert customer["attributes"]["pkce.code.challenge.method"] == "S256"
 
@@ -111,7 +109,7 @@ def test_onex_customer_admits_the_customer_app_host_and_not_the_dashboard() -> N
         "https://omninode.ai",
         "https://dev.omninode.ai",
     ):
-        assert f"{host}/*" in customer["redirectUris"]
+        assert host in customer["redirectUris"]
         assert host in customer["webOrigins"]
 
     dashboard_hosts = ("dash.omninode.ai", "dev.dash.omninode.ai")
@@ -123,6 +121,15 @@ def test_onex_customer_admits_the_customer_app_host_and_not_the_dashboard() -> N
         for origin in customer["webOrigins"]
         for host in dashboard_hosts
     )
+
+
+def test_onex_customer_redirects_do_not_use_wildcard_paths() -> None:
+    """OMN-17527: public customer redirects must stay exact-host scoped."""
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+
+    assert all("*" not in uri for uri in customer["redirectUris"])
+    assert all(uri.startswith("https://") for uri in customer["redirectUris"])
 
 
 def test_onex_customer_mints_onex_api_audience_and_tenant_claims() -> None:
@@ -151,6 +158,8 @@ def test_onex_customer_mints_onex_api_audience_and_tenant_claims() -> None:
         assert mapper["config"]["user.attribute"] == claim
         assert mapper["config"]["claim.name"] == claim
         assert mapper["config"]["access.token.claim"] == "true"
+        assert mapper["config"]["id.token.claim"] == "false"
+        assert mapper["config"]["userinfo.token.claim"] == "true"
 
 
 def test_omnidash_spa_is_untouched_by_the_customer_client_work() -> None:
@@ -194,3 +203,28 @@ def test_customer_client_carries_no_client_secret_indirection() -> None:
     customer = _client(config, "onex-customer")
 
     assert "secretEnv" not in customer
+
+
+def test_onex_customer_admits_no_loopback_redirect_or_origin() -> None:
+    """OMN-17527: the customer client carries no localhost surface.
+
+    Raised as a MAJOR hostile-reviewer finding on omnibase_infra#3159. Every
+    other browser client in this file (`omniweb`, `omnidash-spa`) admits
+    `localhost:3000`/`localhost:8080` because a developer runs those SPAs
+    locally. No customer ever does -- there is no documented customer flow
+    that lands on a loopback host -- so a loopback entry here is an
+    unjustified widening, and a widening that matters: `webOrigins` grants
+    CORS to the token endpoint, and this client has `directAccessGrants`
+    enabled, so any page served from that origin could post credentials to
+    it.
+
+    Asserted in the negative on purpose. The natural next edit is someone
+    copying the host list off `omniweb`, which would silently reintroduce it.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+
+    for value in (*customer["redirectUris"], *customer["webOrigins"]):
+        assert "localhost" not in value
+        assert "127.0.0.1" not in value
+        assert "[::1]" not in value

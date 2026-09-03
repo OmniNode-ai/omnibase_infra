@@ -116,24 +116,22 @@
       "clientId": "onex-customer",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
       "redirectUris": [
-        "https://omninode.ai/*",
-        "https://app.omninode.ai/*",
-        "https://dev.omninode.ai/*",
-        "https://dev.app.omninode.ai/*",
-        "http://localhost:3000/*"
+        "https://omninode.ai",
+        "https://app.omninode.ai",
+        "https://dev.omninode.ai",
+        "https://dev.app.omninode.ai"
       ],
       "webOrigins": [
         "https://omninode.ai",
         "https://app.omninode.ai",
         "https://dev.omninode.ai",
-        "https://dev.app.omninode.ai",
-        "http://localhost:3000"
+        "https://dev.app.omninode.ai"
       ],
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
       "protocolMappers": [
@@ -143,7 +141,7 @@
           "config": {
             "user.attribute": "tenant_id",
             "claim.name": "tenant_id",
-            "id.token.claim": "true",
+            "id.token.claim": "false",
             "access.token.claim": "true",
             "userinfo.token.claim": "true",
             "jsonType.label": "String"
@@ -155,7 +153,7 @@
           "config": {
             "user.attribute": "tenant_slug",
             "claim.name": "tenant_slug",
-            "id.token.claim": "true",
+            "id.token.claim": "false",
             "access.token.claim": "true",
             "userinfo.token.claim": "true",
             "jsonType.label": "String"
@@ -167,7 +165,7 @@
           "config": {
             "user.attribute": "principal_id",
             "claim.name": "principal_id",
-            "id.token.claim": "true",
+            "id.token.claim": "false",
             "access.token.claim": "true",
             "userinfo.token.claim": "true",
             "jsonType.label": "String"
