@@ -152,6 +152,7 @@ from omnibase_infra.runtime.models.model_postgres_pool_config import (
 from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_refs
 from omnibase_infra.runtime.projection_dispatch_ledger import (
     record_dispatch_skipped_projection,
+    record_live_projection_dispatch,
 )
 from omnibase_infra.runtime.projection_tenant_authority import (
     VerifiedProjectionTenantAuthority,
@@ -683,6 +684,13 @@ class PreparedWiring:
     # only for payloads that match the event_model, so sibling handlers on a
     # multi-handler contract are not all invoked for one message (OMN-12416).
     payload_type_matcher: Callable[[object], bool] | None = None
+    # OMN-17562. True when this entry's dispatcher is a no-op by construction:
+    # the standalone-runner branch (OMN-15905) or the zero-route branch
+    # (OMN-17519). Carried as a typed per-ENTRY fact rather than read back out
+    # of the process-global dispatch ledger, because the subscribe decision is
+    # about this contract in this wiring pass, and because a contract with one
+    # no-op entry and one live entry must keep consuming.
+    dispatch_is_noop: bool = False
 
     @property
     def is_skip(self) -> bool:
@@ -3475,7 +3483,7 @@ def _make_undispatched_projection_callback(
     projection arm registered it before) so this changes only whether a pool is
     opened, never which routes exist.
     """
-    record_dispatch_skipped_projection(contract_name)
+    record_dispatch_skipped_projection(contract_name, handler_name)
     logger.warning(
         "Projection %r wires handler %s with ZERO routes, so this process "
         "cannot dispatch it and does NOT open a projection database for it "
@@ -3552,7 +3560,7 @@ def _make_projection_dispatch_callback(
         # topics, so the consumer takes every message and commits every offset
         # while nothing is written here. Recorded on the SAME branch that
         # decides it, so the health ledger cannot drift from the wiring.
-        record_dispatch_skipped_projection(contract_name)
+        record_dispatch_skipped_projection(contract_name, handler_name)
         logger.warning(
             "Projection %r wires a standalone runner (%s): this process "
             "subscribes its topics and dispatches NOTHING, so it persists no "
@@ -3584,6 +3592,12 @@ def _make_projection_dispatch_callback(
             )
         )
     if not is_projection_runner:
+        # OMN-17562. The live counterpart of the skip recorded above, written on
+        # the branch that decides it. Without it, "no skip row for this
+        # contract" and "this contract has a live dispatcher" are the same
+        # observation, and a mixed contract cannot be told from a wholly
+        # non-writing one -- six of the fifteen names the .201 lanes reported.
+        record_live_projection_dispatch(contract_name, handler_name)
         # OMN-16911: an in-process handler that opened its own pool takes the
         # DSN resolved and privilege-proved above, instead of resolving one of
         # its own that the topology never vouched for.
@@ -7916,6 +7930,23 @@ async def subscribe_wired_contract_topics(
                 contract.name,
             )
             continue
+        # OMN-17562. The same withholding as the immediate seam, applied here
+        # too because this path re-derives eligibility from the wiring REPORT
+        # rather than reading ``PreparedContractWiring.subscription_topics``.
+        # The real kernel boot takes THIS path (subscribe_immediately=False,
+        # subscribe after the dispatch engine is frozen), so a fix applied only
+        # to the immediate seam would change nothing on any deployed lane.
+        if result.has_no_live_dispatcher:
+            logger.warning(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "contract '%s' — all %d handler entries wire a no-op dispatch "
+                "here, so consuming would commit offsets over events no "
+                "handler runs on (OMN-17562). handlers=%s",
+                contract.name,
+                len(result.wirings),
+                list(result.nonwriting_handlers),
+            )
+            continue
         eligible.append((result, contract))
 
     knobs = readiness_config or ModelTopicReadinessConfig()
@@ -8507,12 +8538,29 @@ def _prepare_contract_wiring(
                 f"handler={entry.handler.name}: {type(exc).__name__}: {exc_summary}"
             ) from exc
 
+    # OMN-17562. A contract EVERY handler entry of which wires a no-op dispatch
+    # is not consumable by this process: the callback returns None before any
+    # handler runs, so subscribing would take every message, commit every
+    # offset and destroy the events -- unrecoverably, since a committed offset
+    # on a topic no process re-reads cannot be backfilled by deploying the
+    # writer later. Withholding the subscription instead leaves them on the
+    # broker, replayable by the dedicated writer that owns the rows (OMN-15905).
+    # Same treatment as plugin_managed below; the dispatchers and routes are
+    # still registered, so a future routing change surfaces on them.
+    #
+    # The test is per ENTRY and requires ALL of them: projection_pattern_learning
+    # and projection_routing_decision each declare one subscribe topic and two
+    # entries, one standalone runner and one LIVE in-process handler that writes
+    # rows on every message. A contract-name rule would silently stop both.
+    no_live_dispatcher = bool(prepared_wirings) and all(
+        prepared.dispatch_is_noop for prepared in prepared_wirings
+    )
     # plugin_managed: domain plugin owns Kafka subscription for this contract's
     # topics (OMN-10864). Dispatch routes are still registered so the engine
     # can route messages consumed via the plugin's EventBusSubcontractWiring.
     subscription_topics: list[str] = (
         []
-        if contract.event_bus.plugin_managed
+        if contract.event_bus.plugin_managed or no_live_dispatcher
         else list(contract.event_bus.subscribe_topics)
     )
     if contract.event_bus.plugin_managed:
@@ -8520,6 +8568,18 @@ def _prepare_contract_wiring(
             "Auto-wiring: skipping Kafka subscription for plugin-managed contract "
             "'%s' — domain plugin owns topic subscription (OMN-10864)",
             contract.name,
+        )
+    elif no_live_dispatcher:
+        logger.warning(
+            "Auto-wiring: skipping Kafka subscription for contract '%s' — all "
+            "%d handler entries wire a no-op dispatch here, so consuming would "
+            "commit offsets over events no handler runs on (OMN-17562). Its "
+            "rows depend on a dedicated writer process for this lane; the "
+            "events stay on the broker until that writer reads them. "
+            "handlers=%s",
+            contract.name,
+            len(prepared_wirings),
+            [prepared.handler_name for prepared in prepared_wirings],
         )
 
     return PreparedContractWiring(
@@ -8556,6 +8616,7 @@ async def _commit_contract_wiring(
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
     topics_subscribed: list[str] = []
+    nonwriting_handlers: list[str] = []
     wirings: list[ModelWiringOutcome] = []
     skipped_handlers: list[ModelSkippedEntry] = []
     quarantined: list[ModelQuarantinedWiring] = []
@@ -8589,6 +8650,8 @@ async def _commit_contract_wiring(
         else:
             dispatchers_registered.append(dispatcher_id)
             routes_registered.extend(route_ids)
+        if prepared.dispatch_is_noop:
+            nonwriting_handlers.append(prepared.handler_name)
         wirings.append(
             ModelWiringOutcome(
                 handler_name=prepared.handler_name,
@@ -8693,6 +8756,7 @@ async def _commit_contract_wiring(
         wirings=tuple(wirings),
         skipped_handlers=tuple(skipped_handlers),
         quarantined_handlers=tuple(quarantined),
+        nonwriting_handlers=tuple(nonwriting_handlers),
     )
 
 
@@ -9401,6 +9465,11 @@ def _prepare_handler_wiring(
             typed_input_model.__name__,
         )
         db_tables = ()
+        # OMN-17562. A typed def-B handler on a db_io contract IS dispatched
+        # here, so the contract has a live dispatcher even though this entry
+        # never reaches the projection arm that records one.
+        record_live_projection_dispatch(contract.name, handler_ref.name)
+    dispatch_is_noop = False
     if db_tables:
         if topology is None:
             raise ModelOnexError(
@@ -9438,6 +9507,7 @@ def _prepare_handler_wiring(
             else _read_dlq_topics(contract.contract_path)
         )
         if _projection_dispatch_owned_elsewhere(contract, entry):
+            dispatch_is_noop = True
             callback = _make_undispatched_projection_callback(
                 handler_ref.name,
                 target,
@@ -9445,6 +9515,10 @@ def _prepare_handler_wiring(
                 _topic_owning_handler_names(contract, entry),
             )
         else:
+            # OMN-17562. Read here, not inside the factory, because the
+            # subscribe decision is taken from the PREPARED wiring rather than
+            # from the process-global ledger the factory writes.
+            dispatch_is_noop = _is_standalone_projection_runner(handler_instance)
             callback = _make_projection_dispatch_callback(
                 handler_instance,
                 target,
@@ -9574,6 +9648,7 @@ def _prepare_handler_wiring(
         route_ids=route_ids,
         routes=routes,
         payload_type_matcher=payload_type_matcher,
+        dispatch_is_noop=dispatch_is_noop,
     )
 
 

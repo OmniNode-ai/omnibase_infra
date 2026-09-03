@@ -72,11 +72,15 @@ from omnibase_infra.runtime.auto_wiring.models import (
 from omnibase_infra.runtime.health.projection_liveness import (
     describe_projection_write_path,
     evaluate_projection_liveness,
+    select_kernel_nonwriting_projections,
     select_projection_contracts,
 )
 from omnibase_infra.runtime.projection_dispatch_ledger import (
+    dispatch_skipped_entries,
     dispatch_skipped_projections,
+    projections_with_no_live_dispatcher,
     record_dispatch_skipped_projection,
+    record_live_projection_dispatch,
     reset_dispatch_skipped_projections,
 )
 
@@ -122,10 +126,18 @@ def _registry_contract(
     )
 
 
-def _projections() -> tuple[Any, ...]:
-    return select_projection_contracts(
-        ModelAutoWiringManifest(contracts=(_registry_contract(),), errors=())
-    )
+def _manifest() -> ModelAutoWiringManifest:
+    return ModelAutoWiringManifest(contracts=(_registry_contract(),), errors=())
+
+
+def _projections(*, kernel_nonwriting: frozenset[str] = frozenset()) -> tuple[Any, ...]:
+    """The attachment/saturation scope, with the OMN-17562 exclusion applied."""
+    return select_projection_contracts(_manifest(), kernel_nonwriting=kernel_nonwriting)
+
+
+def _nonwriting(*names: str) -> tuple[Any, ...]:
+    """The declared projections the kernel will never dispatch here."""
+    return select_kernel_nonwriting_projections(_manifest(), frozenset(names))
 
 
 # =============================================================================
@@ -133,12 +145,16 @@ def _projections() -> tuple[Any, ...]:
 # =============================================================================
 
 
+RUNNER_ENTRY = "TenantRegistryProjectionRunner"
+LIVE_ENTRY = "HandlerProjectionTenantRegistry"
+
+
 @pytest.mark.unit
 class TestProjectionDispatchLedger:
-    """Process-local record of the standalone-runner wiring branch."""
+    """Process-local record of the projection wiring branch, per handler entry."""
 
     def test_recorded_name_is_reported(self) -> None:
-        record_dispatch_skipped_projection(REGISTRY_PROJECTION)
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
         assert dispatch_skipped_projections() == frozenset({REGISTRY_PROJECTION})
 
     def test_empty_ledger_is_empty(self) -> None:
@@ -146,13 +162,65 @@ class TestProjectionDispatchLedger:
 
     def test_blank_name_is_not_stored(self) -> None:
         """An unnamed entry cannot be rendered on a detail an operator can look up."""
-        record_dispatch_skipped_projection("   ")
+        record_dispatch_skipped_projection("   ", RUNNER_ENTRY)
         assert dispatch_skipped_projections() == frozenset()
 
+    def test_blank_handler_name_is_not_stored(self) -> None:
+        """A contract-only row cannot answer "which entry", so it is not a row."""
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, "  ")
+        assert dispatch_skipped_entries() == frozenset()
+
     def test_recording_is_idempotent(self) -> None:
-        record_dispatch_skipped_projection(REGISTRY_PROJECTION)
-        record_dispatch_skipped_projection(REGISTRY_PROJECTION)
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
         assert dispatch_skipped_projections() == frozenset({REGISTRY_PROJECTION})
+
+    def test_ledger_is_keyed_by_contract_and_handler_entry(self) -> None:
+        """RED before OMN-17562: the ledger was a bare set of contract names.
+
+        ``record_dispatch_skipped_projection`` is called once per HANDLER ENTRY
+        (the zero-route branch and the standalone-runner branch), but was keyed
+        by CONTRACT. A contract with one runner entry and one live in-process
+        entry therefore landed in the ledger even though it dispatched and
+        wrote rows.
+        """
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
+        record_live_projection_dispatch(REGISTRY_PROJECTION, LIVE_ENTRY)
+        assert dispatch_skipped_entries() == frozenset(
+            {(REGISTRY_PROJECTION, RUNNER_ENTRY)}
+        )
+
+    def test_projections_with_no_live_dispatcher_excludes_mixed_contracts(
+        self,
+    ) -> None:
+        """The 6 false positives the OMN-17448 count carried, removed.
+
+        ``projection_pattern_learning`` / ``projection_routing_decision`` /
+        ``node_projection_receipt_gate`` / ``projection_baselines`` /
+        ``projection_intent_classification`` / ``projection_session_outcome``
+        all have a live in-process entry beside a skipped one. Live on both
+        ``.201`` lanes this reported ``nonwriting=15`` where only 9 of the 37
+        main-profile projections genuinely dispatch nothing.
+        """
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
+        record_live_projection_dispatch(REGISTRY_PROJECTION, LIVE_ENTRY)
+        record_dispatch_skipped_projection("node_projection_savings", "SavingsRunner")
+
+        assert projections_with_no_live_dispatcher() == frozenset(
+            {"node_projection_savings"}
+        )
+
+    def test_a_contract_with_only_skipped_entries_has_no_live_dispatcher(self) -> None:
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, "SecondRunner")
+        assert projections_with_no_live_dispatcher() == frozenset({REGISTRY_PROJECTION})
+
+    def test_reset_clears_both_halves(self) -> None:
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
+        record_live_projection_dispatch(REGISTRY_PROJECTION, LIVE_ENTRY)
+        reset_dispatch_skipped_projections()
+        assert dispatch_skipped_entries() == frozenset()
+        assert projections_with_no_live_dispatcher() == frozenset()
 
 
 # =============================================================================
@@ -167,26 +235,30 @@ class TestNonWritingProjectionIsNamed:
     def test_the_two_prior_masks_both_read_clean_on_this_shape(self) -> None:
         """RED anchor: without the write-path leg, this state reports nothing.
 
-        Attached (so not unattached) and never raising (so never DLQ-saturated).
-        This is exactly the state the monitor called HEALTHY while the mirror
-        held 0 rows — asserted here so a future change that reintroduces the
-        mask fails loudly instead of quietly.
+        Attached (so not unattached) and never raising (so never
+        DLQ-saturated). This is exactly the state the monitor called HEALTHY
+        while the mirror held 0 rows.
         """
         verdict = evaluate_projection_liveness(
-            projections=_projections(),
+            projections=_projections(
+                kernel_nonwriting=frozenset({REGISTRY_PROJECTION})
+            ),
             attached_topics=frozenset({TENANT_TOPIC}),
             flow_windows=(),
-            dispatch_skipped=frozenset({REGISTRY_PROJECTION}),
+            kernel_nonwriting=_nonwriting(REGISTRY_PROJECTION),
         )
         assert verdict.unattached_projections == ()
         assert verdict.dlq_saturated_projections == ()
+        assert verdict.nonwriting_projections == (REGISTRY_PROJECTION,)
 
-    def test_dispatch_skipped_projection_is_named(self) -> None:
+    def test_kernel_nonwriting_projection_is_named(self) -> None:
         verdict = evaluate_projection_liveness(
-            projections=_projections(),
-            attached_topics=frozenset({TENANT_TOPIC}),
+            projections=_projections(
+                kernel_nonwriting=frozenset({REGISTRY_PROJECTION})
+            ),
+            attached_topics=frozenset(),
             flow_windows=(),
-            dispatch_skipped=frozenset({REGISTRY_PROJECTION}),
+            kernel_nonwriting=_nonwriting(REGISTRY_PROJECTION),
         )
         assert verdict.nonwriting_projections == (REGISTRY_PROJECTION,)
 
@@ -195,9 +267,70 @@ class TestNonWritingProjectionIsNamed:
             projections=_projections(),
             attached_topics=frozenset({TENANT_TOPIC}),
             flow_windows=(),
-            dispatch_skipped=frozenset(),
         )
         assert verdict.nonwriting_projections == ()
+        assert verdict.nonwriting_attached_projections == ()
+
+    def test_a_contract_with_one_live_entry_is_not_named_nonwriting(self) -> None:
+        """RED before OMN-17562: the ledger named every mixed contract.
+
+        The ``node_projection_receipt_gate`` / ``projection_pattern_learning``
+        shape — one runner-skipped entry beside one LIVE in-process entry. It
+        dispatches and it writes, so it is neither excluded from the attachment
+        scope nor named on the write path.
+        """
+        record_dispatch_skipped_projection(REGISTRY_PROJECTION, RUNNER_ENTRY)
+        record_live_projection_dispatch(REGISTRY_PROJECTION, LIVE_ENTRY)
+        kernel_nonwriting = projections_with_no_live_dispatcher()
+
+        verdict = evaluate_projection_liveness(
+            projections=_projections(kernel_nonwriting=kernel_nonwriting),
+            attached_topics=frozenset({TENANT_TOPIC}),
+            flow_windows=(),
+            kernel_nonwriting=_nonwriting(*kernel_nonwriting),
+        )
+        assert verdict.nonwriting_projections == ()
+        assert verdict.projection_count == 1, (
+            "a mixed contract must stay in the attachment scope — it really is "
+            "subscribed and really does dispatch"
+        )
+
+    def test_a_still_attached_nonwriting_projection_is_the_defect(self) -> None:
+        """The regression detector: subscribed AND dispatching nothing.
+
+        This is the OMN-17448 silent-loss state itself. After OMN-17562 the
+        kernel withholds the subscription, so the topic leaves the live
+        registry and this list is empty. A change that re-subscribes one
+        reopens the loss, and it fails here.
+        """
+        verdict = evaluate_projection_liveness(
+            projections=_projections(
+                kernel_nonwriting=frozenset({REGISTRY_PROJECTION})
+            ),
+            attached_topics=frozenset({TENANT_TOPIC}),
+            flow_windows=(),
+            kernel_nonwriting=_nonwriting(REGISTRY_PROJECTION),
+        )
+        assert verdict.nonwriting_attached_projections == (REGISTRY_PROJECTION,)
+
+    def test_an_unsubscribed_nonwriting_projection_is_not_the_defect(self) -> None:
+        """The fixed state: named, not consumed, and not a runtime failure.
+
+        Whether a dedicated writer exists on this lane is a corpus-level claim
+        over the deployment manifests (OMN-17448 AC5), asserted by the static
+        lane gate. A kernel process cannot see a sibling container, so it must
+        not report one missing.
+        """
+        verdict = evaluate_projection_liveness(
+            projections=_projections(
+                kernel_nonwriting=frozenset({REGISTRY_PROJECTION})
+            ),
+            attached_topics=frozenset({"onex.evt.some.other.topic.v1"}),
+            flow_windows=(),
+            kernel_nonwriting=_nonwriting(REGISTRY_PROJECTION),
+        )
+        assert verdict.nonwriting_projections == (REGISTRY_PROJECTION,)
+        assert verdict.nonwriting_attached_projections == ()
 
     def test_a_ledger_entry_out_of_contract_scope_is_not_named(self) -> None:
         """A stale or foreign entry must not manufacture an unlookupable name."""
@@ -205,27 +338,42 @@ class TestNonWritingProjectionIsNamed:
             projections=_projections(),
             attached_topics=frozenset({TENANT_TOPIC}),
             flow_windows=(),
-            dispatch_skipped=frozenset({"node_projection_from_another_process"}),
+            kernel_nonwriting=_nonwriting("node_projection_from_another_process"),
         )
         assert verdict.nonwriting_projections == ()
 
     def test_detail_names_the_projection_and_says_what_is_missing(self) -> None:
         verdict = evaluate_projection_liveness(
-            projections=_projections(),
-            attached_topics=frozenset({TENANT_TOPIC}),
+            projections=_projections(
+                kernel_nonwriting=frozenset({REGISTRY_PROJECTION})
+            ),
+            attached_topics=frozenset({"onex.evt.some.other.topic.v1"}),
             flow_windows=(),
-            dispatch_skipped=frozenset({REGISTRY_PROJECTION}),
+            kernel_nonwriting=_nonwriting(REGISTRY_PROJECTION),
         )
         detail = describe_projection_write_path(verdict)
         assert REGISTRY_PROJECTION in detail
         assert "dedicated writer" in detail
+        assert "not subscribed" in detail
+
+    def test_detail_for_the_still_attached_defect_says_offsets_commit(self) -> None:
+        verdict = evaluate_projection_liveness(
+            projections=_projections(
+                kernel_nonwriting=frozenset({REGISTRY_PROJECTION})
+            ),
+            attached_topics=frozenset({TENANT_TOPIC}),
+            flow_windows=(),
+            kernel_nonwriting=_nonwriting(REGISTRY_PROJECTION),
+        )
+        detail = describe_projection_write_path(verdict)
+        assert REGISTRY_PROJECTION in detail
+        assert "offsets commit" in detail
 
     def test_clean_detail_states_the_count(self) -> None:
         verdict = evaluate_projection_liveness(
             projections=_projections(),
             attached_topics=frozenset({TENANT_TOPIC}),
             flow_windows=(),
-            dispatch_skipped=frozenset(),
         )
         assert describe_projection_write_path(verdict) == (
             "All 1 declared projection(s) dispatch in-process"
@@ -293,8 +441,26 @@ class TestWiringSeamRecordsTheSkip:
 
     def test_standalone_runner_contract_is_recorded(self) -> None:
         self._build(_StandaloneRunnerShaped(), REGISTRY_PROJECTION)
-        assert REGISTRY_PROJECTION in dispatch_skipped_projections()
+        assert dispatch_skipped_entries() == frozenset(
+            {(REGISTRY_PROJECTION, "_StandaloneRunnerShaped")}
+        )
 
     def test_in_process_handler_contract_is_not_recorded(self) -> None:
         self._build(_InProcessHandler(), "node_projection_dispatched_in_kernel")
         assert dispatch_skipped_projections() == frozenset()
+
+    def test_the_live_branch_records_the_entry_too(self) -> None:
+        """Both halves are written by the branch that decides them.
+
+        Recording only the skip is what made a mixed contract indistinguishable
+        from a wholly non-writing one: absence of a skip row is not evidence of
+        a live dispatcher, because a contract can also be absent entirely.
+        """
+        self._build(_InProcessHandler(), REGISTRY_PROJECTION)
+        assert projections_with_no_live_dispatcher() == frozenset()
+
+    def test_a_mixed_contract_is_recorded_as_having_a_live_dispatcher(self) -> None:
+        self._build(_StandaloneRunnerShaped(), REGISTRY_PROJECTION)
+        self._build(_InProcessHandler(), REGISTRY_PROJECTION)
+        assert dispatch_skipped_projections() == frozenset({REGISTRY_PROJECTION})
+        assert projections_with_no_live_dispatcher() == frozenset()

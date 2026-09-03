@@ -85,51 +85,21 @@ DLQ_SATURATION_RATIO: float = 1.0
 MAX_NAMED_PROJECTIONS: int = 8
 
 
-def select_projection_contracts(
+def _declared_projection_refs(
     manifest: ProtocolAutoWiringManifestLike,
 ) -> tuple[ModelProjectionContractRef, ...]:
-    """Return the contract-declared projections this runtime must have attached.
+    """Every contract-declared projection in the manifest, ordered by name.
+
+    The single discriminator both selectors below read, so the in-scope half
+    and the excluded half can never disagree about what a projection is.
 
     In scope: a contract with ``subscribe_topics`` that declares
     ``db_io.db_tables``. That is the same discriminator the wiring seam uses to
     choose the projection dispatch arm (``handler_wiring._choose_dispatch_
     callback``: "Use projection callback when contract declares
-    db_io.db_tables"), so the health surface and the wiring seam cannot disagree
-    about what a projection is — a contract that one calls a projection and the
-    other does not is how a gap hides.
-
-    Deliberately OUT of scope, because being unattached is their correct state
-    rather than a defect — including them would make this dimension fire on
-    healthy lanes, which is how a health signal earns a permanent exclusion:
-
-    * ``plugin_managed`` contracts — a domain plugin owns the subscription, so
-      it never appears in the runtime's own bus registry (OMN-10864).
-    * ``requires_cloud_gateway`` contracts — deliberately unwired on lanes with
-      no cloud mirroring provisioned (OMN-13809).
-    * **raw-event projection contracts** (``consumer_purpose: audit|projection``
-      with no ``db_io.db_tables``). ``handler_wiring`` skips their Kafka
-      subscription outright unless the kernel registered a result applier for
-      that exact contract name (``_raw_event_projection_enabled``), and the
-      registry is not visible from a health cycle. Being unattached is their
-      documented default, so selecting them would report a permanent fleet-wide
-      outage. Census 2026-08-29: the five contracts in this class
-      (``node_build_loop_projection_compute``,
-      ``node_gateway_link_health_projection_compute``,
-      ``node_ledger_projection_compute``, ``node_pr_state_projection_compute``,
-      ``node_validation_ledger_projection_compute``) all live in
-      ``omnibase_infra`` and NONE of them declares ``db_io.db_tables``, while
-      all 49 ``db_io.db_tables`` projections live in ``omnimarket`` and NONE of
-      them declares a raw-event ``consumer_purpose`` — the two sets are
-      disjoint, so nothing real is lost by narrowing to ``db_io``.
-
-    Args:
-        manifest: A discovery manifest, already filtered to this runtime's
-            profile by the caller. Read structurally so a manifest double that
-            exposes only the protocol's guarantees degrades to an empty set
-            instead of raising inside a health check.
-
-    Returns:
-        The in-scope projections, ordered by contract name.
+    db_io.db_tables"), so the health surface and the wiring seam cannot
+    disagree about what a projection is — a contract that one calls a
+    projection and the other does not is how a gap hides.
     """
     contracts = getattr(manifest, "contracts", ())
     selected: list[ModelProjectionContractRef] = []
@@ -162,12 +132,102 @@ def select_projection_contracts(
     return tuple(sorted(selected, key=lambda ref: ref.name))
 
 
+def select_projection_contracts(
+    manifest: ProtocolAutoWiringManifestLike,
+    *,
+    kernel_nonwriting: frozenset[str] = frozenset(),
+) -> tuple[ModelProjectionContractRef, ...]:
+    """Return the contract-declared projections this runtime must have attached.
+
+    Deliberately OUT of scope, because being unattached is their correct state
+    rather than a defect — including them would make this dimension fire on
+    healthy lanes, which is how a health signal earns a permanent exclusion:
+
+    * ``plugin_managed`` contracts — a domain plugin owns the subscription, so
+      it never appears in the runtime's own bus registry (OMN-10864).
+    * ``requires_cloud_gateway`` contracts — deliberately unwired on lanes with
+      no cloud mirroring provisioned (OMN-13809).
+    * **raw-event projection contracts** (``consumer_purpose: audit|projection``
+      with no ``db_io.db_tables``). ``handler_wiring`` skips their Kafka
+      subscription outright unless the kernel registered a result applier for
+      that exact contract name (``_raw_event_projection_enabled``), and the
+      registry is not visible from a health cycle. Being unattached is their
+      documented default, so selecting them would report a permanent fleet-wide
+      outage. Census 2026-08-29: the five contracts in this class
+      (``node_build_loop_projection_compute``,
+      ``node_gateway_link_health_projection_compute``,
+      ``node_ledger_projection_compute``, ``node_pr_state_projection_compute``,
+      ``node_validation_ledger_projection_compute``) all live in
+      ``omnibase_infra`` and NONE of them declares ``db_io.db_tables``, while
+      all 49 ``db_io.db_tables`` projections live in ``omnimarket`` and NONE of
+      them declares a raw-event ``consumer_purpose`` — the two sets are
+      disjoint, so nothing real is lost by narrowing to ``db_io``.
+    * **kernel-nonwriting contracts** (OMN-17562) — every handler entry on the
+      contract is wired with a no-op dispatch, so this kernel deliberately
+      withholds the Kafka subscription rather than consuming, acking and
+      discarding. Their topics correctly leave the live bus registry. This
+      selector is manifest-derived while ``attached_topics`` is the live
+      registry, so keeping them here would simply trade ``projection_write_path``
+      DEGRADED for ``projection_attachment`` DEGRADED on every one of them —
+      the same false outage reported by a different dimension. They are not
+      dropped from the health surface: :func:`select_kernel_nonwriting_projections`
+      returns exactly the excluded half, and the write-path leg names it.
+
+    Args:
+        manifest: A discovery manifest, already filtered to this runtime's
+            profile by the caller. Read structurally so a manifest double that
+            exposes only the protocol's guarantees degrades to an empty set
+            instead of raising inside a health check.
+        kernel_nonwriting: Contract names this process wires with NO live
+            dispatcher, from
+            ``projection_dispatch_ledger.projections_with_no_live_dispatcher``.
+
+    Returns:
+        The in-scope projections, ordered by contract name.
+    """
+    return tuple(
+        ref
+        for ref in _declared_projection_refs(manifest)
+        if ref.name not in kernel_nonwriting
+    )
+
+
+def select_kernel_nonwriting_projections(
+    manifest: ProtocolAutoWiringManifestLike,
+    kernel_nonwriting: frozenset[str],
+) -> tuple[ModelProjectionContractRef, ...]:
+    """Return the declared projections the fourth exclusion removed from scope.
+
+    The complement of :func:`select_projection_contracts` over the same
+    discriminator, so a contract can never be dropped by one and unclaimed by
+    the other.
+
+    Resolving names against the manifest here is also what keeps the write-path
+    detail honest: a stale ledger entry, or one belonging to a contract this
+    runtime profile does not own, resolves to nothing and is never rendered.
+    An operator must be able to look up every name on a health detail.
+
+    Args:
+        manifest: The same profile-filtered discovery manifest.
+        kernel_nonwriting: Contract names this process wires with NO live
+            dispatcher.
+
+    Returns:
+        The excluded projections, ordered by contract name.
+    """
+    return tuple(
+        ref
+        for ref in _declared_projection_refs(manifest)
+        if ref.name in kernel_nonwriting
+    )
+
+
 def evaluate_projection_liveness(
     *,
     projections: tuple[ModelProjectionContractRef, ...],
     attached_topics: frozenset[str],
     flow_windows: Iterable[ModelNodeFlowWindow],
-    dispatch_skipped: frozenset[str] = frozenset(),
+    kernel_nonwriting: tuple[ModelProjectionContractRef, ...] = (),
 ) -> ModelProjectionLivenessVerdict:
     """Compute the projection liveness verdict from injected observations.
 
@@ -182,15 +242,16 @@ def evaluate_projection_liveness(
         flow_windows: Closed OMN-16777 flow windows. Empty means the saturation
             half reports UNKNOWN — a runtime whose heartbeat has not yet closed
             a window has not proven anything either way.
-        dispatch_skipped: OMN-17448. Contract names this process wired onto the
-            standalone-runner branch, from
-            ``omnibase_infra.runtime.projection_dispatch_ledger``. Unlike the
-            two halves above, an empty set here is NOT ambiguous: the ledger is
-            written by the wiring seam on the same branch it describes, so
-            "nothing recorded" means "no projection took that branch in this
-            process". Only projections that are BOTH in scope and actually
-            subscribed are named — a contract this runtime does not own cannot
-            be a non-writing projection of it.
+        kernel_nonwriting: OMN-17448/OMN-17562. The declared projections every
+            one of whose handler entries this process wired with a no-op
+            dispatch, from :func:`select_kernel_nonwriting_projections`. Unlike
+            the two halves above, an empty tuple here is NOT ambiguous: the
+            underlying ledger is written by the wiring seam on the same branches
+            it describes, so "nothing recorded" means "every projection this
+            process wired has a live dispatcher". Passed as resolved refs rather
+            than bare names so a name that is not a declared projection of this
+            runtime cannot reach a health detail, and so the subset that is
+            STILL attached — the actual silent-loss state — can be computed.
 
     Returns:
         The verdict. Names, counts, and two UNKNOWN flags; no status word.
@@ -232,11 +293,33 @@ def evaluate_projection_liveness(
             and (min(totals_dlq.get(name, 0), taken) / taken) >= DLQ_SATURATION_RATIO
         )
 
-    # OMN-17448. Narrowed to projections this health cycle already has in scope,
-    # so a stale or foreign ledger entry can never manufacture a name the
-    # operator cannot look up in the contract set this runtime wired.
-    in_scope = {ref.name for ref in projections}
-    nonwriting = sorted(in_scope & dispatch_skipped)
+    # OMN-17562. Two different facts, and collapsing them is what made the
+    # OMN-17448 dimension unactionable:
+    #
+    #  * ``nonwriting`` — this kernel dispatches nothing for them. Expected and
+    #    correct on every lane where a dedicated writer process owns the rows;
+    #    whether that writer is DEPLOYED here is a corpus-level claim over the
+    #    deployment manifests (OMN-17448 AC5), which a kernel process cannot
+    #    see and therefore must not report on.
+    #  * ``nonwriting_attached`` — dispatches nothing AND is still consuming.
+    #    That is the silent-loss state itself: the consumer takes every message
+    #    and commits every offset while no handler runs, so the events are
+    #    destroyed rather than merely unwritten. After this ticket the kernel
+    #    withholds the subscription, so this list is empty; a change that
+    #    re-subscribes one reopens the loss and lights the dimension.
+    #
+    # ``attachment_evaluated`` gates the second: with no readable registry the
+    # subset is unknowable, and an empty list must not read as "none attached".
+    nonwriting = tuple(sorted(ref.name for ref in kernel_nonwriting))
+    nonwriting_attached: tuple[str, ...] = ()
+    if attachment_evaluated:
+        nonwriting_attached = tuple(
+            sorted(
+                ref.name
+                for ref in kernel_nonwriting
+                if any(topic in attached_topics for topic in ref.subscribe_topics)
+            )
+        )
 
     return ModelProjectionLivenessVerdict(
         projection_count=len(projections),
@@ -245,7 +328,8 @@ def evaluate_projection_liveness(
         saturation_evaluated=saturation_evaluated,
         dlq_saturated_projections=tuple(saturated),
         observed_window_count=len(windows),
-        nonwriting_projections=tuple(nonwriting),
+        nonwriting_projections=nonwriting,
+        nonwriting_attached_projections=nonwriting_attached,
     )
 
 
@@ -295,17 +379,27 @@ def describe_dlq_saturation(verdict: ModelProjectionLivenessVerdict) -> str:
 
 
 def describe_projection_write_path(verdict: ModelProjectionLivenessVerdict) -> str:
-    """Build the ``projection_write_path`` dimension detail (OMN-17448)."""
+    """Build the ``projection_write_path`` dimension detail (OMN-17448/OMN-17562)."""
     if not verdict.nonwriting_projections:
         return (
             f"All {verdict.projection_count} declared projection(s) dispatch in-process"
         )
+    if verdict.nonwriting_attached_projections:
+        return (
+            f"{len(verdict.nonwriting_attached_projections)} projection(s) are "
+            f"SUBSCRIBED here but dispatch NOTHING in this process "
+            f"(standalone-runner shape): offsets commit and every event is "
+            f"consumed, acked and destroyed rather than left replayable for the "
+            f"dedicated writer that owns the rows: "
+            f"{_name_list(verdict.nonwriting_attached_projections)}"
+        )
     return (
-        f"{len(verdict.nonwriting_projections)}/{verdict.projection_count} declared "
-        f"projection(s) are subscribed here but dispatch NOTHING in this process "
-        f"(standalone-runner shape): offsets commit and no row is written unless a "
-        f"dedicated writer is deployed for each on this lane: "
-        f"{_name_list(verdict.nonwriting_projections)}"
+        f"{len(verdict.nonwriting_projections)} declared projection(s) have no "
+        f"in-process dispatcher here and are deliberately not subscribed "
+        f"(OMN-17562), so their events stay replayable; their rows depend "
+        f"entirely on a dedicated writer this process cannot see, whose "
+        f"presence is asserted by the static lane writer-coverage gate rather "
+        f"than by this runtime: {_name_list(verdict.nonwriting_projections)}"
     )
 
 
@@ -317,5 +411,6 @@ __all__: list[str] = [
     "describe_projection_attachment",
     "describe_projection_write_path",
     "evaluate_projection_liveness",
+    "select_kernel_nonwriting_projections",
     "select_projection_contracts",
 ]
