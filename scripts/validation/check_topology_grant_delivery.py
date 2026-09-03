@@ -77,16 +77,28 @@ DELIVERY PROGRESS
     OMN-17379. The ``node_projection_baselines`` relations in that tranche
     turned out NOT to be sequence-backed (see THE SEQUENCE HALF below); their
     TABLE grants were just as undelivered, so they stayed.
+  * OMN-17440 tranche 2 delivered the remaining 26 across 21 node lineages,
+    taking the bound to 1 -- the undeliverable residual below. The tranche is
+    the whole rest of the set rather than another sub-selection, because the
+    live measurement made further staging pointless: of the 63 declared grants
+    the ``.201`` dev lane actually holds (read-only probe of
+    ``information_schema.role_table_grants`` in ``omnidash_analytics``,
+    2026-09-03), exactly 38 were issued by a migration. The other 26 were
+    granted OUT OF BAND BY HAND, so every one of them is already a live
+    dependency on a lane nobody can rebuild. A fresh staging namespace, a
+    rebuilt onex-dev or prod gets 38 of 65 and refuses the rest.
 
-WHAT THE REMAINING 27 ARE
--------------------------
-26 are deliverable and simply not yet done -- each has an owning node with a
-creating migration to land the grant beside. The 27th, ``nightly_loop_configs``,
-is NOT deliverable by any migration: nothing in the corpus issues a CREATE TABLE
-for it, so there is no lineage to put a grant in and no relation for a grant to
-bite on. It is named here so the floor is understood as 1 rather than 0, and
-``test_residual_relation_has_no_creating_migration`` asserts that reason still
-holds instead of trusting this prose.
+WHAT THE REMAINING 1 IS
+-----------------------
+``nightly_loop_configs`` is NOT deliverable by any migration: nothing in the
+corpus issues a CREATE TABLE for it, so there is no lineage to put a grant in
+and no relation for a grant to bite on. It is the reason the floor is 1 rather
+than 0, and ``test_residual_relation_has_no_creating_migration`` asserts that
+reason still holds instead of trusting this prose. Closing it to 0 is not a
+grant-delivery change: either ``node_nightly_loop_controller`` grows a CREATE
+TABLE for the relation its contract declares under ``db_io.db_tables``, or that
+declaration is removed. Both are OMN-17440 AC2/AC4 decisions, and neither is
+made by adding a GRANT for a relation that does not exist.
 
 THE SEQUENCE HALF (OMN-17447)
 -----------------------------
@@ -162,12 +174,15 @@ _GRANT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# The count measured on 2026-09-01 after OMN-17440 landed the first delivery
-# tranche (13 grants across 8 node lineages) on top of OMN-17374's own.
+# The count measured on 2026-09-03 after OMN-17440's second delivery tranche
+# (the remaining 26 grants across 21 node lineages) landed on top of the first
+# (13 across 8) and OMN-17374's own. What is left is the single undeliverable
+# residual named in WHAT THE REMAINING 1 IS above, so this is now the floor and
+# not merely the current reading.
 # It may only ever go down. Moving it UP is the one edit this file rejects on
 # sight: it converts the gate into a record of the drift instead of a bound on
 # it.
-MAX_UNDELIVERED = 27
+MAX_UNDELIVERED = 1
 
 # OMN-17447: the SEQUENCE half of the same defect class, measured after this
 # change lands its own seven deliveries. Same ratchet discipline as above.
