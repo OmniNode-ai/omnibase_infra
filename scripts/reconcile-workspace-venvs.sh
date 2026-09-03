@@ -564,9 +564,29 @@ run_repair() {
       # already located the binary in the parent. The interpreter is PASSED
       # DOWN rather than re-resolved: two independent resolutions can disagree,
       # and then the version the parent proved usable is not the one that runs.
-      if ! as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
+      #
+      # `cd "$OMNI_HOME"` for the same reason, one variable over (OMN-17800).
+      # `runuser` changes UID, GID and HOME; it does NOT change the inherited
+      # working directory. Under the `.201` root cron that directory is /root,
+      # mode 0700 -- so the child became the operator while still standing in
+      # root's home, and uv, which discovers configuration by walking UP from
+      # the working directory, died on:
+      #
+      #   error: failed to open file `/root/uv.toml`: Permission denied (os error 13)
+      #
+      # every hour for 67 consecutive ticks. The co-install is the FIRST step of
+      # the venv repair and forces the lock pass after it, so one unreadable
+      # directory took out all three venv surfaces at once.
+      #
+      # $OMNI_HOME rather than $INFRA_DIR, unlike the sync calls below: this is a
+      # `uv pip install`, and from inside the project uv would newly discover
+      # omnibase_infra/pyproject.toml's `[tool.uv] override-dependencies` -- the
+      # layer beneath, which this install exists NOT to re-resolve (hence its own
+      # --no-deps). The workspace root carries no uv configuration on any host,
+      # so this changes where the child stands without changing what it installs.
+      if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
           PATH="$(dirname "$UV_BIN"):$PATH" \
-          bash "$INSTALL_SCRIPT" --execute "$INFRA_PYTHON"; then
+          bash "$INSTALL_SCRIPT" --execute "$INFRA_PYTHON"); then
         fail "provider co-install did not complete; omnimarket is not installed." \
           "Every \`onex skill\`/\`onex node\`/\`onex delegate\` dispatch will refuse" \
           "until this succeeds. Run by hand and read the error:" \
