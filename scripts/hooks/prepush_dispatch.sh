@@ -952,8 +952,18 @@ prepush_developer_shell_path() {
   local uvbin uvdir lc rowuv rowdir
   uvbin="${1:-}"
   [ -n "$uvbin" ] || uvbin="$(command -v uv 2> /dev/null || true)"
+  # OMN-17704: the resolved uv path must be ABSOLUTE before its directory goes
+  # at the HEAD of PATH. `command -v` reports the path as resolved, so if the
+  # caller's PATH already carries a relative element (including the
+  # empty-element-means-dot case this function exists to avoid) it can hand
+  # back `./uv`, and `dirname` would then splice a caller-controlled relative
+  # directory in front of every governed pytest run. This is the same `/*`
+  # discipline prepush_local_row_uv already applies to the table's column, and
+  # a non-absolute answer drops the entry rather than contributing it.
   uvdir=""
-  [ -n "$uvbin" ] && uvdir="$(dirname "$uvbin"):"
+  case "$uvbin" in
+    /*) uvdir="$(dirname "$uvbin"):" ;;
+  esac
   # The committed table's uv directory for THIS host, which is the local
   # analogue of the remote leg's `$(dirname "$UV")` and the only entry that
   # covers a NON-OWNER actor: their `$HOME` is not where the host's tooling was

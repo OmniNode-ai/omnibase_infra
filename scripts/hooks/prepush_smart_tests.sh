@@ -1285,8 +1285,25 @@ scrub_prepush_override_env() {
 # list is single-sourced with the remote wrapper in prepush_dispatch.sh
 # (prepush_developer_shell_path) and the caller's own `${PATH}` stays last, so
 # this can only add resolution.
-PATH="$(prepush_developer_shell_path)"
+# OMN-17704: refuse loudly rather than assign an empty PATH. A bare
+# `PATH="$(prepush_developer_shell_path)"` is silent if the helper is ever
+# undefined (dispatch failed to source, or a later refactor renamed it): the
+# substitution yields "", PATH becomes the empty string mid-hook AFTER the
+# placement decision, and every later lookup fails for a reason that has
+# nothing to do with the tree under test. This is a fail-closed surface, so
+# silence is the wrong failure mode.
+if ! type prepush_developer_shell_path > /dev/null 2>&1; then
+  die "prepush_developer_shell_path is not defined -- prepush_dispatch.sh did not source, so the governed suite would run on an unrestored PATH" \
+    "This is a hook-integrity failure, not a test failure. Repair the dispatch source; do not work around it by unsetting the check."
+fi
+_prepush_devpath="$(prepush_developer_shell_path)"
+if [ -z "$_prepush_devpath" ]; then
+  die "prepush_developer_shell_path returned an empty PATH" \
+    "Assigning it would blank PATH for every subsequent command in this hook. Repair the helper; do not bypass."
+fi
+PATH="$_prepush_devpath"
 export PATH
+unset _prepush_devpath
 
 if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
   guard_full_suite_host

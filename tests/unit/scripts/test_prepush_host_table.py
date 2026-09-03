@@ -1798,13 +1798,63 @@ def test_the_local_leg_restores_a_developer_shell_path_too() -> None:
     PATH simply omits `~/.local/bin`. Six guaranteed false reds hard-block a
     push."""
     hook = HOOK.read_text(encoding="utf-8")
-    assert 'PATH="$(prepush_developer_shell_path)"' in hook
+
+    # Assert the EXECUTABLE form, not the prose. An earlier revision of this
+    # test looked for `PATH="$(prepush_developer_shell_path)"`, which the
+    # OMN-17704 guard moved into an explanatory comment -- the assertion would
+    # then have passed against comment text while the real assignment could be
+    # anything at all. Anchor on the assignment and its guard instead.
+    assert '_prepush_devpath="$(prepush_developer_shell_path)"' in hook
+    assert 'PATH="$_prepush_devpath"' in hook
     assert "export PATH" in hook
 
-    export_at = hook.index('PATH="$(prepush_developer_shell_path)"')
+    export_at = hook.index('PATH="$_prepush_devpath"')
     first_pytest = hook.index("exec uv run pytest")
     assert export_at < first_pytest, (
         "PATH must be exported before any local pytest invocation, not after"
+    )
+
+
+def test_the_local_leg_refuses_rather_than_blanking_path() -> None:
+    """OMN-17704. A bare `PATH="$(helper)"` is silent when the helper is
+    undefined: the substitution yields "", PATH becomes the empty string mid-
+    hook AFTER the placement decision, and every later lookup fails for a
+    reason that has nothing to do with the tree under test. The governed hook
+    is a fail-closed surface, so both the missing-helper and empty-result cases
+    must refuse loudly instead."""
+    hook = HOOK.read_text(encoding="utf-8")
+
+    guard_at = hook.index("if ! type prepush_developer_shell_path")
+    assign_at = hook.index('_prepush_devpath="$(prepush_developer_shell_path)"')
+    export_at = hook.index('PATH="$_prepush_devpath"')
+    assert guard_at < assign_at < export_at, (
+        "the helper must be proven defined before it is called, and the result "
+        "proven non-empty before it becomes PATH"
+    )
+    assert '[ -z "$_prepush_devpath" ]' in hook, (
+        "an empty helper result must refuse, never be assigned to PATH"
+    )
+
+
+def test_the_local_leg_only_trusts_an_absolute_uv_path() -> None:
+    """OMN-17704. `command -v` reports the path as resolved, so a relative
+    element already on the caller's PATH can make it answer `./uv`. Its
+    `dirname` would then be spliced at the HEAD of PATH for every governed
+    pytest run -- a caller-controlled directory in front of the system ones.
+    prepush_local_row_uv already enforces `/*` on the table's own column; this
+    pins the same discipline on the resolved binary, and a non-absolute answer
+    must DROP the entry rather than contribute it."""
+    lib = LIB.read_text(encoding="utf-8")
+    start = lib.index("prepush_developer_shell_path() {")
+    body = lib[start : lib.index("\n}", start)]
+
+    uv_case = body.index('case "$uvbin" in')
+    uv_assign = body.index('uvdir="$(dirname "$uvbin"):"')
+    assert uv_case < uv_assign, (
+        "the absolute-path test must gate the assignment, not follow it"
+    )
+    assert '/*) uvdir="$(dirname "$uvbin"):" ;;' in body, (
+        "only an absolute uv path may contribute a PATH entry"
     )
 
 
