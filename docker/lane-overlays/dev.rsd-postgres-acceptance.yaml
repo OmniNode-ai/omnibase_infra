@@ -1,0 +1,5 @@
+schema_version: rsd_postgres_acceptance_overlay.v1
+lane: dev
+locale: lab
+rsd_distribution_ref: omninode-rsd/0.1.0
+postgres_capability_ref: capability://rsd/postgres/acceptance
