@@ -31,6 +31,15 @@ class ModelModelReviewCapabilityConfig(BaseModel):
         default="model-review",
         description="Required runner capability label.",
     )
+    runner_group: Literal["omnibase-ci"] = Field(
+        default="omnibase-ci",
+        description="Required runner group for the capability overlay.",
+    )
+    max_observation_age_seconds: int = Field(
+        default=300,
+        ge=1,
+        description="Maximum age of a capability attestation accepted by preflight.",
+    )
     credential_reference_id: UUID = Field(
         ...,
         description="Opaque logical identifier for the required credential reference.",

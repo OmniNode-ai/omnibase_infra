@@ -1,0 +1,22 @@
+{
+  "runner_labels": [
+    "self-hosted",
+    "omnibase-ci",
+    "model-review",
+    "linux",
+    "x64"
+  ],
+  "runner_groups": ["omnibase-ci"],
+  "present_reference_ids": [
+    "dc9565c8-7f13-46dc-bd89-9694c13e1d2f",
+    "b2a8287b-0a9f-4cbc-b2e8-cf954f9a71f7",
+    "2672472a-bac9-4344-8c8c-79da6cb604ae"
+  ],
+  "healthy_reference_ids": [
+    "dc9565c8-7f13-46dc-bd89-9694c13e1d2f",
+    "b2a8287b-0a9f-4cbc-b2e8-cf954f9a71f7",
+    "2672472a-bac9-4344-8c8c-79da6cb604ae"
+  ],
+  "reviewer_cli_available": true,
+  "observation_age_seconds": 0
+}

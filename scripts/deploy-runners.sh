@@ -136,6 +136,7 @@ SYNC_PATHS=(
     "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
     "docker/runners/healthcheck.sh"
+    "docker/runners/model-review-healthcheck.sh"
     # OMN-15142: docker/runners/Dockerfile does `COPY omni-curl
     # /usr/local/bin/omni-curl` -- both the built binary shim and its source
     # script must be synced or a rebuild against a fresh/empty deployment dir
@@ -143,6 +144,8 @@ SYNC_PATHS=(
     "docker/runners/omni-curl"
     "docker/runners/omni-curl.sh"
     "docker/docker-compose.runners.yml"
+    "docker/docker-compose.model-review-canary.yml"
+    "docker/compose-overrides.list"
     "scripts/ci/build_runner_image.sh"
     "scripts/ci/ci_env_digest.py"
     "scripts/ci/ensure_ci_env.sh"
@@ -269,6 +272,7 @@ rsync_artifacts() {
         "${REPO_ROOT}/docker/runners/runner-job-started.sh" \
         "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
         "${REPO_ROOT}/docker/runners/healthcheck.sh" \
+        "${REPO_ROOT}/docker/runners/model-review-healthcheck.sh" \
         "${REPO_ROOT}/docker/runners/omni-curl" \
         "${REPO_ROOT}/docker/runners/omni-curl.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
@@ -283,6 +287,8 @@ rsync_artifacts() {
     # Sync compose file into docker/
     rsync -av --checksum \
         "${REPO_ROOT}/docker/docker-compose.runners.yml" \
+        "${REPO_ROOT}/docker/docker-compose.model-review-canary.yml" \
+        "${REPO_ROOT}/docker/compose-overrides.list" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/"
 
     log "Rsync complete."
@@ -296,7 +302,11 @@ deploy_runners() {
     local token_b64="${1}"
     local remote_token_b64="${token_b64}"
 
-    local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml"
+    # Keep the inactive candidate overlay on the normal deploy path as well as
+    # the monitor repair path. Its defaults preserve the generic fleet, while
+    # dropping the file here would make a later authorized activation vanish on
+    # the next force-recreate.
+    local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
 
     local up_flags="--force-recreate --remove-orphans"
 

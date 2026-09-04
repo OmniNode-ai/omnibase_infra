@@ -1,0 +1,36 @@
+# OMN-17876 — private, hosted contract/evidence canary.
+#
+# This validates the inactive-by-default capability contract with a sanitized
+# fixture. Live runner registration, selection, and the RSD canary belong to
+# the separately authorized operator ticket OMN-17878.
+name: model-review-capability-canary
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  contract-evidence:
+    name: model-review-contract-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout contract and fixture
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          uv-version: "0.6.14"
+          install-args: "--frozen"
+
+      - name: Validate and emit sanitized capability evidence
+        run: |
+          uv run python scripts/ci/model_review_capability_canary.py \
+            --fixture tests/fixtures/model_review_capability_canary.json \
+            | tee -a "${GITHUB_STEP_SUMMARY}"

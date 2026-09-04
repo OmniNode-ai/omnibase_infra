@@ -19,3 +19,4 @@
 # docker-compose.runners.yml itself) or because it was rolled back.
 
 docker-compose.pypi-canary.yml
+docker-compose.model-review-canary.yml
