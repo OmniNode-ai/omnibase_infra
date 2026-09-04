@@ -7,8 +7,10 @@
 # derivation drift on the next --check. Rationale for a principal therefore goes
 # in the migration that provisions it and in its test module, not here.
 # `validator_ro` (read-only validation identity, CONNECT + schema USAGE, no
-# binding): docker/migrations/forward/104_create_validator_ro_role.sql and
-# tests/unit/topology/test_validator_ro_principal_omn17792.py.
+# binding): tests/unit/topology/test_validator_ro_principal_omn17792.py. Its
+# migration (104, OMN-17792) is RETIRED until OMN-17923 carries this principal
+# to the provisioning seam -- the declaration stays; see
+# docker/migrations/forward/_ledger/retired-flat-migrations.tsv.
 active_preset: application-local
 databases:
   application:

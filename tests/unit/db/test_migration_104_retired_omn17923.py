@@ -77,6 +77,15 @@ RETIRED_ROLLBACK_SHA256 = (
 RETIRING_TICKET = "OMN-17923"
 ORIGIN_TICKET = "OMN-17792"
 SURVIVING_HIGH_WATER = 103
+# The stream as it stood BEFORE #3190 landed 104: the fingerprint stamped at
+# cb122fefb's parent (71177a327, #3188). The retirement must reproduce it
+# exactly -- that equality is the proof that the stream through 103 is
+# byte-unchanged and that the retirement removed 104 and nothing else.
+PRE_3190_PARENT_COMMIT = "71177a327dbf4d1a2c62d186c5ebc61a726c887a"
+PRE_3190_STREAM_SHA256 = (
+    "79aa3056a6ad65eaf8899cfbb689c9cbe13b2088f3af40f970710890270d1143"
+)
+PRE_3190_STREAM_FILE_COUNT = 88
 ROLE = "validator_ro"
 SHIPPED_INSTANCES = ("local", "onex-dev", "onex-prod")
 
@@ -226,6 +235,29 @@ def test_stream_tops_out_at_103_until_the_reissue() -> None:
     assert max(below_or_at_retired) == SURVIVING_HIGH_WATER, (
         f"the surviving stream at or below 104 tops out at "
         f"{max(below_or_at_retired):03d}, expected {SURVIVING_HIGH_WATER:03d}"
+    )
+
+
+@pytest.mark.unit
+def test_surviving_stream_is_byte_identical_to_the_pre_3190_stream() -> None:
+    """The stream through 103 is byte-unchanged: the retirement removed ONLY 104.
+
+    ``compute_migration_fingerprint`` hashes every forward ``*.sql`` by name and
+    content, so equality with the value stamped at #3190's parent commit is a
+    byte-level statement about the whole surviving corpus, not just a count.
+    A new migration, or any edit to 001..103, changes this value and must land
+    as its own change with its own restamp -- never folded into a retirement.
+    """
+    fingerprint, count = compute_migration_fingerprint(FORWARD_DIR)
+    assert (fingerprint, count) == (
+        PRE_3190_STREAM_SHA256,
+        PRE_3190_STREAM_FILE_COUNT,
+    ), (
+        f"the surviving forward stream fingerprints as {fingerprint} over {count} "
+        f"files; the stream before #3190 (parent {PRE_3190_PARENT_COMMIT[:9]}) "
+        f"was {PRE_3190_STREAM_SHA256} over {PRE_3190_STREAM_FILE_COUNT}. "
+        "Either the retirement removed more than 104, or something else in "
+        "001..103 changed and needs its own restamp."
     )
 
 
