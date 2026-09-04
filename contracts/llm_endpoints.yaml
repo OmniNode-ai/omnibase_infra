@@ -41,13 +41,39 @@ endpoints:
     endpoint_url: http://192.168.86.201:8000
     url_env_var: LLM_CODER_URL
     role_env_alias: LLM_CODER_SLOW_URL
-    model_hf_id: Qwen/Qwen3.8-27B
+    model_hf_id: Qwen/Qwen3.6-35B-A3B
     role: coder_slow
     status: running
     hardware: RTX 5090 (.201)
-    context_window_budgeted: 122880
+    context_window_budgeted: 131072
     launchd_unit_or_none: null
     notes: |
+      OMN-14379 reconcile (2026-09-03). This slot went DOWN entirely: nothing
+      was listening on :8000, and `vllm-gpu0.service` was inactive+disabled and
+      crash-looped on every start because its --gpu-memory-utilization 0.92 and
+      vllm-embeddings.service's 0.08 sum to 1.00 on the ONE surviving GPU,
+      leaving no room for either process's CUDA context. Fixed by sizing the
+      unit to 0.86 (arithmetic in
+      deploy/systemd/vllm-gpu0-qwen-coder.service, enforced by
+      tests/ci/test_vllm_qwen_coder_service_unit.py); both services are now
+      co-resident.
+      The SGLang description below is RETIRED. Live readback 2026-09-03T16:07Z,
+      GET http://192.168.86.201:8000/v1/models: id "Qwen3.6-35B-A3B",
+      owned_by "vllm", root /data/inference/hf-cache/Qwen3.6-35B-A3B-GPTQ-Int4,
+      max_model_len 131072; a chat completion returned HTTP 200. The served
+      artifact is a locally-produced GPTQ-Int4 quantization (gptqmodel 6.0.3)
+      with no upstream HF repo of its own; model_hf_id records the BASE model,
+      Qwen/Qwen3.6-35B-A3B. context_window_budgeted 122880 -> 131072 to match
+      the live max_model_len.
+      MODEL-ID ENFORCEMENT CHANGED WITH THE BACKEND: SGLang echoed any `model`
+      string back at HTTP 200; vLLM does NOT. Live-verified same session:
+      POST /v1/chat/completions with model "qwen3.8" now returns HTTP 404
+      "The model `qwen3.8` does not exist." Any consumer still pinned to the
+      SGLang-era id is now hard-failing, not silently mis-attributing.
+      CONCURRENCY: vLLM reports "Maximum concurrency for 131,072 tokens per
+      request: 1.44x" (GPU KV cache 188,416 tokens / 3.71 GiB). Size callers
+      against roughly one full-context request in flight.
+      --- superseded, kept for lineage ---
       OMN-16442 reconcile (2026-08-28) against the canonical inventory
       omni_home/docs/reference/AI_LAB_HARDWARE.md ("Last verified: 2026-08-28").
       The .201 reboot of 2026-08-23 replaced the vLLM Qwen3-Coder-30B stack with
@@ -118,6 +144,15 @@ endpoints:
       different width, so the stale id here was an actively misleading claim.
       `hardware` also corrected: the 4090 was removed for RMA (OMN-16407); this
       service runs on the surviving RTX 5090.
+      CO-RESIDENCY BUDGET (OMN-14379, 2026-09-03): this service shares cuda:0
+      with the coder-5090 slot's vllm-gpu0.service. Its
+      --gpu-memory-utilization 0.08 budgets 2.51 GiB but it holds ~3.04 GiB
+      resident, because each vLLM process's CUDA context (~0.53 GiB) is
+      allocated OUTSIDE the fraction. Changing EITHER fraction requires redoing
+      the arithmetic for BOTH; the numbers live in
+      deploy/systemd/vllm-gpu0-qwen-coder.service. NOTE: this unit is NOT
+      repo-owned yet — it exists only as a hand-managed
+      /etc/systemd/system/vllm-embeddings.service on .201.
   - slot_id: reasoning-deepseek-32b
     host: 192.168.86.200
     port: 8101

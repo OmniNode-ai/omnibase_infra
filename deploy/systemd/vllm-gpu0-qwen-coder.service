@@ -11,6 +11,66 @@
 # The auto-tool-choice and qwen3_coder parser flags are required for SEA ADK
 # tool-calling runs. Without them, local OpenAI-compatible ADK calls can fail
 # with HTTP 400 even though plain chat completions pass.
+#
+# ---------------------------------------------------------------------------
+# --gpu-memory-utilization 0.86 — CO-RESIDENCY BUDGET (OMN-14379)
+# ---------------------------------------------------------------------------
+# This unit is NOT alone on cuda:0. Since the RTX 4090 was pulled for RMA
+# (OMN-16407, 2026-08-23) `vllm-embeddings.service` (:8002,
+# Qwen3-Embedding-0.6B) also runs on the surviving RTX 5090. Its unit carries
+# CUDA_VISIBLE_DEVICES=0 too. Both fractions are therefore taken out of ONE
+# 31.36 GiB device and MUST be sized against each other.
+#
+# The value was 0.92 while embeddings ran at 0.08. Those sum to exactly 1.00,
+# leaving zero room for either process's CUDA context — which is allocated
+# OUTSIDE the fraction. The unit could therefore never start, deterministically:
+#
+#   ValueError: Free memory on device cuda:0 (27.8/31.36 GiB) on startup is
+#   less than desired GPU memory utilization (0.92, 28.85 GiB).
+#
+# Measured on .201, 2026-09-03 (nvidia-smi + torch.cuda.mem_get_info):
+#
+#   T  total device                                        = 31.3564 GiB
+#                                                 (33,668,726,784 B; nvidia-smi 32,607 MiB)
+#   E  vllm-embeddings RESIDENT (nvidia-smi                 =  3.0391 GiB  (3,112 MiB)
+#      --query-compute-apps, pid 966377)
+#      its budget 0.08 * T                                  =  2.5085 GiB
+#      delta 0.5306 GiB = its CUDA context, outside the fraction
+#   F  free as seen by a STARTING vLLM process on cuda:0    = 27.8034 GiB
+#      (torch.cuda.mem_get_info, i.e. after this process's own ~0.51 GiB context)
+#
+# vLLM v1 gates startup on:  F >= gpu_memory_utilization * T
+#   hard ceiling  f_max = 27.8034 / 31.3564         = 0.8867
+#   old value     0.92 * T = 28.848 GiB vs 27.803 free  -> SHORT BY 1.045 GiB (the crash)
+#   chosen        0.86 * T = 26.966 GiB
+#                 startup margin = 27.8034 - 26.9665     =  0.837 GiB
+#
+# 0.86 rather than the 0.8867 ceiling: the margin has to absorb the embedding
+# server's own growth under load and allocator fragmentation across restarts,
+# or the fix regresses into an intermittent crash-loop instead of a permanent
+# one. 0.87 would leave only 0.52 GiB.
+#
+# KV floor — the budget must still hold at least one full --max-model-len run:
+#   Qwen3.6-35B-A3B has 40 layers of which only 10 are full_attention (the rest
+#   are linear_attention with constant-size state), num_key_value_heads=2,
+#   head_dim=256, bf16:
+#     per token = 10 * 2(K+V) * 2 * 256 * 2 B = 20,480 B = 20 KiB
+#     131,072 tokens                          = 2.500 GiB
+#   weights loaded = 22.743 GiB safetensors - 1.573 GiB mtp.safetensors
+#     (no --speculative-config, so the MTP module is not loaded) = 21.17 GiB
+#     + CUDA context + activation peak; MEASURED non-KV footprint = 23.26 GiB
+#   KV available = 26.966 - 23.26 = 3.71 GiB.
+#   Confirmed live at 0.86 (vllm 0.21.0, 2026-09-03T16:06:26Z):
+#     gpu_worker.py:462   Available KV cache memory: 3.71 GiB
+#     kv_cache_utils:1710 GPU KV cache size: 188,416 tokens
+#     kv_cache_utils:1711 Maximum concurrency for 131,072 tokens per request: 1.44x
+#
+# Physical sum check: E 3.039 + 26.966 = 30.005 of 31.356 GiB (1.35 GiB spare).
+# Old config:         E 3.039 + 28.848 = 31.887 > 31.356      (over by 0.53 GiB).
+#
+# If you change EITHER fraction, redo this arithmetic for BOTH units.
+# vllm-embeddings.service is not yet repo-owned — tracked separately.
+# ---------------------------------------------------------------------------
 
 [Unit]
 Description=vLLM API - Qwen3.6-35B-A3B GPTQ-Int4 (RTX 5090, 128K)
@@ -33,7 +93,7 @@ ExecStart=/opt/vllm/venv/bin/python -m vllm.entrypoints.openai.api_server \
     --tensor-parallel-size 1 \
     --max-model-len 131072 \
     --max-num-seqs 4 \
-    --gpu-memory-utilization 0.92 \
+    --gpu-memory-utilization 0.86 \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --trust-remote-code
