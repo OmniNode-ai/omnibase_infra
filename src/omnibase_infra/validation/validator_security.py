@@ -25,7 +25,7 @@ CLI Usage:
     python -m omnibase_infra.validation.validator_security src/
 
 See Also:
-    - docs/patterns/security_patterns.md - Comprehensive security guide
+    - knowledge-base-internal:reference/omnibase-infra-security-patterns.md - Comprehensive security guide
     - ValidatorBase - Base class for contract-driven validators
 """
 

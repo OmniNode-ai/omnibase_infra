@@ -2060,7 +2060,7 @@ def _should_jsonb_wrap_list(key: str, value: list[object]) -> bool:
     return any(isinstance(item, (dict, list)) for item in value)
 
 
-# Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
+# Authoritative source: knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md "Per-Service Database
 # URL Contract" — each OmniNode service owns its own PostgreSQL database and a
 # dedicated *_DB_URL env var. This map MUST stay in parity with that table; a
 # missing row makes the DB-injection auto-wiring reject a contract whose

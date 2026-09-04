@@ -15,7 +15,7 @@ out at the 30-minute job budget (see OMN-16114).
 
 `insteadOf` has no server-side fallback: once a URL is rewritten, a fetch the
 mirror cannot serve fails outright rather than retrying the un-rewritten URL
-(documented in docker/runners/README-c2b-uv-git-mirror.md, re-verified for
+(documented in knowledge-base-internal:runbooks/omnibase-infra-uv-git-mirror-routing.md, re-verified for
 the sibling-checkout case by test_exact_sha_absent_from_mirror_fails_open_not_a_silent_fallthrough
 below). Every test here proves either (a) the rewrite is installed only when
 the mirror can actually serve every ref the discovered job would request, or

@@ -27,8 +27,8 @@ Environment Variables:
     OMNIBASE_INFRA_DB_URL: PostgreSQL DSN for tracking (required with --enable-tracking)
 
 See Also:
-    docs/operations/DLQ_REPLAY_RUNBOOK.md
-    docs/operations/DLQ_QUARANTINE_OWNERSHIP.md
+    knowledge-base:runbooks/omnibase-infra-dlq-replay.md
+    knowledge-base:reference/omnibase-infra-dlq-quarantine-ownership.md
 """
 
 from __future__ import annotations
@@ -464,7 +464,7 @@ Examples:
   python scripts/dlq_replay.py stats --dlq-topic onex.dlq.omnibase-infra.events.v1
 
 Non-replayable messages are quarantined to onex.dlq.omnibase-infra.quarantine.v1 (never dropped).
-See docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
+See knowledge-base:reference/omnibase-infra-dlq-quarantine-ownership.md.
         """,
     )
     parser.add_argument(

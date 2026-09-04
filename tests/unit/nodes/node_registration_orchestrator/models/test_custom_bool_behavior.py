@@ -28,7 +28,7 @@ Example:
 
 Related:
     - CLAUDE.md: Section on "Custom __bool__ for Result Models"
-    - ADR: docs/decisions/adr-custom-bool-result-models.md (if exists)
+    - ADR: knowledge-base:reference/omnibase-infra-adr-custom-bool-result-models.md (if exists)
     - PR #92 review feedback: CRITICAL - missing tests for __bool__ behavior
 
 .. versionadded:: 0.7.0

@@ -13,7 +13,7 @@
 # recreate, so this component can roll out mid-wave.
 [Unit]
 Description=OmniNode runner-fleet git mirror daemon (OMN-14027 C2)
-Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/dev/docs/runbooks/c2-git-mirror-egress-rollout.md
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/dev/knowledge-base:runbooks/c2-git-mirror-egress-rollout.md
 After=docker.service network-online.target
 Wants=network-online.target
 

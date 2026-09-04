@@ -106,7 +106,7 @@ env:
   ONEX_EVENT_BUS_TYPE: "inmemory"
   # Explicit database name for integration tests that pass POSTGRES_DATABASE
   # into Docker containers and for injection_effectiveness conftest.  Production
-  # code uses OMNIBASE_INFRA_DB_URL instead (see docs/patterns/db_url_contract.md).
+  # code uses OMNIBASE_INFRA_DB_URL instead (see knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md).
   POSTGRES_DATABASE: "omnibase_infra"
   # LLM endpoint CIDR allowlist — required by MixinLlmHttpTransport.
   # CI uses a dummy value since no LLM calls are made during tests.
@@ -951,7 +951,7 @@ jobs:
     # ran. ``cache-enabled: "false"`` is intentionally NOT flipped here: this
     # repo's self-hosted-fleet CI already replaced the per-job uv cache with
     # the shared host-local dependency-environment canary (see
-    # ``docs/ci/versioned-ci-env-canary.md``), which explicitly says "Do not
+    # ``knowledge-base-internal:runbooks/omnibase-infra-versioned-ci-env-canary.md``), which explicitly says "Do not
     # enable setup-uv cache save for direct jobs that intentionally run
     # ``uv sync --no-cache``; the post-job cache upload can outlive the
     # actual check and cancel merge-group CI while adding no useful reuse" --
@@ -3148,7 +3148,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: e6e80785aad4930e4e9066185c0643404972032d
+          ref: 989dbb47fa524f0d6fd543ba9dc56dc6b3f60661
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false

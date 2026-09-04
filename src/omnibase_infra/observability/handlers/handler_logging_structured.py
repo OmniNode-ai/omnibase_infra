@@ -211,7 +211,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
 
         See Also:
             - handler_category: Behavioral classification (EFFECT/COMPUTE)
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return EnumHandlerType.INFRA_HANDLER
 
@@ -236,7 +236,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
 
         See Also:
             - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
-            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+            - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
         """
         return EnumHandlerTypeCategory.EFFECT
 

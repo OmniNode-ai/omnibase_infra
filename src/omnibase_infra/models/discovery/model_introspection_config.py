@@ -14,7 +14,7 @@ Topic Validation:
     - Legacy topics (not starting with 'onex.') are allowed for flexibility
 
 See Also:
-    - docs/architecture/EVENT_STREAMING_TOPICS.md: Topic naming conventions
+    - knowledge-base:architecture/event-streaming-topics.md: Topic naming conventions
 """
 
 from __future__ import annotations

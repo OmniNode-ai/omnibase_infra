@@ -204,7 +204,7 @@ class HandlerManifestPersistence(
         See Also:
             - CLAUDE.md "Container-Based Dependency Injection" section for the
               standard ONEX container injection pattern.
-            - docs/patterns/container_dependency_injection.md for detailed DI patterns.
+            - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md for detailed DI patterns.
         """
         self._container = container
         self._storage_path: Path | None = None

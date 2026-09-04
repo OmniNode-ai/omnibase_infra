@@ -160,7 +160,7 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         """Test that error is raised when both contract types exist in same directory.
 
         This verifies the fail-fast behavior for ambiguous contract configurations
-        as documented in docs/patterns/handler_plugin_loader.md#contract-file-precedence.
+        as documented in knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md#contract-file-precedence.
 
         When both handler_contract.yaml and contract.yaml exist in the same directory,
         the loader raises ProtocolConfigurationError with AMBIGUOUS_CONTRACT_CONFIGURATION

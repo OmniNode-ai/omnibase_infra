@@ -3,7 +3,7 @@
 #
 # Wires a SMALL, NAMED SUBSET of runners at the devpi pull-through cache, leaving
 # every other runner on direct PyPI egress. This is the "step 3" artifact of
-# docs/runbooks/pypi-cache-egress-rollout.md: it is how a canary is expressed as
+# knowledge-base:runbooks/pypi-cache-egress-rollout.md: it is how a canary is expressed as
 # config-as-code instead of as a hand-typed shell command on the runner host.
 #
 # WHY THIS FILE EXISTS AS A TRACKED ARTIFACT (do not delete it and go back to an
@@ -43,7 +43,7 @@
 # to direct egress rather than failing the job closed.
 #
 # Endpoint source of truth: config/runner_fleet.yaml -> pypi_cache:
-# Rollout / rollback procedure: docs/runbooks/pypi-cache-egress-rollout.md
+# Rollout / rollback procedure: knowledge-base:runbooks/pypi-cache-egress-rollout.md
 x-pypi-cache-env: &pypi-cache-env
   UV_DEFAULT_INDEX: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
   UV_INDEX_STRATEGY: "unsafe-best-match"

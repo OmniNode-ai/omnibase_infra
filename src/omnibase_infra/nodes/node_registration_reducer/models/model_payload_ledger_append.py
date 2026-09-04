@@ -35,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_core.types import JsonType
 
 # NOTE: This infra-local payload DTO extends pydantic.BaseModel directly (repo
-# convention; see docs/standards/ONEX_TERMINOLOGY.md). omnibase_core's
+# convention; see knowledge-base-internal:reference/omnibase-infra-onex-terminology.md). omnibase_core's
 # ModelIntentPayloadBase was never removed — it still exists and bases core's
 # closed-set intent payloads.
 

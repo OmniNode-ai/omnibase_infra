@@ -25,8 +25,8 @@ Error Codes:
 Related:
     - OMN-1132: Handler Plugin Loader implementation
     - CLAUDE.md: Handler Plugin Loader Patterns section
-    - docs/patterns/handler_plugin_loader.md
-    - docs/decisions/adr-handler-plugin-loader-security.md
+    - knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md
+    - knowledge-base:reference/omnibase-infra-adr-handler-plugin-loader-security.md
 
 Test Categories:
     - TestHandlerPluginLoaderNamespaceSecurity: Core namespace security tests

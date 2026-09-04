@@ -96,7 +96,7 @@ class AdapterProtocolEventPublisherKafka:
         This adapter intentionally does NOT inherit MixinAsyncCircuitBreaker.
         Resilience (circuit breaker, retry with exponential backoff) is delegated
         to the underlying EventBusKafka instance to avoid the "double circuit breaker"
-        anti-pattern. See docs/patterns/dispatcher_resilience.md for details on
+        anti-pattern. See knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md for details on
         dispatcher-owned resilience patterns.
 
     Attributes:

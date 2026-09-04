@@ -98,7 +98,7 @@ def test_bridge_effect_resolves_to_the_service_binding_and_dsn_key(
 def test_declared_dsn_key_matches_the_per_service_db_url_contract() -> None:
     """The topology DSN key must be the one the wiring module already knows.
 
-    ``docs/patterns/db_url_contract.md`` is the authority both surfaces
+    ``knowledge-base:reference/omnibase-infra-per-service-database-url-contract.md`` is the authority both surfaces
     project; a mismatch here would give the same database two DSN names.
     """
     assert _DB_URL_ENV_MAP["omniintelligence"] == "OMNIINTELLIGENCE_DB_URL"

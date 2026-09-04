@@ -12,7 +12,7 @@
 #   ./scripts/headless-close-out.sh [--repos REPO1,REPO2,...] [--skip-release] [--dry-run]
 #                                   [--skip-validation]
 #
-# Templates: scripts/headless-pipeline/TEMPLATES.md [OMN-6984]
+# Templates: knowledge-base-internal:reference/omnibase-infra-headless-pipeline-templates.md [OMN-6984]
 # Validation: scripts/headless-pipeline/validate-state.sh [OMN-6988]
 
 set -euo pipefail
@@ -29,7 +29,7 @@ STATE_DIR="/tmp/headless-state/${RUN_ID}"
 
 # --- Stage Templates [OMN-6984] ---
 # Per-stage command templates (tool allowlists, prompts, timeouts).
-# See scripts/headless-pipeline/TEMPLATES.md for full documentation.
+# See knowledge-base-internal:reference/omnibase-infra-headless-pipeline-templates.md for full documentation.
 declare -A STAGE_TOOLS
 STAGE_TOOLS[merge-sweep]="Bash(git:*,gh:*) Read Glob Grep"
 STAGE_TOOLS[release]="Bash(git:*,gh:*,uv:*) Read Edit Write Glob Grep"

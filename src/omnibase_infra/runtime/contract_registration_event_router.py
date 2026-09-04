@@ -120,7 +120,7 @@ class ContractRegistrationEventRouter:
         ... )
 
     See Also:
-        - docs/patterns/container_dependency_injection.md for DI patterns.
+        - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md for DI patterns.
         - IntrospectionEventRouter for reference implementation.
     """
 
@@ -159,7 +159,7 @@ class ContractRegistrationEventRouter:
             ... )
 
         See Also:
-            - docs/patterns/container_dependency_injection.md for DI patterns.
+            - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md for DI patterns.
         """
         if not output_topic:
             raise ValueError("output_topic cannot be empty")

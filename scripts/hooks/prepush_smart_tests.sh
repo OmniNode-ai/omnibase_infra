@@ -82,7 +82,7 @@
 #   PREPUSH_FULL_SUITE   set non-empty to force the FULL suite.
 #
 # Heavy-escalation execution targets (in precedence order, see
-# docs/runbooks/prepush-remote-full-suite-verify.md):
+# knowledge-base-internal:runbooks/omnibase-infra-prepush-remote-full-suite-verify.md):
 #   1. the local host, when it IS a designated gate host AND is under the load
 #      threshold -- `.200` (OMN-15059) or the `.201` gate-runner (OMN-16295)
 #   2. a GitHub-hosted FULL-suite CI run pinned to the exact HEAD sha
@@ -849,7 +849,7 @@ guard_full_suite_host() {
         log "  local capacity accepted on: ${PREPUSH_LAST_FIT_DETAIL:-unknown}"
         log "  This is NOT a bypass: the full escalation runs here, unmodified. It is a"
         log "  capacity event -- if you are seeing it often, the lab is undersized or a"
-        log "  host is wedged (docs/runbooks/lab-prepush-host-table.md)."
+        log "  host is wedged (knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md)."
         log "=============================================================================="
         return 0
       fi
@@ -910,7 +910,7 @@ guard_full_suite_host() {
       return 0
     fi
     die "${heavy_what} triggered on '${host}' (designated gate host '${label}'), but its load is at/over the ${PREPUSH_LOAD_THRESHOLD}x-core threshold and no other lab host could take the work" \
-        "probed hosts: ${PREPUSH_PROBE_LOG:-none}. PREFERRED: open/refresh the PR so GitHub-hosted CI runs the FULL suite on this exact sha, then re-push -- this hook accepts that run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'). See docs/runbooks/lab-prepush-host-table.md to add or re-enable a lab host, or mint a single-use grant to run here anyway (degraded evidence -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
+        "probed hosts: ${PREPUSH_PROBE_LOG:-none}. PREFERRED: open/refresh the PR so GitHub-hosted CI runs the FULL suite on this exact sha, then re-push -- this hook accepts that run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'). See knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md to add or re-enable a lab host, or mint a single-use grant to run here anyway (degraded evidence -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
   fi
   # Not a designated host. Same precedence, same ordering, same reasoning.
   if remote_full_suite_verified "$heavy_what"; then
@@ -920,11 +920,11 @@ guard_full_suite_host() {
     return 0
   fi
   if consume_override_grant "degraded-host: ${heavy_what} on '${host}', not a designated gate host"; then
-    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}', NOT a designated gate host (${designated}). This host has weaker isolation/headroom; treat any evidence from this run as WEAKER than a designated-host gate. See docs/runbooks/lab-prepush-host-table.md."
+    log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}', NOT a designated gate host (${designated}). This host has weaker isolation/headroom; treat any evidence from this run as WEAKER than a designated-host gate. See knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md."
     return 0
   fi
   die "${heavy_what} triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}') nor any other designated gate host (${designated})" \
-      "probed lab hosts: ${PREPUSH_PROBE_LOG:-none}. Push from a designated host, OR let GitHub-hosted CI run the FULL suite on this exact sha and re-push -- this hook accepts a sha-pinned green full-suite run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'), OR see docs/runbooks/lab-prepush-host-table.md to add/enable a lab host, OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
+      "probed lab hosts: ${PREPUSH_PROBE_LOG:-none}. Push from a designated host, OR let GitHub-hosted CI run the FULL suite on this exact sha and re-push -- this hook accepts a sha-pinned green full-suite run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'), OR see knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md to add/enable a lab host, OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
 }
 
 # -----------------------------------------------------------------------------

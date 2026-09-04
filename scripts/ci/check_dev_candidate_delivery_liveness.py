@@ -189,7 +189,7 @@ def evaluate(
                 "startup_failure: the workflow graph did not compile, so NO job ran "
                 "and nothing else in either repo will go red. Every dev merge since "
                 "is merged-but-undelivered. See "
-                "docs/runbooks/dev-candidate-delivery-recovery.md.",
+                "knowledge-base-internal:runbooks/omnibase-infra-dev-candidate-delivery-recovery.md.",
             )
         )
 
@@ -257,7 +257,7 @@ def evaluate(
             "NOT_DELIVERED",
             f"run {run.get('id')} for dev commit {target['sha'][:9]} completed with "
             f"conclusion={run.get('conclusion')!r}. onex-dev is not running this "
-            "commit. See docs/runbooks/dev-candidate-delivery-recovery.md.",
+            "commit. See knowledge-base-internal:runbooks/omnibase-infra-dev-candidate-delivery-recovery.md.",
         )
     )
     return verdict

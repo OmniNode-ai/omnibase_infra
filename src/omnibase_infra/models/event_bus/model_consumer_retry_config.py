@@ -24,8 +24,8 @@ Example:
     >>> config.calculate_delay_ms(attempt=3)  # Returns ~2000ms + jitter
 
 See Also:
-    - docs/patterns/error_recovery_patterns.md: Error recovery patterns
-    - docs/patterns/dispatcher_resilience.md: Dispatcher resilience patterns
+    - knowledge-base-internal:reference/omnibase-infra-error-recovery-patterns.md: Error recovery patterns
+    - knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md: Dispatcher resilience patterns
 """
 
 from __future__ import annotations

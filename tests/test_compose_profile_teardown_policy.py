@@ -68,11 +68,6 @@ EXCLUDED_PREFIXES: tuple[str, ...] = ()
 ALLOWLISTED_PATHS = {
     "tests/test_compose_profile_teardown_policy.py",
     ".github/workflows/no-bare-compose-teardown.yml",
-    # Historical 2026-05-04 plan checklist: a core+keycloak teardown recorded
-    # before the runtime lane profiles existed, not a live runtime-lane op.
-    # Allowlisted by path (rather than inline-annotated) because the separate
-    # `no-planning-docs` gate rejects any edit to plan docs in this repo.
-    "docs/plans/2026-05-04-seed-keycloak-orchestrator.md",
 }
 
 # Per-line escape hatch. Comment-syntax-agnostic; intentionally distinct from

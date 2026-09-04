@@ -396,7 +396,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                 - Share registries across trust boundaries
 
         See Also:
-            - docs/patterns/policy_registry_trust_model.md for detailed security guide
+            - knowledge-base:architecture/omnibase-infra-policy-registry-trust-model.md for detailed security guide
             - ProtocolPolicy for interface requirements
             - ModelPolicyRegistration for registration model validation
 

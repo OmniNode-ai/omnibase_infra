@@ -20,7 +20,7 @@ Thread Safety:
         - Keep publish operations stateless where possible
 
 Related:
-    - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Circuit breaker patterns
+    - knowledge-base-internal:reference/omnibase-infra-circuit-breaker-thread-safety.md: Circuit breaker patterns
     - EventBusKafka: Production implementation with circuit breaker integration
     - EventBusInmemory: Simple implementation for testing
 
@@ -71,7 +71,7 @@ class ProtocolEventBusLike(Protocol):
         for ``typing.Protocol`` classes per PEP 544.
 
     See Also:
-        - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Thread safety patterns
+        - knowledge-base-internal:reference/omnibase-infra-circuit-breaker-thread-safety.md: Thread safety patterns
         - MixinAsyncCircuitBreaker: Recommended for production implementations
     """
 

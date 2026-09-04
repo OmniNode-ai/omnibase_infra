@@ -30,7 +30,7 @@
 # writes when free space is already below this same default 5 GB floor,
 # rather than letting the job proceed to an eventual ENOSPC. This job still
 # runs on every push/PR as the in-job backstop signal for whichever runner
-# actually picked up the work; see docs/runbooks/runner-disk-admission-gate.md
+# actually picked up the work; see knowledge-base:runbooks/runner-disk-admission-gate.md
 # for the full mechanism and the AC3 threshold-consistency note.
 ---
 name: Runner Disk Preflight

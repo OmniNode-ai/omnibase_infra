@@ -68,7 +68,7 @@
 #   - DEPLOY_RUNNER_OPERATOR_ENV_FILE  Host path of the operator env file
 #                                   (e.g. /home/<operator>/.omnibase/.env).
 #                                   Fail-fast `:?` in compose.
-# See docs/runbooks/release-train-lab.md for the full recreate procedure.
+# See knowledge-base-internal:runbooks/omnibase-infra-release-train-lab.md for the full recreate procedure.
 
 set -euo pipefail
 

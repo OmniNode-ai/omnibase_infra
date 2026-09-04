@@ -42,7 +42,7 @@ Related
 -------
 - OMN-765: BindingConfigResolver implementation
 - PR #168: Security enhancements
-- docs/patterns/binding_config_resolver.md#path-traversal-protection
+- knowledge-base-internal:reference/omnibase-infra-handler-config-resolver.md#path-traversal-protection
 """
 
 from __future__ import annotations

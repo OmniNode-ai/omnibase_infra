@@ -14,7 +14,7 @@ If this test fails, either:
 1. A topic was added/removed without updating documentation, OR
 2. Documentation was updated without updating this test
 
-Reference: docs/architecture/EVENT_STREAMING_TOPICS.md Section 10
+Reference: knowledge-base:architecture/event-streaming-topics.md Section 10
 """
 
 import re

@@ -129,6 +129,11 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         # the expiring-ignore policy is enforced by
         # scripts/ci/check_trivyignore_expiry.py, not by its location.
         ".trivyignore",
+        # The kb-doc-gate validator (omniclaude/scripts/kb_doc_gate.py, reached
+        # through .github/workflows/kb-doc-gate.yml) resolves its config as
+        # <repo-root>/.kb-doc-gate.yaml, so root placement is the contract, not
+        # a convenience (OMN-16607, epic OMN-16602).
+        ".kb-doc-gate.yaml",
         # Special files
         ".migration_freeze",
         ".mcp.json",

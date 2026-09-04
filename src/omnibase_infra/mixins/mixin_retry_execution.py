@@ -35,7 +35,7 @@ Design Rationale:
     exception types (e.g., asyncpg.PostgresError, hvac.exceptions.Forbidden).
 
 See Also:
-    - docs/patterns/error_recovery_patterns.md for retry pattern documentation
+    - knowledge-base-internal:reference/omnibase-infra-error-recovery-patterns.md for retry pattern documentation
     - MixinAsyncCircuitBreaker for circuit breaker integration
 """
 

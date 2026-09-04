@@ -42,7 +42,7 @@ Testing Notes:
         * Intent emission through RuntimeHostProcess
         * End-to-end registration workflow with Consul/PostgreSQL mocks
         * FSM state persistence via RegistrationProjector
-    - Test coverage matrix: docs/decisions/adr-any-type-pydantic-workaround.md
+    - Test coverage matrix: knowledge-base:reference/omnibase-infra-adr-any-type-pydantic-workaround.md
 
 Tracking:
     - OMN-1104: Declarative reducer refactoring

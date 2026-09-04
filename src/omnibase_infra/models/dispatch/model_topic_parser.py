@@ -373,7 +373,7 @@ class ModelTopicParser:
 
         External Documentation:
             - ONEX Topic Taxonomy: docs/architecture/TOPIC_TAXONOMY.md
-            - Environment-Aware Topics: docs/patterns/ENVIRONMENT_TOPICS.md
+            - Environment-Aware Topics: knowledge-base:architecture/omnibase-infra-environment-aware-topic-naming.md
             - Message Categories: EnumMessageCategory in omnibase_infra.enums
     """
 

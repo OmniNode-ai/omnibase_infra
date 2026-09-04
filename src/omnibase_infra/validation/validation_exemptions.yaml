@@ -196,7 +196,7 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
-      - docs/patterns/circuit_breaker_implementation.md
+      - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md
     ticket: OMN-1305
   - file_pattern: 'event_bus_kafka\.py'
     method_pattern: "Function '__init__'"
@@ -478,7 +478,7 @@ pattern_exemptions:
   # PolicyRegistry Exemptions
   # ==========================================================================
   # Domain registry pattern requires comprehensive policy management operations.
-  # Design Doc: docs/patterns/container_dependency_injection.md - Registry patterns
+  # Design Doc: knowledge-base:architecture/omnibase-infra-container-dependency-injection.md - Registry patterns
   - file_pattern: 'policy_registry\.py'
     class_pattern: "Class 'PolicyRegistry'"
     violation_pattern: 'has \d+ methods'
@@ -486,7 +486,7 @@ pattern_exemptions:
       Central registry pattern requires CRUD operations (register, get, update, remove), query operations (list, filter, search), and lifecycle operations (enable, disable, validate).
 
     documentation:
-      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md (Registry patterns)
       - CLAUDE.md (Container-Based Dependency Injection section)
     ticket: null
   - file_pattern: 'registry_policy\.py'
@@ -494,7 +494,7 @@ pattern_exemptions:
     violation_pattern: 'has \d+ parameters'
     reason: Policy registration requires multiple fields for complete policy definition. ModelPolicyRegistration is available as the preferred API for new code.
     documentation:
-      - docs/patterns/container_dependency_injection.md
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md
     ticket: null
   - file_pattern: 'registry_policy\.py'
     class_pattern: "Class 'RegistryPolicy'"
@@ -503,7 +503,7 @@ pattern_exemptions:
       Registry pattern after mixin extraction (MixinPolicyValidation, MixinSemverCache). Core class has 12 methods for CRUD, query, and lifecycle operations. This is at the threshold and acceptable per CLAUDE.md registry patterns.
 
     documentation:
-      - docs/patterns/container_dependency_injection.md
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md
     ticket: OMN-1305
   # ==========================================================================
   # Policy ID Exemptions (OMN-812)
@@ -517,7 +517,7 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
-      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md (Registry patterns)
     ticket: OMN-812
   - file_pattern: 'model_policy_registration\.py'
     violation_pattern: "Field 'policy_id' should use UUID"
@@ -553,7 +553,7 @@ pattern_exemptions:
       EnumHandlerType defines ONEX handler architectural roles (InfraHandler, NodeHandler, etc.) which are architectural concepts, not implementation classes.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1092
   - file_pattern: 'enum_handler_type_category\.py'
@@ -562,7 +562,7 @@ pattern_exemptions:
       EnumHandlerTypeCategory defines ONEX handler behavioral classification (Compute, Effect, NondeterministicCompute) which are architectural concepts for policy envelopes, not implementation classes.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (ONEX Architecture - Handler Classification)
     ticket: OMN-1092
   - file_pattern: 'validator_execution_shape\.py'
@@ -572,7 +572,7 @@ pattern_exemptions:
       ModelDetectedNodeInfo is a validation data class for describing detected node information during AST analysis - follows Model* naming convention.
 
     documentation:
-      - docs/validation/validator_reference.md
+      - knowledge-base-internal:reference/omnibase-infra-validator-reference.md
     ticket: OMN-958
   - file_pattern: 'validator_execution_shape\.py'
     class_pattern: "Class 'ExecutionShapeValidator'"
@@ -582,7 +582,7 @@ pattern_exemptions:
 
     documentation:
       - docs/as_is/02_NODE_EXECUTION_SHAPES.md
-      - docs/validation/validator_reference.md
+      - knowledge-base-internal:reference/omnibase-infra-validator-reference.md
     ticket: OMN-958
   # ==========================================================================
   # Any Type Validator Exemptions (OMN-1276)
@@ -596,7 +596,7 @@ pattern_exemptions:
       AST visitor class after mixin extraction (MixinAnyTypeClassification, MixinAnyTypeExemption, MixinAnyTypeReporting). Core class has 12 methods for visit methods and annotation checking. This is at the threshold and acceptable per standard AST visitor pattern.
 
     documentation:
-      - docs/decisions/adr-any-type-pydantic-workaround.md
+      - knowledge-base:reference/omnibase-infra-adr-any-type-pydantic-workaround.md
       - CLAUDE.md (Any Type CI Enforcement)
     ticket: OMN-1276
   - file_pattern: 'model_any_type_violation\.py'
@@ -605,12 +605,12 @@ pattern_exemptions:
       context_name is descriptive metadata (e.g., "process_event(payload)") showing where the violation occurred, not an entity reference requiring ID + display_name. It provides human-readable context for error messages.
 
     documentation:
-      - docs/decisions/adr-any-type-pydantic-workaround.md
+      - knowledge-base:reference/omnibase-infra-adr-any-type-pydantic-workaround.md
     ticket: OMN-1276
   # ==========================================================================
   # RuntimeShapeValidator Exemptions
   # ==========================================================================
-  # Design Doc: docs/patterns/error_handling_patterns.md - Validation error patterns
+  # Design Doc: knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md - Validation error patterns
   - file_pattern: 'validator_runtime_shape\.py'
     method_pattern: "Function 'validate_handler_output'"
     violation_pattern: 'has \d+ parameters'
@@ -618,7 +618,7 @@ pattern_exemptions:
       Validation requires multiple context parameters for proper violation reporting: handler_type, output, output_category, source_file, line_number, correlation_id. These are distinct required contexts, not candidates for a model wrapper.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md (Validation error hierarchy)
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md (Validation error hierarchy)
       - CLAUDE.md (ONEX Architecture - Contract-Driven section)
     ticket: null
   - file_pattern: 'validator_runtime_shape\.py'
@@ -626,7 +626,7 @@ pattern_exemptions:
     violation_pattern: 'has \d+ parameters'
     reason: Same rationale as validate_handler_output - requires distinct context params.
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: null
   # ==========================================================================
   # MixinNodeIntrospection Exemptions (OMN-958)
@@ -661,7 +661,7 @@ pattern_exemptions:
       Central dispatch coordinator requires: registration (register_dispatcher, register_route), routing (dispatch, get_dispatchers_for_message), metrics (get_dispatcher_metrics, get_dispatch_metrics), lifecycle (start, stop, health_check). This is a central coordinator pattern.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
       - docs/as_is/05_RUNTIME_DISPATCH_SHAPES.md
     ticket: OMN-934
   - file_pattern: 'message_dispatch_engine\.py'
@@ -671,7 +671,7 @@ pattern_exemptions:
       Log context builder intentionally takes many optional parameters to build structured log context. Each parameter is a distinct log field.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-934
   - file_pattern: 'message_dispatch_engine\.py'
     method_pattern: "Function '__init__'"
@@ -680,7 +680,7 @@ pattern_exemptions:
       Central dispatch coordinator requires multiple configuration parameters: context_enforcer, topic_parser, default_node_kind, logger, topic_to_dispatcher_map, category_dispatchers. These are distinct required contexts for dispatch orchestration.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-990
   - file_pattern: 'message_dispatch_engine\.py'
     method_pattern: "Function 'register_dispatcher'"
@@ -689,7 +689,7 @@ pattern_exemptions:
       Dispatcher registration requires multiple parameters for complete routing configuration: dispatcher, category, node_kind, topic_patterns, priority. These are distinct routing configuration fields.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-990
   - file_pattern: 'message_dispatch_engine\.py'
     method_pattern: "Function '_register_dispatcher_unlocked'"
@@ -698,7 +698,7 @@ pattern_exemptions:
       Unlocked variant of register_dispatcher; carries the identical routing-configuration fields (dispatcher_id, dispatcher, category, message_types, node_kind, operation_bindings, payload_type_matcher). Same coordinator pattern as register_dispatcher (already exempt) — splitting would fragment a single registration operation.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-12416
   - file_pattern: 'message_dispatch_engine\.py'
     method_pattern: "Function '_register_dispatcher_dynamic'"
@@ -707,7 +707,7 @@ pattern_exemptions:
       Post-freeze dynamic variant of register_dispatcher for contract materialization; carries the same routing-configuration fields including payload_type_matcher so dynamically materialized multi-handler contracts stay type-scoped (OMN-12416). Same coordinator pattern as register_dispatcher (already exempt).
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-12416
   # ==========================================================================
   # RegistryDispatcher Exemptions (OMN-934)
@@ -719,8 +719,8 @@ pattern_exemptions:
       Domain registry pattern requires CRUD + query operations: registration (register, unregister), lookup (get_by_id, get_by_type, get_all), metrics (get_metrics). This is an established domain registry pattern.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
-      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - knowledge-base:architecture/message-dispatch-engine.md
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md (Registry patterns)
     ticket: OMN-934
   # ==========================================================================
   # Dispatch Model Semantic Identifier Exemptions (OMN-983)
@@ -745,7 +745,7 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (Registry Naming Conventions)
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-983
   - file_pattern: 'model_dispatcher_registration\.py'
     violation_pattern: 'dispatcher_name.*entity'
@@ -753,7 +753,7 @@ pattern_exemptions:
       dispatcher_name is a display name for the dispatcher, paired with dispatcher_id as the semantic identifier. This follows the ID + display_name pattern.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-983
   - file_pattern: 'model_dispatcher_metrics\.py'
     violation_pattern: "Field 'dispatcher_id' should use UUID"
@@ -770,7 +770,7 @@ pattern_exemptions:
       Metrics recording requires multiple parameters for complete dispatch tracking: identifiers (dispatcher_id, route_id, topic, message_type), timing (start_time, end_time, duration_ms), status (success, error_code, error_message).
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-983
   # ==========================================================================
   # RuntimeScheduler Semantic Identifier Exemptions (OMN-953)
@@ -1029,8 +1029,8 @@ pattern_exemptions:
       Domain registry pattern after mixin extraction (MixinMessageTypeRegistration, MixinMessageTypeQuery). Core class has 11 methods for domain registry operations. This is below the threshold and acceptable per established domain registry pattern.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
-      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - knowledge-base:architecture/message-dispatch-engine.md
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md (Registry patterns)
     ticket: OMN-983
   # ==========================================================================
   # Idempotency Store Configuration Exemptions (OMN-945)
@@ -1043,7 +1043,7 @@ pattern_exemptions:
       table_name is a database configuration parameter specifying the PostgreSQL table name for storing idempotency records (default: "idempotency_records"). This is infrastructure configuration, not an entity reference.
 
     documentation:
-      - docs/patterns/retry_backoff_compensation_strategy.md (Idempotency patterns)
+      - knowledge-base-internal:reference/omnibase-infra-retry-backoff-compensation.md (Idempotency patterns)
     ticket: OMN-945
   # ==========================================================================
   # RegistryCompute Exemptions (OMN-811)
@@ -1057,7 +1057,7 @@ pattern_exemptions:
       Central registry pattern requires comprehensive plugin management: CRUD operations (register, unregister, get), query operations (list_keys, list_plugins, get_all), version resolution (get_latest_version, _parse_version), validation (protocol compliance, async detection), and container integration. This is an established domain registry pattern consistent with PolicyRegistry, MessageTypeRegistry.
 
     documentation:
-      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md (Registry patterns)
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-811
   - file_pattern: 'registry_compute\.py'
@@ -1067,7 +1067,7 @@ pattern_exemptions:
       Plugin registration requires multiple parameters for complete registration: plugin_id, plugin_class, version, description, deterministic_async. This is a convenience method; the model-based register() method is the preferred API.
 
     documentation:
-      - docs/patterns/container_dependency_injection.md
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md
     ticket: OMN-811
   # ==========================================================================
   # ComputeRegistryError Exemptions (OMN-811)
@@ -1080,7 +1080,7 @@ pattern_exemptions:
       Error class requires multiple contextual parameters for debugging: message, plugin_id, version, registered_plugins, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
       - CLAUDE.md (Infrastructure Error Patterns)
     ticket: OMN-811
   # ==========================================================================
@@ -1094,7 +1094,7 @@ pattern_exemptions:
       Error class requires multiple contextual parameters for debugging: message, bus_kind, bus_class, available_kinds, existing_class, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
       - CLAUDE.md (Infrastructure Error Patterns)
     ticket: OMN-1276
   # ==========================================================================
@@ -1108,7 +1108,7 @@ pattern_exemptions:
       Error class requires multiple contextual parameters for debugging: message, message_type, domain, category, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
       - CLAUDE.md (Infrastructure Error Patterns)
     ticket: OMN-983
   # ==========================================================================
@@ -1123,7 +1123,7 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
-      - docs/patterns/container_dependency_injection.md
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md
     ticket: OMN-811
   - file_pattern: 'model_compute_registration\.py'
     violation_pattern: "Field 'plugin_id' should use UUID"
@@ -1246,7 +1246,7 @@ pattern_exemptions:
       Plugin context accepts correlation_id as string for flexibility. Plugins may receive correlation IDs from various sources that are not UUIDs. String type allows compatibility with diverse plugin input sources.
 
     documentation:
-      - docs/patterns/correlation_id_tracking.md
+      - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
     ticket: OMN-811
   # ==========================================================================
   # MCP Handler Model Exemptions (OMN-1288)
@@ -1290,7 +1290,7 @@ pattern_exemptions:
       Builder pattern model for structured logging with fluent interface. Many methods provide convenience factories (for_event_bus, for_dispatch, for_error) and builder methods (with_*). This is intentional API design for developer ergonomics.
 
     documentation:
-      - docs/patterns/correlation_id_tracking.md
+      - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
       - CLAUDE.md (Type Annotation Conventions)
     ticket: OMN-1002
   - file_pattern: 'model_log_context\.py'
@@ -1299,7 +1299,7 @@ pattern_exemptions:
       correlation_id is stored as str for logging compatibility. Log formatters expect string values. The correlation ID is typically stringified from UUID before logging anyway.
 
     documentation:
-      - docs/patterns/correlation_id_tracking.md
+      - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
     ticket: OMN-1002
   - file_pattern: 'model_log_context\.py'
     violation_pattern: "Field 'group_id' should use UUID"
@@ -1315,7 +1315,7 @@ pattern_exemptions:
       service_name is a logging field for identifying the service (e.g., "kafka", "consul"). It is NOT an entity reference but a simple label for log correlation.
 
     documentation:
-      - docs/patterns/correlation_id_tracking.md
+      - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
     ticket: OMN-1002
   - file_pattern: 'model_circuit_breaker_state_event\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
@@ -1323,7 +1323,7 @@ pattern_exemptions:
       service_name in ModelCircuitBreakerStateEvent mirrors the same identifier used by MixinAsyncCircuitBreaker.service_name — a free-form string label (e.g. "kafka.production", "db.primary") identifying which service the circuit protects. It is not a reference to a domain entity; it is a telemetry label. The ID + display_name pattern does not apply here.
 
     documentation:
-      - docs/patterns/circuit_breaker_implementation.md
+      - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md
     ticket: OMN-5293
   # ModelDispatchLogContext - Dispatch-specific logging
   - file_pattern: 'model_dispatch_log_context\.py'
@@ -1333,8 +1333,8 @@ pattern_exemptions:
       Builder pattern model for dispatch logging with factory methods for common patterns (for_dispatch_start, for_dispatch_complete, for_dispatch_error). Intentional API design.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
-      - docs/patterns/correlation_id_tracking.md
+      - knowledge-base:architecture/message-dispatch-engine.md
+      - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
     ticket: OMN-1002
   - file_pattern: 'model_dispatch_log_context\.py'
     violation_pattern: "Field 'dispatcher_id' should use UUID"
@@ -1351,7 +1351,7 @@ pattern_exemptions:
       Factory method that captures all dispatch completion context. Parameters are optional with defaults. Breaking into multiple calls would reduce usability.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-1002
   - file_pattern: 'model_dispatch_log_context\.py'
     method_pattern: "Function 'for_dispatch_error'"
@@ -1360,7 +1360,7 @@ pattern_exemptions:
       Factory method that captures all dispatch error context. Parameters are optional with defaults. Breaking into multiple calls would reduce usability.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
     ticket: OMN-1002
   # ModelDispatchOutcome - Dispatcher output normalization
   - file_pattern: 'model_dispatch_outcome\.py'
@@ -1370,7 +1370,7 @@ pattern_exemptions:
       Model with multiple factory methods (none, single, multiple, from_legacy_output) and convenience properties (is_empty, has_topics, single_topic, has_single_topic). Provides comprehensive API for handling dispatcher outputs.
 
     documentation:
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+      - knowledge-base:architecture/message-dispatch-engine.md
       - docs/design/ADR_DISPATCHER_TYPE_SAFETY.md
     ticket: OMN-1002
   # ==========================================================================
@@ -1416,7 +1416,7 @@ pattern_exemptions:
       Result model with comprehensive API: computed properties (has_blocking, violation_count, blocking_count, warning_count), factory methods (from_violations, success, from_legacy_result), utility methods (to_legacy_result, format_for_ci), and dunder methods (__bool__, __str__). This is intentional API design for CI integration and developer ergonomics.
 
     documentation:
-      - docs/validation/validator_reference.md
+      - knowledge-base-internal:reference/omnibase-infra-validator-reference.md
       - CLAUDE.md (Custom __bool__ for Result Models)
     ticket: OMN-1003
   # ==========================================================================
@@ -1445,7 +1445,7 @@ pattern_exemptions:
       Circuit breaker initialization requires cohesive configuration parameters: threshold (failures before open), reset_timeout (seconds before half-open), service_name (for error context), transport_type (for error codes), and half_open_successes (for close validation). These parameters define the complete circuit breaker behavior and cannot be split without losing cohesion. Alternative is ModelCircuitBreakerConfig but direct parameters preferred for mixin flexibility.
 
     documentation:
-      - docs/patterns/circuit_breaker_implementation.md
+      - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md
       - CLAUDE.md (Circuit Breaker Pattern section)
     ticket: OMN-1743
   # ModelOperationContext - operation_name is an operation identifier string
@@ -1493,7 +1493,7 @@ pattern_exemptions:
       rule_id is a human-readable semantic identifier (e.g., "CONTRACT-001", "SECURITY-002") per ticket spec. Used for CI output and developer reference. Not a UUID.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: OMN-1091
   - file_pattern: 'model_handler_validation_error\.py'
     method_pattern: "Function 'from_contract_error'"
@@ -1502,7 +1502,7 @@ pattern_exemptions:
       Factory method with many optional parameters for complete error construction. Parameters have defaults. Breaking into multiple calls would reduce usability.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: OMN-1091
   - file_pattern: 'model_handler_validation_error\.py'
     method_pattern: "Function 'from_security_violation'"
@@ -1511,7 +1511,7 @@ pattern_exemptions:
       Factory method with many optional parameters for complete error construction. Parameters have defaults. Breaking into multiple calls would reduce usability.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: OMN-1091
   - file_pattern: 'model_handler_validation_error\.py'
     method_pattern: "Function 'from_descriptor_error'"
@@ -1520,7 +1520,7 @@ pattern_exemptions:
       Factory method with many optional parameters for complete error construction. Parameters have defaults.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: OMN-1091
   - file_pattern: 'model_handler_validation_error\.py'
     method_pattern: "Function 'from_architecture_error'"
@@ -1529,7 +1529,7 @@ pattern_exemptions:
       Factory method with many optional parameters for complete error construction. Parameters have defaults.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: OMN-1091
   - file_pattern: 'model_handler_identifier\.py'
     violation_pattern: "Field 'handler_id' should use UUID"
@@ -1552,7 +1552,7 @@ pattern_exemptions:
       HandlerContractSource discovers handler contract YAML files from the filesystem. The "Handler" refers to ONEX handler contracts being discovered, not an anti-pattern manager class. This is legitimate handler infrastructure code.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1097
   # ==========================================================================
@@ -1573,7 +1573,7 @@ pattern_exemptions:
       HandlerBootstrapSource centralizes hardcoded handler registration for core infrastructure handlers (Consul, DB, HTTP, Vault). The "Handler" refers to ONEX handler concepts, consistent with HandlerContractSource. This is legitimate handler infrastructure code per OMN-1087.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1087
   # ==========================================================================
@@ -1590,7 +1590,7 @@ pattern_exemptions:
       EnumHandlerSourceMode defines handler loading modes (BOOTSTRAP, CONTRACT, HYBRID). The "Handler" refers to ONEX handler concepts - how handlers are discovered and loaded at runtime. Consistent with HandlerBootstrapSource and HandlerContractSource naming.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1095
   - file_pattern: 'handler_source_resolver\.py'
@@ -1600,7 +1600,7 @@ pattern_exemptions:
       HandlerSourceResolver implements per-handler identity resolution between bootstrap and contract sources. The "Handler" refers to ONEX handler concepts - resolving which handler source takes precedence. Consistent with HandlerBootstrapSource and HandlerContractSource naming.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1095
   # ==========================================================================
@@ -1616,7 +1616,7 @@ pattern_exemptions:
       HandlerPluginLoader loads ONEX handler contracts from YAML files. The "Handler" refers to ONEX handler contracts being discovered and loaded, not an anti-pattern manager class. This is legitimate handler infrastructure code.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1132
   - file_pattern: 'handler_plugin_loader\.py'
@@ -1626,7 +1626,7 @@ pattern_exemptions:
       Plugin loader pattern requires multiple discovery methods (load_from_contract, load_from_directory, discover_and_load), security validation (_validate_namespace, _validate_file_security), contract parsing (_load_contract, _import_handler_class), and error handling methods. This is the standard plugin loader pattern consistent with ProjectorPluginLoader.
 
     documentation:
-      - docs/patterns/handler_plugin_loader.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md
       - CLAUDE.md (Handler Plugin Loader Patterns)
     ticket: OMN-1132
   - file_pattern: 'protocol_handler_plugin_loader\.py'
@@ -1636,7 +1636,7 @@ pattern_exemptions:
       ProtocolHandlerPluginLoader defines the interface for handler plugin loading. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
     ticket: OMN-1132
   - file_pattern: 'handler_pool\.py'
     class_pattern: "Class name 'HandlerPool'"
@@ -1654,7 +1654,7 @@ pattern_exemptions:
       ModelLoadedHandler represents metadata about a loaded ONEX handler contract. The "Handler" refers to ONEX handler concepts, not an anti-pattern.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
     ticket: OMN-1132
   - file_pattern: 'model_handler_contract\.py'
     class_pattern: "Class name 'ModelHandlerContract'"
@@ -1663,7 +1663,7 @@ pattern_exemptions:
       ModelHandlerContract is the Pydantic schema for handler contract YAML files. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader and ModelLoadedHandler.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
     ticket: OMN-1132
   - file_pattern: 'model_handler_contract\.py'
     violation_pattern: "Field 'handler_name' might reference an entity"
@@ -1686,7 +1686,7 @@ pattern_exemptions:
       ContractHandlerDiscovery discovers ONEX handler contracts and registers them with the runtime. The "Handler" refers to ONEX handler contracts being discovered, consistent with HandlerPluginLoader.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - CLAUDE.md (Handler Plugin Loader Patterns)
     ticket: OMN-1133
   - file_pattern: 'protocol_handler_discovery\.py'
@@ -1696,7 +1696,7 @@ pattern_exemptions:
       ProtocolHandlerDiscovery defines the interface for handler discovery services. The "Handler" refers to ONEX handler contracts, consistent with ProtocolHandlerPluginLoader.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
     ticket: OMN-1133
   - file_pattern: 'model_loaded_handler\.py'
     violation_pattern: "Field 'handler_name' might reference an entity"
@@ -1740,7 +1740,7 @@ pattern_exemptions:
       ModelHandlerWiringOutcome is the Pydantic model describing a single handler's wiring outcome (resolved / skipped / failed) in the auto-wiring report. The "Handler" refers to the ONEX handler being wired, consistent with ModelLoadedHandler and ModelHandlerContract.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - docs/plans/2026-04-18-handler-resolver-architecture.md
     ticket: OMN-9201
   - file_pattern: 'runtime/auto_wiring/report\.py'
@@ -1750,7 +1750,7 @@ pattern_exemptions:
       ModelSkippedHandlerEntry is the Pydantic model describing a handler that was deliberately skipped during auto-wiring (e.g., local ownership skip). The "Handler" refers to the ONEX handler being skipped, consistent with ModelLoadedHandler and ModelHandlerContract.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
       - docs/plans/2026-04-18-handler-resolver-architecture.md
     ticket: OMN-9201
   - file_pattern: 'model_handler_security_policy\.py'
@@ -1759,7 +1759,7 @@ pattern_exemptions:
       ModelHandlerSecurityPolicy defines security policies for ONEX handlers. The "Handler" refers to ONEX handler security constraints, not an anti-pattern manager class. Part of the two-layer security validation system (OMN-1098).
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
     ticket: OMN-1098
   # LocalHandler validator models - OMN-743
   # These models validate LocalHandler import restrictions in production code.
@@ -1790,7 +1790,7 @@ pattern_exemptions:
       Aggregator class requires multiple methods for comprehensive error management: collection (add_error, add_errors), properties (has_errors, has_blocking_errors, counts), grouping (by_type, by_source), formatting (console, ci, summary), and lifecycle (raise_if_blocking, clear). This is an established aggregator pattern.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: OMN-1091
   - file_pattern: 'validator_security\.py'
     method_pattern: "Function 'convert_to_validation_error'"
@@ -1799,7 +1799,7 @@ pattern_exemptions:
       Conversion function requires multiple context parameters for complete error construction. Parameters are distinct required contexts for error reporting.
 
     documentation:
-      - docs/patterns/security_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-security-patterns.md
     ticket: OMN-1091
   # ==========================================================================
   # Service Discovery Node Exemptions (OMN-1131)
@@ -1895,7 +1895,7 @@ pattern_exemptions:
       RegistryInfraServiceDiscovery is the DI registry for service discovery handlers. "Service" is the canonical domain term.
 
     documentation:
-      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - knowledge-base:architecture/omnibase-infra-container-dependency-injection.md (Registry patterns)
       - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1131
   # Registration Service Exemption (OMN-7115)
@@ -1955,7 +1955,7 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (Handler No-Publish Constraint)
-      - docs/patterns/security_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-security-patterns.md
     ticket: OMN-1099
   # ==========================================================================
   # Validation Result Model Exemptions (OMN-1104)
@@ -1969,7 +1969,7 @@ pattern_exemptions:
       field_name is a validation field path (e.g., "node_id"), not an entity reference. It indicates which field in the validated object failed validation.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
     ticket: OMN-1104
   # ==========================================================================
   # Snapshot Topic Naming Exemption (OMN-2115)
@@ -2036,7 +2036,7 @@ pattern_exemptions:
       Validation error class requires multiple contextual parameters for debugging: error_type, contract_path, message, remediation_hint, correlation_id. These are distinct error context fields needed for comprehensive error reporting and graceful mode error collection.
 
     documentation:
-      - docs/patterns/error_handling_patterns.md
+      - knowledge-base-internal:reference/omnibase-infra-error-handling-patterns.md
       - CLAUDE.md (Infrastructure Error Patterns)
     ticket: OMN-1168
   # ==========================================================================
@@ -2064,7 +2064,7 @@ pattern_exemptions:
 
     documentation:
       - src/omnibase_infra/runtime/handler_plugin_loader.py (reference pattern)
-      - docs/patterns/handler_plugin_loader.md (security model)
+      - knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md (security model)
     ticket: OMN-1316
   # ==========================================================================
   # ProjectorShell Exemptions (OMN-1169)
@@ -2166,7 +2166,7 @@ pattern_exemptions:
       SecretResolver provides centralized secret resolution with sync/async APIs, caching with TTL, and safe introspection. The 18 methods are cohesive: 4 primary API methods, 3 cache management, 2 introspection, and 9 internal helpers. Splitting would fragment a unified secret management interface.
 
     documentation:
-      - docs/patterns/secret_resolver.md
+      - knowledge-base-internal:reference/omnibase-infra-secret-resolution.md
       - CLAUDE.md (Infrastructure Patterns - SecretResolver)
     ticket: OMN-764
   # logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password")
@@ -2177,7 +2177,7 @@ pattern_exemptions:
       logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password"), not an entity reference. It's a lookup key for the SecretResolver, similar to how env var names or Vault paths identify secrets.
 
     documentation:
-      - docs/patterns/secret_resolver.md (Naming Conventions section)
+      - knowledge-base-internal:reference/omnibase-infra-secret-resolution.md (Naming Conventions section)
     ticket: OMN-764
   - file_pattern: 'model_secret_mapping\.py'
     violation_pattern: "Field 'logical_name' might reference an entity"
@@ -2185,7 +2185,7 @@ pattern_exemptions:
       logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password"), not an entity reference. It's a lookup key for mapping secrets to their sources.
 
     documentation:
-      - docs/patterns/secret_resolver.md (Naming Conventions section)
+      - knowledge-base-internal:reference/omnibase-infra-secret-resolution.md (Naming Conventions section)
     ticket: OMN-764
   - file_pattern: 'model_cached_secret\.py'
     violation_pattern: "Field 'logical_name' might reference an entity"
@@ -2193,7 +2193,7 @@ pattern_exemptions:
       logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password"), not an entity reference. It's stored in the cache to track which secret this cached value represents.
 
     documentation:
-      - docs/patterns/secret_resolver.md (Naming Conventions section)
+      - knowledge-base-internal:reference/omnibase-infra-secret-resolution.md (Naming Conventions section)
     ticket: OMN-764
   # ==========================================================================
   # Observability Layer Exemptions (OMN-767)
@@ -2244,7 +2244,7 @@ pattern_exemptions:
       BindingConfigResolver provides centralized configuration resolution with sync/async APIs, TTL-based caching, and multi-source support (file, env, vault). Similar to SecretResolver, the 21 methods are cohesive: 4 primary resolution API methods, 4 cache management, and 13 internal helpers for source loading, environment overrides, vault reference resolution, and validation. Splitting would fragment a unified configuration management interface.
 
     documentation:
-      - docs/patterns/binding_config_resolver.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-config-resolver.md
     ticket: OMN-765
   # ==========================================================================
   # AdapterInfisical Method Count Exemption (OMN-2286)
@@ -3150,7 +3150,7 @@ pattern_exemptions:
       HandlerResourceManager is an infrastructure-layer resource lifecycle class that manages httpx.AsyncClient instances per handler_id. The "Handler" prefix refers to ONEX handler-layer runtime resources, consistent with HandlerContractSource/HandlerBootstrapSource conventions. Name prescribed by OMN-4225 ticket spec.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
     ticket: OMN-4225
   - file_pattern: 'handler_resource_manager\.py'
     class_pattern: "Class name 'HandlerResourceManager'"
@@ -3159,7 +3159,7 @@ pattern_exemptions:
       HandlerResourceManager is a purpose-built infrastructure lifecycle class, not a generic "Manager" utility. It encapsulates httpx.AsyncClient pooling per handler_id with explicit create/release/shutdown lifecycle — a specific domain responsibility. Name prescribed by OMN-4225 ticket spec.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
     ticket: OMN-4225
   # ==========================================================================
   # Validation Event Model Opaque ID Exemptions (OMN-5184)
@@ -4015,7 +4015,7 @@ architecture_exemptions:
 
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-      - docs/validation/validator_reference.md
+      - knowledge-base-internal:reference/omnibase-infra-validator-reference.md
     ticket: PR-57
   - file_pattern: 'validation/linter_contract\.py'
     violation_pattern: 'Mixed types in one file'
@@ -4024,7 +4024,7 @@ architecture_exemptions:
 
     documentation:
       - CLAUDE.md (Protocol File Naming)
-      - docs/validation/validator_reference.md
+      - knowledge-base-internal:reference/omnibase-infra-validator-reference.md
     ticket: PR-57
   # ==========================================================================
   # Domain-Grouped Protocol Exemptions (CLAUDE.md Convention)
@@ -4039,7 +4039,7 @@ architecture_exemptions:
 
       Architectural documentation included in module: - Concurrency safety requirements (lines 13-24): Implementations MUST be coroutine-safe - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors - Protocol contracts with examples in docstrings
 
-      Full architectural documentation: - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
+      Full architectural documentation: - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md - Node README: knowledge-base:reference/omnibase-infra-node-registration-orchestrator.md
 
     documentation:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md

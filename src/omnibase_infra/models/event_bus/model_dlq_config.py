@@ -33,7 +33,7 @@ Topic Naming Convention:
 See Also:
     - MixinKafkaDlq: DLQ publishing implementation
     - ModelDlqEvent: Individual DLQ event model for callbacks
-    - docs/architecture/DLQ_MESSAGE_FORMAT.md: DLQ message structure
+    - knowledge-base:architecture/dlq-message-format.md: DLQ message structure
 """
 
 from __future__ import annotations

@@ -208,7 +208,7 @@ slack_alert() {
         -H "Content-Type: application/json" \
         -d "$(jq -n \
             --arg channel "${SLACK_CHANNEL_ID}" \
-            --arg text "*[RUNNER FLEET CANARY — ${severity}]* ${detail} (expected=${EXPECTED_RUNNERS} online=${online_count} offline=${offline_count} offline_but_busy=${offline_busy_count} offline_idle=${offline_idle_count} missing=${missing_count}). Offline: ${offline_names:-none}. See docs/runbooks/runner-fleet-listener-liveness.md" \
+            --arg text "*[RUNNER FLEET CANARY — ${severity}]* ${detail} (expected=${EXPECTED_RUNNERS} online=${online_count} offline=${offline_count} offline_but_busy=${offline_busy_count} offline_idle=${offline_idle_count} missing=${missing_count}). Offline: ${offline_names:-none}. See knowledge-base:runbooks/runner-fleet-listener-liveness.md" \
             '{channel: $channel, text: $text}')" > /dev/null 2>&1 || true
 }
 
@@ -216,13 +216,13 @@ slack_alert() {
 # from the registry, so this is unambiguous evidence of real fleet loss.
 if [[ "${missing_count}" -gt 0 ]]; then
     slack_alert "FAIL" "${missing_count} runner registration(s) LOST (registered=${total_registered}/${EXPECTED_RUNNERS})"
-    fail "${missing_count} runner registration(s) missing (registered=${total_registered}, expected=${EXPECTED_RUNNERS}). A runner dropped its registration entirely — this is real fleet loss, not a stale status read. See docs/runbooks/runner-fleet-listener-liveness.md"
+    fail "${missing_count} runner registration(s) missing (registered=${total_registered}, expected=${EXPECTED_RUNNERS}). A runner dropped its registration entirely — this is real fleet loss, not a stale status read. See knowledge-base:runbooks/runner-fleet-listener-liveness.md"
 fi
 
 # --- FAIL 2: mass listener death (the 2026-07-03 mode, 77% of fleet).
 if [[ "${unreachable}" -ge "${mass_threshold}" ]]; then
     slack_alert "FAIL" "${unreachable}/${EXPECTED_RUNNERS} runners offline-and-idle (>= ${mass_threshold})"
-    fail "${unreachable}/${EXPECTED_RUNNERS} runners offline-and-not-busy (>= ${mass_threshold} = ${RUNNER_CANARY_MASS_OFFLINE_PCT}% of fleet). At this scale it is no longer explainable as broker-status staleness — treat as mass listener death. Offline: ${offline_names:-none}. Do NOT trust Docker 'Up (healthy)'. See docs/runbooks/runner-fleet-listener-liveness.md"
+    fail "${unreachable}/${EXPECTED_RUNNERS} runners offline-and-not-busy (>= ${mass_threshold} = ${RUNNER_CANARY_MASS_OFFLINE_PCT}% of fleet). At this scale it is no longer explainable as broker-status staleness — treat as mass listener death. Offline: ${offline_names:-none}. Do NOT trust Docker 'Up (healthy)'. See knowledge-base:runbooks/runner-fleet-listener-liveness.md"
 fi
 
 # --- WARN: elevated but within the band that measurement attributes to V2

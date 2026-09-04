@@ -7,7 +7,7 @@
 #
 # Pattern note: the OMN-14027 pypi-cache canary was wired live, ad hoc, via an
 # env-var-prefixed `docker compose ... --force-recreate` command
-# (docs/runbooks/pypi-cache-egress-rollout.md §3) rather than a checked-in
+# (knowledge-base:runbooks/pypi-cache-egress-rollout.md §3) rather than a checked-in
 # override file, and a matching override file
 # (docker-compose.pypi-canary.yml) exists only on .201, outside git. This
 # file intentionally deviates from that precedent by being a real, reviewable,

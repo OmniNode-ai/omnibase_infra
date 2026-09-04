@@ -24,7 +24,7 @@ Mechanical guard (no bypass)
 The queue-depth gate (:func:`wait_for_queue_depth`) has no force/skip/bypass
 parameter anywhere in this module or its CLI. A caller cannot opt out of
 throttling short of not using this tool at all — see
-``docs/runbooks/bulk-pr-operations.md`` for the doctrine-wiring follow-up
+``knowledge-base:runbooks/bulk-pr-operations.md`` for the doctrine-wiring follow-up
 that makes *not using it* visible.
 
 Usage

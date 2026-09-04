@@ -21,7 +21,7 @@ dod_evidence:
       - check_type: command
         check_value: "gh pr diff 1475 --repo OmniNode-ai/omnibase_infra | grep -q 'OmniNode eXecution'"
   - id: dod-002
-    description: "docs/architecture/overview.md corrected from wrong expansion to canonical form"
+    description: "knowledge-base:architecture/onex-runtime-overview.md corrected from wrong expansion to canonical form"
     source: manual
     checks:
       - check_type: command

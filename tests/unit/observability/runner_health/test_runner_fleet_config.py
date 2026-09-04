@@ -272,14 +272,27 @@ def test_runner_fleet_config_git_mirror_covers_all_nine_repos() -> None:
 def test_runner_fleet_config_tool_cache_durability_is_recorded() -> None:
     """OMN-16053 (OMN-14027 C2): RUNNER_TOOL_CACHE lives in the container
     filesystem (durable=False), so fleet recreates must be bracketed by the
-    recorded seed script. The record must name existing repo files.
+    recorded seed script and a recreate procedure that resolves somewhere real.
+
+    ``seed_script`` is executable code and stays a repo file. ``recreate_procedure``
+    is prose, and OMN-16607 moved this repo's prose into the knowledge bases, so it
+    is now a ``knowledge-base:``/``knowledge-base-internal:`` reference. This repo
+    cannot open the far side, so what it asserts instead is that the value is a
+    well-formed reference into a named knowledge base rather than a bare string --
+    which is what keeps a typo or an emptied field from passing.
     """
     config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
 
     assert config.tool_cache is not None
     assert config.tool_cache.durable is False
     assert (REPO_ROOT / config.tool_cache.seed_script).is_file()
-    assert (REPO_ROOT / config.tool_cache.recreate_procedure).is_file()
+
+    procedure = config.tool_cache.recreate_procedure
+    kb, _, kb_path = procedure.partition(":")
+    assert kb in {"knowledge-base", "knowledge-base-internal"}, procedure
+    assert kb_path.endswith(".md"), procedure
+    assert not kb_path.startswith("/"), procedure
+    assert len(Path(kb_path).parts) >= 2, procedure
 
 
 def test_runner_fleet_config_dns_cache_is_recorded_but_inert() -> None:

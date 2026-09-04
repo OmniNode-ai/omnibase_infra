@@ -201,7 +201,7 @@ _TRANSPORT_FAILURE_CIRCUIT_BREAKER = 3
 # ``cache-enabled: "false"`` is intentionally left unchanged for this job --
 # this repo's self-hosted-fleet CI already replaced the per-job uv cache with
 # the shared host-local dependency-environment canary (see
-# ``docs/ci/versioned-ci-env-canary.md``), which explicitly forbids enabling
+# ``knowledge-base-internal:runbooks/omnibase-infra-versioned-ci-env-canary.md``), which explicitly forbids enabling
 # setup-uv cache save on jobs that run ``uv sync --no-cache``, and
 # ``tests/ci/test_ci_workflow_resilience.py::test_short_gates_can_disable_uv_cache_cleanup``
 # enforces that uniformly across every ci.yml job. The job-timeout bound

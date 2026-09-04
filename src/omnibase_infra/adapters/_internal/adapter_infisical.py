@@ -19,7 +19,7 @@ Circuit Breaking:
     This adapter deliberately omits circuit-breaking logic. Per the
     handler-owns-cross-cutting-concerns architecture, circuit breaking
     is owned by ``HandlerInfisical``, not the adapter. See
-    ``docs/patterns/circuit_breaker_implementation.md``.
+    ``knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md``.
 
 Security:
     - All secret values are wrapped in ``SecretStr`` before being returned.

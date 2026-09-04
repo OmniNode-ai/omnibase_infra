@@ -17,7 +17,7 @@ Tests cover:
 
 Related:
     - OMN-951: Enforce Correlation and Causation Chain Validation
-    - docs/patterns/correlation_id_tracking.md
+    - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
 """
 
 from __future__ import annotations

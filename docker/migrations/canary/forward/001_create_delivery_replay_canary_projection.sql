@@ -29,7 +29,7 @@
 --   docker/migrations/forward/ set and is NEVER auto-applied via
 --   docker-entrypoint-initdb.d — it is applied MANUALLY, one operator-gated step
 --   at a time, per the provisioning runbook:
---       docs/runbooks/managed-staging-canary-postgres-provisioning.md
+--       knowledge-base-internal:runbooks/omnibase-infra-managed-staging-canary-postgres-provisioning.md
 --
 -- PROVISIONING SAFETY:
 --   This file is HELD FOR OPERATOR. Authoring or reading it authorizes no live
@@ -42,7 +42,9 @@
 -- Idempotent: all statements use IF NOT EXISTS / OR REPLACE; safe to re-apply.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS delivery_replay_canary_projection (
+CREATE SCHEMA IF NOT EXISTS omninode_internal;
+
+CREATE TABLE IF NOT EXISTS omninode_internal.delivery_replay_canary_projection (
     -- ModelReplayProjection.correlation_id (UUID | None in the pure-compute
     -- model). The canary readback is *correlation-linked*, so for the landing
     -- contract it is REQUIRED and is the natural key: it is the ONLY key the
@@ -124,18 +126,18 @@ CREATE TABLE IF NOT EXISTS delivery_replay_canary_projection (
 
 -- Soak/staleness scans and the B10 monitoring window read by recency.
 CREATE INDEX IF NOT EXISTS ix_delivery_replay_canary_projection_updated_at
-    ON delivery_replay_canary_projection (updated_at);
+    ON omninode_internal.delivery_replay_canary_projection (updated_at);
 
 -- Divergence monitoring during the canary soak: a partial index over the rows
 -- that failed the replay-determinism check keeps the B10 divergence signal cheap.
 CREATE INDEX IF NOT EXISTS ix_delivery_replay_canary_projection_diverged
-    ON delivery_replay_canary_projection (correlation_id)
+    ON omninode_internal.delivery_replay_canary_projection (correlation_id)
     WHERE diverged;
 
 -- Keep updated_at fresh on UPSERT (the readback is an idempotent upsert keyed on
 -- correlation_id). Mirrors the trigger pattern used by delegation_workflow_state
 -- (migration 090).
-CREATE OR REPLACE FUNCTION refresh_delivery_replay_canary_projection_updated_at()
+CREATE OR REPLACE FUNCTION omninode_internal.refresh_delivery_replay_canary_projection_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = NOW();
@@ -144,8 +146,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_delivery_replay_canary_projection_updated_at
-    ON delivery_replay_canary_projection;
+    ON omninode_internal.delivery_replay_canary_projection;
 CREATE TRIGGER trg_delivery_replay_canary_projection_updated_at
-    BEFORE UPDATE ON delivery_replay_canary_projection
+    BEFORE UPDATE ON omninode_internal.delivery_replay_canary_projection
     FOR EACH ROW
-    EXECUTE FUNCTION refresh_delivery_replay_canary_projection_updated_at();
+    EXECUTE FUNCTION omninode_internal.refresh_delivery_replay_canary_projection_updated_at();

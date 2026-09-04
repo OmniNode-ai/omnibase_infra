@@ -485,7 +485,7 @@ def _zombie_restart_corroboration(
     So the RESTART_RUNNER recommendation now requires the staleness flag PLUS
     at least one independent fact that the runner is actually not serving, and
     requires that neither probe source failed. The runbook rule this encodes
-    (docs/runbooks/runner-fleet-listener-liveness.md, OMN-15233): *cross-check
+    (knowledge-base:runbooks/runner-fleet-listener-liveness.md, OMN-15233): *cross-check
     the GitHub runner registry before ANY restart sweep -- if the runner is
     online, the flag is the bug.*
 

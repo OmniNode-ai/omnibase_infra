@@ -42,7 +42,7 @@ network_pool_warn_ratio: 0.8
 #   - The matching UV_DEFAULT_INDEX / PIP_INDEX_URL wiring therefore stays
 #     commented in docker/docker-compose.runners.yml. Do not uncomment it here or
 #     there as a shortcut; graduate via the runbook.
-# Runbook: docs/runbooks/pypi-cache-egress-rollout.md.
+# Runbook: knowledge-base:runbooks/pypi-cache-egress-rollout.md.
 pypi_cache:
   active: false
   # Runners currently wired at the cache via docker/docker-compose.pypi-canary.yml.
@@ -132,7 +132,7 @@ tool_cache:
   durable: false
   snapshot_root: /home/jonah/.omnibase/runners/toolcache-seed
   seed_script: docker/runners/toolcache-seed.sh
-  recreate_procedure: docs/runbooks/c2-git-mirror-egress-rollout.md
+  recreate_procedure: knowledge-base:runbooks/c2-git-mirror-egress-rollout.md
 # OMN-15736 — local caching DNS resolver (unbound) endpoint. Scaling
 # precondition #1 (capacity probe: [mergesweep-0808-capacity]). STATUS:
 # pending-activation / INERT — the cache service
@@ -141,7 +141,7 @@ tool_cache:
 # The matching canary `dns:` wiring lives in
 # docker/docker-compose.dns-canary.yml (non-default override, not applied by
 # any default deploy path). Runbook:
-# docs/runbooks/runner-dns-cache-rollout.md.
+# knowledge-base:runbooks/runner-dns-cache-rollout.md.
 dns_cache:
   active: false
   # `dns:` (the compose/Docker container directive) requires a raw IP, not a

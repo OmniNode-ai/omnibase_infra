@@ -45,7 +45,7 @@ JsonType Recursion Fix (OMN-1274) - Type Selection Guide:
         JsonType: TypeAlias = "dict[str, JsonType] | list[JsonType] | str | ..."
 
 See Also:
-    - ADR: ``docs/decisions/adr-any-type-pydantic-workaround.md`` (historical)
+    - ADR: ``knowledge-base:reference/omnibase-infra-adr-any-type-pydantic-workaround.md`` (historical)
     - Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 """
 

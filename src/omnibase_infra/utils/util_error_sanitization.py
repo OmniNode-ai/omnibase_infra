@@ -19,8 +19,8 @@ ONEX Error Sanitization Guidelines:
     SAFE to include: Error types, correlation IDs, topic names, timestamps
 
 See Also:
-    docs/patterns/error_sanitization_patterns.md - Comprehensive sanitization guide
-    docs/architecture/DLQ_MESSAGE_FORMAT.md - DLQ security considerations
+    knowledge-base-internal:reference/omnibase-infra-error-sanitization-patterns.md - Comprehensive sanitization guide
+    knowledge-base:architecture/dlq-message-format.md - DLQ security considerations
 
 Example:
     >>> from omnibase_infra.utils import sanitize_error_message

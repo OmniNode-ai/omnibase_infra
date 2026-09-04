@@ -45,7 +45,7 @@ Usage Example:
 See Also:
     - ProtocolHotPathMetricsSink: Protocol definition in omnibase_spi
     - ModelMetricsPolicy: Cardinality policy model in omnibase_core
-    - docs/patterns/circuit_breaker_implementation.md: Circuit breaker metrics
+    - knowledge-base:guides/omnibase-infra-circuit-breaker-implementation.md: Circuit breaker metrics
 """
 
 from __future__ import annotations

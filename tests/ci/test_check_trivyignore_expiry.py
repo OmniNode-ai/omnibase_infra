@@ -32,9 +32,7 @@ class TestEvaluateTrivyignore:
         assert verdict.entries == ()
 
     def test_header_only_file_passes(self) -> None:
-        text = (
-            "# This file lists CVE ignores.\n# See docs/patterns/security_patterns.md\n"
-        )
+        text = "# This file lists CVE ignores.\n# See knowledge-base-internal:reference/omnibase-infra-security-patterns.md\n"
         verdict = evaluate_trivyignore(text, today=_TODAY)
         assert verdict.passed
         assert verdict.entries == ()

@@ -15,7 +15,7 @@ Test Coverage:
 Related:
     - OMN-1132: Handler Plugin Loader implementation
     - PR #134: Security enhancements and protocol validation
-    - docs/patterns/handler_plugin_loader.md
+    - knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md
 
 Protocol Compliance Requirements (from handler_plugin_loader.py docstring):
     ProtocolHandler requires these 5 methods:

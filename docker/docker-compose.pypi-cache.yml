@@ -21,7 +21,7 @@
 # INERT UV_DEFAULT_INDEX block in docker-compose.runners.yml):
 #   http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/
 #
-# Rollout / rollback (do NOT run now): docs/runbooks/pypi-cache-egress-rollout.md
+# Rollout / rollback (do NOT run now): knowledge-base:runbooks/pypi-cache-egress-rollout.md
 #   Bring up:  docker compose -f docker/docker-compose.pypi-cache.yml up -d --build
 #   Tear down: docker compose -f docker/docker-compose.pypi-cache.yml down
 services:

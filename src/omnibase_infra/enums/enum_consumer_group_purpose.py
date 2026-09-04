@@ -22,7 +22,7 @@ Thread Safety:
 
 See Also:
     - ModelKafkaConsumerConfig: Consumer configuration using this enum
-    - docs/decisions/adr-consumer-group-naming.md: Naming conventions
+    - knowledge-base:reference/omnibase-infra-adr-consumer-group-naming.md: Naming conventions
 """
 
 from __future__ import annotations

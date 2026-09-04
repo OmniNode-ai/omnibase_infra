@@ -244,7 +244,7 @@ _C2_REWRITE_COUNT=0
 # (mirror); pushes to $2 stay pinned at $2 via an identity pushInsteadOf
 # (git resolves pushInsteadOf before insteadOf, so this pins the push path
 # back on github.com without touching the fetch redirect -- see the "Push is
-# pinned back on github.com" note in docker/runners/README-c2b-uv-git-mirror.md
+# pinned back on github.com" note in knowledge-base-internal:runbooks/omnibase-infra-uv-git-mirror-routing.md
 # for the field verification this relies on).
 _c2_rewrite_add_pair() {
     local mirror_url="$1" upstream_url="$2"
@@ -376,7 +376,7 @@ wire_uv_git_mirror_rewrite() {
         # _c2_rewrite_add_pair for why an identity pushInsteadOf is also
         # installed (`insteadOf` on its own ALSO rewrites the push URL -- this
         # is documented git behaviour, not an edge case; verified in
-        # docker/runners/README-c2b-uv-git-mirror.md that an unpinned push
+        # knowledge-base-internal:runbooks/omnibase-infra-uv-git-mirror-routing.md that an unpinned push
         # dies with "access denied or repository not exported" against the
         # daemon, which deliberately serves no receive-pack).
         local upstream_url="https://github.com/${GITHUB_REPOSITORY%%/*}/${repo}.git"
@@ -411,7 +411,7 @@ wire_uv_git_mirror_rewrite() {
 # names (`ref: dev`), historical exact SHAs, and refs computed by an earlier
 # step in the SAME job (unresolvable here, before any step has run).
 # `insteadOf` has NO server fallback (verified in
-# docker/runners/README-c2b-uv-git-mirror.md): once a URL is rewritten, a
+# knowledge-base-internal:runbooks/omnibase-infra-uv-git-mirror-routing.md): once a URL is rewritten, a
 # fetch the mirror cannot serve fails outright -- git does not then retry the
 # un-rewritten URL. A blanket per-repo rewrite would therefore convert "mirror
 # is stale for this one ref" into a hard failure, worse than the flakiness
@@ -681,7 +681,7 @@ _C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-
 # paused and safely bring them back once disk recovers. Fails open (self-pause
 # skipped, the per-job gate above still blocks each individual job) when the
 # mount is absent -- e.g. before the fleet is recreated to pick up the new
-# compose volume; see the rollout note in docs/runbooks/runner-disk-admission-gate.md.
+# compose volume; see the rollout note in knowledge-base:runbooks/runner-disk-admission-gate.md.
 _C3_DISK_ADMISSION_PAUSE_DIR="${RUNNER_DISK_ADMISSION_PAUSE_DIR:-/home/runner/.onex-disk-admission-pause}"
 # The runner's own workspace/tool-cache mount -- the same volume actions/checkout,
 # uv, and docker builds all write to inside this container.

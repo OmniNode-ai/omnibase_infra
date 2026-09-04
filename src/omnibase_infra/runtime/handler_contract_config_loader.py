@@ -36,7 +36,7 @@ Security:
 See Also:
     - HandlerBootstrapSource: Uses this loader for bootstrap handler contracts
     - handler_plugin_loader.py: Related handler loading infrastructure
-    - docs/patterns/handler_plugin_loader.md: Security documentation
+    - knowledge-base-internal:reference/omnibase-infra-handler-plugin-loader.md: Security documentation
 
 .. versionadded:: 0.6.5
     Created for bootstrap handler contract loading.

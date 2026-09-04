@@ -394,7 +394,7 @@ check_dev_lane_liveness() {
     if [[ "$total" -eq 0 ]]; then
         if [[ "$LANE_KEEPALIVE" == "1" ]]; then
             log_check "$name" "red" \
-                "compose project '${project}' has ZERO containers — the lab lane is fully GC/idle-reclaimed (OMN-15190). Under the keep-alive ruling this is a defect: while it is down, every repo's occ-autobind / occ-companion-effect publish fails connection-refused and cascades into occ-preflight / Receipt Gate org-wide. Recovery: docs/runbooks/cold-lane-full-bringup.md"
+                "compose project '${project}' has ZERO containers — the lab lane is fully GC/idle-reclaimed (OMN-15190). Under the keep-alive ruling this is a defect: while it is down, every repo's occ-autobind / occ-companion-effect publish fails connection-refused and cascades into occ-preflight / Receipt Gate org-wide. Recovery: knowledge-base:runbooks/cold-lane-full-bringup.md"
         else
             log_check "$name" "yellow" \
                 "compose project '${project}' has ZERO containers (ONEX_LANE_KEEPALIVE=0 — lane treated as ephemeral per OMN-13414)"

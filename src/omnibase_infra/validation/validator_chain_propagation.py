@@ -110,7 +110,7 @@ Usage:
 
 Related:
     - OMN-951: Enforce Correlation and Causation Chain Validation
-    - docs/patterns/correlation_id_tracking.md
+    - knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md
 
 .. versionadded:: 0.5.0
 """
@@ -237,7 +237,7 @@ def get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
 
     See Also:
         - Module docstring "Causation ID Semantics" section for architectural context
-        - ``docs/patterns/correlation_id_tracking.md`` for full tracing patterns
+        - ``knowledge-base:architecture/omnibase-infra-correlation-id-tracking.md`` for full tracing patterns
     """
     # Check for direct attribute
     if hasattr(envelope, "causation_id"):

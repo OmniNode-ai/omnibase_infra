@@ -1,0 +1,15 @@
+# KB doc gate configuration for omnibase_infra (OMN-16607, epic OMN-16602).
+#
+# mode: strict — this repo's Wave-4 migration has landed, so ANY tracked
+# markdown outside the allowed set is a violation, not just an added or
+# modified one. The allowed set is the operator ruling's default, carried by
+# omniclaude/scripts/kb_doc_gate.py; this repo adds nothing to it.
+#
+# Canonical documentation now lives in the two knowledge bases (see the
+# Documentation section of README.md). The three markdown files under
+# tests/ci/fixtures/managed_staging_proof_kit/ are not documentation: they are
+# rendered-surface fixtures that tests/ci/test_managed_staging_proof_kit_seam.py
+# opens and asserts field-by-field against fields.yaml, which is why they sit in
+# the ruling's tests/**/fixtures/** allowance rather than needing a repo-specific
+# exemption here.
+mode: strict

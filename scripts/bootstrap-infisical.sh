@@ -225,7 +225,7 @@ fi
 # ============================================================================
 # Non-fatal: local dev may not have the omnidash_analytics DB or omnidash
 # checkout available yet. Bootstrap is advisory; deploy-time init is
-# authoritative (see docs/runbooks/apply-migrations.md).
+# authoritative (see knowledge-base:runbooks/apply-migrations.md).
 if [ -n "${OMNIDASH_ANALYTICS_DB_URL:-}" ] && [ -n "${OMNIDASH_DIR:-}" ]; then
     log_step "1d" "Apply omnidash read-model migrations"
     if [[ "${DRY_RUN}" != "true" ]]; then

@@ -23,7 +23,7 @@ read, so the reconciliation cannot silently regress:
   between the two shapes would be untested.
 * **Ownership half** — the canonical file must live in the directory the lanes
   apply. A fix landed in the omniintelligence tree reads green and changes
-  nothing on any lane; see ``docker/migrations/intelligence/README.md``.
+  nothing on any lane; see ``knowledge-base-internal:reference/omnibase-infra-omniintelligence-migration-set.md``.
 
 Column provenance is recorded per constant. These lists are transcribed from the
 consumers' SQL, not invented here; each constant names the file and statement it

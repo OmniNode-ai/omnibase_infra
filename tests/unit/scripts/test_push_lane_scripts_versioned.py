@@ -34,12 +34,15 @@ DEPLOY = LANES / "deploy-push-lanes.sh"
 
 #: Every artifact that must be versioned. Adding a file to the host without
 #: adding it here is exactly the drift this ticket closes.
+#: README-QUEUE.md left this set in OMN-16607 (epic OMN-16602): it was the queue's
+#: operator runbook, prose the runner never reads, and it now lives at
+#: knowledge-base-internal:runbooks/omnibase-infra-heavy-prepush-queue.md. Its row
+#: in deploy-push-lanes.sh's FILES array went with it.
 EXPECTED = {
     "queue-runner.py",
     "queue-runner.sh",
     "queue-contract-validator.py",
     "detect_foreign_prepush.py",
-    "README-QUEUE.md",
     "deploy-push-lanes.sh",
     "DEPLOYED_SHA256.json",
 }

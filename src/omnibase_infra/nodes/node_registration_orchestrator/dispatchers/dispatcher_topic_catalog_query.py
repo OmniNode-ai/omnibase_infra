@@ -38,7 +38,7 @@ Typing Note (ModelEventEnvelope[object]):
 Related:
     - OMN-2313: Topic Catalog: query handler + dispatcher + contract wiring
     - OMN-2311: Topic Catalog: ServiceTopicCatalog + KV precedence + caching
-    - docs/patterns/dispatcher_resilience.md
+    - knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ class DispatcherTopicCatalogQuery(MixinAsyncCircuitBreaker):
 
         Circuit Breaker:
             Initialized with KAFKA transport settings per
-            ``docs/patterns/dispatcher_resilience.md``:
+            ``knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md``:
             - threshold=3: Open after 3 consecutive failures
             - reset_timeout=20.0: 20 seconds before testing recovery
         """

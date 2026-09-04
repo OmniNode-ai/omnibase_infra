@@ -15,7 +15,7 @@ Related:
     - OMN-1087: HandlerBootstrapSource for hardcoded handler registration
     - OMN-7225: MCP handler opt-in (default OFF)
     - src/omnibase_infra/runtime/handler_bootstrap_source.py
-    - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    - knowledge-base-internal:reference/omnibase-infra-handler-protocol-driven-architecture.md
 
 Expected Behavior:
     HandlerBootstrapSource implements ProtocolContractSource from omnibase_infra.

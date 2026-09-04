@@ -785,7 +785,7 @@ def _raw_create_topics_offenders(roots: Sequence[Path]) -> list[str]:
     structurally blind to a module that reaches past the provisioner and builds
     its own ``NewTopic`` — which is exactly what ``scripts/create_kafka_topics.py``
     did: a second live ``CreateTopics`` path, the one
-    ``docs/operations/README.md`` tells operators to run and the one
+    the operations documentation tells operators to run and the one
     ``compare_environments.py`` names in its topic-parity ``fix_hint``, creating
     every topic at a flat ``--replication-factor`` default of 1 with the
     fail-closed policy never consulted. Neither the guard nor CI could see it.

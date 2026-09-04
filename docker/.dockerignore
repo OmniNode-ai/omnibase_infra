@@ -136,7 +136,7 @@ site/
 !README.md
 !LICENSE
 CHANGELOG.md
-CONTRIBUTING.md
+.github/CONTRIBUTING.md
 
 # =============================================================================
 # OS Files

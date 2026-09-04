@@ -466,7 +466,7 @@ OPTIONS
                         'docker compose up -d' starts NOTHING), and the default
                         BUILD_SOURCE=release cannot rebuild a cold lane from
                         un-released merged-dev code. See
-                        docs/runbooks/cold-lane-full-bringup.md.
+                        knowledge-base:runbooks/cold-lane-full-bringup.md.
     --profile <name>    Docker compose profile (default: runtime).
     --print-compose-cmd Print exact compose commands without executing, then exit.
     --prod              Enforce the prod promotion-lineage guard before build:

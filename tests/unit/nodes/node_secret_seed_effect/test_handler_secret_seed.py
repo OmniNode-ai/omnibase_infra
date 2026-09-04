@@ -556,7 +556,7 @@ def test_plain_http_host_is_accepted() -> None:
 
     All three Infisical instances this node exists to seed are plain http:
     the two ``.201`` lanes and the in-cluster service address, all three
-    named in ``docs/runbooks/headless-secret-seeding.md``. An https-only
+    named in ``knowledge-base-internal:runbooks/omnibase-infra-headless-secret-seeding.md``. An https-only
     rule would reject every address the node actually targets — including
     every invocation the runbook documents — which is a validator that
     reads as security while delivering none and that the operator must

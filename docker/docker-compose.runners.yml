@@ -89,7 +89,7 @@ x-runner-base: &runner-base
     # canary is measured green. PyPI stays as the fallback index so a cache
     # miss/outage degrades, not fails-closed. Cache endpoint + activation steps:
     # config/runner_fleet.yaml (pypi_cache:) and
-    # docs/runbooks/pypi-cache-egress-rollout.md.
+    # knowledge-base:runbooks/pypi-cache-egress-rollout.md.
     # UV_DEFAULT_INDEX: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
     # UV_INDEX_STRATEGY: "unsafe-best-match"
     # PIP_INDEX_URL: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
@@ -103,7 +103,7 @@ x-runner-base: &runner-base
     # A SINGLE shared host directory across all 88 runners; each container only
     # ever writes its own ${RUNNER_NAME} marker file inside it, so one bind mount
     # suffices (no per-runner subdirectory needed). Requires a container recreate
-    # to take effect — see docs/runbooks/runner-disk-admission-gate.md rollout
+    # to take effect — see knowledge-base:runbooks/runner-disk-admission-gate.md rollout
     # section. Until recreated, docker/runners/runner-job-started.sh's
     # disk_admission_self_pause() fails open (no-op) on the missing mount; the
     # primary per-job admission gate is unaffected and needs no recreate.
@@ -1334,7 +1334,7 @@ services:
   # mint a REPO registration token (`gh api -X POST
   # repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token`,
   # valid 1h) and export DEPLOY_RUNNER_TOKEN before `up -d`.
-  # See docs/runbooks/release-train-lab.md for the full recreate procedure.
+  # See knowledge-base-internal:runbooks/omnibase-infra-release-train-lab.md for the full recreate procedure.
   omninode-deploy-runner:
     image: omninode-runner:latest
     container_name: omninode-deploy-runner

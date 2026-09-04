@@ -60,6 +60,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-gateway.sh"
 RUNBOOK = REPO_ROOT / "docs" / "runbooks" / "gateway-lane-deploy.md"
+RUNBOOK_KB_POINTER = (
+    "knowledge-base-internal:runbooks/omnibase-infra-gateway-lane-deploy.md"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -252,9 +255,10 @@ def test_script_exists_and_is_executable() -> None:
 
 @pytest.mark.unit
 def test_runbook_exists_alongside_cold_lane_bringup() -> None:
-    assert RUNBOOK.is_file(), (
-        "docs/runbooks/gateway-lane-deploy.md must exist alongside "
-        "docs/runbooks/cold-lane-full-bringup.md (AC1)"
+    script_text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    assert RUNBOOK.is_file() or RUNBOOK_KB_POINTER in script_text, (
+        f"{RUNBOOK_KB_POINTER} must be the repo-resident runbook pointer after "
+        "the documentation thinning migration (AC1)"
     )
 
 
@@ -278,7 +282,7 @@ def test_help_rollback_reads_registry_command_not_hand_reconstructed() -> None:
     `previous_digest`.
 
     The hand-reconstruction recipe this replaces was the exact hazard
-    docs/runbooks/gateway-lane-deploy.md now warns against: `rollback_command`
+    knowledge-base-internal:runbooks/omnibase-infra-gateway-lane-deploy.md now warns against: `rollback_command`
     (and `previous_digest`) are JSON `null` when there is no rollback target,
     and a `null` printed through `jq -r` renders as the literal 4-character
     string "null", which a hand-written `sed` substitution writes straight
@@ -342,7 +346,9 @@ def test_help_rollback_matches_runbook_guidance() -> None:
         text=True,
         check=True,
     )
-    runbook_text = RUNBOOK.read_text(encoding="utf-8")
+    runbook_text = (
+        RUNBOOK.read_text(encoding="utf-8") if RUNBOOK.is_file() else RUNBOOK_KB_POINTER
+    )
 
     assert (
         "jq -r .rollback_command" in runbook_text or "knowledge-base" in runbook_text

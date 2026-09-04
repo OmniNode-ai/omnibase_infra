@@ -84,7 +84,7 @@ class ModelSecretSeedRequest(BaseModel):
             "with no default: this estate runs three separate instances (dev "
             "lane, stability lane, in-cluster) and a guessed host would write "
             "a real key into an instance nobody meant to touch. The concrete "
-            "hosts and ports are in docs/runbooks/headless-secret-seeding.md "
+            "hosts and ports are in knowledge-base-internal:runbooks/omnibase-infra-headless-secret-seeding.md "
             "-- deliberately not inlined here, because an address literal in "
             "source is the thing that turns into a default."
         ),
@@ -196,7 +196,7 @@ class ModelSecretSeedRequest(BaseModel):
         ``http://`` is deliberately ACCEPTED. All three instances this node
         exists to seed are plain http — the two `.201` lanes and the
         in-cluster service address in
-        ``docs/runbooks/headless-secret-seeding.md`` — so an https-only rule
+        ``knowledge-base-internal:runbooks/omnibase-infra-headless-secret-seeding.md`` — so an https-only rule
         would reject every address the node actually targets, including
         every invocation the runbook documents. A rule the operator must
         route around is worse than no rule. Transport confidentiality on a

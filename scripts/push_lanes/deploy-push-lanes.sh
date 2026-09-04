@@ -36,12 +36,18 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # REFUSES to run against a queue whose parent dir or artifacts are group- or
 # world-accessible, so a deploy that widened these modes would break the runner
 # rather than merely loosen it.
+#
+# README-QUEUE.md was deployed here until OMN-16607 (epic OMN-16602). It was the
+# only prose in the set -- the operator runbook for the queue, never read by the
+# runner -- and it now lives at
+# knowledge-base-internal:runbooks/omnibase-infra-heavy-prepush-queue.md. This
+# array is the deploy contract, so dropping the file without dropping the row
+# would make every deploy exit 1 on "versioned file missing".
 FILES=(
   "queue-runner.py:700"
   "queue-runner.sh:700"
   "queue-contract-validator.py:700"
   "detect_foreign_prepush.py:600"
-  "README-QUEUE.md:600"
 )
 
 echo "[deploy-push-lanes] target: ${HOST}:~/${DEST}"
