@@ -55,6 +55,23 @@ through the host-artifact manifest to the repo file it is installed from -- and
 a scheduled command that resolves to no repo file is a FAILURE, not a skip, so
 "install an unlisted script and schedule it" is not a way back to green.
 
+**4. A privilege drop must choose the ground it lands on (OMN-17800).**
+
+Rules 1-3 govern what the child INHERITS -- the tool, the PATH, the user. They
+said nothing about the working directory, and ``runuser -u <owner> -- env
+HOME=...`` changes UID, GID and HOME while leaving the CWD untouched. Under the
+`.201` root cron that CWD is ``/root`` at mode 0700, so the child became the
+operator standing in root's home. uv discovers its configuration by walking UP
+from the working directory, reached ``/root/uv.toml``, and refused with
+"Permission denied (os error 13)" -- on 67 consecutive hourly ticks, taking all
+three venv surfaces down with it while the clone surfaces reconciled fine.
+
+Every other package operation in the venv reconciler was already written
+``(cd "$dir" && as_owner ...)``. The provider co-install was the single site
+that was not, and this was the SECOND defect on that exact line -- OMN-17383
+fixed the inherited PATH there and left the inherited directory. So the rule is
+stated over the whole family rather than over that one invocation.
+
 Usage:
     python scripts/check_reconciler_privilege.py [--repo-root PATH]
 """
@@ -137,6 +154,13 @@ _INSTALL_INVOCATION = re.compile(r"\$\{?INSTALL_SCRIPT\}?")
 # `uv` reached by name rather than through the resolved path -- the PATH-only
 # defect re-entering through a back door.
 _BARE_UV = re.compile(r"(?<![\w./$-])uv\s+(?:sync|pip|run|venv|tool)\b")
+
+# A command that sets the working directory before the privilege drop. The
+# `(cd "$dir" && as_owner ...)` subshell is the form already used by every other
+# package operation in the venv reconciler; the co-install was the one site that
+# was not, which is OMN-17800. Matched on the JOINED logical line, so a
+# continuation cannot separate the `cd` from the command it governs.
+_WORKDIR_SET = re.compile(r"(?<![\w.$-])cd\s")
 
 _QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
 
@@ -541,6 +565,56 @@ def check(repo_root: Path) -> list[str]:
                         "call is wrapped in `|| true`, the guard that reads its "
                         "result silently stops guarding (OMN-17439)."
                     )
+
+    # -- Part 7: a privilege drop must also choose the ground it lands on --- #
+    #
+    # OMN-17800. Parts 1-3 made the child inherit the right TOOL. They said
+    # nothing about the working directory, and `runuser -u <owner> -- env
+    # HOME=...` changes UID, GID and HOME while leaving the CWD exactly where
+    # the caller left it. Under the `.201` root cron that is `/root`, mode
+    # 0700 -- so the child became the operator standing in root's home, and uv,
+    # which discovers configuration by walking UP from the working directory,
+    # refused:
+    #
+    #   error: failed to open file `/root/uv.toml`: Permission denied (os error 13)
+    #
+    # for 67 consecutive hourly ticks, taking all three venv surfaces with it.
+    #
+    # The rule is written over the whole family rather than over that one line,
+    # because the property is general: whatever a dropped-privilege child reads
+    # from its surroundings must be surroundings the parent PICKED. Every other
+    # package operation in the venv reconciler was already `(cd "$dir" && ...)`;
+    # the co-install was the single site that was not, and it is the second
+    # defect on that exact line after OMN-17383.
+    for script in guarded:
+        rel = script.relative_to(repo_root)
+        text = script.read_text(encoding="utf-8")
+        for number, line in logical_lines(text):
+            executable = _code(line)
+            if OWNER_HELPER not in executable:
+                continue
+
+            runs_uv = bool(_UV_INVOCATION.search(executable)) and " sync" in executable
+            runs_install = (
+                bool(_INSTALL_INVOCATION.search(executable))
+                and "--execute" in executable
+            )
+            if not (runs_uv or runs_install):
+                continue
+            if _WORKDIR_SET.search(executable):
+                continue
+
+            what = "a uv sync" if runs_uv else "the provider co-install"
+            failures.append(
+                f"{rel}:{number}: runs {what} through {OWNER_HELPER} without "
+                "setting a working directory. `runuser` moves the user and not "
+                "the CWD, so the child lands in whatever directory the caller "
+                "had -- under a root cron, /root at mode 0700, which the "
+                "dropped-to owner cannot even stat. uv searches for its config "
+                "upward from there and refuses, so the parent resolves "
+                "everything correctly and the child still fails (OMN-17800). "
+                'Wrap it: (cd "$dir" && ' + OWNER_HELPER + " ...)."
+            )
 
     return failures
 

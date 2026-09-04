@@ -497,7 +497,14 @@ fi
   for line in "${SURFACE_LINES[@]}"; do
     IFS='|' read -r s v d <<<"$line"
     printf '%s    {"surface": "%s", "verdict": "%s", "detail": "%s"}' "$sep" "$s" "$v" "${d//\"/\'}"
-    sep=",\n"
+    # $'...' , not "..." (OMN-17800). Bash interprets \n only in ANSI-C quoting,
+    # and this value is then handed to printf as a %s ARGUMENT, where printf does
+    # not interpret escapes either -- so `sep=",\n"` wrote the literal three
+    # characters `,\n` between elements and every receipt this script has ever
+    # produced, on BOTH hosts, failed json.loads with "Expecting value: line 8".
+    # The pre-existing receipt test missed it because its workspace yields one
+    # surface, and a separator is untested until something is separated.
+    sep=$',\n'
   done
   printf '\n  ],\n  "failures": %d\n}\n' "${#FAILURES[@]}"
 } | as_owner tee "$RECEIPT" >/dev/null 2>&1 || \
