@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "ticket": "OMN-17872",
+  "crit_free_gb": 50,
+  "warn_free_gb": 100,
+  "warn_pct": 85,
+  "derivation": {
+    "measured_on": "2026-09-04",
+    "host": "local_macos_claude_hooks",
+    "largest_single_lane_tree_gib": 0.86,
+    "largest_single_lane_tree_path": "omni_worktrees/broker-render-authority/omnibase_infra",
+    "omnibase_core_worktree_gib_range": [0.4, 0.59],
+    "omnibase_infra_worktree_gib_range": [0.47, 0.86],
+    "conservative_per_lane_gib": 1.5,
+    "concurrent_lanes": 12,
+    "lane_demand_gb": 18,
+    "docker_build_cache_growth_gb": 36.47,
+    "docker_build_cache_records": 466,
+    "total_demand_gb": 54.5,
+    "note": "crit_free_gb=50 sits just under the 54.5 GB of measured demand because a breach is a signal to reclaim, not a cliff: the guard must fire while there is still room to run the GC that clears it. warn_free_gb=100 gives roughly one GC cycle of lead time. Percent-used is deliberately NOT a halt criterion -- on a 3.6 TiB volume the ten points between 90% and 100% are 360 GB, two orders of magnitude more than any single lane needs."
+  }
+}
