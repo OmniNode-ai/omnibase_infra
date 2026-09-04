@@ -1,0 +1,49 @@
+# OMN-17861: Inert RSD live-delegation composition. Capability identifiers are
+# opaque names only; none is resolved by this record or by its pure preflight.
+schema_version: rsd_live_delegation_overlay.v1
+lane: dev
+locale: lab
+execute_enabled: false
+rsd_distribution_ref: omninode-rsd/0.1.0
+public_rsd_revision_sha: 3177c31ed7db4e5551e93dadfd0f9a034728b8ab
+delegation_policy_schema: rsd.delegation-overlay.v1
+dispatch_outcome_schema: rsd.dispatch-outcome-attestation.v1
+claim_binding_schema: rsd.delegation-claim-binding.v1
+route_ref: logical://delegation/qwen3.8-27b
+backend_id: local-coder
+model_id: Qwen/Qwen3.8-27B
+dispatch_policy: backend-pinned-single-attempt.v1
+one_shot_endpoint_capability_ref: capability://rsd/one-shot-dispatch/inert
+root_authority_capability_ref: capability://rsd/root-authority/inert
+root_authority_key_id: 00000000-0000-4000-8000-000000000001
+root_authority_public_key_fingerprint_sha256: 8345171ccec637fe7fb72786bcde5a8a8517a393ed65ead3104cc920abb37bb9
+result_attestor_signer_capability_ref: capability://rsd/result-attestor/signer
+result_attestor_key_capability_ref: capability://rsd/result-attestor/key
+result_attestor_fingerprint_capability_ref: capability://rsd/result-attestor/fingerprint
+result_attestor_key_id: 00000000-0000-4000-8000-000000000002
+result_attestor_public_key_fingerprint_sha256: 24f6ed6acbfe1009c030d7ca567c33ca4830911498236b5561a6c82abec5de28
+postgres_capability_ref: capability://rsd/postgres/acceptance
+observed_model_attestation_capability_ref: capability://rsd/model-attestation/inert
+observed_model_id: Qwen3.6-35B-A3B
+observed_model_attestation_sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+model_match_status: model_id_mismatch
+authority_envelope:
+  schema_version: rsd.live-delegation-authority-envelope.v1
+  authority_domain: omninode-rsd.inert-live-delegation.v1
+  authority_root_id: 00000000-0000-4000-8000-000000000001
+  authority_root_public_key_fingerprint_sha256: 8345171ccec637fe7fb72786bcde5a8a8517a393ed65ead3104cc920abb37bb9
+  overlay_schema_version: rsd_live_delegation_overlay.v1
+  overlay_digest_sha256: ee7a3fed3212c8dbdd387b5dcfd776b14e40c3757102cbc693a7e464b9455fbc
+  delegation_policy_schema: rsd.delegation-overlay.v1
+  dispatch_outcome_schema: rsd.dispatch-outcome-attestation.v1
+  claim_binding_schema: rsd.delegation-claim-binding.v1
+  route_ref: logical://delegation/qwen3.8-27b
+  backend_id: local-coder
+  model_id: Qwen/Qwen3.8-27B
+  attestor_key_id: 00000000-0000-4000-8000-000000000002
+  attestor_public_key_fingerprint_sha256: 24f6ed6acbfe1009c030d7ca567c33ca4830911498236b5561a6c82abec5de28
+  observed_model_id: Qwen3.6-35B-A3B
+  observed_model_attestation_sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  issued_at: "2026-01-01T00:00:00Z"
+  expires_at: "2030-01-01T00:00:00Z"
+  signature_base64: N9Eiaa5K2V9Ay9uS09n8Gh-KmtdsiOjle1bypnfa_CEj1y-zZkvMulCu5ZlHHLSZ364R_qeoX9pejwGHI_ijCw==
