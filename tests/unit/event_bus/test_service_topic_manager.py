@@ -22,6 +22,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.event_bus.enum_topic_readiness_status import (
+    EnumTopicReadinessStatus,
+)
+from omnibase_infra.event_bus.model_topic_set_readiness import (
+    ModelTopicSetReadiness,
+)
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
@@ -397,6 +403,17 @@ class TestTopicProvisioner:
         monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
         manager = _make_provisioner(contracts_root)
 
+        async def _ready(
+            topics: list[str], **_kwargs: object
+        ) -> ModelTopicSetReadiness:
+            return ModelTopicSetReadiness(
+                topics=tuple(topics),
+                status=EnumTopicReadinessStatus.READY,
+                ready_topics=tuple(topics),
+            )
+
+        monkeypatch.setattr(manager, "confirm_topics_ready", _ready)
+
         mock_admin_cls = MagicMock()
         mock_new_topic_cls = MagicMock()
         mock_admin_instance = AsyncMock()
@@ -431,6 +448,94 @@ class TestTopicProvisioner:
             replication_factor=1,
             topic_configs={},
         )
+
+    async def test_ensure_single_topic_does_not_cache_unconfirmed_create(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A successful CreateTopics RPC is not evidence of broker materialization."""
+        manager = _make_provisioner(contracts_root)
+
+        async def _not_ready(
+            topics: list[str], **_kwargs: object
+        ) -> ModelTopicSetReadiness:
+            return ModelTopicSetReadiness(
+                topics=tuple(topics),
+                status=EnumTopicReadinessStatus.NOT_READY,
+            )
+
+        monkeypatch.setattr(manager, "confirm_topics_ready", _not_ready)
+        mock_admin_cls = MagicMock()
+        mock_admin_instance = AsyncMock()
+        mock_admin_instance.start = AsyncMock()
+        mock_admin_instance.close = AsyncMock()
+        mock_admin_instance.create_topics = AsyncMock()
+        mock_admin_cls.return_value = mock_admin_instance
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=mock_admin_cls,
+                    NewTopic=MagicMock(),
+                ),
+                "aiokafka.errors": MagicMock(
+                    TopicAlreadyExistsError=type(
+                        "TopicAlreadyExistsError", (Exception,), {}
+                    ),
+                ),
+            },
+        ):
+            result = await manager.ensure_topic_exists("test.topic")
+
+        assert result is False
+        assert "test.topic" not in manager._created_specs
+        assert "test.topic" not in (manager._existing_topics or frozenset())
+
+    async def test_ensure_single_topic_already_exists_requires_metadata_confirm(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The CreateTopics race also cannot turn a local cache into broker proof."""
+        manager = _make_provisioner(contracts_root)
+        manager._existing_topics = frozenset()
+        already_exists = type("TopicAlreadyExistsError", (Exception,), {})
+
+        async def _unavailable(
+            topics: list[str], **_kwargs: object
+        ) -> ModelTopicSetReadiness:
+            return ModelTopicSetReadiness(
+                topics=tuple(topics),
+                status=EnumTopicReadinessStatus.UNAVAILABLE,
+            )
+
+        monkeypatch.setattr(manager, "confirm_topics_ready", _unavailable)
+        mock_admin_cls = MagicMock()
+        mock_admin_instance = AsyncMock()
+        mock_admin_instance.start = AsyncMock()
+        mock_admin_instance.close = AsyncMock()
+        mock_admin_instance.create_topics = AsyncMock(side_effect=already_exists())
+        mock_admin_cls.return_value = mock_admin_instance
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=mock_admin_cls,
+                    NewTopic=MagicMock(),
+                ),
+                "aiokafka.errors": MagicMock(TopicAlreadyExistsError=already_exists),
+            },
+        ):
+            result = await manager.ensure_topic_exists("test.topic")
+
+        assert result is False
+        assert "test.topic" not in manager._created_specs
+        assert "test.topic" not in manager._existing_topics
 
     async def test_ensure_single_topic_failure(self, contracts_root: Path) -> None:
         """Single topic creation returns False on failure."""
