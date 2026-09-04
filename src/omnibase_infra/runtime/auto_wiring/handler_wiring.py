@@ -9035,15 +9035,40 @@ def _resolve_boundary_terminal_answer_topic(
     * exactly one declared FAILURE terminal -> that one (OMN-16812, unchanged);
     * two or more -> ``None``. There is no basis to choose, and choosing would
       be the guess ``apply_failure_terminal_guard`` refuses to make;
-    * none declared -> the contract's own declared terminal/output topic, when
-      it has one. This is emphatically not an invented address: it is inside the
-      contract's publish allowlist, and it is where every SUCCESSFUL answer for
-      this contract already goes — so it is, by construction, where the caller
-      is already listening. ``ModelBoundaryFailureTerminal`` was designed for
-      exactly this landing: its ``status`` field is the vocabulary
-      ``resolve_terminal_verdict`` reads, so a reader of that topic derives
-      ``failed`` "even on a contract whose single declared terminal is nominally
-      the success topic" (its own docstring).
+    * none declared, and the CONSUMED topic is a COMMAND -> the contract's own
+      declared terminal/output topic, when it has one. This is emphatically not
+      an invented address: it is inside the contract's publish allowlist, and it
+      is where every SUCCESSFUL answer for this contract already goes — so it
+      is, by construction, where the caller is already listening.
+      ``ModelBoundaryFailureTerminal`` was designed for exactly this landing:
+      its ``status`` field is the vocabulary ``resolve_terminal_verdict`` reads,
+      so a reader of that topic derives ``failed`` "even on a contract whose
+      single declared terminal is nominally the success topic" (its own
+      docstring);
+    * none declared, and the consumed topic is an EVENT or an INTENT -> ``None``
+      (OMN-17895). See below — the clause above turns on the word CALLER, and an
+      event notification has none.
+
+    WHY THE LAST RESORT IS COMMAND-ONLY (OMN-17895). The justification for the
+    success-terminal fallback is that the caller "is already listening" there. A
+    caller in that sense exists only for a COMMAND: a request published with a
+    correlation held open, awaiting this contract's terminal. The publisher of
+    an ``onex.evt.*`` notification awaits nothing — it fired and moved on — so a
+    terminal published on the contract's success topic for a failed EVENT
+    consumption reaches nobody, and it puts a ``ModelBoundaryFailureTerminal``
+    on a topic whose declared payload model is something else. That is not
+    hypothetical: on the dev lane, ``node_swarm_fanout_orchestrator`` failing an
+    ``onex.evt.omnimarket.delegation-escalation-triggered.v1`` record answered on
+    its own success terminal ``onex.evt.omnimarket.swarm-fanout-completed.v1``,
+    whose two live consumers DO hold a dispatcher for that ``event_type`` and
+    ``model_validate`` against ``ModelSwarmFanoutResult``. Both rejected every
+    terminal and re-DLQ'd it, and the replay leg doubled it each round — 11,340
+    records, not one of them a genuine fan-out result.
+
+    This is the same reasoning ``_is_boundary_failure_terminal_record`` already
+    applies one step later ("a terminal is an answer, not a request: nobody is
+    holding a correlation open behind it"), applied to the consumed record's own
+    category rather than to its payload.
 
     In every case an address equal to the CONSUMED topic is refused, so a
     contract that both consumes and publishes one topic cannot have its own
@@ -9051,13 +9076,23 @@ def _resolve_boundary_terminal_answer_topic(
     ``_is_dead_letter_source_topic`` guards on the DLQ leg, with the same answer.
 
     Declaring a distinct failure terminal remains the better practice and still
-    wins here; this is the answer of last resort for the contracts that do not.
+    wins here — and is the ONLY way an event-driven contract gets a boundary
+    terminal at all, precisely because the contract, not the runtime, is what
+    says a topic may carry failures.
     """
     if len(failure_terminal_topics) > 1:
         return None
-    resolved = (
-        failure_terminal_topics[0] if failure_terminal_topics else terminal_answer_topic
-    )
+    if failure_terminal_topics:
+        resolved: str | None = failure_terminal_topics[0]
+    else:
+        from omnibase_infra.enums import EnumMessageCategory
+
+        if (
+            _derive_message_category(consumed_topic)
+            != EnumMessageCategory.COMMAND.value
+        ):
+            return None
+        resolved = terminal_answer_topic
     if not resolved or resolved == consumed_topic:
         return None
     return resolved
