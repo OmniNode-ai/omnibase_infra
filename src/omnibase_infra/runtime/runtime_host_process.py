@@ -187,6 +187,7 @@ if TYPE_CHECKING:
         ModelMessageEnvelope,
     )
     from omnibase_infra.event_bus.models import ModelEventMessage
+    from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
     from omnibase_infra.handlers.handler_infisical import HandlerInfisical
     from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
     from omnibase_infra.idempotency.protocol_idempotency_store import (
@@ -2435,12 +2436,113 @@ class RuntimeHostProcess:
                 if part.strip()
             )
             routes = discover_runtime_local_ingress_routes(package_names)
+        command_topic = self._pattern_b_broker_config.command_topic
+        await self._provision_pattern_b_command_topic(command_topic)
         self._pattern_b_broker = RuntimePatternBBroker(
             self._event_bus,
-            command_topic=self._pattern_b_broker_config.command_topic,
+            command_topic=command_topic,
             routes=routes,
         )
         await self._pattern_b_broker.start()
+
+    def _build_kafka_topic_provisioner(self) -> TopicProvisioner | None:
+        """Build a TopicProvisioner for the owned bus, or None when not Kafka.
+
+        Returns None for an in-memory bus (no admin client, nothing to
+        provision) and for a Kafka bus with no bootstrap servers configured.
+        """
+        event_bus = getattr(self, "_event_bus", None)
+        bootstrap = (
+            # Why: Control flow narrows this union at runtime before the attribute access.
+            event_bus._bootstrap_servers  # type: ignore[union-attr]
+            if isinstance(event_bus, EventBusKafka)
+            else ""
+        )
+        if not bootstrap:
+            return None
+
+        from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+
+        contracts_root = self._contract_paths[0] if self._contract_paths else Path()
+        return TopicProvisioner(
+            bootstrap_servers=bootstrap,
+            contracts_root=contracts_root,
+        )
+
+    async def _provision_pattern_b_command_topic(self, command_topic: str) -> None:
+        """Ensure the Pattern B command topic exists before the consumer attaches.
+
+        OMN-17857: an ephemeral lane (a staging delivery bringing up a fresh
+        redpanda) has no producer for this topic at boot, so the topic does not
+        exist, ``EventBusKafka.subscribe`` burns its whole metadata retry budget
+        on ``UnknownTopicOrPartitionError`` and raises ``InfraTimeoutError``.
+        ``start()`` re-raises that, so the runtime process exits 1 instead of
+        coming up -- observed on delivery run 33843160175 of
+        ``deliver-dev-candidate-to-staging.yml`` (head ``9ac332d4``), where
+        ``omninode-runtime`` died after 1677s while ``omninode-runtime-effects``
+        reached Ready.
+
+        The auto-wiring boot interleave already provisions every
+        contract-declared topic through this same ``TopicProvisioner``
+        (OMN-13237), and live contract materialization does the same
+        (OMN-11242). The Pattern B command topic is the one consumer topic
+        neither path sees, because it comes from runtime *config* rather than a
+        contract's ``event_bus`` subcontract. Reuse the existing provisioner
+        rather than tolerating the missing topic, so the attach is real and the
+        120s metadata budget keeps its meaning against a genuinely broken
+        broker.
+
+        A provisioning failure is logged and left to fail closed at the attach:
+        an admin client that cannot create a topic is a real infrastructure
+        fault, not an ephemeral-lane cold start.
+        """
+        try:
+            provisioner = self._build_kafka_topic_provisioner()
+        except Exception:  # noqa: BLE001 — boundary: must not add a new boot failure
+            logger.warning(
+                "Pattern B command topic provisioner could not be built for %s "
+                "(OMN-17857); the consumer attach below will fail closed if the "
+                "topic is absent",
+                command_topic,
+                extra={"command_topic": command_topic},
+                exc_info=True,
+            )
+            return
+        if provisioner is None:
+            return
+
+        try:
+            provisioned = await provisioner.ensure_topic_exists(
+                topic_name=command_topic
+            )
+        except TopicReplicationPolicyError:
+            # OMN-15395: durability violations are fail-closed and must escape.
+            raise
+        except Exception:  # noqa: BLE001 — boundary: logged, attach still fails closed
+            logger.warning(
+                "Pattern B command topic provisioning raised for %s (OMN-17857); "
+                "the consumer attach below will fail closed if the topic is absent",
+                command_topic,
+                extra={"command_topic": command_topic},
+                exc_info=True,
+            )
+            return
+
+        if not provisioned:
+            logger.warning(
+                "Pattern B command topic provisioning reported failure for %s "
+                "(OMN-17857); the consumer attach below will fail closed if the "
+                "topic is absent",
+                command_topic,
+                extra={"command_topic": command_topic},
+            )
+            return
+
+        logger.info(
+            "Pattern B command topic provisioned before broker attach: %s (OMN-17857)",
+            command_topic,
+            extra={"command_topic": command_topic},
+        )
 
     def _is_local_ingress_effectively_enabled(self) -> bool:
         return self._local_ingress_config.enabled and _runtime_profile_is_enabled(
@@ -3731,50 +3833,33 @@ class RuntimeHostProcess:
         if subcontract.subscribe_topics:
             # Provision new contract's topics before subscribing (OMN-11242).
             # Best-effort: failure logs a warning but never blocks materialization.
-            _event_bus = getattr(self, "_event_bus", None)
-            _bootstrap = (
-                # Why: Control flow narrows this union at runtime before the attribute access.
-                _event_bus._bootstrap_servers  # type: ignore[union-attr]
-                if isinstance(_event_bus, EventBusKafka)
-                else ""
-            )
-            if _bootstrap:
-                try:
-                    from omnibase_infra.event_bus.service_topic_manager import (
-                        TopicProvisioner,
-                    )
-
-                    _contracts_root = (
-                        self._contract_paths[0] if self._contract_paths else Path()
-                    )
-                    _provisioner = TopicProvisioner(
-                        bootstrap_servers=_bootstrap,
-                        contracts_root=_contracts_root,
-                    )
-                except Exception:  # noqa: BLE001 — boundary: best-effort, never blocks
-                    logger.warning(
-                        "Topic pre-provisioning failed for live contract (non-blocking): "
-                        "node=%s topics=%s",
-                        node_name,
-                        subcontract.subscribe_topics,
-                        exc_info=True,
-                    )
-                else:
-                    for _topic in subcontract.subscribe_topics:
-                        try:
-                            await _provisioner.ensure_topic_exists(topic_name=_topic)
-                        except TopicReplicationPolicyError:
-                            # OMN-15395: durability violations are fail-closed
-                            # and must escape this best-effort boundary.
-                            raise
-                        except Exception:  # noqa: BLE001 — boundary: best-effort
-                            logger.warning(
-                                "Topic pre-provisioning failed for live contract "
-                                "(non-blocking): node=%s topic=%s",
-                                node_name,
-                                _topic,
-                                exc_info=True,
-                            )
+            try:
+                _provisioner = self._build_kafka_topic_provisioner()
+            except Exception:  # noqa: BLE001 — boundary: best-effort, never blocks
+                _provisioner = None
+                logger.warning(
+                    "Topic pre-provisioning failed for live contract (non-blocking): "
+                    "node=%s topics=%s",
+                    node_name,
+                    subcontract.subscribe_topics,
+                    exc_info=True,
+                )
+            if _provisioner is not None:
+                for _topic in subcontract.subscribe_topics:
+                    try:
+                        await _provisioner.ensure_topic_exists(topic_name=_topic)
+                    except TopicReplicationPolicyError:
+                        # OMN-15395: durability violations are fail-closed
+                        # and must escape this best-effort boundary.
+                        raise
+                    except Exception:  # noqa: BLE001 — boundary: best-effort
+                        logger.warning(
+                            "Topic pre-provisioning failed for live contract "
+                            "(non-blocking): node=%s topic=%s",
+                            node_name,
+                            _topic,
+                            exc_info=True,
+                        )
 
             await self._event_bus_wiring.wire_subscriptions(
                 subcontract=subcontract,
