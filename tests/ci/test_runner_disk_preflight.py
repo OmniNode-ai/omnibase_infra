@@ -13,6 +13,7 @@ Coverage:
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -24,6 +25,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PREFLIGHT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runner-disk-preflight.yml"
 DISK_WATERMARK_SCRIPT = REPO_ROOT / "scripts" / "disk-watermark-check.sh"
+DISK_WATERMARK_THRESHOLDS = REPO_ROOT / "scripts" / "disk-watermark-thresholds.json"
 DISK_GC_SERVICE = REPO_ROOT / "deploy" / "disk-gc" / "onex-disk-gc.service"
 INFRA_RERUN_SCRIPT = REPO_ROOT / "scripts" / "infra-signature-rerun.sh"
 
@@ -198,36 +200,66 @@ def test_disk_watermark_script_exists() -> None:
 
 
 def test_disk_watermark_85_pct_warn_leg_is_wired() -> None:
-    """The 85% ALERT leg must be wired in disk-watermark-check.sh (OMN-13008 §3).
+    """The 85% ALERT leg must still be wired (OMN-13008 §3, OMN-13040 §2).
 
-    OMN-13040 §2 requires: verify the OMN-13008 timer has an ALERT leg at 85%,
-    not just GC. The script must default WARN_PCT to 85 and emit at >= that threshold.
+    OMN-17872 moved the number out of the script and into the guard's own
+    declaration, so the assertion follows it there. The leg itself is unchanged:
+    at or above 85% used the guard emits severity=warning.
     """
-    source = DISK_WATERMARK_SCRIPT.read_text(encoding="utf-8")
-    assert "WARN_PCT=85" in source, (
-        "disk-watermark-check.sh must default WARN_PCT=85 — the 85% alert leg "
-        "required by OMN-13008 is missing."
+    declared = json.loads(DISK_WATERMARK_THRESHOLDS.read_text(encoding="utf-8"))
+    assert declared["warn_pct"] == 85, (
+        "disk-watermark-thresholds.json must declare warn_pct=85 — the 85% alert "
+        f"leg required by OMN-13008 is missing; got {declared.get('warn_pct')!r}."
     )
-    # Must also check against WARN_PCT and emit something (not silently exit).
-    assert "USED_PCT < WARN_PCT" in source or "WARN_PCT" in source, (
+    source = DISK_WATERMARK_SCRIPT.read_text(encoding="utf-8")
+    assert "USED_PCT >= WARN_PCT" in source, (
         "disk-watermark-check.sh must compare usage against WARN_PCT to emit the alert."
     )
-    # Must emit severity=warning at 85%.
     assert "warning" in source.lower(), (
         "disk-watermark-check.sh must emit severity=warning at 85% (the alert leg)."
     )
 
 
-def test_disk_watermark_90_pct_crit_leg_is_wired() -> None:
-    """The 90% CRITICAL leg must also be wired (OMN-13008 §3 bus event)."""
+def test_disk_watermark_crit_leg_is_an_absolute_free_space_floor() -> None:
+    """The critical leg is free space, never a percentage (OMN-17872).
+
+    The percentage critical leg (CRIT_PCT=90) halted a lane on 2026-09-04 with
+    87 GiB free on a 3.6 TiB volume. It is gone; the floor replaces it, and no
+    percentage may produce the critical exit code.
+    """
+    declared = json.loads(DISK_WATERMARK_THRESHOLDS.read_text(encoding="utf-8"))
+    assert isinstance(declared["crit_free_gb"], int), declared
+    assert declared["crit_free_gb"] > 0, declared
+    assert declared["warn_free_gb"] > declared["crit_free_gb"], declared
+
     source = DISK_WATERMARK_SCRIPT.read_text(encoding="utf-8")
-    assert "CRIT_PCT=90" in source, (
-        "disk-watermark-check.sh must default CRIT_PCT=90 — the 90% critical "
-        "bus-event leg required by OMN-13008 is missing."
+    assert "CRIT_PCT" not in source, (
+        "disk-watermark-check.sh must not carry a critical PERCENTAGE any more — "
+        "OMN-17872 replaced it with an absolute free-space floor."
+    )
+    assert "AVAIL_GB < CRIT_FREE_GB" in source, (
+        "disk-watermark-check.sh must halt on free space below crit_free_gb."
     )
     assert "critical" in source.lower(), (
-        "disk-watermark-check.sh must emit severity=critical at 90%."
+        "disk-watermark-check.sh must emit severity=critical below the floor."
     )
+
+
+def test_disk_watermark_thresholds_are_not_environment_configurable() -> None:
+    """Rule 8: the floors are declared, not injected by an env var."""
+    source = DISK_WATERMARK_SCRIPT.read_text(encoding="utf-8")
+    for banned in (
+        "DISK_WATERMARK_CRIT_FREE_GB",
+        "DISK_WATERMARK_WARN_FREE_GB",
+        "DISK_WATERMARK_WARN_PCT",
+        "${CRIT_FREE_GB:-",
+        "${WARN_FREE_GB:-",
+        "${WARN_PCT:-",
+    ):
+        assert banned not in source, (
+            f"{banned}: disk-watermark thresholds must come from "
+            f"{DISK_WATERMARK_THRESHOLDS.name}, never from the environment."
+        )
 
 
 def test_disk_gc_service_wires_watermark_check() -> None:

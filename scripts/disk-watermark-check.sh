@@ -11,11 +11,28 @@
 # is misleading — always pass --mount /System/Volumes/Data on the Mac.
 #
 # Behavior (df on the target mount):
-#   usage >= warn_pct  (default 85): emit a disk-watermark bus event with
-#                       severity=warning. A downstream consumer (node_runtime_sweep
-#                       auto-ticket path) turns warning events into a Linear ticket.
-#   usage >= crit_pct  (default 90): ALSO emit severity=critical — the loud event.
-#   usage <  warn_pct : no-op (exit 0, quiet).
+#   free_gb <  crit_free_gb (50): emit severity=critical, exit 20. THIS IS THE ONLY
+#                       HALT. Admission is an absolute question -- does the next
+#                       unit of work fit -- so the halt criterion is free space.
+#   free_gb <  warn_free_gb (100): emit severity=warning, exit 10.
+#   used_pct >= warn_pct (85): emit severity=warning, exit 10. The percentage is a
+#                       SECONDARY signal only and can never, on its own, produce
+#                       the critical exit code.
+#   otherwise         : no-op (exit 0, quiet).
+#
+# WHY THE PERCENTAGE IS NOT THE HALT (OMN-17872). Until 2026-09-04 this script
+# halted on percent-used alone -- a warning line at 85% and a critical line at
+# 90% -- while AVAIL_KB was measured and then ignored. On the 3.6 TiB Mac Data volume that called 87 GiB
+# free "critical" and stopped a lane at 2026-09-04T00:52:44Z, and still read
+# critical at 276 GiB free. Percent-used is a ratio; ten points on a 3.6 TiB
+# volume are 360 GB, two orders of magnitude more than any single lane needs.
+# The runner-side gate (docker/runners/runner-job-started.sh, OMN-16363) already
+# used an absolute floor; this is the repo-side guard converted to match.
+#
+# THRESHOLDS ARE NOT ENVIRONMENT-CONFIGURABLE. All three numbers, and the
+# measurements they were derived from, are declared in the guard's own config,
+# scripts/disk-watermark-thresholds.json, and read fail-fast at startup (Rule 8:
+# a missing or malformed declaration aborts, it never falls back to a default).
 #
 # The bus is the transport (ONEX doctrine): this script publishes the typed event
 # and does not itself talk to Linear. Ticket creation is the consumer's job, which
@@ -32,12 +49,15 @@
 # Usage:
 #   ./scripts/disk-watermark-check.sh                                       # check /data (.201)
 #   ./scripts/disk-watermark-check.sh --mount /System/Volumes/Data          # Mac Data volume
-#   ./scripts/disk-watermark-check.sh --warn 85 --crit 90                   # thresholds
 #   ./scripts/disk-watermark-check.sh --dry-run                             # print event, no publish
 #
-# Exit codes: 0 ok (under warn, or published), 10 warn breached, 20 crit breached,
-#             2 bad args. (Non-zero breach codes let the timer surface state in
-#             `systemctl --user status`.)
+# There is deliberately no --warn/--crit flag: a threshold an operator can retype
+# per invocation is not a declared threshold. Edit the JSON, in a reviewed commit.
+#
+# Exit codes: 0 ok (under every threshold, or published), 10 warn breached,
+#             20 crit breached (free space below the floor), 2 bad args or an
+#             unreadable threshold declaration. (Non-zero breach codes let the
+#             timer surface state in `systemctl --user status`.)
 #
 # Runs on .201 via deploy/disk-gc.timer (shares the GC timer). Log: ~/.local/log/onex/disk-watermark.log
 # Runs on Mac via the reaper daemon (T4/OMN-13228) or operator invocation.
@@ -46,18 +66,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MOUNT="/data"
-WARN_PCT=85
-CRIT_PCT=90
 DRY_RUN=false
 TOPIC="onex.evt.infra.disk-watermark.v1"
+THRESHOLDS_FILE="${SCRIPT_DIR}/disk-watermark-thresholds.json"
 LOG_FILE="${HOME}/.local/log/onex/disk-watermark.log"
 HOSTNAME_TAG="$(hostname -s 2>/dev/null || echo unknown)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mount) MOUNT="$2"; shift 2 ;;
-    --warn) WARN_PCT="$2"; shift 2 ;;
-    --crit) CRIT_PCT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --help|-h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -67,36 +84,64 @@ done
 mkdir -p "$(dirname "$LOG_FILE")"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [disk-watermark] $*" | tee -a "$LOG_FILE" >&2; }
 
-# Resolve usage percentage for the mount (fall back to / if MOUNT absent).
-target="$MOUNT"
-df -P "$target" >/dev/null 2>&1 || target="/"
-USED_PCT="$(df -P "$target" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
-AVAIL_KB="$(df -P "$target" | awk 'NR==2 {print $4}')"
+# Thresholds come from the guard's own declaration, fail-fast (Rule 8). A missing
+# or malformed file aborts with exit 2 -- it never falls back to a built-in
+# default, because a silently-defaulted admission threshold is the failure this
+# ticket exists to remove.
+if ! THRESHOLDS_RAW="$(python3 "${SCRIPT_DIR}/disk_watermark_thresholds.py" "$THRESHOLDS_FILE" 2>&1)"; then
+  log "ERROR: unusable threshold declaration ${THRESHOLDS_FILE}: ${THRESHOLDS_RAW}"
+  exit 2
+fi
+read -r CRIT_FREE_GB WARN_FREE_GB WARN_PCT <<<"$THRESHOLDS_RAW"
 
-if ! [[ "$USED_PCT" =~ ^[0-9]+$ ]]; then
+# Resolve usage for the mount (fall back to / if MOUNT absent).
+#
+# `-k` IS LOAD-BEARING, NOT DECORATION. POSIX `df -P` alone reports 512-byte
+# blocks on BSD/macOS and 1024-byte blocks on GNU/Linux, so the same command
+# returns figures a factor of two apart on the two hosts this guard runs on.
+# While the halt was a percentage that never mattered; now that free space IS
+# the halt, a 2x unit error would admit at half the real floor. Measured on the
+# Mac 2026-09-04: `df -P` avail 579152816 vs `df -Pk` avail 289576408 for the
+# same 276 GiB. The runner-side gate already used `df -Pk`
+# (docker/runners/runner-job-started.sh:697); this matches it.
+target="$MOUNT"
+df -Pk "$target" >/dev/null 2>&1 || target="/"
+USED_PCT="$(df -Pk "$target" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+AVAIL_KB="$(df -Pk "$target" | awk 'NR==2 {print $4}')"
+
+if ! [[ "$USED_PCT" =~ ^[0-9]+$ ]] || ! [[ "$AVAIL_KB" =~ ^[0-9]+$ ]]; then
   log "ERROR: could not parse df usage for $target"
   exit 2
 fi
 
-log "mount=$target used=${USED_PCT}% avail_kb=${AVAIL_KB} warn=${WARN_PCT} crit=${CRIT_PCT}"
+AVAIL_GB=$(( AVAIL_KB / 1024 / 1024 ))
 
-if (( USED_PCT < WARN_PCT )); then
-  log "under watermark — quiet"
-  exit 0
-fi
+log "mount=$target avail_gb=${AVAIL_GB} (crit_floor=${CRIT_FREE_GB} warn_floor=${WARN_FREE_GB}) used=${USED_PCT}% (advisory warn=${WARN_PCT}%) avail_kb=${AVAIL_KB}"
 
-SEVERITY="warning"
-EXIT_CODE=10
-if (( USED_PCT >= CRIT_PCT )); then
+# Free space is the halt. The percentage only ever warns.
+if (( AVAIL_GB < CRIT_FREE_GB )); then
   SEVERITY="critical"
   EXIT_CODE=20
+  HALT_REASON="free_space_below_crit_floor"
+elif (( AVAIL_GB < WARN_FREE_GB )); then
+  SEVERITY="warning"
+  EXIT_CODE=10
+  HALT_REASON="free_space_below_warn_floor"
+elif (( USED_PCT >= WARN_PCT )); then
+  SEVERITY="warning"
+  EXIT_CODE=10
+  HALT_REASON="used_pct_advisory"
+else
+  log "above both free-space floors and under the advisory percentage -- quiet"
+  exit 0
 fi
 
 # Build the typed event payload deterministically in Python so the schema is
 # stable and unit-testable.
 EVENT_JSON="$(
-  USED_PCT="$USED_PCT" AVAIL_KB="$AVAIL_KB" MOUNT="$target" \
-  SEVERITY="$SEVERITY" WARN_PCT="$WARN_PCT" CRIT_PCT="$CRIT_PCT" \
+  USED_PCT="$USED_PCT" AVAIL_KB="$AVAIL_KB" AVAIL_GB="$AVAIL_GB" MOUNT="$target" \
+  SEVERITY="$SEVERITY" HALT_REASON="$HALT_REASON" WARN_PCT="$WARN_PCT" \
+  CRIT_FREE_GB="$CRIT_FREE_GB" WARN_FREE_GB="$WARN_FREE_GB" \
   HOSTNAME_TAG="$HOSTNAME_TAG" TOPIC="$TOPIC" \
   python3 "${SCRIPT_DIR}/disk_watermark_event.py"
 )"

@@ -7,10 +7,17 @@ Verifies that disk-watermark-check.sh behaves correctly when targeting the Mac
 Data volume (/System/Volumes/Data). Tests mock `df` to inject synthetic usage
 readings and mock `rpk`/`curl` to intercept publish calls — no live side effects.
 
-Threshold contract:
-  >85% used  => warning event emitted (ticket-path signal to sweep consumer)
-  >90% used  => critical event emitted (loud bus event)
-  <85% used  => quiet (exit 0, no event, no publish call)
+Threshold contract (rewritten by OMN-17872 — free space is the halt):
+  free < 50 GiB  => critical event emitted (loud bus event, exit 20) — THE ONLY halt
+  free < 100 GiB => warning event emitted (exit 10)
+  >=85% used     => warning event emitted (exit 10); the percentage is advisory and
+                    can never escalate to critical on its own
+  none of these  => quiet (exit 0, no event, no publish call)
+
+The shim volume here is 976762584 KiB (~931 GiB), so a usage percentage maps to a
+free-space figure: 84% => ~149 GiB, 87% => ~121 GiB, 91% => ~84 GiB, 95% => ~47 GiB.
+That is why the critical cases below use 95% and not 91% — at 91% this volume still
+has 84 GiB free, which OMN-17872 admits.
 
 The Mac publish path uses `curl` (ONEX_BUS_PUBLISH_URL) because rpk is not
 present on Mac hosts. Both paths are tested here.
@@ -85,8 +92,6 @@ def _run_watermark(
     *,
     used_pct: int,
     mount: str = "/System/Volumes/Data",
-    warn_pct: int = 85,
-    crit_pct: int = 90,
     extra_env: dict[str, str] | None = None,
     dry_run: bool = False,
     curl_http_status: str = "200",
@@ -120,10 +125,6 @@ def _run_watermark(
         str(_SCRIPTS / "disk-watermark-check.sh"),
         "--mount",
         mount,
-        "--warn",
-        str(warn_pct),
-        "--crit",
-        str(crit_pct),
     ]
     if dry_run:
         args.append("--dry-run")
@@ -168,11 +169,13 @@ class TestDiskWatermarkMacParity:
         assert '"severity": "warning"' in proc.stdout, proc.stdout
         assert '"event_type": "disk-watermark"' in proc.stdout, proc.stdout
 
-    def test_crit_threshold_triggers_loud_bus_event(self, tmp_path: Path) -> None:
-        """91% usage crosses crit=90 — must emit a critical (loud) bus event."""
+    def test_free_space_floor_breach_triggers_loud_bus_event(
+        self, tmp_path: Path
+    ) -> None:
+        """95% on this volume is ~47 GiB free — under the 50 GiB floor, so critical."""
         proc, _ = _run_watermark(
             tmp_path,
-            used_pct=91,
+            used_pct=95,
             dry_run=True,
         )
         # Exit code 20 = crit breach
@@ -180,6 +183,29 @@ class TestDiskWatermarkMacParity:
             f"expected exit 20; got {proc.returncode}; stderr={proc.stderr}"
         )
         assert '"severity": "critical"' in proc.stdout, proc.stdout
+        assert '"halt_reason": "free_space_below_crit_floor"' in proc.stdout, (
+            proc.stdout
+        )
+
+    def test_percentage_breach_with_headroom_warns_but_does_not_halt(
+        self, tmp_path: Path
+    ) -> None:
+        """91% on this volume is ~84 GiB free — the pre-OMN-17872 halt, now a warning.
+
+        This is the exact shape that stopped a lane at 2026-09-04T00:52:44Z with
+        87 GiB free. It must warn and let the work through.
+        """
+        proc, _ = _run_watermark(
+            tmp_path,
+            used_pct=91,
+            dry_run=True,
+        )
+        assert proc.returncode == 10, (
+            f"91% with 84 GiB free must warn, not halt; got {proc.returncode}; "
+            f"stderr={proc.stderr}"
+        )
+        assert '"severity": "warning"' in proc.stdout, proc.stdout
+        assert '"severity": "critical"' not in proc.stdout, proc.stdout
 
     def test_warn_breach_publishes_via_http_when_url_set(self, tmp_path: Path) -> None:
         """87% + ONEX_BUS_PUBLISH_URL set → curl POST invoked (non-dry-run)."""
@@ -196,10 +222,10 @@ class TestDiskWatermarkMacParity:
         assert "bus.example.internal" in calls, f"wrong URL in curl call:\n{calls}"
 
     def test_crit_breach_publishes_via_http_when_url_set(self, tmp_path: Path) -> None:
-        """91% + ONEX_BUS_PUBLISH_URL set → curl POST with critical event."""
+        """95% (~47 GiB free) + ONEX_BUS_PUBLISH_URL set → curl POST, critical event."""
         proc, calls = _run_watermark(
             tmp_path,
-            used_pct=91,
+            used_pct=95,
             extra_env={
                 "ONEX_BUS_PUBLISH_URL": "http://bus.example.internal/api/events"
             },
@@ -224,7 +250,7 @@ class TestDiskWatermarkMacParity:
     def test_no_broker_and_no_url_logs_but_does_not_crash(self, tmp_path: Path) -> None:
         """Breach with neither KAFKA_BOOTSTRAP_SERVERS nor ONEX_BUS_PUBLISH_URL:
         script must log the event and exit with breach code, never crash."""
-        proc, calls = _run_watermark(tmp_path, used_pct=91)
+        proc, calls = _run_watermark(tmp_path, used_pct=95)
         assert proc.returncode == 20, f"expected exit 20; stderr={proc.stderr}"
         # Neither publisher should have been invoked
         assert "produce" not in calls, calls
@@ -234,7 +260,7 @@ class TestDiskWatermarkMacParity:
         """HTTP 500 from the bus endpoint must not change the exit code or crash."""
         proc, calls = _run_watermark(
             tmp_path,
-            used_pct=91,
+            used_pct=95,
             extra_env={
                 "ONEX_BUS_PUBLISH_URL": "http://bus.example.internal/api/events"
             },
