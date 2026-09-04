@@ -116,17 +116,16 @@ def test_invalid_environment_override_does_not_fall_back(tmp_path: Path) -> None
 def test_symlinked_forbidden_source_root_is_rejected(
     tmp_path: Path, forbidden_root: str
 ) -> None:
-    """A logical source-looking link cannot hide an installed/venv target."""
+    """An intermediate link cannot hide an installed/venv target."""
     physical = tmp_path / forbidden_root / "src" / "omnibase_core"
     physical.mkdir(parents=True)
     (physical / "__init__.py").write_text("__all__ = []\n")
     (tmp_path / forbidden_root / "pyproject.toml").write_text(
         "[project]\nname = 'omnibase-core'\nversion = '0.0.0'\n"
     )
-    logical_parent = tmp_path / "linked" / "src"
-    logical_parent.mkdir(parents=True)
-    logical = logical_parent / "omnibase_core"
-    logical.symlink_to(physical, target_is_directory=True)
+    logical_root = tmp_path / "linked"
+    logical_root.symlink_to(tmp_path / forbidden_root, target_is_directory=True)
+    logical = logical_root / "src" / "omnibase_core"
 
     result = _run(logical)
 
@@ -185,6 +184,61 @@ def test_no_argument_resolution_uses_core_sibling_of_linked_worktree(
 
     assert result.returncode == 0, result.stderr
     assert str(core) in result.stdout
+
+
+@pytest.mark.unit
+def test_no_argument_linked_source_precedes_omni_home_fallback(
+    tmp_path: Path,
+) -> None:
+    """A valid OMNI_HOME source is a fallback, not an override of a linked tree."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    linked_core = _source_tree(workspace)
+
+    infra_repo = workspace / "omnibase_infra"
+    infra_repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(infra_repo)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(infra_repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+        check=True,
+    )
+    linked = workspace / "omnibase_infra-linked"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(infra_repo),
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            str(linked),
+            "HEAD",
+        ],
+        check=True,
+    )
+
+    fallback_home = tmp_path / "fallback-home"
+    _source_tree(fallback_home)
+    env = os.environ.copy()
+    env.pop("OMNIBASE_CORE_PATH", None)
+    env["OMNI_HOME"] = str(fallback_home)
+    result = _run_without_path(linked, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert str(linked_core) in result.stdout
 
 
 @pytest.mark.unit
