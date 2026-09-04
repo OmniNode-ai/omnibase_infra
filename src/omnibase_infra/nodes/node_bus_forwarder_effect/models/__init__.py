@@ -8,6 +8,7 @@ from .model_gateway_envelope import ModelGatewayEnvelope
 from .model_gateway_forwarder_config import ModelGatewayForwarderConfig
 from .model_gateway_forwarder_runtime_config import ModelGatewayForwarderRuntimeConfig
 from .model_gateway_heartbeat import ModelGatewayHeartbeat
+from .model_gateway_lane_mirror_config import ModelGatewayLaneMirrorConfig
 from .model_gateway_mirror_topics import ModelGatewayMirrorTopics
 from .model_gateway_tenant_identity import ModelGatewayTenantIdentity
 
@@ -18,6 +19,7 @@ __all__ = [
     "ModelGatewayForwarderConfig",
     "ModelGatewayForwarderRuntimeConfig",
     "ModelGatewayHeartbeat",
+    "ModelGatewayLaneMirrorConfig",
     "ModelGatewayMirrorTopics",
     "ModelGatewayTenantIdentity",
 ]

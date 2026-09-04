@@ -30,6 +30,26 @@ services:
         # of writing (highest observed: .19) to avoid future collision with
         # Docker's sequential auto-assignment.
         ipv4_address: 172.19.0.250
+      # OMN-17034: the bastion MUST join every lane network the forwarder
+      # resolves names on. gateway-forwarder's `dns:` key sends ALL of its
+      # queries here, and this sidecar's dnsmasq forwards everything
+      # non-overridden to `server=127.0.0.11` -- Docker's embedded resolver
+      # *in this container's* network namespace, which only answers for
+      # containers on the networks THIS container is attached to. Joining
+      # gateway-forwarder to the stability lane is therefore not sufficient
+      # on its own: the name would still fail to resolve here.
+      #
+      # MEASURED, not inferred (.201, 2026-09-04):
+      #   docker exec omninode-gateway-dns-bastion getent hosts \
+      #     omnibase-infra-stability-test-redpanda   -> no result
+      #   docker exec omninode-gateway-dns-bastion getent hosts \
+      #     omnibase-infra-redpanda                  -> 172.19.0.7
+      # Without this attachment the lane-mirror leg would have deployed and
+      # silently failed to connect -- the exact "declared but unreachable"
+      # failure class this ticket exists to close. No static IP here: nothing
+      # dials the bastion on the stability network, it only needs to be able
+      # to ask about it.
+      gateway-lane-mirror-source: {}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "dig", "+short", "+time=2", "@127.0.0.1", "b-1.omninodedevmsk.7ozyd3.c14.kafka.us-east-1.amazonaws.com"]
@@ -99,6 +119,16 @@ services:
       - ${GATEWAY_TPM_DEVICE:?GATEWAY_TPM_DEVICE is required}:/dev/tpmrm0
     networks:
       - gateway-runtime
+      # OMN-17034: the source lane. The hook edge publishes to the
+      # stability-test lane (omniclaude hook_edge_lane.yaml, OMN-17204) and a
+      # container cannot see a record on a lane network it is not joined to --
+      # which is why 16,616 hook rows sat on stability while this forwarder,
+      # attached only to `gateway-runtime` (dev), moved 0 of them. Joining the
+      # second network is what makes the contract-declared lane_mirror leg
+      # physically possible; the leg itself addresses each broker by unique
+      # container name, never the bare `redpanda` alias, which now resolves on
+      # BOTH of these networks (see docker/gateway/beta-gateway-canary.yaml).
+      - gateway-lane-mirror-source
     # OMN-16449: per-container DNS override so the MSK broker hostnames
     # (unroutable private VPC IPs from .201's public DNS view) resolve
     # through the live SNI-routing bastion instead. Deliberately scoped to
@@ -154,6 +184,14 @@ networks:
   gateway-runtime:
     external: true
     name: omnibase-infra-network
+  # OMN-17034: the lane the Claude Code hook edge actually publishes to.
+  # External + pre-existing: this compose project does not own the lane and
+  # must never create it -- `external: true` makes a missing stability lane a
+  # loud compose failure rather than a silently-created empty network with no
+  # broker on it.
+  gateway-lane-mirror-source:
+    external: true
+    name: omnibase-infra-stability-test-network
 volumes:
   gateway-delivery-state:
     name: omninode-gateway-delivery-state

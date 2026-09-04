@@ -38,6 +38,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_for
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     prefix_topic,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror import (
+    NodeLaneMirror,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,7 @@ def load_gateway_forwarder_runtime_config(
     raw: dict[str, object] = {str(key): value for key, value in raw_object.items()}
     _materialize_contract_mirror_topics(raw, contract_path)
     _materialize_contract_canary_config(raw, contract_path)
+    _materialize_contract_lane_mirror(raw, contract_path)
     _materialize_cloud_broker_ref(raw, contract_path, broker_ref_map_path)
     return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
 
@@ -162,6 +166,60 @@ def _materialize_contract_canary_config(
             "gateway node contract is missing config.gateway_forwarder.canary"
         )
     forwarder["canary"] = {str(key): value for key, value in canary_object.items()}
+
+
+def _materialize_contract_lane_mirror(
+    raw: dict[str, object],
+    contract_path: Path,
+) -> None:
+    """Resolve the lane-mirror lane names and topic set from the node contract.
+
+    Same authority pattern as ``_materialize_contract_mirror_topics`` and
+    ``_materialize_contract_canary_config`` (OMN-17034): the resolved
+    deployment YAML names the contract via ``lane_mirror_set`` and may not
+    redeclare the block inline, so the source lane, the mirror-lane set and
+    the mirrored topics have exactly one home. The per-lane BROKER ADDRESSES
+    are not resolved here -- those are this deployment's answer and stay in
+    the resolved YAML's ``lane_mirror_source_bus``/``lane_mirror_buses``,
+    exactly as ``local_bus`` already works.
+
+    A contract with no ``lane_mirror`` block and a resolved file that does not
+    name ``lane_mirror_set`` is a valid two-leg deployment and passes through
+    untouched.
+    """
+    forwarder_object = raw.get("forwarder")
+    if not isinstance(forwarder_object, dict):
+        raise ValueError("gateway forwarder config requires a forwarder mapping")
+    forwarder: dict[str, object] = forwarder_object
+    # Key-presence alone is NOT a redeclaration: ``lane_mirror`` is an optional
+    # field on ModelGatewayForwarderConfig, so any round-trip through
+    # ``model_dump()`` emits an explicit ``lane_mirror: null`` for a two-leg
+    # deployment. Rejecting that would refuse a legitimate operator artifact
+    # (and did -- it broke three existing loader tests). Only a populated block
+    # is an attempt to redeclare what the contract owns.
+    if forwarder.get("lane_mirror") is not None:
+        raise ValueError(
+            "resolved gateway config must name lane_mirror_set instead of "
+            "redeclaring the lane_mirror block"
+        )
+    selector = forwarder.pop("lane_mirror_set", None)
+    if selector is None:
+        return
+    if selector != _GATEWAY_CONTRACT_NAME:
+        raise ValueError(
+            f"lane_mirror_set must be {_GATEWAY_CONTRACT_NAME!r}, got {selector!r}"
+        )
+
+    gateway_config = _load_gateway_forwarder_config_block(contract_path, selector)
+    lane_mirror_object = gateway_config.get("lane_mirror")
+    if not isinstance(lane_mirror_object, dict):
+        raise ValueError(
+            "resolved gateway config names lane_mirror_set but the node contract "
+            "has no config.gateway_forwarder.lane_mirror block"
+        )
+    forwarder["lane_mirror"] = {
+        str(key): value for key, value in lane_mirror_object.items()
+    }
 
 
 def _materialize_cloud_broker_ref(
@@ -284,6 +342,33 @@ async def run_gateway_forwarder(
         ),
         auto_offset_reset=config.cloud_bus.auto_offset_reset,
     )
+    # OMN-17034: the lane-mirror leg's own transports. Deliberately separate
+    # KafkaTransport instances with their own consumer group: a single
+    # transport backs one direction's consumer AND another direction's
+    # producer (see NodeGatewayDelivery's note on restart_consumer), so
+    # sharing one with the trust-boundary legs would couple a stability-lane
+    # fault to the dev/cloud delegation path.
+    lane_mirror_config = config.forwarder.lane_mirror
+    lane_mirror_source: KafkaTransport | None = None
+    lane_mirror_producers: dict[str, KafkaTransport] = {}
+    if lane_mirror_config is not None:
+        source_bus_config = config.lane_mirror_source_bus
+        if source_bus_config is None:  # pragma: no cover - runtime config validates
+            raise ValueError("lane_mirror declared without a resolved source bus")
+        lane_mirror_source = KafkaTransport(
+            config=source_bus_config,
+            group=f"tenant-{tenant_slug}-gateway-lane-mirror-source",
+            topics=lane_mirror_config.topics,
+            auto_offset_reset=source_bus_config.auto_offset_reset,
+        )
+        for lane in lane_mirror_config.mirror_lanes:
+            lane_mirror_producers[lane] = KafkaTransport(
+                config=config.lane_mirror_buses[lane],
+                group=f"tenant-{tenant_slug}-gateway-lane-mirror-{lane}",
+                topics=(),
+                auto_offset_reset=config.lane_mirror_buses[lane].auto_offset_reset,
+            )
+
     local_bus = TransportGatewayBus(local_transport)
     cloud_bus = TransportGatewayBus(cloud_transport)
     idempotency_store = StoreIdempotencySqlite(config.forwarder.dedupe_store_path)
@@ -307,6 +392,7 @@ async def run_gateway_forwarder(
     started_transports: list[KafkaTransport] = []
     delivery_started = False
     heartbeat_task: asyncio.Task[None] | None = None
+    lane_mirror_task: asyncio.Task[None] | None = None
     try:
         await idempotency_store.start()
         store_started = True
@@ -314,12 +400,31 @@ async def run_gateway_forwarder(
         started_transports.append(local_transport)
         await cloud_transport.start()
         started_transports.append(cloud_transport)
+        if lane_mirror_source is not None:
+            await lane_mirror_source.start()
+            started_transports.append(lane_mirror_source)
+            for lane_producer in lane_mirror_producers.values():
+                await lane_producer.start()
+                started_transports.append(lane_producer)
         await delivery.start()
         delivery_started = True
         heartbeat_task = asyncio.create_task(
             _run_heartbeat_loop(forwarder, config, shutdown_event),
             name="gateway-forwarder-heartbeat",
         )
+        if lane_mirror_config is not None and lane_mirror_source is not None:
+            lane_mirror_task = asyncio.create_task(
+                NodeLaneMirror(
+                    config=lane_mirror_config,
+                    source_consumer=lane_mirror_source,
+                    mirror_producers={
+                        lane: TransportGatewayBus(transport)
+                        for lane, transport in lane_mirror_producers.items()
+                    },
+                    idempotency_store=idempotency_store,
+                ).run(shutdown_event),
+                name="gateway-forwarder-lane-mirror",
+            )
 
         if ready_path is not None:
             ready_path.write_text("ready\n", encoding="utf-8")
@@ -339,6 +444,10 @@ async def run_gateway_forwarder(
     finally:
         if ready_path is not None:
             ready_path.unlink(missing_ok=True)
+        if lane_mirror_task is not None and not lane_mirror_task.done():
+            lane_mirror_task.cancel()
+        if lane_mirror_task is not None:
+            await asyncio.gather(lane_mirror_task, return_exceptions=True)
         if heartbeat_task is not None and not heartbeat_task.done():
             heartbeat_task.cancel()
         if heartbeat_task is not None:

@@ -15,6 +15,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_canary_
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_cloud_bus_config import (
     ModelGatewayCloudBusConfig,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_lane_mirror_config import (
+    ModelGatewayLaneMirrorConfig,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_mirror_topics import (
     ModelGatewayMirrorTopics,
 )
@@ -33,6 +36,11 @@ class ModelGatewayForwarderConfig(BaseModel):
     local_transport_flavor: Literal["containerized", "lightweight"]
     mirror_topics: ModelGatewayMirrorTopics
     canary: ModelGatewayCanaryConfig
+    # OMN-17034. Optional so a deployment that predates the lane-mirror leg
+    # (or one where there is only one lane to begin with) keeps booting with
+    # the two trust-boundary legs alone; the runtime config below is what
+    # refuses a declaration whose broker legs were not resolved.
+    lane_mirror: ModelGatewayLaneMirrorConfig | None = None
     heartbeat_interval_seconds: int = Field(default=15, ge=1)
     max_silence_window_seconds: int = Field(default=60, ge=1)
     lag_threshold_messages: int = Field(default=500, ge=1)

@@ -16,6 +16,10 @@ forwarder:
   local_transport_flavor: "containerized"
   mirror_topic_set: "node_bus_forwarder_effect"
   canary_topic_set: "node_bus_forwarder_effect"
+  # OMN-17034: names the contract's lane_mirror block (source lane, mirror
+  # lane set, topic set). The per-lane broker addresses are below, not here --
+  # this file may not redeclare the block itself; the loader rejects that.
+  lane_mirror_set: "node_bus_forwarder_effect"
   heartbeat_interval_seconds: 15
   max_silence_window_seconds: 60
   lag_threshold_messages: 500
@@ -54,3 +58,38 @@ cloud_bus:
   security_protocol: "SASL_SSL"
   sasl_mechanism: "AWS_MSK_IAM"
   msk_region: "us-east-1"
+# ---------------------------------------------------------------------------
+# OMN-17034: resolved broker legs for the contract-declared lane mirror.
+# ---------------------------------------------------------------------------
+# The contract NAMES lanes ("stability-test" -> ["dev"]); this is where THIS
+# deployment says which broker each named lane is. Same authority split
+# local_bus already uses.
+#
+# Brokers are addressed by their UNIQUE CONTAINER NAME, not by the bare
+# `redpanda` alias local_bus uses. That is load-bearing, not style: the
+# forwarder container is now joined to BOTH lane networks, and `redpanda`
+# resolves on each of them -- a bare alias would resolve to whichever lane
+# Docker's embedded DNS answered with, non-deterministically, and the failure
+# would look like "the mirror sometimes works". The container names are
+# globally unique across lanes (verified on .201 2026-09-04:
+# omnibase-infra-redpanda, omnibase-infra-stability-test-redpanda,
+# omnibase-infra-prod-redpanda, omnibase-infra-judge-redpanda,
+# omnibase-infra-lakshman-redpanda). Port 9092 is each broker's INTERNAL
+# listener; the 19092/39092 host mappings are for off-host clients only.
+lane_mirror_source_bus:
+  bootstrap_servers: "omnibase-infra-stability-test-redpanda:9092" # onex-allow-kafka-broker
+  environment: "beta-gateway-lane-mirror-source"
+  timeout_seconds: 30
+  # Same OMN-15781 hazard as both trust-boundary legs: "latest" would silently
+  # drop every hook event produced while this consumer group was unjoined.
+  auto_offset_reset: "earliest"
+  enable_auto_commit: false
+  security_protocol: "PLAINTEXT"
+lane_mirror_buses:
+  dev:
+    bootstrap_servers: "omnibase-infra-redpanda:9092" # onex-allow-kafka-broker
+    environment: "beta-gateway-lane-mirror-dev"
+    timeout_seconds: 30
+    auto_offset_reset: "earliest"
+    enable_auto_commit: false
+    security_protocol: "PLAINTEXT"
