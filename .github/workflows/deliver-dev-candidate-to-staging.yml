@@ -51,6 +51,36 @@
 # omnimarket prod-promotion gate refuses such an image for prod. This workflow
 # adds a delivery path to the dev/staging lane and no capability at all toward
 # prod -- it names no prod cluster, credential, or manifest.
+#
+# OMN-17875 (2026-09-04): this workflow was the highest-severity victim of a
+# defect that lived entirely OUTSIDE it. `auto-merge.yml` armed
+# `gh pr merge --squash --auto` with `secrets.GITHUB_TOKEN`; GitHub completes an
+# armed auto-merge as the arming identity, and a GITHUB_TOKEN-authored commit
+# fires no `push` event. So every dev merge that landed through that job
+# produced no push event at all, and this workflow -- which exists precisely to
+# make a dev merge deliver itself -- simply did not run. Nothing was red.
+#
+# Measured that day (`gh api "repos/OmniNode-ai/omnibase_infra/actions/runs?
+# head_sha=<sha>&event=push" --jq .total_count`): 97 of 101 bot-armed dev merges
+# had ZERO push runs, e.g. `9d273373f` (#3171) 0 and `812d0b5451c` (#3179) 0 --
+# 812d0b5451c is the sharper reading of the two, because `shellcheck-gate.yml`,
+# `runner-disk-preflight.yml` and `no-bare-compose-teardown.yml` carry no
+# `paths:` filter at all and still did not fire on it. Human-merged commits in
+# the same window fired 4-5 runs each (`21992826f` #3177 -> 4, including this
+# workflow). Fixed by pointing the two merge-state-mutating steps in
+# `auto-merge.yml` at the long-lived user-PAT secret used for the same purpose
+# in `omninode_infra` (named there and in `auto-merge.yml`, deliberately not
+# spelled here -- `tests/ci/test_dev_candidate_delivery.py` asserts this file
+# never names it, because THIS workflow must keep using the onexbot App
+# credential); see `auto-merge.yml`'s header for the full measurement.
+#
+# Consequence for reading this file's history: an absence of a run on a dev
+# commit BEFORE 2026-09-04T12:32Z is not evidence the `paths:` filter below
+# excluded it. Check the merger identity first -- `gh pr view <n> --json
+# mergedBy` -- because a `github-actions[bot]` merge produced no push event for
+# any workflow, filtered or not. The OMN-16906 liveness guard
+# (`dev-candidate-delivery-liveness.yml`) reported this as NOT_FIRED for
+# `9d273373f` in run 33859940620 and was correct; the cause was never here.
 
 name: Deliver dev candidate to onex-staging (OMN-15796)
 
