@@ -102,12 +102,13 @@ import pytest
 from aiokafka.admin import NewTopic
 
 from omnibase_infra.errors import TopicReplicationPolicyError
-from omnibase_infra.event_bus.enum_topic_readiness_failure_reason import (
-    EnumTopicReadinessFailureReason,
+from omnibase_infra.event_bus.enum_topic_readiness_status import (
+    EnumTopicReadinessStatus,
 )
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
+from omnibase_infra.event_bus.model_topic_set_readiness import ModelTopicSetReadiness
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 from omnibase_infra.topics.model_topic_provisioning_policy import (
     MANAGED_MINIMUM_REPLICATION_FACTOR,
@@ -125,6 +126,18 @@ PRODUCTION_CONTRACTS_ROOT = (
 
 TOPIC = "onex.evt.test-producer.example-event.v1"  # onex-topic-allow: unit fixture
 OTHER_TOPIC = "onex.evt.test-producer.other-event.v1"  # onex-topic-allow: unit fixture
+
+
+async def _ready_topic_confirmation(
+    topics: Sequence[str], **_kwargs: object
+) -> ModelTopicSetReadiness:
+    """Fixture confirmation for tests focused on policy/request construction."""
+    requested = tuple(topics)
+    return ModelTopicSetReadiness(
+        topics=requested,
+        status=EnumTopicReadinessStatus.READY,
+        ready_topics=requested,
+    )
 
 
 class _TopicAlreadyExistsError(Exception):
@@ -994,6 +1007,9 @@ class TestExplicitReplicationPassesThroughUnmutated:
         _write_contract(tmp_path, replication_factor=2, partitions=3)
         provisioner = _provisioner(tmp_path)
         recorder = _AdminRecorder()
+        monkeypatch.setattr(
+            provisioner, "confirm_topics_ready", _ready_topic_confirmation
+        )
 
         with _patched_admin(recorder):
             created = await provisioner.ensure_topic_exists(topic_name=TOPIC)
@@ -1555,6 +1571,9 @@ class TestDerivedTopicsWithNoContractSpec:
             "contract-derived registry for this to exercise the real gap"
         )
         recorder = _AdminRecorder()
+        monkeypatch.setattr(
+            provisioner, "confirm_topics_ready", _ready_topic_confirmation
+        )
 
         with _patched_admin(recorder):
             created = await provisioner.ensure_topic_exists(topic_name=dlq_topic)
@@ -1582,6 +1601,9 @@ class TestDerivedTopicsWithNoContractSpec:
         dlq_topic = derive_canonical_dlq_topic(TOPIC)
         provisioner = _provisioner(tmp_path)
         recorder = _AdminRecorder()
+        monkeypatch.setattr(
+            provisioner, "confirm_topics_ready", _ready_topic_confirmation
+        )
 
         with _patched_admin(recorder):
             await _provision_dlq_topics(
@@ -2074,6 +2096,9 @@ class TestSnapshotConfigCreationPath:
         _write_contract(tmp_path, replication_factor=2)
         provisioner = _provisioner(tmp_path)
         recorder = _AdminRecorder(broker_count=1)
+        monkeypatch.setattr(
+            provisioner, "confirm_topics_ready", _ready_topic_confirmation
+        )
 
         with _patched_admin(recorder):
             created = await provisioner.ensure_topic_exists(
@@ -2104,19 +2129,13 @@ class TestSnapshotConfigCreationPath:
         )
 
         with _patched_admin(recorder):
-            await provisioner.ensure_topic_exists(
+            created = await provisioner.ensure_topic_exists(
                 topic_name=TOPIC,
                 config=self._snapshot_config(replication_factor=2, partition_count=3),  # type: ignore[arg-type]
             )
-            readiness = await provisioner.confirm_topics_ready(
-                [TOPIC], config=ModelTopicReadinessConfig(max_attempts=1)
-            )
 
-        assert not readiness.is_ready
-        assert any(
-            failure.reason is EnumTopicReadinessFailureReason.PARTITION_MISMATCH
-            for failure in readiness.failures
-        ), f"expected a partition mismatch against the created spec: {readiness}"
+        assert created is False
+        assert TOPIC not in provisioner._created_specs
 
 
 class TestDriftIsReportedAgainstTheResolvedSpec:
