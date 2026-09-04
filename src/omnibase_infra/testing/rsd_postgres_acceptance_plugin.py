@@ -57,8 +57,20 @@ def postgres_lifecycle_connection_factory(
     resolver = cast("CapabilityResolver", resolver_value)
     try:
         capability_ref = load_overlay(Path(configured)).postgres_capability_ref
-    except (OSError, ValidationError, YAMLError):
-        pytest.fail("RSD PostgreSQL acceptance overlay is invalid", pytrace=False)
+    except OSError:
+        pytest.fail(
+            "RSD PostgreSQL acceptance overlay could not be read", pytrace=False
+        )
+        raise AssertionError("unreachable")
+    except ValidationError:
+        pytest.fail(
+            "RSD PostgreSQL acceptance overlay failed validation", pytrace=False
+        )
+        raise AssertionError("unreachable")
+    except YAMLError:
+        pytest.fail(
+            "RSD PostgreSQL acceptance overlay contains invalid YAML", pytrace=False
+        )
         raise AssertionError("unreachable")
     try:
         return resolve_postgres_lifecycle_factory(resolver, capability_ref)

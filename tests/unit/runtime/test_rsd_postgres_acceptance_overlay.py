@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from _pytest.pytester import Pytester
+from pydantic import ValidationError
 
 from omnibase_infra.testing.rsd_postgres_acceptance_capability import (
     CapabilityResolver,
@@ -129,7 +130,7 @@ def test_overlay_rejects_unknown_fields(tmp_path: Path) -> None:
     path.write_text(
         "schema_version: rsd_postgres_acceptance_overlay.v1\nlane: dev\nlocale: lab\nrsd_distribution_ref: omninode-rsd/0.1.0\npostgres_capability_ref: capability://rsd/postgres/acceptance\nhost: bad\n"
     )
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         load_overlay(path)
 
 
@@ -147,6 +148,23 @@ def test_capability_resolution_passes_opaque_ref_to_operator() -> None:
 
     assert resolve_postgres_lifecycle_factory(resolver, capability_ref) is factory
     assert calls == [capability_ref]
+
+
+def test_capability_resolution_rejects_mismatched_evidence_ref() -> None:
+    def factory() -> AbstractContextManager[object]:
+        raise AssertionError("factory must not be called during resolution")
+
+    evidence = _evidence(
+        "capability://rsd/postgres/123e4567-e89b-42d3-a456-426614174000"
+    )
+
+    with pytest.raises(
+        RsdPostgresAcceptanceResolutionError, match="reference does not match"
+    ):
+        resolve_postgres_lifecycle_factory(
+            lambda _: RsdPostgresAcceptanceCapability(factory, evidence),
+            "capability://rsd/postgres/acceptance",
+        )
 
 
 @pytest.mark.parametrize(
@@ -214,7 +232,7 @@ def test_evidence_json_round_trip_and_strict_disposition() -> None:
         evidence.model_dump_json()
     )
     assert restored == evidence
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ModelRsdPostgresAcceptanceEvidence.model_validate(
             evidence.model_dump() | {"authority_disposition": "operator_claimed"}
         )
@@ -244,7 +262,7 @@ def test_evidence_json_round_trip_and_strict_disposition() -> None:
 def test_evidence_rejects_topology_bearing_attestation_refs(
     field: str, hostile_value: str
 ) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ModelRsdPostgresAcceptanceEvidence.model_validate(
             _evidence().model_dump() | {field: hostile_value}
         )
@@ -257,12 +275,14 @@ def test_explicit_plugin_harness_covers_missing_and_mismatch_paths(
     pytester.makeconftest(
         """
         from contextlib import contextmanager
+        from uuid import uuid4
         from omnibase_infra.testing.rsd_postgres_acceptance_capability import (
             ModelRsdPostgresAcceptanceEvidence,
             RsdPostgresAcceptanceCapability,
         )
 
         EXPECTED_REF = "capability://rsd/postgres/acceptance"
+        active_connections = 0
 
         def _evidence():
             return ModelRsdPostgresAcceptanceEvidence(
@@ -283,9 +303,26 @@ def test_explicit_plugin_harness_covers_missing_and_mismatch_paths(
                 transaction_idle=True,
             )
 
+        class FakeConnection:
+            def __init__(self):
+                self.transaction_id = uuid4()
+                self.transaction_state = "IDLE"
+                self.exclusive = True
+                self.closed = False
+
         @contextmanager
         def _connection():
-            yield object()
+            global active_connections
+            if active_connections:
+                raise AssertionError("connection CMs must be exclusive")
+            active_connections += 1
+            connection = FakeConnection()
+            try:
+                yield connection
+            finally:
+                assert connection.transaction_state == "IDLE"
+                connection.closed = True
+                active_connections -= 1
 
         def _factory():
             return _connection()
@@ -332,9 +369,26 @@ def test_explicit_plugin_harness_covers_missing_and_mismatch_paths(
     )
     pytester.makepyfile(
         test_plugin_harness="""
-        def test_factory_is_injected(postgres_lifecycle_connection_factory):
-            with postgres_lifecycle_connection_factory() as connection:
-                assert connection is not None
+        import pytest
+
+        def test_fresh_exclusive_transaction_idle_connections(
+            postgres_lifecycle_connection_factory,
+        ):
+            first_cm = postgres_lifecycle_connection_factory()
+            with first_cm as first:
+                assert first.exclusive
+                assert first.transaction_state == "IDLE"
+                with pytest.raises(AssertionError, match="exclusive"):
+                    with postgres_lifecycle_connection_factory():
+                        pass
+            second_cm = postgres_lifecycle_connection_factory()
+            assert first_cm is not second_cm
+            with second_cm as second:
+                assert second.exclusive
+                assert second.transaction_state == "IDLE"
+                assert first.transaction_id != second.transaction_id
+                assert first.closed
+            assert second.closed
         """
     )
     overlay = pytester.path / "overlay.yaml"
@@ -441,4 +495,47 @@ def test_plugin_rejects_missing_resolver(tmp_path: Path) -> None:
         postgres_lifecycle_connection_factory.__wrapped__,  # type: ignore[attr-defined]
     )
     with pytest.raises(pytest.fail.Exception, match="resolver is not injected"):
+        fixture_function(Request())
+
+
+@pytest.mark.parametrize(
+    ("filename", "contents", "message"),
+    [
+        ("missing.yaml", None, "overlay could not be read"),
+        (
+            "invalid-overlay.yaml",
+            "schema_version: rsd_postgres_acceptance_overlay.v1\n"
+            "lane: dev\nlocale: lab\n"
+            "rsd_distribution_ref: omninode-rsd/0.1.0\n"
+            "postgres_capability_ref: capability://rsd/postgres/acceptance\n"
+            "host: bad\n",
+            "overlay failed validation",
+        ),
+        ("invalid-yaml.yaml", "schema_version: [", "overlay contains invalid YAML"),
+    ],
+)
+def test_plugin_normalizes_overlay_load_failures(
+    tmp_path: Path, filename: str, contents: str | None, message: str
+) -> None:
+    overlay = tmp_path / filename
+    if contents is not None:
+        overlay.write_text(contents)
+
+    class Config:
+        @staticmethod
+        def rsd_postgres_acceptance_capability_resolver(_ref: str) -> None:
+            return None
+
+        def getoption(self, name: str) -> str:
+            assert name == "--rsd-postgres-acceptance-overlay"
+            return str(overlay)
+
+    class Request:
+        config = Config()
+
+    fixture_function = cast(
+        "Callable[[object], object]",
+        postgres_lifecycle_connection_factory.__wrapped__,  # type: ignore[attr-defined]
+    )
+    with pytest.raises(pytest.fail.Exception, match=message):
         fixture_function(Request())
