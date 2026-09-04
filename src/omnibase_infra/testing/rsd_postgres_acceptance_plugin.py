@@ -1,6 +1,16 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Explicit pytest injection boundary for the public RSD acceptance suite."""
+"""Explicit pytest injection boundary for the public RSD acceptance suite.
+
+Canonical invocation is intentionally explicit::
+
+    uv run pytest -p omnibase_infra.testing.rsd_postgres_acceptance_plugin \
+        --rsd-postgres-acceptance-overlay docker/lane-overlays/dev.rsd-postgres-acceptance.yaml \
+        tests/integration/runtime/test_rsd_postgres_acceptance.py
+
+The ``-p`` opt-in is required; this module is never auto-registered by ordinary
+pytest runs.
+"""
 
 from __future__ import annotations
 
