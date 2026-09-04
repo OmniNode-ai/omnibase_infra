@@ -203,6 +203,35 @@ databases:
               - UPDATE
             schema: public
         login: true
+      validator_ro:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: omninode_internal
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: platform_catalog
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: tenant
+        login: true
     schemas:
       omninode_internal:
         domain: OMNINODE_INTERNAL
@@ -318,5 +347,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 0e01755c1dc17827d763b60c287617357be7a2393123df2575d9278be73a1816
   repository: OmniNode-ai/omnibase_infra
-  sha256: d0a2d1c5b8d2dac5098cd939ea89546f138c1a9e5c1554f410bb30df27d3174f
+  sha256: ea4fa0119344317303175e5701c0afc90cc9430dbea54b7dec750a53e919d22b
 topology_instance: local

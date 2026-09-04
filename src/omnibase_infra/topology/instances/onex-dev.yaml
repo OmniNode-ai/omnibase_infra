@@ -168,6 +168,61 @@ databases:
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
         login: true
+      # OMN-17792 AC6 (RDS half). Read-only validation principal for the
+      # application database, named after its purpose rather than after a
+      # person: this topology, the rendered projections and the k8s projection
+      # in omninode_infra are shared artifacts, and a person's name in them is a
+      # rename waiting to happen plus a re-grant nobody audits.
+      #
+      # DECLARED IN ALL THREE INSTANCES because the schema has no include
+      # mechanism and `tests/unit/topology/test_application_database_table_grants.py
+      # ::test_shipped_instances_declare_identical_grants` requires the three
+      # copies not to drift. Declaration is NOT provisioning: the role reaches a
+      # cluster only when `omninode_infra scripts/provision-cluster-roles.sh` is
+      # run against that instance, and the only caller is the "Provision topology
+      # cluster roles (OMN-17347)" step of `deploy-onex-staging.yml`, which
+      # passes onex-dev. `deploy-onex-prod.yml` has no such step. And even where
+      # it is created, it is created NOLOGIN and stays unusable until the
+      # deployment-owned credential attach runs for that lane.
+      #
+      # It is NOT bound. `application_database.py` checks binding-set EQUALITY
+      # and principal-set CONTAINMENT, so an extra principal without a binding is
+      # structurally permitted; an extra binding would not be, and would be wrong
+      # besides -- a binding is a runtime connection pool and OMN-16911 attests
+      # current_user on every one of them.
+      #
+      # NOBYPASSRLS is the point of the role, not an inherited default: a
+      # validation principal that could bypass RLS would read the rows the
+      # tenant_isolation policies exist to withhold and report the database
+      # clean, masking the exact defect class OMN-17298 and OMN-17422 turn on.
+      # `login: true` is the END state after the credential attach; migration
+      # 104 CREATEs it NOLOGIN and never re-asserts that.
+      #
+      # Reach is CONNECT plus schema USAGE and nothing else. No CREATE: a role
+      # that can create a relation OWNS it, and PostgreSQL exempts an owner from
+      # row-level security unconditionally, FORCE included. Relation SELECT is
+      # deliberately absent here -- it is `SELECT ON ALL TABLES` plus
+      # ALTER DEFAULT PRIVILEGES, which the typed grant model cannot express
+      # (TABLE grants require explicit object names) and which rides the
+      # node-owned migration loop that connects to omnidash_analytics directly.
+      validator_ro:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: omninode_internal
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: platform_catalog
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
+        login: true
     schemas:
       omninode_internal:
         domain: OMNINODE_INTERNAL
