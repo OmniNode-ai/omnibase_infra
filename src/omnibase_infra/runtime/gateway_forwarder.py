@@ -6,15 +6,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import contextlib
+import json
 import logging
 import random
 import signal
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import httpx
 import yaml
 from aiokafka.errors import KafkaError
 
@@ -28,11 +31,13 @@ from omnibase_infra.idempotency import StoreIdempotencySqlite
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
+    ModelGatewayHttpsIngestConfig,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_delivery import (
     NodeGatewayDelivery,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
+    ProtocolGatewayPublisher,
     ServiceGatewayForwarder,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
@@ -40,6 +45,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror import (
     NodeLaneMirror,
+)
+from omnibase_infra.secret_stores.adapter_env_secret_store import (
+    AdapterEnvSecretStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,6 +79,7 @@ def load_gateway_forwarder_runtime_config(
     _materialize_contract_canary_config(raw, contract_path)
     _materialize_contract_lane_mirror(raw, contract_path)
     _materialize_cloud_broker_ref(raw, contract_path, broker_ref_map_path)
+    _materialize_contract_https_ingest(raw, contract_path, broker_ref_map_path)
     return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
 
 
@@ -319,13 +328,271 @@ def _materialize_cloud_broker_ref(
     cloud_bus["bootstrap_servers"] = resolved.strip()
 
 
+def _materialize_contract_https_ingest(
+    raw: dict[str, object],
+    contract_path: Path,
+    broker_ref_map_path: Path,
+) -> None:
+    """Resolve the OUTBOUND HTTPS ingest leg from the node contract (OMN-16459).
+
+    Same authority split ``_materialize_contract_mirror_topics`` uses: the node
+    contract owns the refs, the batch bound and the idempotency key; the
+    resolved deployment YAML only NAMES the contract via ``https_ingest_set``.
+    The one value this boundary resolves -- the ingest route address -- comes
+    from the SAME operator-supplied ref map that already resolves
+    ``cloud_broker_ref``, so the leg adds no new mount and no new env var.
+
+    Opt-in: a resolved deployment with no ``https_ingest_set`` keeps the
+    direct-MSK Kafka outbound leg unchanged.
+    """
+    forwarder_object = raw.get("forwarder")
+    if not isinstance(forwarder_object, dict):
+        raise ValueError("gateway forwarder config requires a forwarder mapping")
+    forwarder: dict[str, object] = {
+        str(key): value for key, value in forwarder_object.items()
+    }
+    raw["forwarder"] = forwarder
+
+    # ``https_ingest`` is optional on the frozen model, so any config round-tripped
+    # through ``model_dump()`` emits an explicit ``https_ingest: null``. Refusing
+    # on key PRESENCE would break every such round trip; only a POPULATED inline
+    # block is a redeclaration of contract-owned values.
+    inline = forwarder.get("https_ingest")
+    if inline:
+        raise ValueError(
+            "resolved gateway config must name https_ingest_set instead of "
+            "redeclaring the contract's ingest refs, batch bound or idempotency key"
+        )
+    forwarder.pop("https_ingest", None)
+
+    selector = forwarder.pop("https_ingest_set", None)
+    if selector is None:
+        return
+    if selector != _GATEWAY_CONTRACT_NAME:
+        raise ValueError(
+            f"https_ingest_set must be {_GATEWAY_CONTRACT_NAME!r}, got {selector!r}"
+        )
+
+    gateway_config = _load_gateway_forwarder_config_block(contract_path, selector)
+    declared = gateway_config.get("https_ingest")
+    if not isinstance(declared, dict):
+        raise ValueError(
+            "gateway node contract is missing config.gateway_forwarder.https_ingest "
+            "but the resolved deployment opted in via https_ingest_set"
+        )
+    ingest: dict[str, object] = {str(key): value for key, value in declared.items()}
+    url_ref = ingest.get("ingest_url_ref")
+    if not isinstance(url_ref, str) or not url_ref.strip():
+        raise ValueError(
+            "gateway node contract https_ingest.ingest_url_ref must be a non-empty "
+            "string"
+        )
+    ingest["ingest_url"] = _resolve_ref_from_map(
+        broker_ref_map_path, url_ref.strip(), "https ingest url"
+    )
+    forwarder["https_ingest"] = ingest
+
+
+def _resolve_ref_from_map(
+    broker_ref_map_path: Path, reference: str, description: str
+) -> str:
+    """Resolve one reference from the operator-supplied ref map, fail-closed."""
+    if not broker_ref_map_path.is_file():
+        raise ValueError(
+            f"no ref map was found at {broker_ref_map_path!s}; the gateway process "
+            f"refuses to start without a resolvable {description} (fail-closed -- "
+            "there is no hardcoded fallback endpoint)"
+        )
+    map_object: object = yaml.safe_load(broker_ref_map_path.read_text(encoding="utf-8"))
+    if not isinstance(map_object, dict):
+        raise ValueError(f"ref map at {broker_ref_map_path!s} must be a YAML mapping")
+    resolved = map_object.get(reference)
+    if not isinstance(resolved, str) or not resolved.strip():
+        raise ValueError(
+            f"ref map at {broker_ref_map_path!s} has no resolvable entry for "
+            f"{reference} ({description})"
+        )
+    return resolved.strip()
+
+
+class TransportGatewayHttpsIngest:
+    """Adapt the gateway's single HTTPS ingest route to the publish boundary.
+
+    Sibling of ``TransportGatewayBus``: it satisfies the node's existing
+    ``ProtocolGatewayPublisher`` structurally and introduces NO new protocol
+    (the node already owns ``ProtocolGatewayPublisher`` and
+    ``ProtocolGatewayConsumer``; OMN-12912's protocol-ownership gate refuses a
+    duplicate surface). It is a transport adapter, not a bespoke client class.
+
+    Delivery semantics deliberately match what the direct-MSK leg got for free
+    from the broker: a transient failure raises ``InfraUnavailableError``, the
+    forwarder's retryable class, so ``_publish_with_delivery_retry`` retains the
+    source message and the delivery node never commits the source offset. A 4xx
+    is the route REFUSING this record, which retrying cannot fix, so it is
+    deliberately raised as a non-retryable class instead of spinning forever.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: ModelGatewayHttpsIngestConfig,
+        tenant_slug: str,
+        client: httpx.AsyncClient,
+        auth_token: str,
+    ) -> None:
+        self._config = config
+        self._tenant_slug = tenant_slug
+        self._client = client
+        self._auth_token = auth_token
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: object | None = None,
+    ) -> None:
+        idempotency_key = self._idempotency_key(value)
+        record: dict[str, object] = {
+            "topic": topic,
+            "key": base64.b64encode(key).decode("ascii") if key is not None else None,
+            "value": base64.b64encode(value).decode("ascii"),
+            "envelope_id": idempotency_key,
+        }
+        encoded_headers = self._encode_headers(headers)
+        if encoded_headers:
+            record["headers"] = encoded_headers
+        try:
+            response = await self._client.post(
+                self._config.ingest_url,
+                json={"tenant_slug": self._tenant_slug, "records": [record]},
+                headers={
+                    "authorization": f"Bearer {self._auth_token}",
+                    "idempotency-key": idempotency_key,
+                    "content-type": "application/json",
+                },
+                timeout=self._config.request_timeout_seconds,
+            )
+        except httpx.HTTPError as exc:
+            raise InfraUnavailableError(
+                "gateway https ingest route unreachable for topic "
+                f"{topic}: {type(exc).__name__}"
+            ) from exc
+        if response.status_code >= 500:
+            raise InfraUnavailableError(
+                f"gateway https ingest route returned {response.status_code} for "
+                f"topic {topic}; retaining the source message"
+            )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"gateway https ingest route rejected the record for topic {topic} "
+                f"with status {response.status_code}; retrying a rejection cannot "
+                "succeed, so this is not raised as the retryable class"
+            )
+
+    def _idempotency_key(self, value: bytes) -> str:
+        """Read the content-addressed envelope id the route deduplicates on."""
+        try:
+            decoded: object = json.loads(value.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "gateway https ingest requires a JSON envelope carrying "
+                "envelope_id; the record could not be decoded"
+            ) from exc
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                "gateway https ingest requires a JSON object carrying envelope_id"
+            )
+        envelope_id = decoded.get("envelope_id")
+        if not isinstance(envelope_id, str) or not envelope_id.strip():
+            raise ValueError(
+                "gateway https ingest record carries no envelope_id; without the "
+                "content-addressed id the ingest route cannot deduplicate a "
+                "redelivery, so the record is refused rather than sent unkeyed"
+            )
+        return envelope_id.strip()
+
+    @staticmethod
+    def _encode_headers(headers: object | None) -> dict[str, str]:
+        if headers is None:
+            return {}
+        if isinstance(headers, ModelEventHeaders):
+            return {
+                header_key: str(header_value)
+                for header_key, header_value in headers.model_dump(
+                    mode="json", exclude_none=True
+                ).items()
+            }
+        if isinstance(headers, Mapping):
+            encoded: dict[str, str] = {}
+            for header_key, header_value in headers.items():
+                if not isinstance(header_key, str):
+                    raise TypeError(
+                        "gateway transport headers must map string keys to bytes"
+                    )
+                if isinstance(header_value, bytes):
+                    encoded[header_key] = header_value.decode("utf-8", "replace")
+                else:
+                    raise TypeError(
+                        "gateway transport headers must map string keys to bytes"
+                    )
+            return encoded
+        raise TypeError("gateway transport headers must map string keys to bytes")
+
+
+async def select_outbound_publish_transport(
+    config: ModelGatewayForwarderRuntimeConfig,
+    *,
+    kafka_bus: ProtocolGatewayPublisher,
+    resolve_secret: Callable[[str], Awaitable[str | None]],
+    client_factory: Callable[[], httpx.AsyncClient] = httpx.AsyncClient,
+) -> tuple[ProtocolGatewayPublisher, httpx.AsyncClient | None]:
+    """Pick the outbound publish boundary from the RESOLVED CONTRACT.
+
+    There is deliberately no flag and no environment variable for this: the
+    transport is whatever ``config.forwarder.https_ingest`` says it is, which is
+    whatever the node contract plus the resolved deployment's
+    ``https_ingest_set`` opt-in produced. Returns the publisher plus the HTTP
+    client that must be closed on shutdown (``None`` on the Kafka path).
+    """
+    ingest = config.forwarder.https_ingest
+    if ingest is None:
+        return kafka_bus, None
+    token = await resolve_secret(ingest.ingest_auth_ref)
+    if not token:
+        raise ValueError(
+            "gateway https ingest leg is declared but its credential reference "
+            f"{ingest.ingest_auth_ref} did not resolve in the secret store; the "
+            "process refuses to start rather than fall back to the direct-MSK "
+            "leg the ruling retires (OMN-16459 / OMN-15692 ruling 39)"
+        )
+    client = client_factory()
+    return (
+        TransportGatewayHttpsIngest(
+            config=ingest,
+            tenant_slug=config.forwarder.tenant_identity.tenant_slug,
+            client=client,
+            auth_token=token,
+        ),
+        client,
+    )
+
+
 async def run_gateway_forwarder(
     config: ModelGatewayForwarderRuntimeConfig,
     *,
     shutdown_event: asyncio.Event,
+    resolve_secret: Callable[[str], Awaitable[str | None]],
     ready_path: Path | None = None,
 ) -> None:
-    """Run the bridge until ``shutdown_event`` is set, then close both legs."""
+    """Run the bridge until ``shutdown_event`` is set, then close both legs.
+
+    ``resolve_secret`` is required with no default: OMN-16459's outbound HTTPS
+    leg authenticates with the forwarder's own verified actor credential, whose
+    VALUE is resolved from the secret store by the reference the node contract
+    declares. A default would let a mis-wired process silently fall back to the
+    direct-MSK leg ruling 39 (OMN-15692) retires.
+    """
     tenant_slug = config.forwarder.tenant_identity.tenant_slug
     local_transport = KafkaTransport(
         config=config.local_bus,
@@ -370,12 +637,21 @@ async def run_gateway_forwarder(
             )
 
     local_bus = TransportGatewayBus(local_transport)
-    cloud_bus = TransportGatewayBus(cloud_transport)
+    # OMN-16459: the OUTBOUND publish boundary is whatever the resolved contract
+    # says it is. ``cloud_transport`` stays a KafkaTransport either way -- it is
+    # still the INBOUND consumer (mirror_topics.inbound is pulled from the cloud
+    # broker), which is why this ticket alone does not retire the OMN-16449
+    # bastion.
+    cloud_outbound, ingest_client = await select_outbound_publish_transport(
+        config,
+        kafka_bus=TransportGatewayBus(cloud_transport),
+        resolve_secret=resolve_secret,
+    )
     idempotency_store = StoreIdempotencySqlite(config.forwarder.dedupe_store_path)
     forwarder = ServiceGatewayForwarder(
         config=config.forwarder,
         local_bus=local_bus,
-        cloud_bus=cloud_bus,
+        cloud_bus=cloud_outbound,
     )
     delivery = NodeGatewayDelivery(
         config=config.forwarder,
@@ -456,6 +732,8 @@ async def run_gateway_forwarder(
             await delivery.stop()
         for transport in reversed(started_transports):
             await transport.close()
+        if ingest_client is not None:
+            await ingest_client.aclose()
         if store_started:
             await idempotency_store.close()
 
@@ -735,6 +1013,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     await run_gateway_forwarder(
         config,
         shutdown_event=shutdown_event,
+        resolve_secret=AdapterEnvSecretStore().get_secret,
         ready_path=args.ready_file,
     )
 

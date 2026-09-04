@@ -7,13 +7,13 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 1
-  patch: 3
+  patch: 4
 node_version:
   major: 0
   minor: 1
-  patch: 3
+  patch: 4
 description: >
-  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM).
+  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM). OMN-16459: adds the contract-declared OUTBOUND https_ingest leg -- when a resolved deployment opts in via https_ingest_set, the cloud publish boundary becomes the gateway's single HTTPS ingest route instead of a direct MSK produce (operator ruling 2026-08-24 'replaced with the https doors'; scope ruling 2026-08-30 'one ingress for all calls'). The INBOUND leg is unchanged and still pulls mirror_topics.inbound from the cloud broker, so this does NOT retire the OMN-16449 dnsmasq bastion on its own. No deployment opts in yet; mirror_topics is byte-unchanged (widening is OMN-16979).
 
 runtime_profiles:
   - canary
@@ -129,6 +129,38 @@ config:
       # Poll batch size and the source-commit deadline for one drain pass.
       max_messages_per_poll: 50
       poll_timeout_ms: 1000
+    # OMN-16459: the OUTBOUND HTTPS ingest leg that replaces the direct-MSK
+    # cloud publish. Operator ruling 2026-08-24 (verbatim, via team-lead):
+    # "the gateway on the cloud should be configurable to point at whatever env
+    # we want. we can use the forwarder to accelerate moving our work to the
+    # cloud, but it should be replaced with the https doors as soon as
+    # possible." Operator scope ruling 2026-08-30 (verbatim): "the cloud leg
+    # shouldn't need anything new. all we need is one ingress for all calls
+    # right?" -- hence ONE route with a batch bound, never a per-event-class
+    # endpoint map, and idempotency asserted BY THE CALLER on that route keyed
+    # on the content-addressed envelope id.
+    #
+    # Both refs resolve at the effect boundary, never as literals here or in the
+    # resolved deployment YAML: ingest_url_ref resolves from the same
+    # operator-supplied ref map that already carries cloud_broker_ref (mounted
+    # at GATEWAY_BROKER_REF_MAP_FILE -- no new mount, no new env var), and
+    # ingest_auth_ref names the forwarder's own verified actor credential, whose
+    # VALUE lives only in the secret store.
+    #
+    # SCOPE: this is the OUTBOUND leg only. mirror_topics.inbound is still a
+    # Kafka pull from the cloud broker, so declaring this block does not by
+    # itself make the OMN-16449 dnsmasq bastion deletable -- the runtime config
+    # refuses an empty inbound set precisely so that claim cannot be made by
+    # accident. Widening what FLOWS through this route is OMN-16979, gated
+    # behind OMN-17209 / OMN-16019; this ticket changes transport only.
+    https_ingest:
+      ingest_url_ref: "gateway.cloud.https.ingest_url"
+      ingest_auth_ref: "gateway.cloud.https.gateway_token"
+      idempotency_key: "envelope_id"
+      max_batch_records: 100
+      request_timeout_seconds: 15
+      retry_initial_seconds: 1
+      retry_max_seconds: 30
     canary:
       # OMN-15741 (G1): dedicated topic for the path-verifying healthcheck probe.
       # Never mirrored, never carries tenant traffic -- the probe produces a tiny
