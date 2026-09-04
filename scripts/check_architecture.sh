@@ -553,47 +553,92 @@ EOF
 # Path Detection
 # =============================================================================
 
+# Accept only a checked-out omnibase_core source package. Arbitrary directories,
+# empty directories, and installed wheels must never become green no-op targets.
+is_source_package_path() {
+    local candidate="$1" resolved project_root
+    [[ -d "${candidate}" ]] || return 1
+    resolved=$(cd "${candidate}" 2>/dev/null && pwd) || return 1
+    case "${resolved}" in
+        */site-packages|*/site-packages/*|*/dist-packages|*/dist-packages/*|*/.venv/*|*/venv/*)
+            return 1
+            ;;
+    esac
+    [[ "$(basename "${resolved}")" == "omnibase_core" ]] || return 1
+    [[ "$(basename "$(dirname "${resolved}")")" == "src" ]] || return 1
+    [[ -f "${resolved}/__init__.py" ]] || return 1
+    project_root=$(cd "${resolved}/../.." 2>/dev/null && pwd) || return 1
+    [[ -f "${project_root}/pyproject.toml" ]] || return 1
+}
+
+sibling_core_from_git_clone() {
+    local common_dir clone_root
+    command -v git >/dev/null 2>&1 || return 1
+    common_dir=$(git rev-parse --git-common-dir 2>/dev/null) || return 1
+    [[ -n "${common_dir}" ]] || return 1
+    [[ "${common_dir}" == /* ]] || common_dir="$(pwd)/${common_dir}"
+    clone_root=$(cd "$(dirname "${common_dir}")" 2>/dev/null && pwd) || return 1
+    echo "$(dirname "${clone_root}")/omnibase_core/src/omnibase_core"
+}
+
 find_omnibase_core_path() {
     local custom_path="${1:-}"
 
     # If custom path provided, use it
     if [[ -n "${custom_path}" ]]; then
-        if [[ -d "${custom_path}" ]]; then
-            echo "${custom_path}"
+        if is_source_package_path "${custom_path}"; then
+            (cd "${custom_path}" && pwd)
             return 0
         else
-            echo "ERROR: Specified path does not exist: ${custom_path}" >&2
+            echo "ERROR: Specified path is not an omnibase_core source package: ${custom_path}" >&2
             return 2
         fi
     fi
 
-    # Try common local paths before installed packages. In workspace worktrees,
-    # the installed package can resolve through a venv/site-packages tree and
-    # make this grep-based pre-push validator exceed its timeout.
-    local local_paths=(
-        "${OMNI_HOME:-}/omnibase_core/src/omnibase_core"
+    # An explicit environment override is authoritative. Never fall back to a
+    # different target when it is malformed or points at an installed package.
+    if [[ -n "${OMNIBASE_CORE_PATH:-}" ]]; then
+        if is_source_package_path "${OMNIBASE_CORE_PATH}"; then
+            (cd "${OMNIBASE_CORE_PATH}" && pwd)
+            return 0
+        fi
+        echo "ERROR: OMNIBASE_CORE_PATH is not an omnibase_core source package: ${OMNIBASE_CORE_PATH}" >&2
+        return 2
+    fi
+
+    # Try the linked-worktree sibling, then repo-local and canonical workspace
+    # source trees before consulting the interpreter.
+    local local_paths=()
+    local git_sibling
+    if git_sibling=$(sibling_core_from_git_clone); then
+        local_paths+=("${git_sibling}")
+    fi
+    local_paths+=(
         "./src/omnibase_core"
         "../omnibase_core/src/omnibase_core"
         "../omnibase_core"
     )
+    if [[ -n "${OMNI_HOME:-}" ]]; then
+        local_paths+=("${OMNI_HOME}/omnibase_core/src/omnibase_core")
+    fi
 
     for path in "${local_paths[@]}"; do
-        if [[ -n "${path}" && -d "${path}" ]]; then
+        if is_source_package_path "${path}"; then
             (cd "${path}" && pwd)
             return 0
         fi
     done
 
-    # Try to find installed package using Python
+    # An editable source install may be returned by the interpreter. Installed
+    # wheel/venv paths are rejected rather than used as a silent fallback.
     local python_path
     python_path=$(python3 -c "import omnibase_core; import os; print(os.path.dirname(omnibase_core.__file__))" 2>/dev/null) || true
-
-    if [[ -n "${python_path}" && -d "${python_path}" ]]; then
-        echo "${python_path}"
+    if [[ -n "${python_path}" ]] && is_source_package_path "${python_path}"; then
+        (cd "${python_path}" && pwd)
         return 0
     fi
 
-    echo "ERROR: Could not find omnibase_core. Use --path to specify location." >&2
+    echo "ERROR: Could not find an omnibase_core source package; no safe fallback exists." >&2
     return 2
 }
 
@@ -843,14 +888,12 @@ main() {
 
     # Handle case where no Python files found
     if [[ "${file_count}" -eq 0 ]]; then
-        print_skip "No Python files found in target directory: ${core_path}"
-        print_skip "Reason: Directory may be empty or contain no .py files"
-        print_skip "Action: This is OK if omnibase_core is not installed in this environment"
+        echo "ERROR: No Python files found in source target: ${core_path}" >&2
         if [[ "${OUTPUT_JSON}" == "true" ]]; then
-            JSON_EXIT_CODE=0
+            JSON_EXIT_CODE=2
             output_json
         fi
-        exit 0
+        exit 2
     fi
 
     # Always show what's being excluded for CI debugging

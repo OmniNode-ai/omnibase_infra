@@ -134,11 +134,12 @@ def run_architecture_layers(verbose: bool = False) -> bool:
         passed = result.returncode == 0
 
         if not passed and result.returncode == 2:
-            # Exit code 2 means script error (path not found, etc.)
-            # This is not a violation, just skip
-            if verbose:
-                print("Architecture Layers: SKIP (omnibase_core not found)")
-            return True
+            # A missing or invalid source target is a validation failure, not
+            # an environment skip. A green no-op would bypass enforcement.
+            print(
+                "Architecture Layers: ERROR (omnibase_core source target invalid or unavailable)"
+            )
+            return False
 
         # Note: The bash script already reports known issues with ticket links
         # when violations are found, so we don't duplicate the reporting here.
