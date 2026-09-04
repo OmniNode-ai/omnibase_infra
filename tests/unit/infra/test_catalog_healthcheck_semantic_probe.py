@@ -175,3 +175,119 @@ def test_both_probe_forms_are_recognised_as_runtime_health_claims() -> None:
     assert probes_runtime_health(semantic), "semantic form must stay in scope"
     assert not validate_runtime_semantic_probe({"s": shallow}).ok
     assert validate_runtime_semantic_probe({"s": semantic}).ok
+
+
+@pytest.mark.unit
+def test_the_list_form_renders_as_CMD_argv_in_generated_compose() -> None:
+    """The manifest change's central mechanical claim, exercised not asserted.
+
+    The six manifests declare `test` as a YAML list on the stated ground that it
+    "renders as [CMD, ...] and needs no shell". Nothing else in this change runs
+    the generator, so if it stringified the list or emitted CMD-SHELL, six
+    services would ship a healthcheck that fails at container start and every
+    other test here would still pass -- the validator reads manifests, not
+    rendered compose.
+
+    I verified this by hand while writing the fix and did not commit the check.
+    That gap is the finding (fp=19db1f9e2463) and this is it closed.
+    """
+    from omnibase_infra.docker.catalog.generator import generate_compose
+
+    resolved = CatalogResolver(catalog_dir=CATALOG_DIR).resolve(
+        bundles=["runtime-core"]
+    )
+    compose = generate_compose(resolved)
+    services = compose["services"]
+    assert isinstance(services, dict)
+
+    rendered = {
+        name: svc["healthcheck"]["test"]
+        for name, svc in services.items()
+        if isinstance(svc, dict)
+        and isinstance(svc.get("healthcheck"), dict)
+        and _SEMANTIC_PROBE_MARKER_IN(svc["healthcheck"]["test"])
+    }
+    assert rendered, "runtime-core must render at least one semantic probe"
+
+    for name, test in rendered.items():
+        assert isinstance(test, list), f"{name}: healthcheck.test must be a list"
+        assert test[0] == "CMD", (
+            f"{name}: rendered as {test[0]!r}, not 'CMD'. CMD-SHELL requires "
+            f"/bin/sh in the image and changes argv handling."
+        )
+        assert test[1:] == _SEMANTIC_PROBE, f"{name}: argv is {test[1:]!r}"
+
+
+def _SEMANTIC_PROBE_MARKER_IN(test: object) -> bool:
+    """True if a rendered `test` value names the semantic probe, either form."""
+    flat = test if isinstance(test, str) else " ".join(map(str, test or []))
+    return "onex-container-healthcheck" in flat
+
+
+@pytest.mark.unit
+def test_the_declared_policy_is_enforced_not_merely_prescribed() -> None:
+    """The violation message asks for an explicit policy; the gate must check it.
+
+    A probe invoked with no `--degraded-policy` is not fail-open -- the script
+    defaults to `fail`. But whether a DEGRADED runtime reads unhealthy is a
+    per-lane decision with measured consequences (dev PASSes today while
+    lakshman and stability-test both FAIL on runtime_degraded), so a manifest
+    must declare it rather than inherit whichever default the script carries.
+    """
+    no_policy = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test=["python", "/usr/local/bin/onex-container-healthcheck"],
+    )
+    result = validate_runtime_semantic_probe({"s": no_policy})
+    assert not result.ok
+    assert result.violations[0].reason == "policy_missing"
+
+    bogus = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test=[
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--degraded-policy",
+            "sometimes",
+        ],
+    )
+    assert not validate_runtime_semantic_probe({"s": bogus}).ok
+
+    for policy in ("fail", "warn"):
+        good = _manifest(
+            name="s",
+            layer=EnumInfraLayer.RUNTIME,
+            test=[
+                "python",
+                "/usr/local/bin/onex-container-healthcheck",
+                "--degraded-policy",
+                policy,
+            ],
+        )
+        assert validate_runtime_semantic_probe({"s": good}).ok, policy
+
+
+@pytest.mark.unit
+def test_an_incidental_port_digit_run_does_not_pull_a_service_into_scope() -> None:
+    """`"8085" in command` also matches 18085, 80853 and HEALTH_PORT=8085.
+
+    A runtime-layer service whose probe merely contains those digits never
+    claimed runtime health, and pulling it into the ratchet would fail it for a
+    coincidence (finding fp=d39830ae35e8).
+    """
+    for incidental in (
+        "curl -sf http://localhost:18085/health",
+        "curl -sf http://localhost:80853/health",
+        "sh -c 'HEALTH_PORT=8085x curl -sf http://localhost:9000/health'",
+    ):
+        svc = _manifest(name="s", layer=EnumInfraLayer.RUNTIME, test=incidental)
+        assert not probes_runtime_health(svc), incidental
+
+    real = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test="curl -sf http://localhost:8085/health",
+    )
+    assert probes_runtime_health(real), "a real :8085 address must stay in scope"

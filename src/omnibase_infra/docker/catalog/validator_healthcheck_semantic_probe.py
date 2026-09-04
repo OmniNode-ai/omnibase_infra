@@ -26,6 +26,7 @@ cannot silently revert.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
@@ -45,11 +46,35 @@ RUNTIME_LAYER = EnumInfraLayer.RUNTIME
 # defect this ticket exists to close.
 RUNTIME_HEALTH_PORT = "8085"
 
-# Substring identifying the semantic probe. Deliberately the installed path
-# rather than the bare name: `Dockerfile.runtime` installs it there and invokes
-# it as a FILE (not `python -m`), because importing the package chain costs ~6.8s
-# against a 10s probe timeout.
+# Matched as an ADDRESS, not as a bare substring. `"8085" in command` also
+# matches `18085`, `80853` and `HEALTH_PORT=8085`, pulling a service that never
+# claimed runtime health into the ratchet and failing it for a coincidence.
+#
+# The leading `:` is what makes it an address (`localhost:8085`, `:8085`) rather
+# than any occurrence of the digits; the trailing guard rejects `:80853`. A
+# digit-boundary-only pattern is not enough -- it still accepts `HEALTH_PORT=8085`,
+# which a test in this repo pins.
+_RUNTIME_PORT_RE = re.compile(rf":{RUNTIME_HEALTH_PORT}(?![0-9])")
+
+# Substring identifying the semantic probe.
+#
+# On the timing: the probe is fast because the MODULE is stdlib-only (its own
+# docstring: "nothing here imports from omnibase_infra -- a unit test pins the
+# property"), starting in ~0.12s against a 10s timeout. Invoking it by path
+# rather than `python -m omnibase_infra...` avoids importing the package chain
+# to REACH it, but the headroom comes from what the script imports, not from the
+# invocation form -- a file that imported the chain would be just as slow.
 _SEMANTIC_PROBE_MARKER = "onex-container-healthcheck"
+
+# The probe's own default is `fail` (DEGRADED_POLICY_FAIL), so an invocation
+# with no policy is not fail-open. It is still required explicitly: whether a
+# DEGRADED runtime should read unhealthy is a per-lane decision, and a manifest
+# that leaves it implicit silently inherits whichever default the script
+# carries at the time. Enforced because the violation message prescribes it --
+# a gate whose message asks for something it does not check is advice, not a
+# gate.
+_DEGRADED_POLICY_FLAG = "--degraded-policy"
+_VALID_DEGRADED_POLICIES = ("fail", "warn")
 
 
 def _command_text(healthcheck: HealthCheck) -> str:
@@ -91,17 +116,28 @@ def probes_runtime_health(manifest: CatalogManifest) -> bool:
     if manifest.layer is not RUNTIME_LAYER:
         return False
     command = _command_text(manifest.healthcheck)
-    return RUNTIME_HEALTH_PORT in command or _SEMANTIC_PROBE_MARKER in command
+    return bool(_RUNTIME_PORT_RE.search(command)) or _SEMANTIC_PROBE_MARKER in command
 
 
 @dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class SemanticProbeViolation:
-    """A runtime service whose healthcheck is not the semantic probe."""
+    """A runtime service whose healthcheck is not a well-formed semantic probe."""
 
     service: str
     command: str
+    reason: str = "not_semantic"
 
     def message(self) -> str:
+        if self.reason == "policy_missing":
+            return (
+                f"catalog service '{self.service}' invokes "
+                f"'{_SEMANTIC_PROBE_MARKER}' but declares no explicit "
+                f"{_DEGRADED_POLICY_FLAG} {'|'.join(_VALID_DEGRADED_POLICIES)}. "
+                f"The script defaults to 'fail', so this is not fail-open -- but "
+                f"whether a DEGRADED runtime reads unhealthy is a per-lane "
+                f"decision and must be declared, not inherited from whatever "
+                f"default the script carries. Command: {self.command!r}"
+            )
         return (
             f"catalog service '{self.service}' is on the '{RUNTIME_LAYER.value}' layer and "
             f"probes :{RUNTIME_HEALTH_PORT}, but its healthcheck is "
@@ -150,4 +186,22 @@ def validate_runtime_semantic_probe(
         command = _command_text(manifest.healthcheck)
         if _SEMANTIC_PROBE_MARKER not in command:
             violations.append(SemanticProbeViolation(service=name, command=command))
+            continue
+        # The marker alone is not enough: the message prescribes an explicit
+        # policy, so the gate checks for one (finding fp=c27ee7e18877).
+        tokens = command.split()
+        if _DEGRADED_POLICY_FLAG not in tokens:
+            violations.append(
+                SemanticProbeViolation(
+                    service=name, command=command, reason="policy_missing"
+                )
+            )
+            continue
+        policy = tokens[tokens.index(_DEGRADED_POLICY_FLAG) + 1 :][:1]
+        if not policy or policy[0] not in _VALID_DEGRADED_POLICIES:
+            violations.append(
+                SemanticProbeViolation(
+                    service=name, command=command, reason="policy_missing"
+                )
+            )
     return SemanticProbeValidationResult(ok=len(violations) == 0, violations=violations)
