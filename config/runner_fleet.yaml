@@ -158,3 +158,12 @@ dns_cache:
   # Acceptance targets before fleet-wide rollout (OMN-15736 AC3).
   target_hit_rate: 0.80
   target_dns_failure_count: 0
+# OMN-17855 — source-only model-review runner-overlay contract. These are
+# opaque logical reference identifiers; activation requires a separate,
+# authorized control-plane rollout and cannot be performed by this record.
+model_review:
+  active: false
+  runner_label: model-review
+  credential_reference_id: dc9565c8-7f13-46dc-bd89-9694c13e1d2f
+  endpoint_reference_id: b2a8287b-0a9f-4cbc-b2e8-cf954f9a71f7
+  healthcheck_reference_id: 2672472a-bac9-4344-8c8c-79da6cb604ae
