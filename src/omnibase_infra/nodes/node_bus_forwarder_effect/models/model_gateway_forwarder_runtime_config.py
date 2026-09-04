@@ -27,6 +27,12 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
     forwarder: ModelGatewayForwarderConfig
     local_bus: ModelKafkaEventBusConfig
     cloud_bus: ModelKafkaEventBusConfig
+    # OMN-17034: resolved broker legs for the contract-declared lane mirror.
+    # The contract NAMES lanes; this is where this deployment says which
+    # broker each named lane is. Both stay None when the contract declares no
+    # lane_mirror.
+    lane_mirror_source_bus: ModelKafkaEventBusConfig | None = None
+    lane_mirror_buses: dict[str, ModelKafkaEventBusConfig] = {}
 
     @model_validator(mode="after")
     def _validate_resolved_legs(self) -> ModelGatewayForwarderRuntimeConfig:
@@ -63,6 +69,8 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
                 "production gateway forwarder requires an outbound heartbeat topic"
             )
 
+        self._validate_lane_mirror_legs()
+
         declared_cloud = self.forwarder.cloud_bus
         if self.cloud_bus.security_protocol != declared_cloud.security_protocol:
             raise ValueError(
@@ -78,6 +86,72 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
         ):
             raise ValueError("resolved AWS_MSK_IAM cloud bus requires msk_region")
         return self
+
+    def _validate_lane_mirror_legs(self) -> None:
+        """Fail closed on a declared lane mirror whose brokers were not resolved.
+
+        The failure this prevents is the one OMN-17034 exists to close: a
+        forwarder that *declares* it mirrors a lane it cannot actually reach
+        looks healthy and moves nothing. Silence is the defect, so an
+        unresolved leg is a boot refusal, never a skipped mirror.
+        """
+        lane_mirror = self.forwarder.lane_mirror
+        if lane_mirror is None:
+            if self.lane_mirror_source_bus is not None or self.lane_mirror_buses:
+                raise ValueError(
+                    "lane_mirror_source_bus/lane_mirror_buses are resolved but the "
+                    "node contract declares no lane_mirror; the contract is the "
+                    "authority for which lanes are mirrored"
+                )
+            return
+
+        if self.lane_mirror_source_bus is None:
+            raise ValueError(
+                "the node contract declares a lane_mirror with source_lane "
+                f"{lane_mirror.source_lane!r} but no lane_mirror_source_bus was "
+                "resolved for it"
+            )
+
+        missing = [
+            lane
+            for lane in lane_mirror.mirror_lanes
+            if lane not in self.lane_mirror_buses
+        ]
+        if missing:
+            raise ValueError(
+                "every contract-declared mirror lane requires a resolved broker "
+                f"leg; unresolved: {missing}"
+            )
+        undeclared = [
+            lane
+            for lane in self.lane_mirror_buses
+            if lane not in lane_mirror.mirror_lanes
+        ]
+        if undeclared:
+            raise ValueError(
+                "resolved lane_mirror_buses carry lanes the node contract does not "
+                f"declare: {undeclared}"
+            )
+
+        source_endpoint = self.lane_mirror_source_bus.bootstrap_servers
+        for lane, bus in self.lane_mirror_buses.items():
+            if bus.bootstrap_servers == source_endpoint:
+                raise ValueError(
+                    f"lane_mirror source and mirror lane {lane!r} must be distinct "
+                    "brokers; mirroring a broker onto itself republishes every "
+                    "record onto the topic it was just consumed from"
+                )
+        if self.lane_mirror_source_bus.enable_auto_commit:
+            raise ValueError(
+                "the lane_mirror source leg requires enable_auto_commit=false; "
+                "the source offset commits only after every mirror lane has "
+                "acknowledged"
+            )
+        if self.lane_mirror_source_bus.auto_offset_reset != "earliest":
+            raise ValueError(
+                "the lane_mirror source leg requires auto_offset_reset=earliest "
+                "for the same reason both trust-boundary legs do (OMN-15781)"
+            )
 
 
 __all__ = ["ModelGatewayForwarderRuntimeConfig"]

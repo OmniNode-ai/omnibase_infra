@@ -7,11 +7,11 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 1
-  patch: 2
+  patch: 3
 node_version:
   major: 0
   minor: 1
-  patch: 2
+  patch: 3
 description: >
   Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM).
 
@@ -67,6 +67,68 @@ config:
         # separately -- this only arms the contract-declared mirror set.
         - "onex.evt.omniclaude.session-started.v1"
         - "onex.evt.omniclaude.session-ended.v1"
+    # ------------------------------------------------------------------
+    # OMN-17034: the lane-mirror leg.
+    # ------------------------------------------------------------------
+    # Operator ruling 2026-09-04, paraphrased: BOTH lanes, not either. The
+    # forwarder consumes the hook topics on the lane the hook edge actually
+    # publishes to and mirrors them to the dev lane; nothing is repointed.
+    #
+    # The measured defect this closes: omniclaude's hook edge publishes to
+    # the STABILITY lane (declared by
+    # omniclaude/plugins/onex/hooks/contracts/hook_edge_lane.yaml, OMN-17204,
+    # `lane: stability-test`), while `omninode-gateway-forwarder` was attached
+    # only to `omnibase-infra-network` (dev). A container cannot see a record
+    # on a lane network it is not joined to, so every hook event was invisible
+    # to this node -- 16,616 hook rows on stability against 2 on dev
+    # (measured 2026-09-04).
+    #
+    # WHY A THIRD LEG RATHER THAN REPOINTING `local_bus`:
+    # `local_bus` is the trust-boundary leg. Its OUTBOUND direction carries
+    # delegation/inference results to cloud and its INBOUND direction
+    # republishes cloud delegation commands to the local runtime, whose
+    # consumers live on DEV. Repointing it to stability would move those
+    # commands off the lane their consumers run on -- a regression traded for
+    # a fix. So `local_bus` stays on dev, unchanged, and this is an additive
+    # leg with its own consumer group.
+    #
+    # HOW THE CLOUD ARM OF THE RULING IS SATISFIED WITH NO NEW CLOUD CODE:
+    # this leg republishes each stability hook record onto the DEV broker
+    # under the same canonical topic name. The pre-existing trust-boundary
+    # outbound leg already consumes `mirror_topics.outbound` on dev, and that
+    # set already contains the OD-9-approved session-started/session-ended
+    # pair (OMN-16204). So the composed path is
+    #   stability --(this leg)--> dev --(existing outbound leg)--> cloud
+    # and the forwarder mirrors to dev AND onward to the cloud leg it already
+    # has. `mirror_topics.outbound` is deliberately NOT widened here --
+    # widening the cloud set to tool-executed/prompt-submitted is OMN-16979,
+    # gated behind the OMN-17209 redaction contract, and actual cloud
+    # delivery is still gated behind OMN-14323 gate 1 (MSK network/IAM) and
+    # OMN-16459 (HTTPS ingest replacing the direct-MSK leg).
+    #
+    # `topics` is the four `governed_topics` of hook_edge_lane.yaml. This is
+    # a LOCAL lane-to-lane mirror inside one trusted host, not a trust-boundary
+    # crossing, so the OD-9 content restriction that scopes the cloud set does
+    # not apply to it; the OD-9 scope is still enforced, unchanged, at the
+    # cloud boundary by `mirror_topics.outbound`.
+    #
+    # Lanes are named, never addressed. The resolved deployment YAML supplies
+    # the per-lane broker endpoint (`lane_mirror_source_bus` /
+    # `lane_mirror_buses`), the same authority split `local_bus` already uses:
+    # this contract owns the topic set and the lane names, the resolved tenant
+    # file owns this deployment's broker addresses.
+    lane_mirror:
+      source_lane: "stability-test"
+      mirror_lanes:
+        - "dev"
+      topics:
+        - "onex.evt.omniclaude.session-started.v1"
+        - "onex.evt.omniclaude.session-ended.v1"
+        - "onex.evt.omniclaude.tool-executed.v1"
+        - "onex.evt.omniclaude.prompt-submitted.v1"
+      # Poll batch size and the source-commit deadline for one drain pass.
+      max_messages_per_poll: 50
+      poll_timeout_ms: 1000
     canary:
       # OMN-15741 (G1): dedicated topic for the path-verifying healthcheck probe.
       # Never mirrored, never carries tenant traffic -- the probe produces a tiny
@@ -144,13 +206,15 @@ capabilities:
     description: "Source offsets commit only after destination broker acknowledgement and a durable envelope_id marker; acknowledged redelivery is suppressed across restarts."
   - name: "raw_dispatch_envelope_normalization"
     description: "Handlers deserialize serialized outer event envelopes before reading payload."
+  - name: "contract_declared_lane_mirror"
+    description: "Mirrors the contract-declared hook topic set from the declared source lane's broker to every declared mirror lane's broker, at-least-once with a durable per-envelope marker, and never mirrors a topic outside that set."
   - name: "verified_inbound_payload_tenant_stamp"
     description: "Inbound gateway consumption overwrites payload[\"tenant_id\"] with the config-bound gateway tenant slug (canonical shared-helper shape; no separate tenant_slug key) before local republish."
 metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
   created: "2026-06-10"
-  updated: "2026-08-18"
+  updated: "2026-09-04"
   tags:
     - gateway
     - event-bus
