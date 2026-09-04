@@ -42,6 +42,14 @@ _OCC_REPO = "OmniNode-ai/onex_change_control"
 _TICKET = "OMN-9999"
 
 
+_RECEIPT_SUMMARY_MODEL = (
+    "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary"
+)
+_DOD_VERIFY_STATE_MODEL = (
+    "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState"
+)
+
+
 def _merged_pr(number: int) -> dict[str, object]:
     recent = (datetime.now(tz=UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
@@ -70,9 +78,15 @@ def _skill_result(
 ) -> dict[str, object]:
     """A ModelSkillResult shaped like `onex skill dod_verify` prints.
 
-    Counts live under ``result.terminal_payload`` (OMN-16736), which is
-    ``ModelDodVerifyState.model_dump(mode="json")`` — verified against the
-    live capture at tests/fixtures/omn16736/.
+    On a NON-success run the counts live under ``result.terminal_payload``
+    (OMN-16736), which is ``ModelDodVerifyState.model_dump(mode="json")`` —
+    verified against the live capture at tests/fixtures/omn16736/.
+
+    On a success-like run `receipt_mode` puts that same model FLAT on
+    ``result`` instead, with no ``terminal_payload`` key (OMN-16961, captures
+    at tests/fixtures/omn16961/). The arm is derived from the verdict below
+    exactly as the CLI derives it, so this double cannot model a receipt the
+    CLI never prints.
 
     ``behavior_proving_count=None`` models a verifier predating OMN-15911:
     the key is absent from the payload entirely.
@@ -94,16 +108,26 @@ def _skill_result(
     }
     if behavior_proving_count is not None:
         terminal["behavior_proving_count"] = behavior_proving_count
+    if failed == 0:
+        return {
+            "skill_name": "dod_verify",
+            "node_name": "node_dod_verify",
+            "status": "success",
+            "exit_code": 0,
+            "result": terminal,
+            "result_model": _DOD_VERIFY_STATE_MODEL,
+        }
     return {
         "skill_name": "dod_verify",
         "node_name": "node_dod_verify",
-        "status": "success" if failed == 0 else "failed",
-        "exit_code": 0,
+        "status": "failed",
+        "exit_code": 1,
         "result": {
-            "workflow_result": "completed",
-            "exit_code": 0,
+            "workflow_result": "failed",
+            "exit_code": 1,
             "terminal_payload": terminal,
         },
+        "result_model": _RECEIPT_SUMMARY_MODEL,
     }
 
 

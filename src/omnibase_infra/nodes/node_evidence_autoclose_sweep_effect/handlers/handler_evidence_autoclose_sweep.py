@@ -22,8 +22,10 @@ Pipeline
    the reason). Its stdout is parsed
    REGARDLESS of exit code — the CLI exits 1 on every genuine evidence gap
    while still printing a complete ``ModelSkillResult`` — and the verdict is
-   read from ``result.terminal_payload`` (``result`` itself carries only the
-   dispatch outcome). FLIP requires all of: the verifier's own
+   read from whichever of the CLI's two declared result arms the receipt's
+   own ``result_model`` names: flat on ``result`` for a success-like run,
+   nested at ``result.terminal_payload`` otherwise (OMN-16961 —
+   see ``_extract_dod_verify_verdict``). FLIP requires all of: the verifier's own
    ``status == "verified"``, ``total_checks > 0``, zero failed, at least one
    verified check, and ``verified_count + non_probative_count ==
    total_checks`` (OMN-16821 — see step 9). Anything else that still reached
@@ -194,13 +196,39 @@ _GH_PR_FILE_PATH_KEY = "filename"
 
 # Where `onex skill dod_verify <ticket>` actually puts its verdict.
 #
-# The printed ModelSkillResult nests the node's own terminal state one level
-# below `result`: `result` carries the DISPATCH outcome (workflow_result,
-# exit_code, workflow, handler_result, error, capture_log) and
-# `result.terminal_payload` carries the VERIFICATION outcome (status,
-# total_checks, verified_count, failed_count, skipped_count,
-# superseded_count). `result.total_checks` does not exist — verified against a
-# live capture, committed at tests/fixtures/omn16736/ (OMN-16736).
+# `receipt_mode._run_and_emit` prints ONE of TWO receipt arms, and which one
+# is decided by the run's own outcome (OMN-16961):
+#
+#   success-like AND a handler result exists
+#       -> `result` IS the handler's own model, FLAT. The verdict keys
+#          (status, total_checks, verified_count, ...) sit directly on
+#          `result`, and there is no `terminal_payload` key anywhere.
+#          `result_model` = ModelDodVerifyState.
+#   anything else
+#       -> `result` is a ModelReceiptRuntimeSummary (workflow_result,
+#          exit_code, workflow, terminal_payload, handler_result, error,
+#          capture_log) and the verdict is nested at `result.terminal_payload`.
+#          `result_model` = ModelReceiptRuntimeSummary.
+#
+# OMN-16736 read the second arm only. Its constant was verified against a
+# single live capture (tests/fixtures/omn16736/) that happened to be a
+# `status: failed` run — the summary arm. Generalising it to every outcome
+# inverted the sweep: dod_verify's workflow result is success-like exactly
+# when its verdict is `verified`, so the arm the reader could not parse was
+# precisely the FLIP-ELIGIBLE one. Run 33258391128 recorded 10 of 19
+# verdict-eligible tickets as `error_verify_unparseable` at `exit_code=0`
+# while the diagnose step — which falls back to the envelope itself — read
+# full verdicts from the same bytes. `tickets_flipped` could not leave 0.
+#
+# `result_model` is the receipt's own declared type tag, so reading it is
+# using the contract rather than sniffing the shape. Both arms are captured
+# verbatim at tests/fixtures/omn16961/ (OMN-16961).
+_RECEIPT_SUMMARY_RESULT_MODEL = (
+    "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary"
+)
+_DOD_VERIFY_STATE_RESULT_MODEL = (
+    "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState"
+)
 _DOD_VERIFY_VERDICT_KEY = "terminal_payload"
 # dod_verify's own terminal status for "every verdict-bearing check passed".
 # `EnumDodVerifyStatus.VERIFIED` in omnimarket.
@@ -322,6 +350,71 @@ def _as_int(value: object) -> int:
         except ValueError:
             return 0
     return 0
+
+
+def _extract_dod_verify_verdict(
+    receipt: dict[str, object],
+) -> tuple[dict[str, object] | None, str]:
+    """Return the dod_verify verdict from either declared receipt arm.
+
+    OMN-16961. `onex skill dod_verify` prints two structurally different
+    receipts (see `_RECEIPT_SUMMARY_RESULT_MODEL` above for the branch that
+    picks between them). Both are legitimate, both are declared, and the
+    receipt names which one it is in `result_model`. This reader dispatches
+    on that tag and on nothing else.
+
+    It does NOT sniff for whichever key happens to be present. A receipt
+    whose `result_model` is absent or unrecognised is REFUSED by name — the
+    sweep would rather stop than guess at an undeclared shape, because a
+    wrong guess here is a Done flip on evidence nobody read (OMN-15715 /
+    OMN-16832 AC2). Same for a declared arm that carries no `total_checks`:
+    that is a dispatch which produced output but reached no verdict, and it
+    stays an error, never a 0/0 "gap" that reads like a ticket problem.
+
+    Returns ``(verdict, "")`` on success and ``(None, reason)`` on refusal,
+    where ``reason`` names the specific cause rather than the generic "no
+    verdict was reached".
+    """
+    result_model = receipt.get("result_model")
+    result = receipt.get("result")
+    result = result if isinstance(result, dict) else {}
+
+    if not isinstance(result_model, str) or not result_model.strip():
+        return None, (
+            "the receipt declares no `result_model`, so which of the two "
+            "`onex skill` result arms it carries cannot be established — "
+            "refusing to guess at an undeclared shape."
+        )
+
+    if result_model == _RECEIPT_SUMMARY_RESULT_MODEL:
+        verdict = result.get(_DOD_VERIFY_VERDICT_KEY)
+        if not isinstance(verdict, dict):
+            return None, (
+                f"the receipt is a `{_RECEIPT_SUMMARY_RESULT_MODEL}` whose "
+                f"`result.{_DOD_VERIFY_VERDICT_KEY}` is absent — the runtime "
+                "emitted no terminal event, so the verifier genuinely reached "
+                "no verdict."
+            )
+        arm = f"result.{_DOD_VERIFY_VERDICT_KEY}"
+    elif result_model == _DOD_VERIFY_STATE_RESULT_MODEL:
+        # Success arm: `result` IS the verdict, flat. No nesting exists.
+        verdict = result
+        arm = "result"
+    else:
+        return None, (
+            f"unrecognised dod_verify receipt `result_model` {result_model!r} "
+            f"— expected {_DOD_VERIFY_STATE_RESULT_MODEL!r} (success arm) or "
+            f"{_RECEIPT_SUMMARY_RESULT_MODEL!r} (runtime-summary arm). The "
+            "receipt contract drifted; refusing to infer a verdict from an "
+            "unknown shape."
+        )
+
+    if "total_checks" not in verdict:
+        return None, (
+            f"the receipt declares `{result_model}` but its `{arm}` carries no "
+            "`total_checks` — output was produced, no verdict was reached."
+        )
+    return verdict, ""
 
 
 def _extract_ticket_binding(title: str, files: list[str]) -> tuple[str | None, bool]:
@@ -1391,19 +1484,14 @@ class HandlerEvidenceAutocloseSweep:
                 reason=f"dod_verify exit_code={exit_code}: {verify_error}",
             )
 
-        dispatch_payload = dod_result.get("result")
-        dispatch_payload = (
-            dispatch_payload if isinstance(dispatch_payload, dict) else {}
-        )
-        verdict = dispatch_payload.get(_DOD_VERIFY_VERDICT_KEY)
-        verdict = verdict if isinstance(verdict, dict) else {}
-
-        # A ModelSkillResult with no terminal payload means the dispatch
-        # produced output but the verifier never reached a verdict. Absent the
-        # counts there is nothing to decide on, so fail closed rather than
-        # letting `_as_int(None) -> 0` silently manufacture a 0/0 "gap" that
-        # reads like a ticket problem (OMN-16736).
-        if "total_checks" not in verdict:
+        # Read the verdict from whichever arm the receipt DECLARES it is
+        # carrying (OMN-16961). A refusal here always names its own cause —
+        # undeclared shape, drifted `result_model`, or a genuinely unreached
+        # verdict — so "the sweep could not read it" is never confusable with
+        # "the ticket is not proven". Absent counts still fail closed: nothing
+        # is coerced to 0 and nothing unread is ever counted as proof.
+        verdict, verdict_refusal = _extract_dod_verify_verdict(dod_result)
+        if verdict is None:
             decision = (
                 EnumEvidenceAutocloseDecision.ERROR_VERIFY_UNPARSEABLE
                 if exit_code == 0
@@ -1414,11 +1502,7 @@ class HandlerEvidenceAutocloseSweep:
                 companion_pr_number=companion_pr_number,
                 companion_pr_url=companion_pr_url,
                 decision=decision,
-                reason=(
-                    f"dod_verify exit_code={exit_code} produced JSON with no "
-                    f"`result.{_DOD_VERIFY_VERDICT_KEY}.total_checks` — no "
-                    "verdict was reached, so no flip or gap can be inferred."
-                ),
+                reason=f"dod_verify exit_code={exit_code}: {verdict_refusal}",
             )
 
         total_checks = _as_int(verdict.get("total_checks"))

@@ -25,11 +25,14 @@
 #     both found by the first live run in which `node_dod_verify` actually
 #     resolved.
 #       (a) The dod_verify counts were read from `result.total_checks`. The
-#           live CLI nests every count under `result.terminal_payload`;
-#           `result` carries only the DISPATCH outcome. The reader therefore
-#           saw 0/0 on every run and no flip was reachable at all. The
-#           verdict must now also agree with dod_verify's own terminal
-#           `status: verified` — counts alone do not authorize a flip.
+#           capture this was corrected against nested every count under
+#           `result.terminal_payload`, with `result` carrying only the
+#           DISPATCH outcome. The reader therefore saw 0/0 on every run and
+#           no flip was reachable at all. The verdict must now also agree
+#           with dod_verify's own terminal `status: verified` — counts alone
+#           do not authorize a flip. (That correction was right for the arm
+#           it was measured on and WRONG as a universal rule; see OMN-16961
+#           below, which is the same defect one turn later.)
 #       (b) `onex skill dod_verify` exits 1 on every genuine evidence GAP
 #           while still printing a complete ModelSkillResult. stdout is now
 #           parsed regardless of exit code, so a gap is recorded as a gap
@@ -50,7 +53,7 @@
 #     entirely by "the PR merged" — and this node then wrote into Linear that
 #     the ticket's acceptance criteria were receipt-proven. dod_verify now
 #     classifies every check verdict and reports
-#     `result.terminal_payload.behavior_proving_count` (checks that both
+#     `behavior_proving_count` on its verdict (checks that both
 #     PASSED and executed the claimed behavior). A flip requires it to be
 #     >= 1; zero on an otherwise-clean run WITHHOLDS the flip and posts
 #     GAP_NO_BEHAVIOR_PROOF. A verdict carrying no such field at all (an
@@ -105,14 +108,48 @@
 #     reads 0 whenever a ticket is not already flippable cannot distinguish
 #     "no behavior proof was declared" from "behavior proof ran, passed, and
 #     something else held the flip".
+#   - OMN-16961 (contract 1.3.2): READ THE ARM THE RECEIPT DECLARES. OMN-16736
+#     (a) above fixed the verdict path against ONE live capture and stated the
+#     result as universal: "the live CLI nests every count under
+#     `result.terminal_payload`". It does not. `receipt_mode._run_and_emit`
+#     emits one of TWO receipts, branching on the run's own outcome:
+#       success-like + a handler result -> `result` IS the handler model,
+#           FLAT (`ModelDodVerifyState`); NO `terminal_payload` key exists.
+#       anything else -> `result` is a `ModelReceiptRuntimeSummary` and the
+#           verdict is nested at `result.terminal_payload`.
+#     The OMN-16736 capture happened to be a `status: failed` run — the
+#     nested arm — so the constant derived from it was correct for that arm
+#     and wrong for the other. And dod_verify's workflow result is
+#     success-like EXACTLY when its verdict is `verified`, so the arm the
+#     reader could not parse was precisely the FLIP-ELIGIBLE one:
+#     `tickets_flipped` was not stuck at 0, it was UNREACHABLE by
+#     construction for every ticket that satisfied the predicate. Run
+#     33258391128 scored 10 of 19 verdict-eligible tickets
+#     ERROR_VERIFY_UNPARSEABLE at `exit_code=0` while the diagnose step in
+#     the SAME job printed full verdicts from the same bytes — that step's
+#     `terminal_payload or envelope` fallback absorbed both arms by accident,
+#     so the run contained its own contradiction with the cause invisible in
+#     it. The reader now dispatches on `result_model`, the receipt's own
+#     declared type tag, and on nothing else. It is deliberately NOT a
+#     parser that accepts both shapes by sniffing whichever key is present:
+#     an absent or drifted `result_model` is REFUSED BY NAME, because a wrong
+#     guess here is a Done flip on evidence nobody read. Strictness is
+#     unchanged (OMN-15715): a declared arm carrying no `total_checks` is
+#     still an error and never a 0/0 "gap", and no count is ever coerced.
+#     What changes is that a refusal now names its own cause — undeclared
+#     shape, drifted `result_model`, or a genuinely unreached verdict —
+#     instead of the generic "no verdict was reached". Both arms are captured
+#     verbatim at tests/fixtures/omn16961/. The diagnose step is fixed the
+#     same way: a diagnostic that reads the receipt differently from the
+#     reader it is diagnosing cannot diagnose that reader.
 #
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 3
-  patch: 1
-node_version: "1.3.1"
+  patch: 2
+node_version: "1.3.2"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -168,7 +205,7 @@ error_handling:
       retry_strategy: "none"
     - name: "DOD_VERIFY_NONZERO_EXIT"
       description: >
-        `onex skill dod_verify <ticket>` exited non-zero AND printed no usable verdict (no result.terminal_payload.total_checks) — fail closed, never flip. A non-zero exit ALONE is not this failure: the CLI exits 1 on every genuine evidence gap while still printing a complete ModelSkillResult, and that case is a gap, not an error (OMN-16736).
+        `onex skill dod_verify <ticket>` exited non-zero AND printed no usable verdict (no `total_checks` in the receipt arm its own `result_model` declares — OMN-16961) — fail closed, never flip. A non-zero exit ALONE is not this failure: the CLI exits 1 on every genuine evidence gap while still printing a complete ModelSkillResult, and that case is a gap, not an error (OMN-16736).
 
       recoverable: true
       retry_strategy: "none"
@@ -186,7 +223,7 @@ error_handling:
       retry_strategy: "none"
     - name: "DOD_VERIFY_PROOF_CLASS_UNREPORTED"
       description: >
-        The verdict carried no `result.terminal_payload.behavior_proving_count` — the verifier predates OMN-15911 and cannot say whether any green check proved behavior. Fails closed as ERROR_VERIFY_UNPARSEABLE rather than inferring a value: reading the absence as "zero behavior proof" would post a Linear comment stating a finding the run never made, and reading it as satisfied would flip on exactly the arithmetic the guard exists to stop.
+        The verdict carried no `behavior_proving_count` — the verifier predates OMN-15911 and cannot say whether any green check proved behavior. Fails closed as ERROR_VERIFY_UNPARSEABLE rather than inferring a value: reading the absence as "zero behavior proof" would post a Linear comment stating a finding the run never made, and reading it as satisfied would flip on exactly the arithmetic the guard exists to stop.
 
       recoverable: true
       retry_strategy: "none"

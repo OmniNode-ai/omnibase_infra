@@ -1150,20 +1150,47 @@ jobs:
               print(raw[:2000])
               raise SystemExit(0)
 
-          # `onex skill dod_verify` emits a ModelSkillResult envelope whose
-          # `result` is the WORKFLOW result; the ModelDodVerifyState the
-          # verdict actually lives in is nested one level deeper under
-          # `terminal_payload`. Reading `result` directly yields a dict with
-          # none of the verdict keys, which renders as an all-None row that
-          # looks like dod_verify produced nothing — the first run of this
-          # diagnostic did exactly that. Fall back to `result` itself so a
-          # future envelope change degrades to a visible mismatch rather than
-          # a silent one.
+          # `onex skill dod_verify` emits ONE of TWO ModelSkillResult arms, and
+          # `receipt_mode` picks between them on the run's own outcome:
+          #   ModelDodVerifyState        -> `result` IS the verdict, flat
+          #                                 (success-like runs; a `verified`
+          #                                 verdict is always this one)
+          #   ModelReceiptRuntimeSummary -> the verdict is nested at
+          #                                 `result.terminal_payload`
+          # `result_model` is the receipt's own declared type tag, so this
+          # dispatches on it and refuses anything else.
+          #
+          # OMN-16961: a prior revision read `terminal_payload or envelope`.
+          # That fallback silently absorbed BOTH arms, which is precisely why
+          # this diagnostic printed clean verdicts for the same tickets the
+          # sweep — which hardcoded the nested arm — scored
+          # `error_verify_unparseable`. The two steps must read the receipt
+          # the same way or the diagnostic cannot diagnose the reader.
+          SUMMARY_MODEL = (
+              "omnibase_infra.cli.model_receipt_runtime_summary."
+              "ModelReceiptRuntimeSummary"
+          )
+          STATE_MODEL = (
+              "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state."
+              "ModelDodVerifyState"
+          )
           envelope = payload.get("result") or {}
-          result = envelope.get("terminal_payload") or envelope
+          result_model = payload.get("result_model")
+          if result_model == SUMMARY_MODEL:
+              result = envelope.get("terminal_payload") or {}
+          elif result_model == STATE_MODEL:
+              result = envelope
+          else:
+              print(
+                  f"  (unrecognised dod_verify result_model {result_model!r} — "
+                  f"top-level keys: {sorted(payload)}; result keys: "
+                  f"{sorted(envelope)})"
+              )
+              result = {}
+          print(f"  receipt_arm={result_model}")
           if "status" not in result:
               print(
-                  "  (unrecognised dod_verify envelope — top-level keys: "
+                  "  (no verdict in the declared arm — top-level keys: "
                   f"{sorted(payload)}; result keys: {sorted(envelope)})"
               )
           # OMN-16821: non_probative and behavior_proving are printed because
