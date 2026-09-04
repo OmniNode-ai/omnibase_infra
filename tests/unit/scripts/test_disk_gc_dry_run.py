@@ -36,8 +36,35 @@ def _make_shim(bin_dir: Path, name: str, calllog: Path) -> None:
     shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _make_df_shim(bin_dir: Path, *, avail_gb: int) -> None:
+    """Create a `df` shim reporting an exact free-space figure, in 1 KiB blocks.
+
+    OMN-17872 made free space the halt criterion, so a test that wants to force a
+    breach shims the MEASUREMENT rather than passing a throwaway threshold. The
+    thresholds themselves are declared in scripts/disk-watermark-thresholds.json
+    and are deliberately not settable per invocation.
+    """
+    total_kb = 1024 * 1024 * 1024  # 1 TiB
+    avail_kb = avail_gb * 1024 * 1024
+    used_kb = total_kb - avail_kb
+    used_pct = round(used_kb * 100 / total_kb)
+    shim = bin_dir / "df"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "cat <<'POSIXEOF'\n"
+        "Filesystem     1024-blocks      Used Available Capacity Mounted on\n"
+        f"/dev/disk1   {total_kb}  {used_kb}  {avail_kb}  {used_pct}% /\n"
+        "POSIXEOF\n"
+    )
+    shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
 def _run(
-    script: str, args: list[str], tmp_path: Path
+    script: str,
+    args: list[str],
+    tmp_path: Path,
+    *,
+    df_avail_gb: int | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -45,6 +72,8 @@ def _run(
     calllog.write_text("")
     for tool in ("docker", "git", "rpk"):
         _make_shim(bin_dir, tool, calllog)
+    if df_avail_gb is not None:
+        _make_df_shim(bin_dir, avail_gb=df_avail_gb)
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
@@ -75,14 +104,16 @@ class TestGcDryRunSafety:
             )
 
     def test_watermark_dry_run_does_not_produce_to_bus(self, tmp_path: Path) -> None:
-        # Force a breach against a tiny mount-independent threshold so the event
-        # path runs, but --dry-run must NOT call `rpk ... produce`.
+        # Force a breach by shimming the MEASUREMENT (1 GiB free, under the
+        # declared 50 GiB floor) so the event path runs, but --dry-run must NOT
+        # call `rpk ... produce`.
         proc, calls = _run(
             "disk-watermark-check.sh",
-            ["--mount", "/", "--warn", "0", "--crit", "0", "--dry-run"],
+            ["--mount", "/", "--dry-run"],
             tmp_path,
+            df_avail_gb=1,
         )
-        # Breach with crit=0 → exit 20, but dry-run means no publish.
+        # Below the free-space floor → exit 20, but dry-run means no publish.
         assert proc.returncode == 20, proc.stderr
         assert "produce" not in calls, f"dry-run published to bus:\n{calls}"
         assert '"severity": "critical"' in proc.stdout
@@ -94,21 +125,23 @@ class TestGcDryRunSafety:
         # the script must NOT fall back to a default broker and must NOT call produce.
         proc, calls = _run(
             "disk-watermark-check.sh",
-            ["--mount", "/", "--warn", "0", "--crit", "0"],
+            ["--mount", "/"],
             tmp_path,
+            df_avail_gb=1,
         )
         assert proc.returncode == 20, proc.stderr
         assert "produce" not in calls, f"published with no broker configured:\n{calls}"
 
     def test_watermark_under_threshold_is_quiet(self, tmp_path: Path) -> None:
+        # 900 GiB free on a 1 TiB volume: above both floors, 12% used, so quiet.
         proc, calls = _run(
             "disk-watermark-check.sh",
-            ["--mount", "/", "--warn", "100", "--crit", "100"],
+            ["--mount", "/"],
             tmp_path,
+            df_avail_gb=900,
         )
-        # warn=100 can only breach at exactly 100%; on a normal test host it stays quiet.
-        if proc.returncode == 0:
-            assert "produce" not in calls
+        assert proc.returncode == 0, proc.stderr
+        assert "produce" not in calls
 
     def test_worktree_gc_default_dry_run_passes_no_execute(
         self, tmp_path: Path

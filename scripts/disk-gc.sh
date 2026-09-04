@@ -196,13 +196,25 @@ log "Done. df after:"
 DF_OUT="$(df -h /data 2>/dev/null || df -h /)"
 echo "$DF_OUT" | tee -a "$LOG_FILE" >&2
 
-# OMN-15804: surface the watermark threshold (shared with disk-watermark-check.sh,
-# no new alerting path — this is a log-line-only warning) directly in the GC
-# summary so a breach is visible without cross-referencing a second log file.
+# OMN-15804: surface the watermark threshold directly in the GC summary so a
+# breach is visible without cross-referencing a second log file. No new alerting
+# path — this is a log-line-only warning.
+#
+# OMN-17872: the threshold is READ from the guard's own declaration rather than
+# re-typed here. It used to be a literal `WATERMARK_WARN_PCT=85` under a comment
+# claiming it was "shared with disk-watermark-check.sh" — it was not shared, it
+# was copied, and the copy would have silently outlived any change to the real
+# one. A failed read skips the line and says so; it never falls back to a
+# guessed number, and it never aborts the GC run over a log line.
 DF_USED_PCT="$(echo "$DF_OUT" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
-WATERMARK_WARN_PCT=85
-if [[ "$DF_USED_PCT" =~ ^[0-9]+$ ]] && [[ "$DF_USED_PCT" -ge "$WATERMARK_WARN_PCT" ]]; then
-  log "WARNING: disk usage ${DF_USED_PCT}% >= watermark ${WATERMARK_WARN_PCT}% — see disk-watermark-check.sh"
+WATERMARK_THRESHOLDS_FILE="${SCRIPT_DIR}/disk-watermark-thresholds.json"
+if WATERMARK_TRIPLE="$(python3 "${SCRIPT_DIR}/disk_watermark_thresholds.py" "$WATERMARK_THRESHOLDS_FILE" 2>&1)"; then
+  WATERMARK_WARN_PCT="$(echo "$WATERMARK_TRIPLE" | awk '{print $3}')"
+  if [[ "$DF_USED_PCT" =~ ^[0-9]+$ ]] && [[ "$DF_USED_PCT" -ge "$WATERMARK_WARN_PCT" ]]; then
+    log "WARNING: disk usage ${DF_USED_PCT}% >= advisory watermark ${WATERMARK_WARN_PCT}% — see disk-watermark-check.sh (the HALT there is a free-space floor, not this percentage)"
+  fi
+else
+  log "NOTE: could not read ${WATERMARK_THRESHOLDS_FILE} (${WATERMARK_TRIPLE}); skipping the advisory watermark line"
 fi
 
 exit 0
