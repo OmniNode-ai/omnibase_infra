@@ -558,7 +558,10 @@ EOF
 is_source_package_path() {
     local candidate="$1" resolved project_root
     [[ -d "${candidate}" ]] || return 1
-    resolved=$(cd "${candidate}" 2>/dev/null && pwd) || return 1
+    # Resolve the physical path before checking forbidden roots. Plain `pwd`
+    # may preserve a logical symlink path on some shells/platforms, allowing a
+    # link outside a venv or installed package tree to evade the guard.
+    resolved=$(cd -P "${candidate}" 2>/dev/null && pwd -P) || return 1
     case "${resolved}" in
         */site-packages|*/site-packages/*|*/dist-packages|*/dist-packages/*|*/.venv/*|*/venv/*)
             return 1

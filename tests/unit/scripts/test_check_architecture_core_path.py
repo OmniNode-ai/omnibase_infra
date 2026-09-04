@@ -110,6 +110,31 @@ def test_invalid_environment_override_does_not_fall_back(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "forbidden_root", ["site-packages", "dist-packages", ".venv", "venv"]
+)
+def test_symlinked_forbidden_source_root_is_rejected(
+    tmp_path: Path, forbidden_root: str
+) -> None:
+    """A logical source-looking link cannot hide an installed/venv target."""
+    physical = tmp_path / forbidden_root / "src" / "omnibase_core"
+    physical.mkdir(parents=True)
+    (physical / "__init__.py").write_text("__all__ = []\n")
+    (tmp_path / forbidden_root / "pyproject.toml").write_text(
+        "[project]\nname = 'omnibase-core'\nversion = '0.0.0'\n"
+    )
+    logical_parent = tmp_path / "linked" / "src"
+    logical_parent.mkdir(parents=True)
+    logical = logical_parent / "omnibase_core"
+    logical.symlink_to(physical, target_is_directory=True)
+
+    result = _run(logical)
+
+    assert result.returncode == 2
+    assert "source package" in result.stderr
+
+
+@pytest.mark.unit
 def test_no_argument_resolution_uses_core_sibling_of_linked_worktree(
     tmp_path: Path,
 ) -> None:
