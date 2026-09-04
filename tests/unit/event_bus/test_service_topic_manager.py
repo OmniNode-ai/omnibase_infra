@@ -22,8 +22,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.event_bus.enum_topic_readiness_failure_reason import (
+    EnumTopicReadinessFailureReason,
+)
 from omnibase_infra.event_bus.enum_topic_readiness_status import (
     EnumTopicReadinessStatus,
+)
+from omnibase_infra.event_bus.model_topic_readiness_failure import (
+    ModelTopicReadinessFailure,
 )
 from omnibase_infra.event_bus.model_topic_set_readiness import (
     ModelTopicSetReadiness,
@@ -403,9 +409,10 @@ class TestTopicProvisioner:
         monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
         manager = _make_provisioner(contracts_root)
 
-        async def _ready(
-            topics: list[str], **_kwargs: object
-        ) -> ModelTopicSetReadiness:
+        confirmation_kwargs: dict[str, object] = {}
+
+        async def _ready(topics: list[str], **kwargs: object) -> ModelTopicSetReadiness:
+            confirmation_kwargs.update(kwargs)
             return ModelTopicSetReadiness(
                 topics=tuple(topics),
                 status=EnumTopicReadinessStatus.READY,
@@ -448,6 +455,12 @@ class TestTopicProvisioner:
             replication_factor=1,
             topic_configs={},
         )
+        expected_specs = confirmation_kwargs["expected_specs"]
+        assert isinstance(expected_specs, dict)
+        expected_spec = expected_specs["test.topic"]
+        assert isinstance(expected_spec, ModelTopicSpec)
+        assert expected_spec.partitions == 1
+        assert expected_spec.replication_factor == 1
 
     async def test_ensure_single_topic_does_not_cache_unconfirmed_create(
         self,
@@ -500,13 +513,17 @@ class TestTopicProvisioner:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The CreateTopics race also cannot turn a local cache into broker proof."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
         manager = _make_provisioner(contracts_root)
         manager._existing_topics = frozenset()
         already_exists = type("TopicAlreadyExistsError", (Exception,), {})
 
+        confirmation_kwargs: dict[str, object] = {}
+
         async def _unavailable(
-            topics: list[str], **_kwargs: object
+            topics: list[str], **kwargs: object
         ) -> ModelTopicSetReadiness:
+            confirmation_kwargs.update(kwargs)
             return ModelTopicSetReadiness(
                 topics=tuple(topics),
                 status=EnumTopicReadinessStatus.UNAVAILABLE,
@@ -534,6 +551,134 @@ class TestTopicProvisioner:
             result = await manager.ensure_topic_exists("test.topic")
 
         assert result is False
+        assert "test.topic" not in manager._created_specs
+        assert "test.topic" not in manager._existing_topics
+        expected_specs = confirmation_kwargs["expected_specs"]
+        assert isinstance(expected_specs, dict)
+        expected_spec = expected_specs["test.topic"]
+        assert isinstance(expected_spec, ModelTopicSpec)
+        assert expected_spec.partitions == 1
+        assert expected_spec.replication_factor == 1
+
+    async def test_ensure_single_topic_already_exists_accepts_matching_resolved_spec_without_caching(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A create race accepts only matching resolved metadata and stays uncreated."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        manager = _make_provisioner(contracts_root)
+        manager._existing_topics = frozenset()
+        already_exists = type("TopicAlreadyExistsError", (Exception,), {})
+        confirmation_kwargs: dict[str, object] = {}
+
+        async def _matching_metadata(
+            topics: list[str], **kwargs: object
+        ) -> ModelTopicSetReadiness:
+            confirmation_kwargs.update(kwargs)
+            return ModelTopicSetReadiness(
+                topics=tuple(topics),
+                status=EnumTopicReadinessStatus.READY,
+                ready_topics=tuple(topics),
+            )
+
+        monkeypatch.setattr(manager, "confirm_topics_ready", _matching_metadata)
+        mock_admin_cls = MagicMock()
+        mock_admin_instance = AsyncMock()
+        mock_admin_instance.start = AsyncMock()
+        mock_admin_instance.close = AsyncMock()
+        mock_admin_instance.create_topics = AsyncMock(side_effect=already_exists())
+        mock_admin_cls.return_value = mock_admin_instance
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=mock_admin_cls,
+                    NewTopic=MagicMock(),
+                ),
+                "aiokafka.errors": MagicMock(TopicAlreadyExistsError=already_exists),
+            },
+        ):
+            result = await manager.ensure_topic_exists("test.topic")
+
+        assert result is True
+        expected_specs = confirmation_kwargs["expected_specs"]
+        assert isinstance(expected_specs, dict)
+        expected_spec = expected_specs["test.topic"]
+        assert isinstance(expected_spec, ModelTopicSpec)
+        assert expected_spec.partitions == 1
+        assert expected_spec.replication_factor == 1
+        assert manager._created_specs == {}
+        assert manager._existing_topics == frozenset({"test.topic"})
+
+    async def test_ensure_single_topic_race_rechecks_exact_spec_without_caching(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An unconfirmed create followed by AlreadyExists remains spec-gated."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+        manager = _make_provisioner(contracts_root)
+        manager._existing_topics = frozenset()
+        already_exists = type("TopicAlreadyExistsError", (Exception,), {})
+        confirmation_specs: list[ModelTopicSpec] = []
+
+        async def _partition_mismatch(
+            topics: list[str], **kwargs: object
+        ) -> ModelTopicSetReadiness:
+            expected_specs = kwargs["expected_specs"]
+            assert isinstance(expected_specs, dict)
+            expected_spec = expected_specs["test.topic"]
+            assert isinstance(expected_spec, ModelTopicSpec)
+            confirmation_specs.append(expected_spec)
+            return ModelTopicSetReadiness(
+                topics=tuple(topics),
+                status=EnumTopicReadinessStatus.NOT_READY,
+                failures=(
+                    ModelTopicReadinessFailure(
+                        topic="test.topic",
+                        reason=EnumTopicReadinessFailureReason.PARTITION_MISMATCH,
+                        detail="broker reported six partitions for expected one",
+                    ),
+                    ModelTopicReadinessFailure(
+                        topic="test.topic",
+                        reason=EnumTopicReadinessFailureReason.REPLICATION_MISMATCH,
+                        detail="broker reported two replicas for expected one",
+                    ),
+                ),
+            )
+
+        monkeypatch.setattr(manager, "confirm_topics_ready", _partition_mismatch)
+        mock_admin_cls = MagicMock()
+        mock_admin_instance = AsyncMock()
+        mock_admin_instance.start = AsyncMock()
+        mock_admin_instance.close = AsyncMock()
+        mock_admin_instance.create_topics = AsyncMock(
+            side_effect=[None, already_exists()]
+        )
+        mock_admin_cls.return_value = mock_admin_instance
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=mock_admin_cls,
+                    NewTopic=MagicMock(),
+                ),
+                "aiokafka.errors": MagicMock(TopicAlreadyExistsError=already_exists),
+            },
+        ):
+            first = await manager.ensure_topic_exists("test.topic")
+            second = await manager.ensure_topic_exists("test.topic")
+
+        assert first is False
+        assert second is False
+        assert len(confirmation_specs) == 2
+        assert all(spec.partitions == 1 for spec in confirmation_specs)
+        assert all(spec.replication_factor == 1 for spec in confirmation_specs)
         assert "test.topic" not in manager._created_specs
         assert "test.topic" not in manager._existing_topics
 

@@ -102,6 +102,9 @@ import pytest
 from aiokafka.admin import NewTopic
 
 from omnibase_infra.errors import TopicReplicationPolicyError
+from omnibase_infra.event_bus.enum_topic_readiness_failure_reason import (
+    EnumTopicReadinessFailureReason,
+)
 from omnibase_infra.event_bus.enum_topic_readiness_status import (
     EnumTopicReadinessStatus,
 )
@@ -114,6 +117,7 @@ from omnibase_infra.topics.model_topic_provisioning_policy import (
     MANAGED_MINIMUM_REPLICATION_FACTOR,
     ModelTopicProvisioningPolicy,
 )
+from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
 # ``asyncio_mode = "auto"`` (pyproject) marks the async cases; an explicit
 # module-level asyncio mark would warn on the synchronous guards below.
@@ -2133,9 +2137,25 @@ class TestSnapshotConfigCreationPath:
                 topic_name=TOPIC,
                 config=self._snapshot_config(replication_factor=2, partition_count=3),  # type: ignore[arg-type]
             )
+            readiness = await provisioner.confirm_topics_ready(
+                [TOPIC],
+                expected_specs={
+                    TOPIC: ModelTopicSpec(
+                        suffix=TOPIC,
+                        partitions=3,
+                        replication_factor=2,
+                    )
+                },
+                config=ModelTopicReadinessConfig(max_attempts=1),
+            )
 
         assert created is False
         assert TOPIC not in provisioner._created_specs
+        assert not readiness.is_ready
+        assert any(
+            failure.reason is EnumTopicReadinessFailureReason.PARTITION_MISMATCH
+            for failure in readiness.failures
+        ), f"expected a partition mismatch against the created spec: {readiness}"
 
 
 class TestDriftIsReportedAgainstTheResolvedSpec:

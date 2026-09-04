@@ -1053,7 +1053,11 @@ class TopicProvisioner:
 
         except TopicAlreadyExistsError:
             readiness = await self.confirm_topics_ready(
-                [topic_name], correlation_id=correlation_id
+                [topic_name],
+                expected_specs={topic_name: created_spec}
+                if created_spec is not None
+                else None,
+                correlation_id=correlation_id,
             )
             if readiness.is_ready:
                 self._note_topic_created(topic_name)
