@@ -1,0 +1,24 @@
+# OMN-17871: inert example only; not an activation or deployment record.
+schema_version: rsd.model-artifact-provenance.v1
+execute_enabled: false
+approval_status: unapproved
+base_model_id: Qwen/Qwen3.8-27B
+base_model_revision_sha: 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
+artifact_id: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
+artifact_revision_sha: 4b8533275c5e5e267838c0312737f5a4323c01d0
+artifact_manifest_digest_sha256: null
+artifact_manifest_algorithm: null
+quantization: modelopt_nvfp4
+architecture: Qwen3_5ForConditionalGeneration
+runtime_implementation: vllm
+runtime_version: 0.21.0
+required_hardware_capability: nvidia.sm120
+served_model_id: Qwen/Qwen3.8-27B
+issued_at: "2026-09-04T19:55:00Z"
+expires_at: "2026-09-04T20:00:00Z"
+signer_capability_ref: capability://rsd/model-artifact-provenance/signer
+signer_key_id: 00000000-0000-4000-8000-000000000003
+signer_public_key_fingerprint_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+signature_domain: omninode-rsd.model-artifact-provenance.v1
+# Sentinel signature: an operator must issue a real signature before approval.
+signature_base64: N9Eiaa5K2V9Ay9uS09n8Gh-KmtdsiOjle1bypnfa_CEj1y-zZkvMulCu5ZlHHLSZ364R_qeoX9pejwGHI_ijCw==
