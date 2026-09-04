@@ -27,6 +27,7 @@ cannot silently revert.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass, field
 
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
@@ -74,7 +75,8 @@ _SEMANTIC_PROBE_MARKER = "onex-container-healthcheck"
 # a gate whose message asks for something it does not check is advice, not a
 # gate.
 _DEGRADED_POLICY_FLAG = "--degraded-policy"
-_VALID_DEGRADED_POLICIES = ("fail", "warn")
+_VALID_DEGRADED_POLICIES = ("fail",)
+_URL_FLAG = "--url"
 
 
 def _command_text(healthcheck: HealthCheck) -> str:
@@ -85,6 +87,29 @@ def _command_text(healthcheck: HealthCheck) -> str:
     """
     test = healthcheck.test
     return test if isinstance(test, str) else " ".join(test)
+
+
+def _command_tokens(healthcheck: HealthCheck) -> list[str]:
+    test = healthcheck.test
+    if isinstance(test, str):
+        return shlex.split(test)
+    return list(test)
+
+
+def _last_option_value(tokens: list[str], flag: str) -> str | None:
+    for index in range(len(tokens) - 1, -1, -1):
+        token = tokens[index]
+        if token.startswith(f"{flag}="):
+            return token.split("=", 1)[1]
+        if token == flag and index + 1 < len(tokens):
+            return tokens[index + 1]
+    return None
+
+
+def _expected_health_url(manifest: CatalogManifest) -> str | None:
+    if manifest.ports is None:
+        return f"http://localhost:{RUNTIME_HEALTH_PORT}/health"  # url-authority-ok: container self-probe loopback URL rendered into docker healthcheck argv
+    return f"http://localhost:{manifest.ports.internal}/health"  # url-authority-ok: manifest-declared container self-probe loopback URL rendered into docker healthcheck argv
 
 
 def probes_runtime_health(manifest: CatalogManifest) -> bool:
@@ -138,6 +163,25 @@ class SemanticProbeViolation:
                 f"decision and must be declared, not inherited from whatever "
                 f"default the script carries. Command: {self.command!r}"
             )
+        if self.reason == "policy_invalid":
+            return (
+                f"catalog service '{self.service}' invokes "
+                f"'{_SEMANTIC_PROBE_MARKER}' with a degraded policy other than "
+                f"'fail'. A catalog runtime healthcheck must fail on DEGRADED "
+                f"runtime verdicts. Command: {self.command!r}"
+            )
+        if self.reason == "url_missing":
+            return (
+                f"catalog service '{self.service}' invokes "
+                f"'{_SEMANTIC_PROBE_MARKER}' but declares no explicit {_URL_FLAG} "
+                f"matching its manifest health port. Command: {self.command!r}"
+            )
+        if self.reason == "url_mismatch":
+            return (
+                f"catalog service '{self.service}' invokes "
+                f"'{_SEMANTIC_PROBE_MARKER}' with a {_URL_FLAG} that does not "
+                f"match its manifest health port. Command: {self.command!r}"
+            )
         return (
             f"catalog service '{self.service}' is on the '{RUNTIME_LAYER.value}' layer and "
             f"probes :{RUNTIME_HEALTH_PORT}, but its healthcheck is "
@@ -147,8 +191,8 @@ class SemanticProbeViolation:
             f"catch — and because a compose-level healthcheck OVERRIDES the "
             f"image-level HEALTHCHECK, this entry replaces the deep probe "
             f"Dockerfile.runtime already installs. Declare the argv form: "
-            f"[python, /usr/local/bin/{_SEMANTIC_PROBE_MARKER}, --degraded-policy, "
-            f"<fail|warn>]."
+            f"[python, /usr/local/bin/{_SEMANTIC_PROBE_MARKER}, --url, "
+            f"<health-url>, --degraded-policy, fail]."
         )
 
 
@@ -187,21 +231,45 @@ def validate_runtime_semantic_probe(
         if _SEMANTIC_PROBE_MARKER not in command:
             violations.append(SemanticProbeViolation(service=name, command=command))
             continue
-        # The marker alone is not enough: the message prescribes an explicit
-        # policy, so the gate checks for one (finding fp=c27ee7e18877).
-        tokens = command.split()
-        if _DEGRADED_POLICY_FLAG not in tokens:
+        # The marker alone is not enough: the command must spell out both the
+        # health endpoint and the degraded policy that make the semantic probe
+        # enforceable from docker inspect output.
+        tokens = _command_tokens(manifest.healthcheck)
+        expected_url = _expected_health_url(manifest)
+        if expected_url is None:
+            violations.append(
+                SemanticProbeViolation(
+                    service=name, command=command, reason="url_missing"
+                )
+            )
+            continue
+        actual_url = _last_option_value(tokens, _URL_FLAG)
+        if actual_url is None:
+            violations.append(
+                SemanticProbeViolation(
+                    service=name, command=command, reason="url_missing"
+                )
+            )
+            continue
+        if actual_url != expected_url:
+            violations.append(
+                SemanticProbeViolation(
+                    service=name, command=command, reason="url_mismatch"
+                )
+            )
+            continue
+        policy = _last_option_value(tokens, _DEGRADED_POLICY_FLAG)
+        if policy is None:
             violations.append(
                 SemanticProbeViolation(
                     service=name, command=command, reason="policy_missing"
                 )
             )
             continue
-        policy = tokens[tokens.index(_DEGRADED_POLICY_FLAG) + 1 :][:1]
-        if not policy or policy[0] not in _VALID_DEGRADED_POLICIES:
+        if policy not in _VALID_DEGRADED_POLICIES:
             violations.append(
                 SemanticProbeViolation(
-                    service=name, command=command, reason="policy_missing"
+                    service=name, command=command, reason="policy_invalid"
                 )
             )
     return SemanticProbeValidationResult(ok=len(violations) == 0, violations=violations)

@@ -81,6 +81,8 @@ healthcheck:
   test:
     - python
     - /usr/local/bin/onex-container-healthcheck
+    - --url
+    - http://localhost:8085/health
     - --degraded-policy
     - fail
   interval_s: 45
@@ -137,4 +139,4 @@ labels:
   com.omninode.service: runtime-effects
   com.omninode.layer: runtime
   com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
-  autoheal: 'true'
+  autoheal: 'false'

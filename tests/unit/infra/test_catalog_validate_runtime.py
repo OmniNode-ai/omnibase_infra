@@ -110,3 +110,37 @@ def test_validate_runtime_detects_key_in_both_hardcoded_and_required(
     err = capsys.readouterr().err
     assert "SHARED_KEY" in err
     assert "hardcoded_env" in err and "required_env" in err
+
+
+@pytest.mark.unit
+def test_validate_runtime_reports_semantic_probe_violations(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI must fail closed when the semantic healthcheck ratchet fails."""
+    services_dir = tmp_path / "services"
+    services_dir.mkdir()
+    (services_dir / "runtime-svc.yaml").write_text(
+        textwrap.dedent("""\
+            name: runtime-svc
+            description: runtime service with shallow healthcheck
+            image: runtime:latest
+            layer: runtime
+            ports:
+              external: 8085
+              internal: 8085
+            healthcheck:
+              test: curl -sf http://localhost:8085/health
+        """)
+    )
+    (tmp_path / "bundles.yaml").write_text(
+        yaml.dump(
+            {"runtime-bundle": {"description": "test", "services": ["runtime-svc"]}}
+        )
+    )
+
+    with patch.object(catalog_cli, "_CATALOG_DIR", str(tmp_path)):
+        rc = cmd_validate_runtime(["runtime-bundle"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Runtime catalog validation FAILED" in err
+    assert "onex-container-healthcheck" in err

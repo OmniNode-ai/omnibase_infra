@@ -22,7 +22,11 @@ import pytest
 import yaml
 
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
-from omnibase_infra.docker.catalog.manifest_schema import CatalogManifest, HealthCheck
+from omnibase_infra.docker.catalog.manifest_schema import (
+    CatalogManifest,
+    HealthCheck,
+    PortMapping,
+)
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from omnibase_infra.docker.catalog.validator_healthcheck_semantic_probe import (
     probes_runtime_health,
@@ -35,6 +39,8 @@ _SHALLOW_PROBE = "curl -sf http://localhost:8085/health"
 _SEMANTIC_PROBE = [
     "python",
     "/usr/local/bin/onex-container-healthcheck",
+    "--url",
+    "http://localhost:8085/health",
     "--degraded-policy",
     "fail",
 ]
@@ -69,7 +75,7 @@ def _manifest(
         required_env=[],
         hardcoded_env={},
         operational_defaults={},
-        ports=None,
+        ports=PortMapping(external=8085, internal=8085),
         healthcheck=HealthCheck(test=test),
         volumes=[],
         depends_on=[],
@@ -109,6 +115,36 @@ def test_coverage_is_exactly_the_runtime_family() -> None:
         f"unexpected={sorted(covered - _EXPECTED_COVERED)}. A service leaving "
         f"coverage means this gate stopped checking it, which is silent."
     )
+
+
+@pytest.mark.unit
+def test_fail_on_degraded_catalog_probes_do_not_autoheal() -> None:
+    """A degraded runtime should stay observable instead of being restarted."""
+    manifests = _all_manifests()
+    autohealed = {
+        name
+        for name in _EXPECTED_COVERED
+        if manifests[name].labels.get("autoheal") == "true"
+    }
+    assert not autohealed, (
+        "strict semantic probes must not be paired with autoheal=true: "
+        f"{sorted(autohealed)}"
+    )
+    assert {
+        name: manifests[name].labels.get("autoheal") for name in _EXPECTED_COVERED
+    } == dict.fromkeys(_EXPECTED_COVERED, "false")
+
+
+@pytest.mark.unit
+def test_autoheal_policy_is_declared_as_a_label_not_top_level_yaml() -> None:
+    """Autoheal reads container labels; a top-level YAML key is inert."""
+    misplaced = []
+    for name in _EXPECTED_COVERED:
+        raw = yaml.safe_load(Path(CATALOG_DIR, "services", f"{name}.yaml").read_text())
+        if "autoheal" in raw:
+            misplaced.append(name)
+        assert raw["labels"]["autoheal"] == "false"
+    assert not misplaced, f"autoheal must stay under labels: {misplaced}"
 
 
 @pytest.mark.unit
@@ -237,7 +273,12 @@ def test_the_declared_policy_is_enforced_not_merely_prescribed() -> None:
     no_policy = _manifest(
         name="s",
         layer=EnumInfraLayer.RUNTIME,
-        test=["python", "/usr/local/bin/onex-container-healthcheck"],
+        test=[
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--url",
+            "http://localhost:8085/health",
+        ],
     )
     result = validate_runtime_semantic_probe({"s": no_policy})
     assert not result.ok
@@ -249,24 +290,97 @@ def test_the_declared_policy_is_enforced_not_merely_prescribed() -> None:
         test=[
             "python",
             "/usr/local/bin/onex-container-healthcheck",
+            "--url",
+            "http://localhost:8085/health",
             "--degraded-policy",
             "sometimes",
         ],
     )
     assert not validate_runtime_semantic_probe({"s": bogus}).ok
 
-    for policy in ("fail", "warn"):
-        good = _manifest(
-            name="s",
-            layer=EnumInfraLayer.RUNTIME,
-            test=[
-                "python",
-                "/usr/local/bin/onex-container-healthcheck",
-                "--degraded-policy",
-                policy,
-            ],
-        )
-        assert validate_runtime_semantic_probe({"s": good}).ok, policy
+    warn = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test=[
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--url",
+            "http://localhost:8085/health",
+            "--degraded-policy",
+            "warn",
+        ],
+    )
+    warn_result = validate_runtime_semantic_probe({"s": warn})
+    assert not warn_result.ok
+    assert warn_result.violations[0].reason == "policy_invalid"
+
+    good = _manifest(name="s", layer=EnumInfraLayer.RUNTIME, test=list(_SEMANTIC_PROBE))
+    assert validate_runtime_semantic_probe({"s": good}).ok
+
+
+@pytest.mark.unit
+def test_policy_parser_accepts_equals_form_and_last_value_wins() -> None:
+    """Mirror argparse: both flag forms are valid and a later option overrides."""
+    equals_form = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test=[
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--url=http://localhost:8085/health",
+            "--degraded-policy=fail",
+        ],
+    )
+    assert validate_runtime_semantic_probe({"s": equals_form}).ok
+
+    overridden = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test=[
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--url",
+            "http://localhost:8085/health",
+            "--degraded-policy",
+            "warn",
+            "--degraded-policy=fail",
+        ],
+    )
+    assert validate_runtime_semantic_probe({"s": overridden}).ok
+
+
+@pytest.mark.unit
+def test_semantic_probe_url_must_match_manifest_internal_port() -> None:
+    """The semantic argv must name the health endpoint it is validating."""
+    missing = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test=[
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--degraded-policy",
+            "fail",
+        ],
+    )
+    missing_result = validate_runtime_semantic_probe({"s": missing})
+    assert not missing_result.ok
+    assert missing_result.violations[0].reason == "url_missing"
+
+    mismatch = _manifest(
+        name="s",
+        layer=EnumInfraLayer.RUNTIME,
+        test=[
+            "python",
+            "/usr/local/bin/onex-container-healthcheck",
+            "--url",
+            "http://localhost:18085/health",
+            "--degraded-policy",
+            "fail",
+        ],
+    )
+    mismatch_result = validate_runtime_semantic_probe({"s": mismatch})
+    assert not mismatch_result.ok
+    assert mismatch_result.violations[0].reason == "url_mismatch"
 
 
 @pytest.mark.unit
