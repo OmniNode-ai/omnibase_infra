@@ -32,13 +32,18 @@ def test_overlay_is_one_runner_and_inactive_by_default() -> None:
         env["MODEL_REVIEW_CAPABILITY_ACTIVE"] == "${MODEL_REVIEW_CAPABILITY_ACTIVE:-0}"
     )
     assert env["MODEL_REVIEW_CONFIG_ACTIVE"] == "${MODEL_REVIEW_CONFIG_ACTIVE:-0}"
+    assert env["RUNNER_GROUP"] == "${MODEL_REVIEW_RUNNER_GROUP:-omnibase-ci}"
     assert "MODEL_REVIEW_RUNNER_LABELS" in env["RUNNER_LABELS"]
     assert "self-hosted,omnibase-ci,linux,x64" in env["RUNNER_LABELS"]
-    assert "model-review-healthcheck.sh" in " ".join(service["volumes"])
+    volumes = " ".join(service["volumes"])
+    assert "model-review-healthcheck.sh" in volumes
+    assert "model-review-observation.json" in volumes
+    assert "model-review-observation}" not in volumes
     assert (
         "healthcheck.sh && /usr/local/bin/model-review-healthcheck.sh"
         in service["healthcheck"]["test"][1]
     )
+    assert "volumes" not in overlay
 
 
 def test_overlay_is_preserved_by_repair_and_deployment_sync() -> None:
@@ -54,6 +59,7 @@ def test_overlay_is_preserved_by_repair_and_deployment_sync() -> None:
         "docker/compose-overrides.list",
         "docker/docker-compose.model-review-canary.yml",
         "docker/runners/model-review-healthcheck.sh",
+        "docker/runners/model-review-observation.json",
     ):
         assert f'"{path}"' in deploy
     assert (
@@ -73,6 +79,7 @@ def test_missing_required_overlay_blocks_before_any_compose_recreate() -> None:
     )
     assert "REQUIRED_MODEL_REVIEW_OVERLAY" in monitor
     assert "REQUIRED_OVERRIDE_MISSING=true" in monitor
+    assert "required compose overrides list is missing" in monitor
     missing_check = monitor.index('if [[ "${REQUIRED_OVERRIDE_MISSING}" == true ]]')
     compose_config = monitor.index('docker compose "${COMPOSE_FILE_ARGS[@]}" config -q')
     assert missing_check < compose_config

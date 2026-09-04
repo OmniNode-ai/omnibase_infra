@@ -137,6 +137,7 @@ SYNC_PATHS=(
     "docker/runners/runner-monitor.sh"
     "docker/runners/healthcheck.sh"
     "docker/runners/model-review-healthcheck.sh"
+    "docker/runners/model-review-observation.json"
     # OMN-15142: docker/runners/Dockerfile does `COPY omni-curl
     # /usr/local/bin/omni-curl` -- both the built binary shim and its source
     # script must be synced or a rebuild against a fresh/empty deployment dir

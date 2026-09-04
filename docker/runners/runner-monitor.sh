@@ -95,7 +95,6 @@ RUNNER_FLEET_CONFIG_PATH="${RUNNER_FLEET_CONFIG_PATH:-$HOME/.omnibase/runners/co
 # required entry: a missing required overlay blocks all repair before compose
 # can recreate a runner.
 #
-# Absent list file => COMPOSE_FILE_ARGS is exactly the previous behaviour.
 COMPOSE_OVERRIDES_LIST="${COMPOSE_OVERRIDES_LIST:-${COMPOSE_DIR}/compose-overrides.list}"
 COMPOSE_FILE_ARGS=(-f "${COMPOSE_FILE}")
 COMPOSE_FILE_ARGS_STR="-f ${COMPOSE_FILE}"
@@ -120,6 +119,9 @@ if [[ -f "${COMPOSE_OVERRIDES_LIST}" ]]; then
             fi
         fi
     done < "${COMPOSE_OVERRIDES_LIST}"
+else
+    REQUIRED_OVERRIDE_MISSING=true
+    echo "[runner-monitor] $(date '+%H:%M:%S') ERROR: required compose overrides list is missing: ${COMPOSE_OVERRIDES_LIST}" >&2
 fi
 
 # Silent-wedge thresholds (OMN-13109). A fleet that is online + idle while jobs

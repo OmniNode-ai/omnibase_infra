@@ -74,6 +74,17 @@ def _write_exec(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _write_required_compose_overrides(home: Path) -> None:
+    compose_dir = home / ".omnibase" / "runners" / "docker"
+    compose_dir.mkdir(parents=True, exist_ok=True)
+    (compose_dir / "compose-overrides.list").write_text(
+        "docker-compose.model-review-canary.yml\n", encoding="utf-8"
+    )
+    (compose_dir / "docker-compose.model-review-canary.yml").write_text(
+        "services: {}\n", encoding="utf-8"
+    )
+
+
 def _write_fleet_config(path: Path) -> None:
     path.write_text(
         textwrap.dedent(
@@ -270,6 +281,7 @@ def _run_monitor(
     fleet_config = tmp_path / "runner_fleet.yaml"
     _write_fleet_config(fleet_config)
     call_log = tmp_path / "docker-calls.log"
+    _write_required_compose_overrides(tmp_path)
     _make_mock_bin(
         bindir, docker_status=docker_status, start_marker_dir=start_marker_dir
     )
