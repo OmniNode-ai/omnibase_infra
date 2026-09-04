@@ -151,14 +151,69 @@ class ModelDlqReplayEngineConfig(BaseModel):
         return stripped
 
 
+def _is_boundary_failure_terminal(original_value: str) -> bool:
+    """True when the DLQ'd record is itself a ``ModelBoundaryFailureTerminal``.
+
+    Reads the SAME field ``handler_wiring._is_boundary_failure_terminal_record``
+    reads — the envelope's ``payload_type`` — so the two guards on the two legs
+    of the loop cannot disagree about what a terminal is.
+
+    Anything unparseable is reported as "not a terminal": this predicate may add
+    a refusal, never withdraw eligibility from a record it cannot classify.
+    """
+    from omnibase_infra.runtime.boundary_failure_terminal import (
+        ModelBoundaryFailureTerminal,
+    )
+
+    try:
+        decoded = json.loads(original_value)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    if not isinstance(decoded, dict):
+        return False
+    return decoded.get("payload_type") == ModelBoundaryFailureTerminal.__name__
+
+
 def should_replay(
     message: ModelDlqMessage, config: ModelDlqReplayEngineConfig
 ) -> tuple[bool, str]:
-    """Eligibility predicate — relocated unchanged from scripts/dlq_replay.py.
+    """Eligibility predicate — relocated from scripts/dlq_replay.py.
 
-    Evaluation order: max-retry count, non-retryable error type, time-range
-    (orthogonal), then the type-specific filter. Returns (eligible, reason).
+    Evaluation order: boundary failure terminal, max-retry count, non-retryable
+    error type, time-range (orthogonal), then the type-specific filter. Returns
+    (eligible, reason).
+
+    THE TERMINAL CHECK COMES FIRST, AND IT IS PERMANENT (OMN-17895). Replay
+    exists to re-attempt work that might succeed on a second look. A boundary
+    failure terminal is not work — it is the runtime's own answer that some work
+    will never be attempted again. It carries no request payload, so every
+    consumer holding a dispatcher for its topic's ``event_type`` fails
+    ``model_validate`` on it deterministically; attempt 2 fails exactly as
+    attempt 1 did, and each attempt MULTIPLIES because every rejecting consumer
+    DLQs it independently.
+
+    Measured on the dev lane 2026-09-04: 11,328 of the 11,340 records on
+    ``onex.evt.omnimarket.swarm-fanout-completed.v1`` carried
+    ``x-replayed-by=node_dlq_replay_effect``. One burst bucketed by replay count
+    was 12 / 24 / 48 / 96 / 192 / 384 — exact doubling per round from two
+    rejecting consumers, sum 2^0..2^5 = 63x per terminal. The
+    ``max_replay_count`` cap bounded it; it did not prevent it. The identical
+    signature was live on ``onex.evt.omnimarket.redeploy-completed.v1`` and
+    ``onex.evt.omnibase-infra.runtime-manifest-published.v1`` in the same window,
+    so this is a property of the record class, not of one contract.
+
+    Refusal here routes the record to ``quarantine_topic`` on the caller's
+    existing non-replayable path (OMN-12619), so it stays durable and
+    reclassifiable rather than being dropped.
     """
+    if _is_boundary_failure_terminal(message.original_value):
+        return (
+            False,
+            "Boundary failure terminal: the record is an answer, not a request — "
+            "replaying it is deterministically undispatchable and amplifies once "
+            "per rejecting consumer (OMN-17895)",
+        )
+
     if message.retry_count >= config.max_replay_count:
         return (
             False,
