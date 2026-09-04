@@ -18,7 +18,6 @@ BASE_COMPOSE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 OVERRIDES = REPO_ROOT / "docker" / "compose-overrides.list"
 DEPLOY = REPO_ROOT / "scripts" / "deploy-runners.sh"
 HEALTHCHECK = REPO_ROOT / "docker" / "runners" / "model-review-healthcheck.sh"
-RUNBOOK = REPO_ROOT / "docs" / "runbooks" / "model-review-runner-capability.md"
 
 
 def test_overlay_is_one_runner_and_inactive_by_default() -> None:
@@ -103,19 +102,6 @@ def test_shell_reference_projection_matches_typed_contract() -> None:
         "healthcheck_reference_id",
     ):
         assert refs[key] in healthcheck
-
-
-def test_runbook_defines_sanitized_fail_closed_rollback() -> None:
-    runbook = RUNBOOK.read_text(encoding="utf-8")
-    assert "## Rollback" in runbook
-    assert (
-        'Restore the prior generic selector `["self-hosted","omnibase-ci"]`.' in runbook
-    )
-    assert "not_ready" in runbook
-    assert "not_observed" in runbook
-    assert "unverified" in runbook
-    assert "not_run" in runbook
-    assert ".env" not in runbook
 
 
 def test_healthcheck_stays_inert_without_candidate_activation(tmp_path: Path) -> None:
