@@ -6,7 +6,7 @@ Canonical invocation is intentionally explicit::
 
     uv run pytest -p omnibase_infra.testing.rsd_postgres_acceptance_plugin \
         --rsd-postgres-acceptance-overlay docker/lane-overlays/dev.rsd-postgres-acceptance.yaml \
-        tests/integration/runtime/test_rsd_postgres_acceptance.py
+        tests/unit/runtime/test_rsd_postgres_acceptance_overlay.py
 
 The ``-p`` opt-in is required; this module is never auto-registered by ordinary
 pytest runs.
