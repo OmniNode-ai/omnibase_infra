@@ -193,6 +193,14 @@ skills:
       - {name: dod-verify-timeout-seconds, payload_field: dod_verify_timeout_seconds, arg_type: integer}
       - {name: gh-timeout-seconds, payload_field: gh_timeout_seconds, arg_type: integer}
       - {name: close-if-done-label, payload_field: close_if_done_label, arg_type: string}
+      # OMN-17891. The per-candidate fence. `string_list` splits on commas, so
+      # `--exclude OMN-17857,OMN-17800` is the wire form. Named tickets are
+      # refused BEFORE the sweep's first Linear read about them; every other
+      # candidate in the window is unaffected. This is a caller ASSERTION, not
+      # a derived fact — the node reads no ledger and no ownership signal — and
+      # it is not a kill switch: ONEX_AUTOCLOSE_DISABLED still halts the whole
+      # run regardless of what this names.
+      - {name: exclude, payload_field: exclude_tickets, arg_type: string_list}
   # OMN-16536: detect + re-flip Linear's silent GitHub-sync Done-revert
   # pattern. Node-backed in omnibase_infra itself (same locality
   # precedent as node_evidence_autoclose_sweep_effect above -- calls the

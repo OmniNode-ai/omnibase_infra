@@ -70,6 +70,27 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "a live self-hosted-runner GitHub enumeration)."
         ),
     )
+    exclude_tickets: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Ticket ids this run must refuse before it reads anything about "
+            "them (OMN-17891). Matched case-insensitively after stripping "
+            "surrounding whitespace; each match is recorded as "
+            "SKIPPED_EXCLUDED and costs zero Linear I/O.\n\n"
+            "This is a CALLER ASSERTION, never a derived fact. The node reads "
+            "no ledger, no assignee, and no ownership signal — before this "
+            "field existed an apply run's only refusals were a Linear label "
+            "set beforehand, an already-completed state, a binding-hygiene "
+            "skip, and the global ONEX_AUTOCLOSE_DISABLED kill switch, none "
+            "of which can decline ONE candidate. Whoever dispatches the run "
+            "supplies the list and owns its accuracy; the enum value is "
+            "distinct from SKIPPED_LABEL precisely so the audit record says "
+            "which authority refused.\n\n"
+            "It does not weaken the kill switch: a halted run does zero work "
+            "regardless of what this names, so an exclusion list can never "
+            "opt one ticket back into a halted sweep."
+        ),
+    )
     close_if_done_label: str = Field(
         default="close-if-done",
         description=(

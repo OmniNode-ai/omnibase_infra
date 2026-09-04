@@ -149,7 +149,7 @@ contract_version:
   major: 1
   minor: 3
   patch: 2
-node_version: "1.3.2"
+node_version: "1.4.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -239,6 +239,12 @@ error_handling:
 
       recoverable: true
       retry_strategy: "none"
+    - name: "CALLER_EXCLUDED_TICKET"
+      description: >
+        The ticket was named in `exclude_tickets` on the request, so the sweep refused it BEFORE its first Linear read — no issue fetch, no dod_verify subprocess, no verdict (OMN-17891). Recorded as SKIPPED_EXCLUDED and counted under tickets_skipped. Ordering is the property being asserted: an excluded candidate that had already been read could still surface as ERROR_LINEAR_API on a transport failure, which reads as "the fence did not apply" rather than "the fence applied". Deliberately distinct from SKIPPED_LABEL — a label is a fact this node observed in Linear, whereas this is an assertion the DISPATCHER made from evidence the node cannot see (an open ledger CLAIM, a red gate, a concurrent controller's ownership), and only one of the two is falsifiable from the ticket itself. It does not weaken the kill switch: ONEX_AUTOCLOSE_DISABLED halts the run before any candidate is enumerated, so an exclusion list can never opt one ticket back into a halted sweep.
+
+      recoverable: false
+      retry_strategy: "none"
     - name: "GITHUB_FILES_PAYLOAD_UNREADABLE"
       # OMN-16736. The changed-file listing is a binding input, not a
       # decoration: `contracts/<ticket>.yaml` entries are what disambiguate a
@@ -262,6 +268,7 @@ io_operations:
       - dod_verify_timeout_seconds
       - gh_timeout_seconds
       - close_if_done_label
+      - exclude_tickets
     output_fields:
       - companions_scanned
       - bindings_extracted

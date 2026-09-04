@@ -1163,6 +1163,11 @@ class HandlerEvidenceAutocloseSweep:
             if o.decision
             in (
                 EnumEvidenceAutocloseDecision.SKIPPED_LABEL,
+                # OMN-17891: a caller-asserted refusal. A skip, never a flip
+                # and never a gap — the sweep formed no opinion about this
+                # ticket's evidence, so counting it anywhere else would report
+                # a verdict that was never reached.
+                EnumEvidenceAutocloseDecision.SKIPPED_EXCLUDED,
                 EnumEvidenceAutocloseDecision.SKIPPED_ALREADY_DONE,
                 EnumEvidenceAutocloseDecision.SKIPPED_NO_BINDING,
                 EnumEvidenceAutocloseDecision.SKIPPED_AMBIGUOUS_BINDING,
@@ -1430,6 +1435,36 @@ class HandlerEvidenceAutocloseSweep:
         companion_pr_url: str,
         request: ModelEvidenceAutocloseSweepRequest,
     ) -> ModelEvidenceAutocloseOutcome:
+        # OMN-17891. The caller-asserted fence, and it is FIRST -- ahead of the
+        # Linear read, the label gate, the state gate and the dod_verify
+        # subprocess. An excluded candidate therefore costs zero I/O, which is
+        # what makes the refusal terminal: no transport failure, no verdict and
+        # no later branch can reclassify it, so SKIPPED_EXCLUDED in the record
+        # always means the fence applied rather than that it was reached.
+        #
+        # Match is case-insensitive and whitespace-stripped on BOTH sides. The
+        # value arrives typed into a workflow_dispatch box or spliced from a
+        # script's output, so `omn-17857` and a trailing space are the expected
+        # shapes; a near-miss here does not fail loudly, it flips the ticket the
+        # operator was fencing off.
+        excluded = {
+            candidate.strip().upper()
+            for candidate in request.exclude_tickets
+            if candidate.strip()
+        }
+        if ticket_id.strip().upper() in excluded:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.SKIPPED_EXCLUDED,
+                reason=(
+                    f"{ticket_id} is on the caller-supplied exclusion list — "
+                    "refused before any Linear read, dod_verify never ran, and "
+                    "no verdict was reached about this ticket by this run."
+                ),
+            )
+
         issue = await self._linear.fetch_issue(ticket_id)
         if issue is None:
             return ModelEvidenceAutocloseOutcome(

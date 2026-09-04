@@ -46,6 +46,7 @@ SWEEP_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "evidence-autoclose-sweep
 
 JOB_ID = "evidence-autoclose-sweep"
 APPLY_INPUT = "apply"
+EXCLUDE_INPUT = "exclude"
 SWEEP_STEP_NAME = "Run evidence autoclose sweep"
 SUMMARY_STEP_NAME = "Post summary"
 
@@ -232,6 +233,96 @@ def test_the_run_labels_its_own_mode_from_the_same_guard() -> None:
     assert "this workflow never passes --apply" not in summary, (
         "the summary still carries the pre-OMN-16106 claim that this workflow "
         "never applies — that statement is now false"
+    )
+
+
+def test_the_exclusion_fence_is_a_dispatch_input_that_defaults_to_empty() -> None:
+    """OMN-17891 — the per-candidate fence the apply path had no way to express.
+
+    ``default: ''`` is the load-bearing half in the opposite direction from
+    ``apply``'s: a run that names nothing excludes nothing, so the field cannot
+    quietly shrink a scheduled sweep's coverage.
+    """
+    inputs = (_triggers().get("workflow_dispatch") or {}).get("inputs") or {}
+    assert EXCLUDE_INPUT in inputs, (
+        f"workflow_dispatch must declare an '{EXCLUDE_INPUT}' input — without "
+        "one, an apply dispatch can only choose a companion-merge WINDOW, "
+        "never decline a named candidate inside it"
+    )
+    spec = inputs[EXCLUDE_INPUT]
+    assert spec.get("default") == "", (
+        f"'{EXCLUDE_INPUT}' must default to the empty string; got "
+        f"{spec.get('default')!r}"
+    )
+    assert spec.get("description"), (
+        f"'{EXCLUDE_INPUT}' must carry a description — it is a caller "
+        "ASSERTION the sweep cannot verify, so the dispatcher has to be told "
+        "they own its accuracy"
+    )
+
+
+def test_the_exclusion_reaches_the_sweep_only_through_a_guarded_array() -> None:
+    """``--exclude`` is conditional in the shell, never literal on the line.
+
+    Same property as ``--apply``: a guard plus an unconditional flag reads
+    identically to a guarded one in a diff, so the invocation is asserted to
+    carry no literal ``--exclude`` at all. The value itself arrives via ``env``
+    (asserted by ``test_no_input_is_interpolated_directly_into_the_run_script``,
+    which forbids every ``${{ }}`` in this run body).
+    """
+    step = _step(SWEEP_STEP_NAME)
+    env = step.get("env") or {}
+    assert env.get("EXCLUDE_TICKETS") == "${{ github.event.inputs.exclude || '' }}", (
+        "the exclusion list must reach the shell as an env var, not as "
+        f"expression substitution; got {env.get('EXCLUDE_TICKETS')!r}"
+    )
+
+    run = step.get("run") or ""
+    assert 'if [ -n "${EXCLUDE_TICKETS}" ]' in run, (
+        "the run script must branch on EXCLUDE_TICKETS being non-empty"
+    )
+    invocation_lines = [
+        line
+        for line in run.splitlines()
+        if "onex" in line and "evidence_autoclose_sweep" in line
+    ]
+    assert invocation_lines, "could not find the `onex skill` invocation"
+    for line in invocation_lines:
+        assert "--exclude" not in line, (
+            f"--exclude must never appear on the invocation line itself: {line!r}"
+        )
+
+
+def test_the_fence_is_independent_of_apply_so_a_dry_run_can_rehearse_it() -> None:
+    """The exclusion must NOT be nested inside the apply branch.
+
+    A fence that only existed in apply mode could not be rehearsed: the dry run
+    would sweep a candidate the apply run refuses, and the preview would stop
+    being a preview of the run it exists to de-risk. Asserted structurally —
+    the exclusion array is populated by its own top-level ``if``, not inside
+    the ``SWEEP_APPLY`` branch.
+    """
+    run = _step(SWEEP_STEP_NAME).get("run") or ""
+    exclude_guard = 'if [ -n "${EXCLUDE_TICKETS}" ]'
+    apply_guard = 'if [ "${SWEEP_APPLY}" = "true" ]'
+    assert exclude_guard in run and apply_guard in run
+    assert run.index(exclude_guard) < run.index(apply_guard), (
+        "the exclusion guard must precede the apply guard as a sibling branch; "
+        "if it sits after it, check it is not nested inside it"
+    )
+    exclude_indent = next(
+        len(line) - len(line.lstrip())
+        for line in run.splitlines()
+        if exclude_guard in line
+    )
+    apply_indent = next(
+        len(line) - len(line.lstrip())
+        for line in run.splitlines()
+        if apply_guard in line
+    )
+    assert exclude_indent == apply_indent, (
+        "the exclusion guard must sit at the same nesting depth as the apply "
+        f"guard (sibling, not nested): {exclude_indent} vs {apply_indent}"
     )
 
 
