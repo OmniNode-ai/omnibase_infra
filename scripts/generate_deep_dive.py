@@ -13,7 +13,7 @@ Design goals:
 Usage:
   uv run python scripts/generate_deep_dive.py
   uv run python scripts/generate_deep_dive.py --date 2025-12-20
-  uv run python scripts/generate_deep_dive.py --root $OMNI_HOME --out /tmp/DECEMBER_20_2025_DEEP_DIVE.md
+  uv run python scripts/generate_deep_dive.py --root $OMNI_HOME --out "$KNOWLEDGE_BASE_INTERNAL_PATH/beta/deep-dives/DECEMBER_20_2025_DEEP_DIVE.md"
   uv run python scripts/generate_deep_dive.py --include-dirty
 
 Pure functions (PR categorisation, scoring, dedup, etc.) live in
@@ -87,6 +87,67 @@ def _now_utc_iso_minutes() -> str:
     return dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%MZ")
 
 
+# OMN-17235 -- where a generated deep dive belongs.
+#
+# Operator ruling, 2026-08-31: plans for current work, deep dives, and
+# tracking / status / rollup artifacts go to knowledge-base-internal;
+# `omni_home/docs` keeps doctrine + architecture reference. This script used to
+# default to `<root>/docs/deep-dives/`, i.e. straight into `omni_home` -- it was
+# one of the generators still writing doc-class artifacts to the wrong repo
+# after the ruling, and `omni_home` now runs a `kb-doc-gate` required check that
+# rejects a new markdown file there.
+#
+# The destination mirrors the kb-internal layout the morning workflows already
+# publish into: tracking artifacts under `beta/tracking/`, deep dives under
+# `beta/deep-dives/`.
+KB_INTERNAL_ENV = "KNOWLEDGE_BASE_INTERNAL_PATH"
+KB_DEEP_DIVES_SUBDIR = ("beta", "deep-dives")
+
+
+def _is_git_checkout(path: Path) -> bool:
+    return (path / ".git").exists()
+
+
+def default_out_path(date: dt.date) -> Path:
+    """Resolve the default output path from the kb-internal clone.
+
+    FAIL-FAST, no default (CLAUDE.md Operating Rule 8). An unset variable raises
+    with a message naming it rather than silently picking a wrong directory --
+    a silent fallback here is exactly how deep dives kept landing back in
+    `omni_home/docs` after the placement ruling. Callers who genuinely want
+    another destination pass ``--out`` explicitly, which bypasses this entirely.
+    """
+    raw = os.environ.get(KB_INTERNAL_ENV)
+    if not raw:
+        raise RuntimeError(
+            f"{KB_INTERNAL_ENV} is not set. Deep dives are written to the "
+            "knowledge-base-internal clone (operator ruling 2026-08-31, OMN-17235), "
+            f"under {'/'.join(KB_DEEP_DIVES_SUBDIR)}/. Export {KB_INTERNAL_ENV} to "
+            "the absolute path of that clone, or pass --out explicitly. There is no "
+            "default path and no omni_home fallback."
+        )
+    kb_root = Path(raw).expanduser().resolve()
+    if not kb_root.is_dir():
+        raise NotADirectoryError(
+            f"{KB_INTERNAL_ENV}={kb_root} is not a directory. It must point at a "
+            "checkout of OmniNode-ai/knowledge-base-internal."
+        )
+    if not _is_git_checkout(kb_root):
+        raise RuntimeError(
+            f"{KB_INTERNAL_ENV}={kb_root} is not a git checkout. It must point at "
+            "a checkout of OmniNode-ai/knowledge-base-internal."
+        )
+    deep_dives_dir = kb_root.joinpath(*KB_DEEP_DIVES_SUBDIR)
+    if not deep_dives_dir.is_dir():
+        raise NotADirectoryError(
+            f"{KB_INTERNAL_ENV}={kb_root} is missing "
+            f"{'/'.join(KB_DEEP_DIVES_SUBDIR)}/. Refusing to create it during "
+            "default path resolution; repair the knowledge-base-internal clone "
+            "or pass --out explicitly."
+        )
+    return deep_dives_dir / deep_dive_filename(date)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     _default_root = os.environ.get("OMNI_HOME", ".")
@@ -103,7 +164,12 @@ def main() -> int:
         "--out",
         type=str,
         default=None,
-        help="Output path. Defaults to <root>/docs/deep-dives/<MONTH>_<DAY>_<YEAR>_DEEP_DIVE.md",
+        help=(
+            "Output path. Defaults to "
+            "$KNOWLEDGE_BASE_INTERNAL_PATH/beta/deep-dives/<MONTH>_<DAY>_<YEAR>_DEEP_DIVE.md. "
+            "That environment variable is REQUIRED when --out is omitted; there is "
+            "no default path and no omni_home fallback (OMN-17235)."
+        ),
     )
     ap.add_argument(
         "--json-scan-out",
@@ -166,9 +232,7 @@ def main() -> int:
 
     root = Path(args.root).expanduser().resolve()
     out_path = (
-        Path(args.out).expanduser().resolve()
-        if args.out
-        else (root / "docs" / "deep-dives" / deep_dive_filename(date))
+        Path(args.out).expanduser().resolve() if args.out else default_out_path(date)
     )
 
     repos = find_git_repos_direct_children(root)
@@ -768,7 +832,13 @@ def main() -> int:
         lines.append("```")
         lines.append("")
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if args.out:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    elif not out_path.parent.is_dir():
+        raise NotADirectoryError(
+            f"Default deep-dive output directory disappeared before write: "
+            f"{out_path.parent}"
+        )
     out_path.write_text("\n".join(lines) + "\n")
     print(f"Wrote {out_path}")
     return 0
