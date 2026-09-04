@@ -1,27 +1,46 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-16106 — the deliberate ``--apply`` path, and the guard that keeps it deliberate.
+"""OMN-16106 — the ``--apply`` path, and the guards that keep it honest.
 
-``evidence-autoclose-sweep.yml`` shipped DRY-RUN only, with its own header
-naming the flip to ``--apply`` as "a later, deliberate change (a separate PR),
-not a flag flip buried in this file". This is that change, and this file is
-what makes "deliberate" mechanically true rather than a comment.
+``evidence-autoclose-sweep.yml`` shipped DRY-RUN only; a later slice made
+``--apply`` reachable from an explicit ``workflow_dispatch``. This revision
+makes the **schedule** the applying path, on the operator ruling of
+2026-09-04 (~23:05Z, firm): the evidence closer closes tickets on its own —
+when a ticket's definition of done is met by bound evidence it is Done, with
+no human approval step, because that is the reason the closer exists. A
+closer that only previews on its schedule and mutates only when a human
+happens to tick a box is a manual triage sweep wearing a cron trigger.
 
-The failure this prevents is not "apply is missing" — it is the two ways
-wiring apply goes wrong:
+So the property this file pins has INVERTED, deliberately, and the inversion
+is the whole point of reading it:
 
-1. **A scheduled run applies.** ``schedule`` fires every 30 minutes with no
-   operator present. If ``--apply`` can be reached from any path other than an
-   explicit ``workflow_dispatch`` that asked for it, the sweep becomes an
-   unattended Linear mutator. The guard asserted below names BOTH conjuncts —
-   ``github.event_name == 'workflow_dispatch'`` and the input being literally
-   ``'true'`` — so a cron tick, whose ``github.event.inputs`` is null, cannot
-   satisfy it by any evaluation order.
+1. **The 30-minute schedule applies.** ``schedule`` is the unattended path and
+   it is now the one that writes. What bounds it is not the trigger — it is
+   the flip predicate (untouched by this change and not this file's to set),
+   the per-candidate exclusion fence (OMN-17891), and the
+   ``ONEX_AUTOCLOSE_DISABLED`` kill switch. All three are asserted below to
+   still bind a scheduled run.
 
-2. **The flag becomes unconditional.** ``--apply`` appended straight onto the
+2. **A dispatch can still force a dry run.** The diagnostic path has to
+   survive: ``workflow_dispatch`` with ``apply`` left unticked reaches every
+   decision and writes none of them, which is what makes a rehearsal of a
+   fence list possible. ``apply`` therefore keeps ``default: false`` and keeps
+   meaning "this dispatch writes", while a cron tick — which carries no inputs
+   at all — is decided by its event name alone.
+
+3. **The flag stays conditional.** ``--apply`` appended straight onto the
    ``onex skill`` invocation reads identically to the guarded form in a diff.
    So the invocation line is asserted to carry no literal ``--apply`` at all:
    the flag may only enter through the shell array the guard populates.
+
+4. **The fence is reachable without a dispatcher.** A per-dispatch input
+   cannot fence an unattended run — the same argument OMN-16792 made about the
+   kill switch, which is a repo variable for exactly this reason. With the
+   schedule applying, an exclusion list that only a human can type is a fence
+   that is absent precisely when nobody is watching. So the standing fence
+   arrives from ``vars.ONEX_AUTOCLOSE_EXCLUDE`` and is UNIONED with any
+   dispatch-supplied list: a dispatch may add to the standing fence, never
+   shrink it.
 
 The third assertion is about honesty rather than safety. The job name and the
 step summary both stated "DRY-RUN" as a constant. Left alone they would have
@@ -49,6 +68,9 @@ APPLY_INPUT = "apply"
 EXCLUDE_INPUT = "exclude"
 SWEEP_STEP_NAME = "Run evidence autoclose sweep"
 SUMMARY_STEP_NAME = "Post summary"
+# The shell variable carrying the UNION of the standing repo-variable fence
+# and any dispatch-supplied exclusion. It is what `--exclude` is given.
+FENCE_VAR = "FENCE_TICKETS"
 
 # The one expression that decides whether this run mutates Linear. It is
 # written as a single constant here precisely because it appears at more than
@@ -56,7 +78,8 @@ SUMMARY_STEP_NAME = "Post summary"
 # sites MUST agree — a run that labels itself DRY-RUN while passing --apply is
 # the defect this constant exists to make impossible.
 APPLY_GUARD = (
-    "github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true'"
+    "github.event_name == 'schedule' || "
+    "(github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')"
 )
 
 
@@ -99,11 +122,13 @@ def _triggers() -> dict[str, Any]:
 
 
 def test_apply_is_an_explicit_dispatch_input_defaulting_to_false() -> None:
-    """The operator has to ask for it, per dispatch, in the UI.
+    """A dispatch that leaves the box alone is the DIAGNOSTIC dry run.
 
-    ``default: false`` is the load-bearing half: a dispatch that leaves the box
-    alone is a dry run, so the cheap "just re-run it" reflex cannot mutate
-    anything.
+    ``default: false`` is still load-bearing, but for the opposite reason it
+    was before: now that the schedule applies, this input is what preserves a
+    read-only path at all. Someone rehearsing a fence list, or reading what the
+    sweep currently decides without writing it, dispatches and leaves the box
+    alone. Flipping this default to ``true`` would delete the dry run.
     """
     triggers = _triggers()
     dispatch = triggers.get("workflow_dispatch")
@@ -127,20 +152,72 @@ def test_apply_is_an_explicit_dispatch_input_defaulting_to_false() -> None:
     )
 
 
-def test_the_schedule_trigger_survives_and_cannot_reach_apply() -> None:
-    """The 30-minute cron is still the primary path, and it is still dry-run.
-
-    ``schedule`` events carry no ``inputs``, so ``github.event.inputs.apply``
-    is null there and the guard's second conjunct alone already refuses. The
-    first conjunct is asserted anyway: two independent reasons, because this is
-    the one property whose failure is unattended.
-    """
-    assert "schedule" in _triggers(), (
-        "the scheduled sweep must survive this change — dry-run enumeration is "
-        "what keeps the gap comments current"
+def test_the_schedule_still_fires_every_thirty_minutes() -> None:
+    """The unattended trigger is the closer. It has to exist to be one."""
+    schedule = _triggers().get("schedule")
+    assert isinstance(schedule, list) and schedule, (
+        "the scheduled sweep is the closer's only unattended path — without it "
+        "nothing closes on its own, which is the whole point (operator ruling, "
+        "2026-09-04)"
     )
-    assert "github.event_name == 'workflow_dispatch'" in APPLY_GUARD
-    assert "github.event.inputs.apply == 'true'" in APPLY_GUARD
+    crons = [entry.get("cron") for entry in schedule]
+    assert "*/30 * * * *" in crons, (
+        f"the 30-minute cadence must survive this change; got {crons!r}"
+    )
+
+
+def test_the_scheduled_run_applies() -> None:
+    """A cron tick reaches ``--apply``, by its event name alone.
+
+    This is the inversion. ``schedule`` carries no ``github.event.inputs`` at
+    all, so an input could never enable it — the guard has to name the event.
+    Asserted both ways: the schedule disjunct is present, AND the guard is not
+    still the dispatch-only form that made every unattended run read-only.
+    """
+    assert "github.event_name == 'schedule'" in APPLY_GUARD, (
+        "the apply guard must name the schedule event — a closer whose "
+        "scheduled run only previews is not closing anything"
+    )
+    guard = (_job().get("env") or {}).get("SWEEP_APPLY") or ""
+    assert APPLY_GUARD in guard, (
+        f"SWEEP_APPLY must carry the canonical guard\n  expected: {APPLY_GUARD}\n"
+        f"  got: {guard}"
+    )
+    # The pre-ruling form, spelled out so a revert to it fails loudly rather
+    # than silently returning the closer to preview-only.
+    dispatch_only = (
+        "${{ (github.event_name == 'workflow_dispatch' && "
+        "github.event.inputs.apply == 'true') && 'true' || 'false' }}"
+    )
+    assert guard != dispatch_only, (
+        "SWEEP_APPLY is back to the dispatch-only form: scheduled runs would "
+        "preview forever and nothing would ever close unattended"
+    )
+
+
+def test_a_dispatch_can_still_force_a_dry_run() -> None:
+    """The diagnostic path survives: dispatch, leave ``apply`` unticked.
+
+    The guard's dispatch branch requires the input to be literally ``'true'``,
+    so a dispatch that leaves the default alone evaluates the whole expression
+    to false and the run writes nothing. That is asserted structurally — the
+    dispatch branch is a CONJUNCTION on the input, not a bare event-name test
+    that would make every dispatch apply too and leave no read-only path at
+    all.
+    """
+    assert (
+        "(github.event_name == 'workflow_dispatch' && "
+        "github.event.inputs.apply == 'true')"
+    ) in APPLY_GUARD, (
+        "the dispatch branch must stay conjoined with the apply input, or a "
+        "dispatch could no longer request a dry run and the rehearsal path "
+        f"would be gone; got {APPLY_GUARD!r}"
+    )
+    inputs = (_triggers().get("workflow_dispatch") or {}).get("inputs") or {}
+    assert inputs.get(APPLY_INPUT, {}).get("default") is False, (
+        "with the schedule applying, this default is the only thing that keeps "
+        "a read-only dispatch reachable"
+    )
 
 
 def test_apply_reaches_the_sweep_only_through_the_guard() -> None:
@@ -278,8 +355,8 @@ def test_the_exclusion_reaches_the_sweep_only_through_a_guarded_array() -> None:
     )
 
     run = step.get("run") or ""
-    assert 'if [ -n "${EXCLUDE_TICKETS}" ]' in run, (
-        "the run script must branch on EXCLUDE_TICKETS being non-empty"
+    assert f'if [ -n "${{{FENCE_VAR}}}" ]' in run, (
+        f"the run script must branch on {FENCE_VAR} being non-empty"
     )
     invocation_lines = [
         line
@@ -293,47 +370,108 @@ def test_the_exclusion_reaches_the_sweep_only_through_a_guarded_array() -> None:
         )
 
 
-def test_the_fence_is_independent_of_apply_so_a_dry_run_can_rehearse_it() -> None:
-    """The exclusion must NOT be nested inside the apply branch.
+def test_the_standing_fence_reaches_an_unattended_run() -> None:
+    """OMN-16106 — a fence only a dispatcher can type is absent on the schedule.
 
-    A fence that only existed in apply mode could not be rehearsed: the dry run
-    would sweep a candidate the apply run refuses, and the preview would stop
-    being a preview of the run it exists to de-risk. Asserted structurally —
-    the exclusion array is populated by its own top-level ``if``, not inside
-    the ``SWEEP_APPLY`` branch.
+    This is the same argument OMN-16792 made about the kill switch and for the
+    same reason: ``github.event.inputs`` is null on a cron tick, so the
+    OMN-17891 exclusion input — the only per-candidate refusal that exists —
+    can never bind the runs nobody dispatched. Once the schedule applies, that
+    is a fence that is missing exactly when no operator is watching.
+
+    A repo variable is reachable from every event, so the standing list arrives
+    that way. It is deliberately a variable and not an input, for the same
+    reason the kill switch is.
+    """
+    env = _step(SWEEP_STEP_NAME).get("env") or {}
+    assert env.get("STANDING_EXCLUDE_TICKETS") == (
+        "${{ vars.ONEX_AUTOCLOSE_EXCLUDE }}"
+    ), (
+        "the standing fence must be read from a repo variable so it binds "
+        "scheduled runs; got "
+        f"{env.get('STANDING_EXCLUDE_TICKETS')!r}"
+    )
+    inputs = (_triggers().get("workflow_dispatch") or {}).get("inputs") or {}
+    assert "ONEX_AUTOCLOSE_EXCLUDE" not in inputs, (
+        "the standing fence must not be a dispatch input — it exists to bind "
+        "runs nobody dispatched"
+    )
+
+
+def test_a_dispatch_can_add_to_the_standing_fence_but_never_shrink_it() -> None:
+    """The two lists are UNIONED, and the union is what reaches ``--exclude``.
+
+    If the dispatch input replaced the variable, a dispatch naming one ticket
+    would silently drop every standing exclusion — a fence that gets smaller
+    the more precisely you aim it. Asserted structurally: the fence value is
+    built from BOTH names, and the ``--exclude`` argument carries that built
+    value rather than either input on its own.
     """
     run = _step(SWEEP_STEP_NAME).get("run") or ""
-    exclude_guard = 'if [ -n "${EXCLUDE_TICKETS}" ]'
-    apply_guard = 'if [ "${SWEEP_APPLY}" = "true" ]'
-    assert exclude_guard in run and apply_guard in run
-    assert run.index(exclude_guard) < run.index(apply_guard), (
-        "the exclusion guard must precede the apply guard as a sibling branch; "
-        "if it sits after it, check it is not nested inside it"
+    build_lines = [line for line in run.splitlines() if f"{FENCE_VAR}=" in line]
+    assert build_lines, f"could not find where {FENCE_VAR} is built"
+    built_from = (
+        "\n".join(build_lines)
+        + "\n"
+        + "\n".join(
+            line
+            for line in run.splitlines()
+            if "STANDING_EXCLUDE_TICKETS" in line or "EXCLUDE_TICKETS}" in line
+        )
     )
-    exclude_indent = next(
+    assert "STANDING_EXCLUDE_TICKETS" in built_from, (
+        "the fence value must be built from the standing repo variable"
+    )
+    assert "EXCLUDE_TICKETS" in built_from, (
+        "the fence value must also be built from the dispatch input, so an "
+        "operator can add a candidate to a scheduled run's refusals"
+    )
+    assert f'exclude_args+=(--exclude "${{{FENCE_VAR}}}")' in run, (
+        f"--exclude must carry the UNIONED {FENCE_VAR}, not either list alone"
+    )
+    assert 'exclude_args+=(--exclude "${EXCLUDE_TICKETS}")' not in run, (
+        "--exclude must not carry the dispatch input alone: a dispatch would "
+        "then shrink the standing fence rather than add to it"
+    )
+
+
+def test_the_fence_binds_the_applying_run_at_the_same_depth_as_apply() -> None:
+    """The fence is not nested inside — nor gated on — the apply branch.
+
+    Now that the schedule applies, this property carries more weight than it
+    did as a rehearsal argument: a fence evaluated inside the apply branch
+    would still work, but a fence evaluated inside a DISPATCH-only branch
+    would leave every scheduled write unfenced. Asserted as sibling nesting,
+    the same structural check as before.
+    """
+    run = _step(SWEEP_STEP_NAME).get("run") or ""
+    fence_guard = f'if [ -n "${{{FENCE_VAR}}}" ]'
+    apply_guard = 'if [ "${SWEEP_APPLY}" = "true" ]'
+    assert fence_guard in run and apply_guard in run
+    fence_indent = next(
         len(line) - len(line.lstrip())
         for line in run.splitlines()
-        if exclude_guard in line
+        if fence_guard in line
     )
     apply_indent = next(
         len(line) - len(line.lstrip())
         for line in run.splitlines()
         if apply_guard in line
     )
-    assert exclude_indent == apply_indent, (
-        "the exclusion guard must sit at the same nesting depth as the apply "
-        f"guard (sibling, not nested): {exclude_indent} vs {apply_indent}"
+    assert fence_indent == apply_indent, (
+        "the fence guard must sit at the same nesting depth as the apply guard "
+        f"(sibling, not nested): {fence_indent} vs {apply_indent}"
     )
 
 
 def test_the_kill_switch_still_dominates_the_apply_path() -> None:
     """ONEX_AUTOCLOSE_DISABLED stays wired, and stays out of the inputs.
 
-    The kill switch has to bind every run including an apply dispatch, which is
-    exactly why it is a repo variable plumbed into the step env (OMN-16792 AC3)
-    and NOT a per-dispatch input: an input is a choice, and the operator making
-    the apply choice is the last person who should be able to opt out of the
-    halt.
+    The kill switch has to bind every run, which now means every SCHEDULED run
+    — it is the only way to stop an applying closer without editing this file,
+    and a cron tick carries no inputs to opt out with. That is exactly why it
+    is a repo variable plumbed into the step env (OMN-16792 AC3) and not a
+    per-dispatch input.
     """
     env = _step(SWEEP_STEP_NAME).get("env") or {}
     assert (
