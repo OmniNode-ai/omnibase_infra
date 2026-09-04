@@ -435,7 +435,65 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # spelling <table>_<column>_seq, RAISEs if the column is not sequence-backed
     # instead of no-oping into another silent half-grant, and asserts
     # has_sequence_privilege post-grant.
-    assert len(result.declarations) == 150
+    #
+    # OMN-17440 tranche 2 moves this count 150 -> 171 by ADDING twenty-one
+    # declarations, one per owning node lineage, every one a pure ADD next to an
+    # untouched creating migration and every one domain `omninode_internal` to
+    # match the migration that creates its relation (checked against the
+    # existing rows for all twenty-one lineages, including
+    # node_projection_delegation, whose `generation_*` files are
+    # omninode_internal while its `delegation_*` files are `tenant`):
+    #
+    #   node_deployment_evidence_reducer/0002       (deployment_evidence_projection,
+    #                                                deployment_readiness_projection)
+    #   node_evidence_dashboard_reducer/0002        (evidence_correlation_trace_projection,
+    #                                                evidence_dashboard_projection,
+    #                                                evidence_readiness_aggregate_projection)
+    #   node_llm_delegation_projection/0002         (llm_delegation_daily_projection)
+    #   node_nightly_loop_controller/002            (nightly_loop_decisions,
+    #                                                nightly_loop_iterations)
+    #   node_projection_baselines_quality/003       (baselines_quality_snapshots)
+    #   node_projection_baselines_roi/003           (baselines_roi_snapshots)
+    #   node_projection_capsule_store/080           (capsule_store)
+    #   node_projection_consumer_flow/0003          (omninode_internal.consumer_flow_windows,
+    #                                                omninode_internal.topic_produce_windows)
+    #   node_projection_cost_by_repo/0002           (cost_by_repo_snapshots)
+    #   node_projection_delegation/0035             (generation_events)
+    #   node_projection_event_chain/0002            (event_chain)
+    #   node_projection_llm_cost/0002               (llm_call_metrics)
+    #   node_projection_llm_routing/0002            (llm_routing_decisions)
+    #   node_projection_mcp_tools/0002              (mcp_tools)
+    #   node_projection_registration/0006           (node_service_registry)
+    #   node_projection_sandbox_decisions/0002      (sandbox_decisions)
+    #   node_projection_session_outcome/0022        (session_outcomes)
+    #   node_projection_swarm/0002                  (swarm_runs)
+    #   node_projection_traces/0002                 (traces)
+    #   node_projection_voice_sessions/0002         (voice_sessions)
+    #   node_renderer_capability_projection/0002    (renderer_capability_projection)
+    #
+    # Together these issue the 26 remaining topology-declared TABLE grants that
+    # no migration in either repo has ever issued, taking
+    # check_topology_grant_delivery.py's MAX_UNDELIVERED from 27 to 1 -- the one
+    # relation (nightly_loop_configs) that has no CREATE TABLE anywhere in the
+    # corpus and so no lineage to land a grant in.
+    #
+    # Not a bulk grant file, for the OMN-15701 reason the tranche-1 files state:
+    # a shared cross-node grant block is how a relation added to a node later
+    # silently misses its grant.
+    #
+    # No creating migration is edited. Each of the twenty-one parents is applied
+    # on the `.201` dev lane with a recorded content_sha256, so an in-place
+    # repair would raise "conflicting migration checksum in canonical node
+    # history" (the OMN-16705 constraint that 083/087 and 0032/0033 already hit).
+    #
+    # Vendored into omnibase_infra first per the node-migration-vendor-parity-
+    # gate ordering, ahead of the omnimarket source PR: an omnimarket PR
+    # touching src/omnimarket/nodes/*/migrations/*.sql cannot land until
+    # omnibase_infra@dev already carries a byte-identical copy. These tsv rows
+    # are what make that infra-ahead-by-one state legal rather than drift --
+    # sync-node-migrations.sh --check reads them as preserved history via the
+    # OMN-15717 legacy-declared exemption.
+    assert len(result.declarations) == 171
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

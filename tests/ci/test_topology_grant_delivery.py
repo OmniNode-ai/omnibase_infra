@@ -101,6 +101,85 @@ OMN_17440_DELIVERED = frozenset(
     }
 )
 
+# OMN-17440 tranche 2: the WHOLE remainder of the declared set, 26 grants across
+# 21 node lineages. Not another sub-selection, because the live measurement made
+# further staging pointless.
+#
+# Read-only probe of the `.201` dev lane (compose project `omnibase-infra`,
+# database `omnidash_analytics`) on 2026-09-03 against
+# `information_schema.role_table_grants`, diffed against the generated topology:
+#
+#   declared                                   65
+#   present live                               63
+#   present live AND issued by a migration     38
+#   present live and issued by NOTHING         26   <-- this set
+#   declared, absent live                       2   (nightly_loop_configs and
+#                                                    delegation_shadow_comparisons;
+#                                                    both relations are absent
+#                                                    from the lane entirely)
+#   live, declared by nothing                   4   (OMN-17440 AC3, not this change)
+#
+# So every pair below is ALREADY a live dependency of the dev lane that exists
+# only because somebody typed the GRANT. A fresh staging namespace, a rebuilt
+# onex-dev, or prod gets 38 of 65 and refuses the rest -- which is the
+# OMN-16993 / OMN-17379 failure shape, with the offset committed anyway.
+#
+# One case per pair, same reason tranche 1 gives: an aggregate assertion would
+# report "26 missing" and make the next reader re-derive which.
+OMN_17440_TRANCHE2_DELIVERED = frozenset(
+    {
+        # node_projection_consumer_flow / 0000_create_consumer_flow_windows.sql
+        GrantKey("omninode_runtime", "omninode_internal", "consumer_flow_windows"),
+        GrantKey("omninode_runtime", "omninode_internal", "topic_produce_windows"),
+        # node_projection_baselines_quality / 001
+        GrantKey("omninode_runtime", "public", "baselines_quality_snapshots"),
+        # node_projection_baselines_roi / 001
+        GrantKey("omninode_runtime", "public", "baselines_roi_snapshots"),
+        # node_projection_capsule_store / 078
+        GrantKey("omninode_runtime", "public", "capsule_store"),
+        # node_projection_cost_by_repo / 0001
+        GrantKey("omninode_runtime", "public", "cost_by_repo_snapshots"),
+        # node_deployment_evidence_reducer / 0001
+        GrantKey("omninode_runtime", "public", "deployment_evidence_projection"),
+        GrantKey("omninode_runtime", "public", "deployment_readiness_projection"),
+        # node_projection_event_chain / 0001
+        GrantKey("omninode_runtime", "public", "event_chain"),
+        # node_evidence_dashboard_reducer / 0001
+        GrantKey("omninode_runtime", "public", "evidence_correlation_trace_projection"),
+        GrantKey("omninode_runtime", "public", "evidence_dashboard_projection"),
+        GrantKey(
+            "omninode_runtime", "public", "evidence_readiness_aggregate_projection"
+        ),
+        # node_projection_delegation / 0008_generation_events.sql
+        GrantKey("omninode_runtime", "public", "generation_events"),
+        # node_projection_llm_cost / 0001
+        GrantKey("omninode_runtime", "public", "llm_call_metrics"),
+        # node_llm_delegation_projection / 0001
+        GrantKey("omninode_runtime", "public", "llm_delegation_daily_projection"),
+        # node_projection_llm_routing / 0000
+        GrantKey("omninode_runtime", "public", "llm_routing_decisions"),
+        # node_projection_mcp_tools / 0001
+        GrantKey("omninode_runtime", "public", "mcp_tools"),
+        # node_nightly_loop_controller / 001_create_nightly_loop_tables.sql
+        GrantKey("omninode_runtime", "public", "nightly_loop_decisions"),
+        GrantKey("omninode_runtime", "public", "nightly_loop_iterations"),
+        # node_projection_registration / 0000
+        GrantKey("omninode_runtime", "public", "node_service_registry"),
+        # node_renderer_capability_projection / 0001
+        GrantKey("omninode_runtime", "public", "renderer_capability_projection"),
+        # node_projection_sandbox_decisions / 0001
+        GrantKey("omninode_runtime", "public", "sandbox_decisions"),
+        # node_projection_session_outcome / 0021
+        GrantKey("omninode_runtime", "public", "session_outcomes"),
+        # node_projection_swarm / 0001
+        GrantKey("omninode_runtime", "public", "swarm_runs"),
+        # node_projection_traces / 0001
+        GrantKey("omninode_runtime", "public", "traces"),
+        # node_projection_voice_sessions / 0001
+        GrantKey("omninode_runtime", "public", "voice_sessions"),
+    }
+)
+
 # The one relation in the declared set that NO migration can deliver: nothing in
 # the corpus issues a CREATE TABLE for it, so there is no lineage to land a
 # grant in. Named here so the residual stays visible as a fact rather than as an
@@ -183,6 +262,60 @@ def test_omn_17440_subset_is_declared_by_the_topology() -> None:
     assert not undeclared, (
         "these grants are delivered by a migration but declared by no "
         f"contract-derived topology entry: {sorted(map(str, undeclared))}"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", sorted(OMN_17440_TRANCHE2_DELIVERED, key=str))
+def test_omn_17440_tranche2_is_delivered_by_a_migration(key: GrantKey) -> None:
+    """OMN-17440 tranche 2: every remaining declared grant reaches a database.
+
+    RED before this change: running
+    ``scripts/validation/check_topology_grant_delivery.py`` at omnibase_infra
+    dev ``4053dc3c0`` printed ``topology grant delivery: 27 undelivered (of 65
+    declared)`` and listed every pair in this set. GREEN after: 1 undelivered,
+    the undeliverable residual below.
+    """
+    delivered = delivered_grants(REPO_ROOT / "docker/migrations/forward")
+    assert key in delivered, (
+        f"{key} is declared by the topology and issued by no migration. "
+        "Land the GRANT in the owning node's own migration lineage, next to "
+        "the file that creates the relation."
+    )
+
+
+@pytest.mark.unit
+def test_omn_17440_tranche2_is_declared_by_the_topology() -> None:
+    """Tranche 2 grants only what the generated topology actually declares.
+
+    Same outward-drift guard tranche 1 carries: a migration that grants a
+    relation nobody declares is drift in the other direction, and 26 new GRANT
+    statements is exactly the size of change that could introduce one.
+    """
+    declared = declared_grants(
+        REPO_ROOT / "src/omnibase_infra/topology/instances/local.yaml"
+    )
+    undeclared = OMN_17440_TRANCHE2_DELIVERED - declared
+    assert not undeclared, (
+        "these grants are delivered by a migration but declared by no "
+        f"contract-derived topology entry: {sorted(map(str, undeclared))}"
+    )
+
+
+@pytest.mark.unit
+def test_the_two_tranches_together_are_the_whole_deliverable_set() -> None:
+    """Nothing declared is left undelivered except the undeliverable residual.
+
+    This is the assertion that makes the bound a FLOOR rather than a reading.
+    ``test_undelivered_count_is_exactly_the_ratchet_bound`` proves the count
+    matches ``MAX_UNDELIVERED``; this proves the one member of that residual is
+    the relation no migration can deliver, so a future change cannot satisfy the
+    count by leaving a *different* grant undelivered and calling it the floor.
+    """
+    missing = set(undelivered(REPO_ROOT))
+    assert missing == {UNDELIVERABLE_NO_CREATING_MIGRATION}, (
+        "the undelivered set is no longer exactly the one relation with no "
+        f"creating migration: {sorted(map(str, missing))}"
     )
 
 
