@@ -3289,6 +3289,64 @@ def test_the_serial_collector_banner_is_still_understood(
     assert _marker_field(remote_run_env["rundir"], "collected") == "18095"
 
 
+def test_a_report_saying_zero_tests_is_carried_through_as_zero(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """A remote leg that EXITS 0 and writes a real JUnit document whose
+    ``<testsuite>`` says ``tests="0"`` -- a genuinely empty run, the case the
+    parsing defect made indistinguishable from a full one.
+
+    The wrapper must carry that ``0`` into the marker unchanged. Specifically
+    it must NOT treat a report of zero as "no report" and fall through to a
+    banner: the fallback chain is keyed on the count being UNREADABLE, not on
+    it being small, and a chain that re-reads a zero off some other line could
+    invent a number for a run that executed nothing. The acceptance branch
+    then refuses that marker as NO EVIDENCE -- proven in
+    ``test_a_green_remote_run_that_collected_nothing_is_no_evidence_not_a_pass``,
+    which is the other half of this chain.
+    """
+    (remote_run_env["uv"]).write_text(
+        _uv_stub_emitting(banner="4 workers [0 items]", junit_tests=0)
+    )
+    (remote_run_env["uv"]).chmod(0o755)
+    result = _run_wrapper(
+        remote_run_env,
+        extra_env={
+            "PYTEST_ARGV_WITNESS": str(remote_run_env["rundir"] / "pytest_argv.txt")
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert _marker_field(remote_run_env["rundir"], "exit") == "0"
+    assert _marker_field(remote_run_env["rundir"], "collected") == "0", (
+        "a report of zero tests must reach the marker as zero, not be treated "
+        "as a missing report and replaced from a banner"
+    )
+
+
+def test_a_banner_only_host_that_ran_nothing_still_reports_zero(
+    remote_run_env: dict[str, Path],
+) -> None:
+    """The degraded path: no JUnit report at all (a host that could not write
+    one), exit 0, and a banner that itself says zero items. The ordered banner
+    fallbacks must land on ``0`` rather than on an empty string that the
+    ``|| COLLECTED=0`` tail would coincidentally also render as ``0`` -- the
+    two are the same number here, which is exactly why the case needs its own
+    pin: it is the one input where a broken fallback chain and a working one
+    agree, so it cannot be inferred from the non-zero tests."""
+    (remote_run_env["uv"]).write_text(
+        _uv_stub_emitting(banner="4 workers [0 items]", junit_tests=None)
+    )
+    (remote_run_env["uv"]).chmod(0o755)
+    result = _run_wrapper(
+        remote_run_env,
+        extra_env={
+            "PYTEST_ARGV_WITNESS": str(remote_run_env["rundir"] / "pytest_argv.txt")
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert _marker_field(remote_run_env["rundir"], "collected") == "0"
+
+
 # -----------------------------------------------------------------------------
 # Acceptance must GATE on the count (OMN-17787 defect 2)
 # -----------------------------------------------------------------------------
@@ -3443,11 +3501,25 @@ def test_a_non_numeric_collected_field_cannot_fall_through_to_a_pass(
 
 def test_the_acceptance_branch_names_the_count_it_gates_on() -> None:
     """A later edit that reverts the comparison must not be able to leave the
-    PASS log sentence intact and silently stop gating."""
+    PASS log sentence intact and silently stop gating.
+
+    THE ASSERTION IS MADE AGAINST COMMENT-STRIPPED SOURCE, and that is the
+    whole point of it. Measured 2026-09-04: deleting the entire acceptance
+    gate left this test PASSING, because the normalization block immediately
+    above it carries a COMMENT that quotes the very string being searched for
+    (``[ "$m_collected" -eq 0 ]`` -- explaining why the value is normalized
+    before it is compared). A guard that a comment can satisfy is the same
+    defect class as the gate this ticket closes: it cannot tell the artifact
+    from a description of the artifact. Executable lines only.
+    """
     lib = LIB.read_text(encoding="utf-8")
     run = lib[lib.index("prepush_remote_run() {") :]
+    code = "\n".join(
+        line for line in run.splitlines() if not line.lstrip().startswith("#")
+    )
     assert "OMN-17787" in run, "the acceptance branch carries no reference to the gate"
-    assert "m_collected" in run
-    assert '[ "$m_collected" -eq 0 ]' in run, (
-        "acceptance no longer compares the collected count to zero"
+    assert "m_collected" in code
+    assert '[ "$m_collected" -eq 0 ]' in code, (
+        "acceptance no longer compares the collected count to zero on any "
+        "EXECUTABLE line (a comment mentioning the comparison does not count)"
     )
