@@ -245,12 +245,12 @@ services:
   #
   # SCOPE, STATED HONESTLY
   # ----------------------
-  # Two writers, not five. onex-dev runs five standalone writers
-  # (delegation, live-events, registration, savings, tenant-credentials).
-  # This file lands the two that are on the beta-critical path -- the ones
-  # OMN-17298 AC3, OMN-17374 AC3 and OMN-16804 AC5 are blocked behind. The
-  # remaining three follow the same pattern and are ticketed separately; the
-  # pattern is this block, copied.
+  # These two were the beta-critical pair -- the ones OMN-17298 AC3,
+  # OMN-17374 AC3 and OMN-16804 AC5 were blocked behind. OMN-17562 landed the
+  # remaining four of the ADOPT set in the block further down this file, by
+  # copying this pattern verbatim; onex-dev runs six standalone writers
+  # (delegation, live-events, registration, savings, tenant-credentials,
+  # tenant-registry) and this lane now mirrors all six.
   #
   # NO ANCHOR REUSE
   # ---------------
@@ -415,4 +415,252 @@ services:
       - "com.omninode.layer=runtime"
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-17448"
+      - "autoheal=true"
+  # ---------------------------------------------------------------------------
+  # OMN-17562: the remaining four of the ADOPT set
+  # ---------------------------------------------------------------------------
+  # The block above landed two writers and said so honestly: "Two writers, not
+  # five ... The remaining three follow the same pattern and are ticketed
+  # separately; the pattern is this block, copied." This is that copy, plus
+  # `projection_tenant_registry`'s sibling on the proof lane.
+  #
+  # WHY THESE FOUR AND NOT ALL SIXTEEN WRITER-OWNED CONTRACTS
+  # --------------------------------------------------------
+  # Membership is not a judgement call. These are exactly the contracts with a
+  # checked-in writer Deployment under `omninode_infra` `k8s/onex-dev/runtime/`
+  # on origin/dev -- a runner already proven to run as its own process. Two
+  # other runner-shaped contracts (`projection_pattern_learning`,
+  # `projection_routing_decision`) deliberately get NO writer here:
+  # `omninode_infra#1147` removed their Deployments on 2026-09-02 as a
+  # prohibited rollout direction, and their in-process sibling entry is the one
+  # raising `ValueError: Projection handler requires topology bindings with
+  # configured DSNs: tenant_projection:ONEX_TENANT_DB_URL` -- store-resolved
+  # credential work (OMN-17557 / OMN-17556), not a missing container.
+  #
+  # Four more contracts (`node_projection_cost_by_repo`,
+  # `node_projection_instruction_eval`, `node_projection_skill_executions`,
+  # `projection_llm_cost`) were RULED OUT of the served set entirely: no writer
+  # exists on any lane and nothing reads their tables, so the kernel stops
+  # subscribing them (omnibase_infra#3156) rather than four processes being
+  # deployed to write rows no reader reads.
+  #
+  # tests/ci/test_lane_projection_writer_coverage_omn17562.py holds both sets
+  # frozen and fails if this file drifts from either.
+  #
+  # Ticket: OMN-17562. Pattern source: the two services above, unchanged.
+  projection-registration-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-projection-registration-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_registration.handlers.handler_registration
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.registration-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8100"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-registration-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17562"
+      - "autoheal=true"
+  projection-savings-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-projection-savings-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_savings.handlers.handler_savings
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.savings-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8101"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8101/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-savings-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17562"
+      - "autoheal=true"
+  projection-tenant-credentials-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-projection-tenant-credentials-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.tenant-credentials-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8102"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8102/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-tenant-credentials-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17562"
+      - "autoheal=true"
+  projection-live-events-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omnimarket-projection-live-events-writer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_live_events.handlers.handler_live_events
+    environment:
+      !!merge <<: *dev_lane_analytics_env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.live-events-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8103"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8103/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1024M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=projection-live-events-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17562"
       - "autoheal=true"

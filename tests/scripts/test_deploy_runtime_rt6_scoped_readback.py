@@ -65,6 +65,26 @@ def _extract_function(name: str) -> str:
     return match.group(0)
 
 
+def _extract_array(name: str) -> str:
+    """Return the source text of a single top-level bash array ``name=(...)``.
+
+    Read from the script rather than restated here. OMN-17562: this harness used
+    to carry a hand-written ``DEV_LANE_ONLY_RUNTIME_SERVICES=(...)`` literal, and
+    it silently went stale the moment that array grew from two writers to six —
+    the harness kept proving a narrower readback than production performs.
+    """
+    text = _script_text()
+    match = re.search(
+        rf"^readonly {re.escape(name)}=\(.*?\n\)",
+        text,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match is not None, (
+        f"could not extract array {name}=() from deploy-runtime.sh"
+    )
+    return match.group(0)
+
+
 def _write_docker_stub(bin_dir: Path) -> Path:
     """Write a fake `docker` on PATH that answers `compose ps -q`, `inspect`,
     and `exec ... uv pip show` from files under $DOCKER_STUB_DIR, and appends
@@ -129,6 +149,7 @@ def _run_readback(
     revision_map: dict[str, str],
     version_map: dict[str, str] | None = None,
     scoped_override: bool = False,
+    compose_project: str = "omnibase-infra",
 ) -> subprocess.CompletedProcess[str]:
     """Extract + execute readback_deployed_ref() with real dependencies, stubbed docker."""
     stub_dir = tmp_path / "stubs"
@@ -164,18 +185,15 @@ def _run_readback(
             _extract_function("resolve_lane_overlay_filename"),
             _extract_function("resolve_compose_file_args"),
             _extract_function("resolve_lane_runtime_container_name"),
-            (
-                "DEV_LANE_ONLY_RUNTIME_SERVICES=("
-                "projection-tenant-registry-writer projection-delegation-writer"
-                ")"
-            ),
+            _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
+            _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_function("resolve_lane_runtime_services"),
             _extract_function("readback_deployed_ref"),
             override_line,
             f"RUNTIME_BUILD_SERVICES=({services_literal})",
             (
                 f'readback_deployed_ref "{GIT_SHA}" "{VERSION}" '
-                f'"omnibase-infra" "{REPO_ROOT}" "/tmp/fake-deploy-target"'
+                f'"{compose_project}" "{REPO_ROOT}" "/tmp/fake-deploy-target"'
             ),
         ]
     )
@@ -254,6 +272,10 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "omninode-contract-resolver",
         "projection-tenant-registry-writer",
         "projection-delegation-writer",
+        "projection-registration-writer",
+        "projection-savings-writer",
+        "projection-tenant-credentials-writer",
+        "projection-live-events-writer",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -265,6 +287,10 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "omninode-contract-resolver": "omninode-contract-resolver",
         "projection-tenant-registry-writer": "projection-tenant-registry-writer",
         "projection-delegation-writer": "projection-delegation-writer",
+        "projection-registration-writer": "projection-registration-writer",
+        "projection-savings-writer": "projection-savings-writer",
+        "projection-tenant-credentials-writer": "projection-tenant-credentials-writer",
+        "projection-live-events-writer": "projection-live-events-writer",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not
@@ -288,3 +314,85 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         )
     # The package-version check is still asserted for the primary container.
     assert "uv pip show omnibase-infra" in calls_log
+
+
+@pytest.mark.unit
+def test_stability_lane_readback_covers_its_own_writer_services(
+    tmp_path: Path,
+) -> None:
+    """OMN-17562: the stability lane's own writers are read back, like dev's.
+
+    ``resolve_lane_runtime_services()`` gained a second lane branch. Without a
+    case that actually resolves the stability overlay, that branch would be
+    dead code in every test while being live in every proof-lane deploy — and
+    the readback would silently skip the six containers whose whole purpose is
+    to prove the lane writes rows.
+    """
+    lane_agnostic = ["omninode-runtime", "runtime-effects", "runtime-worker"]
+    writers = [
+        "projection-tenant-registry-writer",
+        "projection-delegation-writer",
+        "projection-registration-writer",
+        "projection-savings-writer",
+        "projection-tenant-credentials-writer",
+        "projection-live-events-writer",
+    ]
+    ps_map = {
+        "omninode-runtime": "omninode-stability-test-runtime",
+        "runtime-effects": "omninode-stability-test-runtime-effects",
+        "runtime-worker": "omninode-stability-test-runtime-worker",
+        **{name: f"omnimarket-stability-test-{name}" for name in writers},
+    }
+    revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
+    version_map = {"omninode-stability-test-runtime": VERSION}
+
+    result = _run_readback(
+        tmp_path,
+        runtime_build_services=lane_agnostic,
+        ps_map=ps_map,
+        revision_map=revision_map,
+        version_map=version_map,
+        compose_project="omnibase-infra-stability-test",
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls_log = (tmp_path / "stubs" / "calls.log").read_text(encoding="utf-8")
+    for service in writers:
+        assert service in calls_log, (
+            f"the stability-test readback must probe its own writer {service!r}; "
+            f"docker calls were:\n{calls_log}"
+        )
+
+
+@pytest.mark.unit
+def test_prod_lane_is_handed_no_lane_only_service(tmp_path: Path) -> None:
+    """A lane with no writers must be handed the lane-agnostic set and nothing else.
+
+    This is the fail-closed direction and the reason the writers are NOT in
+    ``RUNTIME_SERVICES``: ``docker compose up`` fails the WHOLE invocation on a
+    single undefined service name, so one lane-agnostic entry would turn every
+    prod and judge restart into a deploy outage.
+    """
+    lane_agnostic = ["omninode-runtime", "runtime-effects"]
+    ps_map = {
+        "omninode-runtime": "omninode-prod-runtime",
+        "runtime-effects": "omninode-prod-runtime-effects",
+    }
+    revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
+    version_map = {"omninode-prod-runtime": VERSION}
+
+    result = _run_readback(
+        tmp_path,
+        runtime_build_services=lane_agnostic,
+        ps_map=ps_map,
+        revision_map=revision_map,
+        version_map=version_map,
+        compose_project="omnibase-infra-prod",
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls_log = (tmp_path / "stubs" / "calls.log").read_text(encoding="utf-8")
+    assert "-writer" not in calls_log, (
+        "a projection writer was probed on the prod lane, which declares none. "
+        f"docker calls were:\n{calls_log}"
+    )

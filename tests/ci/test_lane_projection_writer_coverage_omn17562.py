@@ -276,30 +276,95 @@ WRITER_OWNED_PROJECTIONS: dict[str, WriterOwned] = {
 # elsewhere`'s own docstring names it as the pre-existing orphan the OMN-15905
 # pattern is distinguished from. Excluded from the coverage ratchets because a
 # writer service would be a container with nothing to run.
-ORPHANED_PROJECTIONS: dict[str, str] = {
-    "projection_overnight": (
-        "OMN-17562: contract defect, not a deployment gap — 3 entries / 3 topics, "
-        "every entry zero-route, no runner class exists. Needs a handler_routing "
-        "ruling (single owning entry, or a runner), not a writer service."
-    ),
+# The 17th WAS `projection_overnight`, and it is gone: `omnimarket#2278`
+# ("fix(OMN-17562): projection_overnight registers zero dispatch routes",
+# merged 2026-09-03T07:31:06Z) switched its `handler_routing` from
+# `operation_match` to `topic_match` and gave each of its three entries an
+# owning `topic:`. Every entry now resolves a route, so the contract dispatches
+# in-process and is no longer subscribed-and-never-dispatched on any lane. It
+# needs no writer service and is not an orphan — it left this classification
+# entirely rather than moving between its halves.
+#
+# Kept as an empty registry rather than deleted: a zero-route contract is a
+# recurring class (`_projection_dispatch_owned_elsewhere`'s own docstring names
+# it), and the next one must land in a named, ticket-citing home instead of
+# being folded into the writer ratchets, where a writer service would be a
+# container with nothing to run and the ratchet would become un-closeable.
+ORPHANED_PROJECTIONS: dict[str, str] = {}
+
+# The operator ruling of 2026-09-03 split the writer-owned set in two, and the
+# split is the substance of this PR. Both halves are frozen here so neither can
+# grow by accident.
+#
+# ADOPT — mirrored onto both mutable lab lanes as writer services by this
+# change. Membership is not a judgement call: these are exactly the six with a
+# checked-in writer Deployment under `omninode_infra` `k8s/onex-dev/runtime/` on
+# origin/dev, i.e. a runner already proven to run as its own process.
+# `omninode_infra#1147` ("revert(OMN-17519): remove rejected projection writer
+# rollout", merged 2026-09-02T19:28:06Z, the exact inverse of #1146) removed the
+# pattern-learning and routing-decision Deployments, stating that "the operator
+# ruling identified that rollout direction as prohibited" — so those two are NOT
+# adopted here. Their in-process sibling is the entry raising
+# `ValueError: Projection handler requires topology bindings with configured
+# DSNs: tenant_projection:ONEX_TENANT_DB_URL`, which is OMN-17557 / OMN-17556
+# store-resolved-credential work, not writer-mirroring work.
+ADOPTED_WRITER_PROJECTIONS: frozenset[str] = frozenset(
+    {
+        "projection_delegation",
+        "projection_live_events",
+        "projection_registration",
+        "projection_savings",
+        "projection_tenant_credentials",
+        "projection_tenant_registry",
+    }
+)
+
+# DROP — ruled out of the shared main/effects runtime profiles: no writer exists
+# on any lane and nothing consumes their tables, so the ruling stops the kernel
+# subscribing them rather than deploying four processes to write rows no reader
+# reads. Delivered by the omnibase_infra#3156 subscription skip, NOT by editing
+# the omnimarket contracts: none of the four declares `runtime_profiles` at all
+# (so it defaults to `main`), an empty list is falsy and falls through to that
+# same default, and naming a non-consumer-attached profile is rejected by
+# `ValidatorRuntimeProfiles` against `CONSUMER_ATTACHED_RUNTIME_PROFILES`. A new
+# registered profile name would need an omnibase_core release, which the same
+# ruling forbids.
+#
+# Frozen at exactly four. A fifth name appearing here would mean a projection
+# was dropped without a ruling — the failure mode this allowlist exists to make
+# impossible, since "no writer" and "ruled to need none" are indistinguishable
+# from the coverage count alone.
+RULED_DROP_PROJECTIONS: dict[str, str] = {
+    "node_projection_cost_by_repo": "OMN-17562 ruling (1): no writer on any lane, no consumer.",
+    "node_projection_instruction_eval": "OMN-17562 ruling (1): no writer on any lane, no consumer.",
+    "node_projection_skill_executions": "OMN-17562 ruling (1): no writer on any lane, no consumer.",
+    "projection_llm_cost": "OMN-17562 ruling (1): no writer on any lane, no consumer.",
 }
 
 # Writer-owned projections with NO writer service on the lane, pinned at the
 # value measured on 2026-09-03T01:08Z. Shrink-only: a PR that lands a writer
 # lowers the number here in the same change; a PR that removes one fails.
 #
-# dev runs 2 of 16 (delegation, tenant-registry — the beta-critical pair
-# OMN-17448 landed). stability-test and lakshman run none of their own.
+# OMN-17562 moved both mutable lanes from 14/16 to 10: the six-name ADOPT set
+# now has a writer service on each. The residual 10 is the four ruled-DROP names
+# plus the six contracts that keep a LIVE in-process dispatcher beside their
+# runner entry (`node_projection_receipt_gate`, `projection_baselines`,
+# `projection_intent_classification`, `projection_session_outcome`,
+# `projection_pattern_learning`, `projection_routing_decision`) — they write
+# rows today and a writer container for them would be a second process
+# competing for the same partitions. `lakshman` is unchanged: this repo measures
+# that lane but does not deploy it.
 LANE_UNCOVERED_RATCHET: dict[str, int] = {
-    "dev": 14,
-    "stability-test": 16,
+    "dev": 10,
+    "stability-test": 10,
     "lakshman": 16,
 }
 
 # Writers the mutable dev lane has that the PROOF lane does not. The proof lane
 # being the weaker of the two is backwards — `stability-proven` is resolved from
-# it — so the asymmetry is pinned and must shrink, never grow.
-PROOF_LANE_WRITER_GAP: int = 2
+# it — so the asymmetry is pinned and must shrink, never grow. OMN-17562 closed
+# it: the two lanes now run the same six.
+PROOF_LANE_WRITER_GAP: int = 0
 
 _OMNIMARKET_ABSENT_REASON = (
     "omnimarket is not importable here. It is deliberately absent from this "
@@ -547,6 +612,87 @@ def test_proof_lane_is_not_more_than_the_pinned_gap_weaker_than_dev() -> None:
         f"The dev/stability writer gap is now {len(dev_only)}, below the pinned "
         f"{PROOF_LANE_WRITER_GAP}. Lower PROOF_LANE_WRITER_GAP to "
         f"{len(dev_only)} in this same change."
+    )
+
+
+@pytest.mark.parametrize(
+    "lane", sorted(name for name, spec in GOVERNED_LANES.items() if spec.mutable_here)
+)
+def test_every_adopted_projection_has_a_writer_service_on_every_mutable_lane(
+    lane: str,
+) -> None:
+    """The ruled ADOPT set is deployed, not merely ratified.
+
+    This is the closeable half of the coverage question. The ratchet above is a
+    number that may fall; this is a NAMED set that must be complete on both
+    lanes this repo deploys, so a writer cannot be quietly dropped from one lane
+    while the ratchet stays satisfied by an unrelated addition.
+
+    Deliberately not applied to `lakshman`: this repo measures that lane so it
+    cannot silently diverge, but its owner deploys it.
+    """
+    missing = sorted(ADOPTED_WRITER_PROJECTIONS - _covered_projections(lane))
+
+    assert not missing, (
+        f"Lane {lane!r} declares no writer service for {missing}. Each has a "
+        "checked-in onex-dev writer Deployment, so a runner provably exists to "
+        "run; without the service here the kernel consumes their topics to LAG 0 "
+        "and writes nothing. Add the service to "
+        f"docker/{GOVERNED_LANES[lane].overlay}."
+    )
+
+
+def test_the_ruled_sets_are_exactly_the_ruled_names_and_disjoint() -> None:
+    """ADOPT is six, DROP is four, and neither may grow without a ruling.
+
+    Both are operator decisions, not derivations, so nothing else in this file
+    can catch them growing. The count assertions are the whole guard: a seventh
+    adopted name would mean a writer was deployed for a projection with no
+    proven runner, and a fifth dropped name would mean a projection stopped
+    being served with no ruling behind it.
+    """
+    assert len(ADOPTED_WRITER_PROJECTIONS) == 6, (
+        f"ADOPTED_WRITER_PROJECTIONS is {sorted(ADOPTED_WRITER_PROJECTIONS)}. The "
+        "ruled ADOPT set is the six with a checked-in onex-dev writer Deployment "
+        "on omninode_infra origin/dev. Adding a name means deploying a writer "
+        "whose runner has never run as its own process anywhere."
+    )
+    assert sorted(RULED_DROP_PROJECTIONS) == [
+        "node_projection_cost_by_repo",
+        "node_projection_instruction_eval",
+        "node_projection_skill_executions",
+        "projection_llm_cost",
+    ], (
+        f"RULED_DROP_PROJECTIONS is {sorted(RULED_DROP_PROJECTIONS)}, not the four "
+        "names the OMN-17562 ruling dropped. A projection may only leave the "
+        "served set by a ruling — 'has no writer' and 'was ruled to need none' "
+        "are indistinguishable from the coverage count alone, which is exactly "
+        "why this list is frozen rather than derived."
+    )
+
+    overlap = sorted(ADOPTED_WRITER_PROJECTIONS & set(RULED_DROP_PROJECTIONS))
+    assert not overlap, (
+        f"{overlap} are both adopted and dropped. A contract gets a writer or "
+        "stops being subscribed; it cannot be ruled both ways."
+    )
+
+    unknown = sorted(
+        (ADOPTED_WRITER_PROJECTIONS | set(RULED_DROP_PROJECTIONS))
+        - set(WRITER_OWNED_PROJECTIONS)
+    )
+    assert not unknown, (
+        f"{unknown} are ruled on but are not writer-owned per the registry "
+        "above. A ruling that names a contract this gate does not track cannot "
+        "be enforced by it — re-derive the registry rather than widening a set "
+        "to match a name."
+    )
+
+    unticketed = sorted(
+        name for name, reason in RULED_DROP_PROJECTIONS.items() if "OMN-" not in reason
+    )
+    assert not unticketed, (
+        f"Dropped projection(s) {unticketed} cite no OMN ticket. A drop is a "
+        "decision with an author, not a settled fact."
     )
 
 

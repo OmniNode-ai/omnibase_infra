@@ -386,10 +386,41 @@ def test_dev_worker_replicas_fails_closed_when_policy_value_unset(
 # `tenant_registry_mirror` at 0 rows, with HWM 0 on both the DLQ and the
 # terminal-event topic.
 
-_WRITER_SERVICES: tuple[str, ...] = (
-    "projection-tenant-registry-writer",
-    "projection-delegation-writer",
-)
+# OMN-17562 widened this from the two beta-critical writers OMN-17448 landed to
+# the full ADOPT set: the six projections that have a checked-in onex-dev writer
+# Deployment on `omninode_infra` origin/dev and therefore a proven runner to
+# mirror. `omninode_infra#1147` ("revert(OMN-17519): remove rejected projection
+# writer rollout", merged 2026-09-02T19:28:06Z) removed the
+# pattern-learning and routing-decision Deployments as a prohibited rollout
+# direction, so those two are deliberately NOT here — they are OMN-17557 /
+# OMN-17556 store-resolved-credential work, not writer-mirroring work.
+#
+# Service name -> the runner module its `__main__` block starts. One mapping,
+# not a tuple beside a dict: a writer whose name is asserted but whose module is
+# not is exactly the half-checked service this file exists to prevent.
+_WRITER_MODULES: dict[str, str] = {
+    "projection-tenant-registry-writer": (
+        "omnimarket.nodes.node_projection_tenant_registry.handlers"
+        ".handler_tenant_registry_projection"
+    ),
+    "projection-delegation-writer": (
+        "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation"
+    ),
+    "projection-registration-writer": (
+        "omnimarket.nodes.node_projection_registration.handlers.handler_registration"
+    ),
+    "projection-savings-writer": (
+        "omnimarket.nodes.node_projection_savings.handlers.handler_savings"
+    ),
+    "projection-tenant-credentials-writer": (
+        "omnimarket.nodes.node_projection_tenant_credentials.handlers"
+        ".handler_tenant_credentials_projection"
+    ),
+    "projection-live-events-writer": (
+        "omnimarket.nodes.node_projection_live_events.handlers.handler_live_events"
+    ),
+}
+_WRITER_SERVICES: tuple[str, ...] = tuple(_WRITER_MODULES)
 
 
 @pytest.mark.integration
@@ -424,16 +455,7 @@ def test_writers_invoke_the_runner_module_entrypoint() -> None:
 
     assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
     services = yaml.safe_load(result.stdout)["services"]
-    expected = {
-        "projection-tenant-registry-writer": (
-            "omnimarket.nodes.node_projection_tenant_registry.handlers"
-            ".handler_tenant_registry_projection"
-        ),
-        "projection-delegation-writer": (
-            "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation"
-        ),
-    }
-    for name, module in expected.items():
+    for name, module in _WRITER_MODULES.items():
         command = services[name]["command"]
         assert command[:3] == ["python", "-m", module], (
             f"{name} must run {module} as a module entrypoint; got {command!r}"
@@ -469,14 +491,50 @@ def test_each_writer_holds_its_own_consumer_group() -> None:
 
 
 @pytest.mark.integration
-def test_writers_are_absent_from_the_base_file_every_other_lane_merges() -> None:
-    """Fail-closed containment: stability-test, prod and judge must not inherit these.
+def test_each_writer_healthcheck_probes_its_own_readiness_port() -> None:
+    """A healthcheck pointing at a sibling's port is an autoheal restart loop.
 
-    The base file is merged by EVERY lane; only the dev lane layers the overlay
-    (``resolve_compose_file_args()``). Declaring the writers in the base would
-    add them to prod and to any lane created later by someone who has never
-    read this file — the same fail-open shape the migration-lane indicator at
-    the top of the overlay exists to prevent.
+    ``BaseProjectionRunner`` serves readiness on ``PROJECTION_RUNNER_HEALTH_PORT``
+    and nothing else listens inside the container, so a copy-pasted healthcheck
+    URL that kept the previous writer's port would curl a closed port forever.
+    These services carry ``autoheal=true``, so that does not read as one
+    unhealthy container — it restarts the process every 30s indefinitely, and
+    the writer that looks deployed writes nothing between restarts. The exact
+    silent-loss shape this whole writer set exists to end.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    for name in _WRITER_SERVICES:
+        port = services[name]["environment"]["PROJECTION_RUNNER_HEALTH_PORT"]
+        probe = " ".join(str(part) for part in services[name]["healthcheck"]["test"])
+        assert f"localhost:{port}/ready" in probe, (
+            f"{name} serves readiness on port {port!r} but its healthcheck probes "
+            f"{probe!r}. A mismatched port is permanently unhealthy, and with "
+            "autoheal=true that is a restart loop, not a visible failure."
+        )
+
+
+@pytest.mark.integration
+def test_writers_are_absent_from_the_base_file_every_other_lane_merges() -> None:
+    """Fail-closed containment: prod and judge must not inherit these.
+
+    The base file is merged by EVERY lane; only the dev lane layers this
+    overlay (``resolve_compose_file_args()``). Declaring the writers in the base
+    would add them to prod and to any lane created later by someone who has
+    never read this file — the same fail-open shape the migration-lane
+    indicator at the top of the overlay exists to prevent.
+
+    OMN-17562 gave the stability-test lane the same six writers, and that is
+    exactly why this stays a base-file check rather than becoming a
+    "nowhere but dev" one: the proof lane declares them EXPLICITLY in
+    ``docker-compose.stability-test.yml``, with its own container names, its own
+    lane-scoped consumer groups and its own DSN spelling. Inheriting them
+    silently from the base would have given it the dev lane's identities
+    instead, which is the failure this assertion is shaped against.
     """
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
 

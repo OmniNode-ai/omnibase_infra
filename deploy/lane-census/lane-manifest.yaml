@@ -33,6 +33,34 @@
 #   but dispatch nothing in-process (the standalone-runner shape, the OMN-17448 class), which is a
 #   lane-content observation, NOT lane-census drift: no container is absent, extra or mis-tagged
 #   and `lane_census_plan.py` reports zero findings for this lane on the same inventory.
+# verified: 2026-09-03T12:56Z via read-only ssh jonah@192.168.86.201 `docker ps -a --filter
+#   label=com.docker.compose.project=<project> --format '{{.Names}}\t{{.Status}}'` for both
+#   `omnibase-infra-stability-test` and `omnibase-infra` — OMN-17562, the attestation for the
+#   ten projection-writer service entries this PR adds below.
+#   STATE AT THIS LINE, stated as the baseline these declarations are ahead of:
+#   stability-test runs 12 containers (9 up + 3 oneshots Exited (0)) and ZERO projection
+#   writers; `omninode-stability-test-runtime` and `-runtime-effects` are `Up 22 hours
+#   (unhealthy)`. The dev lane runs `omnimarket-projection-delegation-writer` and
+#   `omnimarket-projection-tenant-registry-writer`, both `Up 22 hours (healthy)`, and no other
+#   writer. So: of the sixteen writer service entries declared below, six exist on a lane
+#   today (2 on dev) and ten do not yet.
+#   THAT GAP IS DELIBERATE AND IS THE POINT. This file is the DESIRED-state authority; the
+#   compose overlays in the same commit declare the services, and the next
+#   `lane-census-check.sh` run on .201 is what turns the gap into visible drift instead of
+#   silence. The census reporting ten `container_absent` findings after this merges is the
+#   gate working, not a regression — it clears when the lanes are refreshed through the
+#   sanctioned attributed paths (`scripts/deploy-runtime.sh --execute`,
+#   `scripts/runtime_build/refresh_stability_lane.sh --execute`). Declaring the desired state
+#   FIRST is the same discipline the lakshman reservation above used, and it is the opposite
+#   of the failure this file exists for: a running-but-undeclared container is invisible,
+#   whereas a declared-but-absent one is loud.
+#   NOT REGENERATED IN THIS COMMIT: the CLAUDE.md GENERATED_LANE_TABLE block.
+#   `generate_claude_lane_block.py` derives its per-lane count from THIS file and its drift
+#   verdict from the checked-in `census-snapshot.json` (taken 2026-09-02, before these
+#   services existed), so regenerating now would publish `14 running (census clean)` for a
+#   lane on which six of those fourteen do not exist. That is precisely the phantom-lane
+#   claim retro B-6 made unwritable. The block regenerates truthfully from the next census
+#   after the lanes are refreshed.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -121,6 +149,37 @@ lanes:
       # The worker that OMN-12988 / OMN-12990 silently scaled to 0. Declared
       # replicas: 1 here so its absence (replicas 0 => no container) is loud drift.
       - name: omninode-stability-test-runtime-worker
+        kind: service
+        replicas: 1
+      # OMN-17562: the standalone projection writers on the PROOF lane.
+      #
+      # This lane ran ZERO of them while the throwaway dev lane ran two, so the
+      # surface `stability-proven` is resolved from for every live prod-promotion
+      # grant (OMN-15243) had the WEAKER write path of the two. The shared kernel
+      # subscribes each of these contracts' topics and dispatches nothing
+      # (OMN-15905 / OMN-16874), so without a dedicated process every message is
+      # consumed, acked and destroyed with no DLQ record and no ERROR log.
+      #
+      # `kind: service, replicas: 1` and NOT `profile_gated`: unlike the four
+      # OMN-16803 entries above, these ARE members of this lane's `runtime`
+      # profile and refresh_stability_lane.sh builds and recreates them, so an
+      # absent container here is real drift, not an expected absence.
+      - name: omnimarket-stability-test-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-live-events-writer
         kind: service
         replicas: 1
       # OMN-16803: these four are `profile_gated` — EXPECTED ABSENT on this lane.
@@ -274,10 +333,27 @@ lanes:
       # nothing, and no census, health surface or lane document said so.
       # `optional: true` on this lane still holds: an entirely-down dev lane is
       # not drift. When dev IS up, these must be running.
+      # OMN-17562 completed the set: all six the onex-dev cluster runs as
+      # Deployments now run here as compose services. A writer declared in the
+      # overlay but absent from this file is invisible to the census, which is
+      # how "undocumented-but-running" (and its mirror, "declared-but-never-
+      # started") both hide.
       - name: omnimarket-projection-tenant-registry-writer
         kind: service
         replicas: 1
       - name: omnimarket-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-live-events-writer
         kind: service
         replicas: 1
   # OMN-17143: COLLABORATOR lane for Lakshman Patel (operator decision

@@ -147,6 +147,33 @@ readonly RUNTIME_SERVICES=(
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-tenant-registry-writer
     projection-delegation-writer
+    projection-registration-writer
+    projection-savings-writer
+    projection-tenant-credentials-writer
+    projection-live-events-writer
+)
+
+# OMN-17562: the same six, mirrored onto the PROOF lane.
+#
+# A SEPARATE array, not a shared one appended for both lanes, and emphatically
+# not additions to RUNTIME_SERVICES. RUNTIME_SERVICES is lane-agnostic: every
+# lane's `docker compose ... up -d --no-deps "${services[@]}"` names it
+# verbatim, and `docker compose up` fails the WHOLE invocation on an undefined
+# service name. These services exist only in docker-compose.dev-lane.yml and
+# docker-compose.stability-test.yml, so a lane-agnostic entry would break every
+# prod and judge deploy at the first restart -- turning a projection-coverage
+# improvement into a production deploy outage.
+#
+# Keyed by lane rather than by overlay filename so it reads the same way
+# resolve_lane_name() does, and so a lane that later gains its own writers adds
+# one array here instead of editing the resolution logic.
+readonly STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES=(
+    projection-tenant-registry-writer
+    projection-delegation-writer
+    projection-registration-writer
+    projection-savings-writer
+    projection-tenant-credentials-writer
+    projection-live-events-writer
 )
 
 # OMN-14873: optional scoped-build/restart override. When RUNTIME_BUILD_SERVICES_OVERRIDE
@@ -172,11 +199,18 @@ fi
 
 resolve_lane_runtime_services() {
     # Populate a caller-provided array (by name) with the runtime services to
-    # build/restart for one lane: the lane-agnostic set, plus the dev-lane-only
-    # additions when (and only when) the target IS the dev lane. Lane identity
-    # is read the same way every other function here reads it -- an empty
-    # overlay filename means the bare `omnibase-infra` dev project -- so this
-    # cannot drift from resolve_compose_file_args().
+    # build/restart for one lane: the lane-agnostic set, plus that lane's OWN
+    # additions when (and only when) the target IS that lane. Lane identity is
+    # read the same way every other function here reads it -- through
+    # resolve_lane_overlay_filename(), where an empty result means the bare
+    # `omnibase-infra` dev project -- so this cannot drift from
+    # resolve_compose_file_args().
+    #
+    # OMN-17562 widened this from a dev-only branch to a per-lane case. The
+    # fail-closed direction is the default one: a lane with no entry gets the
+    # lane-agnostic set and nothing else, so prod and judge can never be handed
+    # a service name that exists in no compose file they load -- `docker compose
+    # up` fails the WHOLE invocation on one undefined service.
     local _out_args_name="$1"
     local compose_project="$2"
 
@@ -192,13 +226,33 @@ resolve_lane_runtime_services() {
         return 0
     fi
 
+    # Keyed on the OVERLAY, not on the lane name: these services exist because
+    # that specific compose file is loaded, so the overlay is the thing the
+    # array is actually a property of. It also inherits that resolver's
+    # fail-closed behaviour on an unknown lane instead of re-deriving a lane
+    # string that echoes unknown suffixes through unchanged.
     local overlay_filename
     overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
-    if [[ -n "${overlay_filename}" ]]; then
-        return 0
-    fi
+    local -a lane_only_services=()
+    case "${overlay_filename}" in
+        "")
+            # Bare `omnibase-infra` -> the dev lane, which loads
+            # docker-compose.dev-lane.yml through resolve_compose_file_args()'s
+            # fall-through.
+            lane_only_services=("${DEV_LANE_ONLY_RUNTIME_SERVICES[@]}")
+            ;;
+        docker-compose.stability-test.yml)
+            lane_only_services=("${STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES[@]}")
+            ;;
+        *)
+            # prod and judge declare no services of their own. Returning here is
+            # the fail-closed default: naming a service that exists in none of
+            # the compose files a lane loads fails the WHOLE `docker compose up`.
+            return 0
+            ;;
+    esac
 
-    for svc in "${DEV_LANE_ONLY_RUNTIME_SERVICES[@]}"; do
+    for svc in "${lane_only_services[@]}"; do
         eval "${_out_args_name}+=( $(printf '%q' "${svc}") )"
     done
 }
