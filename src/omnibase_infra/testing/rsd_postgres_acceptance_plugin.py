@@ -14,16 +14,22 @@ pytest runs.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import cast
 
 import pytest
 import yaml
+from pydantic import ValidationError
+from yaml import YAMLError
 
 from omnibase_infra.runtime.models.model_rsd_postgres_acceptance_overlay import (
     ModelRsdPostgresAcceptanceOverlay,
+)
+from omnibase_infra.testing.rsd_postgres_acceptance_capability import (
+    CapabilityResolver,
+    PostgresLifecycleConnectionFactory,
+    RsdPostgresAcceptanceResolutionError,
+    resolve_postgres_lifecycle_factory,
 )
 
 
@@ -39,14 +45,23 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.fixture
 def postgres_lifecycle_connection_factory(
     request: pytest.FixtureRequest,
-) -> Callable[[], AbstractContextManager[object]]:
+) -> PostgresLifecycleConnectionFactory:
     configured = request.config.getoption("--rsd-postgres-acceptance-overlay")
     if not isinstance(configured, str) or not configured:
         pytest.fail("RSD PostgreSQL acceptance overlay path must be explicit")
-    resolver = cast(
-        "Callable[[str], Callable[[], AbstractContextManager[object]]] | None",
-        getattr(request.config, "rsd_postgres_acceptance_capability_resolver", None),
+    resolver_value = getattr(
+        request.config, "rsd_postgres_acceptance_capability_resolver", None
     )
-    if not callable(resolver):
+    if not callable(resolver_value):
         pytest.fail("operator capability resolver is not injected")
-    return resolver(load_overlay(Path(configured)).postgres_capability_ref)
+    resolver = cast("CapabilityResolver", resolver_value)
+    try:
+        capability_ref = load_overlay(Path(configured)).postgres_capability_ref
+    except (OSError, ValidationError, YAMLError):
+        pytest.fail("RSD PostgreSQL acceptance overlay is invalid", pytrace=False)
+        raise AssertionError("unreachable")
+    try:
+        return resolve_postgres_lifecycle_factory(resolver, capability_ref)
+    except RsdPostgresAcceptanceResolutionError as exc:
+        pytest.fail(str(exc), pytrace=False)
+        raise AssertionError("unreachable")
