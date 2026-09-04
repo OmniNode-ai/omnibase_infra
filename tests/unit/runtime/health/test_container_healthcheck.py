@@ -189,6 +189,39 @@ class TestVerdictTable:
         )
         assert (verdict.verdict, verdict.reason) == ("FAIL", "runtime_unhealthy")
 
+    @pytest.mark.parametrize(
+        ("body", "case"),
+        [
+            ({"details": {"healthy": True}}, "absent"),
+            ({"status": "", "details": {"healthy": True}}, "empty"),
+            ({"status": None}, "null"),
+            ({"status": True}, "non-string"),
+            ({"status": "starting"}, "unrecognised"),
+        ],
+    )
+    def test_unreadable_status_fails_closed(self, body: dict, case: str) -> None:
+        """OMN-17623: an unreadable status is unknown health, never proven health.
+
+        ``ServiceHealth._handle_health`` types its status
+        ``Literal["healthy", "degraded", "unhealthy"]`` and every branch assigns
+        one of the three, so no ONEX runtime can serve any of these bodies. A
+        body outside that closed set means the probe is not talking to a runtime
+        health endpoint at all — which this module already fails closed on when
+        the body is unparseable (``payload_missing``) or the endpoint is
+        unreachable (``probe_unreachable``). Passing the strictly-less-broken
+        case was the inconsistency.
+        """
+        verdict = chc.evaluate_health_response(http_status=200, payload=body)
+        assert (verdict.verdict, verdict.reason) == ("FAIL", "status_unreadable"), case
+
+    @pytest.mark.parametrize("status", ["healthy", "HEALTHY", "Healthy"])
+    def test_recognised_status_is_case_insensitive(self, status: str) -> None:
+        """The closed-set guard must not regress the existing case folding."""
+        verdict = chc.evaluate_health_response(
+            http_status=200, payload={"status": status}
+        )
+        assert (verdict.verdict, verdict.reason) == ("PASS", "healthy")
+
     def test_critical_verdict_fails_even_under_warn_policy(self) -> None:
         """CRITICAL is never downgraded — `warn` only softens DEGRADED."""
         payload = _degraded_payload()

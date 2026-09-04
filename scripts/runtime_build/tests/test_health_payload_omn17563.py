@@ -436,24 +436,15 @@ def test_script_runs_standalone_from_an_unrelated_cwd(
 _LANE_PROBE_POLICY = "fail"
 
 
-# Bodies where the gate is deliberately STRICTER than the probe. Measured, not
-# assumed: `evaluate_health_response` reads `payload.get("status", "")`, fails
-# only on the literal "unhealthy"/"degraded", and falls through every other
-# value -- including an ABSENT status -- to `PASS "healthy"`. So the probe
-# accepts all five of these. That is the same fail-open class as OMN-17563 on
-# a different surface, filed as OMN-17623 rather than fixed here: that module is
-# also the Docker LIVENESS probe watched by autoheal, so tightening it turns
-# an unreadable body into a restart loop, which is a real design call and not
-# a drive-by edit. AC-4 forbids loosening the probe; nothing here does.
-_GATE_STRICTER_THAN_PROBE = frozenset(
-    {
-        "missing-status",
-        "empty-status",
-        "null-status",
-        "non-string-status",
-        "unrecognised-status",
-    }
-)
+# Bodies where the gate is deliberately STRICTER than the probe. Empty as of
+# OMN-17623: the five rows that used to live here (missing/empty/null/non-string/
+# unrecognised status) were the probe reading `payload.get("status", "")` and
+# falling through every unrecognised value to `PASS "healthy"`. The probe now
+# fails those closed as `status_unreadable`, so gate and probe agree body-for-body
+# and each row was deleted rather than the gate loosened, as the comment here
+# instructed. Kept as an empty frozenset because the assertion below is the
+# ratchet: a future row added here has to justify itself.
+_GATE_STRICTER_THAN_PROBE: frozenset[str] = frozenset()
 
 
 @pytest.mark.unit
