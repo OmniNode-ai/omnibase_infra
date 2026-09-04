@@ -54,6 +54,31 @@ liveness probe an absent verdict is "not known yet" (pass, do not restart), but
 for a *proof* consumer an absent verdict is "cannot prove healthy" (fail).
 Same evaluator, different policy, one code path.
 
+An **unreadable top-level status** is treated differently from an absent verdict,
+and the restart-loop question that distinction raises was decided as follows
+(OMN-17623). A body whose ``status`` is absent, empty, null, non-string, or
+outside ``healthy``/``degraded``/``unhealthy`` fails closed as
+``status_unreadable`` on *every* policy, not only under ``--require-verdict``:
+
+* ``ServiceHealth._handle_health`` types its status
+  ``Literal["healthy", "degraded", "unhealthy"]``, every branch assigns one of
+  the three, and ``fold_runtime_verdict_into_status`` returns the same Literal —
+  so no ONEX runtime can serve such a body. A booting runtime serves
+  ``unhealthy``/``degraded``, never ``starting``. The condition means the probe
+  is not talking to a runtime health endpoint at all.
+* This module already fails closed on the strictly *more* broken inputs — an
+  unreachable endpoint (``probe_unreachable``) and a body that is absent or not
+  a JSON object (``payload_missing``). Passing the less-broken case in between
+  was the inconsistency, not a deliberate leniency.
+* Docker suppresses probe failures for the entire ``start_period`` (120s here,
+  1200-1800s on the dev lane) and then requires 3-5 *consecutive* failures, so
+  this cannot flap a container over one malformed response.
+
+That is why it is unconditional, unlike ``verdict_absent`` / ``verdict_stale``
+below: those cover the monitor's optional enrichment, which legitimately has not
+landed one interval after boot. The top-level status is the health contract
+itself and is present from the first response.
+
 Exit codes: ``0`` healthy, ``1`` not healthy (Docker's unhealthy signal).
 """
 
@@ -80,6 +105,17 @@ _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 # inside a container with a 10s timeout, and package import cost is not a budget
 # a health probe should spend.
 RUNTIME_HEALTH_DETAIL_KEY = "runtime_health"
+
+# The closed set ``ServiceHealth._handle_health`` can serve. Its local is typed
+# ``Literal["healthy", "degraded", "unhealthy"]`` and every branch assigns one of
+# the three, as does ``fold_runtime_verdict_into_status``, so a status outside
+# this set did not come from an ONEX runtime. Mirrored as plain literals for the
+# stdlib-only reason in ``RUNTIME_HEALTH_DETAIL_KEY`` above.
+_RECOGNISED_STATUSES = frozenset({"healthy", "degraded", "unhealthy"})
+
+# A status echoed into container logs is bounded: the body is read up to
+# _MAX_RESPONSE_BYTES and a wrong endpoint can put anything in that field.
+_MAX_ECHOED_STATUS_CHARS = 40
 
 EXIT_HEALTHY = 0
 EXIT_UNHEALTHY = 1
@@ -168,6 +204,19 @@ def evaluate_health_response(
     fail_on_degraded = degraded_policy != DEGRADED_POLICY_WARN
 
     top_status = str(payload.get("status", "")).lower()
+
+    # OMN-17623: an unrecognised status is unknown health, not proven health.
+    # Unconditional rather than gated behind require_verdict — see the module
+    # docstring for the restart-loop reasoning that settles it.
+    if top_status not in _RECOGNISED_STATUSES:
+        observed = repr(payload.get("status"))[:_MAX_ECHOED_STATUS_CHARS]
+        return ContainerHealthVerdict(
+            "FAIL",
+            "status_unreadable",
+            f"health payload status {observed} is not one of "
+            f"healthy/degraded/unhealthy — health is unknown, not proven",
+        )
+
     if top_status == "unhealthy":
         return ContainerHealthVerdict(
             "FAIL", "runtime_unhealthy", "health payload reports status=unhealthy"
