@@ -69,3 +69,162 @@ def test_omnidash_spa_mints_onex_api_audience() -> None:
     assert audience_mapper["protocolMapper"] == "oidc-audience-mapper"
     assert audience_mapper["config"]["included.client.audience"] == "onex-api"
     assert audience_mapper["config"]["access.token.claim"] == "true"
+
+
+def test_onex_customer_is_a_dedicated_public_customer_client() -> None:
+    """OMN-17527: the customer sign-on path gets its own client.
+
+    Operator ruling (OMN-17527, 2026-09-02): the documented customer
+    registration path moves to a dedicated customer client and stops
+    borrowing `omnidash-spa`, which is an internal dashboard SPA client.
+
+    The replacement must be public and PKCE-only. Resource-owner password
+    credentials are not part of the browser sign-on path.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+
+    assert customer["publicClient"] is True
+    assert customer["standardFlowEnabled"] is True
+    assert customer["directAccessGrantsEnabled"] is False
+    assert customer["serviceAccountsEnabled"] is False
+    assert customer["attributes"]["pkce.code.challenge.method"] == "S256"
+
+
+def test_onex_customer_admits_the_customer_app_host_and_not_the_dashboard() -> None:
+    """OMN-17527 acceptance 3 (source finding S1 on OMN-17275).
+
+    The documented registration URL returned 400 `Invalid parameter:
+    redirect_uri` because `omnidash-spa` admits only the internal dashboard
+    host. The customer client must admit the host a customer actually lands
+    on -- and must not acquire the dashboard host, which would recreate the
+    coupling this ticket exists to remove.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+
+    for host in (
+        "https://app.omninode.ai",
+        "https://dev.app.omninode.ai",
+        "https://omninode.ai",
+        "https://dev.omninode.ai",
+    ):
+        assert host in customer["redirectUris"]
+        assert host in customer["webOrigins"]
+
+    dashboard_hosts = ("dash.omninode.ai", "dev.dash.omninode.ai")
+    assert all(
+        host not in uri for uri in customer["redirectUris"] for host in dashboard_hosts
+    )
+    assert all(
+        host not in origin
+        for origin in customer["webOrigins"]
+        for host in dashboard_hosts
+    )
+
+
+def test_onex_customer_redirects_do_not_use_wildcard_paths() -> None:
+    """OMN-17527: public customer redirects must stay exact-host scoped."""
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+
+    assert all("*" not in uri for uri in customer["redirectUris"])
+    assert all(uri.startswith("https://") for uri in customer["redirectUris"])
+
+
+def test_onex_customer_mints_onex_api_audience_and_tenant_claims() -> None:
+    """OMN-17527 acceptance 4 (source finding F10 on OMN-17281).
+
+    `aud` is minted by client configuration, not requested by the caller, so
+    the customer client needs its own `oidc-audience-mapper` for `onex-api`
+    or `POST /v1/auth/provision` 401s on a valid token. The three tenant
+    identity mappers match the `omniweb` client -- once a customer is
+    provisioned, their token has to carry the tenant the API resolves them
+    against.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+    mappers = {mapper["name"]: mapper for mapper in customer["protocolMappers"]}
+
+    audience = mappers["onex-api-audience"]
+    assert audience["protocolMapper"] == "oidc-audience-mapper"
+    assert audience["config"]["included.client.audience"] == "onex-api"
+    assert audience["config"]["access.token.claim"] == "true"
+    assert audience["config"]["id.token.claim"] == "false"
+
+    for claim in ("tenant_id", "tenant_slug", "principal_id"):
+        mapper = mappers[claim]
+        assert mapper["protocolMapper"] == "oidc-usermodel-attribute-mapper"
+        assert mapper["config"]["user.attribute"] == claim
+        assert mapper["config"]["claim.name"] == claim
+        assert mapper["config"]["access.token.claim"] == "true"
+        assert mapper["config"]["id.token.claim"] == "false"
+        assert mapper["config"]["userinfo.token.claim"] == "true"
+
+
+def test_omnidash_spa_is_untouched_by_the_customer_client_work() -> None:
+    """OMN-17527 acceptance 6, asserted rather than assumed.
+
+    A change that "fixes" the customer path by further mutating the internal
+    dashboard client has not done what the ticket asks. This pins the SPA
+    client's own host set and its OMN-17512 audience mapper against exactly
+    that drift.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    omnidash_spa = _client(config, "omnidash-spa")
+
+    assert omnidash_spa["redirectUris"] == [
+        "https://dash.omninode.ai/*",
+        "https://dev.dash.omninode.ai/*",
+        "http://localhost:3000/*",
+        "http://localhost:8080/*",
+    ]
+    assert omnidash_spa["webOrigins"] == [
+        "https://dash.omninode.ai",
+        "https://dev.dash.omninode.ai",
+        "http://localhost:3000",
+        "http://localhost:8080",
+    ]
+    assert [mapper["name"] for mapper in omnidash_spa["protocolMappers"]] == [
+        "onex-api-audience"
+    ]
+
+
+def test_customer_client_carries_no_client_secret_indirection() -> None:
+    """A public client has no secret, so it must not declare `secretEnv`.
+
+    `seed-keycloak-clients.py`'s `_resolve_client_secret()` reads every
+    declared `secretEnv` unconditionally and `_die()`s when the named
+    variable is unset. Declaring one here would add a 15th required key to
+    the `keycloak-smtp-credentials` Secret and hard-fail the reconcile for
+    every client after this one.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+
+    assert "secretEnv" not in customer
+
+
+def test_onex_customer_admits_no_loopback_redirect_or_origin() -> None:
+    """OMN-17527: the customer client carries no localhost surface.
+
+    Raised as a MAJOR hostile-reviewer finding on omnibase_infra#3159. Every
+    other browser client in this file (`omniweb`, `omnidash-spa`) admits
+    `localhost:3000`/`localhost:8080` because a developer runs those SPAs
+    locally. No customer ever does -- there is no documented customer flow
+    that lands on a loopback host -- so a loopback entry here is an
+    unjustified widening, and one that matters even now that
+    `directAccessGrantsEnabled` is off: `webOrigins` grants CORS to the
+    realm's token endpoint, so every listed origin is a browser context
+    allowed to run the code exchange against it.
+
+    Asserted in the negative on purpose. The natural next edit is someone
+    copying the host list off `omniweb`, which would silently reintroduce it.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = _client(config, "onex-customer")
+
+    for value in (*customer["redirectUris"], *customer["webOrigins"]):
+        assert "localhost" not in value
+        assert "127.0.0.1" not in value
+        assert "[::1]" not in value
