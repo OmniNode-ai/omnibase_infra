@@ -223,6 +223,40 @@ def test_validator_ro_reaches_a_cluster_only_where_the_seam_is_invoked() -> None
     )
 
 
+def test_instance_files_carry_no_indented_comment() -> None:
+    """A rationale comment inside a principals block is silently destroyed.
+
+    ``scripts/generate_application_database_table_grants.py`` re-serialises the
+    whole document through ``yaml.dump`` and rebuilds the file as
+    ``(column-0 # lines) + (dumped body)``. An indented comment survives neither
+    ``--write`` nor the byte comparison ``--check`` makes, so it does not read as
+    "a comment was lost" -- it reads as **derivation drift on all three
+    instances**, on a PR that changed no grant. That is what it did here: the
+    first revision of this change put a 37-line rationale block inside the
+    ``validator_ro`` principal and reddened
+    ``Application Database Domain Enforcement (OMN-15361)`` with a message
+    telling the author to regenerate.
+
+    The generator's own ``--check`` catches this, but only in the CI job that
+    has the cross-repo omnimarket checkout. This runs everywhere, costs nothing,
+    and says what is actually wrong.
+    """
+    for instance in _SHIPPED_INSTANCES:
+        offending = [
+            (number, line)
+            for number, line in enumerate(
+                (INSTANCE_ROOT / f"{instance}.yaml").read_text("utf-8").splitlines(), 1
+            )
+            if line.startswith((" ", "\t")) and line.lstrip().startswith("#")
+        ]
+        assert offending == [], (
+            f"{instance}.yaml carries an indented comment at line(s) "
+            f"{[number for number, _ in offending]}. This file is machine-rendered; "
+            "only column-0 '#' lines survive. Put the rationale in the migration "
+            "that provisions the principal and in its test module."
+        )
+
+
 def test_rendered_projection_carries_the_principal() -> None:
     # The rendered catalog is what docker/compose consumers read; the unit
     # suite fails closed on drift, and this names WHICH principal drifted.
