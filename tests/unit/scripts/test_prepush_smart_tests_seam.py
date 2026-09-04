@@ -437,6 +437,10 @@ def test_omn15060_runtime_directory_is_slot_backed_but_file_targets_are_not() ->
     assert _run_selection_is_whole_suite(
         SLOT_BACKED_IMPACTED_SCOPE, ["tests/unit/runtime"]
     )
+    assert _run_selection_is_whole_suite(SLOT_BACKED_IMPACTED_SCOPE, ["tests/unit/"])
+    assert not _run_selection_is_whole_suite(
+        SLOT_BACKED_IMPACTED_SCOPE, ["tests/unit/runtime/sub/"]
+    )
     assert not _run_selection_is_whole_suite(
         SLOT_BACKED_IMPACTED_SCOPE,
         ["tests/unit/runtime/test_registry_race_conditions.py"],

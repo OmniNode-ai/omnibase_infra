@@ -464,6 +464,14 @@ def _hook_func(name: str) -> str:
     return text[start + 1 : end + 3]
 
 
+def _impacted_selection_branch() -> str:
+    """The shipped impacted-selection branch, without the surrounding script exit."""
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index('  if selection_is_whole_suite "$FULL_SUITE_TARGET"')
+    end = text.index('\nelse\n  log "no impacted unit tests', start)
+    return text[start:end] + "\n"
+
+
 def _with_real_load() -> str:
     """Prelude that restores the hook's real load/fitness implementation (and
     the memory floor it reads) on top of the driver's network-free stub.
@@ -1357,7 +1365,10 @@ def test_the_local_heavy_path_takes_the_host_lock() -> None:
     assert "prepush_local_workroot" in body
 
 
-def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup() -> None:
+def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup(
+    table_repo: Path,
+    tmp_path: Path,
+) -> None:
     """OMN-15060 adds no second lock protocol for narrowed runtime work.
 
     The runtime directory must take ``guard_full_suite_host`` before the local
@@ -1366,20 +1377,51 @@ def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup() ->
     returns non-zero.  Keeping this structural link explicit prevents a future
     refactor from classifying the selection correctly but running it unlocked.
     """
-    text = HOOK.read_text(encoding="utf-8")
-    dispatch = text[text.index('elif [ "${#PATHS[@]}" -gt 0 ]; then') :]
-    runtime_scope = 'SLOT_BACKED_IMPACTED_SCOPE="tests/unit/runtime/"'
-    runtime_guard = 'guard_full_suite_host "slot-backed runtime impacted selection '
-    assert runtime_scope in text
-    assert runtime_guard in dispatch
-    assert dispatch.index(runtime_guard) < dispatch.index(
-        'log "running impacted subset:'
+    fake_bin = tmp_path / "bin"
+    fake_uv = fake_bin / "uv"
+    fake_bin.mkdir()
+    fake_uv.write_text(
+        "#!/usr/bin/env bash\nprintf 'EVENT pytest %s\\n' \"$*\" >&2\nexit 7\n",
+        encoding="utf-8",
     )
+    fake_uv.chmod(0o755)
 
-    guard = _extract_shell_function(HOOK, "prepush_try_local_heavy_slot")
-    cleanup = _extract_shell_function(HOOK, "prepush_hook_cleanup")
-    assert "prepush_lock_acquire" in guard
-    assert "prepush_lock_release" in cleanup
+    body = (
+        f'PATH="{fake_bin}:$PATH"\n'
+        f"CHANGED_FILE={tmp_path}/changed\n"
+        f"SELECTION_FILE={tmp_path}/selection\n"
+        f"SELECTION_ERR={tmp_path}/selection.err\n"
+        'FULL_SUITE_TARGET="tests/unit/"\n'
+        'SLOT_BACKED_IMPACTED_SCOPE="tests/unit/runtime/"\n'
+        'IS_FULL="false"\n'
+        'PATHS=("tests/unit/runtime/")\n'
+        'PATHS_STR="tests/unit/runtime/ "\n'
+        'PREPUSH_PYTEST_ARGS=""\n'
+        "REMOTE_FULL_SUITE_VERIFIED=0\n"
+        "REMOTE_LAB_RUN_VERDICT=0\n"
+        "RC=0\n"
+        "hostname() { printf 'omninode-pc\\n'; }\n"
+        "prepush_table_text() { printf 'table\\n'; }\n"
+        "prepush_identity_label() { printf 'h201\\n'; }\n"
+        "prepush_designated_hostnames() { printf 'omninode-pc\\n'; }\n"
+        "prepush_heavy_local_policy() { printf 'allowed\\n'; }\n"
+        "prepush_try_local_heavy_slot() { printf 'EVENT slot-acquired %s\\n' \"$heavy_what\"; return 0; }\n"
+        "prepush_lock_release() { printf 'EVENT cleanup-release\\n'; }\n"
+        "scrub_prepush_override_env() { :; }\n"
+        + _hook_func("selection_is_whole_suite")
+        + _hook_func("guard_full_suite_host")
+        + _hook_func("prepush_hook_cleanup")
+        + _impacted_selection_branch()
+        + 'printf "RC=%s\\n" "$RC"\n'
+        "prepush_hook_cleanup\n"
+    )
+    out = _driver_both(table_repo, body)
+    assert "EVENT slot-acquired slot-backed runtime impacted selection" in out, out
+    assert "EVENT slot-acquired" in out, out
+    assert "EVENT pytest run pytest tests/unit/runtime/" in out, out
+    assert out.index("EVENT slot-acquired") < out.index("EVENT pytest"), out
+    assert "RC=7" in out, out
+    assert "EVENT cleanup-release" in out, out
 
 
 def test_the_escalation_argv_stays_a_superset_of_the_narrow_selection() -> None:
