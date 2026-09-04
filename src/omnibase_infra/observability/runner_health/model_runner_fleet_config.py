@@ -17,6 +17,9 @@ from omnibase_infra.observability.runner_health.model_dns_cache_config import (
 from omnibase_infra.observability.runner_health.model_git_mirror_config import (
     ModelGitMirrorConfig,
 )
+from omnibase_infra.observability.runner_health.model_model_review_capability_config import (
+    ModelModelReviewCapabilityConfig,
+)
 from omnibase_infra.observability.runner_health.model_pypi_cache_config import (
     ModelPyPICacheConfig,
 )
@@ -102,6 +105,14 @@ class ModelRunnerFleetConfig(BaseModel):
             "Optional and inert until the operator-gated rollout sets "
             "active=True and repoints canary runners' `dns:` directive. "
             "Absent in configs predating this work."
+        ),
+    )
+    model_review: ModelModelReviewCapabilityConfig | None = Field(
+        default=None,
+        description=(
+            "OMN-17855 — opaque model-review runner-overlay contract. Optional "
+            "and inactive by default; this record does not provision or activate "
+            "any runner."
         ),
     )
 
