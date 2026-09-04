@@ -36,6 +36,20 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # nothing says the system does the thing, so the flip is withheld
     # (OMN-15911).
     GAP_NO_BEHAVIOR_PROOF = "gap_no_behavior_proof"
+    # The caller named this ticket in `exclude_tickets` on the request, so the
+    # sweep refused it BEFORE its first Linear read -- no issue fetch, no
+    # dod_verify subprocess, no verdict (OMN-17891). Ordering is the property:
+    # an excluded candidate that had already been read could still surface as
+    # ERROR_LINEAR_API on a transport failure, which reads as "the fence did
+    # not apply" rather than "the fence applied".
+    #
+    # Deliberately NOT folded into SKIPPED_LABEL. A label is a fact the sweep
+    # observed in Linear; this is an assertion the dispatcher made, derived
+    # from nothing the node can see (an open ledger CLAIM, a red gate, a
+    # concurrent controller's ownership). The audit record has to say which
+    # authority refused, because only one of the two is falsifiable from the
+    # ticket itself.
+    SKIPPED_EXCLUDED = "skipped_excluded"
     # Ticket carries the close-if-done label -> decision-only path stays manual.
     SKIPPED_LABEL = "skipped_label"
     # Ticket is already in a completed/canceled state -> nothing to do.

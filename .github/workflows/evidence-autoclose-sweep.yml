@@ -200,6 +200,22 @@ on:
           the value every scheduled run uses) skips the whole step at zero cost.
         required: false
         default: ''
+      exclude:
+        description: >-
+          OMN-17891. PER-CANDIDATE FENCE. Comma-separated ticket ids (e.g.
+          "OMN-17857,OMN-17800") this run must refuse BEFORE it reads anything
+          about them — no Linear fetch, no dod_verify, no verdict. Everything
+          else in the window is swept normally, so this scopes a run DOWN; it
+          is not a halt (that is ONEX_AUTOCLOSE_DISABLED, which is a repo
+          variable and binds every run including scheduled ones). Matched
+          case-insensitively after stripping whitespace. Honoured in DRY-RUN
+          too, deliberately: a dry run carrying the same list is the rehearsal
+          that shows exactly what the apply dispatch will and will not touch.
+          What it asserts is not derivable by the sweep — an open ledger CLAIM,
+          a red gate, a concurrent controller's ownership — so the dispatcher
+          supplies it and owns its accuracy.
+        required: false
+        default: ''
       apply:
         description: >-
           OMN-16106. WRITE MODE. Tick this and the sweep stops previewing and
@@ -1239,6 +1255,14 @@ jobs:
           # input reaches the shell the same way, via SWEEP_APPLY at job
           # level.
           LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '6' }}
+          # OMN-17891. Same discipline as LOOKBACK_HOURS and for the same
+          # reason: a workflow_dispatch STRING input is operator-typed text,
+          # and `${{ ... }}` pasted into a `run:` body is substituted before
+          # bash parses the line, so its characters would become shell syntax.
+          # As `"${EXCLUDE_TICKETS}"` it is a value. Renders as the empty
+          # string on schedule (no inputs), which the guard below reads as "no
+          # exclusions" — a scheduled dry run is unchanged by this field.
+          EXCLUDE_TICKETS: ${{ github.event.inputs.exclude || '' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # OMN-16846 changed what UV_NO_SYNC was for; OMN-16902 removed it.
           #
@@ -1310,6 +1334,19 @@ jobs:
           # in a diff, so the invocation is asserted (by
           # tests/ci/test_evidence_autoclose_sweep_apply_input.py) to contain
           # no literal `--apply` at all.
+          # OMN-17891. The exclusion enters the same way `--apply` does — only
+          # through a shell array, never as a literal on the invocation line —
+          # and it is populated INDEPENDENTLY of SWEEP_APPLY. A fence that only
+          # existed in apply mode could not be rehearsed: the dry run would
+          # sweep a candidate the apply run refuses, and the preview would stop
+          # being a preview of the run it is meant to de-risk.
+          exclude_args=()
+          if [ -n "${EXCLUDE_TICKETS}" ]; then
+            exclude_args+=(--exclude "${EXCLUDE_TICKETS}")
+            echo "fence: refusing ${EXCLUDE_TICKETS} before any Linear read (OMN-17891). Every other bound ticket in the window is swept normally; this is a scope, not a halt."
+          else
+            echo "fence: none — no ticket is excluded from this run"
+          fi
           apply_args=()
           if [ "${SWEEP_APPLY}" = "true" ]; then
             apply_args+=(--apply)
@@ -1323,6 +1360,7 @@ jobs:
           # bash < 4.4, and this must not become the reason a dry run fails.
           "${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep \
             --lookback-hours "${LOOKBACK_HOURS}" \
+            ${exclude_args[@]+"${exclude_args[@]}"} \
             ${apply_args[@]+"${apply_args[@]}"}
 
       # OMN-16902, the enforcement half (CLAUDE.md rule 5). Dropping UV_NO_SYNC
