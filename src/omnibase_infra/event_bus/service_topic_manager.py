@@ -916,7 +916,9 @@ class TopicProvisioner:
                 *config* is supplied.
 
         Returns:
-            True if topic was created or already exists, False on failure.
+            True only after broker metadata confirms the topic is ready; False
+            when creation, an already-exists race, or readiness confirmation
+            cannot establish that proof.
 
         Raises:
             TopicReplicationPolicyError: The resolved spec violates the
@@ -1026,22 +1028,48 @@ class TopicProvisioner:
                 )
 
             await admin.create_topics([new_topic])
-            self._note_topic_created(topic_name, created_spec)
-            logger.info(
-                "Created topic: %s",
+            readiness = await self.confirm_topics_ready(
+                [topic_name],
+                expected_specs={topic_name: created_spec}
+                if created_spec is not None
+                else None,
+                correlation_id=correlation_id,
+            )
+            if readiness.is_ready:
+                self._note_topic_created(topic_name, created_spec)
+                logger.info(
+                    "Created topic: %s",
+                    topic_name,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                return True
+            logger.warning(
+                "Topic create did not materialize in broker metadata: %s (%s)",
                 topic_name,
+                readiness.status.value,
                 extra={"correlation_id": str(correlation_id)},
             )
-            return True
+            return False
 
         except TopicAlreadyExistsError:
-            self._note_topic_created(topic_name)
-            logger.debug(
-                "Topic already exists: %s",
+            readiness = await self.confirm_topics_ready(
+                [topic_name], correlation_id=correlation_id
+            )
+            if readiness.is_ready:
+                self._note_topic_created(topic_name)
+                logger.debug(
+                    "Topic already exists: %s",
+                    topic_name,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                return True
+            logger.warning(
+                "Topic already-exists race did not materialize in broker metadata: %s (%s)",
                 topic_name,
+                readiness.status.value,
                 extra={"correlation_id": str(correlation_id)},
             )
-            return True
+            return False
 
         except TopicReplicationPolicyError:
             # Durability violations are fail-closed: never degraded to a
