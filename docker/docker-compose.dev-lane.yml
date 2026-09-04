@@ -3,17 +3,24 @@
 #
 # WHAT THIS IS FOR
 # ----------------
-# Everything the DEV/LAB LANE gets and no other lane may inherit. Three things
-# as of OMN-17448, each with its own block below and each here for the same
+# Everything the DEV/LAB LANE gets and no other lane may inherit. Five things
+# as of OMN-17562, each with its own block below and each here for the same
 # fail-closed reason:
 #
 #   1. OMN-15379 — the migration lane indicator (this block).
 #   2. OMN-15363 — the lab-lane analytics connection identity (role_omnidash).
-#   3. OMN-17448 — the standalone projection writer services.
+#   3. OMN-17531 — the strict auto-wiring binding on the three kernel services.
+#   4. OMN-17448 / OMN-17562 — the standalone projection writer services.
+#   5. OMN-17562 — the strict semantic container probe on those same three
+#      kernel services, with autoheal disarmed in the same block.
 #
 # The header used to say "it carries exactly ONE thing". That stopped being
 # true at (2) and is corrected here rather than left to mislead the next reader
-# into thinking a second entry is a mistake.
+# into thinking a second entry is a mistake. (3) was landed by OMN-17531 and was
+# never added to this list; it is added here rather than left to be rediscovered.
+#
+# Requires Docker Compose v2.24.4 or later for the `!override` merge semantics
+# entry (5) depends on.
 #
 # (1) The lane indicator that lets the compose
 # forward-migration runner apply the node_projection_registration trio
@@ -176,18 +183,163 @@ services:
     labels:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-15379"
+  # ===========================================================================
+  # STRICT SEMANTIC CONTAINER PROBE, AUTOHEAL DISARMED (OMN-17562, ruling 4)
+  # ===========================================================================
+  # WHAT THIS CHANGES
+  # -----------------
+  # The base file gives all three kernel runtime services the same probe:
+  #
+  #   docker-compose.infra.yml:
+  #     healthcheck:
+  #       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+  #
+  # That asserts exactly one property — HTTP status < 400. `/health` returns 200
+  # for a running-but-DEGRADED runtime BY DESIGN (a degraded container stays in
+  # rotation rather than triggering cascading restarts), so the base probe is a
+  # liveness check wearing a health check's name. OMN-15217 replaced it on the
+  # stability lane after reading the mask live there, 2026-07-27: all three
+  # runtime containers `Up 4 hours (healthy)` while their own monitors logged
+  # `status=DEGRADED`.
+  #
+  # This lane kept the shallow probe, and that is exactly how it carried the
+  # OMN-17448 silent-loss defect green for as long as it did —
+  # tests/ci/test_lane_projection_writer_coverage_omn17562.py names the shallow
+  # dev probe as the reason the defect was only ever caught on the lane that had
+  # already been made honest. `--degraded-policy fail` is the load-bearing flag:
+  # without it the check degrades to the same pass-on-DEGRADED semantics as
+  # `curl -sf`.
+  #
+  # WHY THE PROBE AND THE LABEL BLOCK ARE ONE CHANGE
+  # ------------------------------------------------
+  # `autoheal` (docker-compose.infra.yml, service `autoheal`) restarts any
+  # container labelled `autoheal=true` that Docker reports unhealthy. With the
+  # strict probe above, "unhealthy" now means "semantically degraded", and
+  # semantic degradation is typically restart-IMMUNE: four contracts that fail to
+  # import will fail to import again. Leaving autoheal armed would therefore turn
+  # an honest signal into a restart of all three runtime containers every 30s and
+  # destroy the forensic state, which is the opposite of what the strict probe is
+  # for. The stability lane made exactly this pairing for exactly this reason.
+  #
+  # `labels: !override` and not a plain `labels:` block: compose APPENDS label
+  # sequences, so the base service's `autoheal=true` survives a plain block and
+  # the parsed overlay looks identical either way. Only the resolved render can
+  # tell the two apart, which is why the assertions live in
+  # tests/integration/infra/test_dev_runtime_compose_render.py (a
+  # `docker compose config` read) rather than in a file-parsing unit test.
+  # `!override` replaces the whole sequence, so the base identity labels are
+  # restated here verbatim — dropping them would silently strip the identity the
+  # lane census and every `docker ps --filter label=` read depends on. Restore
+  # autoheal by removing `!override`.
+  #
+  # Restated VERBATIM and NOTHING ELSE — deliberately no `com.omninode.lane=dev`
+  # and no ticket label, unlike the writer services further down this file.
+  # `scripts/lane_census_plan.py` treats any container carrying
+  # `com.omninode.lane=<lane>` as claimed by that lane and raises
+  # `unexpected_container` for one the lane manifest does not declare;
+  # `deploy/lane-census/lane-manifest.yaml` declares omninode-runtime and
+  # omninode-runtime-effects on this lane but not the worker, so a decorative
+  # lane label here would manufacture a census finding. This block removes one
+  # label and changes nothing else.
+  #
+  # WHY THIS FILE AND NOT docker-compose.infra.yml
+  # ----------------------------------------------
+  # Ruling item (4) pointed at the base file's three healthcheck blocks. It
+  # cannot go there. `docker-compose.prod.yml` declares NO healthcheck override
+  # for omninode-runtime / runtime-effects / runtime-worker and `autoheal=true`
+  # is a base-file label, so editing the base would flip the PROD probe to the
+  # strict semantic check AND disarm prod's self-recovery — two live-blast-radius
+  # changes, made as a side effect, on a lane this ticket has no mandate over.
+  # Judge is declared read-only. Only the bare `omnibase-infra` project loads
+  # this overlay (`resolve_compose_file_args()` falls through to it), so the
+  # change reaches the dev lane and provably no other; the RED-guard
+  # test_the_base_file_probe_and_autoheal_are_unchanged_for_every_other_lane
+  # fails if it ever leaks into the base.
+  #
+  # TIMINGS
+  # -------
+  # Inherited from each base service and restated so the flap budget is readable
+  # at the strict call site: interval 30s / timeout 10s / retries 5, with
+  # start_period 1800s for main and effects and 1200s for the worker (the base
+  # worker window, which is genuinely shorter — not a typo). The monitor's first
+  # verdict lands ~one RUNTIME_HEALTH_CHECK_INTERVAL (300s) after boot and an
+  # absent verdict PASSES, so startup cannot flap on it.
+  #
+  # DEPLOY ORDERING — READ BEFORE APPLYING THIS TO THE LANE
+  # -------------------------------------------------------
+  # This is declarative until a deploy runs. Apply it only once the OMN-17562
+  # kernel change (omnibase_infra#3156) and the writer services (#3163) are
+  # deployed on this lane and
+  #   docker exec omninode-runtime python \
+  #     /usr/local/bin/onex-container-healthcheck --degraded-policy fail
+  # exits 0. Flipping the probe while `projection_write_path` is still DEGRADED
+  # makes all three containers unhealthy on the next 30s interval; before this
+  # block that would have been an autoheal restart loop, and after it, it is
+  # three permanently-unhealthy containers. Deploy through the sanctioned
+  # attributed path (`scripts/deploy-runtime.sh --execute`) only.
+  #
+  # Ticket: OMN-17562 (operator ruling 2026-09-03, item 4). Pattern source:
+  #   docker/docker-compose.stability-test.yml (OMN-15217).
   omninode-runtime:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /usr/local/bin/onex-container-healthcheck
+        - --degraded-policy
+        - fail
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels: !override
+      - "com.omninode.service=runtime-main"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   runtime-effects:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /usr/local/bin/onex-container-healthcheck
+        - --degraded-policy
+        - fail
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels: !override
+      - "com.omninode.service=runtime-effects"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   projection-api:
     environment:
       !!merge <<: *dev_lane_analytics_env
   runtime-worker:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
+    # Base runtime-worker inherits interval 30s / timeout 10s / retries 5 but
+    # start_period 1200s, NOT 1800s. Restated rather than copied from the two
+    # services above so the shorter window is a visible decision.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /usr/local/bin/onex-container-healthcheck
+        - --degraded-policy
+        - fail
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels: !override
+      - "com.omninode.service=runtime-worker"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   omninode-contract-resolver:
     environment:
       !!merge <<: *dev_lane_analytics_env

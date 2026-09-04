@@ -30,6 +30,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -546,4 +547,204 @@ def test_writers_are_absent_from_the_base_file_every_other_lane_merges() -> None
         assert name not in services, (
             f"{name!r} leaked into docker-compose.infra.yml — every non-dev "
             "lane merges that file and would inherit this service"
+        )
+
+
+# =============================================================================
+# OMN-17562 ruling item (4) — the dev lane's runtime probe becomes semantic and
+# autoheal is disarmed in the same change
+# =============================================================================
+#
+# The base compose probe is ``curl -sf http://localhost:8085/health``, which
+# asserts exactly one property: HTTP status < 400. ``/health`` returns 200 for a
+# running-but-DEGRADED runtime BY DESIGN (a degraded container stays in rotation
+# rather than triggering cascading restarts), so the base probe is a liveness
+# check wearing a health check's name. OMN-15217 replaced it on the stability
+# lane after the mask was read live there — ``Up 4 hours (healthy)`` on all three
+# runtime containers while their own monitors logged ``status=DEGRADED``.
+#
+# The dev lane kept the shallow probe, and that is precisely how it carried the
+# OMN-17448 silent-loss defect green: `tests/ci/test_lane_projection_writer_
+# coverage_omn17562.py` names the shallow probe as the reason the defect was
+# only ever caught on the lane that had already been made honest. This block is
+# the other half — the dev lane now runs the same strict check.
+#
+# The two changes are ONE change. ``autoheal`` watches Docker health, and
+# semantic degradation is typically restart-immune (four contracts that fail to
+# import will fail to import again). Flipping the probe while leaving
+# ``autoheal=true`` armed would convert an honest unhealthy signal into a
+# restart of all three runtime containers every 30s. Compose APPENDS label
+# sequences, so the base service's ``autoheal=true`` survives a plain ``labels:``
+# block — only ``labels: !override`` disarms it, and that is a merge behaviour
+# the overlay file alone cannot prove, which is why these read the RENDER.
+_STRICT_PROBE: list[str] = [
+    "CMD",
+    "python",
+    "/usr/local/bin/onex-container-healthcheck",
+    "--degraded-policy",
+    "fail",
+]
+_SHALLOW_PROBE: list[str] = ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+_KERNEL_RUNTIME_SERVICES: tuple[str, ...] = (
+    "omninode-runtime",
+    "runtime-effects",
+    "runtime-worker",
+)
+
+
+def _label_value(service_config: dict[str, Any], key: str) -> str | None:
+    """Read one label off a rendered service, whichever shape compose emits."""
+    labels = service_config.get("labels", {})
+    if isinstance(labels, dict):
+        value = labels.get(key)
+        return str(value) if value is not None else None
+    if isinstance(labels, list):
+        prefix = f"{key}="
+        for label in labels:
+            if isinstance(label, str) and label.startswith(prefix):
+                return label.removeprefix(prefix)
+    return None
+
+
+@pytest.mark.integration
+def test_dev_lane_runtime_probe_is_the_strict_semantic_check() -> None:
+    """OMN-17562(4): the rendered dev lane runs the semantic probe, not curl.
+
+    Mirror of ``tests/unit/infra/test_stability_test_runtime_lane.py``'s
+    ``test_stability_lane_runtime_healthchecks_are_semantic_not_shallow``, read
+    off the RENDER rather than the overlay file: compose replaces ``healthcheck``
+    wholesale, so a mis-authored override surfaces here as the inherited
+    ``curl -sf`` probe rather than as a file diff.
+
+    The flap budget is asserted against the BASE service's own resolved values
+    rather than against literals, so a future change to the base window cannot
+    leave this lane silently tighter than the process it is probing (the
+    monitor's first verdict lands ~one ``RUNTIME_HEALTH_CHECK_INTERVAL`` (300s)
+    after boot, and an absent verdict passes, so startup cannot flap on it).
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    lane = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert lane.returncode == 0, f"docker compose config failed:\n{lane.stderr}"
+    base = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=False)
+    assert base.returncode == 0, f"docker compose config failed:\n{base.stderr}"
+
+    lane_services = yaml.safe_load(lane.stdout)["services"]
+    base_services = yaml.safe_load(base.stdout)["services"]
+
+    for service_name in _KERNEL_RUNTIME_SERVICES:
+        healthcheck = lane_services[service_name]["healthcheck"]
+
+        # Exact list, not a substring check: the probe is what Docker executes,
+        # so a partial match would accept a shallow fallback appended beside it.
+        assert healthcheck["test"] == _STRICT_PROBE, (
+            f"{service_name}: the dev lane must run the strict semantic check; "
+            "the shallow curl probe reports healthy for a runtime whose own "
+            f"monitor says DEGRADED. Got {healthcheck['test']!r}"
+        )
+        assert "curl" not in healthcheck["test"], (
+            f"{service_name}: shallow curl probe survived the strict override"
+        )
+        assert healthcheck["test"][-2:] == ["--degraded-policy", "fail"], (
+            f"{service_name}: strict policy flag missing — without it the check "
+            "degrades to the same pass-on-DEGRADED semantics as curl -sf"
+        )
+
+        base_healthcheck = base_services[service_name]["healthcheck"]
+        for window_key in ("interval", "timeout", "retries", "start_period"):
+            assert healthcheck[window_key] == base_healthcheck[window_key], (
+                f"{service_name}: strict probe must keep the base service's "
+                f"{window_key} budget ({base_healthcheck[window_key]!r}); got "
+                f"{healthcheck[window_key]!r}. A tighter window flaps on the "
+                "boot interval where no verdict has been published yet."
+            )
+
+
+@pytest.mark.integration
+def test_dev_lane_runtime_services_do_not_carry_autoheal() -> None:
+    """OMN-17562(4): strict health and armed autoheal must never coexist here.
+
+    ``labels`` are APPENDED by compose, so the base service's ``autoheal=true``
+    survives a plain ``labels:`` block and only ``labels: !override`` removes
+    it. The overlay file cannot prove that on its own — both spellings parse
+    identically — so this reads the resolved render.
+
+    With the strict probe above, "unhealthy" now means "semantically degraded",
+    and semantic degradation is usually restart-immune. An armed autoheal would
+    therefore restart all three dev runtime containers every 30s forever and
+    destroy the forensic state, instead of surfacing one honest unhealthy
+    container.
+
+    The identity labels are asserted too: ``!override`` replaces the whole
+    sequence, so an override that forgot to restate them would silently strip
+    the service/layer identity the lane census and every ``docker ps`` filter
+    read.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+
+    expected_service_label = {
+        "omninode-runtime": "runtime-main",
+        "runtime-effects": "runtime-effects",
+        "runtime-worker": "runtime-worker",
+    }
+    for service_name in _KERNEL_RUNTIME_SERVICES:
+        service = services[service_name]
+
+        assert _label_value(service, "autoheal") is None, (
+            f"{service_name}: autoheal survived into the rendered dev lane — "
+            "compose appends label sequences, so `labels:` must be "
+            "`labels: !override`. Strict health plus armed autoheal restart-"
+            "loops a restart-immune defect every 30s."
+        )
+        assert (
+            _label_value(service, "com.omninode.service")
+            == (expected_service_label[service_name])
+        ), (
+            f"{service_name}: the `!override` label block dropped the service "
+            "identity label the lane census reads"
+        )
+        assert _label_value(service, "com.omninode.layer") == "runtime", (
+            f"{service_name}: the `!override` label block dropped the layer label"
+        )
+
+
+@pytest.mark.integration
+def test_the_base_file_probe_and_autoheal_are_unchanged_for_every_other_lane() -> None:
+    """RED-guard: prod, judge and lakshman are provably untouched by this change.
+
+    This is why the strict probe lands in the dev-lane OVERLAY and not at
+    ``docker-compose.infra.yml`` lines ~992/1067/1235, which is where ruling
+    item (4) literally pointed. ``docker-compose.prod.yml`` declares NO
+    healthcheck override for these three services and ``autoheal=true`` is a
+    base-file label, so editing the base would flip the PROD probe to the strict
+    semantic check and disarm prod's autoheal — two live-blast-radius changes
+    this ticket has no mandate over, made silently as a side effect.
+
+    Rendering the base with no overlay is exactly what those lanes inherit, so
+    an edit that leaked into the base fails here.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=False)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+
+    for service_name in _KERNEL_RUNTIME_SERVICES:
+        service = services[service_name]
+        assert service["healthcheck"]["test"] == _SHALLOW_PROBE, (
+            f"{service_name}: the base probe changed. Every non-dev lane merges "
+            "docker-compose.infra.yml, and prod declares no healthcheck override "
+            "for this service — so this edit moved PROD's probe. Put the strict "
+            "check in docker/docker-compose.dev-lane.yml instead."
+        )
+        assert _label_value(service, "autoheal") == "true", (
+            f"{service_name}: autoheal=true was removed from the base file. "
+            "prod inherits that label; dropping it here disarms prod's "
+            "self-recovery. Disarm it in the dev-lane overlay instead."
         )
