@@ -71,6 +71,19 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
 
         self._validate_lane_mirror_legs()
 
+        https_ingest = self.forwarder.https_ingest
+        if https_ingest is not None:
+            # OMN-16459: the HTTPS door is not the broker. If the operator wired
+            # the ingest ref at the broker ref, the leg would "work" by dialing
+            # the very endpoint this ticket exists to stop dialing.
+            cloud_host = self.cloud_bus.bootstrap_servers.split(",")[0].split(":")[0]
+            if https_ingest.ingest_host == cloud_host:
+                raise ValueError(
+                    "gateway https_ingest.ingest_url must not resolve to the cloud "
+                    "broker host; the HTTPS ingest door is a gateway route, not a "
+                    "broker endpoint (OMN-16459 / ruling 39 OMN-15692)"
+                )
+
         declared_cloud = self.forwarder.cloud_bus
         if self.cloud_bus.security_protocol != declared_cloud.security_protocol:
             raise ValueError(

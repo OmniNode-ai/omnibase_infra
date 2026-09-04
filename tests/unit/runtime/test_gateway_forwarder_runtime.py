@@ -403,9 +403,17 @@ async def test_process_starts_both_legs_and_cleans_readiness(
     shutdown_event.set()
     ready_path = tmp_path / "ready"
 
+    async def _no_secret(_reference: str) -> str | None:
+        # OMN-16459: this config declares no https_ingest leg, so the resolver is
+        # never consulted. Passing one that always returns None also pins that:
+        # if a future change made the Kafka path consult the secret store, this
+        # test would fail closed rather than pass by accident.
+        return None
+
     await gateway_forwarder.run_gateway_forwarder(
         _runtime_config(),
         shutdown_event=shutdown_event,
+        resolve_secret=_no_secret,
         ready_path=ready_path,
     )
 

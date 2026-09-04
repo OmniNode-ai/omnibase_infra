@@ -15,6 +15,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_canary_
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_cloud_bus_config import (
     ModelGatewayCloudBusConfig,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_https_ingest_config import (
+    ModelGatewayHttpsIngestConfig,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_lane_mirror_config import (
     ModelGatewayLaneMirrorConfig,
 )
@@ -41,6 +44,13 @@ class ModelGatewayForwarderConfig(BaseModel):
     # the two trust-boundary legs alone; the runtime config below is what
     # refuses a declaration whose broker legs were not resolved.
     lane_mirror: ModelGatewayLaneMirrorConfig | None = None
+    # OMN-16459: opt-in HTTPS ingest leg for the OUTBOUND publish boundary.
+    # ``None`` (the default) keeps the direct-MSK Kafka outbound leg, so every
+    # deployment that has not opted in is byte-unchanged. The INBOUND leg is
+    # a Kafka pull from the cloud broker either way -- see
+    # ModelGatewayHttpsIngestConfig's module docstring for why that means this
+    # block alone does not retire the OMN-16449 bastion.
+    https_ingest: ModelGatewayHttpsIngestConfig | None = None
     heartbeat_interval_seconds: int = Field(default=15, ge=1)
     max_silence_window_seconds: int = Field(default=60, ge=1)
     lag_threshold_messages: int = Field(default=500, ge=1)
