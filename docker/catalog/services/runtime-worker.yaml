@@ -41,7 +41,20 @@ operational_defaults:
   ONEX_GROUP_ID: onex-runtime-workers
 ports: null
 healthcheck:
-  test: curl -sf http://localhost:8085/health
+  # OMN-17883: the SEMANTIC probe, not `curl -sf`. `curl -sf` asserts only
+  # "status code < 400", and /health returns 200 for a running-but-DEGRADED
+  # runtime by design (ServiceHealth._handle_health), so the shallow check
+  # cannot fail on the exact condition OMN-15217 was filed for. Worse, a
+  # compose-level healthcheck OVERRIDES the image-level HEALTHCHECK, so this
+  # entry was replacing the deep probe Dockerfile.runtime already bakes in.
+  # List form renders as ["CMD", ...] and needs no shell.
+  test:
+    - python
+    - /usr/local/bin/onex-container-healthcheck
+    - --url
+    - http://localhost:8085/health
+    - --degraded-policy
+    - fail
   interval_s: 30
   timeout_s: 10
   retries: 5
@@ -65,4 +78,4 @@ labels:
   com.omninode.service: runtime-worker
   com.omninode.layer: runtime
   com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
-  autoheal: 'true'
+  autoheal: 'false'
