@@ -56,6 +56,20 @@ def test_valid_source_package_is_accepted(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_valid_symlink_scans_the_physical_source_target(tmp_path: Path) -> None:
+    """A valid symlink must not reintroduce a logical scan target after validation."""
+    physical = _source_tree(tmp_path / "physical")
+    logical = tmp_path / "logical-source"
+    logical.symlink_to(physical, target_is_directory=True)
+
+    result = _run(logical)
+
+    assert result.returncode == 0, result.stderr
+    assert f"Target: {physical}" in result.stdout
+    assert f"Target: {logical}" not in result.stdout
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "kind",
     [
