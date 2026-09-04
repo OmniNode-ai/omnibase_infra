@@ -98,6 +98,9 @@ scope:
     - scripts/ci/check_trivyignore_expiry.py
     - scripts/ci/ci_env_digest.py
     - scripts/ci/ci_summary_gate.py
+    # OMN-17876: the offline contract canary is a new preventive evidence
+    # projection; it deliberately cannot replay a live runner incident.
+    - scripts/ci/model_review_capability_canary.py
     - scripts/ci/detect_test_paths.py
     - scripts/ci/ensure_ci_env.sh
     - scripts/ci/merge_queue_enqueue.py

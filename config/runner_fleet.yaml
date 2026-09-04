@@ -164,6 +164,8 @@ dns_cache:
 model_review:
   active: false
   runner_label: model-review
+  runner_group: omnibase-ci
+  max_observation_age_seconds: 300
   credential_reference_id: dc9565c8-7f13-46dc-bd89-9694c13e1d2f
   endpoint_reference_id: b2a8287b-0a9f-4cbc-b2e8-cf954f9a71f7
   healthcheck_reference_id: 2672472a-bac9-4344-8c8c-79da6cb604ae

@@ -90,14 +90,16 @@ RUNNER_FLEET_CONFIG_PATH="${RUNNER_FLEET_CONFIG_PATH:-$HOME/.omnibase/runners/co
 # canary attempt was lost by 2026-08-10.
 #
 # COMPOSE_OVERRIDES_LIST is a newline-delimited list of override compose files
-# (relative to COMPOSE_DIR, or absolute). '#' starts a comment. Missing entries
-# WARN rather than fail so a stale list never wedges auto-repair — but a listed
-# override that IS present is always layered, so a recreate preserves it.
+# (relative to COMPOSE_DIR, or absolute). '#' starts a comment. Optional legacy
+# entries WARN rather than fail, but the model-review candidate overlay is a
+# required entry: a missing required overlay blocks all repair before compose
+# can recreate a runner.
 #
-# Absent list file => COMPOSE_FILE_ARGS is exactly the previous behaviour.
 COMPOSE_OVERRIDES_LIST="${COMPOSE_OVERRIDES_LIST:-${COMPOSE_DIR}/compose-overrides.list}"
 COMPOSE_FILE_ARGS=(-f "${COMPOSE_FILE}")
 COMPOSE_FILE_ARGS_STR="-f ${COMPOSE_FILE}"
+REQUIRED_MODEL_REVIEW_OVERLAY="${COMPOSE_DIR}/docker-compose.model-review-canary.yml"
+REQUIRED_OVERRIDE_MISSING=false
 if [[ -f "${COMPOSE_OVERRIDES_LIST}" ]]; then
     while IFS= read -r _ovr_line || [[ -n "${_ovr_line}" ]]; do
         _ovr="${_ovr_line%%#*}"
@@ -109,9 +111,17 @@ if [[ -f "${COMPOSE_OVERRIDES_LIST}" ]]; then
             COMPOSE_FILE_ARGS+=(-f "${_ovr}")
             COMPOSE_FILE_ARGS_STR="${COMPOSE_FILE_ARGS_STR} -f ${_ovr}"
         else
-            echo "[runner-monitor] $(date '+%H:%M:%S') WARNING: compose override listed in ${COMPOSE_OVERRIDES_LIST} but not found on disk: ${_ovr} (skipped)" >&2
+            if [[ "${_ovr}" == "${REQUIRED_MODEL_REVIEW_OVERLAY}" ]]; then
+                REQUIRED_OVERRIDE_MISSING=true
+                echo "[runner-monitor] $(date '+%H:%M:%S') ERROR: required model-review compose overlay listed but missing: ${_ovr}" >&2
+            else
+                echo "[runner-monitor] $(date '+%H:%M:%S') WARNING: optional compose override listed in ${COMPOSE_OVERRIDES_LIST} but not found on disk: ${_ovr} (skipped)" >&2
+            fi
         fi
     done < "${COMPOSE_OVERRIDES_LIST}"
+else
+    REQUIRED_OVERRIDE_MISSING=true
+    echo "[runner-monitor] $(date '+%H:%M:%S') ERROR: required compose overrides list is missing: ${COMPOSE_OVERRIDES_LIST}" >&2
 fi
 
 # Silent-wedge thresholds (OMN-13109). A fleet that is online + idle while jobs
@@ -442,6 +452,12 @@ FLEET_COUNT_DRIFT=false
 
 compose_preflight() {
     local config_stderr
+    if [[ "${REQUIRED_OVERRIDE_MISSING}" == true ]]; then
+        COMPOSE_INTERPOLATION_OK=false
+        COMPOSE_INTERPOLATION_ERROR="required model-review compose overlay is missing"
+        log "PREFLIGHT FAILED: ${COMPOSE_INTERPOLATION_ERROR} — auto-repair is BLOCKED before compose recreate"
+        return 0
+    fi
     if config_stderr=$(docker compose "${COMPOSE_FILE_ARGS[@]}" config -q 2>&1); then
         COMPOSE_INTERPOLATION_OK=true
     else

@@ -4,11 +4,16 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
+from omnibase_infra.observability.runner_health.collect_model_review_capability import (
+    ModelModelReviewReferenceProbe,
+    collect_model_review_capability_observation,
+)
 from omnibase_infra.observability.runner_health.enum_model_review_capability_failure import (
     EnumModelReviewCapabilityFailure,
 )
@@ -25,6 +30,8 @@ from omnibase_infra.observability.runner_health.preflight_model_review_capabilit
     preflight_model_review_capability,
 )
 
+OBSERVED_AT = datetime(2026, 9, 4, 12, 0, tzinfo=UTC)
+
 
 def _active_config() -> ModelModelReviewCapabilityConfig:
     return ModelModelReviewCapabilityConfig(
@@ -35,29 +42,41 @@ def _active_config() -> ModelModelReviewCapabilityConfig:
     )
 
 
+def _healthy_observation(
+    config: ModelModelReviewCapabilityConfig,
+    *,
+    observed_at: datetime = OBSERVED_AT,
+    reviewer_cli_available: bool = True,
+) -> ModelModelReviewCapabilityObservation:
+    return collect_model_review_capability_observation(
+        config,
+        runner_labels={config.runner_label},
+        runner_groups={config.runner_group},
+        probe_reference=lambda _reference_id: ModelModelReviewReferenceProbe(
+            present=True,
+            healthy=True,
+        ),
+        probe_reviewer_cli=lambda: reviewer_cli_available,
+        now=observed_at,
+    )
+
+
 def test_repo_config_records_an_inert_model_review_capability() -> None:
     config = load_runner_fleet_config()
 
     assert config.model_review is not None
     assert config.model_review.active is False
     assert config.model_review.runner_label == "model-review"
+    assert config.model_review.runner_group == "omnibase-ci"
+    assert config.model_review.max_observation_age_seconds == 300
 
 
 def test_preflight_fails_closed_when_config_is_inactive() -> None:
     config = _active_config().model_copy(update={"active": False})
-    observation = ModelModelReviewCapabilityObservation(
-        runner_labels=frozenset({"model-review"}),
-        present_reference_ids=frozenset(
-            {
-                config.credential_reference_id,
-                config.endpoint_reference_id,
-                config.healthcheck_reference_id,
-            }
-        ),
-        healthy_reference_ids=frozenset({config.healthcheck_reference_id}),
+    result = preflight_model_review_capability(
+        config,
+        ModelModelReviewCapabilityObservation(),
     )
-
-    result = preflight_model_review_capability(config, observation)
 
     assert result.ready is False
     assert result.failures == (EnumModelReviewCapabilityFailure.CONFIG_INACTIVE,)
@@ -73,18 +92,25 @@ def test_preflight_fails_closed_when_config_is_absent() -> None:
     assert result.failures == (EnumModelReviewCapabilityFailure.CONFIG_ABSENT,)
 
 
-def test_preflight_requires_label_references_and_health_assertion() -> None:
+def test_preflight_requires_all_authoritative_observation_facts() -> None:
     config = _active_config()
 
     result = preflight_model_review_capability(
         config,
         ModelModelReviewCapabilityObservation(),
+        now=OBSERVED_AT,
     )
 
     assert result.ready is False
     assert result.failures == (
         EnumModelReviewCapabilityFailure.REQUIRED_LABEL_MISSING,
+        EnumModelReviewCapabilityFailure.REQUIRED_GROUP_MISSING,
         EnumModelReviewCapabilityFailure.REQUIRED_REFERENCE_MISSING,
+        EnumModelReviewCapabilityFailure.HEALTH_ASSERTION_MISSING,
+        EnumModelReviewCapabilityFailure.PROVENANCE_MISSING,
+        EnumModelReviewCapabilityFailure.LIVE_ATTESTATION_UNAVAILABLE,
+        EnumModelReviewCapabilityFailure.OBSERVATION_STALE,
+        EnumModelReviewCapabilityFailure.REVIEWER_CLI_UNAVAILABLE,
     )
     assert result.missing_reference_ids == tuple(
         sorted(
@@ -99,50 +125,117 @@ def test_preflight_requires_label_references_and_health_assertion() -> None:
 
 def test_preflight_rejects_unhealthy_health_assertion() -> None:
     config = _active_config()
-    present_reference_ids = frozenset(
-        (
-            config.credential_reference_id,
-            config.endpoint_reference_id,
-            config.healthcheck_reference_id,
-        )
-    )
-
     result = preflight_model_review_capability(
         config,
-        ModelModelReviewCapabilityObservation(
-            runner_labels=frozenset({"model-review"}),
-            present_reference_ids=present_reference_ids,
+        collect_model_review_capability_observation(
+            config,
+            runner_labels={"model-review"},
+            runner_groups={"omnibase-ci"},
+            probe_reference=lambda reference_id: ModelModelReviewReferenceProbe(
+                present=True,
+                healthy=reference_id != config.healthcheck_reference_id,
+            ),
+            probe_reviewer_cli=lambda: True,
+            now=OBSERVED_AT,
         ),
+        now=OBSERVED_AT,
     )
 
     assert result.ready is False
     assert result.failures == (
         EnumModelReviewCapabilityFailure.HEALTH_ASSERTION_MISSING,
+        EnumModelReviewCapabilityFailure.LIVE_ATTESTATION_UNAVAILABLE,
     )
 
 
-def test_preflight_accepts_only_complete_healthy_observation() -> None:
+def test_preflight_keeps_complete_observation_not_ready_without_live_verifier() -> None:
     config = _active_config()
-    present_reference_ids = frozenset(
-        (
-            config.credential_reference_id,
-            config.endpoint_reference_id,
-            config.healthcheck_reference_id,
-        )
+
+    result = preflight_model_review_capability(
+        config,
+        _healthy_observation(config),
+        now=OBSERVED_AT,
+    )
+
+    assert result.ready is False
+    assert result.failures == (
+        EnumModelReviewCapabilityFailure.LIVE_ATTESTATION_UNAVAILABLE,
+    )
+    assert result.missing_reference_ids == ()
+
+
+def test_preflight_rejects_stale_attestation() -> None:
+    config = _active_config()
+    result = preflight_model_review_capability(
+        config,
+        _healthy_observation(
+            config,
+            observed_at=OBSERVED_AT
+            - timedelta(seconds=config.max_observation_age_seconds + 1),
+        ),
+        now=OBSERVED_AT,
+    )
+
+    assert result.ready is False
+    assert result.failures == (
+        EnumModelReviewCapabilityFailure.LIVE_ATTESTATION_UNAVAILABLE,
+        EnumModelReviewCapabilityFailure.OBSERVATION_STALE,
+    )
+
+
+def test_preflight_rejects_missing_cli_capability() -> None:
+    config = _active_config()
+    result = preflight_model_review_capability(
+        config,
+        _healthy_observation(config, reviewer_cli_available=False),
+        now=OBSERVED_AT,
+    )
+
+    assert result.ready is False
+    assert result.failures == (
+        EnumModelReviewCapabilityFailure.LIVE_ATTESTATION_UNAVAILABLE,
+        EnumModelReviewCapabilityFailure.REVIEWER_CLI_UNAVAILABLE,
+    )
+
+
+def test_preflight_rejects_detached_attestation() -> None:
+    config = _active_config()
+    observation = _healthy_observation(config).model_copy(
+        update={"attestation_id": UUID("f3df2b7f-e8d5-41f0-8d6b-df65ea5c8ae4")}
     )
 
     result = preflight_model_review_capability(
         config,
-        ModelModelReviewCapabilityObservation(
-            runner_labels=frozenset({"model-review"}),
-            present_reference_ids=present_reference_ids,
-            healthy_reference_ids=frozenset({config.healthcheck_reference_id}),
-        ),
+        observation,
+        now=OBSERVED_AT,
     )
 
-    assert result.ready is True
-    assert result.failures == ()
-    assert result.missing_reference_ids == ()
+    assert result.ready is False
+    assert result.failures == (
+        EnumModelReviewCapabilityFailure.ATTESTATION_INVALID,
+        EnumModelReviewCapabilityFailure.LIVE_ATTESTATION_UNAVAILABLE,
+    )
+
+
+def test_collector_requires_each_reference_probe_to_be_healthy() -> None:
+    config = _active_config()
+
+    observation = collect_model_review_capability_observation(
+        config,
+        runner_labels={config.runner_label},
+        runner_groups={config.runner_group},
+        probe_reference=lambda reference_id: ModelModelReviewReferenceProbe(
+            present=reference_id != config.endpoint_reference_id,
+            healthy=True,
+        ),
+        probe_reviewer_cli=lambda: True,
+        now=OBSERVED_AT,
+    )
+
+    assert observation.present_reference_ids == frozenset(
+        {config.credential_reference_id, config.healthcheck_reference_id}
+    )
+    assert observation.healthy_reference_ids == observation.present_reference_ids
 
 
 def test_observation_rejects_health_assertion_for_absent_reference() -> None:
