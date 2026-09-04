@@ -192,6 +192,32 @@ def select_projection_contracts(
     )
 
 
+def _topic_declarers(
+    manifest: ProtocolAutoWiringManifestLike,
+) -> dict[str, frozenset[str]]:
+    """Map every subscribed topic in the manifest to the contracts declaring it.
+
+    Read over EVERY contract, not only the ones the projection discriminator
+    admits: ``onex.evt.omninode.node-introspection.v1`` is co-owned by
+    ``node_ledger_projection_compute`` (a raw-event projection with no
+    ``db_io.db_tables``) and ``node_registration_orchestrator`` (not a
+    projection at all), and both of them put that topic in the live registry.
+    A census narrowed to projections would miss exactly the co-owners that
+    make an attachment unattributable.
+    """
+    declarers: dict[str, set[str]] = {}
+    for contract in getattr(manifest, "contracts", ()):
+        event_bus = getattr(contract, "event_bus", None)
+        if event_bus is None:
+            continue
+        name = str(getattr(contract, "name", "") or "")
+        if not name:
+            continue
+        for topic in getattr(event_bus, "subscribe_topics", ()) or ():
+            declarers.setdefault(str(topic), set()).add(name)
+    return {topic: frozenset(names) for topic, names in declarers.items()}
+
+
 def select_kernel_nonwriting_projections(
     manifest: ProtocolAutoWiringManifestLike,
     kernel_nonwriting: frozenset[str],
@@ -207,6 +233,18 @@ def select_kernel_nonwriting_projections(
     runtime profile does not own, resolves to nothing and is never rendered.
     An operator must be able to look up every name on a health detail.
 
+    Each returned ref also carries ``attributable_subscribe_topics``: the
+    topics whose presence in the live registry can only be this contract's own
+    subscription, because every OTHER contract declaring them is itself in
+    *kernel_nonwriting* and therefore had its subscription withheld too. The
+    live registry is topic-keyed, so a topic shared with a contract that has a
+    live in-process dispatcher carries no attribution at all — asking "is this
+    projection's declared topic subscribed here?" instead of "did this process
+    subscribe on behalf of this projection?" named ``projection_llm_cost``,
+    ``projection_registration`` and ``projection_live_events`` as silent-loss
+    sites on both ``.201`` lanes on 2026-09-04 while all 12 of their writers
+    were healthy and consuming (OMN-17557).
+
     Args:
         manifest: The same profile-filtered discovery manifest.
         kernel_nonwriting: Contract names this process wires with NO live
@@ -215,8 +253,18 @@ def select_kernel_nonwriting_projections(
     Returns:
         The excluded projections, ordered by contract name.
     """
+    declarers = _topic_declarers(manifest)
     return tuple(
-        ref
+        ref.model_copy(
+            update={
+                "attributable_subscribe_topics": tuple(
+                    topic
+                    for topic in ref.subscribe_topics
+                    if (declarers.get(topic, frozenset({ref.name})) - {ref.name})
+                    <= kernel_nonwriting
+                )
+            }
+        )
         for ref in _declared_projection_refs(manifest)
         if ref.name in kernel_nonwriting
     )
@@ -308,6 +356,15 @@ def evaluate_projection_liveness(
     #    withholds the subscription, so this list is empty; a change that
     #    re-subscribes one reopens the loss and lights the dimension.
     #
+    # The second is read off ``attributable_subscribe_topics``, never off the
+    # ref's full declared set. ``attached_topics`` is topic-keyed: a topic is
+    # in it when ANY contract in this process subscribed it, so a declared
+    # topic shared with a live-dispatching co-owner proves nothing about this
+    # projection. The residual is a loss of sensitivity, not of safety — on a
+    # wholly shared topic no in-process fact can attribute the subscription,
+    # and the wiring seam's withholding (which IS per contract) is what
+    # actually prevents the loss.
+    #
     # ``attachment_evaluated`` gates the second: with no readable registry the
     # subset is unknowable, and an empty list must not read as "none attached".
     nonwriting = tuple(sorted(ref.name for ref in kernel_nonwriting))
@@ -317,7 +374,10 @@ def evaluate_projection_liveness(
             sorted(
                 ref.name
                 for ref in kernel_nonwriting
-                if any(topic in attached_topics for topic in ref.subscribe_topics)
+                if any(
+                    topic in attached_topics
+                    for topic in ref.attributable_subscribe_topics
+                )
             )
         )
 

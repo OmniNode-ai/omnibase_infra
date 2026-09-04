@@ -28,6 +28,25 @@ class ModelProjectionContractRef(BaseModel):
     subscribe_topics: tuple[str, ...] = Field(
         ..., min_length=1, description="Topics the projection must consume"
     )
+    attributable_subscribe_topics: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "OMN-17562. The subset of ``subscribe_topics`` whose presence in "
+            "the live, TOPIC-KEYED bus registry can only be this contract's "
+            "own subscription -- every other contract in the manifest that "
+            "declares the topic is itself wired with no live dispatcher here, "
+            "so none of them could have put it there. Empty is the correct "
+            "value whenever a contract with a live in-process dispatcher "
+            "shares the topic: the registry cannot attribute a subscription "
+            "to a contract, and reading a co-owner's subscription as this "
+            "projection's is what reported three healthy projections as "
+            "silent-loss sites on both .201 lanes on 2026-09-04. Populated "
+            "only by "
+            ":func:`omnibase_infra.runtime.health.projection_liveness."
+            "select_kernel_nonwriting_projections`, which is the only caller "
+            "that needs to attribute an attachment rather than expect one."
+        ),
+    )
 
 
 __all__: list[str] = ["ModelProjectionContractRef"]
