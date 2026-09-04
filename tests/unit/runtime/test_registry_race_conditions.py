@@ -1836,99 +1836,157 @@ class TestComputeRegistryHighContention:
     def test_high_contention_10_writers_10_readers_timed(
         self, compute_registry: RegistryCompute
     ) -> None:
-        """High contention test: 10 writers + 10 readers for ~1 second.
+        """Run a synchronized, fixed high-contention workload.
 
         This stress test verifies that the registry remains consistent
-        under high concurrent load.
+        under high concurrent load without using scheduler-dependent operation
+        counts as the correctness oracle.
         """
-        import random
-
+        num_writers = 10
+        num_readers = 10
+        operations_per_worker = 25
         errors: list[Exception] = []
         write_count = 0
         read_count = 0
         lock = threading.Lock()
-        stop_event = threading.Event()
+        start_barrier = threading.Barrier(num_writers + num_readers)
+
+        def record_error(error: Exception) -> None:
+            """Record a worker failure without racing the final assertion."""
+            with lock:
+                errors.append(error)
+
+        def wait_for_start() -> bool:
+            """Release all workers together, or fail every waiter within a bound."""
+            try:
+                start_barrier.wait(timeout=5.0)
+            except threading.BrokenBarrierError as error:
+                record_error(error)
+                return False
+            return True
 
         def writer_task(thread_id: int) -> None:
-            """Continuously register plugins until stopped."""
+            """Register a deterministic set of plugins after all workers start."""
             nonlocal write_count
             local_count = 0
             try:
-                while not stop_event.is_set():
+                if not wait_for_start():
+                    return
+                for operation_index in range(operations_per_worker):
                     compute_registry.register_plugin(
-                        plugin_id=f"stress-plugin-{thread_id}-{local_count}",
+                        plugin_id=f"stress-plugin-{thread_id}-{operation_index}",
                         plugin_class=MockComputePlugin,  # type: ignore[arg-type]
                         version="1.0.0",
                     )
                     local_count += 1
             except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
-                errors.append(e)
+                start_barrier.abort()
+                record_error(e)
             finally:
                 with lock:
                     write_count += local_count
 
-        def reader_task() -> None:
-            """Continuously read registry until stopped."""
+        def reader_task(thread_id: int) -> None:
+            """Perform a deterministic mix of reads after all workers start."""
             nonlocal read_count
             local_count = 0
             try:
-                while not stop_event.is_set():
-                    # Mix of different read operations
-                    op = local_count % 4
+                if not wait_for_start():
+                    return
+                for operation_index in range(operations_per_worker):
+                    # Use a predictable target while preserving races with writers.
+                    target_writer = (thread_id + operation_index) % num_writers
+                    target_plugin_id = (
+                        f"stress-plugin-{target_writer}-{operation_index}"
+                    )
+                    op = operation_index % 4
                     if op == 0:
                         _ = compute_registry.list_keys()
                     elif op == 1:
                         _ = len(compute_registry)
                     elif op == 2:
-                        # Random check for registered plugin
-                        random_id = f"stress-plugin-{random.randint(0, 9)}-{random.randint(0, 100)}"
-                        _ = compute_registry.is_registered(random_id)
+                        _ = compute_registry.is_registered(target_plugin_id)
                     else:
-                        # Try to get a plugin that may or may not exist
+                        # The writer may not have registered this key yet.
                         try:
-                            random_id = f"stress-plugin-{random.randint(0, 9)}-{random.randint(0, 50)}"
-                            _ = compute_registry.get(random_id)
+                            _ = compute_registry.get(target_plugin_id)
                         except ComputeRegistryError:
-                            pass  # Expected - plugin may not exist yet
+                            pass
                     local_count += 1
             except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
-                if not isinstance(e, ComputeRegistryError):
-                    errors.append(e)
+                start_barrier.abort()
+                record_error(e)
             finally:
                 with lock:
                     read_count += local_count
 
         # Create 10 writers and 10 readers
-        writers = [threading.Thread(target=writer_task, args=(i,)) for i in range(10)]
-        readers = [threading.Thread(target=reader_task) for _ in range(10)]
+        writers = [
+            threading.Thread(target=writer_task, args=(i,)) for i in range(num_writers)
+        ]
+        readers = [
+            threading.Thread(target=reader_task, args=(i,)) for i in range(num_readers)
+        ]
+        workers = writers + readers
 
-        # Start all threads
-        for t in writers + readers:
-            t.start()
+        started_workers: list[threading.Thread] = []
+        try:
+            for worker in workers:
+                worker.start()
+                started_workers.append(worker)
+        except Exception as error:  # noqa: BLE001 — boundary: thread creation failure
+            start_barrier.abort()
+            record_error(error)
+        finally:
+            # Liveness has a bounded deadline, independent of operation counts.
+            deadline = time.monotonic() + 10.0
+            for worker in started_workers:
+                worker.join(timeout=max(0.0, deadline - time.monotonic()))
 
-        # Run for ~1 second
-        time.sleep(1.0)
-
-        # Signal threads to stop
-        stop_event.set()
-
-        # Wait for threads to complete
-        for t in writers + readers:
-            t.join(timeout=5.0)
+        stalled_workers = [worker.name for worker in workers if worker.is_alive()]
+        assert not stalled_workers, f"Workers did not finish: {stalled_workers}"
 
         # Verify no unexpected errors
-        unexpected_errors = [
-            e for e in errors if not isinstance(e, ComputeRegistryError)
-        ]
-        assert len(unexpected_errors) == 0, f"Unexpected errors: {unexpected_errors}"
+        assert not errors, f"Unexpected errors: {errors}"
 
-        # Verify significant operations occurred (at least 100 each)
-        assert write_count >= 100, f"Too few writes: {write_count}"
-        assert read_count >= 100, f"Too few reads: {read_count}"
+        # The exact counts prove that every concurrent worker exercised its workload.
+        assert write_count == num_writers * operations_per_worker
+        assert read_count == num_readers * operations_per_worker
 
-        # Verify registry is in consistent state
+        # Verify every unique write survived and the registry indexes agree.
         final_keys = compute_registry.list_keys()
         assert len(final_keys) == len(compute_registry)
+        expected_keys = {
+            (f"stress-plugin-{writer_id}-{operation_index}", "1.0.0")
+            for writer_id in range(num_writers)
+            for operation_index in range(operations_per_worker)
+        }
+        assert set(final_keys) == expected_keys
+
+    def test_high_contention_cleans_up_after_worker_start_failure(
+        self,
+        compute_registry: RegistryCompute,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Abort the start barrier and join started workers if thread startup fails."""
+        original_start = threading.Thread.start
+        started_workers: list[threading.Thread] = []
+        start_attempts = 0
+
+        def fail_second_start(worker: threading.Thread) -> None:
+            nonlocal start_attempts
+            start_attempts += 1
+            if start_attempts == 2:
+                raise RuntimeError("injected thread startup failure")
+            started_workers.append(worker)
+            original_start(worker)
+
+        monkeypatch.setattr(threading.Thread, "start", fail_second_start)
+
+        with pytest.raises(AssertionError, match="Unexpected errors"):
+            self.test_high_contention_10_writers_10_readers_timed(compute_registry)
+
+        assert all(not worker.is_alive() for worker in started_workers)
 
     def test_concurrent_stress_random_interleaving(
         self, compute_registry: RegistryCompute
