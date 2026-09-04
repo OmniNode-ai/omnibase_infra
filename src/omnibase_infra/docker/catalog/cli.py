@@ -29,6 +29,9 @@ import yaml
 from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from omnibase_infra.docker.catalog.validator import validate_env
+from omnibase_infra.docker.catalog.validator_healthcheck_semantic_probe import (
+    validate_runtime_semantic_probe,
+)
 from omnibase_infra.docker.catalog.validator_healthcheck_start_period import (
     validate_migration_gate_start_period,
 )
@@ -420,6 +423,15 @@ def cmd_validate_runtime(args: list[str]) -> int:
     start_period_result = validate_migration_gate_start_period(resolved.manifests)
     for violation in start_period_result.violations:
         errors.append(violation.message())
+
+    # A runtime service's health probe must be the SEMANTIC one (OMN-17883).
+    # `curl -sf` passes on any 200, and /health returns 200 for a DEGRADED
+    # runtime by design, so the shallow form cannot fail on the condition
+    # OMN-15217 exists to catch — and it OVERRIDES the deep probe the image
+    # already bakes in.
+    semantic_probe_result = validate_runtime_semantic_probe(resolved.manifests)
+    for probe_violation in semantic_probe_result.violations:
+        errors.append(probe_violation.message())
 
     if warnings:
         for w in warnings:
