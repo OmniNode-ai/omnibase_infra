@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,12 +43,21 @@ def _module():
     return mod
 
 
+def _kb_internal_clone(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".git").mkdir()
+    (root / "beta" / "deep-dives").mkdir(parents=True)
+    return root
+
+
 @pytest.mark.unit
 def test_default_out_path_is_the_kb_internal_deep_dives_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     mod = _module()
-    monkeypatch.setenv("KNOWLEDGE_BASE_INTERNAL_PATH", str(tmp_path))
+    monkeypatch.setenv(
+        "KNOWLEDGE_BASE_INTERNAL_PATH", str(_kb_internal_clone(tmp_path))
+    )
     out = mod.default_out_path(dt.date(2026, 9, 2))
     assert out.parent == tmp_path.resolve() / "beta" / "deep-dives", (
         f"deep dives belong in the kb-internal beta/deep-dives/ mirror, got {out}"
@@ -62,7 +72,7 @@ def test_unset_env_raises_and_names_the_variable(
     """Fail-fast, not a silent fallback — CLAUDE.md Operating Rule 8."""
     mod = _module()
     monkeypatch.delenv("KNOWLEDGE_BASE_INTERNAL_PATH", raising=False)
-    with pytest.raises(KeyError) as excinfo:
+    with pytest.raises(RuntimeError) as excinfo:
         mod.default_out_path(dt.date(2026, 9, 2))
     message = str(excinfo.value)
     assert "KNOWLEDGE_BASE_INTERNAL_PATH" in message, "the error must name the variable"
@@ -85,7 +95,7 @@ def test_unset_env_does_not_fall_back_to_omni_home(
     mod = _module()
     monkeypatch.delenv("KNOWLEDGE_BASE_INTERNAL_PATH", raising=False)
     monkeypatch.setenv("OMNI_HOME", "/nonexistent/omni_home")
-    with pytest.raises(KeyError):
+    with pytest.raises(RuntimeError):
         mod.default_out_path(dt.date(2026, 9, 2))
 
 
@@ -104,10 +114,84 @@ def test_non_directory_env_is_rejected(
 
 
 @pytest.mark.unit
-def test_script_no_longer_defaults_into_omni_home_docs() -> None:
-    """Guard the literal that was the defect."""
-    source = SCRIPT.read_text(encoding="utf-8")
-    assert '"docs" / "deep-dives"' not in source, (
-        "generate_deep_dive.py still defaults into <root>/docs/deep-dives — that is "
-        "an omni_home path and the kb-doc-gate rejects a new markdown file there"
+def test_default_out_path_rejects_directory_that_is_not_a_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mod = _module()
+    (tmp_path / "beta" / "deep-dives").mkdir(parents=True)
+    monkeypatch.setenv("KNOWLEDGE_BASE_INTERNAL_PATH", str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="git checkout"):
+        mod.default_out_path(dt.date(2026, 9, 2))
+
+
+@pytest.mark.unit
+def test_default_out_path_rejects_missing_deep_dives_subdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mod = _module()
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setenv("KNOWLEDGE_BASE_INTERNAL_PATH", str(tmp_path))
+
+    with pytest.raises(NotADirectoryError, match="beta/deep-dives"):
+        mod.default_out_path(dt.date(2026, 9, 2))
+
+
+@pytest.mark.unit
+def test_main_omitted_out_writes_to_kb_internal_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mod = _module()
+    kb_root = _kb_internal_clone(tmp_path / "knowledge-base-internal")
+    scan_root = tmp_path / "omni_home"
+    scan_root.mkdir()
+
+    monkeypatch.setenv("KNOWLEDGE_BASE_INTERNAL_PATH", str(kb_root))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_deep_dive.py",
+            "--root",
+            str(scan_root),
+            "--date",
+            "2026-09-02",
+        ],
     )
+
+    assert mod.main() == 0
+    assert (kb_root / "beta" / "deep-dives" / "SEPTEMBER_2_2026_DEEP_DIVE.md").is_file()
+
+
+@pytest.mark.unit
+def test_main_omitted_out_rechecks_default_parent_before_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mod = _module()
+    kb_root = _kb_internal_clone(tmp_path / "knowledge-base-internal")
+    scan_root = tmp_path / "omni_home"
+    scan_root.mkdir()
+    out_dir = kb_root / "beta" / "deep-dives"
+
+    original_find = mod.find_git_repos_direct_children
+
+    def remove_default_parent(root: Path):
+        out_dir.rmdir()
+        return original_find(root)
+
+    monkeypatch.setenv("KNOWLEDGE_BASE_INTERNAL_PATH", str(kb_root))
+    monkeypatch.setattr(mod, "find_git_repos_direct_children", remove_default_parent)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_deep_dive.py",
+            "--root",
+            str(scan_root),
+            "--date",
+            "2026-09-02",
+        ],
+    )
+
+    with pytest.raises(NotADirectoryError, match="disappeared before write"):
+        mod.main()

@@ -104,6 +104,10 @@ KB_INTERNAL_ENV = "KNOWLEDGE_BASE_INTERNAL_PATH"
 KB_DEEP_DIVES_SUBDIR = ("beta", "deep-dives")
 
 
+def _is_git_checkout(path: Path) -> bool:
+    return (path / ".git").exists()
+
+
 def default_out_path(date: dt.date) -> Path:
     """Resolve the default output path from the kb-internal clone.
 
@@ -115,7 +119,7 @@ def default_out_path(date: dt.date) -> Path:
     """
     raw = os.environ.get(KB_INTERNAL_ENV)
     if not raw:
-        raise KeyError(
+        raise RuntimeError(
             f"{KB_INTERNAL_ENV} is not set. Deep dives are written to the "
             "knowledge-base-internal clone (operator ruling 2026-08-31, OMN-17235), "
             f"under {'/'.join(KB_DEEP_DIVES_SUBDIR)}/. Export {KB_INTERNAL_ENV} to "
@@ -128,7 +132,20 @@ def default_out_path(date: dt.date) -> Path:
             f"{KB_INTERNAL_ENV}={kb_root} is not a directory. It must point at a "
             "checkout of OmniNode-ai/knowledge-base-internal."
         )
-    return kb_root.joinpath(*KB_DEEP_DIVES_SUBDIR, deep_dive_filename(date))
+    if not _is_git_checkout(kb_root):
+        raise RuntimeError(
+            f"{KB_INTERNAL_ENV}={kb_root} is not a git checkout. It must point at "
+            "a checkout of OmniNode-ai/knowledge-base-internal."
+        )
+    deep_dives_dir = kb_root.joinpath(*KB_DEEP_DIVES_SUBDIR)
+    if not deep_dives_dir.is_dir():
+        raise NotADirectoryError(
+            f"{KB_INTERNAL_ENV}={kb_root} is missing "
+            f"{'/'.join(KB_DEEP_DIVES_SUBDIR)}/. Refusing to create it during "
+            "default path resolution; repair the knowledge-base-internal clone "
+            "or pass --out explicitly."
+        )
+    return deep_dives_dir / deep_dive_filename(date)
 
 
 def main() -> int:
@@ -815,7 +832,13 @@ def main() -> int:
         lines.append("```")
         lines.append("")
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if args.out:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    elif not out_path.parent.is_dir():
+        raise NotADirectoryError(
+            f"Default deep-dive output directory disappeared before write: "
+            f"{out_path.parent}"
+        )
     out_path.write_text("\n".join(lines) + "\n")
     print(f"Wrote {out_path}")
     return 0
