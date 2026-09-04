@@ -1649,6 +1649,35 @@ _RUN_BUDGET_FLOOR_SECONDS = 180.0
 # Above every measured row's derived budget, so no measured row is capped here;
 # past this the probe is describing a hang, not a slow host.
 _RUN_BUDGET_CEILING_SECONDS = 2400.0
+# OMN-17923 -- the OUTER half of the OMN-17639 repair.
+#
+# OMN-17639 made the runner invocation's budget host-measured (above) precisely
+# because a wall-clock literal "measures the host, not the runner, and turns
+# host load into a push-blocking false red" -- see
+# `test_no_runner_invocation_carries_a_bare_wall_clock_timeout`, whose own
+# docstring records that "the virgin proofs only fail on a loaded host".
+#
+# That repair was incomplete on the path it exists for. pytest-timeout is the
+# OUTER limit and it fires while the inner budget is still counting. The
+# governed pre-push remote leg runs the suite with a flat `--timeout=60
+# --timeout-method=signal` (read live from the h105 run's `argv.txt`,
+# 2026-09-04), and 60s is below `_RUN_BUDGET_FLOOR_SECONDS` (180.0) -- so on
+# that leg NO measured budget could ever be exercised, and a `_run` proof died
+# in `subprocess.communicate` rather than on anything it asserts.
+#
+# Measured: the two live virgin proofs failed on h105 (10-core M4, `-n4
+# --dist=loadgroup`, 27276 tests) in three consecutive runs at `d3f9c2ea2686`
+# and PASSED on that same host at `29d71d16dc80` against a byte-identical
+# migration corpus -- load, not content. Standalone on an unloaded host they
+# take ~63s each, i.e. they straddle the 60s line.
+#
+# Derived, never guessed, for the same reason the inner budget is: the largest
+# budget an invocation may consume, plus the probe that measures it. It is an
+# upper bound a healthy run never approaches -- a genuine hang still fails, it
+# just fails on the runner's own ceiling instead of below its floor.
+_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS = _RUN_BUDGET_CEILING_SECONDS + (
+    _BUDGET_PROBE_ROUND_TRIPS * _BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS
+)
 
 
 def _psql_round_trip_seconds(target: PgTarget) -> float | None:
@@ -2003,6 +2032,116 @@ def test_no_runner_invocation_carries_a_bare_wall_clock_timeout() -> None:
     )
 
 
+def _timeout_marker_arg(func_node: ast.FunctionDef) -> ast.expr | None:
+    """The single argument of ``@pytest.mark.timeout(...)`` on ``func_node``,
+    or None when the decorator is absent or carries no positional argument."""
+    for deco in func_node.decorator_list:
+        if not isinstance(deco, ast.Call):
+            continue
+        func = deco.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "timeout"
+            and isinstance(func.value, ast.Attribute)
+            and func.value.attr == "mark"
+        ):
+            return deco.args[0] if deco.args else None
+    return None
+
+
+@pytest.mark.unit
+def test_every_runner_proof_outlives_the_suite_wide_pytest_timeout() -> None:
+    """The companion ratchet (OMN-17923). A host-measured INNER budget is dead
+    code on any leg whose OUTER pytest timeout is tighter than it.
+
+    The governed pre-push remote leg runs ``--timeout=60
+    --timeout-method=signal``, below ``_RUN_BUDGET_FLOOR_SECONDS`` (180.0). So
+    before this ratchet every ``_run`` proof was capped at 60s there no matter
+    what the probe measured: it died in ``subprocess.communicate`` rather than
+    on anything it asserts, and the OMN-17639 repair could never take effect on
+    the one host class it was written for. Two of these proofs did exactly that
+    three runs in a row on h105 while passing on the same host earlier the same
+    day against a byte-identical corpus.
+
+    Rule: a test that calls ``_run`` carries an explicit ``pytest.mark.timeout``
+    of at least ``_RUN_BUDGET_CEILING_SECONDS``, so the outer limit can never be
+    the binding one. Dropping the marker, or shrinking it back under the
+    ceiling, fails HERE -- deterministically, on every host -- instead of as a
+    false red on whichever host happens to be loaded that night.
+
+    The eight proofs against small synthetic trees are in scope with the two
+    live ones deliberately: they carry the identical structural defect and are
+    green today only because their trees are small.
+    """
+    module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    constants = {
+        "_RUN_BUDGET_CEILING_SECONDS": _RUN_BUDGET_CEILING_SECONDS,
+        "_RUN_BUDGET_FLOOR_SECONDS": _RUN_BUDGET_FLOOR_SECONDS,
+        "_BUDGET_PROBE_ROUND_TRIPS": _BUDGET_PROBE_ROUND_TRIPS,
+        "_BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS": (
+            _BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS
+        ),
+        "_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS": (_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS),
+    }
+    offenders: list[str] = []
+    proofs = 0
+
+    for node in ast.walk(module):
+        if not (isinstance(node, ast.FunctionDef) and node.name.startswith("test_")):
+            continue
+        if not any(
+            isinstance(c, ast.Call)
+            and isinstance(c.func, ast.Name)
+            and c.func.id == "_run"
+            for c in ast.walk(node)
+        ):
+            continue
+        proofs += 1
+
+        arg = _timeout_marker_arg(node)
+        if arg is None:
+            offenders.append(
+                f"line {node.lineno}: {node.name} calls _run() with no "
+                "pytest.mark.timeout -- the governed remote leg's suite-wide "
+                "--timeout=60 caps it below the runner's own "
+                f"{_RUN_BUDGET_FLOOR_SECONDS:.0f}s budget floor"
+            )
+            continue
+
+        try:
+            # Resolved against THIS module's constants, so a derived expression
+            # is checked by VALUE rather than trusted by shape.
+            marked = float(
+                eval(  # noqa: S307 - AST parsed from this very file
+                    compile(ast.Expression(arg), "<ratchet>", "eval"),
+                    {"__builtins__": {}},
+                    dict(constants),
+                )
+            )
+        except (NameError, TypeError, ValueError, ZeroDivisionError) as exc:
+            offenders.append(
+                f"line {node.lineno}: {node.name} carries a timeout marker this "
+                f"ratchet cannot resolve ({exc!r}); express it from the module's "
+                "budget constants"
+            )
+            continue
+
+        if marked < _RUN_BUDGET_CEILING_SECONDS:
+            offenders.append(
+                f"line {node.lineno}: {node.name} carries "
+                f"pytest.mark.timeout({marked:.0f}), under the runner budget "
+                f"ceiling {_RUN_BUDGET_CEILING_SECONDS:.0f} -- the outer limit "
+                "can still bind before the measured budget does"
+            )
+
+    assert proofs, "no _run proofs found; this ratchet has stopped watching anything"
+    assert not offenders, (
+        "a _run proof can be killed by the suite-wide pytest timeout before its "
+        "host-measured budget expires, reintroducing the OMN-17639 false red "
+        "through the outer limit instead of the inner one.\n" + "\n".join(offenders)
+    )
+
+
 @pytest.mark.unit
 def test_the_live_runner_call_actually_uses_the_measured_path() -> None:
     """The ratchet above proves the literal is gone. This proves what replaced
@@ -2064,6 +2203,7 @@ def _ledger_ids(target: PgTarget, dbname: str) -> set[str]:
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_shipped_runner_skips_and_records_fenced_node_migrations(
     pg_target: PgTarget,
     node_tree: Path,
@@ -2109,6 +2249,7 @@ def test_shipped_runner_skips_and_records_fenced_node_migrations(
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_fence_free_runner_applies_the_fenced_migration(
     pg_target: PgTarget,
     node_tree: Path,
@@ -2262,6 +2403,7 @@ def _relrowsecurity(target: PgTarget, dbname: str, table: str) -> tuple[bool, bo
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_dev_lane_applies_the_registration_trio_with_force_rls(
     pg_target: PgTarget,
     real_registration_tree: Path,
@@ -2344,6 +2486,7 @@ def test_dev_lane_applies_the_registration_trio_with_force_rls(
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_default_lane_creates_the_registry_table_without_force_rls(
     pg_target: PgTarget,
     real_registration_tree: Path,
@@ -2436,6 +2579,7 @@ def test_default_lane_creates_the_registry_table_without_force_rls(
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_default_lane_cold_boot_satisfies_the_migration_gate(
     pg_target: PgTarget,
     real_registration_tree: Path,
@@ -2495,6 +2639,7 @@ def test_default_lane_cold_boot_satisfies_the_migration_gate(
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_unknown_lane_value_fails_closed_to_the_full_fence(
     pg_target: PgTarget,
     real_registration_tree: Path,
@@ -2585,6 +2730,7 @@ def unclassified_force_rls_tree(tmp_path: Path) -> Path:
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_unclassified_force_rls_migration_is_refused(
     pg_target: PgTarget,
     unclassified_force_rls_tree: Path,
@@ -2623,6 +2769,7 @@ def test_unclassified_force_rls_migration_is_refused(
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_guard_free_runner_applies_the_unclassified_migration(
     pg_target: PgTarget,
     unclassified_force_rls_tree: Path,
@@ -3025,6 +3172,7 @@ REAL_FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_virgin_database_applies_the_full_real_vendored_tree(
     virgin_pg_target: PgTarget,
     virgin_node_db: str,
@@ -3063,6 +3211,7 @@ def test_virgin_database_applies_the_full_real_vendored_tree(
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
 def test_virgin_database_still_refuses_a_new_unfenced_force_rls_migration(
     virgin_pg_target: PgTarget,
     virgin_node_db: str,
