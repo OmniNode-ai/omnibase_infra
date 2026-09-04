@@ -1,5 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# NOTE (OMN-17792): this file is MACHINE-RENDERED by
+# scripts/generate_application_database_table_grants.py, which re-serialises the
+# whole document and keeps only column-0 `#` lines like these. An indented
+# comment inside a principals block does not survive, and its loss reads as
+# derivation drift on the next --check. Rationale for a principal therefore goes
+# in the migration that provisions it and in its test module, not here.
+# `validator_ro` (read-only validation identity, CONNECT + schema USAGE, no
+# binding): docker/migrations/forward/104_create_validator_ro_role.sql and
+# tests/unit/topology/test_validator_ro_principal_omn17792.py.
 active_preset: application-local
 databases:
   application:
@@ -167,6 +176,24 @@ databases:
               - tenant_inference_credentials
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
+        login: true
+      validator_ro:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: omninode_internal
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: platform_catalog
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: tenant
         login: true
     schemas:
       omninode_internal:
