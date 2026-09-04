@@ -1357,6 +1357,31 @@ def test_the_local_heavy_path_takes_the_host_lock() -> None:
     assert "prepush_local_workroot" in body
 
 
+def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup() -> None:
+    """OMN-15060 adds no second lock protocol for narrowed runtime work.
+
+    The runtime directory must take ``guard_full_suite_host`` before the local
+    pytest execution.  That guard is already the only path that acquires the
+    exclusive slot; the hook's single EXIT cleanup releases it even when pytest
+    returns non-zero.  Keeping this structural link explicit prevents a future
+    refactor from classifying the selection correctly but running it unlocked.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    dispatch = text[text.index('elif [ "${#PATHS[@]}" -gt 0 ]; then') :]
+    runtime_scope = 'SLOT_BACKED_IMPACTED_SCOPE="tests/unit/runtime/"'
+    runtime_guard = 'guard_full_suite_host "slot-backed runtime impacted selection '
+    assert runtime_scope in text
+    assert runtime_guard in dispatch
+    assert dispatch.index(runtime_guard) < dispatch.index(
+        'log "running impacted subset:'
+    )
+
+    guard = _extract_shell_function(HOOK, "prepush_try_local_heavy_slot")
+    cleanup = _extract_shell_function(HOOK, "prepush_hook_cleanup")
+    assert "prepush_lock_acquire" in guard
+    assert "prepush_lock_release" in cleanup
+
+
 def test_the_escalation_argv_stays_a_superset_of_the_narrow_selection() -> None:
     """OMN-16825: the heavy call site runs $FULL_SUITE_TARGET **plus** the
     allowlisted service-free integration paths. Shipping only tests/unit/ to a
