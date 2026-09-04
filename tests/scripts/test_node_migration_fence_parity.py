@@ -1054,13 +1054,40 @@ def test_release_is_checked_inside_the_fenced_branch_not_beside_it() -> None:
     )
 
 
+def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
+    """Resolve a Docker Compose merge tag to the value it decorates.
+
+    OMN-17562 gave the dev-lane overlay's three runtime services
+    ``labels: !override`` (compose APPENDS label sequences, so a plain block
+    would leave the base ``autoheal=true`` armed beside the new strict probe).
+    ``yaml.safe_load`` raises ``ConstructorError`` on that tag, so any parse of
+    a lane overlay needs the same tag support the stability-lane suite has
+    carried since OMN-15217. The tag is a compose MERGE directive; it carries no
+    meaning for the ``forward-migration`` environment these checks read.
+    """
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    assert isinstance(node, yaml.ScalarNode)
+    return loader.construct_scalar(node)
+
+
+class _ComposeSafeLoader(yaml.SafeLoader):
+    """Test-local YAML loader with Docker Compose tag support."""
+
+
+_ComposeSafeLoader.add_constructor("!override", _construct_compose_value)
+
+
 def _forward_migration_environment(relpath: str) -> dict[str, str] | None:
     """The ``forward-migration`` service's ``environment:`` in one compose file.
 
     ``None`` when the file does not define that service at all — which is a
     meaningfully different statement from "defines it with no environment".
     """
-    doc = yaml.safe_load((REPO_ROOT / relpath).read_text(encoding="utf-8"))
+    text = (REPO_ROOT / relpath).read_text(encoding="utf-8")
+    doc = yaml.load(text, Loader=_ComposeSafeLoader)  # noqa: S506
     service = (doc.get("services") or {}).get("forward-migration")
     if service is None:
         return None

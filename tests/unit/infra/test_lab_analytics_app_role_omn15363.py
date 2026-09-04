@@ -25,6 +25,7 @@ Execution proof against a real cluster is the ticket's live readback table.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -94,8 +95,40 @@ def _executable_sql() -> str:
     return " ".join(_executable_text().split())
 
 
+def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
+    """Resolve a Docker Compose merge tag to the value it decorates.
+
+    OMN-17562 gave the dev-lane overlay's three runtime services
+    ``labels: !override`` (compose APPENDS label sequences, so a plain block
+    leaves the base ``autoheal=true`` armed beside the new strict probe).
+    ``yaml.safe_load`` raises ``ConstructorError`` on that tag, so every parse of
+    this overlay needs the same tag support the stability-lane suite has carried
+    since OMN-15217 — the tag is a compose MERGE directive and carries no
+    meaning for what these assertions read.
+    """
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    assert isinstance(node, yaml.ScalarNode)
+    return loader.construct_scalar(node)
+
+
+class _ComposeSafeLoader(yaml.SafeLoader):
+    """Test-local YAML loader with Docker Compose tag support."""
+
+
+_ComposeSafeLoader.add_constructor("!override", _construct_compose_value)
+
+
+def _load_compose(path: Path) -> dict[str, Any]:
+    doc = yaml.load(path.read_text(encoding="utf-8"), Loader=_ComposeSafeLoader)  # noqa: S506
+    assert isinstance(doc, dict)
+    return doc
+
+
 def _services_with_analytics_dsn(path: Path) -> set[str]:
-    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    doc = _load_compose(path)
     services = doc.get("services") or {}
     return {
         name
@@ -105,7 +138,7 @@ def _services_with_analytics_dsn(path: Path) -> set[str]:
 
 
 def _dev_lane_dsn(service: str) -> str:
-    doc = yaml.safe_load(DEV_LANE_OVERLAY.read_text(encoding="utf-8"))
+    doc = _load_compose(DEV_LANE_OVERLAY)
     value = doc["services"][service]["environment"][ANALYTICS_DSN_KEY]
     assert isinstance(value, str)
     return value
