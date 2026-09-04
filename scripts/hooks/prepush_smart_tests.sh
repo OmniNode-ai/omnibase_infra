@@ -1040,6 +1040,7 @@ SELECTION_ERR="$(mktemp)"
 # to install silently REPLACED the temp-file cleanup and leaked three mktemp
 # files on every heavy run that took the host slot. Both jobs live in one
 # handler instead, so neither can displace the other.
+# shellcheck disable=SC2329 # Invoked by the single EXIT trap below.
 prepush_hook_cleanup() {
   rm -f "${CHANGED_FILE:-}" "${SELECTION_FILE:-}" "${SELECTION_ERR:-}" 2> /dev/null || true
   prepush_lock_release
@@ -1223,6 +1224,22 @@ RC=0
 # escalation target automatically moves the guard predicate with it.
 FULL_SUITE_TARGET="tests/unit/"
 
+# A selected directory is a durable cost classification: the selector emits
+# ``tests/unit/runtime/`` for runtime implementation and test changes, and that
+# target currently collects thousands of tests.  In particular, OMN-17909's
+# affected runtime selection collected 5,759 tests and occupied an unguarded
+# local pre-push lane for 848 seconds.  That is slot-sized work even though it
+# is a proper narrowing of ``tests/unit/`` and therefore has
+# ``is_full_suite=False``.
+#
+# Do not discover the cost by collecting tests here: that would run the suite
+# twice, make placement depend on a live measurement, and create a second
+# execution path.  The selector's runnable directory scope is already a
+# deterministic input.  The same coverage predicate used for the full-suite
+# target below means an explicit runtime *file* remains a small local target,
+# while the runtime directory (or any ancestor) is slot-backed.
+SLOT_BACKED_IMPACTED_SCOPE="tests/unit/runtime/"
+
 # OMN-15071: git EXPORTS repo-scoping variables into hook processes -- a live
 # `git push` from a worktree hands this hook
 # `GIT_DIR=<common>/worktrees/<name>` -- and those variables OVERRIDE both `-C`
@@ -1341,8 +1358,17 @@ elif [ "${#PATHS[@]}" -gt 0 ]; then
   # OMN-15408: guard on the SELECTED WORK, not the is_full_suite flag. A
   # selection that covers the whole full-suite target is the heavy run under
   # another name and must be routed to .200 exactly as the flagged escalation is.
+  #
+  # OMN-15060: a runtime-directory selection is also slot-sized work.  Route it
+  # through the SAME refusing guard and lock acquisition as a full-suite run;
+  # do not let the selector's ``is_full_suite=False`` label turn thousands of
+  # tests into an untracked concurrent local lane.  This branch intentionally
+  # precedes no other narrowed execution path, so the existing EXIT cleanup
+  # releases the acquired slot on either test success or failure.
   if selection_is_whole_suite "$FULL_SUITE_TARGET" "${PATHS[@]}"; then
     guard_full_suite_host "whole-suite-equivalent impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover the entire '${FULL_SUITE_TARGET}' escalation target)"
+  elif selection_is_whole_suite "$SLOT_BACKED_IMPACTED_SCOPE" "${PATHS[@]}"; then
+    guard_full_suite_host "slot-backed runtime impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover '${SLOT_BACKED_IMPACTED_SCOPE}')"
   fi
   if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ] || [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
     # Only reachable when the selection was whole-suite-equivalent (the guard

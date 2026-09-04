@@ -61,12 +61,6 @@ import click
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from omnibase_infra.utils.util_producer_effect_assertion import (
-    ProducerZeroOutputError,
-    assert_producer_emitted,
-    require_producer_preconditions,
-)
-
 # CI publishes the node_redeploy_orchestrator start command; the orchestrator's
 # deploy publish-monitor effect is the sole emitter of the deploy-agent rebuild
 # command downstream.
@@ -661,6 +655,12 @@ def main(
     # replaces printed "KAFKA_BOOTSTRAP_SERVERS is not set -- skipping publish"
     # and exited 0, so the deploy trigger was green-but-silent on every merge —
     # it had never published once (run 29189239291).
+    from omnibase_infra.utils.util_producer_effect_assertion import (
+        ProducerZeroOutputError,
+        assert_producer_emitted,
+        require_producer_preconditions,
+    )
+
     try:
         require_producer_preconditions(
             artifact=TOPIC,

@@ -51,6 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts/hooks/prepush_smart_tests.sh"
 FUNCTION_NAME = "filter_prepush_runnable_paths"
 WHOLE_SUITE_PREDICATE = "selection_is_whole_suite"
+SLOT_BACKED_IMPACTED_SCOPE = "tests/unit/runtime/"
 
 # The one integration subtree the hook is allowed to run locally (OMN-16825).
 # Kept here as a literal so a directory-wide reversion in the hook turns this
@@ -416,3 +417,48 @@ def test_omn16745_workflow_diff_selects_a_class_the_hook_will_run(
     assert _run_filter(list(selection.selected_paths), tmp_path) == [
         CI_CONTRACT_TEST_ROOT
     ]
+
+
+# ---------------------------------------------------------------------------
+# OMN-15060: runtime-sized narrowed selections take the existing slot guard
+# ---------------------------------------------------------------------------
+
+
+def test_omn15060_runtime_directory_is_slot_backed_but_file_targets_are_not() -> None:
+    """Classification follows deterministic selected scope, not host timing.
+
+    The selector's runtime directory is the known multi-thousand-test target;
+    a file-grain invocation remains a genuinely small target and must not be
+    made to wait for a heavy-suite slot.
+    """
+    assert _run_selection_is_whole_suite(
+        SLOT_BACKED_IMPACTED_SCOPE, [SLOT_BACKED_IMPACTED_SCOPE]
+    )
+    assert _run_selection_is_whole_suite(
+        SLOT_BACKED_IMPACTED_SCOPE, ["tests/unit/runtime"]
+    )
+    assert _run_selection_is_whole_suite(SLOT_BACKED_IMPACTED_SCOPE, ["tests/unit/"])
+    assert not _run_selection_is_whole_suite(
+        SLOT_BACKED_IMPACTED_SCOPE, ["tests/unit/runtime/sub/"]
+    )
+    assert not _run_selection_is_whole_suite(
+        SLOT_BACKED_IMPACTED_SCOPE,
+        ["tests/unit/runtime/test_registry_race_conditions.py"],
+    )
+    assert not _run_selection_is_whole_suite(
+        SLOT_BACKED_IMPACTED_SCOPE, ["tests/unit/scripts/"]
+    )
+
+
+def test_omn15060_runtime_change_selects_the_slot_backed_scope() -> None:
+    """End-to-end selector output still drives the slot classification."""
+    selection = compute_selection(
+        changed_files=["tests/unit/runtime/test_registry_race_conditions.py"],
+        adjacency_path=REPO_ROOT / "scripts/ci/test_selection_adjacency.yaml",
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == [SLOT_BACKED_IMPACTED_SCOPE]
+    assert _run_selection_is_whole_suite(
+        SLOT_BACKED_IMPACTED_SCOPE, list(selection.selected_paths)
+    )
