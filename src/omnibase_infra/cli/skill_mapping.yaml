@@ -245,6 +245,15 @@ skills:
       # nothing, so the run recorded an error on a write that had succeeded.
       - {name: readback-max-attempts, payload_field: readback_max_attempts, arg_type: integer}
       - {name: readback-delay-seconds, payload_field: readback_delay_seconds, arg_type: integer}
+      # OMN-16106. Bounded retry for the sweep's OWN Linear reads, which every
+      # fail-closed caller in the handler consumes. The attempt count is
+      # exposed so an operator can tighten or widen it during a rate-limit
+      # incident without a deploy. `linear_retry_base_delay_seconds` is
+      # deliberately NOT exposed here: it is a float, this CLI has no float
+      # arg_type, and coercing one through `string` would put an unvalidated
+      # value on a wire that currently cannot carry a bad one. It stays a
+      # contract-declared field the request sets directly.
+      - {name: linear-retry-max-attempts, payload_field: linear_retry_max_attempts, arg_type: integer}
   # OMN-16536: detect + re-flip Linear's silent GitHub-sync Done-revert
   # pattern. Node-backed in omnibase_infra itself (same locality
   # precedent as node_evidence_autoclose_sweep_effect above -- calls the
