@@ -30,9 +30,49 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_mirror_
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_tenant_identity import (
     ModelGatewayTenantIdentity,
 )
-from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
-    CONTENT_BEARING_HOOK_TOPICS,
-)
+
+# OMN-16979. Which omniclaude hook classes are treated as content-bearing is a
+# RULE, not a list -- deliberately.
+#
+# A list would have to be edited whenever a new hook class appears, and the
+# edit that forgets it is exactly the one that leaks. The rule instead presumes
+# EVERY omniclaude event class carries content, and carves out only the
+# session-lifecycle pair that operator ruling OD-9 (2026-08-18) established as
+# content-free and that OMN-16204 already mirrors outbound without a gate.
+#
+# So a hook class that does not exist yet is content-bearing by default: adding
+# it to mirror_topics.outbound without also governing it fails config
+# validation, with no action required by whoever adds it. That is the
+# fail-closed direction.
+#
+# Matched on name segments rather than whole topic strings, so this stays a
+# predicate over the canonical topic grammar rather than a second topic
+# registry competing with the contract.
+# Parsed by SEGMENT over the canonical topic grammar
+# (``onex.<kind>.<producer>.<event-name>.<version>``) rather than by matching a
+# topic-shaped prefix string. That keeps this a predicate over the grammar --
+# no literal topic lives here, so this module cannot drift into a second topic
+# registry competing with the contract, which is what the imperative-contract
+# guard (OMN-12515) correctly rejected in the first revision of this change.
+_ONEX_NAMESPACE = "onex"
+_EVENT_KIND = "evt"
+_HOOK_PRODUCER = "omniclaude"
+_OD9_CONTENT_FREE_EVENTS = frozenset({"session-started", "session-ended"})
+
+
+def is_content_bearing_hook_topic(canonical_topic: str) -> bool:
+    """Whether ``canonical_topic`` is an omniclaude class presumed to carry content."""
+    segments = canonical_topic.split(".")
+    if len(segments) < 5:
+        return False
+    if (segments[0], segments[1], segments[2]) != (
+        _ONEX_NAMESPACE,
+        _EVENT_KIND,
+        _HOOK_PRODUCER,
+    ):
+        return False
+    event_name = ".".join(segments[3:-1])
+    return event_name not in _OD9_CONTENT_FREE_EVENTS
 
 
 class ModelGatewayForwarderConfig(BaseModel):
@@ -133,7 +173,7 @@ class ModelGatewayForwarderConfig(BaseModel):
         unguarded = sorted(
             topic
             for topic in outbound
-            if topic in CONTENT_BEARING_HOOK_TOPICS and topic not in governed
+            if is_content_bearing_hook_topic(topic) and topic not in governed
         )
         if unguarded:
             raise ValueError(

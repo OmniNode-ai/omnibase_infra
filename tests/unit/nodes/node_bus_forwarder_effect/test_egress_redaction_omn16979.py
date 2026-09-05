@@ -47,6 +47,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayMirrorTopics,
     ModelGatewayTenantIdentity,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_config import (
+    is_content_bearing_hook_topic,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
     egress_admits,
@@ -483,3 +486,59 @@ def test_governed_set_matches_the_upstream_redaction_contract_topics() -> None:
     """
     governed = set(_forwarder_block()["egress_redaction"]["governed_topics"])  # type: ignore[index]
     assert governed == {TOOL_EXECUTED, PROMPT_SUBMITTED}
+
+
+# ---------------------------------------------------------------------------
+# The interlock is a RULE, not a list
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "topic",
+    [
+        TOOL_EXECUTED,
+        PROMPT_SUBMITTED,
+        STILL_DENIED,
+        "onex.evt.omniclaude.skill-started.v1",
+        "onex.evt.omniclaude.skill-completed.v1",
+    ],
+)
+def test_known_omniclaude_content_classes_are_content_bearing(topic: str) -> None:
+    assert is_content_bearing_hook_topic(topic) is True
+
+
+@pytest.mark.parametrize("topic", [SESSION_STARTED, SESSION_ENDED])
+def test_the_od9_session_pair_is_not_content_bearing(topic: str) -> None:
+    """OD-9 (operator ruling 2026-08-18) established the pair as content-free,
+    and OMN-16204 already mirrors it outbound without a gate."""
+    assert is_content_bearing_hook_topic(topic) is False
+
+
+def test_a_hook_class_that_does_not_exist_yet_is_content_bearing() -> None:
+    """The fail-closed direction, and the reason this is a rule rather than a
+    list: a list has to be edited when a new hook class appears, and the edit
+    that forgets it is exactly the one that leaks.
+    """
+    assert is_content_bearing_hook_topic("onex.evt.omniclaude.not-a-real-class.v1")
+
+
+def test_non_omniclaude_topics_are_not_content_bearing() -> None:
+    """The rule must not accidentally govern the delegation legs."""
+    assert is_content_bearing_hook_topic(UNGOVERNED_OUTBOUND) is False
+    assert (
+        is_content_bearing_hook_topic("onex.evt.omnibase-infra.gateway-heartbeat.v1")
+        is False
+    )
+
+
+def test_a_future_omniclaude_class_cannot_be_widened_without_being_governed() -> None:
+    """End-to-end on the interlock: the config model refuses it."""
+    with pytest.raises(ValueError, match="governed"):
+        _config(
+            outbound=(UNGOVERNED_OUTBOUND, "onex.evt.omniclaude.not-a-real-class.v1"),
+            egress_redaction=ModelGatewayEgressRedaction(
+                state_field="redaction_state",
+                admitted_states=(STATE_REDACTED,),
+                governed_topics=(TOOL_EXECUTED,),
+            ),
+        )
