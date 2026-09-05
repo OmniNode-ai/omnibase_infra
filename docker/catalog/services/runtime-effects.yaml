@@ -109,9 +109,6 @@ volumes:
   # (e.g. /home/jonah/.onex-agent-creds/{.codex,.claude} on .201) and points
   # CODING_AGENT_{CODEX,CLAUDE}_CREDS_HOST_DIR at them.
   #
-  # Default /dev/null keeps lanes without configured creds startable (the CLIs
-  # simply have no ambient auth and fail closed on invocation, never at boot).
-  #
   # codex: mount the credential FILE (auth.json) read-only, NOT the whole
   # ~/.codex dir. codex 0.141.0 writes app-server / session state into CODEX_HOME
   # (~/.codex) at runtime, so a fully read-only dir mount makes `codex exec` fail
@@ -121,8 +118,14 @@ volumes:
   - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
   # claude: the whole ~/.claude dir read-only works (claude reads
   # .credentials.json for ambient OAuth; `claude -p` needs no write to that dir;
-  # verified in-container 2026-06-18).
-  - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
+  # verified in-container 2026-06-18). Its optional directory bind mount is
+  # intentionally omitted when unset: a /dev/null fallback is a file and Docker
+  # rejects it at this directory target. The coding-agent handler fails closed
+  # when ambient Claude credentials are absent.
+optional_directory_bind_mounts:
+  - source_env: CODING_AGENT_CLAUDE_CREDS_HOST_DIR
+    container_path: /home/omniinfra/.claude
+    read_only: true
 depends_on:
   - service: omninode-runtime
     condition: service_healthy

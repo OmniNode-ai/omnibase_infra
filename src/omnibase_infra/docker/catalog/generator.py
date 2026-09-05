@@ -4,12 +4,46 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+
 # Compose YAML values are heterogeneous dicts. We use dict[str, object]
 # instead of dict[str, Any] to satisfy the ONEX Any-type ban.
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
 from omnibase_infra.docker.catalog.resolver import ResolvedStack
 
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
+
+
+def _render_optional_directory_bind_mount(
+    *,
+    source_env: str,
+    container_path: str,
+    read_only: bool,
+    environment: Mapping[str, str],
+) -> str | None:
+    """Render an optional directory mount after validating its host source.
+
+    A file fallback (such as ``/dev/null``) is invalid for a directory target:
+    Docker rejects it as a file-to-directory mount.  Keep an unset optional
+    credential source out of compose entirely, while making an explicitly
+    configured source fail closed unless it is an existing absolute directory.
+    """
+    raw_source = environment.get(source_env)
+    if raw_source is None or not raw_source.strip():
+        return None
+    if raw_source != raw_source.strip():
+        raise ValueError(f"{source_env} must not contain surrounding whitespace")
+
+    source_path = Path(raw_source)
+    if not source_path.is_absolute() or not source_path.is_dir():
+        raise ValueError(f"{source_env} must point to an existing absolute directory")
+
+    mode = ":ro" if read_only else ""
+    return (
+        f"${{{source_env}:?{source_env} must point to an existing absolute directory}}:"
+        f"{container_path}{mode}"
+    )
 
 
 def _runtime_image_build() -> dict[str, object]:
@@ -31,8 +65,11 @@ def _runtime_image_build() -> dict[str, object]:
     }
 
 
-def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
+def generate_compose(
+    resolved: ResolvedStack, *, environment: Mapping[str, str] | None = None
+) -> dict[str, object]:
     """Generate a docker-compose dict from a resolved stack."""
+    configured_environment = environment or {}
     services: dict[str, dict[str, object]] = {}
     all_volumes: set[str] = set()
     all_extra_networks: set[str] = set()
@@ -75,9 +112,20 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
             svc["ports"] = [f"{manifest.ports.external}:{manifest.ports.internal}"]
 
         # Volumes
-        if manifest.volumes:
-            svc["volumes"] = list(manifest.volumes)
-            for v in manifest.volumes:
+        volumes = list(manifest.volumes)
+        for mount in manifest.optional_directory_bind_mounts:
+            rendered = _render_optional_directory_bind_mount(
+                source_env=mount.source_env,
+                container_path=mount.container_path,
+                read_only=mount.read_only,
+                environment=configured_environment,
+            )
+            if rendered is not None:
+                volumes.append(rendered)
+
+        if volumes:
+            svc["volumes"] = volumes
+            for v in volumes:
                 # Extract named volume (before :)
                 vol_name = v.split(":")[0]
                 # Skip bind-mount sources: relative paths (`.`), absolute paths
