@@ -1,0 +1,149 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - In-Progress Probe Hygiene Effect
+#
+# OMN-17942 / OMN-16106 class (g).
+#
+# The scheduled evidence closer (OMN-16106) closes a ticket by re-running
+# `onex skill dod_verify` against the checks its OCC contract declares. A
+# ticket that declares NONE is not failing that verifier -- it is invisible to
+# it, and to every other mechanical closing path. It can only ever be closed by
+# a person reading it, and nothing on the board says so. Four tickets in the
+# 2026-08-31 sprint are in exactly that state (OMN-17926, OMN-17277, OMN-17380,
+# OMN-17353), and they do not appear in the closer's outcomes at all, because
+# the closer enumerates merged OCC companions and they have none. Their absence
+# reads exactly like "nothing to report".
+#
+# This sweep enumerates In-Progress tickets, asks whether each declares an
+# executable close probe -- an OCC `dod_evidence[].checks[]` entry, or a
+# `Probe: <command> => <observation>` line in the description -- and comments
+# ONCE on each that declares neither, naming exactly what is missing.
+#
+# It NEVER changes ticket state, sets no label, and holds no flip budget. A
+# ticket with no probe is not wrong; it may be genuinely un-probeable work. The
+# finding is that nothing mechanical can close it, which is a fact its owner
+# needs and not a verdict this sweep is entitled to act on.
+#
+# Related Tickets:
+#   - OMN-17942: the creation gate that stops NEW tickets entering In Progress
+#     without a probe line. This node is the other half -- it names the ones
+#     already there.
+#   - OMN-16106: the evidence closer whose reachability this measures.
+#   - OMN-16808: the marker-line dedup construction, taken verbatim. An
+#     unreadable comment history fails closed as an error rather than risking a
+#     duplicate: "there is no prior comment" and "I could not look" are
+#     different facts and only one releases a write.
+#   - OMN-17891: the per-candidate exclusion fence, taken on the same terms, so
+#     a lane holding a ticket is not commented at by a second process.
+name: "node_in_progress_probe_hygiene_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Scheduled hygiene sweep naming every In-Progress ticket that declares no executable close probe, and is therefore unreachable by the evidence closer and by every other mechanical closing path. Comments once per ticket, identified by a marker line. Never changes ticket state.
+
+input_model:
+  name: "ModelProbeHygieneRequest"
+  module: "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.models.model_probe_hygiene_request"
+  description: "Sweep scope, write flag, comment budget, exclusion fence."
+output_model:
+  name: "ModelProbeHygieneResult"
+  module: "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.models.model_probe_hygiene_result"
+  description: "Per-ticket outcomes and run-level counts; tickets_without_probe is the finding."
+# Top-level handler block: RuntimeLocal's single-shot compute execution path
+# resolves the handler + its input model from HERE, not from handler_routing
+# below -- same shape as node_evidence_autoclose_sweep_effect, and for the same
+# reason (without it, dispatch fails closed on a missing terminal_event topic).
+handler:
+  module: "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.handlers.handler_in_progress_probe_hygiene"
+  class: "HandlerInProgressProbeHygiene"
+  input_model: "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.models.model_probe_hygiene_request.ModelProbeHygieneRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "sweep_in_progress_probe_hygiene"
+      handler:
+        name: "HandlerInProgressProbeHygiene"
+        module: "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.handlers.handler_in_progress_probe_hygiene"
+      description: "Linear enumerate -> OCC contract + description probe read -> one marker-guarded comment"
+      output_fields:
+        - tickets_scanned
+        - tickets_with_probe
+        - tickets_without_probe
+        - tickets_commented
+        - tickets_skipped
+        - tickets_errored
+        - outcomes
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+  # No node-level retry. Every Linear read here already carries the OMN-16106
+  # bounded retry INSIDE the call, where a transient fault can be told apart
+  # from a deterministic one; a node-level retry would re-run the whole sweep
+  # and re-ask every ticket, which is how a hygiene comment becomes a duplicate.
+  dead_letter_queue: false
+io_operations:
+  - operation: "sweep_in_progress_probe_hygiene"
+    description: "Name every In-Progress ticket with no executable close probe."
+    input_fields:
+      - occ_repo_dir
+      - project
+      - max_tickets
+      - max_comments_per_run
+      - apply
+      - exclude_tickets
+      - linear_retry_max_attempts
+      - linear_retry_base_delay_seconds
+    output_fields:
+      - correlation_id
+      - dry_run
+      - tickets_scanned
+      - tickets_with_probe
+      - tickets_without_probe
+      - tickets_commented
+      - tickets_skipped
+      - tickets_errored
+      - outcomes
+      - success
+      - error_message
+dependencies:
+  - name: "linear_api_key"
+    type: "environment"
+    env_var: "LINEAR_API_KEY"
+    description: "Linear API key for issue read + commentCreate. No state mutation is ever performed."
+    required: true
+  - name: "httpx"
+    type: "library"
+    library: "httpx"
+    description: "Async HTTP client for the Linear GraphQL API."
+  - name: "pyyaml"
+    type: "library"
+    library: "pyyaml"
+    description: "Reads the ticket's OCC contract to count its declared checks."
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 300
+  checks:
+    - name: "linear_configured"
+      check_type: "environment"
+      env_var: "LINEAR_API_KEY"
+      description: "Verify LINEAR_API_KEY is set."
+metadata:
+  description: "In-progress probe hygiene sweep: name the tickets no mechanical closer can reach (OMN-17942)"
+  author: "OmniNode Team"
+  transport_type: "http"
+  created: "2026-09-05"
+  updated: "2026-09-05"
+  tags:
+    - "effect"
+    - "linear"
+    - "scheduled-sweep"
+    - "probe-hygiene"
+    - "closeout"

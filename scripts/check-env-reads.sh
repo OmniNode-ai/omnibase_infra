@@ -65,6 +65,12 @@ APPROVED_INFIX_PATTERNS=(
     # /cli/receipt_mode.py entry above. Declares required_secrets per the
     # OMN-14951 gap-2 check below.
     "/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py"
+    # OMN-17942: the In-Progress probe-hygiene sweep. Same class and same
+    # reason as the autoclose sweep above: a scheduled CI job whose Linear
+    # credential is a trusted-runner secret, not an overlay-resolved runtime
+    # config value. There is no overlay in a GitHub Actions job to resolve it
+    # from.
+    "/nodes/node_in_progress_probe_hygiene_effect/handlers/handler_in_progress_probe_hygiene.py"
     # OMN-16536: the sync-revert watchdog is the same dispatch shape as the
     # OMN-16106 entry immediately above (RuntimeLocal's single-shot compute
     # path, no config-prefetch/overlay seam reachable from a node's own

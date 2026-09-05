@@ -181,6 +181,22 @@ skills:
   # resolves (the omnibase_infra clone, same as every other `onex skill`
   # invocation here). apply defaults false (DRY-RUN); pass --apply to let
   # the sweep call the Linear mutation API for real.
+  # OMN-17942 / OMN-16106 class (g). The other half of the creation gate: the
+  # gate stops NEW tickets entering In Progress with no executable probe, and
+  # this names the ones already there. Comments only -- it changes no ticket
+  # state, holds no flip budget, and says a thing once per ticket (marker-line
+  # dedup, OMN-16808). apply defaults false (DRY-RUN).
+  - skill_name: in_progress_probe_hygiene
+    node_name: node_in_progress_probe_hygiene_effect
+    result_model: omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.models.model_probe_hygiene_result.ModelProbeHygieneResult
+    args:
+      - {name: occ-repo-dir, payload_field: occ_repo_dir, arg_type: string}
+      - {name: project, payload_field: project, arg_type: string}
+      - {name: max-tickets, payload_field: max_tickets, arg_type: integer}
+      - {name: max-comments-per-run, payload_field: max_comments_per_run, arg_type: integer}
+      - {name: apply, payload_field: apply, arg_type: boolean, default: false}
+      - {name: exclude, payload_field: exclude_tickets, arg_type: string_list}
+      - {name: linear-retry-max-attempts, payload_field: linear_retry_max_attempts, arg_type: integer}
   - skill_name: evidence_autoclose_sweep
     node_name: node_evidence_autoclose_sweep_effect
     result_model: omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_result.ModelEvidenceAutocloseSweepResult
