@@ -104,7 +104,39 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # by a real actor. Somebody disagreed with a previous close, and re-closing
     # it from the same mechanism is exactly the disagreement being overruled by
     # a cron tick. Read live from `stateHistory`, never inferred.
+    #
+    # OMN-16106 D2. Reached by TWO independent branches now. The original one
+    # asks whether the reverted Done was written with a null `actorId`, on the
+    # premise that an integration write has no actor; that premise is FALSE for
+    # this sweep — `LINEAR_API_KEY` is a personal key and Linear attributes its
+    # writes to that user, measured live on OMN-17957 — so it never fired on
+    # the population it was built for. The second branch reads what is actually
+    # durable: the closer's own audit comment (`_FLIP_COMMENT_CLASS_MARKER`)
+    # carrying the verdict fingerprint, plus any completed -> non-completed
+    # transition on the ticket. Same verdict + a reversal = refuse. A CHANGED
+    # verdict has a different fingerprint and is free to close, so the hold is
+    # on re-asserting an overruled statement, not on the ticket forever.
     SKIPPED_PRIOR_REVERT = "skipped_prior_revert"
+    # OMN-16106, D1. The ticket's own description (or a Linear-linked
+    # attachment) CITES a product PR that is not merged. This is the OMN-13856
+    # done-flip guard's `pr_not_merged` refusal, replicated: that guard runs at
+    # the tool seam of an interactive Linear write and correctly refused this
+    # exact flip on OMN-17957 at 17:21:23Z, and the closer -- which writes
+    # through the Linear API from a GitHub Actions runner and never crosses
+    # that seam -- flipped the same ticket twice anyway, because nothing in its
+    # predicate asks whether the work the ticket cites actually landed.
+    #
+    # dod_verify cannot supply this: it verifies the OCC contract's checks, and
+    # an acceptance criterion whose evidence is "this PR is merged" is
+    # structurally invisible to it when the citation lives only in the ticket
+    # body. Evidence-companion (`onex_change_control`) refs are excluded on the
+    # OMN-14641 reasoning -- a receipt companion neither satisfies nor blocks a
+    # product ticket's Done.
+    #
+    # HELD, never judged: the ticket is left exactly as it was and re-offered
+    # on the next tick, so the merge of the cited PR is all that is needed to
+    # close it -- no human relaunch.
+    SKIPPED_REFERENCED_PR_UNMERGED = "skipped_referenced_pr_unmerged"
     # OMN-17658. `max_flips_per_run` was already spent by earlier candidates in
     # this run. The bound is a blast-radius cap, not a verdict: the candidate
     # reached no decision about its evidence and the next run will offer it

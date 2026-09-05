@@ -173,13 +173,32 @@
 #     write and can only convert a decision already made to REFUSE. A false
 #     positive costs a gap comment that does not get written; it cannot cost a
 #     flip. Pinned by a test that reads the source, not by this paragraph.
+#
+# OMN-16106 D1/D2 — two conjuncts added to the FLIP branch, both narrowings,
+# neither of them a change to what counts as proof:
+#
+#   * the CITED-PR MERGE conjunct replicates the OMN-13856 done-flip guard's
+#     `pr_not_merged` refusal inside the closer. That guard sits on the Linear
+#     MCP tool seam; the closer writes through the Linear HTTP API from an
+#     Actions runner and never crosses it, so on 2026-09-05 the guard refused
+#     OMN-17957's flip at 17:21:23Z and the closer wrote it anyway at 17:35Z
+#     and again at 19:36Z. A ticket citing a product PR that has not merged is
+#     now HELD (`skipped_referenced_pr_unmerged`), never flipped over.
+#   * the PRIOR-REVERT fence now anchors on the closer's OWN audit-comment
+#     marker and verdict fingerprint. Its previous `actorId`-null discriminator
+#     rests on a false premise, measured live: `LINEAR_API_KEY` is a personal
+#     key, so the sweep's own flips carry a real `actorId` and the fence could
+#     never see one of its own closes being reverted.
+#
+# Both are HOLDS: nothing is written, nothing is judged, and the candidate is
+# re-offered on the next tick.
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 4
-  patch: 1
-node_version: "1.5.1"
+  minor: 5
+  patch: 0
+node_version: "1.6.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
