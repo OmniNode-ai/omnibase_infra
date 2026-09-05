@@ -304,15 +304,37 @@ def test_gateway_forwarder_service_joins_both_lane_networks() -> None:
     assert "gateway-lane-mirror-source" in names
 
 
-def test_lane_brokers_are_addressed_by_unique_container_name_not_bare_redpanda() -> (
-    None
-):
-    """`redpanda` resolves on BOTH lane networks -- a bare alias is ambiguous."""
+def test_no_lane_leg_is_addressed_by_the_bare_redpanda_alias() -> None:
+    """`redpanda` resolves on BOTH lane networks -- a bare alias is ambiguous.
+
+    AMENDED BY OMN-17919. This test used to additionally require the SOURCE leg
+    to start with ``omnibase-infra-stability-test-redpanda:``, on the belief
+    that a unique container name was sufficient to disambiguate the two lanes.
+    It is not, and that belief is what let this suite stay green while the live
+    leg mirrored zero records: a unique container name fixes the address the
+    client BOOTSTRAPS at, and the client then re-resolves whatever the broker
+    ADVERTISES back -- which for both lanes' internal listener is the bare
+    ``redpanda``. The source leg now dials stability's external listener; the
+    listener-level invariant that replaces the removed assertion lives in
+    ``test_lane_mirror_omn17919_advertised_listener.py``, which asserts a
+    relationship against the source lane's own compose file rather than a
+    string this deployment can satisfy while still being wrong.
+
+    What survives here is the part that was always true and is still enforced:
+    no leg may be addressed by the bare alias itself.
+    """
     resolved = yaml.safe_load(_RESOLVED_CONFIG_PATH.read_text(encoding="utf-8"))
-    source = resolved["lane_mirror_source_bus"]["bootstrap_servers"]
-    mirrors = resolved["lane_mirror_buses"]
-    assert source.startswith("omnibase-infra-stability-test-redpanda:")
-    assert mirrors["dev"]["bootstrap_servers"].startswith("omnibase-infra-redpanda:")
+    legs = [resolved["lane_mirror_source_bus"]["bootstrap_servers"]]
+    legs += [bus["bootstrap_servers"] for bus in resolved["lane_mirror_buses"].values()]
+
+    for endpoint in legs:
+        assert not endpoint.startswith("redpanda:"), (
+            f"lane-mirror leg {endpoint!r} uses the bare `redpanda` alias, which "
+            "resolves on both lane networks this forwarder is joined to"
+        )
+    assert resolved["lane_mirror_buses"]["dev"]["bootstrap_servers"].startswith(
+        "omnibase-infra-redpanda:"
+    )
 
 
 def test_dns_bastion_joins_every_lane_network_the_forwarder_resolves_on() -> None:

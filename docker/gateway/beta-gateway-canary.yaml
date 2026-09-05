@@ -59,29 +59,68 @@ cloud_bus:
   sasl_mechanism: "AWS_MSK_IAM"
   msk_region: "us-east-1"
 # ---------------------------------------------------------------------------
-# OMN-17034: resolved broker legs for the contract-declared lane mirror.
+# OMN-17034 / OMN-17919: resolved broker legs for the contract-declared lane mirror.
 # ---------------------------------------------------------------------------
 # The contract NAMES lanes ("stability-test" -> ["dev"]); this is where THIS
 # deployment says which broker each named lane is. Same authority split
 # local_bus already uses.
 #
-# Brokers are addressed by their UNIQUE CONTAINER NAME, not by the bare
-# `redpanda` alias local_bus uses. That is load-bearing, not style: the
-# forwarder container is now joined to BOTH lane networks, and `redpanda`
-# resolves on each of them -- a bare alias would resolve to whichever lane
-# Docker's embedded DNS answered with, non-deterministically, and the failure
-# would look like "the mirror sometimes works". The container names are
-# globally unique across lanes (verified on .201 2026-09-04:
-# omnibase-infra-redpanda, omnibase-infra-stability-test-redpanda,
-# omnibase-infra-prod-redpanda, omnibase-infra-judge-redpanda,
-# omnibase-infra-lakshman-redpanda). Port 9092 is each broker's INTERNAL
-# listener; the 19092/39092 host mappings are for off-host clients only.
+# THE SOURCE LEG IS ADDRESSED ON THE STABILITY LANE'S *EXTERNAL* LISTENER, AND
+# THAT IS THE WHOLE FIX (OMN-17919).
+#
+# A Kafka client does not keep talking to the endpoint it was configured with.
+# It bootstraps there once, reads the cluster's ADVERTISED listener out of the
+# metadata response, and every subsequent fetch / join / commit goes to that
+# advertised address. Both lane brokers advertise their internal listener as
+# the bare name `redpanda` -- each lane's compose file names the service
+# `redpanda`, which also puts a `redpanda` network alias on both lane networks.
+# This forwarder is joined to BOTH networks. Measured on .201 2026-09-05,
+# read-only:
+#
+#   docker exec omninode-gateway-forwarder getent hosts redpanda -> 172.19.0.7
+#   omnibase-infra-redpanda                aliases [omnibase-infra-redpanda, redpanda]
+#   omnibase-infra-stability-test-redpanda aliases [omnibase-infra-stability-test-redpanda, redpanda]
+#
+# So the previous revision of this file -- which addressed BOTH legs by unique
+# container name and said in this very comment that doing so removed the
+# ambiguity -- bootstrapped correctly against stability (172.22.0.4), was handed
+# `redpanda:9092` back, re-resolved it to 172.19.0.7, and ran the entire mirror
+# against DEV. The consumer group came up Stable on dev with LAG 0 and Dead on
+# stability, holding 1 partition where stability's topic has 6, and 0 records
+# crossed. A unique container name fixes the BOOTSTRAP address; it cannot fix
+# the ADVERTISED one, and aiokafka has no way to ignore an advertised listener.
+#
+# Redpanda advertises per-listener. A client that bootstraps on stability's
+# external listener is handed the external advertised address, which this lane
+# pins to a literal routable endpoint in its own compose contract
+# (docker-compose.stability-test.yml, OMN-12832) -- a value that collides with
+# nothing. Verified live before landing, read-only, no lane mutated:
+#
+#   docker exec omnibase-infra-redpanda rpk cluster metadata \
+#     -X brokers=100.109.203.94:39092   -> BROKERS  ID 0*  HOST 100.109.203.94  PORT 39092
+#   docker exec omninode-gateway-forwarder python3 -c 'socket.connect(...)'
+#     -> CONNECT OK 100.109.203.94:39092
+#
+# This touches NOTHING on the stability lane: that advertised address is
+# pre-existing committed lane-contract data, and the leg is a read.
+#
+# The DEV mirror target stays on its unique container name. It is the asymmetry
+# the two lanes force: the dev lane interpolates its external advertised host
+# from DEV_REDPANDA_ADVERTISE_HOST at deploy time (it currently renders a
+# MagicDNS name), so there is no literal to pin, while its internal advertised
+# `redpanda` re-resolves -- from this container -- to the dev broker, which is
+# the correct destination. That leg is correct but relies on which network
+# Docker answers the alias from; the durable fix is to stop both lanes sharing
+# the name at all, recorded on OMN-17919 (needs a stability broker recreate).
 lane_mirror_source_bus:
-  bootstrap_servers: "omnibase-infra-stability-test-redpanda:9092" # onex-allow-kafka-broker
+  bootstrap_servers: "100.109.203.94:39092" # onex-allow-kafka-broker
   environment: "beta-gateway-lane-mirror-source"
   timeout_seconds: 30
   # Same OMN-15781 hazard as both trust-boundary legs: "latest" would silently
   # drop every hook event produced while this consumer group was unjoined.
+  # Load-bearing on this deploy specifically: the group has never committed an
+  # offset on the stability broker (every commit it made went to dev), so
+  # "earliest" is what makes the accumulated hook backlog cross.
   auto_offset_reset: "earliest"
   enable_auto_commit: false
   security_protocol: "PLAINTEXT"
