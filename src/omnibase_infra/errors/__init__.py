@@ -25,6 +25,7 @@ Exports:
     PolicyRegistryError: Policy registry operation errors
     ComputeRegistryError: Compute registry operation errors
     EventBusRegistryError: Event bus registry operation errors
+    LaneMirrorRecordRefusedError: Lane-mirror record carries no usable identity
     ChainPropagationError: Correlation/causation chain validation errors
     ArchitectureViolationError: Architecture validation errors (blocks startup)
     InvariantViolation: Runtime contract invariant violations
@@ -148,6 +149,7 @@ from omnibase_infra.errors.error_infra import (
     UnknownHandlerTypeError,
 )
 from omnibase_infra.errors.error_invariant_violation import InvariantViolation
+from omnibase_infra.errors.error_lane_mirror import LaneMirrorRecordRefusedError
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
@@ -198,6 +200,7 @@ __all__: list[str] = [
     # Error catalog (OMN-518)
     "ErrorResolution",
     "EventBusRegistryError",
+    "LaneMirrorRecordRefusedError",
     # Payload-size errors (OMN-16267)
     "EventPayloadTooLargeError",
     # Event registry fingerprint errors

@@ -101,6 +101,10 @@ class _FakeIdempotencyStore:
     ) -> None:
         self._seen.add((message_id, domain))
 
+    def marked_ids(self) -> set[UUID]:
+        """Every id durably marked so far (OMN-17919 keys on the wire header)."""
+        return {message_id for message_id, _domain in self._seen}
+
 
 @dataclass
 class _LaneMirrorHarness:
@@ -124,13 +128,28 @@ class _LaneMirrorHarness:
             "event_type": topic,
             "payload": {"probe": "omn17034"},
         }
+        # OMN-17919: ``headers={}`` here was the fixture half of the defect.
+        # No record on any lane has an empty header set -- ``ModelEventHeaders``
+        # makes ``message_id`` mandatory and ``event_bus_kafka`` stamps it on
+        # every publish -- so a fixture without one was testing a shape the
+        # broker cannot produce, and it is what let a mirror that could not read
+        # the real wire ship green. The value stays envelope-shaped on purpose:
+        # the mirror keys on the header now, so it must move an envelope-shaped
+        # record and a flat hook record alike (the flat one is covered by the
+        # captured-record fixture in test_lane_mirror_omn17919_wire_shape.py).
         return ModelTransportMessage(
             topic=topic,
             partition=0,
             offset=offset,
             key=None,
             value=json.dumps(envelope).encode("utf-8"),
-            headers={},
+            headers={
+                "content_type": b"application/json",
+                "correlation_id": str(stable_id).encode("utf-8"),
+                "message_id": str(stable_id).encode("utf-8"),
+                "event_type": topic.encode("utf-8"),
+                "source": b"node_event_emit_effect",
+            },
             ack_token=f"{topic}:0:{offset}",
         )
 
