@@ -88,7 +88,7 @@ def _resolve_and_generate(bundles: list[str], output: str) -> int:
     """Resolve bundles, generate compose, write to output path."""
     resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
     resolved = resolver.resolve(bundles=bundles)
-    compose = generate_compose(resolved)
+    compose = generate_compose(resolved, environment=os.environ)
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     with open(output, "w") as f:
@@ -121,6 +121,7 @@ def _load_stack() -> list[str]:
 
 def cmd_generate(args: list[str]) -> int:
     """Generate compose from selected bundles."""
+    _load_omnibase_env()
     output = _DEFAULT_OUTPUT
     bundles = []
     i = 0

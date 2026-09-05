@@ -211,6 +211,60 @@ def test_generated_runtime_effects_requires_deploy_agent_hmac_secret() -> None:
 
 
 @pytest.mark.unit
+def test_runtime_effects_omits_unset_optional_claude_credentials() -> None:
+    """An unset optional directory must not become a file-to-directory mount."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    compose = generate_compose(
+        resolver.resolve(bundles=["runtime-core"]), environment={}
+    )
+
+    volumes = compose["services"]["runtime-effects"]["volumes"]
+    assert all("/home/omniinfra/.claude" not in volume for volume in volumes)
+    assert (
+        "${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:"
+        "/home/omniinfra/.codex/auth.json:ro" in volumes
+    )
+
+
+@pytest.mark.unit
+def test_runtime_effects_renders_configured_optional_claude_directory(
+    tmp_path: Path,
+) -> None:
+    """A configured credential directory stays read-only and env-backed."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    compose = generate_compose(
+        resolver.resolve(bundles=["runtime-core"]),
+        environment={"CODING_AGENT_CLAUDE_CREDS_HOST_DIR": str(tmp_path)},
+    )
+
+    volumes = compose["services"]["runtime-effects"]["volumes"]
+    assert (
+        "${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:?"
+        "CODING_AGENT_CLAUDE_CREDS_HOST_DIR must point to an existing absolute directory}:"
+        "/home/omniinfra/.claude:ro" in volumes
+    )
+
+
+@pytest.mark.unit
+def test_runtime_effects_rejects_file_for_optional_claude_directory(
+    tmp_path: Path,
+) -> None:
+    """The directory-only declaration must fail closed for a file source."""
+    credential_file = tmp_path / "credential-file"
+    credential_file.touch()
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+
+    with pytest.raises(
+        ValueError,
+        match="CODING_AGENT_CLAUDE_CREDS_HOST_DIR must point to an existing absolute directory",
+    ):
+        generate_compose(
+            resolver.resolve(bundles=["runtime-core"]),
+            environment={"CODING_AGENT_CLAUDE_CREDS_HOST_DIR": str(credential_file)},
+        )
+
+
+@pytest.mark.unit
 def test_generated_compose_includes_network_and_volumes() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["core"])

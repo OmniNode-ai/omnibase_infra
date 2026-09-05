@@ -16,6 +16,9 @@ from omnibase_infra.docker.catalog.enum_depends_on_condition import (
     EnumDependsOnCondition,
 )
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
+from omnibase_infra.docker.catalog.model_optional_directory_bind_mount import (
+    ModelOptionalDirectoryBindMount,
+)
 
 
 @dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
@@ -89,6 +92,9 @@ class CatalogManifest:
     volumes: list[str]
     depends_on: list[DependsOnEntry]
     # Optional fields with sane defaults
+    optional_directory_bind_mounts: list[ModelOptionalDirectoryBindMount] = field(
+        default_factory=list
+    )
     tmpfs: list[str] = field(default_factory=list)
     container_name: str | None = None
     command: str | list[str] | None = None
