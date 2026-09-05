@@ -157,6 +157,34 @@ def test_generated_compose_omits_bundle_env_when_unselected() -> None:
 
 
 @pytest.mark.unit
+def test_runtime_catalog_propagates_topic_partition_override() -> None:
+    """Runtime services share the contract default and operator override."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime-core", "canary"])
+    compose = generate_compose(resolved)
+
+    expected = (
+        "${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-"
+        "${DEV_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set "
+        "DEV_TOPIC_PROVISIONER_MAX_PARTITIONS}}"
+    )
+    runtime_services = {
+        name
+        for name, manifest in resolved.manifests.items()
+        if manifest.layer.value == "runtime"
+    }
+    assert runtime_services
+    for service_name in runtime_services:
+        environment = compose["services"][service_name]["environment"]
+        assert environment["ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"] == expected
+
+    # The setting belongs to runtime containers, not to the broker itself.
+    assert "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS" not in compose["services"][
+        "redpanda"
+    ].get("environment", {})
+
+
+@pytest.mark.unit
 def test_generated_runtime_services_export_onex_state_dir() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["runtime"])

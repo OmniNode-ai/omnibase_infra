@@ -12,6 +12,9 @@ core:
   includes: []
   inject_env:
     INFISICAL_ADDR: "http://infisical:8080"
+    # Allow a process-local dev override while keeping the default owned by
+    # the rendered runtime policy contract (DEV_TOPIC_PROVISIONER_MAX_PARTITIONS).
+    ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-${DEV_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set DEV_TOPIC_PROVISIONER_MAX_PARTITIONS}}"
   # Only vars an operator can supply BEFORE the first bring-up belong here
   # (OMN-16187). The Infisical machine identity is minted by
   # scripts/setup-infisical-identity.sh at step 4 of bootstrap-infisical.sh,
