@@ -408,6 +408,45 @@ _FLIP_COMMENT_CLASS_MARKER = "<!-- onex-autoclose class=flipped -->"
 # receiving duplicates, which is the correct direction to be wrong in.
 _MAX_COMMENT_PAGES = 5
 
+# OMN-16106, class (c). Signals that a dod_verify check failed because the LIVE
+# SURFACE it reads was unreachable, rather than because the behaviour it
+# asserts is absent.
+#
+# These are the terminal strings kubectl, docker and the Go HTTP stack emit
+# when the thing under test is down: they are produced by the TOOL, not by the
+# product, so a product whose behaviour is genuinely wrong does not print them.
+# Matched case-insensitively against a failed check's own message.
+#
+# This is a message-shape classifier and it is stated as one. Its safety
+# argument is not accuracy, it is DIRECTION: the only outcome it can change is
+# a decision the sweep had already made to REFUSE the flip. It converts a
+# GAP_POSTED (which asserts "your acceptance criterion is not met") into a HOLD
+# (which asserts nothing and re-offers the candidate next tick). A false
+# positive costs a gap comment that does not get written; it cannot cost a
+# flip, because it is never consulted on a path that writes Done. That
+# invariant is pinned by a test, not by this comment.
+_LIVE_SURFACE_UNAVAILABLE_SIGNALS: tuple[str, ...] = (
+    "crashloopbackoff",
+    "imagepullbackoff",
+    "unable to connect to the server",
+    "couldn't get current server api group list",
+    "the server could not find the requested resource",
+    "error from server (serviceunavailable)",
+    "connection refused",
+    "connection reset by peer",
+    "no such host",
+    "i/o timeout",
+    "dial tcp",
+    "no such container",
+    "503 service unavailable",
+    "502 bad gateway",
+    "504 gateway time-out",
+)
+
+#: Per-check records on the dod_verify terminal payload. Read for the class-(c)
+#: classifier only; every counter the flip predicate consults is unchanged.
+_DOD_VERIFY_CHECKS_KEY = "checks"
+
 # OMN-17658. First-page size of the `children` connection on `_ISSUE_QUERY`. A
 # parent that fills it is treated as UNREADABLE rather than as fully
 # enumerated — see `_open_children`.
@@ -983,6 +1022,38 @@ def _ac_coverage_gap(
 # when the underlying verdict moves and silent when it does not.
 _SWEEP_COMMENT_MARKER_PREFIX = "onex-autoclose-sweep"
 _SWEEP_COMMENT_MARKER_VERSION = "v1"
+
+
+def _live_surface_unavailable(verdict: dict[str, object]) -> tuple[str, str]:
+    """The first failed check whose message names an unreachable live surface.
+
+    Returns ``(evidence_id, matched signal)``, or ``("", "")`` when no failed
+    check is attributable to one. Only FAILED and UNVERIFIABLE checks are
+    considered: a check that passed says the surface was reachable, and a
+    skipped one was never attempted.
+
+    Why per-check and not a whole-run health probe: the closer verifies many
+    tickets in one run and only some of them read a live surface at all. A
+    run-level "staging is down" flag would hold candidates whose evidence is
+    entirely local, which is the opposite failure — a hold nobody can clear.
+    The attribution has to be to the CHECK that could not read, and the
+    per-check records have carried that message all along; the closer simply
+    never looked at them, reading only the counters beside them.
+    """
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return "", ""
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        status = str(check.get("status", "")).strip().lower()
+        if status not in ("failed", "unverifiable"):
+            continue
+        message = str(check.get("message") or "").lower()
+        for signal in _LIVE_SURFACE_UNAVAILABLE_SIGNALS:
+            if signal in message:
+                return str(check.get("evidence_id") or "<unnamed check>"), signal
+    return "", ""
 
 
 def _gap_shortfall(
@@ -2784,6 +2855,44 @@ class HandlerEvidenceAutocloseSweep:
                 readback_entry_id=readback_entry_id,
                 linear_comment_posted=commented,
                 applied=True,
+            )
+
+        # OMN-16106 class (c). Before calling this a gap, ask whether the
+        # failing check could read the thing it asserts about at all. A
+        # readback against a CrashLoopBackOff pod learned NOTHING about the
+        # acceptance criterion, and saying "your AC is not met" about it is a
+        # false statement that accrues one comment per rotation. HELD instead:
+        # nothing is written, nothing is judged, and the candidate is re-offered
+        # on the next tick — so when the surface comes back the ticket flips
+        # with no human launch, which is the whole point.
+        #
+        # Placed HERE, after every flip path has already returned, so the hold
+        # is structurally unreachable from a write. That is the invariant, not
+        # the signal list.
+        held_check, held_signal = _live_surface_unavailable(verdict)
+        if held_check:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=(
+                    EnumEvidenceAutocloseDecision.SKIPPED_LIVE_SURFACE_UNAVAILABLE
+                ),
+                reason=(
+                    f"HELD, not judged: check '{held_check}' could not reach the "
+                    f"live surface it reads ('{held_signal}' in its own "
+                    "message), so this run learned nothing about the acceptance "
+                    "criterion it proves. No comment posted and no state "
+                    "written; the candidate is re-offered on the next tick and "
+                    "flips on its own once the surface is back. "
+                    f"dod_verify counters at the hold: {verified_count}/"
+                    f"{total_checks} verified, {failed_count} failed."
+                ),
+                dod_verify_total_checks=total_checks,
+                dod_verify_verified_count=verified_count,
+                dod_verify_failed_count=failed_count,
+                dod_verify_non_probative_count=non_probative_count,
+                dod_verify_behavior_proving_count=behavior_proving_count,
             )
 
         # Gap path.
