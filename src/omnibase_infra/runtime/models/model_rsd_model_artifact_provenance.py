@@ -23,6 +23,10 @@ _SHA1 = r"^[0-9a-f]{40}$"
 _RUNTIME_VERSION = r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
 
 ModelRegistryId = Annotated[str, Field(pattern=_REGISTRY_ID)]
+RuntimeVersion = Annotated[str, Field(pattern=_RUNTIME_VERSION)]
+ArtifactManifestAlgorithm = Literal[
+    "sha256-canonical-json-v1", "sha256-path-size-content-sha256-v1"
+]
 
 
 def _reject_topology_like_registry_id(value: str) -> str:
@@ -48,11 +52,11 @@ class ModelRsdModelArtifactProvenance(BaseModel):
     artifact_id: ModelRegistryId
     artifact_revision_sha: str | None = Field(default=None, pattern=_SHA1)
     artifact_manifest_digest_sha256: CanonicalSha256 | None = None
-    artifact_manifest_algorithm: Literal["sha256-canonical-json-v1"] | None = None
+    artifact_manifest_algorithm: ArtifactManifestAlgorithm | None = None
     quantization: str = Field(pattern=_IDENTIFIER)
     architecture: str = Field(pattern=_IDENTIFIER)
     runtime_implementation: str = Field(pattern=_IDENTIFIER)
-    runtime_version: str = Field(pattern=_RUNTIME_VERSION)
+    runtime_version: RuntimeVersion | None = None
     required_hardware_capability: str = Field(pattern=_IDENTIFIER)
     served_model_id: ModelRegistryId
     issued_at: str = Field(pattern=_RFC3339_UTC)
@@ -66,17 +70,18 @@ class ModelRsdModelArtifactProvenance(BaseModel):
     @model_validator(mode="after")
     def validate_provenance_binding(self) -> Self:
         """Require one immutable artifact binding and reject topology aliases."""
-        if (self.artifact_revision_sha is None) == (
-            self.artifact_manifest_digest_sha256 is None
+        if (
+            self.artifact_revision_sha is None
+            and self.artifact_manifest_digest_sha256 is None
         ):
             raise ValueError(
-                "exactly one artifact revision or manifest digest is required"
+                "an immutable artifact revision or manifest digest is required"
             )
         if self.artifact_manifest_digest_sha256 is None:
             if self.artifact_manifest_algorithm is not None:
                 raise ValueError("manifest algorithm requires a manifest digest")
-        elif self.artifact_manifest_algorithm != "sha256-canonical-json-v1":
-            raise ValueError("manifest digest requires the canonical JSON algorithm")
+        elif self.artifact_manifest_algorithm is None:
+            raise ValueError("manifest digest requires a declared algorithm")
         for value in (self.base_model_id, self.artifact_id, self.served_model_id):
             _reject_topology_like_registry_id(value)
         return self

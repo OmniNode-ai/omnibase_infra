@@ -5,14 +5,15 @@ approval_status: unapproved
 base_model_id: Qwen/Qwen3.8-27B
 base_model_revision_sha: 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
 artifact_id: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
-artifact_revision_sha: 4b8533275c5e5e267838c0312737f5a4323c01d0
-artifact_manifest_digest_sha256: null
-artifact_manifest_algorithm: null
+artifact_revision_sha: 0cc27958cefbbe231782ec8511de8c4eb5233348
+artifact_manifest_digest_sha256: e46ef4e3895ed0a6db7c237d642121095629c53bd5b3e5ac799b8a8e2ae83e4f
+artifact_manifest_algorithm: sha256-path-size-content-sha256-v1
 quantization: modelopt_nvfp4
 architecture: Qwen3_5ForConditionalGeneration
 runtime_implementation: vllm
-runtime_version: 0.21.0
-required_hardware_capability: nvidia.sm120
+# HOLD: the immutable artifact specifies only the vLLM 0.27.x family, not one exact required version.
+runtime_version: null
+required_hardware_capability: nvidia.rtx5090_32gb
 served_model_id: Qwen/Qwen3.8-27B
 issued_at: "2026-09-04T19:55:00Z"
 expires_at: "2026-09-04T20:00:00Z"

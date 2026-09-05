@@ -84,10 +84,18 @@ def test_example_is_inert_and_binds_immutable_public_identity() -> None:
         "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
     )
     assert provenance.artifact_revision_sha == (
-        "4b8533275c5e5e267838c0312737f5a4323c01d0"
+        "0cc27958cefbbe231782ec8511de8c4eb5233348"
     )
-    assert provenance.artifact_manifest_digest_sha256 is None
-    assert provenance.artifact_manifest_algorithm is None
+    assert provenance.artifact_manifest_digest_sha256 == (
+        "e46ef4e3895ed0a6db7c237d642121095629c53bd5b3e5ac799b8a8e2ae83e4f"
+    )
+    assert provenance.artifact_manifest_algorithm == (
+        "sha256-path-size-content-sha256-v1"
+    )
+    assert provenance.quantization == "modelopt_nvfp4"
+    assert provenance.required_hardware_capability == "nvidia.rtx5090_32gb"
+    assert provenance.runtime_implementation == "vllm"
+    assert provenance.runtime_version is None
     assert provenance.served_model_id == "Qwen/Qwen3.8-27B"
     assert provenance.issued_at == "2026-09-04T19:55:00Z"
     assert provenance.expires_at == "2026-09-04T20:00:00Z"
@@ -186,17 +194,22 @@ def test_freshness_rejects_excess_window_and_non_utc_clock() -> None:
 @pytest.mark.parametrize(
     "updates",
     [
-        {"artifact_revision_sha": None},
         {
-            "artifact_revision_sha": "4b8533275c5e5e267838c0312737f5a4323c01d0",
-            "artifact_manifest_digest_sha256": "0" * 64,
+            "artifact_revision_sha": None,
+            "artifact_manifest_digest_sha256": None,
+            "artifact_manifest_algorithm": None,
+        },
+        {
+            "artifact_manifest_digest_sha256": None,
             "artifact_manifest_algorithm": "sha256-canonical-json-v1",
         },
-        {"artifact_manifest_digest_sha256": "0" * 64},
-        {"artifact_manifest_algorithm": "sha256-canonical-json-v1"},
+        {
+            "artifact_revision_sha": None,
+            "artifact_manifest_algorithm": None,
+        },
     ],
 )
-def test_artifact_binding_requires_exactly_one_immutable_form(
+def test_artifact_binding_requires_immutable_form_and_digest_algorithm_pair(
     updates: dict[str, object],
 ) -> None:
     raw = _raw_example()
@@ -204,6 +217,16 @@ def test_artifact_binding_requires_exactly_one_immutable_form(
 
     with pytest.raises(ValidationError):
         ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
+
+
+@pytest.mark.unit
+def test_artifact_revision_and_payload_commitment_are_accepted_together() -> None:
+    provenance = ModelRsdModelArtifactProvenance.model_validate(
+        _raw_example(), strict=True
+    )
+
+    assert provenance.artifact_revision_sha is not None
+    assert provenance.artifact_manifest_digest_sha256 is not None
 
 
 @pytest.mark.unit
@@ -237,11 +260,15 @@ def test_schema_is_strict_and_execute_can_never_be_enabled() -> None:
 
 
 @pytest.mark.unit
-def test_manifest_digest_variant_is_accepted() -> None:
+@pytest.mark.parametrize(
+    "algorithm",
+    ["sha256-canonical-json-v1", "sha256-path-size-content-sha256-v1"],
+)
+def test_manifest_digest_variant_is_accepted(algorithm: str) -> None:
     raw = _raw_example()
     raw["artifact_revision_sha"] = None
     raw["artifact_manifest_digest_sha256"] = "0" * 64
-    raw["artifact_manifest_algorithm"] = "sha256-canonical-json-v1"
+    raw["artifact_manifest_algorithm"] = algorithm
 
     provenance = ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
     assert provenance.artifact_revision_sha is None
@@ -348,8 +375,12 @@ def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
 
     reader = _TrackingReader(payload)
 
-    def fail_stat(_path: Path) -> object:
-        raise AssertionError("loader must not stat before opening the descriptor")
+    original_stat = Path.stat
+
+    def fail_stat(path: Path, *, follow_symlinks: bool = True) -> object:
+        if path == _EXAMPLE_PATH:
+            raise AssertionError("loader must not stat before opening the descriptor")
+        return original_stat(path, follow_symlinks=follow_symlinks)
 
     def open_once(_path: Path, mode: str) -> _TrackingReader:
         assert mode == "rb"
