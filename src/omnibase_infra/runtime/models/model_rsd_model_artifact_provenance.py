@@ -54,6 +54,8 @@ class ModelRsdModelArtifactProvenance(BaseModel):
     artifact_manifest_digest_sha256: CanonicalSha256 | None = None
     artifact_manifest_algorithm: ArtifactManifestAlgorithm | None = None
     quantization: str = Field(pattern=_IDENTIFIER)
+    weight_activation_precision: Literal["w4a4"]
+    kv_cache_dtype: Literal["fp8"]
     architecture: str = Field(pattern=_IDENTIFIER)
     runtime_implementation: str = Field(pattern=_IDENTIFIER)
     runtime_version: RuntimeVersion | None = None

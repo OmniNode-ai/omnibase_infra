@@ -9,6 +9,8 @@ artifact_revision_sha: 0cc27958cefbbe231782ec8511de8c4eb5233348
 artifact_manifest_digest_sha256: e46ef4e3895ed0a6db7c237d642121095629c53bd5b3e5ac799b8a8e2ae83e4f
 artifact_manifest_algorithm: sha256-path-size-content-sha256-v1
 quantization: modelopt_nvfp4
+weight_activation_precision: w4a4
+kv_cache_dtype: fp8
 architecture: Qwen3_5ForConditionalGeneration
 runtime_implementation: vllm
 # HOLD: the immutable artifact specifies only the vLLM 0.27.x family, not one exact required version.

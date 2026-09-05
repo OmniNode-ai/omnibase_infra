@@ -93,6 +93,8 @@ def test_example_is_inert_and_binds_immutable_public_identity() -> None:
         "sha256-path-size-content-sha256-v1"
     )
     assert provenance.quantization == "modelopt_nvfp4"
+    assert provenance.weight_activation_precision == "w4a4"
+    assert provenance.kv_cache_dtype == "fp8"
     assert provenance.required_hardware_capability == "nvidia.rtx5090_32gb"
     assert provenance.runtime_implementation == "vllm"
     assert provenance.runtime_version is None
@@ -261,6 +263,24 @@ def test_schema_is_strict_and_execute_can_never_be_enabled() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("weight_activation_precision", "w8a8"),
+        ("kv_cache_dtype", "bf16"),
+    ],
+)
+def test_deployment_precision_mismatch_is_refused_before_activation(
+    field: str, value: str
+) -> None:
+    raw = _raw_example()
+    raw[field] = value
+
+    with pytest.raises(ValidationError):
+        ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "algorithm",
     ["sha256-canonical-json-v1", "sha256-path-size-content-sha256-v1"],
 )
@@ -314,6 +334,11 @@ def test_signing_preimage_is_stable_and_excludes_signature() -> None:
     assert provenance_signing_preimage(provenance) != provenance_signing_preimage(
         changed_time
     )
+    signed_payload = json.loads(
+        provenance_signing_preimage(provenance).split(b"\x00", 1)[1]
+    )
+    assert signed_payload["weight_activation_precision"] == "w4a4"
+    assert signed_payload["kv_cache_dtype"] == "fp8"
 
 
 @pytest.mark.unit
