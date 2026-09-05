@@ -344,7 +344,10 @@ def test_gate_overall_is_pass_when_status_healthy() -> None:
     gate = _stability_gate(
         {
             "status": "healthy",
-            "details": {"healthy": True, "runtime_health": {"status": "HEALTHY"}},
+            "details": {
+                "healthy": True,
+                "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0},
+            },
         }
     )
     assert gate.errors == []
@@ -369,7 +372,9 @@ def test_gate_overall_is_fail_on_degraded_body_with_nested_true() -> None:
         pytest.param(
             {
                 "status": "healthy",
-                "details": {"runtime_health": {"status": "HEALTHY"}},
+                "details": {
+                    "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}
+                },
             },
             "healthy",
             id="healthy",

@@ -70,6 +70,7 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 # Recorded verbatim in the refresh receipt (OMN-17563 AC-3) so a future reader
 # can tell a strict PASS from a lenient one without re-deriving it. Bump the
@@ -90,8 +91,53 @@ VERDICT_WAIT_MARGIN_SECONDS = 60.0
 #: without a ceiling.
 VERDICT_WAIT_POLL_SECONDS = 15.0
 
+#: Each probe is an HTTP fetch with this timeout, spent BEFORE the poll sleep.
+#: Worst-case wall clock is attempts * (poll + this), not attempts * poll.
+VERDICT_PROBE_TIMEOUT_SECONDS = 10.0
+
+#: Multiplier on the monitor's check interval past which a verdict is stale.
+#: Two missed cycles is tolerance for a slow lane; three is a stopped monitor.
+#: This has a DEFAULT because a freshness rule nobody passes enforces nothing:
+#: a monitor that emits one verdict then dies leaves a frozen runtime_health
+#: that an opt-in check would accept forever, which is strictly worse than the
+#: blind window this ticket closes.
+VERDICT_STALE_AFTER_INTERVALS = 3.0
+
+
+#: The reason strings that can come from the semantic health evaluator.
+class HealthVerdictReason(StrEnum):
+    VERDICT_ABSENT = "verdict_absent"
+    VERDICT_STALE = "verdict_stale"
+    STATUS_UNREADABLE = "status_unreadable"
+
+
+#: The reason string that justifies waiting for a first monitor verdict.
+REASON_VERDICT_ABSENT = "verdict_absent"
+
+#: The reason string that justifies waiting for a fresher monitor verdict.
+REASON_VERDICT_STALE = "verdict_stale"
+
+#: The reason string for a body that is not a runtime health endpoint.
+REASON_STATUS_UNREADABLE = "status_unreadable"
+
 #: The only ``status`` value that means healthy.
 HEALTH_STATUS_HEALTHY = "healthy"
+
+DEFAULT_MAX_VERDICT_AGE = object()
+
+_WAITABLE_REASONS = frozenset(
+    {HealthVerdictReason.VERDICT_ABSENT, HealthVerdictReason.VERDICT_STALE}
+)
+
+
+def _normalise_verdict_reason(reason: str | None) -> HealthVerdictReason | None:
+    """Map producer reason strings into the closed wait-policy vocabulary."""
+    if reason is None:
+        return None
+    try:
+        return HealthVerdictReason(reason)
+    except ValueError:
+        return None
 
 
 class HealthPayloadError(ValueError):
@@ -153,6 +199,10 @@ class HealthVerdict:
     status: str | None
     details_healthy: bool | None
     detail: str
+    #: Machine-readable cause, mirrored from ``evaluate_health_response``
+    #: (``verdict_absent`` / ``verdict_stale`` / ``status_unreadable``).
+    #: ``detail`` is prose for humans; retry logic must never parse prose.
+    reason: str | None = None
 
 
 def parse_health_payload(raw: bytes | str) -> HealthPayload:
@@ -223,17 +273,22 @@ class VerdictWaitBound:
     attempts: int
     interval_seconds: float
     total_seconds: float
+    worst_case_seconds: float
     first_visible_verdict_seconds: float
     check_interval_seconds: float
     boot_grace_seconds: float
+    probe_timeout_seconds: float
 
     def describe(self) -> str:
         return (
             f"verdict_wait: {self.attempts} attempts x "
-            f"{self.interval_seconds:g}s = {int(self.total_seconds)}s "
-            f"(first visible verdict ~{int(self.first_visible_verdict_seconds)}s "
-            f"from check_interval={self.check_interval_seconds:g}s, "
-            f"boot_grace={self.boot_grace_seconds:g}s)"
+            f"{self.interval_seconds:g}s = {int(self.total_seconds)}s sleep, "
+            f"worst case {int(self.worst_case_seconds)}s wall clock "
+            f"(each probe may spend up to {self.probe_timeout_seconds:g}s "
+            f"before its sleep); first visible verdict "
+            f"~{int(self.first_visible_verdict_seconds)}s from "
+            f"check_interval={self.check_interval_seconds:g}s, "
+            f"boot_grace={self.boot_grace_seconds:g}s"
         )
 
 
@@ -243,6 +298,7 @@ def derive_verdict_wait_bound(
     boot_grace_seconds: float,
     margin_seconds: float = VERDICT_WAIT_MARGIN_SECONDS,
     poll_seconds: float = VERDICT_WAIT_POLL_SECONDS,
+    probe_timeout_seconds: float = VERDICT_PROBE_TIMEOUT_SECONDS,
 ) -> VerdictWaitBound:
     """Derive how long to wait for a first ``details.runtime_health`` verdict.
 
@@ -279,10 +335,27 @@ def derive_verdict_wait_bound(
         attempts=attempts,
         interval_seconds=poll_seconds,
         total_seconds=attempts * poll_seconds,
+        worst_case_seconds=attempts * (poll_seconds + probe_timeout_seconds),
         first_visible_verdict_seconds=first_visible,
         check_interval_seconds=check_interval_seconds,
         boot_grace_seconds=boot_grace_seconds,
+        probe_timeout_seconds=probe_timeout_seconds,
     )
+
+
+def default_max_verdict_age(check_interval_seconds: float) -> float:
+    """Freshness ceiling derived from the monitor's own cadence.
+
+    Exists so freshness has a value when no caller supplies one. An opt-in
+    freshness check is not a freshness check: a monitor that publishes once
+    and then crashes serves the same verdict forever, and an unbounded gate
+    accepts it forever.
+    """
+    if check_interval_seconds <= 0:
+        raise ValueError(
+            f"check_interval_seconds must be positive, got {check_interval_seconds}"
+        )
+    return check_interval_seconds * VERDICT_STALE_AFTER_INTERVALS
 
 
 def wait_for_verdict(
@@ -317,6 +390,16 @@ def wait_for_verdict(
         verdict = probe()
         if verdict.ok:
             return verdict, f"{bound.describe()} satisfied on attempt {attempt}"
+        normalised_reason = _normalise_verdict_reason(verdict.reason)
+        if normalised_reason not in _WAITABLE_REASONS:
+            # Waiting helps a verdict that has not been published yet, and it
+            # can also help a stale verdict race where the monitor writes a
+            # fresher block inside this bound. An unreadable body, unknown
+            # reason, or dead endpoint is terminal at this boundary.
+            return verdict, (
+                f"{bound.describe()} not waited: failure is terminal "
+                f"(reason={verdict.reason!r}) on attempt {attempt}"
+            )
         if attempt < bound.attempts:
             sleep(bound.interval_seconds)  # type: ignore[operator]
     return verdict, f"{bound.describe()} exhausted without a verdict"
@@ -356,6 +439,7 @@ def evaluate_health_body(
             status=None,
             details_healthy=None,
             detail=str(exc),
+            reason=REASON_STATUS_UNREADABLE if require_verdict else None,
         )
 
     if not require_verdict:
@@ -393,6 +477,7 @@ def evaluate_health_body(
             if ok
             else f"{payload.describe()} (verdict gate: {container_verdict.reason})"
         ),
+        reason=None if ok else container_verdict.reason,
     )
 
 
@@ -404,4 +489,5 @@ def unreachable_verdict(detail: str) -> HealthVerdict:
         status=None,
         details_healthy=None,
         detail=detail,
+        reason=REASON_STATUS_UNREADABLE,
     )

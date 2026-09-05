@@ -73,8 +73,10 @@ import yaml
 # resolves. Sharing the verdict rather than re-copying it is the point:
 # OMN-17563 was one defect that had already been duplicated into both files.
 from health_payload import (
+    DEFAULT_MAX_VERDICT_AGE,
     HEALTH_POLICY_STATUS_ONLY_STRICT,
     HealthVerdict,
+    default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
     unreachable_verdict,
@@ -423,7 +425,7 @@ def check_health_with_retry(
     *,
     opener: object | None = None,
     require_verdict: bool = True,
-    max_verdict_age_seconds: float | None = None,
+    max_verdict_age_seconds: float | None | object = DEFAULT_MAX_VERDICT_AGE,
     check_interval_seconds: float = 300.0,
     boot_grace_seconds: float = 120.0,
     sleep_fn: object | None = None,
@@ -445,13 +447,27 @@ def check_health_with_retry(
         check_interval_seconds=check_interval_seconds,
         boot_grace_seconds=boot_grace_seconds,
     )
+    # OMN-17624 review (omnibase_infra#3208): freshness must NOT be opt-in.
+    # A monitor that publishes one verdict and then crashes serves that same
+    # verdict forever; a gate with no ceiling accepts it forever, which turns
+    # this fix's blind window into "before first verdict, plus always".
+    if max_verdict_age_seconds is DEFAULT_MAX_VERDICT_AGE:
+        effective_max_age: float | None = default_max_verdict_age(
+            check_interval_seconds
+        )
+    elif max_verdict_age_seconds is None or isinstance(
+        max_verdict_age_seconds, int | float
+    ):
+        effective_max_age = max_verdict_age_seconds
+    else:
+        raise TypeError("max_verdict_age_seconds must be a number, None, or omitted")
 
     def _probe() -> HealthVerdict:
         return check_health(
             health_url,
             opener=opener,
             require_verdict=True,
-            max_verdict_age_seconds=max_verdict_age_seconds,
+            max_verdict_age_seconds=effective_max_age,
         )
 
     # Unpacked rather than returned directly: health_payload is imported by

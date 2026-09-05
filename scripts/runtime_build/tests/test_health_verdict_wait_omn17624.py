@@ -39,6 +39,12 @@ import json
 import pytest
 from health_payload import (
     HEALTH_POLICY_VERDICT_REQUIRED,
+    REASON_STATUS_UNREADABLE,
+    REASON_VERDICT_ABSENT,
+    REASON_VERDICT_STALE,
+    VERDICT_PROBE_TIMEOUT_SECONDS,
+    VERDICT_STALE_AFTER_INTERVALS,
+    default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
 )
@@ -49,13 +55,24 @@ _PRE_VERDICT_BODY: dict[str, object] = {
 }
 
 
-def _body_with_verdict(
-    status: str = "HEALTHY", age_seconds: float | None = None
-) -> bytes:
-    details: dict[str, object] = {"healthy": True, "runtime_health": {"status": status}}
-    if age_seconds is not None:
-        details["runtime_health"] = {"status": status, "age_seconds": age_seconds}
-    return json.dumps({"status": "healthy", "details": details}).encode()
+def _body_with_verdict(status: str = "HEALTHY", age_seconds: float = 1.0) -> bytes:
+    """A body shaped like the real one.
+
+    ``build_runtime_health_block`` (runtime_health_block.py:93) ALWAYS emits
+    ``age_seconds`` beside ``status``. An earlier version of this helper made
+    it optional, producing "fresh verdict" fixtures no live lane can emit --
+    and an unrealistic fixture is how a guard passes while the property it
+    names goes unexercised.
+    """
+    return json.dumps(
+        {
+            "status": "healthy",
+            "details": {
+                "healthy": True,
+                "runtime_health": {"status": status, "age_seconds": age_seconds},
+            },
+        }
+    ).encode()
 
 
 # ── AC1: no sign-off before a verdict exists ────────────────────────────────
@@ -201,6 +218,17 @@ def _opener_for(body: dict[str, object]) -> object:
     return _open
 
 
+def _opener_for_sequence(*bodies: dict[str, object]) -> object:
+    calls = {"n": 0}
+
+    def _open(url: str, timeout: int = 10) -> _Resp:
+        index = min(calls["n"], len(bodies) - 1)
+        calls["n"] += 1
+        return _Resp(json.dumps(bodies[index]).encode())
+
+    return _open, calls
+
+
 @_BOTH_GATES
 def test_gate_refuses_when_no_verdict_ever_arrives(gate: ModuleType) -> None:
     verdict, described = gate.check_health_with_retry(
@@ -210,11 +238,15 @@ def test_gate_refuses_when_no_verdict_ever_arrives(gate: ModuleType) -> None:
     )
     assert verdict.ok is False
     assert "exhausted" in described
+    assert verdict.reason == REASON_VERDICT_ABSENT
 
 
 @_BOTH_GATES
 def test_gate_passes_once_the_verdict_is_present(gate: ModuleType) -> None:
-    body = {"status": "healthy", "details": {"runtime_health": {"status": "HEALTHY"}}}
+    body = {
+        "status": "healthy",
+        "details": {"runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}},
+    }
     verdict, described = gate.check_health_with_retry(
         "http://x/health", opener=_opener_for(body), sleep_fn=lambda _s: None
     )
@@ -259,3 +291,183 @@ def test_explicit_opt_out_is_recorded_never_inferred(gate: ModuleType) -> None:
     )
     assert verdict.ok is True
     assert "opted out" in described
+
+
+# ── Hostile-reviewer findings (omnibase_infra#3208), all three upheld ───────
+#
+# The reviewer was right on each of these and the first one is the serious
+# one: I built the freshness capability, tested it, and wrote AC2 down as
+# satisfied -- while no production caller passed the parameter. A test that
+# exercises an argument real callers never supply proves nothing about the
+# shipped behaviour, which is the exact defect class this ticket exists to
+# close.
+
+
+def _stale_verdict_body(age: float = 9_000.0) -> dict[str, object]:
+    return {
+        "status": "healthy",
+        "details": {"runtime_health": {"status": "HEALTHY", "age_seconds": age}},
+    }
+
+
+@_BOTH_GATES
+def test_freshness_is_enforced_without_the_caller_asking(gate: ModuleType) -> None:
+    """fp=ab80aaa67e08 / 6e73ced28ece / e85978c66d2b.
+
+    A monitor that emits one verdict then crashes leaves a frozen
+    runtime_health in the body forever. If the gate only enforces freshness
+    when a caller opts in, the blind window becomes 'before first verdict'
+    PLUS FOREVER -- strictly worse than the bug being fixed.
+    """
+    verdict, _desc = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body()),
+        sleep_fn=lambda _s: None,
+    )
+    assert verdict.ok is False, (
+        "a 9000s-old verdict was accepted with no explicit max age -- "
+        "freshness is opt-in, so production enforces nothing"
+    )
+
+
+@_BOTH_GATES
+def test_a_fatal_probe_does_not_burn_the_whole_window(gate: ModuleType) -> None:
+    """fp=bc154ca9c0a3. Only verdict_absent warrants waiting.
+
+    A connection-refused or malformed endpoint is knowable on attempt 1.
+    Retrying it for the full derived bound turns a fast, correct failure into
+    a ~600s stall on every refresh.
+    """
+    calls = {"n": 0}
+
+    def _broken_open(url: str, timeout: int = 10) -> _Resp:
+        calls["n"] += 1
+        return _Resp(b"this is not json at all")
+
+    verdict, _desc = gate.check_health_with_retry(
+        "http://x/health", opener=_broken_open, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is False
+    assert verdict.reason == REASON_STATUS_UNREADABLE
+    assert calls["n"] == 1, (
+        f"probed {calls['n']} times for an unreadable body -- a permanent "
+        "failure should not consume the wait window"
+    )
+
+
+@_BOTH_GATES
+def test_absent_verdict_is_the_reason_that_retries(gate: ModuleType) -> None:
+    """fp=78891efb05b2. Absence consumes the declared wait window."""
+    calls = {"n": 0}
+
+    def _pre_verdict_open(url: str, timeout: int = 10) -> _Resp:
+        calls["n"] += 1
+        return _Resp(json.dumps(_PRE_VERDICT_BODY).encode())
+
+    bound = derive_verdict_wait_bound(
+        check_interval_seconds=300.0, boot_grace_seconds=120.0
+    )
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=_pre_verdict_open, sleep_fn=lambda _s: None
+    )
+    assert verdict.reason == REASON_VERDICT_ABSENT
+    assert calls["n"] == bound.attempts
+    assert "exhausted" in described
+
+
+@_BOTH_GATES
+def test_stale_verdict_can_become_fresh_inside_the_wait(gate: ModuleType) -> None:
+    """fp=c25c828c87de. Staleness is not terminal during the wait window."""
+    opener, calls = _opener_for_sequence(
+        _stale_verdict_body(),
+        {
+            "status": "healthy",
+            "details": {"runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}},
+        },
+    )
+
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is True
+    assert calls["n"] == 2
+    assert "satisfied on attempt 2" in described
+
+
+@_BOTH_GATES
+def test_explicit_none_disables_freshness_without_changing_default(
+    gate: ModuleType,
+) -> None:
+    """fp=46689089e58e. Omitted and explicit None are different intents."""
+    default_verdict, _default_desc = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body()),
+        sleep_fn=lambda _s: None,
+    )
+    assert default_verdict.reason == REASON_VERDICT_STALE
+
+    disabled_verdict, disabled_desc = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body()),
+        max_verdict_age_seconds=None,
+        sleep_fn=lambda _s: None,
+    )
+    assert disabled_verdict.ok is True
+    assert "satisfied on attempt 1" in disabled_desc
+
+
+def test_default_freshness_ceiling_validates_positive_interval() -> None:
+    """fp=979881a62182. Non-positive intervals cannot derive freshness."""
+    with pytest.raises(ValueError, match="check_interval_seconds"):
+        default_max_verdict_age(0)
+    with pytest.raises(ValueError, match="check_interval_seconds"):
+        default_max_verdict_age(-1)
+
+
+@pytest.mark.parametrize("offset", [-1.0, 1.0])
+def test_default_freshness_boundary_is_derived_from_interval(offset: float) -> None:
+    """fp=27860500fdcb. Test the boundary, not only a large stale value."""
+    ceiling = default_max_verdict_age(300.0)
+    verdict = evaluate_health_body(
+        _body_with_verdict(age_seconds=ceiling + offset),
+        require_verdict=True,
+        max_verdict_age_seconds=ceiling,
+    )
+    assert verdict.ok is (offset < 0)
+
+
+def test_the_recorded_bound_states_worst_case_wall_clock() -> None:
+    """fp=b6cd79370117 / 65ad276129d1.
+
+    Each attempt performs an HTTP fetch (timeout 10s) BEFORE sleeping, so real
+    elapsed time is attempts * (poll + fetch), not attempts * poll. A bound
+    whose stated purpose is to be reviewable must not understate itself.
+    """
+    bound = derive_verdict_wait_bound(
+        check_interval_seconds=300.0, boot_grace_seconds=120.0
+    )
+    described = bound.describe()
+    # STRICTLY greater: `>=` passed even when worst_case was computed as
+    # attempts * poll, i.e. with the fetch cost omitted -- the mutation run
+    # proved that assertion vacuous, which is the same defect class this
+    # ticket exists to close.
+    assert bound.worst_case_seconds > bound.total_seconds, (
+        "worst case does not exceed sleep time, so the probe fetch cost is not counted"
+    )
+    assert bound.probe_timeout_seconds == VERDICT_PROBE_TIMEOUT_SECONDS
+    expected = bound.attempts * (bound.interval_seconds + VERDICT_PROBE_TIMEOUT_SECONDS)
+    assert bound.worst_case_seconds == expected
+    assert str(int(bound.worst_case_seconds)) in described, (
+        "the receipt does not state the worst-case wall clock a reviewer "
+        "would actually observe"
+    )
+
+
+def test_verdict_reason_vocabulary_is_exhaustive_for_wait_policy() -> None:
+    """fp=9a4022e9def5. The string reasons are constrained by constants."""
+    assert {REASON_VERDICT_ABSENT, REASON_VERDICT_STALE, REASON_STATUS_UNREADABLE} == {
+        "verdict_absent",
+        "verdict_stale",
+        "status_unreadable",
+    }
+    assert default_max_verdict_age(300.0) == 300.0 * VERDICT_STALE_AFTER_INTERVALS
