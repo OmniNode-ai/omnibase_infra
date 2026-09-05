@@ -239,6 +239,12 @@ skills:
       # fence and the bound flip readback are resolved from.
       - {name: history-page-size, payload_field: history_page_size, arg_type: integer}
       - {name: history-max-pages, payload_field: history_max_pages, arg_type: integer}
+      # OMN-17658 follow-up. The post-write readback retries because Linear's
+      # history connection lags the mutation that produced the entry -- measured
+      # on run 33958237006, where the flip landed and the immediate readback saw
+      # nothing, so the run recorded an error on a write that had succeeded.
+      - {name: readback-max-attempts, payload_field: readback_max_attempts, arg_type: integer}
+      - {name: readback-delay-seconds, payload_field: readback_delay_seconds, arg_type: integer}
   # OMN-16536: detect + re-flip Linear's silent GitHub-sync Done-revert
   # pattern. Node-backed in omnibase_infra itself (same locality
   # precedent as node_evidence_autoclose_sweep_effect above -- calls the

@@ -228,6 +228,42 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
         ),
     )
 
+    # ------------------------------------------------------------------
+    # OMN-17658 follow-up — the readback reads a connection that LAGS.
+    #
+    # Measured on the first scheduled run under the fences (33958237006,
+    # f8b623672, 2026-09-05T09:33Z): the sweep flipped OMN-17658, `issueUpdate`
+    # returned success, the ticket's own history shows `In Progress -> Done` at
+    # 09:34:43.990Z — and the immediate post-write read of that same connection
+    # showed nothing, so the run recorded ERROR_READBACK_UNCONFIRMED on a write
+    # that had landed.
+    #
+    # A single immediate read of an eventually consistent connection is not a
+    # proof of absence, it is a race, and this one loses every time: without a
+    # retry `tickets_flipped` can never leave 0 and the closer is silently
+    # reduced to a mechanism that writes Done and reports that it did not.
+    readback_max_attempts: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        description=(
+            "How many times the post-write state-history read may be retried "
+            "before the flip is recorded ERROR_READBACK_UNCONFIRMED. The first "
+            "attempt is immediate and costs nothing extra on a connection that "
+            "is already consistent; only a genuine lag pays the delay."
+        ),
+    )
+    readback_delay_seconds: int = Field(
+        default=3,
+        ge=0,
+        le=60,
+        description=(
+            "Delay between post-write readback attempts. 0 is a real value and "
+            "is what tests use — the retry must be exercisable without waiting "
+            "out a production backoff."
+        ),
+    )
+
     apply: bool = Field(
         default=False,
         description=(

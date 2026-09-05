@@ -1576,7 +1576,13 @@ jobs:
           # log line here asserting it would be the same kind of claim. The
           # receipt's own `mode` field carries it.
           if [ "${SWEEP_TRIGGER}" = "schedule" ]; then
-            echo "provenance: SCHEDULED (cron tick, no dispatcher). Whether this run writes is decided by the contract's scheduled_apply, and the sweep receipt's `mode` field reports what it resolved to."
+            # No backticks in this string. They were command substitution
+            # inside the double quotes, not markdown: run 33958237006 printed
+            # `line 123: mode: command not found` to stderr and then rendered
+            # the sentence with an empty gap where the word should have been.
+            # A log line about provenance that mangles itself is the OMN-17935
+            # defect class reproduced by the fix for it.
+            echo "provenance: SCHEDULED (cron tick, no dispatcher). Whether this run writes is decided by the contract's scheduled_apply, and the sweep receipt's 'mode' field reports what it resolved to."
           elif [ "${SWEEP_DISPATCH_APPLY}" = "true" ]; then
             echo "provenance: OPERATOR-DISPATCHED with apply ticked — this run writes."
           else
