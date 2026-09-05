@@ -447,7 +447,10 @@ def test_health_gate_overall_pass():
     # OMN-17624: the gate requires a monitor verdict, so a provably-healthy
     # lane must carry one. Without it the gate correctly refuses.
     health_opener = _opener(
-        {"status": "healthy", "details": {"runtime_health": {"status": "HEALTHY"}}}
+        {
+            "status": "healthy",
+            "details": {"runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}},
+        }
     )
 
     # run_health_gate calls check_health then check_manifest_count with the
@@ -506,7 +509,9 @@ def test_health_gate_overall_fail_when_a_group_is_dead():
             json.dumps(
                 {
                     "status": "healthy",
-                    "details": {"runtime_health": {"status": "HEALTHY"}},
+                    "details": {
+                        "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}
+                    },
                 }
             ).encode()
         )
@@ -562,7 +567,9 @@ def test_health_gate_overall_fail_when_partition_cap_reached():
             json.dumps(
                 {
                     "status": "healthy",
-                    "details": {"runtime_health": {"status": "HEALTHY"}},
+                    "details": {
+                        "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}
+                    },
                 }
             ).encode()
         )
@@ -619,7 +626,9 @@ def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
             json.dumps(
                 {
                     "status": "healthy",
-                    "details": {"runtime_health": {"status": "HEALTHY"}},
+                    "details": {
+                        "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}
+                    },
                 }
             ).encode()
         )
