@@ -143,13 +143,43 @@
 #     same way: a diagnostic that reads the receipt differently from the
 #     reader it is diagnosing cannot diagnose that reader.
 #
+#   - OMN-16106 (contract 1.4.0), class (c): A READBACK AGAINST A DEAD SURFACE
+#     IS HELD, NOT JUDGED. Fourteen tickets in the 2026-08-31 sprint have
+#     acceptance criteria that are live readbacks against onex-dev, which has
+#     been in CrashLoopBackOff since 2026-09-02. Their dod_verify checks fail,
+#     and this node reported that failure as GAP_POSTED -- whose comment
+#     asserts "your acceptance criterion is not met". That is a false
+#     statement: the check learned NOTHING about the criterion, because the
+#     thing under test was down, and the backfill rotation accrued one such
+#     comment per turn.
+#
+#     The per-check records were already on the dod_verify terminal payload
+#     (evidence_id / status / message) and this node read only the counters
+#     beside them. It now reads the records: a FAILED or UNVERIFIABLE check
+#     whose own message carries a surface-unreachable signal
+#     (CrashLoopBackOff, connection refused, dial tcp, no such host, i/o
+#     timeout, ...) terminates the candidate SKIPPED_LIVE_SURFACE_UNAVAILABLE.
+#     Nothing written, nothing judged, candidate re-offered next tick -- so
+#     when staging returns the ticket flips with zero human launch.
+#
+#     Per-check attribution rather than a run-level health flag, deliberately:
+#     only some candidates in a run read a live surface at all, and a "staging
+#     is down" flag would hold candidates whose evidence is entirely local --
+#     a hold nobody can clear.
+#
+#     The classifier is a message-shape match and its safety argument is
+#     DIRECTION, not accuracy: its single call site sits after every flip path
+#     has already returned, so the hold is structurally unreachable from a
+#     write and can only convert a decision already made to REFUSE. A false
+#     positive costs a gap comment that does not get written; it cannot cost a
+#     flip. Pinned by a test that reads the source, not by this paragraph.
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 3
-  patch: 3
-node_version: "1.4.1"
+  minor: 4
+  patch: 1
+node_version: "1.5.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -225,6 +255,12 @@ error_handling:
         dod_verify was fully green AND its checks covered the ticket's criteria, but not one passing check executed the claimed behavior — every green leg bound merge state (a PR is merged) or was a surrogate (a file exists, a generic ticket-independent suite ran). That is evidence the code landed, not evidence the system does the thing, so the flip is WITHHELD (OMN-15911). Recorded as GAP_NO_BEHAVIOR_PROOF and counted under tickets_gap_posted for the same reason AC_COVERAGE_GAP is: the mechanism worked, the evidence was not strong enough to close on.
 
       recoverable: false
+      retry_strategy: "none"
+    - name: "LIVE_SURFACE_UNAVAILABLE"
+      description: >
+        A dod_verify per-check verdict failed or became unverifiable because the live surface it reads could not be reached (for example CrashLoopBackOff, connection refused, no such host, i/o timeout, or gateway/service unavailable). The sweep records SKIPPED_LIVE_SURFACE_UNAVAILABLE and withholds both Done flips and evidence-gap comments: the run learned nothing about the acceptance criterion, so the candidate is re-offered on the next tick rather than judged (OMN-16106 class c).
+
+      recoverable: true
       retry_strategy: "none"
     - name: "DOD_VERIFY_PROOF_CLASS_UNREPORTED"
       description: >
