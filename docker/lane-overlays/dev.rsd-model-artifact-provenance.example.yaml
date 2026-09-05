@@ -2,6 +2,7 @@
 schema_version: rsd.model-artifact-provenance.v1
 execute_enabled: false
 approval_status: unapproved
+model_id: qwen/qwen3.8-27b
 base_model_id: Qwen/Qwen3.8-27B
 base_model_revision_sha: 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
 artifact_id: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
@@ -13,10 +14,11 @@ weight_activation_precision: w4a4
 kv_cache_dtype: fp8
 architecture: Qwen3_5ForConditionalGeneration
 runtime_implementation: vllm
-# HOLD: the immutable artifact specifies only the vLLM 0.27.x family, not one exact required version.
-runtime_version: null
+runtime_version: 0.27.1
 required_hardware_capability: nvidia.rtx5090_32gb
 served_model_id: Qwen/Qwen3.8-27B
+launch_profile_id: qwen38-nvfp4-rtx5090-v1
+launch_profile_digest: 40defad1345d27226916e8946647482bb3eaaeca96c4330968e6a0bcaad074b3
 issued_at: "2026-09-04T19:55:00Z"
 expires_at: "2026-09-04T20:00:00Z"
 signer_capability_ref: capability://rsd/model-artifact-provenance/signer

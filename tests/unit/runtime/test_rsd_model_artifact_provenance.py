@@ -79,6 +79,7 @@ def test_example_is_inert_and_binds_immutable_public_identity() -> None:
 
     assert provenance.execute_enabled is False
     assert provenance.approval_status == "unapproved"
+    assert provenance.model_id == "qwen/qwen3.8-27b"
     assert provenance.base_model_id == "Qwen/Qwen3.8-27B"
     assert provenance.base_model_revision_sha == (
         "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
@@ -97,8 +98,12 @@ def test_example_is_inert_and_binds_immutable_public_identity() -> None:
     assert provenance.kv_cache_dtype == "fp8"
     assert provenance.required_hardware_capability == "nvidia.rtx5090_32gb"
     assert provenance.runtime_implementation == "vllm"
-    assert provenance.runtime_version is None
+    assert provenance.runtime_version == "0.27.1"
     assert provenance.served_model_id == "Qwen/Qwen3.8-27B"
+    assert provenance.launch_profile_id == "qwen38-nvfp4-rtx5090-v1"
+    assert provenance.launch_profile_digest == (
+        "40defad1345d27226916e8946647482bb3eaaeca96c4330968e6a0bcaad074b3"
+    )
     assert provenance.issued_at == "2026-09-04T19:55:00Z"
     assert provenance.expires_at == "2026-09-04T20:00:00Z"
 
@@ -194,58 +199,52 @@ def test_freshness_rejects_excess_window_and_non_utc_clock() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "updates",
+    ("field", "value"),
     [
-        {
-            "artifact_revision_sha": None,
-            "artifact_manifest_digest_sha256": None,
-            "artifact_manifest_algorithm": None,
-        },
-        {
-            "artifact_manifest_digest_sha256": None,
-            "artifact_manifest_algorithm": "sha256-canonical-json-v1",
-        },
-        {
-            "artifact_revision_sha": None,
-            "artifact_manifest_algorithm": None,
-        },
+        ("model_id", "Qwen/Qwen3.8-27B"),
+        ("base_model_id", "Qwen/Qwen3.8-14B"),
+        ("base_model_revision_sha", "0" * 40),
+        ("artifact_id", "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX4090"),
+        ("artifact_revision_sha", "0" * 40),
+        ("artifact_manifest_digest_sha256", "0" * 64),
+        ("artifact_manifest_algorithm", "sha256-canonical-json-v1"),
+        ("runtime_version", "0.27.0"),
+        ("served_model_id", "Qwen/qwen3.8-27b"),
+        ("launch_profile_id", "qwen38-nvfp4-rtx4090-v1"),
+        ("launch_profile_digest", "0" * 64),
     ],
 )
-def test_artifact_binding_requires_immutable_form_and_digest_algorithm_pair(
-    updates: dict[str, object],
+def test_exact_candidate_bindings_reject_substitution(
+    field: str,
+    value: str,
 ) -> None:
     raw = _raw_example()
-    raw.update(updates)
+    raw[field] = value
 
     with pytest.raises(ValidationError):
         ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
 
 
 @pytest.mark.unit
-def test_artifact_revision_and_payload_commitment_are_accepted_together() -> None:
-    provenance = ModelRsdModelArtifactProvenance.model_validate(
-        _raw_example(), strict=True
-    )
-
-    assert provenance.artifact_revision_sha is not None
-    assert provenance.artifact_manifest_digest_sha256 is not None
-
-
-@pytest.mark.unit
 @pytest.mark.parametrize(
-    ("field", "value"),
+    "field",
     [
-        ("base_model_id", "localhost/Qwen3.8-27B"),
-        ("artifact_id", "192.168.0.1/Qwen3.8-27B"),
-        ("served_model_id", "https://registry.invalid/Qwen3.8-27B"),
-        ("artifact_id", "../local-checkpoint/Qwen3.8-27B"),
+        "model_id",
+        "base_model_id",
+        "base_model_revision_sha",
+        "artifact_id",
+        "artifact_revision_sha",
+        "artifact_manifest_digest_sha256",
+        "artifact_manifest_algorithm",
+        "runtime_version",
+        "served_model_id",
+        "launch_profile_id",
+        "launch_profile_digest",
     ],
 )
-def test_registry_identifiers_reject_topology_and_local_path_values(
-    field: str, value: str
-) -> None:
+def test_exact_candidate_bindings_cannot_be_absent(field: str) -> None:
     raw = _raw_example()
-    raw[field] = value
+    del raw[field]
 
     with pytest.raises(ValidationError):
         ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
@@ -280,22 +279,6 @@ def test_deployment_precision_mismatch_is_refused_before_activation(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "algorithm",
-    ["sha256-canonical-json-v1", "sha256-path-size-content-sha256-v1"],
-)
-def test_manifest_digest_variant_is_accepted(algorithm: str) -> None:
-    raw = _raw_example()
-    raw["artifact_revision_sha"] = None
-    raw["artifact_manifest_digest_sha256"] = "0" * 64
-    raw["artifact_manifest_algorithm"] = algorithm
-
-    provenance = ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
-    assert provenance.artifact_revision_sha is None
-    assert provenance.artifact_manifest_digest_sha256 == "0" * 64
-
-
-@pytest.mark.unit
 def test_signature_verification_is_provider_bound_and_fail_closed() -> None:
     provenance, provider = _signed_example()
 
@@ -304,7 +287,7 @@ def test_signature_verification_is_provider_bound_and_fail_closed() -> None:
         == provenance
     )
 
-    changed = provenance.model_copy(update={"served_model_id": "Qwen/changed"})
+    changed = provenance.model_copy(update={"issued_at": "2026-09-04T19:56:00Z"})
     with pytest.raises(ProtocolConfigurationError, match="signature is invalid"):
         verify_rsd_model_artifact_provenance(changed, provider, now=_NOW)
 

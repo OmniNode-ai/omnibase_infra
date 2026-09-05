@@ -4,10 +4,9 @@
 
 from __future__ import annotations
 
-import re
-from typing import Annotated, Literal, Self
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.runtime.models.rsd_live_delegation_schema import (
     _RFC3339_UTC,
@@ -16,27 +15,6 @@ from omnibase_infra.runtime.models.rsd_live_delegation_schema import (
     CanonicalSha256,
     CanonicalUuid4,
 )
-
-_REGISTRY_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-_IDENTIFIER = r"^[A-Za-z][A-Za-z0-9._-]{1,127}$"
-_SHA1 = r"^[0-9a-f]{40}$"
-_RUNTIME_VERSION = r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
-
-ModelRegistryId = Annotated[str, Field(pattern=_REGISTRY_ID)]
-RuntimeVersion = Annotated[str, Field(pattern=_RUNTIME_VERSION)]
-ArtifactManifestAlgorithm = Literal[
-    "sha256-canonical-json-v1", "sha256-path-size-content-sha256-v1"
-]
-
-
-def _reject_topology_like_registry_id(value: str) -> str:
-    """Keep registry identifiers distinct from host and endpoint names."""
-    owner = value.split("/", 1)[0].lower()
-    if owner in {"localhost", "loopback"} or re.fullmatch(
-        r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", owner
-    ):
-        raise ValueError("registry identifiers must not contain host identities")
-    return value
 
 
 class ModelRsdModelArtifactProvenance(BaseModel):
@@ -47,20 +25,27 @@ class ModelRsdModelArtifactProvenance(BaseModel):
     schema_version: Literal["rsd.model-artifact-provenance.v1"]
     execute_enabled: Literal[False]
     approval_status: Literal["unapproved"]
-    base_model_id: ModelRegistryId
-    base_model_revision_sha: str = Field(pattern=_SHA1)
-    artifact_id: ModelRegistryId
-    artifact_revision_sha: str | None = Field(default=None, pattern=_SHA1)
-    artifact_manifest_digest_sha256: CanonicalSha256 | None = None
-    artifact_manifest_algorithm: ArtifactManifestAlgorithm | None = None
-    quantization: str = Field(pattern=_IDENTIFIER)
+    model_id: Literal["qwen/qwen3.8-27b"]
+    base_model_id: Literal["Qwen/Qwen3.8-27B"]
+    base_model_revision_sha: Literal["1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"]
+    artifact_id: Literal["gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"]
+    artifact_revision_sha: Literal["0cc27958cefbbe231782ec8511de8c4eb5233348"]
+    artifact_manifest_digest_sha256: Literal[
+        "e46ef4e3895ed0a6db7c237d642121095629c53bd5b3e5ac799b8a8e2ae83e4f"
+    ]
+    artifact_manifest_algorithm: Literal["sha256-path-size-content-sha256-v1"]
+    quantization: Literal["modelopt_nvfp4"]
     weight_activation_precision: Literal["w4a4"]
     kv_cache_dtype: Literal["fp8"]
-    architecture: str = Field(pattern=_IDENTIFIER)
-    runtime_implementation: str = Field(pattern=_IDENTIFIER)
-    runtime_version: RuntimeVersion | None = None
-    required_hardware_capability: str = Field(pattern=_IDENTIFIER)
-    served_model_id: ModelRegistryId
+    architecture: Literal["Qwen3_5ForConditionalGeneration"]
+    runtime_implementation: Literal["vllm"]
+    runtime_version: Literal["0.27.1"]
+    required_hardware_capability: Literal["nvidia.rtx5090_32gb"]
+    served_model_id: Literal["Qwen/Qwen3.8-27B"]
+    launch_profile_id: Literal["qwen38-nvfp4-rtx5090-v1"]
+    launch_profile_digest: Literal[
+        "40defad1345d27226916e8946647482bb3eaaeca96c4330968e6a0bcaad074b3"
+    ]
     issued_at: str = Field(pattern=_RFC3339_UTC)
     expires_at: str = Field(pattern=_RFC3339_UTC)
     signer_capability_ref: CanonicalCapabilityRef
@@ -68,25 +53,6 @@ class ModelRsdModelArtifactProvenance(BaseModel):
     signer_public_key_fingerprint_sha256: CanonicalSha256
     signature_domain: Literal["omninode-rsd.model-artifact-provenance.v1"]
     signature_base64: CanonicalEd25519Signature
-
-    @model_validator(mode="after")
-    def validate_provenance_binding(self) -> Self:
-        """Require one immutable artifact binding and reject topology aliases."""
-        if (
-            self.artifact_revision_sha is None
-            and self.artifact_manifest_digest_sha256 is None
-        ):
-            raise ValueError(
-                "an immutable artifact revision or manifest digest is required"
-            )
-        if self.artifact_manifest_digest_sha256 is None:
-            if self.artifact_manifest_algorithm is not None:
-                raise ValueError("manifest algorithm requires a manifest digest")
-        elif self.artifact_manifest_algorithm is None:
-            raise ValueError("manifest digest requires a declared algorithm")
-        for value in (self.base_model_id, self.artifact_id, self.served_model_id):
-            _reject_topology_like_registry_id(value)
-        return self
 
 
 __all__ = ["ModelRsdModelArtifactProvenance"]
