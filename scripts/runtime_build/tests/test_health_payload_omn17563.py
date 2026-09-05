@@ -339,7 +339,14 @@ def _stability_gate(health_body: dict) -> object:
 @pytest.mark.unit
 def test_gate_overall_is_pass_when_status_healthy() -> None:
     """Control: with every other check green, a healthy body PASSes."""
-    gate = _stability_gate({"status": "healthy", "details": {"healthy": True}})
+    # OMN-17624: "healthy" now means a lane whose monitor has actually
+    # reported. A body with no runtime_health is unprovable, not passing.
+    gate = _stability_gate(
+        {
+            "status": "healthy",
+            "details": {"healthy": True, "runtime_health": {"status": "HEALTHY"}},
+        }
+    )
     assert gate.errors == []
     assert gate.health_ok is True
     assert gate.overall == "PASS"
@@ -359,7 +366,14 @@ def test_gate_overall_is_fail_on_degraded_body_with_nested_true() -> None:
     ("body", "expected_status"),
     [
         pytest.param(_DEGRADED_BODY, "degraded", id="degraded"),
-        pytest.param({"status": "healthy"}, "healthy", id="healthy"),
+        pytest.param(
+            {
+                "status": "healthy",
+                "details": {"runtime_health": {"status": "HEALTHY"}},
+            },
+            "healthy",
+            id="healthy",
+        ),
     ],
 )
 def test_receipt_records_the_policy_that_produced_health_ok(
@@ -380,11 +394,18 @@ def test_receipt_records_the_policy_that_produced_health_ok(
     )
     health_gate = receipt["health_gate"]
     assert isinstance(health_gate, dict)
-    assert health_gate["health_policy"] == HEALTH_POLICY_STATUS_ONLY_STRICT
+    # OMN-17624: the gate now records the stricter policy, which is the whole
+    # point of AC-3 -- a reader can tell WHICH policy produced health_ok, and
+    # after this fix that policy is the one that can see a DEGRADED verdict.
+    from health_payload import HEALTH_POLICY_VERDICT_REQUIRED
+
+    assert health_gate["health_policy"] == HEALTH_POLICY_VERDICT_REQUIRED
     assert health_gate["health_status"] == expected_status
+    # AC-3 (OMN-17624): the bound that was waited travels with the verdict.
+    assert health_gate["verdict_wait"]
     # The receipt is what a later prod-promotion session reads. Round-trip it.
     assert json.loads(json.dumps(receipt))["health_gate"]["health_policy"] == (
-        HEALTH_POLICY_STATUS_ONLY_STRICT
+        HEALTH_POLICY_VERDICT_REQUIRED
     )
 
 
@@ -522,8 +543,22 @@ def test_gate_agrees_with_the_probe_on_the_live_degraded_body() -> None:
 
 
 @pytest.mark.unit
-def test_known_residual_gate_is_blind_to_an_absent_monitor_verdict() -> None:
-    """Pinned, not hidden: the gate and the probe are BOTH blind here.
+def test_gate_no_longer_signs_off_without_a_monitor_verdict_omn17624() -> None:
+    """CLOSED by OMN-17624. Inverted from its original assertion, not deleted.
+
+    This test was written to hold the gap open: "asserted here so the gap is a
+    recorded fact with a red test the day someone claims it is closed." That
+    day is 2026-09-05. What follows is the same scenario with the outcome the
+    fix requires -- the refresh gate, invoked the way it now invokes itself,
+    refuses a body that carries no monitor verdict.
+
+    The ORIGINAL blind behaviour is still reachable and still asserted below,
+    because it remains correct for a caller that has not opted in: the
+    low-level default is unchanged. What changed is that both refresh gates
+    now pass require_verdict=True, so the blind path is no longer the one that
+    underwrites a stability-proven receipt.
+
+    Original text follows, kept because it is the evidence for why:
 
     ``ServiceRuntimeHealthMonitor`` publishes its first verdict roughly one
     ``RUNTIME_HEALTH_CHECK_INTERVAL`` (300s) after boot, and
@@ -556,9 +591,23 @@ def test_known_residual_gate_is_blind_to_an_absent_monitor_verdict() -> None:
         require_verdict=True,
     )
 
-    # Gate and the lane's ACTUAL probe agree -- both accept it.
+    # The historical record: with no verdict required, both are still blind.
+    # Unchanged by OMN-17624 and correct -- this is the un-opted-in default.
     assert gate.ok is True
     assert lane_probe.verdict == "PASS"
-    # Only --require-verdict, which the lane does not pass, would reject it.
     assert strict_probe.verdict == "FAIL"
     assert strict_probe.reason == "verdict_absent"
+
+    # THE INVERSION (OMN-17624): the refresh gate now requires the verdict, so
+    # the exact body behind the 20260902T145841Z-810c818a10b3 false PASS is
+    # refused. Previously this assertion could not have been written.
+    from health_payload import HEALTH_POLICY_VERDICT_REQUIRED
+
+    gate_now = evaluate_health_body(
+        json.dumps(pre_verdict_body).encode(), require_verdict=True
+    )
+    assert gate_now.ok is False, (
+        "the gate still signs off inside the monitor's blind window -- "
+        "OMN-17624 is not closed"
+    )
+    assert gate_now.policy == HEALTH_POLICY_VERDICT_REQUIRED

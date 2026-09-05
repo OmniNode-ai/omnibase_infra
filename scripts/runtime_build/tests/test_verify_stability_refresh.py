@@ -444,7 +444,11 @@ def _full_pass_runner():
 def test_health_gate_overall_pass():
     pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
     opener = _opener({"contracts": list(range(DEFAULT_MIN_CONTRACTS))})
-    health_opener = _opener({"status": "healthy"})
+    # OMN-17624: the gate requires a monitor verdict, so a provably-healthy
+    # lane must carry one. Without it the gate correctly refuses.
+    health_opener = _opener(
+        {"status": "healthy", "details": {"runtime_health": {"status": "HEALTHY"}}}
+    )
 
     # run_health_gate calls check_health then check_manifest_count with the
     # SAME opener param; use one opener that serves both shapes based on url.
@@ -495,7 +499,17 @@ def test_health_gate_overall_fail_when_a_group_is_dead():
             return _FakeHTTPResponse(
                 json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
             )
-        return _FakeHTTPResponse(json.dumps({"status": "healthy"}).encode())
+        # OMN-17624: an "otherwise-healthy refresh" must carry the monitor
+        # verdict the gate now requires; the point of this test is partition
+        # headroom, not the verdict policy.
+        return _FakeHTTPResponse(
+            json.dumps(
+                {
+                    "status": "healthy",
+                    "details": {"runtime_health": {"status": "HEALTHY"}},
+                }
+            ).encode()
+        )
 
     report = run_health_gate(
         lane="stability-test",
@@ -541,7 +555,17 @@ def test_health_gate_overall_fail_when_partition_cap_reached():
             return _FakeHTTPResponse(
                 json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
             )
-        return _FakeHTTPResponse(json.dumps({"status": "healthy"}).encode())
+        # OMN-17624: an "otherwise-healthy refresh" must carry the monitor
+        # verdict the gate now requires; the point of this test is partition
+        # headroom, not the verdict policy.
+        return _FakeHTTPResponse(
+            json.dumps(
+                {
+                    "status": "healthy",
+                    "details": {"runtime_health": {"status": "HEALTHY"}},
+                }
+            ).encode()
+        )
 
     report = run_health_gate(
         lane="stability-test",
@@ -588,7 +612,17 @@ def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
             return _FakeHTTPResponse(
                 json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
             )
-        return _FakeHTTPResponse(json.dumps({"status": "healthy"}).encode())
+        # OMN-17624: an "otherwise-healthy refresh" must carry the monitor
+        # verdict the gate now requires; the point of this test is partition
+        # headroom, not the verdict policy.
+        return _FakeHTTPResponse(
+            json.dumps(
+                {
+                    "status": "healthy",
+                    "details": {"runtime_health": {"status": "HEALTHY"}},
+                }
+            ).encode()
+        )
 
     report = run_health_gate(
         lane="stability-test",
