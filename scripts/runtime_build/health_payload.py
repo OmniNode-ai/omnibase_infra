@@ -102,9 +102,32 @@ VERDICT_PROBE_TIMEOUT_SECONDS = 10.0
 #: blind window this ticket closes.
 VERDICT_STALE_AFTER_INTERVALS = 3.0
 
-#: The reason string that -- alone -- justifies waiting. Every other failure
-#: is knowable on the first probe; retrying it burns the window for nothing.
-REASON_VERDICT_ABSENT = "verdict_absent"
+#: The reasons a re-probe can CURE. Both describe a verdict that is not yet the
+#: one the new monitor will publish: ``verdict_absent`` (nothing published yet)
+#: and ``verdict_stale`` (the previous container's verdict, replaced within the
+#: window). Everything else -- an unreadable body, a dead endpoint, or any
+#: reason not in this set -- is as true on attempt 24 as on attempt 1 and is
+#: terminal BY POLICY, so a future reason cannot silently start consuming the
+#: window. Review threads 3 and 7 on omnibase_infra#3211.
+RETRYABLE_REASONS: frozenset[str] = frozenset({"verdict_absent", "verdict_stale"})
+
+
+class DeriveMaxVerdictAge:
+    """Sentinel type: derive the freshness ceiling from the monitor cadence.
+
+    Exists so ``None`` can keep its natural meaning -- "no ceiling", matching
+    ``evaluate_health_response``'s own contract -- while the DEFAULT still
+    derives one. Without it a caller could not express a deliberate opt-out
+    (review thread 1 on omnibase_infra#3211).
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "DERIVE_MAX_VERDICT_AGE"
+
+
+DERIVE_MAX_VERDICT_AGE = DeriveMaxVerdictAge()
 
 #: The only ``status`` value that means healthy.
 HEALTH_STATUS_HEALTHY = "healthy"
@@ -169,9 +192,11 @@ class HealthVerdict:
     status: str | None
     details_healthy: bool | None
     detail: str
-    #: Machine-readable cause, mirrored from ``evaluate_health_response``
-    #: (``verdict_absent`` / ``verdict_stale`` / ``status_unreadable``).
-    #: ``detail`` is prose for humans; retry logic must never parse prose.
+    #: Machine-readable cause, mirrored from ``evaluate_health_response``.
+    #: Membership in ``RETRYABLE_REASONS`` is the only thing the wait loop
+    #: reads; anything else, including ``None`` (transport failure) and any
+    #: value not in that set, is terminal. ``detail`` is prose for humans;
+    #: retry logic must never parse prose.
     reason: str | None = None
 
 
@@ -321,6 +346,10 @@ def default_max_verdict_age(check_interval_seconds: float) -> float:
     and then crashes serves the same verdict forever, and an unbounded gate
     accepts it forever.
     """
+    if check_interval_seconds <= 0:
+        raise ValueError(
+            f"check_interval_seconds must be positive, got {check_interval_seconds}"
+        )
     return check_interval_seconds * VERDICT_STALE_AFTER_INTERVALS
 
 
@@ -356,11 +385,12 @@ def wait_for_verdict(
         verdict = probe()
         if verdict.ok:
             return verdict, f"{bound.describe()} satisfied on attempt {attempt}"
-        if verdict.reason != REASON_VERDICT_ABSENT:
-            # Waiting only helps a verdict that has not been published YET.
-            # A stale verdict, an unreadable body or a dead endpoint is just
-            # as true on attempt 24 as on attempt 1; retrying it converts a
-            # fast correct failure into a multi-minute stall on every refresh.
+        if verdict.reason not in RETRYABLE_REASONS:
+            # Waiting only helps a verdict the new monitor will REPLACE:
+            # absent (not yet published) or stale (the previous container's).
+            # An unreadable body or a dead endpoint is just as true on attempt
+            # 24 as on attempt 1; retrying it converts a fast correct failure
+            # into a multi-minute stall on every refresh.
             return verdict, (
                 f"{bound.describe()} not waited: failure is terminal "
                 f"(reason={verdict.reason!r}) on attempt {attempt}"

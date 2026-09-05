@@ -73,7 +73,10 @@ import yaml
 # resolves. Sharing the verdict rather than re-copying it is the point:
 # OMN-17563 was one defect that had already been duplicated into both files.
 from health_payload import (
+    DERIVE_MAX_VERDICT_AGE,
     HEALTH_POLICY_STATUS_ONLY_STRICT,
+    VERDICT_STALE_AFTER_INTERVALS,
+    DeriveMaxVerdictAge,
     HealthVerdict,
     default_max_verdict_age,
     derive_verdict_wait_bound,
@@ -424,7 +427,9 @@ def check_health_with_retry(
     *,
     opener: object | None = None,
     require_verdict: bool = True,
-    max_verdict_age_seconds: float | None = None,
+    max_verdict_age_seconds: float
+    | None
+    | DeriveMaxVerdictAge = DERIVE_MAX_VERDICT_AGE,
     check_interval_seconds: float = 300.0,
     boot_grace_seconds: float = 120.0,
     sleep_fn: object | None = None,
@@ -450,11 +455,24 @@ def check_health_with_retry(
     # A monitor that publishes one verdict and then crashes serves that same
     # verdict forever; a gate with no ceiling accepts it forever, which turns
     # this fix's blind window into "before first verdict, plus always".
-    effective_max_age = (
-        max_verdict_age_seconds
-        if max_verdict_age_seconds is not None
-        else default_max_verdict_age(check_interval_seconds)
-    )
+    # Three states, each recorded in the receipt so a reader can tell which
+    # ceiling produced the verdict: derived (the default), caller-supplied, or
+    # explicitly disabled with None -- legal, but never silent.
+    effective_max_age: float | None
+    if isinstance(max_verdict_age_seconds, DeriveMaxVerdictAge):
+        effective_max_age = default_max_verdict_age(check_interval_seconds)
+        ceiling_note = (
+            f"max_verdict_age={effective_max_age:g}s "
+            f"(derived: {VERDICT_STALE_AFTER_INTERVALS:g} x check_interval)"
+        )
+    elif max_verdict_age_seconds is None:
+        effective_max_age = None
+        ceiling_note = (
+            "no freshness ceiling (max_verdict_age_seconds=None, explicit opt-out)"
+        )
+    else:
+        effective_max_age = max_verdict_age_seconds
+        ceiling_note = f"max_verdict_age={effective_max_age:g}s (caller-supplied)"
 
     def _probe() -> HealthVerdict:
         return check_health(
@@ -469,7 +487,7 @@ def check_health_with_retry(
     # passthrough trips no-any-return. An explicit tuple keeps the
     # annotation honest without a suppression.
     verdict, described = wait_for_verdict(_probe, bound=bound, sleep_fn=sleep_fn)
-    return verdict, described
+    return verdict, f"{described}; {ceiling_note}"
 
 
 def check_cluster_health(

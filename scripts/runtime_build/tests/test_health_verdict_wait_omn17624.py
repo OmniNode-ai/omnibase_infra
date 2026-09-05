@@ -35,12 +35,20 @@ first-pass framing:
 from __future__ import annotations
 
 import json
+import urllib.error
 
 import pytest
 from health_payload import (
+    DERIVE_MAX_VERDICT_AGE,
     HEALTH_POLICY_VERDICT_REQUIRED,
+    RETRYABLE_REASONS,
+    VERDICT_PROBE_TIMEOUT_SECONDS,
+    VERDICT_WAIT_POLL_SECONDS,
+    HealthVerdict,
+    default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
+    wait_for_verdict,
 )
 
 _PRE_VERDICT_BODY: dict[str, object] = {
@@ -312,28 +320,163 @@ def test_freshness_is_enforced_without_the_caller_asking(gate: ModuleType) -> No
     )
 
 
-@_BOTH_GATES
-def test_a_fatal_probe_does_not_burn_the_whole_window(gate: ModuleType) -> None:
-    """fp=bc154ca9c0a3. Only verdict_absent warrants waiting.
+def _raising_open(url: str, timeout: int = 10) -> _Resp:
+    raise urllib.error.URLError("connection refused")
 
-    A connection-refused or malformed endpoint is knowable on attempt 1.
-    Retrying it for the full derived bound turns a fast, correct failure into
-    a ~600s stall on every refresh.
+
+_FULL_BOUND = derive_verdict_wait_bound(
+    check_interval_seconds=300.0, boot_grace_seconds=120.0
+).attempts
+
+
+@_BOTH_GATES
+@pytest.mark.parametrize(
+    ("make_opener", "expected_probes", "case"),
+    [
+        (
+            lambda: _opener_for(_PRE_VERDICT_BODY),
+            _FULL_BOUND,
+            "verdict_absent: not published yet -- curable by waiting",
+        ),
+        (
+            lambda: _opener_for(_stale_verdict_body()),
+            _FULL_BOUND,
+            "verdict_stale: previous container's verdict, replaced within the window",
+        ),
+        (
+            lambda: (lambda url, timeout=10: _Resp(b"this is not json")),
+            1,
+            "unreadable body: as true on attempt 24 as on attempt 1",
+        ),
+        (lambda: _raising_open, 1, "transport failure: dead endpoint, terminal"),
+    ],
+)
+def test_retry_table_waits_only_on_curable_reasons(
+    gate: ModuleType, make_opener: object, expected_probes: int, case: str
+) -> None:
+    """Review threads 2 and 3 on #3211, both upheld.
+
+    Thread 3 caught a bug in my previous fix: I classified verdict_stale as
+    terminal. During boot the body can carry the PREVIOUS container's verdict,
+    stale, while the new monitor is still inside its first 300s -- refusing
+    on attempt 1 forfeits the window in exactly the scenario the ticket
+    describes. Stale is curable by waiting; unreadable and dead are not.
+
+    Thread 2: the earlier test proved one terminal case and nothing about the
+    curable arm, so an inverted predicate (retry only on terminal) would have
+    passed it. This table pins every row.
     """
+    opener = make_opener()  # type: ignore[operator]
     calls = {"n": 0}
 
-    def _broken_open(url: str, timeout: int = 10) -> _Resp:
+    def _counting(url: str, timeout: int = 10) -> _Resp:
         calls["n"] += 1
-        return _Resp(b"this is not json at all")
+        return opener(url, timeout=timeout)  # type: ignore[operator]
 
     verdict, _desc = gate.check_health_with_retry(
-        "http://x/health", opener=_broken_open, sleep_fn=lambda _s: None
+        "http://x/health", opener=_counting, sleep_fn=lambda _s: None
     )
     assert verdict.ok is False
-    assert calls["n"] == 1, (
-        f"probed {calls['n']} times for an unreadable body -- a permanent "
-        "failure should not consume the wait window"
+    assert calls["n"] == expected_probes, (
+        f"{case}: probed {calls['n']} times, expected {expected_probes}"
     )
+
+
+# ── #7: the retry policy is an explicit set, not a string comparison ──────────
+
+
+def test_retryable_reasons_is_the_declared_set() -> None:
+    assert frozenset({"verdict_absent", "verdict_stale"}) == RETRYABLE_REASONS
+
+
+def test_an_unknown_reason_is_terminal_by_policy() -> None:
+    """A future reason such as 'schema_mismatch' must not silently start
+    consuming the wait window. Terminal-by-default is the declared policy,
+    and this pins it rather than leaving it to a string comparison."""
+    calls = {"n": 0}
+
+    def _probe() -> HealthVerdict:
+        calls["n"] += 1
+        return HealthVerdict(
+            ok=False,
+            policy=HEALTH_POLICY_VERDICT_REQUIRED,
+            status="healthy",
+            details_healthy=None,
+            detail="x",
+            reason="schema_mismatch",
+        )
+
+    bound = derive_verdict_wait_bound(
+        check_interval_seconds=300.0, boot_grace_seconds=120.0
+    )
+    verdict, desc = wait_for_verdict(_probe, bound=bound, sleep_fn=lambda _s: None)
+    assert verdict.ok is False
+    assert calls["n"] == 1
+    assert "terminal" in desc
+
+
+# ── #1: None means "no ceiling" and is recorded; the default DERIVES ─────────
+
+
+@_BOTH_GATES
+def test_explicit_none_disables_the_ceiling_and_says_so(gate: ModuleType) -> None:
+    """Thread 1. After my previous fix a caller could no longer express
+    "no freshness ceiling": None was silently replaced by the derived default.
+    None keeps its natural meaning (matching evaluate_health_response's own
+    contract); the DEFAULT is a sentinel that derives. Opting out is legal
+    but it goes on the receipt."""
+    verdict, desc = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body()),
+        max_verdict_age_seconds=None,
+        sleep_fn=lambda _s: None,
+    )
+    assert verdict.ok is True, "explicit None should impose no ceiling"
+    assert "no freshness ceiling" in desc
+
+
+@_BOTH_GATES
+def test_the_default_derives_a_ceiling(gate: ModuleType) -> None:
+    verdict, desc = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body()),
+        max_verdict_age_seconds=DERIVE_MAX_VERDICT_AGE,
+        sleep_fn=lambda _s: None,
+    )
+    assert verdict.ok is False
+    assert "max_verdict_age=" in desc
+
+
+# ── #4: a non-positive interval is refused, matching derive_verdict_wait_bound ─
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0])
+def test_default_max_verdict_age_refuses_non_positive_interval(bad: float) -> None:
+    with pytest.raises(ValueError):
+        default_max_verdict_age(bad)
+
+
+# ── #6: the ceiling boundary, computed in the test, probed on both sides ─────
+
+
+@_BOTH_GATES
+def test_freshness_ceiling_boundary(gate: ModuleType) -> None:
+    """age=9000 proved rejection but not the boundary: a ceiling accidentally
+    in minutes, or the multiplier applied twice, would still pass it. Compute
+    the ceiling the gate will derive and probe one second either side."""
+    ceiling = default_max_verdict_age(300.0)
+    under, _ = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body(age=ceiling - 1.0)),
+        sleep_fn=lambda _s: None,
+    )
+    over, _ = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body(age=ceiling + 1.0)),
+        sleep_fn=lambda _s: None,
+    )
+    assert under.ok is True, f"age {ceiling - 1} is inside the {ceiling}s ceiling"
+    assert over.ok is False, f"age {ceiling + 1} is outside the {ceiling}s ceiling"
 
 
 def test_the_recorded_bound_states_worst_case_wall_clock() -> None:
@@ -354,7 +497,13 @@ def test_the_recorded_bound_states_worst_case_wall_clock() -> None:
     assert bound.worst_case_seconds > bound.total_seconds, (
         "worst case does not exceed sleep time, so the probe fetch cost is not counted"
     )
-    expected = bound.attempts * (bound.interval_seconds + bound.probe_timeout_seconds)
+    # Against the MODULE constants, not the bound's own fields: re-deriving
+    # from bound.probe_timeout_seconds would pass even if the default were
+    # silently set to 0, which is the original bug wearing a new coat.
+    assert VERDICT_PROBE_TIMEOUT_SECONDS > 0
+    expected = bound.attempts * (
+        VERDICT_WAIT_POLL_SECONDS + VERDICT_PROBE_TIMEOUT_SECONDS
+    )
     assert bound.worst_case_seconds == expected
     assert str(int(bound.worst_case_seconds)) in described, (
         "the receipt does not state the worst-case wall clock a reviewer "
