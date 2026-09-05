@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_arm import (
+    EnumEvidenceAutocloseArm,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,
 )
@@ -29,6 +32,17 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
         ..., description="Terminal classification for this pair."
     )
     reason: str = Field(default="", description="Human-readable explanation.")
+    # OMN-17342. Which enumeration arm offered this pair. Defaults to FORWARD so
+    # every pre-existing construction site keeps its meaning unchanged — the
+    # forward window was the only arm that existed. It is recorded on EVERY
+    # outcome rather than only on backfilled ones because the absence of a
+    # marker is not a readable signal: "no arm field" and "the forward arm" have
+    # to be distinguishable in a receipt read months later, and a default that
+    # is also a real value only works if it is written out.
+    enumeration_arm: EnumEvidenceAutocloseArm = Field(
+        default=EnumEvidenceAutocloseArm.FORWARD,
+        description="Enumeration arm that selected this (companion, ticket) pair.",
+    )
     dod_verify_total_checks: int = Field(default=0, ge=0)
     dod_verify_verified_count: int = Field(default=0, ge=0)
     dod_verify_failed_count: int = Field(default=0, ge=0)

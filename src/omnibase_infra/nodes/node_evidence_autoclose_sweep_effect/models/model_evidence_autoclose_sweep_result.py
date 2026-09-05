@@ -28,6 +28,17 @@ class ModelEvidenceAutocloseSweepResult(BaseModel):
         ),
     )
     companions_scanned: int = Field(default=0, ge=0)
+    # OMN-17342. The two numbers that make the backfill arm's coverage claim
+    # checkable rather than assertable. `backfill_pool_size` is how many merged
+    # companions the wider window held after the forward window's own
+    # candidates were removed; `backfill_candidates_selected` is how many of
+    # them this tick's rotating slice actually offered to the pipeline. The
+    # ratio is the drain rate, and `selected` is the run-budget bound — the
+    # thing that must NOT grow with the board. Both stay 0 on a run that did
+    # not ask for the arm, which is what a receipt should say about an arm that
+    # did not run.
+    backfill_pool_size: int = Field(default=0, ge=0)
+    backfill_candidates_selected: int = Field(default=0, ge=0)
     bindings_extracted: int = Field(default=0, ge=0)
     tickets_flipped: int = Field(default=0, ge=0)
     tickets_gap_posted: int = Field(default=0, ge=0)

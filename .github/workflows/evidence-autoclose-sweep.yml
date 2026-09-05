@@ -227,6 +227,39 @@ on:
         # merge rate (~50 per 10h) a 6h window lands around 30 companions,
         # under the cap. Sizing the cap belongs to OMN-16792.
         default: '6'
+      backfill_lookback_hours:
+        description: >-
+          OMN-17342. BACKFILL ARM, in hours. 0 (the default, and the value
+          every scheduled tick uses) leaves the sweep single-armed and behaving
+          exactly as it did before this input existed. A non-zero value adds a
+          SECOND enumeration over a wider window: companions merged between
+          that bound and `lookback_hours` form a pool, and a bounded rotating
+          slice of it is offered to the identical downstream pipeline.
+          Why this is not just a bigger `lookback_hours`: `lookback_hours` is a
+          freshness window. It sees each companion once, in the hours after it
+          merges, and never again — no cursor, no watermark. A companion
+          scanned twelve times that reaches no verdict in any of them ages out
+          permanently. Measured 2026-09-05 over the two beta sprint projects,
+          118 of 238 open tickets carry a merged OCC companion and only 5 of
+          those merged inside the live window; 113 are out of reach for good,
+          74 of them carrying a behaviour-proof receipt. Widening the freshness
+          window cannot fix that, because `dod_verify` dominates the run budget
+          (~15s per ticket) against a 30-minute cadence — a window wide enough
+          to reach the backlog overruns the cadence, and overruns it worse as
+          the board grows. The slice is what makes the reach affordable.
+          It widens WHO is asked, never WHAT counts. Every flip conjunct is
+          untouched: dod_verify's own terminal `verified`, the OMN-16821
+          denominator equality, the OMN-15911 behaviour conjunct and the
+          OMN-16736 AC-coverage re-read all still gate the write.
+          DELIBERATELY NOT ON THE SCHEDULE, and not a repo variable. Arming the
+          arm for unattended runs is a separate decision that belongs behind
+          the recurring-companion refusal (OMN-17934) and the children conjunct
+          (OMN-17658): a wide arm without those fences would reproduce the
+          OMN-17292 re-flip across the whole backlog instead of once. Until
+          they land this is a dispatch-only rehearsal surface — and a dispatch
+          that leaves `apply` unticked reaches every decision and writes none.
+        required: false
+        default: '0'
       diagnose_tickets:
         description: >-
           OMN-16788 diagnostic. Comma-separated ticket ids (e.g.
@@ -1302,6 +1335,15 @@ jobs:
           # input reaches the shell the same way, via SWEEP_APPLY at job
           # level.
           LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '6' }}
+          # OMN-17342. Same discipline as LOOKBACK_HOURS and for the same
+          # reason: as `${{ ... }}` inside a `run:` body an input's characters
+          # become shell syntax; as `"${BACKFILL_LOOKBACK_HOURS}"` it is a
+          # value. `github.event.inputs` is null on a cron tick, so this renders
+          # '0' on every scheduled run — the arm is off unattended by the
+          # structure of the expression, not by a convention someone has to
+          # remember. That is deliberate and is asserted by
+          # tests/ci/test_evidence_autoclose_sweep_apply_input.py.
+          BACKFILL_LOOKBACK_HOURS: ${{ github.event.inputs.backfill_lookback_hours || '0' }}
           # OMN-17891. Same discipline as LOOKBACK_HOURS and for the same
           # reason: a workflow_dispatch STRING input is operator-typed text,
           # and `${{ ... }}` pasted into a `run:` body is substituted before
@@ -1432,6 +1474,28 @@ jobs:
           else
             echo "fence: none — no ticket is excluded from this run"
           fi
+          # OMN-17342. The backfill flag enters the way `--apply` and
+          # `--exclude` do — only through a shell array, never as a literal on
+          # the invocation line — so a guard and an unconditional flag cannot
+          # read the same in a diff. The `-gt 0` test is what makes "absent"
+          # and "explicitly zero" the same run: both leave the array empty and
+          # the sweep single-armed.
+          backfill_args=()
+          case "${BACKFILL_LOOKBACK_HOURS:-0}" in
+            ''|*[!0-9]*)
+              # Loud, never silent, and never via a suppressed stderr: a
+              # malformed value that quietly reads as OFF is a run whose log
+              # says nothing while its coverage silently reverts.
+              echo "::warning title=backfill input ignored::backfill_lookback_hours=[${BACKFILL_LOOKBACK_HOURS:-}] is not a non-negative integer. The backfill arm is OFF for this run; the forward window is unaffected."
+              ;;
+            0)
+              echo "backfill: OFF — single forward window only (the scheduled default)"
+              ;;
+            *)
+              backfill_args+=(--backfill-lookback-hours "${BACKFILL_LOOKBACK_HOURS}")
+              echo "backfill: second enumeration arm ON over ${BACKFILL_LOOKBACK_HOURS}h. A BOUNDED ROTATING SLICE of the companions older than the forward window is offered to the same pipeline; the flip predicate is unchanged. Coverage of the pool is per-slice, not per-run: a ticket absent from this run's outcomes has not been refused, its turn has not come round."
+              ;;
+          esac
           apply_args=()
           if [ "${SWEEP_APPLY}" = "true" ]; then
             apply_args+=(--apply)
@@ -1445,6 +1509,7 @@ jobs:
           # bash < 4.4, and this must not become the reason a dry run fails.
           "${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep \
             --lookback-hours "${LOOKBACK_HOURS}" \
+            ${backfill_args[@]+"${backfill_args[@]}"} \
             ${exclude_args[@]+"${exclude_args[@]}"} \
             ${apply_args[@]+"${apply_args[@]}"}
 

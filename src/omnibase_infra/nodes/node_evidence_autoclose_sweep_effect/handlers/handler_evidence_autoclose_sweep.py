@@ -125,6 +125,9 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_arm import (
+    EnumEvidenceAutocloseArm,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,
 )
@@ -338,6 +341,71 @@ async def _reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
         logger.warning(
             "Timed-out subprocess (pid=%s) did not exit after kill()", proc.pid
         )
+
+
+# -- OMN-17342: the backfill arm's bound and its rotation -----------------
+#
+# Both are pure, both are module-level, and both are tested directly. That is
+# deliberate: the coverage property below ("bounded per tick, exhaustive across
+# ticks") is the entire safety argument for offering old candidates at all, and
+# an argument that can only be exercised through a handler, a Linear double and
+# a `gh` double is one that gets asserted in a comment instead of proven.
+
+
+def _excluded_tickets(request: ModelEvidenceAutocloseSweepRequest) -> set[str]:
+    """The OMN-17891 fence, normalised once.
+
+    OMN-17342 gave the fence a SECOND call site — the pre-pass that refuses a
+    candidate before its file listing is fetched — and two copies of a
+    case-and-whitespace normalisation is how the two drift apart. A near-miss
+    here does not fail loudly; it sweeps a ticket the operator was fencing off.
+    """
+    return {
+        candidate.strip().upper()
+        for candidate in request.exclude_tickets
+        if candidate.strip()
+    }
+
+
+def _rotation_tick(now: datetime, rotation_minutes: int) -> int:
+    """Which rotation period ``now`` falls in, counted from the epoch.
+
+    Derived from the wall clock rather than from stored state on purpose. A
+    durable per-candidate "last attempted" record is the other shape OMN-17342
+    allows, and it is strictly more precise — but it needs a store the sweep
+    does not have, and a store that a scheduled GitHub-hosted job would have to
+    keep somewhere it can also corrupt. The clock is already shared by every
+    runner, needs no writes, and cannot drift out of sync with itself.
+
+    The cost is honest and bounded: two runs inside the same period examine the
+    same slice, so a retried run re-does its work rather than silently skipping
+    a slice. That is the correct direction to be wrong in — the failure mode is
+    a repeated read, not an unexamined ticket.
+    """
+    return int(now.timestamp()) // (rotation_minutes * 60)
+
+
+def _rotating_slice[TypeSliceItem](
+    pool: list[TypeSliceItem], width: int, tick: int
+) -> list[TypeSliceItem]:
+    """A ``width``-wide window over ``pool``, advancing by ``width`` per tick.
+
+    Wraps, so the slice stays full width at the end of the pool and the tail
+    drains at the same rate as the head. ``ceil(len(pool) / width)`` consecutive
+    ticks cover the whole pool.
+
+    A pool no larger than the slice is returned whole rather than rotated: at
+    that size every tick would see everything anyway, and wrapping would hand
+    the same element back twice in one run, which the caller would then have to
+    de-duplicate. Returning it whole makes that impossible rather than handled.
+    """
+    if not pool:
+        return []
+    if len(pool) <= width:
+        return list(pool)
+    start = (tick * width) % len(pool)
+    doubled = pool + pool
+    return doubled[start : start + width]
 
 
 def _as_int(value: object) -> int:
@@ -1058,9 +1126,10 @@ class HandlerEvidenceAutocloseSweep:
                 kill_switch_engaged=True,
             )
 
-        since_iso = (
-            datetime.now(tz=UTC) - timedelta(hours=request.lookback_hours)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(tz=UTC)
+        since_iso = (now - timedelta(hours=request.lookback_hours)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
 
         companions, enum_error = await self._fetch_merged_companions(
             request.occ_repo,
@@ -1076,14 +1145,143 @@ class HandlerEvidenceAutocloseSweep:
                 error_message=f"GitHub enumeration failed: {enum_error}",
             )
 
+        # OMN-17342. The second arm. Off unless asked for, and when it is off
+        # every line below reduces to exactly the single-arm run: an empty
+        # slice, an empty pool, both counters 0.
+        forward_numbers = {_as_int(pr.get("number")) for pr in companions}
+        backfill_pool: list[dict[str, object]] = []
+        backfill_slice: list[dict[str, object]] = []
+        backfill_error = ""
+        if request.backfill_lookback_hours > 0:
+            backfill_since_iso = (
+                now - timedelta(hours=request.backfill_lookback_hours)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            wider, backfill_error = await self._fetch_merged_companions(
+                request.occ_repo,
+                backfill_since_iso,
+                request.backfill_pool_size,
+                request.gh_timeout_seconds,
+            )
+            # Everything the forward arm is already handling this run is removed
+            # here rather than de-duplicated later, so the pool the slice
+            # rotates over is exactly the population the forward window cannot
+            # reach. Otherwise the slice would spend part of its budget on
+            # candidates that were about to be processed anyway, and the drain
+            # rate reported in the receipt would overstate itself.
+            backfill_pool = [
+                pr for pr in wider if _as_int(pr.get("number")) not in forward_numbers
+            ]
+            # Oldest first, then by number. Deterministic so a retry inside the
+            # same rotation period re-examines the same slice, and oldest-first
+            # because the far end of the pool is the part that has been out of
+            # reach longest and would otherwise stay there.
+            backfill_pool.sort(
+                key=lambda pr: (
+                    str(pr.get("merged_at") or ""),
+                    _as_int(pr.get("number")),
+                )
+            )
+            backfill_slice = _rotating_slice(
+                backfill_pool,
+                request.backfill_max_candidates,
+                _rotation_tick(now, request.backfill_rotation_minutes),
+            )
+
         outcomes: list[ModelEvidenceAutocloseOutcome] = []
         seen_tickets: set[str] = set()
         bindings_extracted = 0
 
-        for pr in companions:
+        # Forward first, unconditionally. The freshest companion for a ticket is
+        # the one whose verdict should be recorded, and `seen_tickets` resolves
+        # a collision in favour of whichever arm reaches it first.
+        candidates: list[tuple[dict[str, object], EnumEvidenceAutocloseArm]] = [
+            (pr, EnumEvidenceAutocloseArm.FORWARD) for pr in companions
+        ] + [(pr, EnumEvidenceAutocloseArm.BACKFILL) for pr in backfill_slice]
+
+        for pr, arm in candidates:
             number = _as_int(pr.get("number"))
             url = str(pr.get("html_url") or "")
             title = str(pr.get("title") or "")
+
+            # OMN-17342, the cheap-filter reordering. The per-PR file listing
+            # used to run for EVERY companion before anything could discard the
+            # candidate, so each additional candidate cost a `gh api` call
+            # whatever its ticket's state was. That is affordable for a 6h
+            # window and not affordable for a backfill pool, and it also made
+            # the OMN-17891 fence's "zero I/O" claim false in one direction:
+            # a fenced ticket still paid for a file listing before the fence
+            # was consulted.
+            #
+            # The title carries a binding on its own, and it is enough to
+            # answer both cheap questions — is this ticket fenced, and is it
+            # already terminal. The file listing is still fetched for every
+            # candidate that survives them, so nothing that can influence a
+            # WRITE is decided on the title alone.
+            title_ticket, _title_ambiguous = _extract_ticket_binding(title, [])
+
+            if title_ticket is not None:
+                if title_ticket.strip().upper() in _excluded_tickets(request):
+                    bindings_extracted += 1
+                    if title_ticket in seen_tickets:
+                        continue
+                    seen_tickets.add(title_ticket)
+                    outcomes.append(
+                        ModelEvidenceAutocloseOutcome(
+                            ticket_id=title_ticket,
+                            companion_pr_number=number,
+                            companion_pr_url=url,
+                            decision=EnumEvidenceAutocloseDecision.SKIPPED_EXCLUDED,
+                            reason=(
+                                f"{title_ticket} is on the caller-supplied exclusion "
+                                "list — refused before any Linear read and before the "
+                                "companion's file listing was fetched, so no verdict "
+                                "was reached about this ticket by this run."
+                            ),
+                            enumeration_arm=arm,
+                        )
+                    )
+                    continue
+                if title_ticket in seen_tickets:
+                    bindings_extracted += 1
+                    continue
+
+            # The state short-circuit. It fires ONLY on a terminal state, where
+            # every downstream path is a zero-write skip anyway, so the file
+            # listing it declines to fetch could not have changed the outcome
+            # class. The one thing it gives up is the ambiguity cross-check
+            # between the title and the contract file — and that is why it is
+            # scoped to terminal tickets: on an open ticket the listing is
+            # still fetched and a disagreement still refuses (see the
+            # SKIPPED_AMBIGUOUS_BINDING path below). The reason text says so,
+            # rather than implying a file listing was consulted.
+            prefetched_issue: dict[str, object] | None = None
+            if title_ticket is not None:
+                prefetched_issue = await self._linear.fetch_issue(title_ticket)
+                if prefetched_issue is not None:
+                    state = prefetched_issue.get("state")
+                    state_type = (
+                        str(state.get("type", "")) if isinstance(state, dict) else ""
+                    )
+                    if state_type in ("completed", "canceled"):
+                        bindings_extracted += 1
+                        seen_tickets.add(title_ticket)
+                        outcomes.append(
+                            ModelEvidenceAutocloseOutcome(
+                                ticket_id=title_ticket,
+                                companion_pr_number=number,
+                                companion_pr_url=url,
+                                decision=EnumEvidenceAutocloseDecision.SKIPPED_ALREADY_DONE,
+                                reason=(
+                                    f"Ticket state type is already '{state_type}'. "
+                                    "Bound from the companion title; the changed-file "
+                                    "listing was not fetched because no path from a "
+                                    "terminal state writes anything."
+                                ),
+                                enumeration_arm=arm,
+                            )
+                        )
+                        continue
+
             files, files_error = await self._fetch_pr_files(
                 request.occ_repo, number, request.gh_timeout_seconds
             )
@@ -1094,6 +1292,7 @@ class HandlerEvidenceAutocloseSweep:
                         companion_pr_url=url,
                         decision=EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
                         reason=f"Could not fetch changed-file list: {files_error}",
+                        enumeration_arm=arm,
                     )
                 )
                 continue
@@ -1109,6 +1308,7 @@ class HandlerEvidenceAutocloseSweep:
                             "More than one distinct OMN-XXXXX ticket id found "
                             "across contract files and title — refusing to guess."
                         ),
+                        enumeration_arm=arm,
                     )
                 )
                 continue
@@ -1119,6 +1319,7 @@ class HandlerEvidenceAutocloseSweep:
                         companion_pr_url=url,
                         decision=EnumEvidenceAutocloseDecision.SKIPPED_NO_BINDING,
                         reason="No contracts/OMN-XXXXX.yaml file and no evidence(OMN-XXXXX) title match.",
+                        enumeration_arm=arm,
                     )
                 )
                 continue
@@ -1136,8 +1337,18 @@ class HandlerEvidenceAutocloseSweep:
                 companion_pr_number=number,
                 companion_pr_url=url,
                 request=request,
+                # The state short-circuit above already read this ticket from
+                # Linear. Handing that read down rather than repeating it keeps
+                # the reordering a pure saving: one Linear read and one file
+                # listing per candidate, exactly as before, with the file
+                # listing now second instead of first. Only passed when the
+                # full binding AGREES with the title binding it was fetched
+                # for — a disagreement never reaches here.
+                prefetched_issue=(
+                    prefetched_issue if ticket_id == title_ticket else None
+                ),
             )
-            outcomes.append(outcome)
+            outcomes.append(outcome.model_copy(update={"enumeration_arm": arm}))
 
         flipped = sum(
             1 for o in outcomes if o.decision == EnumEvidenceAutocloseDecision.FLIPPED
@@ -1192,7 +1403,24 @@ class HandlerEvidenceAutocloseSweep:
         return ModelEvidenceAutocloseSweepResult(
             correlation_id=correlation_id,
             dry_run=not request.apply,
-            companions_scanned=len(companions),
+            # OMN-17342. A backfill enumeration failure is reported WITHOUT
+            # discarding the forward arm's decisions. The forward arm is the
+            # freshness path and it already completed; letting an opt-in second
+            # arm's transient `gh api` error void it would make the new arm's
+            # blast radius larger than the coverage it buys. `success=False`
+            # plus the message is what makes the partial coverage legible —
+            # this run's backfill claim is void, its forward claim is not.
+            success=not backfill_error,
+            error_message=(
+                f"Backfill enumeration failed: {backfill_error}. The forward "
+                "window's decisions below are unaffected and complete; this "
+                "run made no coverage claim about the backfill pool."
+                if backfill_error
+                else ""
+            ),
+            companions_scanned=len(companions) + len(backfill_slice),
+            backfill_pool_size=len(backfill_pool),
+            backfill_candidates_selected=len(backfill_slice),
             bindings_extracted=bindings_extracted,
             tickets_flipped=flipped,
             tickets_gap_posted=gap_posted,
@@ -1434,6 +1662,7 @@ class HandlerEvidenceAutocloseSweep:
         companion_pr_number: int,
         companion_pr_url: str,
         request: ModelEvidenceAutocloseSweepRequest,
+        prefetched_issue: dict[str, object] | None = None,
     ) -> ModelEvidenceAutocloseOutcome:
         # OMN-17891. The caller-asserted fence, and it is FIRST -- ahead of the
         # Linear read, the label gate, the state gate and the dod_verify
@@ -1447,12 +1676,7 @@ class HandlerEvidenceAutocloseSweep:
         # script's output, so `omn-17857` and a trailing space are the expected
         # shapes; a near-miss here does not fail loudly, it flips the ticket the
         # operator was fencing off.
-        excluded = {
-            candidate.strip().upper()
-            for candidate in request.exclude_tickets
-            if candidate.strip()
-        }
-        if ticket_id.strip().upper() in excluded:
+        if ticket_id.strip().upper() in _excluded_tickets(request):
             return ModelEvidenceAutocloseOutcome(
                 ticket_id=ticket_id,
                 companion_pr_number=companion_pr_number,
@@ -1465,7 +1689,15 @@ class HandlerEvidenceAutocloseSweep:
                 ),
             )
 
-        issue = await self._linear.fetch_issue(ticket_id)
+        # OMN-17342: reuse the caller's read when it is a read of THIS ticket.
+        # Never a fallback and never optional-with-a-default: the caller passes
+        # None whenever the binding it prefetched for is not the binding that
+        # resolved, so this can only ever be the same ticket's own payload.
+        issue = (
+            prefetched_issue
+            if prefetched_issue is not None
+            else await self._linear.fetch_issue(ticket_id)
+        )
         if issue is None:
             return ModelEvidenceAutocloseOutcome(
                 ticket_id=ticket_id,

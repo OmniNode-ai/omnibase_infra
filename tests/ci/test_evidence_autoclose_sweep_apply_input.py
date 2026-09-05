@@ -485,3 +485,131 @@ def test_the_kill_switch_still_dominates_the_apply_path() -> None:
         "the kill switch must not be a dispatch input — it must bind runs "
         "nobody dispatched"
     )
+
+
+# -- OMN-17342: the backfill arm's trigger surface ------------------------
+
+
+BACKFILL_INPUT = "backfill_lookback_hours"
+BACKFILL_VAR = "BACKFILL_LOOKBACK_HOURS"
+
+
+def test_the_backfill_arm_is_a_dispatch_input_defaulting_to_off() -> None:
+    """The second enumeration arm exists, and it is off unless someone asks.
+
+    ``default: '0'`` is the load-bearing half. The arm reaches candidates the
+    forward window structurally cannot, which is the point — and it is also why
+    it must not switch itself on: a wide arm arriving before the recurring-
+    companion refusal (OMN-17934) and the children conjunct (OMN-17658) would
+    reproduce the OMN-17292 re-flip across the whole standing backlog rather
+    than once.
+    """
+    inputs = (_triggers().get("workflow_dispatch") or {}).get("inputs") or {}
+    assert BACKFILL_INPUT in inputs, (
+        f"workflow_dispatch must declare a '{BACKFILL_INPUT}' input — without "
+        "one there is no way to reach a companion that merged outside the "
+        "forward window, which is 113 of the 118 evidence-bearing open tickets "
+        "measured 2026-09-05"
+    )
+    spec = inputs[BACKFILL_INPUT]
+    assert str(spec.get("default")) == "0", (
+        f"'{BACKFILL_INPUT}' must default to '0' (arm off); got {spec.get('default')!r}"
+    )
+    assert spec.get("description"), (
+        f"'{BACKFILL_INPUT}' must carry a description — it changes which "
+        "tickets an unattended-capable mechanism looks at"
+    )
+
+
+def test_no_scheduled_run_can_turn_the_backfill_arm_on() -> None:
+    """Off unattended by the STRUCTURE of the expression, not by convention.
+
+    ``github.event.inputs`` is null on a cron tick, so the fallback half of the
+    env expression is what every scheduled run gets. Asserting the exact
+    expression is what stops the fallback being edited to a non-zero value
+    without anyone noticing that the schedule's reach changed with it.
+
+    Contrast ``ONEX_AUTOCLOSE_EXCLUDE`` and ``ONEX_AUTOCLOSE_DISABLED``, which
+    are repo VARIABLES precisely so they DO bind unattended runs. The backfill
+    arm is an input for the opposite reason: arming it is a decision, and a
+    decision that binds runs nobody launched is not one this ticket may make.
+    """
+    env = _step(SWEEP_STEP_NAME).get("env") or {}
+    assert (
+        env.get(BACKFILL_VAR)
+        == "${{ github.event.inputs.backfill_lookback_hours || '0' }}"
+    ), (
+        "the backfill window must reach the shell as an env var whose fallback "
+        f"is '0'; got {env.get(BACKFILL_VAR)!r}"
+    )
+    assert BACKFILL_VAR not in set(_job().get("env") or {}), (
+        "the backfill window must not be set at job scope, where it would outlive the guard"
+    )
+
+
+def test_the_backfill_flag_reaches_the_sweep_only_through_a_guarded_array() -> None:
+    """Same property as ``--apply`` and ``--exclude``: never literal on the line."""
+    run = _step(SWEEP_STEP_NAME).get("run") or ""
+    assert f'case "${{{BACKFILL_VAR}:-0}}" in' in run, (
+        "the run script must branch on the backfill window, so an absent "
+        "input and an explicit 0 are the same run"
+    )
+    assert "*[!0-9]*)" in run, (
+        "a non-integer value must be rejected explicitly and loudly, not "
+        "absorbed by a suppressed stderr — a malformed input that silently "
+        "reads as OFF is a run whose log says nothing while its coverage "
+        "reverts"
+    )
+    assert "2>/dev/null" not in run, (
+        "this step must not suppress stderr anywhere: a suppressed error in a "
+        "coverage-widening path returns zero rows and reads exactly like a "
+        "clean run"
+    )
+    invocation_lines = [
+        line
+        for line in run.splitlines()
+        if "onex" in line and "evidence_autoclose_sweep" in line
+    ]
+    assert invocation_lines, "could not find the `onex skill` invocation"
+    for line in invocation_lines:
+        assert "--backfill-lookback-hours" not in line, (
+            "--backfill-lookback-hours must never appear on the invocation "
+            f"line itself: {line!r}"
+        )
+    assert (
+        'backfill_args+=(--backfill-lookback-hours "${BACKFILL_LOOKBACK_HOURS}")' in run
+    ), "the flag must be appended to the guarded array with the window quoted"
+
+
+def test_the_backfill_flags_the_cli_accepts_match_the_request_model() -> None:
+    """A flag the mapping does not declare is a silently-ignored dispatch.
+
+    The workflow passes ``--backfill-lookback-hours``; the CLI resolves flags
+    from ``skill_mapping.yaml``. If those two drift, the sweep runs single-armed
+    while the job log says the arm is on — the failure mode this whole ticket
+    exists to remove, one layer up.
+    """
+    import yaml
+
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models import (
+        ModelEvidenceAutocloseSweepRequest,
+    )
+
+    mapping = yaml.safe_load(
+        (
+            REPO_ROOT / "src" / "omnibase_infra" / "cli" / "skill_mapping.yaml"
+        ).read_text()
+    )
+    entry = next(
+        skill
+        for skill in mapping["skills"]
+        if skill["skill_name"] == "evidence_autoclose_sweep"
+    )
+    declared = {arg["payload_field"] for arg in entry["args"]}
+    fields = set(ModelEvidenceAutocloseSweepRequest.model_fields)
+    backfill_fields = {name for name in fields if name.startswith("backfill_")}
+    assert backfill_fields, "the request model must carry the backfill knobs"
+    assert backfill_fields <= declared, (
+        "every backfill field on the request model must be reachable from the "
+        f"CLI; missing {sorted(backfill_fields - declared)}"
+    )
