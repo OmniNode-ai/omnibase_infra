@@ -4,6 +4,7 @@
 
 from .model_gateway_canary_config import ModelGatewayCanaryConfig
 from .model_gateway_cloud_bus_config import ModelGatewayCloudBusConfig
+from .model_gateway_egress_redaction import ModelGatewayEgressRedaction
 from .model_gateway_envelope import ModelGatewayEnvelope
 from .model_gateway_forwarder_config import ModelGatewayForwarderConfig
 from .model_gateway_forwarder_runtime_config import ModelGatewayForwarderRuntimeConfig
@@ -16,6 +17,7 @@ from .model_gateway_tenant_identity import ModelGatewayTenantIdentity
 __all__ = [
     "ModelGatewayCanaryConfig",
     "ModelGatewayCloudBusConfig",
+    "ModelGatewayEgressRedaction",
     "ModelGatewayEnvelope",
     "ModelGatewayForwarderConfig",
     "ModelGatewayForwarderRuntimeConfig",

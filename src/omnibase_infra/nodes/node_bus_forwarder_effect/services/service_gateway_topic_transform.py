@@ -40,6 +40,27 @@ def validate_tenant_slug(tenant_slug: str) -> str:
     return slug
 
 
+# OMN-16979. Hook classes whose payload can carry captured content -- tool
+# arguments (OMN-17206) and prompt text (OMN-17207) land in exactly these. The
+# session-lifecycle pair is deliberately absent: OD-9 (operator ruling
+# 2026-08-18) established it as content-free, and OMN-16204 already mirrors it
+# outbound without a gate.
+#
+# This is a SECOND declaration that must agree with the contract's
+# egress_redaction.governed_topics, and that is its whole value: it lives in a
+# different file from the widening, so adding a class to mirror_topics.outbound
+# without also governing it fails config validation instead of shipping.
+CONTENT_BEARING_HOOK_TOPICS = frozenset(
+    {
+        "onex.evt.omniclaude.tool-executed.v1",
+        "onex.evt.omniclaude.prompt-submitted.v1",
+        "onex.evt.omniclaude.tool-output-captured.v1",
+        "onex.evt.omniclaude.skill-started.v1",
+        "onex.evt.omniclaude.skill-completed.v1",
+    }
+)
+
+
 def validate_canonical_topic(canonical_topic: str) -> str:
     """Validate a bare ONEX contract topic, never a tenant-prefixed wire topic."""
     topic = canonical_topic.strip() if canonical_topic else canonical_topic

@@ -329,7 +329,10 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
     )
 
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
-    assert len(loaded.forwarder.mirror_topics.outbound) == 8
+    # 8 after OMN-16204's OD-9 pair; 10 after OMN-16979's two governed hook
+    # classes. The governance half is asserted in
+    # tests/unit/nodes/node_bus_forwarder_effect/test_egress_redaction_omn16979.py.
+    assert len(loaded.forwarder.mirror_topics.outbound) == 10
     # OMN-16204: the bare omniclaude session-lifecycle pair, and only that
     # pair, must resolve from the real node contract.yaml -- per-topic proof
     # that config.gateway_forwarder.mirror_topics.outbound is correctly
@@ -345,9 +348,21 @@ def test_staging_canary_resolves_topics_from_node_contract() -> None:
         "onex.evt.omniclaude.session-ended.v1"
         in loaded.forwarder.mirror_topics.outbound
     )
-    denied_omniclaude_topics = (
+    # OMN-16979 admitted two of the five previously-denied classes, and ONLY
+    # behind the egress_redaction gate -- so the resolved deployment is asserted
+    # on both halves. The remaining three stay denied outright.
+    governed_omniclaude_topics = (
         "onex.evt.omniclaude.prompt-submitted.v1",
         "onex.evt.omniclaude.tool-executed.v1",
+    )
+    egress = loaded.forwarder.egress_redaction
+    assert egress is not None
+    for governed_topic in governed_omniclaude_topics:
+        assert governed_topic in loaded.forwarder.mirror_topics.outbound
+        assert egress.governs(governed_topic)
+    assert "raw" not in egress.admitted_states
+
+    denied_omniclaude_topics = (
         "onex.evt.omniclaude.skill-started.v1",
         "onex.evt.omniclaude.skill-completed.v1",
         "onex.evt.omniclaude.tool-output-captured.v1",

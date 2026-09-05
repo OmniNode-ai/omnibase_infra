@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.handlers import (
     HandlerForwardOutbound,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayEgressRedaction,
     ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
     ModelGatewayHeartbeat,
@@ -87,6 +88,43 @@ class ProtocolGatewayPublisher(Protocol):
         """Publish bytes to a topic."""
 
 
+def egress_admits(
+    policy: ModelGatewayEgressRedaction | None,
+    envelope: ModelEventEnvelope[dict[str, object]],
+    canonical_topic: str,
+) -> bool:
+    """OMN-16979: fail-closed redaction admission for the widened hook classes.
+
+    Module-level rather than a method so both the forward path and any
+    validate/canary path resolve the SAME decision, and so the service class
+    does not grow past the OMN pattern-validator's method bound.
+
+    The redaction itself is produced upstream at omnimarket's emit seam
+    (OMN-16019 / OMN-17209), which is the only place that knows tool semantics.
+    This boundary does not re-derive that judgement; it refuses to cross
+    anything the upstream seam did not stamp.
+
+    A refusal is a DROP, never a raise. OMN-17382 is the live proof: on
+    2026-09-05 one foreign-tenant probe record raised out of
+    ``_prepare_outbound`` and wedged this same outbound leg for 7h45m over 925
+    consecutive retries, with 177 real records stuck behind it. A per-record
+    policy decision must not be able to stop the bridge.
+    """
+    if policy is None or not policy.governs(canonical_topic):
+        return True
+    if policy.admits(envelope.payload):
+        return True
+    logger.warning(
+        "Dropping outbound record: topic %s is redaction-governed and the "
+        "payload carries no admitted %s (envelope_id=%s). The upstream emit "
+        "seam did not stamp it; nothing crosses the boundary.",
+        canonical_topic,
+        policy.state_field,
+        envelope.envelope_id,
+    )
+    return False
+
+
 class ServiceGatewayForwarder:
     """Validate, transform, and republish explicitly polled gateway envelopes."""
 
@@ -123,6 +161,8 @@ class ServiceGatewayForwarder:
                 source_topic,
                 direction,
             )
+            return
+        if not egress_admits(self._config.egress_redaction, envelope, source_topic):
             return
         transformed, wire_topic = self._prepare_outbound(envelope, source_topic)
         await self._publish_with_delivery_retry(

@@ -15,6 +15,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_canary_
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_cloud_bus_config import (
     ModelGatewayCloudBusConfig,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_egress_redaction import (
+    ModelGatewayEgressRedaction,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_https_ingest_config import (
     ModelGatewayHttpsIngestConfig,
 )
@@ -26,6 +29,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_mirror_
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_tenant_identity import (
     ModelGatewayTenantIdentity,
+)
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
+    CONTENT_BEARING_HOOK_TOPICS,
 )
 
 
@@ -51,6 +57,11 @@ class ModelGatewayForwarderConfig(BaseModel):
     # ModelGatewayHttpsIngestConfig's module docstring for why that means this
     # block alone does not retire the OMN-16449 bastion.
     https_ingest: ModelGatewayHttpsIngestConfig | None = None
+    # OMN-16979: fail-closed admission gate for the content-bearing hook
+    # classes this ticket adds to ``mirror_topics.outbound``. Optional so every
+    # deployment predating the widening keeps its exact behaviour; the
+    # cross-field validator below is what refuses an inconsistent pairing.
+    egress_redaction: ModelGatewayEgressRedaction | None = None
     heartbeat_interval_seconds: int = Field(default=15, ge=1)
     max_silence_window_seconds: int = Field(default=60, ge=1)
     lag_threshold_messages: int = Field(default=500, ge=1)
@@ -98,4 +109,35 @@ class ModelGatewayForwarderConfig(BaseModel):
                 "reconnect_backoff_max_seconds must be greater than or equal to "
                 "reconnect_backoff_initial_seconds"
             )
+        self._validate_egress_redaction_pairing()
         return self
+
+    def _validate_egress_redaction_pairing(self) -> None:
+        """OMN-16979: the widening and the gate must agree, in both directions.
+
+        A gate that names a topic nobody mirrors is dead policy that reads like
+        live policy. A content-bearing hook class in the outbound set that the
+        gate does NOT name is the credential pipeline OMN-17209 exists to
+        prevent -- so it is refused here rather than merely discouraged.
+        """
+        policy = self.egress_redaction
+        outbound = set(self.mirror_topics.outbound)
+        if policy is not None:
+            ungoverned_declarations = sorted(set(policy.governed_topics) - outbound)
+            if ungoverned_declarations:
+                raise ValueError(
+                    "egress_redaction.governed_topics must all appear in "
+                    f"mirror_topics.outbound; missing: {ungoverned_declarations}"
+                )
+        governed = set(policy.governed_topics) if policy is not None else set()
+        unguarded = sorted(
+            topic
+            for topic in outbound
+            if topic in CONTENT_BEARING_HOOK_TOPICS and topic not in governed
+        )
+        if unguarded:
+            raise ValueError(
+                "content-bearing hook topics may not be mirrored outbound "
+                "unless egress_redaction declares them governed; unguarded: "
+                f"{unguarded}"
+            )
