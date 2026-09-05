@@ -108,7 +108,9 @@ def test_validator_ro_carries_the_isolation_relevant_shape() -> None:
     # `login: true` is the END state the deployment-owned credential attach
     # produces, and the typed model (ModelDeploymentTopologyDatabasePrincipal)
     # accepts no other value. The role is CREATEd NOLOGIN by the provisioning
-    # seam; see migration 104 for why NOLOGIN is never re-asserted.
+    # seam; migration 094's invariant is why NOLOGIN is never re-asserted
+    # (migration 104 carried it too, and is retired until OMN-17923 lands --
+    # see docker/migrations/forward/_ledger/retired-flat-migrations.tsv).
     assert spec["login"] is True
 
 

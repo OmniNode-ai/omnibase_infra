@@ -1,0 +1,29 @@
+# retired-flat-migrations.tsv -- flat forward migrations RETIRED from the stream
+#
+# A flat migration in docker/migrations/forward/*.sql that was landed on dev but
+# had NOT been applied by any managed lane, and whose precondition the lane
+# cannot meet, is REMOVED from the corpus (file + rollback) and recorded here.
+# This is the only retirement the k8s Job that applies the corpus
+# (omninode_infra k8s/migrations/omnibase-infra-migrate.yaml) honours for a
+# same-database file: the cross-database tombstone applies only to files whose
+# \connect names a foreign database, docker/migrations/skip-manifest.yaml is
+# read only by the compose-lane runner (scripts/run-forward-migrations.sh), and
+# _ledger/migration-supersessions.tsv is node-only by scope. Never rewrite a
+# retired migration to skip on insufficient_privilege instead: a fail-open
+# migration is worse than a retired one.
+#
+# A retired ordinal is BURNED. The migration is re-issued as a NEW number once
+# the condition in reissue_condition holds, starting from
+# `git show <retired_from_commit>:docker/migrations/forward/<retired_forward>`.
+# Gate: tests/unit/db/test_migration_104_retired_omn17923.py.
+#
+# Columns (tab-separated; `#` lines are comments):
+#   retired_forward      file name under docker/migrations/forward/
+#   retired_rollback     file name under docker/migrations/rollback/
+#   retired_from_commit  full sha of the commit whose bytes were retired
+#   forward_sha256       sha256 of the retired forward file's bytes
+#   rollback_sha256      sha256 of the retired rollback file's bytes
+#   tickets              comma-separated OMN references (retiring ticket first)
+#   reissue_condition    what must be true before the migration comes back
+#   reason               why it was retired, with the evidence
+104_create_validator_ro_role.sql	rollback_104_create_validator_ro_role.sql	cb122fefb541c199751ad8ffa50efbb00aee003f	ede81614e04b021a462abacc6cb1183cd6cf8aba2e80739d05276d0377a8224a	33c020bcddd77b08d243ed560d5e6c0d27bdffbc15e0f83e860ec3997696cfa0	OMN-17923,OMN-17792	Re-issue as a NEW number (105 or higher, never 104) only after OMN-17923 lands: the omninode_infra projection of the topology (topology/kubernetes/projections/onex-dev.yaml, pinned at owner.commit 406d0d69 when this was retired) carries the validator_ro principal, so the 'Provision topology cluster roles (OMN-17347)' step of deploy-onex-staging.yml creates the role as the RDS master BEFORE the migrate Job runs -- the same seam that let 103 pass once omninode_infra#1106 landed. The re-issued file keeps 104's shape: guard-create, re-raise insufficient_privilege with the named remediation, GRANT CONNECT, aclexplode readback. The validator_ro principal declaration in src/omnibase_infra/topology/instances/{local,onex-dev,onex-prod}.yaml stays in place throughout; declaration is not provisioning and is harmless until the seam carries it.	Retired before any managed lane applied it. 104 guard-creates validator_ro and, when the role is absent and the executing identity cannot create it, re-raises insufficient_privilege by design (there is no skip branch; 103's header rejects the masking skip). On the onex-dev serving RDS (omninode-dev-postgres, dev-system EC2 i-06169517a92b45f86, database omnibase_infra) the flat loop of the migrate Job runs as role_omnibase_infra, read back live 2026-09-04T20:13:34Z (SSM 05265bc7-f5f7-460b-aae6-838aa30cdc50, read-only): rolcreaterole=f rolsuper=f rolbypassrls=f, member only of role_omninode_owner; validator_ro has no pg_roles row (positive control: 3 comparison roles returned); public.schema_migrations high-water is 103 (applied 2026-08-31T15:47:28Z), 104 absent. The OMN-17347 seam that would create the role first reads the omninode_infra projection, which does not carry validator_ro. So the next deploy-onex-staging run of any trigger -- ECR omnibase-infra-migrate bd280ca70 (2026-09-04T19:26:41Z) already carries 104 and the OMN-16493 resolve step selects the newest bundle -- would abort at 'Run database migrations' with SQLSTATE 42501, upstream of the overlay apply and the OMN-11969 boot gate, exactly as 103 did in run 33341217605 (2026-08-30T23:16:01Z, 'permission denied to create role'). A fail-open rewrite was rejected: retired instead. Byte-unchanged elsewhere: the retirement removes exactly these two files; schema_fingerprint.sha256 went from 9704108baac5ed8c212b64f64b7315bf4edc266dbb57ab61f87ec8b87bb5ae52 (89 files) to the restamped value (88 files).
