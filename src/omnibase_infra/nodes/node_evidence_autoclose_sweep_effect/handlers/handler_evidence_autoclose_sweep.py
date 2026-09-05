@@ -100,6 +100,40 @@ Pipeline
    read runs in BOTH modes: it is a read, so DRY-RUN stays zero-write, and a
    DRY-RUN report is then an honest preview of what ``--apply`` would post.
 
+Holds: what the sweep refuses to SAY, not only what it refuses to write
+-----------------------------------------------------------------------
+A gap comment asserts "your acceptance criterion is not met". Two verdict
+shapes cannot support that sentence, and both are HELD instead — nothing
+written, nothing judged, candidate re-offered on the next tick:
+
+* ``SKIPPED_LIVE_SURFACE_UNAVAILABLE`` (class c) — a check RAN and the
+  surface it reads was dead (see ``_live_surface_unavailable``).
+* ``SKIPPED_LIVE_CHECK_NOT_EXECUTED`` (class d) — nothing failed, nothing
+  proved behaviour, and a check never ran at all (see
+  ``_live_check_not_executed``). This is the shape the staging-blocked
+  population actually terminates in; class (c) fired zero times against it
+  across runs 33986056683, 33991898262 and 33993316390.
+
+Both classifiers have exactly one call site each, both placed after every
+flip path has already returned, so neither hold is reachable from a write.
+That placement is the invariant and a test reads the source to enforce it.
+
+The gap-comment fingerprint keys on the SET OF CHECKS that withheld the flip
+plus this node's contract version, not on the verdict counters — see
+``_gap_fingerprint_parts`` for the OMN-17201 regrade that minted the same
+statement twice.
+
+Fences: closure is ownership-agnostic
+-------------------------------------
+Operator ruling, firm, 2026-09-05T20:45:51Z, recorded at omni_home
+``docs/tracking/ROLLING_WORK_LEDGER.md:3372``: when the acceptance criteria
+are met on live evidence the ticket is closed, whoever it is assigned to;
+assignee and fence ownership never hold a Done-eligible ticket open. This
+node accordingly reads no assignee, no ownership signal and no ledger. The
+only per-candidate refusal it can reach is ``exclude_tickets``, a caller
+assertion whose sole admissible meaning is a CONCURRENT WRITE — another lane
+is writing this ticket right now, evidenced by a live ledger CLAIM row.
+
 Non-blocking Design
 --------------------
 Per-ticket failures (Linear API errors, dod_verify crashes) are recorded in
@@ -488,8 +522,35 @@ _LIVE_SURFACE_UNAVAILABLE_SIGNALS: tuple[str, ...] = (
 )
 
 #: Per-check records on the dod_verify terminal payload. Read for the class-(c)
-#: classifier only; every counter the flip predicate consults is unchanged.
+#: and class-(d) classifiers and for the gap fingerprint; every counter the
+#: flip predicate consults is unchanged.
 _DOD_VERIFY_CHECKS_KEY = "checks"
+
+# The per-check fields this module reads, named once. They are declared on
+# `ModelEvidenceCheckResult` in omnimarket; the closer sees them as JSON.
+_CHECK_ID_KEY = "evidence_id"
+_CHECK_STATUS_KEY = "status"
+_CHECK_MESSAGE_KEY = "message"
+#: OMN-16788. Why a check could not be EVALUATED AT ALL. Typed, and only ever
+#: present on a SKIPPED result — `ModelEvidenceCheckResult._cause_requires_skipped`
+#: rejects the combination structurally, which is why this module keys on the
+#: pair and never on a status spelled "unverifiable" (no producer emits one).
+_CHECK_UNVERIFIABLE_CAUSE_KEY = "unverifiable_cause"
+#: OMN-17323. A verifier-derived `::pr-live-state` overlay whose binder derived
+#: no (repo, pr) pair: synthetic, never executed, and incapable of passing.
+_CHECK_UNBINDABLE_OVERLAY_KEY = "unbindable_derived_overlay"
+
+#: Per-check statuses, as `EnumEvidenceCheckStatus` spells them.
+_CHECK_STATUS_VERIFIED = "verified"
+_CHECK_STATUS_FAILED = "failed"
+_CHECK_STATUS_SKIPPED = "skipped"
+_CHECK_STATUS_SUPERSEDED = "superseded"
+
+#: This node's own `contract.yaml` `node_version`, part of the gap-comment
+#: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
+#: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
+#: cannot drift into describing a rule the closer no longer applies.
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.7.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -1217,20 +1278,167 @@ def _live_surface_unavailable(verdict: dict[str, object]) -> tuple[str, str]:
     per-check records have carried that message all along; the closer simply
     never looked at them, reading only the counters beside them.
     """
-    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
-    if not isinstance(checks, list):
-        return "", ""
-    for check in checks:
-        if not isinstance(check, dict):
+    for check in _check_records(verdict):
+        status = _check_status(check)
+        eligible = status == _CHECK_STATUS_FAILED or (
+            status == _CHECK_STATUS_SKIPPED
+            and check.get(_CHECK_UNVERIFIABLE_CAUSE_KEY) is not None
+        )
+        # `status: "unverifiable"` is retained ONLY because this classifier
+        # shipped reading it (OMN-16106 / #3214) and removing a tolerated
+        # spelling is not this change's business. It is dead: EnumEvidence
+        # CheckStatus is verified|failed|skipped|superseded|non_probative, so
+        # no verifier has ever produced it, and reading it was half the reason
+        # the hold fired zero times in runs 33986056683, 33991898262 and
+        # 33993316390. The live spelling is the pair above.
+        eligible = eligible or status == "unverifiable"
+        if not eligible:
             continue
-        status = str(check.get("status", "")).strip().lower()
-        if status not in ("failed", "unverifiable"):
-            continue
-        message = str(check.get("message") or "").lower()
+        message = str(check.get(_CHECK_MESSAGE_KEY) or "").lower()
         for signal in _LIVE_SURFACE_UNAVAILABLE_SIGNALS:
             if signal in message:
-                return str(check.get("evidence_id") or "<unnamed check>"), signal
+                return _check_id(check), signal
     return "", ""
+
+
+def _check_records(verdict: dict[str, object]) -> tuple[dict[str, object], ...]:
+    """The per-check records, or nothing when the payload cannot be read.
+
+    Every consumer of `checks` in this module goes through here so that an
+    unreadable shape means the same thing in all of them: no attribution, no
+    hold, no fingerprint contribution — the pre-existing behaviour, never a
+    silent swallow.
+    """
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return ()
+    return tuple(check for check in checks if isinstance(check, dict))
+
+
+def _check_status(check: dict[str, object]) -> str:
+    return str(check.get(_CHECK_STATUS_KEY, "")).strip().lower()
+
+
+def _check_id(check: dict[str, object]) -> str:
+    return str(check.get(_CHECK_ID_KEY) or "<unnamed check>")
+
+
+def _live_check_not_executed(verdict: dict[str, object]) -> tuple[str, str]:
+    """The first check the run never executed.
+
+    Returns ``(evidence_id, why)``, or ``("", "")`` when every check ran.
+
+    OMN-16106, class (d). Its sibling above asks whether a check that RAN was
+    reading a dead surface. This asks the prior question — did the check run
+    at all — and it is the one the staging-blocked population answers "no"
+    to. A ticket whose live probe never executed has told the closer nothing
+    about its acceptance criterion, and "your acceptance criterion is not
+    met" is not a statement the run earned.
+
+    Two shapes count as "did not execute", and both are positively recorded
+    by the verifier rather than inferred from message text (the OMN-16788
+    rule):
+
+    * ``status == "skipped"`` — the check was not run. A typed
+      ``unverifiable_cause`` is quoted as the reason when present, because
+      "the credential could not read branch protection" is a different
+      operator action from "the probe was skipped"; its absence is not a
+      reason to treat the skip as informative.
+    * ``unbindable_derived_overlay`` — OMN-17323's synthetic
+      ``::pr-live-state`` overlay, which was never executed and can never
+      pass whatever status it carries.
+
+    What deliberately does NOT count is ``non_probative``. Such a check RAN
+    and exited 0; its exit status simply could not have gone the other way
+    for a product reason (OMN-15391). Holding on it would silence the
+    merge-state-only corpus — the exact population `gap_no_behavior_proof`
+    exists to report — so the boundary is drawn at execution, not at
+    probative value. ``superseded`` does not count either: a later item in
+    the same contract carries that verdict (OMN-15382).
+    """
+    for check in _check_records(verdict):
+        status = _check_status(check)
+        if check.get(_CHECK_UNBINDABLE_OVERLAY_KEY) is True:
+            return _check_id(check), "unbindable derived overlay (never executed)"
+        if status != _CHECK_STATUS_SKIPPED:
+            continue
+        cause = check.get(_CHECK_UNVERIFIABLE_CAUSE_KEY)
+        return _check_id(check), (
+            str(cause) if cause is not None else "the check did not execute"
+        )
+    return "", ""
+
+
+def _withheld_check_ids(verdict: dict[str, object]) -> tuple[str, ...]:
+    """Every check that is standing between this ticket and a Done flip.
+
+    Sorted and de-duplicated, so it is a SET and not a transcript: check
+    order is a verifier implementation detail and must not change what the
+    closer considers the same statement.
+
+    `verified` is excluded because it withholds nothing, and `superseded`
+    because a later item in the contract carries its verdict and it is
+    already out of `total_checks` (OMN-15390). Everything else — failed,
+    skipped, non-probative — is a check the flip predicate is still waiting
+    on, whichever of those three it happens to be graded as this rotation.
+    """
+    return tuple(
+        sorted(
+            {
+                _check_id(check)
+                for check in _check_records(verdict)
+                if _check_status(check)
+                not in (_CHECK_STATUS_VERIFIED, _CHECK_STATUS_SUPERSEDED)
+            }
+        )
+    )
+
+
+def _gap_fingerprint_parts(
+    verdict: dict[str, object],
+    *,
+    total_checks: int,
+    verified_count: int,
+    failed_count: int,
+    non_probative_count: int,
+) -> tuple[str, ...]:
+    """The identity of a gap statement: contract version + withheld check set.
+
+    OMN-16808 keyed this on the verdict's COUNTERS, and OMN-17201 measured
+    what that costs. Between run 33991898262 (21:06Z) and run 33993316390
+    (21:35Z) two of its checks moved from `failed` to `non_probative` with
+    nothing about the ticket changing — a regrade, not news. The counters
+    moved, so the digest moved, so the closer wrote the same unmet-criterion
+    assertion onto the ticket a second time within half an hour.
+
+    What a gap comment actually says is *these checks are what is standing
+    between this ticket and Done*. That is a set of ids. Two verdicts that
+    withhold the flip on the same checks are the same statement, and the same
+    statement is not repeated; a check entering or leaving the set is real
+    news and gets a fresh comment.
+
+    The node's contract version joins the key because the RULE that reads
+    those checks can change underneath a ticket. A closer that has learned to
+    say something new must be able to say it, and a version bump is exactly
+    the event that makes a standing statement stale.
+
+    FALLBACK, and it is fail-safe rather than fail-open: a verdict carrying
+    counters but no readable per-check records keys on the counters as
+    before. Keying such a payload on an empty set would make every gap on
+    that ticket identical, which trades a duplicate-on-regrade for a silence
+    the reader cannot distinguish from agreement.
+    """
+    withheld = _withheld_check_ids(verdict)
+    if withheld:
+        return (_GAP_FINGERPRINT_CONTRACT_VERSION, "withheld", *withheld)
+    return (
+        _GAP_FINGERPRINT_CONTRACT_VERSION,
+        "counters",
+        str(total_checks),
+        str(verified_count),
+        str(failed_count),
+        str(non_probative_count),
+    )
 
 
 def _gap_shortfall(
@@ -2285,11 +2493,16 @@ class HandlerEvidenceAutocloseSweep:
                 # PR is a statement about whether this mechanism may act, not a
                 # verdict on the ticket's evidence.
                 EnumEvidenceAutocloseDecision.SKIPPED_REFERENCED_PR_UNMERGED,
-                # OMN-16106 class (c), added here in the same pass because it
-                # was in NO bucket: `tickets_skipped` silently under-reported
-                # every held live-surface candidate, so a run's four counters
-                # did not sum to its outcome count.
+                # OMN-16106 classes (c) and (d). Both holds belong here for the
+                # same reason: the run reached no opinion about the ticket's
+                # evidence, so a hold is a skip and never a gap. Class (c) was
+                # in NO bucket when it shipped, so a run that held a candidate
+                # reported `flipped + gap_posted + skipped + errored` one short
+                # of the outcomes it carried. `test_every_decision_is_tallied
+                # _in_exactly_one_bucket` is what stops the next decision being
+                # added without a bucket.
                 EnumEvidenceAutocloseDecision.SKIPPED_LIVE_SURFACE_UNAVAILABLE,
+                EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED,
             )
         )
         errored = sum(
@@ -3473,6 +3686,56 @@ class HandlerEvidenceAutocloseSweep:
                 dod_verify_behavior_proving_count=behavior_proving_count,
             )
 
+        # OMN-16106 class (d). The sibling question, and the one the real
+        # staging-blocked population answers: did the check RUN? A verdict
+        # that proved no behaviour, failed nothing, and carries a check that
+        # never executed has learned nothing about this ticket — so it says
+        # nothing, and the candidate comes back on the next tick.
+        #
+        # The three conjuncts are each load-bearing:
+        #   * `behavior_proving_count == 0` — a run that DID execute the
+        #     claimed behaviour learned something, and its shortfall is a real
+        #     statement about the ticket even with a skip beside it.
+        #   * `failed_count == 0` — a check that ran and went red on a
+        #     reachable surface is a genuine unmet AC and stays a gap. The
+        #     class-(c) hold above has already taken the failures that name a
+        #     dead surface, so what is left here is a real red.
+        #   * a non-executed check exists — without one there is nothing
+        #     unlearned, and an all-non-probative or merge-state-only corpus
+        #     keeps the gap comment that describes it.
+        #
+        # Placed HERE for the same reason class (c) is: after every flip path
+        # has already returned, so the hold is structurally unreachable from a
+        # write. That placement is the invariant, not the classifier.
+        if behavior_proving_count == 0 and failed_count == 0:
+            unrun_check, unrun_why = _live_check_not_executed(verdict)
+            if unrun_check:
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=(
+                        EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED
+                    ),
+                    reason=(
+                        f"HELD, not judged: check '{unrun_check}' never executed "
+                        f"({unrun_why}), nothing failed, and no check proved "
+                        "behavior — so this run learned nothing about the "
+                        "acceptance criteria it was asked about. No comment "
+                        "posted and no state written; the candidate is "
+                        "re-offered on the next tick and flips on its own once "
+                        "the check can run. dod_verify counters at the hold: "
+                        f"{verified_count}/{total_checks} verified, "
+                        f"{non_probative_count} non-probative, 0 failed, "
+                        f"terminal status {verify_status!r}."
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                )
+
         # Gap path.
         shortfall = _gap_shortfall(
             verify_status=verify_status,
@@ -3500,19 +3763,19 @@ class HandlerEvidenceAutocloseSweep:
             # while its own verdict said 1.
             dod_verify_behavior_proving_count=behavior_proving_count,
         )
-        # OMN-16821: `non_probative_count` joins the OMN-16808 dedup
-        # fingerprint because the STATEMENT now varies with it. Two verdicts
-        # sharing (total, verified, failed) and differing in non-probative
-        # count produce different `shortfall` wording, so keying without it
-        # would let a stale comment suppress the corrected one — the dedup
-        # gate must track what was said, not merely which counts were seen.
+        # The dedup key is the SET OF CHECKS that withheld the flip, plus this
+        # node's contract version — not the counters. See
+        # `_gap_fingerprint_parts` for the OMN-17201 measurement that moved it
+        # and for the counters fallback that keeps an unreadable payload
+        # idempotent.
         marker = _sweep_comment_marker(
             EnumEvidenceAutocloseDecision.GAP_POSTED,
-            (
-                str(total_checks),
-                str(verified_count),
-                str(failed_count),
-                str(non_probative_count),
+            _gap_fingerprint_parts(
+                verdict,
+                total_checks=total_checks,
+                verified_count=verified_count,
+                failed_count=failed_count,
+                non_probative_count=non_probative_count,
             ),
         )
         return await self._emit_gap_comment(

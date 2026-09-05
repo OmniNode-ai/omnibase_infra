@@ -170,6 +170,27 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # reached on a path that was already going to refuse the flip — it is
     # never consulted before a write.
     SKIPPED_LIVE_SURFACE_UNAVAILABLE = "skipped_live_surface_unavailable"
+    # OMN-16106, class (d). The sibling hold, and a DIFFERENT fact from the
+    # one above: no check reported an unreachable surface, because the check
+    # that would have read it never ran at all. The verdict carries a SKIPPED
+    # entry (with or without a typed `unverifiable_cause`) or an unbindable
+    # derived overlay (OMN-17323), dod_verify proved no behaviour, and nothing
+    # failed.
+    #
+    # This is the shape the class-(c) hold could not reach, and it is the one
+    # the staging-blocked population actually terminates in. OMN-17201 —
+    # writer at replicas 0, four MSK wire topics absent — came back from run
+    # 33993316390 as 3/30 verified, 0 failed, 26 non-probative, 0
+    # behaviour-proving, terminal status `skipped`, and was gap-commented
+    # twice within half an hour with "your acceptance criterion is not met".
+    # Nothing failed; nothing was learned either.
+    #
+    # Spelled separately from SKIPPED_LIVE_SURFACE_UNAVAILABLE on purpose. "I
+    # read the surface and it was dead" and "I never ran the check" are
+    # different facts, and an operator triaging a hold needs to know which one
+    # they are looking at. Both are holds: nothing written, candidate
+    # re-offered next tick.
+    SKIPPED_LIVE_CHECK_NOT_EXECUTED = "skipped_live_check_not_executed"
     # OMN-17658 bound readback. `issueUpdate` reported success but the
     # post-write read of the ticket's own state history did not show a
     # completed segment that the pre-write read did not already have. Recorded
