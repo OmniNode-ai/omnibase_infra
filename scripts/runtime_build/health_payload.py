@@ -70,6 +70,7 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 # Recorded verbatim in the refresh receipt (OMN-17563 AC-3) so a future reader
 # can tell a strict PASS from a lenient one without re-deriving it. Bump the
@@ -102,12 +103,41 @@ VERDICT_PROBE_TIMEOUT_SECONDS = 10.0
 #: blind window this ticket closes.
 VERDICT_STALE_AFTER_INTERVALS = 3.0
 
-#: The reason string that -- alone -- justifies waiting. Every other failure
-#: is knowable on the first probe; retrying it burns the window for nothing.
+
+#: The reason strings that can come from the semantic health evaluator.
+class HealthVerdictReason(StrEnum):
+    VERDICT_ABSENT = "verdict_absent"
+    VERDICT_STALE = "verdict_stale"
+    STATUS_UNREADABLE = "status_unreadable"
+
+
+#: The reason string that justifies waiting for a first monitor verdict.
 REASON_VERDICT_ABSENT = "verdict_absent"
+
+#: The reason string that justifies waiting for a fresher monitor verdict.
+REASON_VERDICT_STALE = "verdict_stale"
+
+#: The reason string for a body that is not a runtime health endpoint.
+REASON_STATUS_UNREADABLE = "status_unreadable"
 
 #: The only ``status`` value that means healthy.
 HEALTH_STATUS_HEALTHY = "healthy"
+
+DEFAULT_MAX_VERDICT_AGE = object()
+
+_WAITABLE_REASONS = frozenset(
+    {HealthVerdictReason.VERDICT_ABSENT, HealthVerdictReason.VERDICT_STALE}
+)
+
+
+def _normalise_verdict_reason(reason: str | None) -> HealthVerdictReason | None:
+    """Map producer reason strings into the closed wait-policy vocabulary."""
+    if reason is None:
+        return None
+    try:
+        return HealthVerdictReason(reason)
+    except ValueError:
+        return None
 
 
 class HealthPayloadError(ValueError):
@@ -321,6 +351,10 @@ def default_max_verdict_age(check_interval_seconds: float) -> float:
     and then crashes serves the same verdict forever, and an unbounded gate
     accepts it forever.
     """
+    if check_interval_seconds <= 0:
+        raise ValueError(
+            f"check_interval_seconds must be positive, got {check_interval_seconds}"
+        )
     return check_interval_seconds * VERDICT_STALE_AFTER_INTERVALS
 
 
@@ -356,11 +390,12 @@ def wait_for_verdict(
         verdict = probe()
         if verdict.ok:
             return verdict, f"{bound.describe()} satisfied on attempt {attempt}"
-        if verdict.reason != REASON_VERDICT_ABSENT:
-            # Waiting only helps a verdict that has not been published YET.
-            # A stale verdict, an unreadable body or a dead endpoint is just
-            # as true on attempt 24 as on attempt 1; retrying it converts a
-            # fast correct failure into a multi-minute stall on every refresh.
+        normalised_reason = _normalise_verdict_reason(verdict.reason)
+        if normalised_reason not in _WAITABLE_REASONS:
+            # Waiting helps a verdict that has not been published yet, and it
+            # can also help a stale verdict race where the monitor writes a
+            # fresher block inside this bound. An unreadable body, unknown
+            # reason, or dead endpoint is terminal at this boundary.
             return verdict, (
                 f"{bound.describe()} not waited: failure is terminal "
                 f"(reason={verdict.reason!r}) on attempt {attempt}"
@@ -404,6 +439,7 @@ def evaluate_health_body(
             status=None,
             details_healthy=None,
             detail=str(exc),
+            reason=REASON_STATUS_UNREADABLE if require_verdict else None,
         )
 
     if not require_verdict:
@@ -453,4 +489,5 @@ def unreachable_verdict(detail: str) -> HealthVerdict:
         status=None,
         details_healthy=None,
         detail=detail,
+        reason=REASON_STATUS_UNREADABLE,
     )

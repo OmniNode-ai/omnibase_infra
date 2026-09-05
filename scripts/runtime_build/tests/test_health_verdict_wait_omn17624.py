@@ -39,6 +39,12 @@ import json
 import pytest
 from health_payload import (
     HEALTH_POLICY_VERDICT_REQUIRED,
+    REASON_STATUS_UNREADABLE,
+    REASON_VERDICT_ABSENT,
+    REASON_VERDICT_STALE,
+    VERDICT_PROBE_TIMEOUT_SECONDS,
+    VERDICT_STALE_AFTER_INTERVALS,
+    default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
 )
@@ -212,6 +218,17 @@ def _opener_for(body: dict[str, object]) -> object:
     return _open
 
 
+def _opener_for_sequence(*bodies: dict[str, object]) -> object:
+    calls = {"n": 0}
+
+    def _open(url: str, timeout: int = 10) -> _Resp:
+        index = min(calls["n"], len(bodies) - 1)
+        calls["n"] += 1
+        return _Resp(json.dumps(bodies[index]).encode())
+
+    return _open, calls
+
+
 @_BOTH_GATES
 def test_gate_refuses_when_no_verdict_ever_arrives(gate: ModuleType) -> None:
     verdict, described = gate.check_health_with_retry(
@@ -221,6 +238,7 @@ def test_gate_refuses_when_no_verdict_ever_arrives(gate: ModuleType) -> None:
     )
     assert verdict.ok is False
     assert "exhausted" in described
+    assert verdict.reason == REASON_VERDICT_ABSENT
 
 
 @_BOTH_GATES
@@ -330,10 +348,92 @@ def test_a_fatal_probe_does_not_burn_the_whole_window(gate: ModuleType) -> None:
         "http://x/health", opener=_broken_open, sleep_fn=lambda _s: None
     )
     assert verdict.ok is False
+    assert verdict.reason == REASON_STATUS_UNREADABLE
     assert calls["n"] == 1, (
         f"probed {calls['n']} times for an unreadable body -- a permanent "
         "failure should not consume the wait window"
     )
+
+
+@_BOTH_GATES
+def test_absent_verdict_is_the_reason_that_retries(gate: ModuleType) -> None:
+    """fp=78891efb05b2. Absence consumes the declared wait window."""
+    calls = {"n": 0}
+
+    def _pre_verdict_open(url: str, timeout: int = 10) -> _Resp:
+        calls["n"] += 1
+        return _Resp(json.dumps(_PRE_VERDICT_BODY).encode())
+
+    bound = derive_verdict_wait_bound(
+        check_interval_seconds=300.0, boot_grace_seconds=120.0
+    )
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=_pre_verdict_open, sleep_fn=lambda _s: None
+    )
+    assert verdict.reason == REASON_VERDICT_ABSENT
+    assert calls["n"] == bound.attempts
+    assert "exhausted" in described
+
+
+@_BOTH_GATES
+def test_stale_verdict_can_become_fresh_inside_the_wait(gate: ModuleType) -> None:
+    """fp=c25c828c87de. Staleness is not terminal during the wait window."""
+    opener, calls = _opener_for_sequence(
+        _stale_verdict_body(),
+        {
+            "status": "healthy",
+            "details": {"runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}},
+        },
+    )
+
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is True
+    assert calls["n"] == 2
+    assert "satisfied on attempt 2" in described
+
+
+@_BOTH_GATES
+def test_explicit_none_disables_freshness_without_changing_default(
+    gate: ModuleType,
+) -> None:
+    """fp=46689089e58e. Omitted and explicit None are different intents."""
+    default_verdict, _default_desc = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body()),
+        sleep_fn=lambda _s: None,
+    )
+    assert default_verdict.reason == REASON_VERDICT_STALE
+
+    disabled_verdict, disabled_desc = gate.check_health_with_retry(
+        "http://x/health",
+        opener=_opener_for(_stale_verdict_body()),
+        max_verdict_age_seconds=None,
+        sleep_fn=lambda _s: None,
+    )
+    assert disabled_verdict.ok is True
+    assert "satisfied on attempt 1" in disabled_desc
+
+
+def test_default_freshness_ceiling_validates_positive_interval() -> None:
+    """fp=979881a62182. Non-positive intervals cannot derive freshness."""
+    with pytest.raises(ValueError, match="check_interval_seconds"):
+        default_max_verdict_age(0)
+    with pytest.raises(ValueError, match="check_interval_seconds"):
+        default_max_verdict_age(-1)
+
+
+@pytest.mark.parametrize("offset", [-1.0, 1.0])
+def test_default_freshness_boundary_is_derived_from_interval(offset: float) -> None:
+    """fp=27860500fdcb. Test the boundary, not only a large stale value."""
+    ceiling = default_max_verdict_age(300.0)
+    verdict = evaluate_health_body(
+        _body_with_verdict(age_seconds=ceiling + offset),
+        require_verdict=True,
+        max_verdict_age_seconds=ceiling,
+    )
+    assert verdict.ok is (offset < 0)
 
 
 def test_the_recorded_bound_states_worst_case_wall_clock() -> None:
@@ -354,9 +454,20 @@ def test_the_recorded_bound_states_worst_case_wall_clock() -> None:
     assert bound.worst_case_seconds > bound.total_seconds, (
         "worst case does not exceed sleep time, so the probe fetch cost is not counted"
     )
-    expected = bound.attempts * (bound.interval_seconds + bound.probe_timeout_seconds)
+    assert bound.probe_timeout_seconds == VERDICT_PROBE_TIMEOUT_SECONDS
+    expected = bound.attempts * (bound.interval_seconds + VERDICT_PROBE_TIMEOUT_SECONDS)
     assert bound.worst_case_seconds == expected
     assert str(int(bound.worst_case_seconds)) in described, (
         "the receipt does not state the worst-case wall clock a reviewer "
         "would actually observe"
     )
+
+
+def test_verdict_reason_vocabulary_is_exhaustive_for_wait_policy() -> None:
+    """fp=9a4022e9def5. The string reasons are constrained by constants."""
+    assert {REASON_VERDICT_ABSENT, REASON_VERDICT_STALE, REASON_STATUS_UNREADABLE} == {
+        "verdict_absent",
+        "verdict_stale",
+        "status_unreadable",
+    }
+    assert default_max_verdict_age(300.0) == 300.0 * VERDICT_STALE_AFTER_INTERVALS
