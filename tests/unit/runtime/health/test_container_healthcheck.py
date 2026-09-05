@@ -199,7 +199,19 @@ class TestVerdictTable:
             ({"status": "starting"}, "unrecognised"),
         ],
     )
-    def test_unreadable_status_fails_closed(self, body: dict, case: str) -> None:
+    @pytest.mark.parametrize(
+        "degraded_policy", [chc.DEGRADED_POLICY_FAIL, chc.DEGRADED_POLICY_WARN]
+    )
+    @pytest.mark.parametrize("require_verdict", [False, True])
+    @pytest.mark.parametrize("max_verdict_age_seconds", [None, 30.0])
+    def test_unreadable_status_fails_closed(
+        self,
+        body: dict[str, object],
+        case: str,
+        degraded_policy: str,
+        require_verdict: bool,
+        max_verdict_age_seconds: float | None,
+    ) -> None:
         """OMN-17623: an unreadable status is unknown health, never proven health.
 
         ``ServiceHealth._handle_health`` types its status
@@ -210,9 +222,36 @@ class TestVerdictTable:
         the body is unparseable (``payload_missing``) or the endpoint is
         unreachable (``probe_unreachable``). Passing the strictly-less-broken
         case was the inconsistency.
+
+        **Swept across every policy axis (OMN-17908).** The module docstring
+        calls this guard unconditional "on *every* policy", and until now the
+        test only ever called the function with default arguments — so the
+        general claim rested on one specific configuration.
+
+        That gap is not theoretical. Measured on this file before the sweep was
+        added, with the guard made policy-sensitive: a guard firing only when
+        ``fail_on_degraded`` reported 37 passed, and one firing only when
+        ``max_verdict_age_seconds`` is unset also reported 37 passed. Both are
+        blind, and both leave an unreadable status silently PASSING on a real
+        invocation — the first on ``--degraded-policy warn``, which any catalog
+        manifest is free to declare.
+
+        A regression gated on ``require_verdict`` was caught, but only
+        incidentally: that flag defaults to False, so gating on it also breaks
+        the default path this test already exercised.
         """
-        verdict = chc.evaluate_health_response(http_status=200, payload=body)
-        assert (verdict.verdict, verdict.reason) == ("FAIL", "status_unreadable"), case
+        verdict = chc.evaluate_health_response(
+            http_status=200,
+            payload=body,
+            degraded_policy=degraded_policy,
+            require_verdict=require_verdict,
+            max_verdict_age_seconds=max_verdict_age_seconds,
+        )
+        assert (verdict.verdict, verdict.reason) == ("FAIL", "status_unreadable"), (
+            f"{case} under degraded_policy={degraded_policy!r} "
+            f"require_verdict={require_verdict} "
+            f"max_verdict_age_seconds={max_verdict_age_seconds}"
+        )
 
     @pytest.mark.parametrize("status", ["healthy", "HEALTHY", "Healthy"])
     def test_recognised_status_is_case_insensitive(self, status: str) -> None:
