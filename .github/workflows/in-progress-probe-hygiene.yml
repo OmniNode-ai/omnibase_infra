@@ -1,0 +1,224 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# in-progress-probe-hygiene.yml — OMN-17942 / OMN-16106 class (g)
+#
+# The evidence closer (OMN-16106) closes a ticket by re-running
+# `onex skill dod_verify` against the checks its OCC contract declares. A
+# ticket that declares NONE is not failing that verifier — it is invisible to
+# it, and to every other mechanical closing path. It can only ever be closed by
+# a person reading it, and nothing on the board says so.
+#
+# Worse, the invisibility is silent: the closer enumerates merged OCC
+# companions, so a ticket with none never appears in its outcomes at all, and
+# that absence reads exactly like "nothing to report". Four tickets in the
+# 2026-08-31 sprint are in that state — OMN-17926, OMN-17277, OMN-17380,
+# OMN-17353 — and no run of any sweep has ever mentioned them.
+#
+# This sweep names them, once each.
+#
+# IT NEVER CHANGES TICKET STATE. It has no flip predicate, no flip budget, and
+# its Linear client exposes no state mutation at all (pinned by a test that
+# reads the class). A ticket with no probe is not wrong — it may be genuinely
+# un-probeable work — and the finding is that nothing mechanical can close it,
+# which is a fact its owner needs and not a verdict this sweep is entitled to
+# act on.
+#
+# Idempotency is by marker line, the OMN-16808 construction taken verbatim: a
+# comment history the sweep cannot READ fails closed as an error rather than
+# risking a duplicate, because "there is no prior comment" and "I could not
+# look" are different facts and only one of them releases a write.
+#
+# APPLY is deliberately the DEFAULT on the schedule, on the same operator
+# ruling that armed the closer (2026-09-04 ~23:05Z, firm): a hygiene sweep that
+# previews on its schedule and writes only when someone ticks a box is a manual
+# triage sweep wearing a cron trigger. What bounds it is that the only write it
+# can perform is one comment per ticket, ever, capped per run.
+
+name: In-Progress Probe Hygiene
+
+on:
+  schedule:
+    # Every 6 hours. The finding is a standing condition, not an event: a
+    # ticket without a probe does not acquire one between ticks, so a tighter
+    # cadence buys nothing and only shortens the window in which a person can
+    # fix a ticket before the sweep remarks on it.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: >-
+          Write the hygiene comments. Unticked is the diagnostic dry run: every
+          decision is reached and reported, and nothing is written. The
+          SCHEDULE applies regardless of this input.
+        type: boolean
+        default: false
+      max_comments_per_run:
+        description: >-
+          Cap on comments written this run. The backlog is worked through over
+          several ticks rather than in one notification storm; a ticket past
+          the cap is still REPORTED, its turn simply has not come round.
+        type: string
+        default: '10'
+      project_id:
+        description: >-
+          Linear project id to scope to. Empty sweeps every In-Progress ticket
+          the credential can see.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.8.3"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  probe-hygiene:
+    name: In-Progress Probe Hygiene (${{ github.event_name == 'schedule' && 'SCHEDULE - applies' || (github.event.inputs.apply == 'true' && 'DISPATCH APPLY' || 'DISPATCH DRY-RUN') }})
+    # Trusted runner required: needs LINEAR_API_KEY.
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Mint onexbot App token (OMN-16832)
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: read
+          permission-metadata: read
+
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      # The contracts the closer's verifier resolves against. Checked out at
+      # `dev` for the same reason the closer does: OCC contracts land on dev
+      # first and are batched to main later, so reading main would report a
+      # ticket as probe-less minutes after its companion merged.
+      - name: Checkout onex_change_control (the contracts the closer runs)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/onex_change_control
+          ref: dev
+          path: .occ-src
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      # Assert the read BEFORE the sweep runs. Without this the failure mode is
+      # silent and inverted: a missing contracts/ directory does not look like
+      # "the runner could not look", it looks like "no ticket on the board has
+      # a probe" — the same number, the opposite meaning, and a comment on
+      # every In-Progress ticket in the workspace.
+      #
+      # The node itself already refuses this case per ticket
+      # (ERROR_CONTRACT_UNREADABLE, never the finding). This step is the
+      # earlier, louder half: fail the job rather than emit a run whose every
+      # row is an error.
+      - name: Verify the OCC contracts directory is readable
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d .occ-src/contracts ]; then
+            echo "::error::.occ-src/contracts is missing — the sweep could not tell 'this ticket declares no check' from 'I could not look', so refusing to run." >&2
+            exit 1
+          fi
+          count="$(find .occ-src/contracts -name 'OMN-*.yaml' -type f | wc -l | tr -d ' ')"
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::.occ-src/contracts contains zero OMN-*.yaml contracts. That is not a board with no probes, it is a checkout that did not land." >&2
+            exit 1
+          fi
+          echo "OCC contracts readable: ${count} ticket contracts present."
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run in-progress probe hygiene sweep
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # The schedule applies. A dispatch that leaves the box alone is the
+          # rehearsal surface and stays a dry run.
+          SWEEP_APPLY: ${{ (github.event_name == 'schedule' || github.event.inputs.apply == 'true') && 'true' || 'false' }}
+          MAX_COMMENTS: ${{ github.event.inputs.max_comments_per_run || '10' }}
+          PROJECT_ID: ${{ github.event.inputs.project_id || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Quoted expansion, always: an unset input must become an EMPTY
+          # ARGUMENT, never shell syntax (the OMN-17935 shape).
+          case "${MAX_COMMENTS:-10}" in
+            ''|*[!0-9]*)
+              echo "::warning title=max_comments_per_run ignored::[${MAX_COMMENTS:-}] is not a non-negative integer; the node's contract default applies."
+              budget_args=()
+              ;;
+            *)
+              budget_args=(--max-comments-per-run "${MAX_COMMENTS}")
+              ;;
+          esac
+
+          project_args=()
+          if [ -n "${PROJECT_ID:-}" ]; then
+            project_args=(--project "${PROJECT_ID}")
+          fi
+
+          apply_args=()
+          if [ "${SWEEP_APPLY}" = "true" ]; then
+            apply_args=(--apply)
+            echo "::warning title=APPLY MODE::This run WILL comment on Linear tickets. It writes at most one comment per ticket, ever (marker-line dedup), changes NO ticket state, and is capped at ${MAX_COMMENTS:-10} comments this run."
+          else
+            echo "provenance: DRY RUN — every decision is reported and nothing is written."
+          fi
+
+          uv run onex skill in_progress_probe_hygiene \
+            --occ-repo-dir "${GITHUB_WORKSPACE}/.occ-src" \
+            "${budget_args[@]+"${budget_args[@]}"}" \
+            "${project_args[@]+"${project_args[@]}"}" \
+            "${apply_args[@]+"${apply_args[@]}"}"
+
+      - name: Post summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## In-Progress Probe Hygiene (OMN-17942)"
+            echo ""
+            echo "Named every In-Progress ticket declaring no executable close"
+            echo "probe — no OCC \`dod_evidence[].checks[]\` entry and no"
+            echo "\`Probe: <command> => <observation>\` line. Those tickets are"
+            echo "not failing the evidence closer; they are invisible to it."
+            echo ""
+            echo "**No ticket state was changed.** This sweep only comments, at"
+            echo "most once per ticket, and holds no flip budget."
+            echo ""
+            echo "\`tickets_without_probe\` in the receipt is the finding, and it"
+            echo "counts a ticket whether or not this run commented on it —"
+            echo "\`skipped_already_commented\` and"
+            echo "\`skipped_comment_budget_exhausted\` are still findings."
+          } >> "$GITHUB_STEP_SUMMARY"
