@@ -10,28 +10,64 @@
 # and would flip the bound Linear ticket Done (or post the honest gap) via
 # `onex skill evidence_autoclose_sweep`.
 #
-# DRY-RUN BY DEFAULT, apply BY EXPLICIT DISPATCH ONLY. The previous revision
-# of this paragraph said `apply` "is intentionally NEVER passed here" and
-# named the flip to `--apply` as "a later, deliberate change (a separate PR),
-# not a flag flip buried in this file". This is that PR, and `deliberate` is
-# now a mechanical property rather than a comment:
+# THE SCHEDULE APPLIES. A dispatch can still force a dry run.
 #
-#   * `apply` is a `workflow_dispatch` boolean input, `default: false`. A
-#     dispatch that leaves the box alone is a dry run, so the cheap "just
-#     re-run it" reflex cannot mutate anything.
-#   * The `schedule` path CANNOT reach it. A cron tick carries no
-#     `github.event.inputs` at all, and the guard additionally requires
-#     `github.event_name == 'workflow_dispatch'` — two independent refusals,
-#     because this is the one property whose failure is unattended.
+# The previous revision of this paragraph read "DRY-RUN BY DEFAULT, apply BY
+# EXPLICIT DISPATCH ONLY" and argued that a scheduled run reaching `--apply`
+# was the failure mode to prevent. That is now inverted, on the operator
+# ruling of 2026-09-04 (~23:05Z, firm): the evidence closer closes tickets on
+# its own — when a ticket's definition of done is met by bound evidence it is
+# Done, with no human approval step, because that is the reason the closer
+# exists. A closer that previews on its schedule and writes only when someone
+# happens to tick a box is a manual triage sweep wearing a cron trigger.
+#
+# What actually bounds an unattended write is therefore NOT the trigger. It is,
+# in order, and all three unchanged by this revision:
+#
+#   * the flip PREDICATE (below) — untouched, not widened, and not this file's
+#     to set;
+#   * the OMN-17891 per-candidate exclusion fence — now reachable WITHOUT a
+#     dispatcher (see the standing-fence note below), because an input-only
+#     fence is absent precisely when nobody is watching;
+#   * `ONEX_AUTOCLOSE_DISABLED` — the kill switch, a repo variable, which binds
+#     every run including the scheduled ones and is the way to stop an applying
+#     closer without editing this file.
+#
+# The mechanics that keep the write honest are otherwise as they were:
+#
+#   * `apply` is still a `workflow_dispatch` boolean input, `default: false`,
+#     and it still means "this DISPATCH writes". Its job is now the opposite of
+#     what it was: it is what keeps a read-only path reachable at all. Dispatch
+#     with the box unticked to rehearse a fence list or to read what the sweep
+#     currently decides without writing it.
 #   * `--apply` never appears on the invocation line. It enters only through
 #     the shell array the guard populates, so a guard plus a stray literal
 #     flag (which reads identically in a diff) cannot coexist.
 #   * The job NAME and the step summary render their mode from the SAME guard
 #     expression that gates the flag, so a run cannot label itself DRY-RUN
-#     while flipping tickets. Both previously stated "DRY-RUN" as a constant.
+#     while flipping tickets.
 #
-# All four are pinned by `tests/ci/test_evidence_autoclose_sweep_apply_input.py`
-# (CLAUDE.md rule 5 — the check ships wired, not advisory).
+# THE STANDING FENCE. `github.event.inputs` is null on a cron tick, so the
+# OMN-17891 exclusion input — the only per-candidate refusal that exists — can
+# never bind an unattended run. That was tolerable while the schedule only
+# previewed; it is not tolerable now. So the standing list arrives from the
+# repo variable `ONEX_AUTOCLOSE_EXCLUDE` and is UNIONED with any
+# dispatch-supplied list: a dispatch may ADD to the standing fence, never
+# shrink it. It is a variable and not an input for the same reason the kill
+# switch is — an input is a per-dispatch choice, and a fence that binds only
+# the runs a human launched is not a fence.
+#
+#   To fence:   gh variable set ONEX_AUTOCLOSE_EXCLUDE --repo OmniNode-ai/omnibase_infra --body 'OMN-1,OMN-2'
+#   To release: gh variable delete ONEX_AUTOCLOSE_EXCLUDE --repo OmniNode-ai/omnibase_infra
+#
+# A hand-maintained standing list goes stale in the direction of refusing to
+# close a ticket that is genuinely done — the safe direction, but still a cost.
+# Feeding it mechanically from `scripts/triage_fences.py` `fenced_tickets` is
+# the OMN-17891 follow-on slice; the typed input is the same either way.
+#
+# All of the above is pinned by
+# `tests/ci/test_evidence_autoclose_sweep_apply_input.py` (CLAUDE.md rule 5 —
+# the check ships wired, not advisory).
 #
 # The flip PREDICATE is not relaxed by any of this and is not this file's to
 # set. It lives in `handler_evidence_autoclose_sweep.py` and a flip requires
@@ -208,9 +244,12 @@ on:
           else in the window is swept normally, so this scopes a run DOWN; it
           is not a halt (that is ONEX_AUTOCLOSE_DISABLED, which is a repo
           variable and binds every run including scheduled ones). Matched
-          case-insensitively after stripping whitespace. Honoured in DRY-RUN
-          too, deliberately: a dry run carrying the same list is the rehearsal
-          that shows exactly what the apply dispatch will and will not touch.
+          case-insensitively after stripping whitespace. UNIONED with the
+          standing repo-variable fence ONEX_AUTOCLOSE_EXCLUDE, never replacing
+          it — this field can only ADD refusals to a run, never remove one the
+          standing fence asserts. Honoured in DRY-RUN too, deliberately: a dry
+          run carrying the same list is the rehearsal that shows exactly what
+          an applying run will and will not touch.
           What it asserts is not derivable by the sweep — an open ledger CLAIM,
           a red gate, a concurrent controller's ownership — so the dispatcher
           supplies it and owns its accuracy.
@@ -218,14 +257,18 @@ on:
         default: ''
       apply:
         description: >-
-          OMN-16106. WRITE MODE. Tick this and the sweep stops previewing and
-          actually flips every ticket whose evidence clears the predicate —
-          Linear state to Done plus the audit comment carrying the dod_verify
-          counters that justified it. Leave it alone (the default, and the
-          only value a scheduled run can have) and the run is read-only: it
-          reaches exactly the same decisions and writes none of them. This
-          does not loosen what counts as proven; it only decides whether the
-          verdict is recorded. ONEX_AUTOCLOSE_DISABLED still halts the run.
+          OMN-16106. WRITE MODE FOR THIS DISPATCH ONLY. The 30-minute
+          SCHEDULE already applies — it does not read this box and cannot. What
+          this decides is whether the run YOU are launching writes. Tick it and
+          this dispatch flips every ticket whose evidence clears the predicate
+          (Linear state to Done, plus the audit comment carrying the dod_verify
+          counters that justified it). Leave it alone — the default — and this
+          dispatch is the DIAGNOSTIC dry run: it reaches exactly the same
+          decisions and writes none of them, which is how you rehearse an
+          exclusion list or read the current verdicts without acting on them.
+          Neither setting loosens what counts as proven. To stop the scheduled
+          closer, set ONEX_AUTOCLOSE_DISABLED; to decline named candidates,
+          set ONEX_AUTOCLOSE_EXCLUDE or pass `exclude` below.
         required: false
         type: boolean
         default: false
@@ -238,7 +281,7 @@ jobs:
   evidence-autoclose-sweep:
     # The mode is rendered from the same guard that gates the flag (see
     # SWEEP_APPLY below), so the label cannot drift from the behaviour.
-    name: Evidence Autoclose Sweep (${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'APPLY' || 'DRY-RUN' }})
+    name: Evidence Autoclose Sweep (${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')) && 'APPLY' || 'DRY-RUN' }})
     # Trusted runner required: needs LINEAR_API_KEY and an authenticated gh.
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -267,20 +310,24 @@ jobs:
       # evaluated exactly once, in the expression context, and handed to the
       # shell as data rather than as substituted script text.
       #
-      # Both conjuncts are load-bearing and neither is redundant defence:
-      #   * `github.event_name == 'workflow_dispatch'` states the intent that
-      #     an unattended trigger can never apply, in a form a reader can check
-      #     without knowing how `github.event.inputs` renders on other events.
-      #   * `github.event.inputs.apply == 'true'` is the operator's actual
-      #     choice. A boolean workflow_dispatch input arrives in the `github`
-      #     context as the STRING "true"/"false" (the `inputs` context types it
-      #     as a real boolean, but `inputs` is not available in a job `name:`,
-      #     and the guard has to be one expression usable at every site or the
-      #     label can drift from the behaviour).
+      # Two branches, and which one fires is decided by the event alone:
+      #   * `github.event_name == 'schedule'` — the unattended closer. A cron
+      #     tick carries no `github.event.inputs` at all, so nothing an input
+      #     could say would enable or disable this; the guard has to name the
+      #     event, and does.
+      #   * the `workflow_dispatch` conjunction is the OPERATOR's choice, and
+      #     it stays a conjunction so a dispatch that leaves the box alone is a
+      #     dry run. That is the diagnostic path, and it is the only read-only
+      #     path left. A boolean workflow_dispatch input arrives in the
+      #     `github` context as the STRING "true"/"false" (the `inputs` context
+      #     types it as a real boolean, but `inputs` is not available in a job
+      #     `name:`, and the guard has to be one expression usable at every
+      #     site or the label can drift from the behaviour).
       #
-      # On `schedule`, `github.event.inputs` is null, so the second conjunct is
-      # already false on its own — the two refusals are independent.
-      SWEEP_APPLY: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'true' || 'false' }}
+      # What stops a scheduled write is not this expression. It is the flip
+      # predicate, the standing exclusion fence, and ONEX_AUTOCLOSE_DISABLED —
+      # see the header.
+      SWEEP_APPLY: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')) && 'true' || 'false' }}
 
     steps:
       # OMN-16832. THE credential this job runs under. Everything below that
@@ -1263,6 +1310,21 @@ jobs:
           # string on schedule (no inputs), which the guard below reads as "no
           # exclusions" — a scheduled dry run is unchanged by this field.
           EXCLUDE_TICKETS: ${{ github.event.inputs.exclude || '' }}
+          # OMN-16106. THE STANDING FENCE, and the reason it is a variable.
+          #
+          # `github.event.inputs` is null on a cron tick, so EXCLUDE_TICKETS
+          # above renders empty on every scheduled run — which is every run
+          # nobody is watching, and now every run that WRITES. An exclusion
+          # that only a dispatcher can type is therefore a fence that is
+          # missing exactly when it is needed. Same shape of gap OMN-16792 AC3
+          # found in the kill switch, and the same fix: a repo variable, which
+          # is reachable from every event, plumbed explicitly into this step's
+          # environment because `vars.*` lives only in the expression context.
+          #
+          # Unset renders as the empty string, which the union below reads as
+          # "no standing exclusions" — a repo with no such variable behaves
+          # exactly as it did before this line existed.
+          STANDING_EXCLUDE_TICKETS: ${{ vars.ONEX_AUTOCLOSE_EXCLUDE }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # OMN-16846 changed what UV_NO_SYNC was for; OMN-16902 removed it.
           #
@@ -1336,14 +1398,37 @@ jobs:
           # no literal `--apply` at all.
           # OMN-17891. The exclusion enters the same way `--apply` does — only
           # through a shell array, never as a literal on the invocation line —
-          # and it is populated INDEPENDENTLY of SWEEP_APPLY. A fence that only
-          # existed in apply mode could not be rehearsed: the dry run would
-          # sweep a candidate the apply run refuses, and the preview would stop
-          # being a preview of the run it is meant to de-risk.
+          # and it is populated INDEPENDENTLY of SWEEP_APPLY. That was a
+          # rehearsal argument when only a dispatch could write; now that the
+          # schedule writes it is load-bearing in its own right, because a fence
+          # evaluated inside a dispatch-shaped branch would leave every
+          # unattended write unfenced. It also stays a preview of the applying
+          # run: a dry run carrying the same lists refuses exactly the same
+          # candidates.
+          # OMN-16106. UNION, not override. The standing repo-variable fence
+          # comes first and the dispatch input is appended to it, so a dispatch
+          # naming one ticket ADDS a refusal rather than silently dropping every
+          # standing one — a fence that got smaller the more precisely you aimed
+          # it would be worse than no fence, because it would still read like a
+          # fence in the log. Duplicates are harmless: the node normalises and
+          # membership-tests, it does not iterate the list.
+          #
+          # Pure bash so `set -euo pipefail` has nothing to trip on: an external
+          # filter (`grep -v '^$'`) exits 1 on an all-empty list, which under
+          # pipefail would abort the sweep for the most ordinary input there is.
+          # `${var//,/ }` renders commas as spaces and the unquoted expansion
+          # word-splits, which also absorbs the whitespace an operator types.
+          fence_tickets=""
+          for candidate in ${STANDING_EXCLUDE_TICKETS//,/ } ${EXCLUDE_TICKETS//,/ }; do
+            [ -n "${candidate}" ] || continue
+            fence_tickets="${fence_tickets:+${fence_tickets},}${candidate}"
+          done
+          FENCE_TICKETS="${fence_tickets}"
           exclude_args=()
-          if [ -n "${EXCLUDE_TICKETS}" ]; then
-            exclude_args+=(--exclude "${EXCLUDE_TICKETS}")
-            echo "fence: refusing ${EXCLUDE_TICKETS} before any Linear read (OMN-17891). Every other bound ticket in the window is swept normally; this is a scope, not a halt."
+          if [ -n "${FENCE_TICKETS}" ]; then
+            exclude_args+=(--exclude "${FENCE_TICKETS}")
+            echo "fence: refusing ${FENCE_TICKETS} before any Linear read (OMN-17891). Every other bound ticket in the window is swept normally; this is a scope, not a halt."
+            echo "fence sources: standing=[${STANDING_EXCLUDE_TICKETS:-<unset>}] dispatch=[${EXCLUDE_TICKETS:-<none>}]"
           else
             echo "fence: none — no ticket is excluded from this run"
           fi
@@ -1406,7 +1491,7 @@ jobs:
         # constant; left alone it would have kept asserting it while the run
         # flipped tickets.
         env:
-          SWEEP_MODE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'APPLY' || 'DRY-RUN' }}
+          SWEEP_MODE: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')) && 'APPLY' || 'DRY-RUN' }}
         run: |
           {
             echo "## Evidence Autoclose Sweep (OMN-16106, ${SWEEP_MODE})"
@@ -1422,8 +1507,11 @@ jobs:
               echo "did not clear the predicate were commented with the honest gap, never"
               echo "flipped. The per-ticket receipt in the sweep step's log is the record."
             else
-              echo "No Linear mutation was performed — this dispatch did not pass --apply."
-              echo "Every decision in the sweep step's receipt is a preview of what an"
-              echo "\`apply=true\` dispatch would have written."
+              echo "No Linear mutation was performed — this dispatch left `apply` unticked,"
+              echo "which is the diagnostic dry run. Every decision in the sweep step's"
+              echo "receipt is a preview of what a writing run would have recorded."
+              echo ""
+              echo "Note: the 30-minute SCHEDULE applies. This mode is reachable only by"
+              echo "dispatching with the box unticked; it is not what unattended runs do."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
