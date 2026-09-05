@@ -86,7 +86,20 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 20
+    # Measured, not guessed. The first live dry run (run 33988218390,
+    # 2026-09-05) scanned 200 In-Progress tickets and took ~19 minutes: 97 have
+    # a probe and cost one Linear page each, and the 100 that do not each cost
+    # a paginated comment-history read to establish that the sweep has not
+    # already said this there. At `timeout-minutes: 20` the very next run — the
+    # first APPLY run, 33989253340 — was cancelled mid-sweep by the job
+    # timeout, which is the worst shape available: a scheduled job that always
+    # dies partway and reports a cancellation nobody reads as a failure of the
+    # sweep.
+    #
+    # 45 gives the measured cost real headroom. It is deliberately not fixed by
+    # lowering `max_tickets`, which would make the run finish by looking at
+    # less of the board and report the smaller number as the finding.
+    timeout-minutes: 45
 
     steps:
       - name: Mint onexbot App token (OMN-16832)
