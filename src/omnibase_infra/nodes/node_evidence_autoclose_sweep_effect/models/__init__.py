@@ -8,6 +8,12 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_mode import (
+    EnumEvidenceAutocloseMode,
+)
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
+    EnumEvidenceAutocloseTrigger,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_outcome import (
     ModelEvidenceAutocloseOutcome,
 )
@@ -21,6 +27,8 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evid
 __all__ = [
     "EnumEvidenceAutocloseArm",
     "EnumEvidenceAutocloseDecision",
+    "EnumEvidenceAutocloseMode",
+    "EnumEvidenceAutocloseTrigger",
     "ModelEvidenceAutocloseOutcome",
     "ModelEvidenceAutocloseSweepRequest",
     "ModelEvidenceAutocloseSweepResult",

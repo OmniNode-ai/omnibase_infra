@@ -69,6 +69,61 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # PR — the same verdict re-derived from a later companion is the same
     # statement. A CHANGED verdict has a different fingerprint and does comment.
     SKIPPED_DUPLICATE_COMMENT = "skipped_duplicate_comment"
+    # OMN-17658. The ticket is a PARENT with at least one child that is not in
+    # a completed/canceled state, read live from Linear on this tick. A parent
+    # is not done while its own decomposition is open, whatever its contract's
+    # checks say: dod_verify verifies the parent's OCC contract, which is
+    # structurally incapable of seeing a child ticket that carries its own
+    # separate acceptance criteria. Measured 2026-09-05: 30 of 238 open beta
+    # tickets are parents with open children and 4 of those carry a
+    # behaviour-proof receipt, i.e. four candidates that could clear every
+    # existing conjunct today.
+    #
+    # A conjunct, not a heuristic: the refusal needs no threshold and no
+    # judgement, and it is falsifiable from the ticket itself.
+    SKIPPED_HAS_CHILDREN = "skipped_has_children"
+    # OMN-17934. The binding companion is the evidence companion of a RECURRING
+    # BOT PR — the standing pin-bump refresh — rather than of a PR that did the
+    # ticket's work. The discriminator is a conjunction of the product PR's
+    # author being a GitHub App/Bot AND its title matching the measured
+    # pin-bump shape (see `_is_recurring_bot_product_pr`), derived from
+    # omnibase_infra#3192 and #3199 and positive-controlled against 300 PRs of
+    # that repo: 16 matches, every one bot-authored, zero human PRs.
+    #
+    # Why it is a distinct class rather than a predicate tightening: the flip
+    # predicate was SATISFIED for OMN-17292 — terminal `verified`, 0 failed,
+    # 4 verified, 4+26==30, 1 behaviour-proving, all description boxes ticked.
+    # Nothing about that verdict is wrong; what is wrong is that a ticket which
+    # accumulates recurring bot PRs re-clears it every time one merges,
+    # indefinitely. The ordinary case is untouched: a ticket whose evidence
+    # legitimately arrives across several PRs is refused only if the BOUND
+    # companion's product PR is itself one of the recurring shapes.
+    SKIPPED_RECURRING_COMPANION = "skipped_recurring_companion"
+    # OMN-17934 shape 2. The ticket has already been Done and reopened: its
+    # Linear state history carries a completed -> non-completed transition made
+    # by a real actor. Somebody disagreed with a previous close, and re-closing
+    # it from the same mechanism is exactly the disagreement being overruled by
+    # a cron tick. Read live from `stateHistory`, never inferred.
+    SKIPPED_PRIOR_REVERT = "skipped_prior_revert"
+    # OMN-17658. `max_flips_per_run` was already spent by earlier candidates in
+    # this run. The bound is a blast-radius cap, not a verdict: the candidate
+    # reached no decision about its evidence and the next run will offer it
+    # again. Recorded rather than silently dropped so a truncated run is
+    # legible as truncated.
+    SKIPPED_FLIP_BUDGET_EXHAUSTED = "skipped_flip_budget_exhausted"
+    # OMN-17658 auto-disarm. An earlier candidate in this run (or the persisted
+    # marker the workflow handed in) established that a closer flip was later
+    # found unsafe, so this run refuses to apply from that point on. Every
+    # remaining candidate is recorded with this value instead of a verdict —
+    # the sweep is disarmed, not silent.
+    SKIPPED_DISARMED = "skipped_disarmed"
+    # OMN-17658 bound readback. `issueUpdate` reported success but the
+    # post-write read of the ticket's own state history did not show a
+    # completed segment that the pre-write read did not already have. Recorded
+    # as an ERROR and never as FLIPPED: a write whose effect cannot be read
+    # back is not a proven write, and counting it as one is how a closer's
+    # receipt drifts from the board it claims to describe.
+    ERROR_READBACK_UNCONFIRMED = "error_readback_unconfirmed"
     # `uv run onex skill dod_verify <ticket>` exited non-zero (dispatch/runtime
     # failure, not a normal verified/failed verdict) -> fail closed, never flip.
     ERROR_VERIFY_NONZERO_EXIT = "error_verify_nonzero_exit"

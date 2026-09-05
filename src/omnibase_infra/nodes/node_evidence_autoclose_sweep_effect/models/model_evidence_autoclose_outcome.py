@@ -68,6 +68,43 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
             "no comment, still names exactly what blocked the flip."
         ),
     )
+    # ------------------------------------------------------------------
+    # OMN-17658 — the BOUND READBACK. Three ids that make one flip checkable
+    # by somebody who was not there: which companion carried the evidence
+    # (above), which dod_verify verdict released it (`verdict_fingerprint`),
+    # and which Linear state-history entry the write actually produced
+    # (`readback_entry_id`, which must differ from `pre_write_head_entry_id`).
+    #
+    # The last pair is the point. `issueUpdate` returning `success: true` is
+    # the API agreeing to the request, not evidence the board changed —
+    # exactly the class of claim the deterministic-truth doctrine refuses. A
+    # flip is recorded as FLIPPED only when a post-write read of the ticket's
+    # own history shows a completed segment the pre-write read did not have.
+    pre_write_head_entry_id: str = Field(
+        default="",
+        description=(
+            "Newest `stateHistory` entry id observed BEFORE the flip was "
+            "written. Empty on every non-applying path."
+        ),
+    )
+    readback_entry_id: str = Field(
+        default="",
+        description=(
+            "`stateHistory` entry id of the completed segment the flip "
+            "produced, read back AFTER the write. Empty on every non-applying "
+            "path, and empty on an applying path whose readback did not "
+            "confirm — which is ERROR_READBACK_UNCONFIRMED, never FLIPPED."
+        ),
+    )
+    verdict_fingerprint: str = Field(
+        default="",
+        description=(
+            "Stable digest of the dod_verify counters that released or "
+            "withheld this decision (total/verified/failed/non-probative/"
+            "behaviour-proving). Lets two receipts be compared for 'same "
+            "verdict' without re-parsing free text."
+        ),
+    )
     linear_comment_posted: bool = Field(
         default=False, description="Whether an audit/gap comment was posted."
     )

@@ -180,6 +180,9 @@ handler_routing:
         module: "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep"
       description: "gh api enumerate -> extract binding -> dod_verify -> Linear flip/comment"
       output_fields:
+        - mode
+        - disarm_triggered_by
+        - flip_budget_remaining
         - companions_scanned
         - backfill_pool_size
         - backfill_candidates_selected
@@ -247,6 +250,42 @@ error_handling:
 
       recoverable: false
       retry_strategy: "none"
+    - name: "PARENT_HAS_OPEN_CHILDREN"
+      description: >
+        The ticket is a parent with at least one child not in a completed/canceled state, read live from Linear on this tick (OMN-17658 F-R5-7). Recorded as SKIPPED_HAS_CHILDREN and counted under tickets_skipped. A parent is not done while its own decomposition is open, and dod_verify structurally cannot know that — it verifies the checks in the PARENT's OCC contract, and a child ticket carries its own separate acceptance criteria that never appear there. A `children` connection that cannot be interpreted (absent, malformed, or a full first page that may be truncated) is ERROR_LINEAR_API, never "no children".
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "RECURRING_BOT_COMPANION"
+      description: >
+        The bound companion is the evidence companion of a recurring bot product PR — a standing refresh emission — rather than of a PR that did the ticket's work (OMN-17934). Recorded as SKIPPED_RECURRING_COMPANION. The discriminator is a conjunction of the product PR's author being a GitHub App/Bot AND its title matching the measured pin-bump shape, derived from omnibase_infra#3192 and #3199 and positive-controlled over 300 PRs (16 matches, all bot-authored, zero human). A fetch failure on the product PR is ERROR_GITHUB_API, never a flip: "I could not check" must not resolve to "so I will write".
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PRIOR_CLOSER_FLIP_REVERTED"
+      description: >
+        The ticket's Linear state history shows a completed segment opened by an integration (actorId null — the shape this sweep's own issueUpdate has) and closed by a real actor (OMN-17934). Somebody has already disagreed with an automated close, and re-closing from the same mechanism would overrule that disagreement with a cron tick. Recorded as SKIPPED_PRIOR_REVERT, and it also DISARMS the rest of the run (see AUTOCLOSE_DISARMED).
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "FLIP_BUDGET_EXHAUSTED"
+      description: >
+        max_flips_per_run was already spent by earlier candidates in this run (OMN-17658). Recorded as SKIPPED_FLIP_BUDGET_EXHAUSTED. A truncation, never a verdict: the evidence cleared every conjunct and the next run offers the candidate again. Checked at the write point rather than at intake, so a candidate that would only have gapped still gets its gap comment.
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "AUTOCLOSE_DISARMED"
+      description: >
+        The run refused to write (OMN-17658). Either the caller handed in `disarmed_by_ticket` from the persisted ONEX_AUTOCLOSE_DISARMED marker, or a candidate mid-run proved a closer flip had already been undone by a person. Every remaining candidate is recorded SKIPPED_DISARMED and the result reports mode=disarmed naming the trigger. Weaker than the kill switch on purpose: a halted run does zero I/O and produces no receipt, and an operator deciding whether to re-arm needs one.
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "FLIP_READBACK_UNCONFIRMED"
+      description: >
+        issueUpdate(stateId) reported success but a post-write read of the ticket's own state history showed no completed segment newer than the pre-write head (OMN-17658). Recorded as ERROR_READBACK_UNCONFIRMED and counted under tickets_errored, never as a flip: the API agreeing to a request is not evidence the board moved, and a closer whose receipt and whose board disagree is making a claim rather than offering a proof.
+
+      recoverable: true
+      retry_strategy: "none"
     - name: "GITHUB_FILES_PAYLOAD_UNREADABLE"
       # OMN-16736. The changed-file listing is a binding input, not a
       # decoration: `contracts/<ticket>.yaml` entries are what disambiguate a
@@ -268,6 +307,17 @@ io_operations:
       - backfill_max_candidates
       - backfill_pool_size
       - backfill_rotation_minutes
+      # OMN-17658. `scheduled_apply` is THE arming authority for unattended
+      # runs and it is declared HERE, in the contract, rather than in the
+      # workflow expression that armed the closer at #3195. `trigger` carries
+      # only the fact of what launched the run. `apply` is unchanged and
+      # remains the dispatch-time write request.
+      - trigger
+      - scheduled_apply
+      - max_flips_per_run
+      - disarmed_by_ticket
+      - history_page_size
+      - history_max_pages
       - apply
       - max_companions
       - dispatch_cwd
@@ -276,6 +326,10 @@ io_operations:
       - close_if_done_label
       - exclude_tickets
     output_fields:
+      - mode
+      - disarm_triggered_by
+      - disarm_reason
+      - flip_budget_remaining
       - companions_scanned
       - backfill_pool_size
       - backfill_candidates_selected

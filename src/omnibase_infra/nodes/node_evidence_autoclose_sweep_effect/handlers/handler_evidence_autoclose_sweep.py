@@ -131,6 +131,12 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_mode import (
+    EnumEvidenceAutocloseMode,
+)
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
+    EnumEvidenceAutocloseTrigger,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_outcome import (
     ModelEvidenceAutocloseOutcome,
 )
@@ -272,6 +278,13 @@ query GetIssue($id: String!) {
     state { id name type }
     labels(first: 50) { nodes { name } }
     team { id }
+    # OMN-17658 F-R5-7. The children conjunct is resolved from THIS read, on
+    # this tick, rather than from anything cached: a child opened between two
+    # sweeps must be able to withhold the parent's flip on the very next run.
+    # 100 is far above any observed decomposition; a parent that exceeds it
+    # would truncate, so the guard treats a full page as unreadable rather than
+    # as "these are all the children" (see `_open_children`).
+    children(first: 100) { nodes { id identifier state { id name type } } }
   }
 }
 """
@@ -316,12 +329,89 @@ query IssueComments($id: String!, $after: String) {
 }
 """
 
+# OMN-17658 / OMN-17934. The ticket's own state history, which two fences and
+# one readback are all resolved from:
+#
+#   * the PRIOR-REVERT fence — did a closer flip on this ticket already get
+#     undone by a real person? `actorId` is null for an integration/API write
+#     (which is what this sweep's LINEAR_API_KEY mutation is) and set for a
+#     human, so "a completed segment opened with actorId null and closed by an
+#     entry carrying an actorId" is exactly the shape of "the closer said Done
+#     and somebody disagreed". Same discrimination
+#     node_sync_revert_watchdog_effect makes, one direction over.
+#   * the RUN DISARM — the first such candidate stops the rest of the run
+#     writing.
+#   * the BOUND READBACK — the pre-write newest entry id, compared against the
+#     completed segment the write is supposed to have produced.
+#
+# `orderBy: createdAt` returns newest-first, so a capped walk truncates the
+# OLDEST end. Every consumer above reads from the new end.
+_ISSUE_HISTORY_QUERY = """
+query IssueStateHistory($id: String!, $first: Int!, $after: String) {
+  issue(id: $id) {
+    history(first: $first, after: $after, orderBy: createdAt) {
+      nodes {
+        id
+        createdAt
+        actorId
+        fromState { id name type }
+        toState { id name type }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+# OMN-17934. The recurring-bot product-PR discriminator, derived from the two
+# real PRs that produced the OMN-17292 mis-flip — omnibase_infra#3192
+# (`chore(OMN-17292): advance omnimarket contract pin to 55c8f2642214`, author
+# `onexbot-occ-writer[bot]`, `user.type == "Bot"`) and #3199 (same shape).
+#
+# It is a CONJUNCTION and both halves are load-bearing:
+#
+#   * the author must be a GitHub App/Bot. Without it, a human PR that happens
+#     to say "advance the contract pin" would be fenced off — a false refusal
+#     costs a ticket that stays open, but it is still a refusal the operator
+#     did not ask for.
+#   * the title must match the recurring shape. Without it, EVERY bot-authored
+#     product PR is fenced, including the legitimate release and dependency
+#     work that carries its own ticket.
+#
+# Positive control, 2026-09-05: 300 omnibase_infra PRs, 16 title matches, all
+# 16 bot-authored, zero human matches. Negative control: `chore(deps): bump
+# kafka-python ...` (also bot-authored, also recurring) does NOT match, and
+# that is a recorded residual rather than an oversight — this fence closes the
+# class that was measured to have caused a wrong flip, and widening it to every
+# recurring bot shape needs its own evidence.
+_RECURRING_PRODUCT_PR_TITLE_RE = re.compile(
+    r"^chore\([^)]*\):\s*advance\b.*\bcontract pin\b", re.IGNORECASE
+)
+# `evidence(OMN-17292): OCC companion for OmniNode-ai/omnibase_infra#3192`.
+# The companion names its product PR in its own title; that is the only link
+# between an OCC companion and the change it is evidence for that this node can
+# read without cloning the companion.
+_COMPANION_PRODUCT_PR_RE = re.compile(r"\bfor\s+([\w.-]+/[\w.-]+)#(\d+)\b")
+
+# OMN-17658 F-R5-8. Stamped on every flip audit comment this sweep writes, so a
+# LATER run can tell a closer-authored Done from a human one by reading the
+# ticket rather than by inferring it from `actorId`. It is the durable anchor
+# the prior-revert fence should eventually resolve from; today it covers only
+# tickets flipped from this commit onward, which is why the `actorId` shape
+# above is still what the fence reads. Both agree on the OMN-17292 case.
+_FLIP_COMMENT_CLASS_MARKER = "<!-- onex-autoclose class=flipped -->"
+
 # Page cap for the comment-history read. Exhausting it WITHOUT reaching the end
 # of the connection is an unreadable history, not an empty one — the caller
 # fails closed. 5 x 100 comfortably exceeds any real ticket's comment count;
 # a ticket that somehow exceeds it stops receiving sweep comments rather than
 # receiving duplicates, which is the correct direction to be wrong in.
 _MAX_COMMENT_PAGES = 5
+
+# OMN-17658. First-page size of the `children` connection on `_ISSUE_QUERY`. A
+# parent that fills it is treated as UNREADABLE rather than as fully
+# enumerated — see `_open_children`.
+_MAX_CHILDREN_PAGE = 100
 
 
 async def _reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
@@ -406,6 +496,216 @@ def _rotating_slice[TypeSliceItem](
     start = (tick * width) % len(pool)
     doubled = pool + pool
     return doubled[start : start + width]
+
+
+# -- OMN-17658 / OMN-17934: the safety fences --------------------------------
+#
+# Every function below NARROWS. None of them can release a flip that the
+# existing predicate withholds; each can only withhold one the predicate would
+# have released. That asymmetry is the whole safety argument, and it is why
+# they are pure module-level functions with direct tests rather than branches
+# buried in the 500-line `_process_ticket`.
+
+
+def _open_children(issue: dict[str, object]) -> tuple[str, ...] | None:
+    """Identifiers of this ticket's non-terminal children. None if unreadable.
+
+    ``None`` means "the payload did not carry an interpretable ``children``
+    connection", NEVER "this ticket has no children" — the two must not
+    collapse, because one releases a flip and the other must block it. A
+    missing key is the shape a drifted query would produce, and a drifted query
+    that silently reads as "no children" would retire this fence without
+    changing a single line of the fence itself.
+
+    A full first page is also unreadable: the connection is capped at 100 and a
+    parent that hits the cap may have open children past it.
+    """
+    connection = issue.get("children")
+    if not isinstance(connection, dict):
+        return None
+    nodes = connection.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+    if len(nodes) >= _MAX_CHILDREN_PAGE:
+        return None
+    open_children: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            return None
+        state = node.get("state")
+        state_type = str(state.get("type", "")) if isinstance(state, dict) else ""
+        if not state_type:
+            return None
+        if state_type not in ("completed", "canceled"):
+            identifier = str(node.get("identifier") or node.get("id") or "?")
+            open_children.append(identifier)
+    return tuple(open_children)
+
+
+def _product_pr_ref(companion_title: str) -> tuple[str, int] | None:
+    """``(owner/repo, number)`` of the product PR an OCC companion is for.
+
+    ``None`` when the title names none — an OCC observation append, for
+    instance, carries no product PR at all. That is not a refusal: a fence that
+    cannot classify a candidate must leave it to the rest of the pipeline
+    rather than guess in either direction.
+    """
+    match = _COMPANION_PRODUCT_PR_RE.search(companion_title)
+    if match is None:
+        return None
+    return match.group(1), int(match.group(2))
+
+
+def _is_recurring_bot_product_pr(pull_request: dict[str, object]) -> bool:
+    """Is this product PR an emission of a standing refresh bot?
+
+    See ``_RECURRING_PRODUCT_PR_TITLE_RE`` for the derivation and both
+    controls. The conjunction is deliberate and neither half is redundant.
+    """
+    user = pull_request.get("user")
+    user_type = str(user.get("type", "")) if isinstance(user, dict) else ""
+    if user_type.strip().lower() != "bot":
+        return False
+    title = str(pull_request.get("title") or "")
+    return _RECURRING_PRODUCT_PR_TITLE_RE.search(title) is not None
+
+
+def _newest_first(history: list[dict[str, object]]) -> list[dict[str, object]]:
+    """History sorted newest-first by ``createdAt``, ties broken by id.
+
+    Linear already returns this order, and the handler still sorts: a guard
+    whose correctness depends on an undocumented server-side ordering is a
+    guard that silently inverts the day the ordering changes.
+    """
+    return sorted(
+        history,
+        key=lambda entry: (
+            str(entry.get("createdAt") or ""),
+            str(entry.get("id") or ""),
+        ),
+        reverse=True,
+    )
+
+
+def _head_entry_id(history: list[dict[str, object]]) -> str:
+    """Newest history entry id, or "" for an empty history."""
+    ordered = _newest_first(history)
+    return str(ordered[0].get("id") or "") if ordered else ""
+
+
+def _closer_flip_was_reverted(history: list[dict[str, object]]) -> str:
+    """Reason text when a CLOSER-authored Done on this ticket was undone.
+
+    Empty string means no such reversal was seen in the walked history.
+
+    The shape, read newest-first:
+
+      1. the most recent ``completed -> non-completed`` transition carrying a
+         real ``actorId`` — a person reopened the ticket;
+      2. the transition INTO that completed state, immediately before it. If
+         its ``actorId`` is null the Done was written by an integration — which
+         is what this sweep's own ``issueUpdate`` is.
+
+    Both halves are required. A human Done that a human reopened is an ordinary
+    ticket that went back into flight, and refusing to ever close it again
+    would be a fence on the wrong thing; what must not be overruled by a cron
+    tick is a person disagreeing with THIS MECHANISM's close.
+
+    A pre-OMN-17658 flip is only distinguishable this way. Flips written from
+    this commit onward also carry ``_FLIP_COMMENT_CLASS_MARKER`` on their audit
+    comment, which is the stronger anchor; it is not read here because it would
+    cost a comment-history call on every candidate to identify a condition the
+    ``actorId`` shape already identifies for the whole corpus, including the
+    OMN-17292 case this fence exists for.
+    """
+    ordered = _newest_first(history)
+    for index, entry in enumerate(ordered):
+        from_state = entry.get("fromState")
+        to_state = entry.get("toState")
+        if not isinstance(from_state, dict) or not isinstance(to_state, dict):
+            continue
+        if str(from_state.get("type")) != "completed":
+            continue
+        if str(to_state.get("type")) == "completed":
+            continue
+        if not entry.get("actorId"):
+            # An integration undid it — that is the OMN-16536 sync-revert
+            # pattern, which node_sync_revert_watchdog_effect owns. Not a human
+            # disagreement, so not this fence's business.
+            continue
+        for prior in ordered[index + 1 :]:
+            prior_to = prior.get("toState")
+            if not isinstance(prior_to, dict):
+                continue
+            if str(prior_to.get("type")) != "completed":
+                continue
+            if prior.get("actorId"):
+                return ""
+            return (
+                "a previous Done on this ticket was written by an integration "
+                f"(history entry {prior.get('id')}, actorId null — the shape this "
+                "sweep's own flip has) and was then reopened by a real actor "
+                f"(entry {entry.get('id')}). Somebody has already disagreed with "
+                "an automated close here; re-closing it from the same mechanism "
+                "would overrule that disagreement with a cron tick."
+            )
+        return ""
+    return ""
+
+
+def _completed_entry_since(history: list[dict[str, object]], head_entry_id: str) -> str:
+    """Id of a completed-state entry NEWER than ``head_entry_id``, or "".
+
+    This is the bound half of the flip readback. ``issueUpdate`` returning
+    ``success: true`` is the API agreeing to the request; this is the board
+    having changed. The two are not the same claim and only one of them is
+    evidence.
+    """
+    for entry in _newest_first(history):
+        entry_id = str(entry.get("id") or "")
+        if entry_id == head_entry_id:
+            return ""
+        to_state = entry.get("toState")
+        if isinstance(to_state, dict) and str(to_state.get("type")) == "completed":
+            return entry_id
+    return ""
+
+
+def _mode_for(
+    effective_apply: bool, trigger: EnumEvidenceAutocloseTrigger
+) -> EnumEvidenceAutocloseMode:
+    """The write mode a run resolved to, for the receipt.
+
+    `dry_run` is a boolean and cannot distinguish a dispatched preview from a
+    scheduled run under a contract that declines to arm it. Those are different
+    facts about the closer and an operator asking "why did nothing close last
+    night?" needs the second one named.
+    """
+    if not effective_apply:
+        return EnumEvidenceAutocloseMode.DRY_RUN
+    if trigger is EnumEvidenceAutocloseTrigger.SCHEDULE:
+        return EnumEvidenceAutocloseMode.APPLY_SCHEDULED
+    return EnumEvidenceAutocloseMode.APPLY_DISPATCHED
+
+
+def _verdict_fingerprint(
+    *,
+    total_checks: int,
+    verified_count: int,
+    failed_count: int,
+    non_probative_count: int,
+    behavior_proving_count: int,
+) -> str:
+    """Stable digest of the counters a decision was reached on.
+
+    Lets two receipts be compared for "same verdict" without re-parsing the
+    free-text reason, which is the only place those numbers appeared before.
+    """
+    preimage = (
+        f"total={total_checks};verified={verified_count};failed={failed_count};"
+        f"non_probative={non_probative_count};behavior={behavior_proving_count}"
+    )
+    return hashlib.sha256(preimage.encode()).hexdigest()[:16]
 
 
 def _as_int(value: object) -> int:
@@ -884,6 +1184,51 @@ class _LinearClient:
             cursor = end_cursor
         return None
 
+    async def fetch_issue_history(
+        self, issue_id: str, page_size: int, max_pages: int
+    ) -> tuple[list[dict[str, object]] | None, str]:
+        """One ticket's state history, newest-first. ``(None, error)`` on failure.
+
+        Fails closed on any failed page, exactly like ``fetch_comment_bodies``
+        and for the same reason: a PARTIAL history is indistinguishable from a
+        clean one, and both the prior-revert fence and the flip readback resolve
+        "not seen" as "safe to proceed". A read that could not complete must
+        therefore refuse rather than return what it managed to get.
+
+        Hitting ``max_pages`` is NOT a failure — the walk is newest-first, so
+        the cap truncates the oldest end, and every consumer reads from the new
+        end. A reversal older than the walk is invisible, which is the one
+        direction this read is allowed to be wrong in.
+        """
+        collected: list[dict[str, object]] = []
+        cursor: str | None = None
+        for _ in range(max_pages):
+            data = await self._query(
+                _ISSUE_HISTORY_QUERY,
+                {"id": issue_id, "first": page_size, "after": cursor},
+            )
+            if data is None:
+                return None, "Failed to fetch issue state history from Linear."
+            issue = data.get("issue")
+            if not isinstance(issue, dict):
+                return None, "Linear returned no issue for the history read."
+            connection = issue.get("history")
+            if not isinstance(connection, dict):
+                return None, "Malformed history connection in Linear response."
+            nodes = connection.get("nodes")
+            if not isinstance(nodes, list):
+                return None, "Malformed history nodes in Linear response."
+            collected.extend(node for node in nodes if isinstance(node, dict))
+            page_info = connection.get("pageInfo")
+            page_info = page_info if isinstance(page_info, dict) else {}
+            if not page_info.get("hasNextPage"):
+                break
+            end_cursor = page_info.get("endCursor")
+            if not isinstance(end_cursor, str) or not end_cursor:
+                break
+            cursor = end_cursor
+        return collected, ""
+
     async def create_comment(self, issue_id: str, body: str) -> bool:
         """Post a comment on an issue. False on any failure."""
         data = await self._query(
@@ -1122,9 +1467,48 @@ class HandlerEvidenceAutocloseSweep:
             )
             return ModelEvidenceAutocloseSweepResult(
                 correlation_id=correlation_id,
-                dry_run=not request.apply,
+                dry_run=True,
+                mode=EnumEvidenceAutocloseMode.HALTED,
                 kill_switch_engaged=True,
             )
+
+        # OMN-17658. THE ARMING RESOLUTION, in one place, from typed inputs.
+        #
+        # Before this, whether an unattended run wrote was decided by a
+        # `github.event_name == 'schedule'` disjunct inside a GitHub Actions
+        # expression — outside the contract, outside the type system, and
+        # outside every test that did not parse YAML. The workflow now reports
+        # only WHAT LAUNCHED IT (`trigger`) and the contract decides whether a
+        # run of that class may write (`scheduled_apply`).
+        #
+        # A dispatch is deliberately NOT covered by `scheduled_apply`: the
+        # rehearsal surface — dispatch, leave the box unticked, read every
+        # decision, write none — has to survive arming, or arming removes the
+        # only way to preview what the closer is about to do.
+        scheduled_write = (
+            request.trigger is EnumEvidenceAutocloseTrigger.SCHEDULE
+            and request.scheduled_apply
+        )
+        effective_apply = request.apply or scheduled_write
+
+        # OMN-17658 auto-disarm, the persisted half. A non-empty marker binds
+        # the run before its first candidate; the workflow supplies it from the
+        # ONEX_AUTOCLOSE_DISABLED-shaped repo variable ONEX_AUTOCLOSE_DISARMED,
+        # so a disarm survives the run that discovered the problem and reaches
+        # the scheduled runs nobody is watching. It is weaker than the kill
+        # switch on purpose: a halted run produces no receipt, and an operator
+        # deciding whether to re-arm needs one.
+        disarm_ticket = request.disarmed_by_ticket.strip()
+        disarm_reason = (
+            f"A previous closer flip on {disarm_ticket} was found unsafe, and "
+            "this run was handed that marker before it started. Every "
+            "candidate below is refused unwritten until an operator clears the "
+            "marker."
+            if disarm_ticket
+            else ""
+        )
+        started_disarmed = bool(disarm_ticket)
+        flip_budget = request.max_flips_per_run
 
         now = datetime.now(tz=UTC)
         since_iso = (now - timedelta(hours=request.lookback_hours)).strftime(
@@ -1140,7 +1524,15 @@ class HandlerEvidenceAutocloseSweep:
         if enum_error:
             return ModelEvidenceAutocloseSweepResult(
                 correlation_id=correlation_id,
-                dry_run=not request.apply,
+                dry_run=not effective_apply,
+                mode=(
+                    EnumEvidenceAutocloseMode.DISARMED
+                    if started_disarmed
+                    else _mode_for(effective_apply, request.trigger)
+                ),
+                disarm_triggered_by=disarm_ticket,
+                disarm_reason=disarm_reason,
+                flip_budget_remaining=flip_budget,
                 success=False,
                 error_message=f"GitHub enumeration failed: {enum_error}",
             )
@@ -1336,7 +1728,11 @@ class HandlerEvidenceAutocloseSweep:
                 ticket_id=ticket_id,
                 companion_pr_number=number,
                 companion_pr_url=url,
+                companion_title=title,
                 request=request,
+                apply_writes=effective_apply,
+                disarmed_by=disarm_ticket,
+                flip_budget_remaining=flip_budget,
                 # The state short-circuit above already read this ticket from
                 # Linear. Handing that read down rather than repeating it keeps
                 # the reordering a pure saving: one Linear read and one file
@@ -1349,6 +1745,29 @@ class HandlerEvidenceAutocloseSweep:
                 ),
             )
             outcomes.append(outcome.model_copy(update={"enumeration_arm": arm}))
+
+            # OMN-17658. The two run-level counters the loop maintains, both
+            # derived from the outcome that was just recorded rather than from
+            # a flag the callee set — so a decision and its effect on the run
+            # cannot disagree.
+            if outcome.decision is EnumEvidenceAutocloseDecision.FLIPPED:
+                flip_budget = max(0, flip_budget - 1)
+            if (
+                outcome.decision is EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
+                and not disarm_ticket
+            ):
+                # AUTO-DISARM. One candidate proving that a closer flip was
+                # already undone by a person is enough to stop the REST of this
+                # run writing — not merely to refuse that ticket. A mechanism
+                # that has been overruled once has no standing to keep writing
+                # under the same predicate on the same tick.
+                disarm_ticket = outcome.ticket_id
+                disarm_reason = outcome.reason
+                logger.warning(
+                    "DISARMED by %s — refusing every remaining flip in this run. %s",
+                    outcome.ticket_id,
+                    outcome.reason,
+                )
 
         flipped = sum(
             1 for o in outcomes if o.decision == EnumEvidenceAutocloseDecision.FLIPPED
@@ -1386,6 +1805,19 @@ class HandlerEvidenceAutocloseSweep:
                 # nothing new. A skip, not a gap post — counting it under
                 # `gap_posted` would report comments that were never written.
                 EnumEvidenceAutocloseDecision.SKIPPED_DUPLICATE_COMMENT,
+                # OMN-17658 / OMN-17934. Five refusals, and every one of them
+                # is a SKIP rather than a gap: in none of these cases did the
+                # sweep form an opinion about the ticket's EVIDENCE. A parent
+                # with open children, a recurring-bot companion, an already
+                # overruled close, a spent flip budget and a disarmed run are
+                # statements about whether this mechanism may act, not about
+                # whether the work is proven — counting them as gaps would
+                # report verdicts that were never reached.
+                EnumEvidenceAutocloseDecision.SKIPPED_HAS_CHILDREN,
+                EnumEvidenceAutocloseDecision.SKIPPED_RECURRING_COMPANION,
+                EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                EnumEvidenceAutocloseDecision.SKIPPED_FLIP_BUDGET_EXHAUSTED,
+                EnumEvidenceAutocloseDecision.SKIPPED_DISARMED,
             )
         )
         errored = sum(
@@ -1397,12 +1829,28 @@ class HandlerEvidenceAutocloseSweep:
                 EnumEvidenceAutocloseDecision.ERROR_VERIFY_UNPARSEABLE,
                 EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
                 EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
+                # OMN-17658. A write the board did not confirm is an ERROR, not
+                # a flip: `issueUpdate: success` is the API agreeing to the
+                # request, and only the readback is evidence the state moved.
+                EnumEvidenceAutocloseDecision.ERROR_READBACK_UNCONFIRMED,
             )
         )
 
         return ModelEvidenceAutocloseSweepResult(
             correlation_id=correlation_id,
-            dry_run=not request.apply,
+            # OMN-17658. `dry_run` answers "could this run have written?", so a
+            # run that started disarmed is a dry run whatever its arming said.
+            # A run disarmed MID-flight is not: writes before the trigger were
+            # real, and the outcomes say which. `mode` carries the distinction.
+            dry_run=not effective_apply or started_disarmed,
+            mode=(
+                EnumEvidenceAutocloseMode.DISARMED
+                if disarm_ticket
+                else _mode_for(effective_apply, request.trigger)
+            ),
+            disarm_triggered_by=disarm_ticket,
+            disarm_reason=disarm_reason,
+            flip_budget_remaining=flip_budget,
             # OMN-17342. A backfill enumeration failure is reported WITHOUT
             # discarding the forward arm's decisions. The forward arm is the
             # freshness path and it already completed; letting an opt-in second
@@ -1661,7 +2109,11 @@ class HandlerEvidenceAutocloseSweep:
         ticket_id: str,
         companion_pr_number: int,
         companion_pr_url: str,
+        companion_title: str,
         request: ModelEvidenceAutocloseSweepRequest,
+        apply_writes: bool,
+        disarmed_by: str,
+        flip_budget_remaining: int,
         prefetched_issue: dict[str, object] | None = None,
     ) -> ModelEvidenceAutocloseOutcome:
         # OMN-17891. The caller-asserted fence, and it is FIRST -- ahead of the
@@ -1686,6 +2138,26 @@ class HandlerEvidenceAutocloseSweep:
                     f"{ticket_id} is on the caller-supplied exclusion list — "
                     "refused before any Linear read, dod_verify never ran, and "
                     "no verdict was reached about this ticket by this run."
+                ),
+            )
+
+        # OMN-17658 AUTO-DISARM. Second, immediately after the caller-asserted
+        # fence and still ahead of every read. A disarmed run does not spend the
+        # verifier on candidates it has already decided not to write: the run's
+        # authority to act is gone, so a verdict about this ticket's evidence
+        # would be a number nobody may act on. The candidate is RECORDED, not
+        # dropped — a disarmed run has to be legible as disarmed, and a silent
+        # one reads exactly like a run that found nothing.
+        if disarmed_by:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.SKIPPED_DISARMED,
+                reason=(
+                    f"Run disarmed by {disarmed_by} — a closer flip on that "
+                    "ticket was found unsafe, so this run refuses to act on any "
+                    "further candidate until an operator re-arms it."
                 ),
             )
 
@@ -1733,6 +2205,147 @@ class HandlerEvidenceAutocloseSweep:
                 decision=EnumEvidenceAutocloseDecision.SKIPPED_ALREADY_DONE,
                 reason=f"Ticket state type is already '{state_type}'.",
             )
+
+        # Hoisted above the fences below (OMN-17658): the state-history read and
+        # the flip readback both address the issue by its UUID, so a payload
+        # that carries no id cannot be fenced OR written and has to refuse here
+        # rather than three branches later.
+        issue_id = str(issue.get("id") or "")
+        team = issue.get("team")
+        team_id = str(team.get("id") or "") if isinstance(team, dict) else ""
+        if not issue_id:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                reason=(
+                    "Linear issue payload carries no id — neither the "
+                    "state-history fences nor a flip readback can address this "
+                    "ticket, so nothing about it can be established."
+                ),
+            )
+
+        # OMN-17658 F-R5-7. THE CHILDREN CONJUNCT, read live from this tick's own
+        # Linear payload. A parent whose decomposition is still open is not
+        # Done, and dod_verify structurally cannot know that: it verifies the
+        # checks in the PARENT's OCC contract, and a child ticket carries its
+        # own separate acceptance criteria that never appear there. Measured
+        # 2026-09-05: 30 of 238 open beta tickets are parents with open
+        # children; 4 of those already carry the behaviour-proof receipt that is
+        # the hardest existing conjunct to satisfy.
+        #
+        # Ahead of dod_verify because it is free — the payload is already in
+        # hand — and because a candidate refused here should not cost 15s of
+        # verifier.
+        open_children = _open_children(issue)
+        if open_children is None:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                reason=(
+                    "The ticket's `children` connection could not be read from "
+                    "the Linear payload (absent, malformed, or a full first "
+                    "page that may be truncated). Refusing to treat an "
+                    "unreadable decomposition as an empty one."
+                ),
+            )
+        if open_children:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.SKIPPED_HAS_CHILDREN,
+                reason=(
+                    f"{ticket_id} is a parent with {len(open_children)} child "
+                    f"ticket(s) not in a completed/canceled state: "
+                    f"{', '.join(open_children)}. A parent is not done while its "
+                    "own decomposition is open, and dod_verify cannot see a "
+                    "child's acceptance criteria — they are not in this "
+                    "ticket's contract."
+                ),
+            )
+
+        # OMN-17934 shape 2 + OMN-17658 readback: ONE state-history read serving
+        # both. The pre-write head id captured here is what the post-write
+        # readback is compared against, so the read has to happen before the
+        # write path regardless of what the fence concludes.
+        history, history_error = await self._linear.fetch_issue_history(
+            issue_id, request.history_page_size, request.history_max_pages
+        )
+        if history is None:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                reason=(
+                    "Could not read the ticket's state history, so neither the "
+                    "prior-revert fence nor the flip readback can be resolved: "
+                    f"{history_error}"
+                ),
+            )
+        pre_write_head_entry_id = _head_entry_id(history)
+        revert_reason = _closer_flip_was_reverted(history)
+        if revert_reason:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                reason=revert_reason,
+                pre_write_head_entry_id=pre_write_head_entry_id,
+            )
+
+        # OMN-17934 shape 1. THE RECURRENCE FENCE. The bound companion names its
+        # product PR in its own title; if that PR is an emission of a standing
+        # refresh bot then this candidate's "new evidence" is the bot having run
+        # again, not anybody having done the ticket's work. OMN-17292 accrued
+        # fourteen such PRs and re-cleared the flip predicate on one of them.
+        #
+        # Fails CLOSED on a fetch failure: "I could not check whether this is a
+        # recurring bot PR" must never resolve to "so I will flip it".
+        product_ref = _product_pr_ref(companion_title)
+        if product_ref is not None:
+            product_repo, product_number = product_ref
+            product_pr, product_error = await self._run_gh_command(
+                ["gh", "api", f"repos/{product_repo}/pulls/{product_number}"],
+                request.gh_timeout_seconds,
+            )
+            if not isinstance(product_pr, dict):
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
+                    reason=(
+                        f"Could not read the bound product PR {product_repo}#"
+                        f"{product_number} named by the companion title, so the "
+                        "recurring-companion fence could not be resolved: "
+                        f"{product_error or 'no payload'}"
+                    ),
+                )
+            if _is_recurring_bot_product_pr(product_pr):
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.SKIPPED_RECURRING_COMPANION,
+                    reason=(
+                        f"The bound companion is the evidence companion of "
+                        f"{product_repo}#{product_number} "
+                        f"({str(product_pr.get('title') or '')!r}), a recurring "
+                        "bot emission rather than a PR that did this ticket's "
+                        "work. A ticket that accrues these re-clears the flip "
+                        "predicate every time one merges, indefinitely "
+                        "(OMN-17934). Evidence arriving across several HUMAN "
+                        "PRs is unaffected — only the bound companion's own "
+                        "product PR is examined."
+                    ),
+                    pre_write_head_entry_id=pre_write_head_entry_id,
+                )
 
         dod_result, exit_code, verify_error = await self._run_dod_verify_command(
             ticket_id, request.dispatch_cwd, request.dod_verify_timeout_seconds
@@ -1831,10 +2444,6 @@ class HandlerEvidenceAutocloseSweep:
             and verified_count + non_probative_count == total_checks
         )
 
-        issue_id = str(issue.get("id") or "")
-        team = issue.get("team")
-        team_id = str(team.get("id") or "") if isinstance(team, dict) else ""
-
         if all_verified:
             # OMN-15911: green is necessary, not sufficient — and the FIRST
             # question is what the green legs proved, not what the ticket body
@@ -1871,7 +2480,7 @@ class HandlerEvidenceAutocloseSweep:
                     ticket_id=ticket_id,
                     companion_pr_number=companion_pr_number,
                     companion_pr_url=companion_pr_url,
-                    apply=request.apply,
+                    apply=apply_writes,
                     issue_id=issue_id,
                     total_checks=total_checks,
                     verified_count=verified_count,
@@ -1891,7 +2500,7 @@ class HandlerEvidenceAutocloseSweep:
                     ticket_id=ticket_id,
                     companion_pr_number=companion_pr_number,
                     companion_pr_url=companion_pr_url,
-                    apply=request.apply,
+                    apply=apply_writes,
                     issue_id=issue_id,
                     ac_gap_reason=ac_gap_reason,
                     uncovered=uncovered,
@@ -1915,7 +2524,42 @@ class HandlerEvidenceAutocloseSweep:
                 f"0 failed, {behavior_proving_count} behavior-proving. "
                 f"Companion: {companion_pr_url}"
             )
-            if not request.apply:
+            fingerprint = _verdict_fingerprint(
+                total_checks=total_checks,
+                verified_count=verified_count,
+                failed_count=failed_count,
+                non_probative_count=non_probative_count,
+                behavior_proving_count=behavior_proving_count,
+            )
+
+            # OMN-17658. THE PER-RUN FLIP BUDGET, checked here and not earlier:
+            # a candidate that would only have gapped still gets its gap
+            # comment, so the budget bounds WRITES OF DONE and nothing else.
+            # Applied in DRY-RUN too, so a preview is an honest preview of a
+            # truncated run rather than of an unbounded one.
+            if flip_budget_remaining <= 0:
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.SKIPPED_FLIP_BUDGET_EXHAUSTED,
+                    reason=(
+                        f"max_flips_per_run={request.max_flips_per_run} was "
+                        "already spent by earlier candidates in this run. This "
+                        "is a truncation, not a verdict: the evidence cleared "
+                        "every conjunct and the next run will offer this "
+                        f"candidate again. {reason}"
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                    verdict_fingerprint=fingerprint,
+                    pre_write_head_entry_id=pre_write_head_entry_id,
+                )
+
+            if not apply_writes:
                 logger.info("[DRY-RUN] Would flip %s to Done (%s)", ticket_id, reason)
                 return ModelEvidenceAutocloseOutcome(
                     ticket_id=ticket_id,
@@ -1928,15 +2572,17 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_failed_count=failed_count,
                     dod_verify_non_probative_count=non_probative_count,
                     dod_verify_behavior_proving_count=behavior_proving_count,
+                    verdict_fingerprint=fingerprint,
+                    pre_write_head_entry_id=pre_write_head_entry_id,
                     applied=False,
                 )
-            if not issue_id or not team_id:
+            if not team_id:
                 return ModelEvidenceAutocloseOutcome(
                     ticket_id=ticket_id,
                     companion_pr_number=companion_pr_number,
                     companion_pr_url=companion_pr_url,
                     decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
-                    reason="Linear issue payload missing id/team — refusing to flip.",
+                    reason="Linear issue payload carries no team — refusing to flip.",
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
@@ -1978,17 +2624,86 @@ class HandlerEvidenceAutocloseSweep:
             # reached. The flip path is self-limiting by its own terminal
             # state; the gap paths have no such terminal state, which is why
             # they need the read-before-write gate and this does not.
+            # OMN-17658. THE BOUND READBACK. `issueUpdate` returning
+            # `success: true` is the API agreeing to the request; it is not
+            # evidence the board moved. Re-read the ticket's own state history
+            # and require a completed segment the PRE-WRITE read did not have.
+            # A write that cannot be read back is ERROR_READBACK_UNCONFIRMED and
+            # is never counted as a flip — the alternative is a closer whose
+            # receipt and whose board disagree, which is a claim rather than a
+            # proof.
+            post_history, readback_error = await self._linear.fetch_issue_history(
+                issue_id, request.history_page_size, request.history_max_pages
+            )
+            readback_entry_id = (
+                _completed_entry_since(post_history, pre_write_head_entry_id)
+                if post_history is not None
+                else ""
+            )
+            if not readback_entry_id:
+                logger.error(
+                    "UNCONFIRMED flip of %s: issueUpdate reported success but the "
+                    "post-write state history shows no new completed segment "
+                    "(pre_write_head=%s, error=%s)",
+                    ticket_id,
+                    pre_write_head_entry_id or "<empty history>",
+                    readback_error or "<none>",
+                )
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.ERROR_READBACK_UNCONFIRMED,
+                    reason=(
+                        "issueUpdate(stateId) reported success, but the "
+                        "post-write read of this ticket's state history shows no "
+                        "completed segment newer than "
+                        f"{pre_write_head_entry_id or '<empty history>'}"
+                        + (f" ({readback_error})" if readback_error else "")
+                        + ". The write is unproven, so it is not recorded as a flip."
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                    verdict_fingerprint=fingerprint,
+                    pre_write_head_entry_id=pre_write_head_entry_id,
+                )
+            # No dedup gate on the flip audit comment (OMN-16808) — see above.
+            # `_FLIP_COMMENT_CLASS_MARKER` (OMN-17658 F-R5-8) is stamped so a
+            # LATER run can identify a closer-authored Done by reading the
+            # ticket rather than inferring it from a null actorId.
             commented = await self._linear.create_comment(
                 issue_id,
                 (
+                    f"{_FLIP_COMMENT_CLASS_MARKER}\n"
                     "Automatic Done flip (OMN-16106 evidence autoclose sweep).\n\n"
                     f"Merged evidence companion: {companion_pr_url}\n"
                     f"Behavior-proving checks: {behavior_proving_count} "
                     "(OMN-15911 — at least one check executed the claimed "
                     "behavior, not only a merge-state read).\n"
                     f"dod_verify: {verified_count}/{total_checks} ACs verified "
-                    f"({non_probative_count} non-probative), {failed_count} failed."
+                    f"({non_probative_count} non-probative), {failed_count} failed.\n"
+                    f"Readback (OMN-17658): state-history entry {readback_entry_id} "
+                    "is the completed segment this flip produced; the pre-write "
+                    f"head was {pre_write_head_entry_id or '<empty history>'}. "
+                    f"Verdict fingerprint {fingerprint}."
                 ),
+            )
+            # THE BOUND READBACK LINE — one per flip, carrying the four ids that
+            # make it checkable months later by somebody who was not here: the
+            # ticket, the companion that carried the evidence, the verdict that
+            # released it, and the state-history segment the write produced.
+            logger.info(
+                "FLIP READBACK ticket=%s companion=%s#%d receipt=%s "
+                "pre_write_head=%s readback_entry=%s",
+                ticket_id,
+                request.occ_repo,
+                companion_pr_number,
+                fingerprint,
+                pre_write_head_entry_id or "<empty history>",
+                readback_entry_id,
             )
             return ModelEvidenceAutocloseOutcome(
                 ticket_id=ticket_id,
@@ -2001,6 +2716,9 @@ class HandlerEvidenceAutocloseSweep:
                 dod_verify_failed_count=failed_count,
                 dod_verify_non_probative_count=non_probative_count,
                 dod_verify_behavior_proving_count=behavior_proving_count,
+                verdict_fingerprint=fingerprint,
+                pre_write_head_entry_id=pre_write_head_entry_id,
+                readback_entry_id=readback_entry_id,
                 linear_comment_posted=commented,
                 applied=True,
             )
@@ -2049,7 +2767,7 @@ class HandlerEvidenceAutocloseSweep:
         )
         return await self._emit_gap_comment(
             base=gap_base,
-            apply=request.apply,
+            apply=apply_writes,
             issue_id=issue_id,
             marker=marker,
             comment_body=(

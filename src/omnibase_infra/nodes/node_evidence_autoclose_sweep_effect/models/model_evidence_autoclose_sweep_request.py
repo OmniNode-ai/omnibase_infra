@@ -8,6 +8,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
+    EnumEvidenceAutocloseTrigger,
+)
+
 
 class ModelEvidenceAutocloseSweepRequest(BaseModel):
     """Request to sweep recently-merged OCC companions for governed Done flips."""
@@ -50,8 +54,21 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
     # It is OFF unless asked for. `backfill_lookback_hours=0` means the run has
     # exactly the single-arm behaviour it had before this field existed —
     # same candidates, same I/O, same counters.
+    #
+    # ARMED, 2026-09-05 (OMN-17658 / OMN-17950), in the same commit as the
+    # fences it was deliberately sequenced behind. The default was 0 — off
+    # unless a dispatcher asked — precisely because a wide arm without the
+    # recurring-companion refusal (OMN-17934) and the children conjunct
+    # (OMN-17658) would have reproduced the OMN-17292 re-flip across the whole
+    # backlog instead of once. The live enumeration proved that in one line:
+    # OCC#8193, which binds OMN-17292, is in the backfill pool. Both fences are
+    # now in this same binary, so the arm is armed HERE, in the contract's own
+    # default, and not by an expression in a workflow — same authority split as
+    # `scheduled_apply`. 168h = 7 days: measured 2026-09-05 (dispatch run
+    # 33944132063) to yield a pool of 168 companions against a per-tick slice
+    # of 5, i.e. ~34 ticks (~17h) to sweep the pool once.
     backfill_lookback_hours: int = Field(
-        default=0,
+        default=168,
         ge=0,
         le=24 * 90,
         description=(
@@ -102,6 +119,112 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "consecutive scheduled runs advance by exactly one. Set it to the "
             "workflow's real cron interval; the default matches the sweep's "
             "*/30 schedule."
+        ),
+    )
+
+    # ------------------------------------------------------------------
+    # OMN-17658 — the arming authority, and where it lives.
+    #
+    # Until this field existed, whether an UNATTENDED run wrote to Linear was
+    # decided by one disjunct inside a GitHub Actions expression:
+    # `github.event_name == 'schedule' || (...)`. That is an arming authority
+    # for every write nobody is watching, and it was invisible to this
+    # contract, untyped, and changeable by anyone who could edit a YAML file
+    # without touching the node the contract governs.
+    #
+    # `trigger` carries the FACT (what launched me) and `scheduled_apply`
+    # carries the POLICY (may a run of that class write). Splitting them is
+    # what lets the workflow stop deciding: it now reports its own event and
+    # passes no arming value at all, and the contract below is the single place
+    # a scheduled write is authorised from.
+    #
+    # `apply` (kept, below) is unchanged and remains the DISPATCH-time request.
+    # The effective write mode is `apply or (trigger is SCHEDULE and
+    # scheduled_apply)`, which keeps a dispatch that leaves the box unticked a
+    # dry run even while the schedule is armed — that is the rehearsal surface,
+    # and it must survive arming.
+    trigger: EnumEvidenceAutocloseTrigger = Field(
+        default=EnumEvidenceAutocloseTrigger.DISPATCH,
+        description=(
+            "What launched this run. DISPATCH is the default because a caller "
+            "that names nothing is not the schedule — an un-named "
+            "construction must never pick up the unattended arming authority "
+            "by omission."
+        ),
+    )
+    scheduled_apply: bool = Field(
+        default=True,
+        description=(
+            "THE arming authority for unattended runs (OMN-17658). When True, "
+            "a run whose `trigger` is SCHEDULE writes to Linear without any "
+            "operator input; when False, the same run reaches every decision "
+            "and writes none. It does not affect a dispatch, which is governed "
+            "by `apply`. Declared here rather than in the workflow so that "
+            "disarming the closer is a contract change with a diff, a review "
+            "and a test, instead of an edit to an expression string."
+        ),
+    )
+    # ------------------------------------------------------------------
+    # OMN-17658 — the per-run blast-radius bound.
+    max_flips_per_run: int = Field(
+        default=5,
+        ge=0,
+        le=100,
+        description=(
+            "Hard cap on how many tickets one run may move to Done. Candidates "
+            "that clear every conjunct after the budget is spent are recorded "
+            "SKIPPED_FLIP_BUDGET_EXHAUSTED and offered again next run — a "
+            "truncation, never a verdict. 0 means no flip may be written at "
+            "all, which is a fail-closed value rather than 'unbounded'. This "
+            "is what makes a defect in the predicate cost 5 wrong Dones per "
+            "tick instead of the whole board: the first applying scheduled run "
+            "(33932169358) flipped four tickets and one of them was wrong."
+        ),
+    )
+    # ------------------------------------------------------------------
+    # OMN-17658 — the persisted half of the auto-disarm.
+    disarmed_by_ticket: str = Field(
+        default="",
+        description=(
+            "A ticket id the caller asserts previously received an UNSAFE "
+            "closer flip. Non-empty disarms the whole run before its first "
+            "candidate: every decision is still reached and reported, and none "
+            "is written. Plumbed by the workflow from the repo variable "
+            "ONEX_AUTOCLOSE_DISARMED, the same reachable-from-every-event "
+            "shape the ONEX_AUTOCLOSE_DISABLED kill switch uses (OMN-16792), "
+            "so a disarm survives the run that discovered the problem and "
+            "binds the scheduled runs nobody is watching.\n\n"
+            "It is weaker than the kill switch and deliberately so: a halted "
+            "run does zero I/O and produces no receipt, whereas a disarmed run "
+            "still enumerates, still verifies and still reports what it WOULD "
+            "have done — which is the evidence an operator needs to decide "
+            "whether to re-arm."
+        ),
+    )
+    # ------------------------------------------------------------------
+    # OMN-17658 / OMN-17934 — the Linear state-history read that both the
+    # prior-revert fence and the bound flip readback are resolved from.
+    history_page_size: int = Field(
+        default=100,
+        ge=1,
+        le=250,
+        description=(
+            "Page size for the per-ticket `stateHistory` walk. Mirrors "
+            "node_sync_revert_watchdog_effect, which reads the same connection "
+            "for the same reason."
+        ),
+    )
+    history_max_pages: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Page cap for the per-ticket history walk. The walk is "
+            "newest-first, so hitting the cap truncates the OLDEST end — the "
+            "entries the prior-revert fence and the flip readback depend on "
+            "are always present. A reopen older than the walk resolves to 'not "
+            "seen', which is the only direction this read is allowed to be "
+            "wrong in and is why the cap is small."
         ),
     )
 
