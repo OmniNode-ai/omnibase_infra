@@ -347,5 +347,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 0e01755c1dc17827d763b60c287617357be7a2393123df2575d9278be73a1816
   repository: OmniNode-ai/omnibase_infra
-  sha256: c1da7994d2827400cfb024d3727013d3e73f2856416e3621a49277409618094d
+  sha256: 4d455b0595819f312e5c7fb130f3b18945da4656004a79695fa46ee9aacd7ffb
 topology_instance: onex-dev

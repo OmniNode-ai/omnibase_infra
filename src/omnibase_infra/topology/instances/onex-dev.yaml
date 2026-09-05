@@ -39,8 +39,8 @@ databases:
         principal: onex_api
       tenant_projection:
         database_ref: application
-        secret_ref: database.tenant_projection.dsn
         principal: tenant_projection_writer
+        secret_ref: database.tenant_projection.dsn
     checksum_ledger: canonical
     checksum_ledgers:
       canonical:
