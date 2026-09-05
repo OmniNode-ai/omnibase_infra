@@ -75,6 +75,7 @@ import yaml
 from health_payload import (
     HEALTH_POLICY_STATUS_ONLY_STRICT,
     HealthVerdict,
+    default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
     unreachable_verdict,
@@ -445,13 +446,22 @@ def check_health_with_retry(
         check_interval_seconds=check_interval_seconds,
         boot_grace_seconds=boot_grace_seconds,
     )
+    # OMN-17624 review (omnibase_infra#3208): freshness must NOT be opt-in.
+    # A monitor that publishes one verdict and then crashes serves that same
+    # verdict forever; a gate with no ceiling accepts it forever, which turns
+    # this fix's blind window into "before first verdict, plus always".
+    effective_max_age = (
+        max_verdict_age_seconds
+        if max_verdict_age_seconds is not None
+        else default_max_verdict_age(check_interval_seconds)
+    )
 
     def _probe() -> HealthVerdict:
         return check_health(
             health_url,
             opener=opener,
             require_verdict=True,
-            max_verdict_age_seconds=max_verdict_age_seconds,
+            max_verdict_age_seconds=effective_max_age,
         )
 
     # Unpacked rather than returned directly: health_payload is imported by
