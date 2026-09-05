@@ -2632,14 +2632,34 @@ class HandlerEvidenceAutocloseSweep:
             # is never counted as a flip — the alternative is a closer whose
             # receipt and whose board disagree, which is a claim rather than a
             # proof.
-            post_history, readback_error = await self._linear.fetch_issue_history(
-                issue_id, request.history_page_size, request.history_max_pages
-            )
-            readback_entry_id = (
-                _completed_entry_since(post_history, pre_write_head_entry_id)
-                if post_history is not None
-                else ""
-            )
+            # OMN-17658 follow-up. RETRIED, because the connection LAGS.
+            #
+            # Measured on run 33958237006 (the first scheduled run under these
+            # fences): this exact flip landed — OMN-17658's own history carries
+            # `In Progress -> Done` at 09:34:43.990Z — and the immediate
+            # post-write read of that same connection returned nothing, so the
+            # run recorded ERROR_READBACK_UNCONFIRMED on a write that had
+            # succeeded. One immediate read of an eventually consistent
+            # connection is a race, not a proof of absence, and it loses every
+            # time: `tickets_flipped` could never have left 0.
+            #
+            # The first attempt is immediate, so a connection that is already
+            # consistent pays nothing; only a genuine lag pays the delay.
+            readback_entry_id = ""
+            readback_error = ""
+            for attempt in range(request.readback_max_attempts):
+                if attempt:
+                    await asyncio.sleep(request.readback_delay_seconds)
+                post_history, readback_error = await self._linear.fetch_issue_history(
+                    issue_id, request.history_page_size, request.history_max_pages
+                )
+                readback_entry_id = (
+                    _completed_entry_since(post_history, pre_write_head_entry_id)
+                    if post_history is not None
+                    else ""
+                )
+                if readback_entry_id:
+                    break
             if not readback_entry_id:
                 logger.error(
                     "UNCONFIRMED flip of %s: issueUpdate reported success but the "
@@ -2649,18 +2669,59 @@ class HandlerEvidenceAutocloseSweep:
                     pre_write_head_entry_id or "<empty history>",
                     readback_error or "<none>",
                 )
+                # The Done WAS written. `applied` means "a real Linear
+                # mutation was made" and one was, so it says so — run
+                # 33958237006 recorded `applied: false` on a ticket it had just
+                # moved to Done, and a receipt that under-reports a write is
+                # worse than one that overstates it: the overstatement is
+                # caught by the next reader of the ticket, the understatement
+                # is invisible.
+                #
+                # The audit comment is posted on this path too, carrying the
+                # `class=flipped` marker and an explicit UNCONFIRMED line. A
+                # closer-written Done with NO comment — which is what the
+                # measured run left behind — is the worst of both outcomes:
+                # unattributable on the board, and missing the marker the
+                # prior-revert fence is meant to grow into.
+                unconfirmed_comment = await self._linear.create_comment(
+                    issue_id,
+                    (
+                        f"{_FLIP_COMMENT_CLASS_MARKER}\n"
+                        "Automatic Done flip (OMN-16106 evidence autoclose "
+                        "sweep) — READBACK UNCONFIRMED.\n\n"
+                        f"Merged evidence companion: {companion_pr_url}\n"
+                        f"dod_verify: {verified_count}/{total_checks} ACs "
+                        f"verified ({non_probative_count} non-probative), "
+                        f"{failed_count} failed, {behavior_proving_count} "
+                        "behavior-proving.\n"
+                        "The state change WAS written and Linear reported it "
+                        "succeeded. What could not be established is the "
+                        "readback: no completed state-history segment newer "
+                        f"than {pre_write_head_entry_id or '<empty history>'} "
+                        f"appeared within "
+                        f"{request.readback_max_attempts} attempt(s)"
+                        + (f" ({readback_error})" if readback_error else "")
+                        + ". Treat this ticket's state as written but "
+                        "unverified, and check it by hand.\n"
+                        f"Verdict fingerprint {fingerprint}."
+                    ),
+                )
                 return ModelEvidenceAutocloseOutcome(
                     ticket_id=ticket_id,
                     companion_pr_number=companion_pr_number,
                     companion_pr_url=companion_pr_url,
                     decision=EnumEvidenceAutocloseDecision.ERROR_READBACK_UNCONFIRMED,
                     reason=(
-                        "issueUpdate(stateId) reported success, but the "
-                        "post-write read of this ticket's state history shows no "
-                        "completed segment newer than "
-                        f"{pre_write_head_entry_id or '<empty history>'}"
+                        "issueUpdate(stateId) reported success and the state "
+                        "change was written, but no completed state-history "
+                        "segment newer than "
+                        f"{pre_write_head_entry_id or '<empty history>'} "
+                        f"appeared within {request.readback_max_attempts} "
+                        "readback attempt(s)"
                         + (f" ({readback_error})" if readback_error else "")
-                        + ". The write is unproven, so it is not recorded as a flip."
+                        + ". The write is unverified, so it is not counted as "
+                        "a flip — but it did happen and the ticket needs a "
+                        "human read."
                     ),
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
@@ -2669,6 +2730,8 @@ class HandlerEvidenceAutocloseSweep:
                     dod_verify_behavior_proving_count=behavior_proving_count,
                     verdict_fingerprint=fingerprint,
                     pre_write_head_entry_id=pre_write_head_entry_id,
+                    linear_comment_posted=unconfirmed_comment,
+                    applied=True,
                 )
             # No dedup gate on the flip audit comment (OMN-16808) — see above.
             # `_FLIP_COMMENT_CLASS_MARKER` (OMN-17658 F-R5-8) is stamped so a

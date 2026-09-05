@@ -52,6 +52,7 @@ is asserted — a run cannot label itself DRY-RUN and pass ``--apply``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -867,3 +868,35 @@ def test_the_cli_accepts_every_fence_field_the_request_model_declares() -> None:
         "pass one would be an arming authority, which is exactly what "
         "OMN-17658 moved into the contract"
     )
+
+
+def test_no_log_line_command_substitutes_itself() -> None:
+    """OMN-17935 follow-up, measured on run 33958237006.
+
+    The provenance echo the OMN-17935 fix introduced contained backticks around
+    the word ``mode``. Inside double quotes bash reads those as command
+    substitution, not as markdown: the run printed ``line 123: mode: command
+    not found`` to stderr and then rendered the sentence with an empty gap
+    where the word should have been. A log line ABOUT provenance that mangles
+    itself is the same defect class the fix was for.
+
+    Asserted over the whole run body rather than over one line, because the
+    property is "no echo in this step evaluates its own text", not "this one
+    string is right".
+    """
+    for step_name in (SWEEP_STEP_NAME, SUMMARY_STEP_NAME):
+        run = _step(step_name).get("run") or ""
+        offenders: list[str] = []
+        for line in run.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("echo "):
+                continue
+            # `\`` is an escaped backtick and is a literal; a bare one is a
+            # command substitution.
+            if re.search(r"(?<!\\)`", stripped):
+                offenders.append(stripped)
+        assert not offenders, (
+            f"{step_name}: an echo line contains an unescaped backtick, which "
+            "bash evaluates as command substitution inside double quotes — the "
+            f"line will mangle itself in the log:\n{offenders}"
+        )

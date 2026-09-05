@@ -282,7 +282,7 @@ error_handling:
       retry_strategy: "none"
     - name: "FLIP_READBACK_UNCONFIRMED"
       description: >
-        issueUpdate(stateId) reported success but a post-write read of the ticket's own state history showed no completed segment newer than the pre-write head (OMN-17658). Recorded as ERROR_READBACK_UNCONFIRMED and counted under tickets_errored, never as a flip: the API agreeing to a request is not evidence the board moved, and a closer whose receipt and whose board disagree is making a claim rather than offering a proof.
+        issueUpdate(stateId) reported success but no completed state-history segment newer than the pre-write head appeared within readback_max_attempts reads (OMN-17658). Recorded as ERROR_READBACK_UNCONFIRMED and counted under tickets_errored, never as a flip: the API agreeing to a request is not evidence the board moved. The outcome still carries applied=true and still posts the audit comment with the class=flipped marker and an explicit UNCONFIRMED line, because the state change WAS written -- measured on run 33958237006, where recording applied=false on a ticket the run had just moved to Done left a receipt that disagreed with the board in the direction nobody checks.
 
       recoverable: true
       retry_strategy: "none"
@@ -318,6 +318,8 @@ io_operations:
       - disarmed_by_ticket
       - history_page_size
       - history_max_pages
+      - readback_max_attempts
+      - readback_delay_seconds
       - apply
       - max_companions
       - dispatch_cwd
