@@ -117,6 +117,27 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # remaining candidate is recorded with this value instead of a verdict —
     # the sweep is disarmed, not silent.
     SKIPPED_DISARMED = "skipped_disarmed"
+    # OMN-16106, class (c). A dod_verify check that FAILED because the live
+    # surface it reads was UNREACHABLE — a CrashLoopBackOff pod, a refused
+    # connection, a cluster the runner could not dial. That is not the same
+    # fact as GAP_POSTED, and reporting it as one is a lie in the direction
+    # that costs most: GAP_POSTED tells the ticket's owner "your acceptance
+    # criterion is not met", when what actually happened is that nothing was
+    # learned about the criterion at all because the thing under test was
+    # down.
+    #
+    # Fourteen tickets in the 2026-08-31 sprint are blocked on exactly this —
+    # their acceptance criteria are live readbacks against onex-dev, which has
+    # been in CrashLoopBackOff since 2026-09-02. Under the old behaviour each
+    # of them accrues an "evidence gap" comment asserting an unmet AC every
+    # time its turn on the backfill rotation comes round.
+    #
+    # HELD, not flipped and not judged: the candidate is left exactly as it
+    # was and re-offered on the next tick, so when the surface comes back the
+    # ticket flips with no human launch. This decision can only ever be
+    # reached on a path that was already going to refuse the flip — it is
+    # never consulted before a write.
+    SKIPPED_LIVE_SURFACE_UNAVAILABLE = "skipped_live_surface_unavailable"
     # OMN-17658 bound readback. `issueUpdate` reported success but the
     # post-write read of the ticket's own state history did not show a
     # completed segment that the pre-write read did not already have. Recorded
