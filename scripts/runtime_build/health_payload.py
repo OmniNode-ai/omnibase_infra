@@ -66,12 +66,29 @@ or unrecognised ``status`` is OMN-17623.
 from __future__ import annotations
 
 import json
+import math
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 # Recorded verbatim in the refresh receipt (OMN-17563 AC-3) so a future reader
 # can tell a strict PASS from a lenient one without re-deriving it. Bump the
 # value -- never redefine it in place -- if the policy itself ever changes.
 HEALTH_POLICY_STATUS_ONLY_STRICT = "status_only_strict.v1"
+
+#: OMN-17624. Sign-off additionally requires a fresh ``details.runtime_health``
+#: verdict. ``status_only_strict.v1`` cannot observe a DEGRADED lane inside the
+#: monitor's first-verdict window, which is precisely when a refresh gate runs.
+HEALTH_POLICY_VERDICT_REQUIRED = "verdict_required.v1"
+
+#: Seconds of slack added to the derived wait so a probe landing fractionally
+#: before the first emission does not read as a permanent absence.
+VERDICT_WAIT_MARGIN_SECONDS = 60.0
+
+#: How often the gate re-probes while waiting. Bounded attempts at a fixed
+#: interval, mirroring ``check_consumer_group_with_retry`` -- never a poll
+#: without a ceiling.
+VERDICT_WAIT_POLL_SECONDS = 15.0
 
 #: The only ``status`` value that means healthy.
 HEALTH_STATUS_HEALTHY = "healthy"
@@ -194,24 +211,188 @@ def _nested_healthy_flag(payload: dict[str, object]) -> bool | None:
     return flag if isinstance(flag, bool) else None
 
 
-def evaluate_health_body(raw: bytes | str) -> HealthVerdict:
-    """Strict verdict for a fetched ``/health`` body. Fails closed."""
+@dataclass(frozen=True)
+class VerdictWaitBound:
+    """A bounded wait for the monitor's first verdict, with its arithmetic kept.
+
+    OMN-17624 AC3 requires the receipt to record which bound was applied. A
+    number without its derivation is unreviewable, so the inputs travel with
+    the result.
+    """
+
+    attempts: int
+    interval_seconds: float
+    total_seconds: float
+    first_visible_verdict_seconds: float
+    check_interval_seconds: float
+    boot_grace_seconds: float
+
+    def describe(self) -> str:
+        return (
+            f"verdict_wait: {self.attempts} attempts x "
+            f"{self.interval_seconds:g}s = {int(self.total_seconds)}s "
+            f"(first visible verdict ~{int(self.first_visible_verdict_seconds)}s "
+            f"from check_interval={self.check_interval_seconds:g}s, "
+            f"boot_grace={self.boot_grace_seconds:g}s)"
+        )
+
+
+def derive_verdict_wait_bound(
+    *,
+    check_interval_seconds: float,
+    boot_grace_seconds: float,
+    margin_seconds: float = VERDICT_WAIT_MARGIN_SECONDS,
+    poll_seconds: float = VERDICT_WAIT_POLL_SECONDS,
+) -> VerdictWaitBound:
+    """Derive how long to wait for a first ``details.runtime_health`` verdict.
+
+    ``ServiceRuntimeHealthMonitor._loop`` sleeps one ``check_interval`` BEFORE
+    its first check, so checks land at 1x, 2x, 3x the interval -- never at t=0.
+    ``_emit`` then suppresses publication while ``elapsed < boot_grace``.
+
+    The first VISIBLE verdict is therefore the first check strictly after the
+    grace window. "Strictly after" is deliberate: a check landing exactly on
+    the boundary passes ``elapsed < grace`` by a hair of monotonic clock, and a
+    gate that bets on that tie fails intermittently for a reason nobody can
+    reproduce.
+
+    Hardcoding 390s would be correct only for the default 300s/120s pair. A
+    lane that shortens its interval would get a bound that outlives the signal
+    it waits for, which is the same false-PASS shape in a new costume.
+    """
+    if check_interval_seconds <= 0:
+        raise ValueError(
+            f"check_interval_seconds must be positive, got {check_interval_seconds}"
+        )
+    if boot_grace_seconds < 0:
+        raise ValueError(
+            f"boot_grace_seconds must be non-negative, got {boot_grace_seconds}"
+        )
+    if poll_seconds <= 0:
+        raise ValueError(f"poll_seconds must be positive, got {poll_seconds}")
+
+    checks_within_grace = math.floor(boot_grace_seconds / check_interval_seconds)
+    first_visible = (checks_within_grace + 1) * check_interval_seconds
+    total = first_visible + margin_seconds
+    attempts = max(1, math.ceil(total / poll_seconds))
+    return VerdictWaitBound(
+        attempts=attempts,
+        interval_seconds=poll_seconds,
+        total_seconds=attempts * poll_seconds,
+        first_visible_verdict_seconds=first_visible,
+        check_interval_seconds=check_interval_seconds,
+        boot_grace_seconds=boot_grace_seconds,
+    )
+
+
+def wait_for_verdict(
+    probe: Callable[[], HealthVerdict],
+    *,
+    bound: VerdictWaitBound,
+    sleep_fn: object | None = None,
+) -> tuple[HealthVerdict, str]:
+    """Re-probe until a monitor verdict exists, for a bounded window.
+
+    Shared by both refresh gates. The per-lane HTTP fetch stays in each gate
+    (they already each own a ``check_health``), but the WAIT POLICY lives here
+    once -- duplicating a fetch is cheap, duplicating the rule that decides
+    whether a lane is stability-proven is not.
+
+    Mirrors ``check_consumer_group_with_retry``: bounded attempts at a fixed
+    interval, never an unbounded poll, and the LAST observed result is
+    returned. A lane that never produces a verdict inside the window is a
+    genuine, accurately-reported finding -- not a reason to pass.
+
+    Returns the verdict and the human-readable bound for the receipt (AC3).
+    """
+    sleep = sleep_fn or time.sleep
+    verdict = HealthVerdict(
+        ok=False,
+        policy=HEALTH_POLICY_VERDICT_REQUIRED,
+        status=None,
+        details_healthy=None,
+        detail="health never probed",
+    )
+    for attempt in range(1, bound.attempts + 1):
+        verdict = probe()
+        if verdict.ok:
+            return verdict, f"{bound.describe()} satisfied on attempt {attempt}"
+        if attempt < bound.attempts:
+            sleep(bound.interval_seconds)  # type: ignore[operator]
+    return verdict, f"{bound.describe()} exhausted without a verdict"
+
+
+def evaluate_health_body(
+    raw: bytes | str,
+    *,
+    require_verdict: bool = False,
+    max_verdict_age_seconds: float | None = None,
+) -> HealthVerdict:
+    """Strict verdict for a fetched ``/health`` body. Fails closed.
+
+    OMN-17624: with ``require_verdict=True`` a body carrying no fresh
+    ``details.runtime_health`` is refused rather than accepted. Absence is NOT
+    treated as "monitor disabled, skip" -- ``service_kernel`` starts the
+    monitor only ``if use_kafka`` and swallows a start failure with
+    ``except Exception: ... runtime_health_monitor = None``, so a crashed
+    monitor and an intentionally absent one look identical at this boundary.
+    Skipping on absence would rebuild the blind spot this closes. A
+    monitor-less profile opts out explicitly at the call site, on the record.
+
+    Freshness is delegated to ``evaluate_health_response`` rather than
+    reimplemented -- it already owns ``max_verdict_age_seconds`` and is a pure
+    function (no clock, no I/O, no environment), so this stays hermetic.
+    """
     try:
         payload = parse_health_payload(raw)
     except HealthPayloadError as exc:
         return HealthVerdict(
             ok=False,
-            policy=HEALTH_POLICY_STATUS_ONLY_STRICT,
+            policy=(
+                HEALTH_POLICY_VERDICT_REQUIRED
+                if require_verdict
+                else HEALTH_POLICY_STATUS_ONLY_STRICT
+            ),
             status=None,
             details_healthy=None,
             detail=str(exc),
         )
+
+    if not require_verdict:
+        return HealthVerdict(
+            ok=payload.healthy,
+            policy=HEALTH_POLICY_STATUS_ONLY_STRICT,
+            status=payload.status,
+            details_healthy=payload.details_healthy,
+            detail=payload.describe(),
+        )
+
+    from omnibase_infra.runtime.health.container_healthcheck import (
+        evaluate_health_response,
+    )
+
+    # Re-decoded rather than threaded through HealthPayload: that dataclass is
+    # compared by equality in existing tests, so widening it would edit a test
+    # whose subject is not this change. parse_health_payload already proved the
+    # body decodes, so this cannot raise.
+    decoded_body = json.loads(raw)
+    container_verdict = evaluate_health_response(
+        http_status=200,
+        payload=decoded_body,
+        require_verdict=True,
+        max_verdict_age_seconds=max_verdict_age_seconds,
+    )
+    ok = container_verdict.verdict == "PASS"
     return HealthVerdict(
-        ok=payload.healthy,
-        policy=HEALTH_POLICY_STATUS_ONLY_STRICT,
+        ok=ok,
+        policy=HEALTH_POLICY_VERDICT_REQUIRED,
         status=payload.status,
         details_healthy=payload.details_healthy,
-        detail=payload.describe(),
+        detail=(
+            payload.describe()
+            if ok
+            else f"{payload.describe()} (verdict gate: {container_verdict.reason})"
+        ),
     )
 
 

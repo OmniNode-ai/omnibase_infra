@@ -64,8 +64,10 @@ from dataclasses import asdict, dataclass, field
 from health_payload import (
     HEALTH_POLICY_STATUS_ONLY_STRICT,
     HealthVerdict,
+    derive_verdict_wait_bound,
     evaluate_health_body,
     unreachable_verdict,
+    wait_for_verdict,
 )
 
 _REVISION_LABEL = "org.opencontainers.image.revision"
@@ -108,6 +110,8 @@ class HealthGateReport:
     # a lenient one without re-deriving the whole probe.
     health_status: str | None = None
     health_policy: str = HEALTH_POLICY_STATUS_ONLY_STRICT
+    # OMN-17624 AC-3: the bound that was waited, with its arithmetic.
+    verdict_wait: str | None = None
     cluster_healthy: bool = False
     cluster_detail: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -148,6 +152,7 @@ class HealthGateReport:
             "health_detail": self.health_detail,
             "health_status": self.health_status,
             "health_policy": self.health_policy,
+            "verdict_wait": self.verdict_wait,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "revision_readback_ok": self.revisions_match,
@@ -286,7 +291,18 @@ def check_manifest_count(
     return len(contracts), None
 
 
-def check_health(health_url: str, *, opener: object | None = None) -> HealthVerdict:
+def check_health(
+    health_url: str,
+    *,
+    opener: object | None = None,
+    require_verdict: bool = False,
+    max_verdict_age_seconds: float | None = None,
+) -> HealthVerdict:
+    """Probe ``/health`` once and report what it said.
+
+    OMN-17624: the default is unchanged on purpose -- the verdict REQUIREMENT
+    belongs to the gate (``check_health_with_retry``), not to the probe.
+    """
     open_fn = opener or urllib.request.urlopen
     try:
         with open_fn(health_url, timeout=10) as resp:  # type: ignore[operator]
@@ -296,7 +312,53 @@ def check_health(health_url: str, *, opener: object | None = None) -> HealthVerd
         return unreachable_verdict(f"health fetch failed: {exc}")
     if status_code and status_code != 200:
         return unreachable_verdict(f"health endpoint returned HTTP {status_code}")
-    return evaluate_health_body(raw)
+    return evaluate_health_body(
+        raw,
+        require_verdict=require_verdict,
+        max_verdict_age_seconds=max_verdict_age_seconds,
+    )
+
+
+def check_health_with_retry(
+    health_url: str,
+    *,
+    opener: object | None = None,
+    require_verdict: bool = True,
+    max_verdict_age_seconds: float | None = None,
+    check_interval_seconds: float = 300.0,
+    boot_grace_seconds: float = 120.0,
+    sleep_fn: object | None = None,
+) -> tuple[HealthVerdict, str]:
+    """Probe until a monitor verdict exists, for a bounded window (OMN-17624).
+
+    The dev lane is blind in exactly the same window as stability: the monitor
+    publishes nothing for ~300s after a recreate, which is when a refresh gate
+    runs. Fixing only the stability gate would leave the identical false PASS
+    reachable here.
+    """
+    if not require_verdict:
+        verdict = check_health(health_url, opener=opener, require_verdict=False)
+        return verdict, "verdict_wait: skipped (require_verdict=False, opted out)"
+
+    bound = derive_verdict_wait_bound(
+        check_interval_seconds=check_interval_seconds,
+        boot_grace_seconds=boot_grace_seconds,
+    )
+
+    def _probe() -> HealthVerdict:
+        return check_health(
+            health_url,
+            opener=opener,
+            require_verdict=True,
+            max_verdict_age_seconds=max_verdict_age_seconds,
+        )
+
+    # Unpacked rather than returned directly: health_payload is imported by
+    # plain sibling name, so its types resolve to Any here and a bare
+    # passthrough trips no-any-return. An explicit tuple keeps the
+    # annotation honest without a suppression.
+    verdict, described = wait_for_verdict(_probe, bound=bound, sleep_fn=sleep_fn)
+    return verdict, described
 
 
 def check_cluster_health(
@@ -348,6 +410,11 @@ def run_health_gate(
     runner: object | None = None,
     opener: object | None = None,
     require_digest_change: bool = True,
+    sleep_fn: object | None = None,
+    require_verdict: bool = True,
+    max_verdict_age_seconds: float | None = None,
+    health_check_interval_seconds: float = 300.0,
+    health_boot_grace_seconds: float = 120.0,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -373,11 +440,20 @@ def run_health_gate(
     else:
         report.manifest_ok = count is not None and count >= min_contracts
 
-    health_verdict = check_health(health_url, opener=opener)
+    health_verdict, verdict_wait = check_health_with_retry(
+        health_url,
+        opener=opener,
+        require_verdict=require_verdict,
+        max_verdict_age_seconds=max_verdict_age_seconds,
+        check_interval_seconds=health_check_interval_seconds,
+        boot_grace_seconds=health_boot_grace_seconds,
+        sleep_fn=sleep_fn,
+    )
     report.health_ok = health_verdict.ok
     report.health_detail = health_verdict.detail
     report.health_status = health_verdict.status
     report.health_policy = health_verdict.policy
+    report.verdict_wait = verdict_wait
 
     cluster_healthy, cluster_detail = check_cluster_health(
         broker_container, runner=runner
