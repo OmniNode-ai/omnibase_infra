@@ -232,6 +232,7 @@ UNCOVERED_MODELS: dict[str, str] = {
     # and fail-closed plugin fixture, not the generic round-trip factory set.
     "ModelRsdPostgresAcceptanceOverlay": "Typed operator overlay covered by test_rsd_postgres_acceptance_overlay.py",
     "ModelRsdModelArtifactProvenance": "Strict loader, canonical signing-preimage, and signature coverage in test_rsd_model_artifact_provenance.py",
+    "ModelRsdArtifactSourceRelation": "Strict primary-metadata and non-approval coverage in test_rsd_model_artifact_provenance.py",
     # OMN-17861: canonical JSON strict roundtrips for all five public models
     # live beside the signed fixture and pure-preflight hostile coverage.
     "ModelRsdLiveDelegationOverlay": "Explicit canonical roundtrip coverage in test_rsd_live_delegation_overlay.py",

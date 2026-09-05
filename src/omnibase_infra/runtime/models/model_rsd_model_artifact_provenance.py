@@ -8,6 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.runtime.models.model_rsd_artifact_source_relation import (
+    ModelRsdArtifactSourceRelation,
+)
 from omnibase_infra.runtime.models.rsd_live_delegation_schema import (
     _RFC3339_UTC,
     CanonicalCapabilityRef,
@@ -22,7 +25,7 @@ class ModelRsdModelArtifactProvenance(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    schema_version: Literal["rsd.model-artifact-provenance.v1"]
+    schema_version: Literal["rsd.model-artifact-provenance.v2"]
     execute_enabled: Literal[False]
     approval_status: Literal["unapproved"]
     model_id: Literal["qwen/qwen3.8-27b"]
@@ -34,6 +37,7 @@ class ModelRsdModelArtifactProvenance(BaseModel):
         "e46ef4e3895ed0a6db7c237d642121095629c53bd5b3e5ac799b8a8e2ae83e4f"
     ]
     artifact_manifest_algorithm: Literal["sha256-path-size-content-sha256-v1"]
+    artifact_source_relation: ModelRsdArtifactSourceRelation
     quantization: Literal["modelopt_nvfp4"]
     weight_activation_precision: Literal["w4a4"]
     kv_cache_dtype: Literal["fp8"]
@@ -51,7 +55,7 @@ class ModelRsdModelArtifactProvenance(BaseModel):
     signer_capability_ref: CanonicalCapabilityRef
     signer_key_id: CanonicalUuid4
     signer_public_key_fingerprint_sha256: CanonicalSha256
-    signature_domain: Literal["omninode-rsd.model-artifact-provenance.v1"]
+    signature_domain: Literal["omninode-rsd.model-artifact-provenance.v2"]
     signature_base64: CanonicalEd25519Signature
 
 

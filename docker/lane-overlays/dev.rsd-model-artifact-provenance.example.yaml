@@ -1,5 +1,5 @@
 # OMN-17871: inert example only; not an activation or deployment record.
-schema_version: rsd.model-artifact-provenance.v1
+schema_version: rsd.model-artifact-provenance.v2
 execute_enabled: false
 approval_status: unapproved
 model_id: qwen/qwen3.8-27b
@@ -9,6 +9,17 @@ artifact_id: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
 artifact_revision_sha: 0cc27958cefbbe231782ec8511de8c4eb5233348
 artifact_manifest_digest_sha256: e46ef4e3895ed0a6db7c237d642121095629c53bd5b3e5ac799b8a8e2ae83e4f
 artifact_manifest_algorithm: sha256-path-size-content-sha256-v1
+artifact_source_relation:
+  # Revision-scoped primary metadata; this does not claim weight derivation.
+  source_metadata_authority: huggingface-model-revision-api-v1
+  source_model_card_sha256: 57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641
+  source_config_sha256: 191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab
+  artifact_metadata_authority: huggingface-model-revision-api-v1
+  artifact_model_card_sha256: 3704987ff0e2206ab934af6d71cd0a9b5140536ee8d305aa7ba6e7665f135058
+  artifact_embedded_source_model_card_sha256: 57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641
+  artifact_declared_base_model_id: Qwen/Qwen3.8-27B
+  relation_status: publisher-declared-unverified
+  approval_status: not-approved
 quantization: modelopt_nvfp4
 weight_activation_precision: w4a4
 kv_cache_dtype: fp8
@@ -24,6 +35,6 @@ expires_at: "2026-09-04T20:00:00Z"
 signer_capability_ref: capability://rsd/model-artifact-provenance/signer
 signer_key_id: 00000000-0000-4000-8000-000000000003
 signer_public_key_fingerprint_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
-signature_domain: omninode-rsd.model-artifact-provenance.v1
+signature_domain: omninode-rsd.model-artifact-provenance.v2
 # Sentinel signature: an operator must issue a real signature before approval.
 signature_base64: N9Eiaa5K2V9Ay9uS09n8Gh-KmtdsiOjle1bypnfa_CEj1y-zZkvMulCu5ZlHHLSZ364R_qeoX9pejwGHI_ijCw==

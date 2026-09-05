@@ -25,7 +25,7 @@ from omnibase_infra.runtime.models.model_rsd_model_artifact_provenance import (
     ModelRsdModelArtifactProvenance,
 )
 
-_AUTHORITY_DOMAIN = b"omninode-rsd.model-artifact-provenance.v1\x00"
+_AUTHORITY_DOMAIN = b"omninode-rsd.model-artifact-provenance.v2\x00"
 _MAX_PROVENANCE_BYTES = 64 * 1024
 _MAX_NESTING_DEPTH = 32
 _MAX_VALIDITY_WINDOW_SECONDS = 300

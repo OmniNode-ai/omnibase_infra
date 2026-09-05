@@ -93,6 +93,23 @@ def test_example_is_inert_and_binds_immutable_public_identity() -> None:
     assert provenance.artifact_manifest_algorithm == (
         "sha256-path-size-content-sha256-v1"
     )
+    assert provenance.artifact_source_relation.source_metadata_authority == (
+        "huggingface-model-revision-api-v1"
+    )
+    assert provenance.artifact_source_relation.source_model_card_sha256 == (
+        "57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641"
+    )
+    assert provenance.artifact_source_relation.artifact_model_card_sha256 == (
+        "3704987ff0e2206ab934af6d71cd0a9b5140536ee8d305aa7ba6e7665f135058"
+    )
+    assert (
+        provenance.artifact_source_relation.artifact_embedded_source_model_card_sha256
+        == provenance.artifact_source_relation.source_model_card_sha256
+    )
+    assert provenance.artifact_source_relation.relation_status == (
+        "publisher-declared-unverified"
+    )
+    assert provenance.artifact_source_relation.approval_status == "not-approved"
     assert provenance.quantization == "modelopt_nvfp4"
     assert provenance.weight_activation_precision == "w4a4"
     assert provenance.kv_cache_dtype == "fp8"
@@ -208,6 +225,7 @@ def test_freshness_rejects_excess_window_and_non_utc_clock() -> None:
         ("artifact_revision_sha", "0" * 40),
         ("artifact_manifest_digest_sha256", "0" * 64),
         ("artifact_manifest_algorithm", "sha256-canonical-json-v1"),
+        ("artifact_source_relation", {}),
         ("runtime_version", "0.27.0"),
         ("served_model_id", "Qwen/qwen3.8-27b"),
         ("launch_profile_id", "qwen38-nvfp4-rtx4090-v1"),
@@ -236,6 +254,7 @@ def test_exact_candidate_bindings_reject_substitution(
         "artifact_revision_sha",
         "artifact_manifest_digest_sha256",
         "artifact_manifest_algorithm",
+        "artifact_source_relation",
         "runtime_version",
         "served_model_id",
         "launch_profile_id",
@@ -255,6 +274,28 @@ def test_schema_is_strict_and_execute_can_never_be_enabled() -> None:
     raw = _raw_example()
     raw["execute_enabled"] = True
     raw["unexpected"] = "rejected"
+
+    with pytest.raises(ValidationError):
+        ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("relation_status", "verified"),
+        ("approval_status", "approved"),
+        ("artifact_declared_base_model_id", "Qwen/Qwen3.8-14B"),
+        ("source_model_card_sha256", "0" * 64),
+    ],
+)
+def test_primary_metadata_relation_cannot_assert_unverified_derivation(
+    field: str, value: str
+) -> None:
+    raw = _raw_example()
+    relation = raw["artifact_source_relation"]
+    assert type(relation) is dict
+    relation[field] = value
 
     with pytest.raises(ValidationError):
         ModelRsdModelArtifactProvenance.model_validate(raw, strict=True)
@@ -406,5 +447,5 @@ def test_preimage_is_canonical_json() -> None:
     provenance, _ = _signed_example()
 
     preimage = provenance_signing_preimage(provenance)
-    assert preimage.startswith(b"omninode-rsd.model-artifact-provenance.v1\x00{")
+    assert preimage.startswith(b"omninode-rsd.model-artifact-provenance.v2\x00{")
     assert json.dumps(json.loads(preimage.split(b"\x00", 1)[1]), separators=(",", ":"))
