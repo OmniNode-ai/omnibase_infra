@@ -18,6 +18,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
+    GatewayRecordRefusedError,
     ServiceGatewayForwarder,
 )
 from omnibase_infra.utils import sanitize_error_message
@@ -335,6 +336,23 @@ class NodeGatewayDelivery:
             )
         except asyncio.CancelledError:
             raise
+        except GatewayRecordRefusedError as refusal:
+            # OMN-17382: a per-record trust-boundary refusal is PERMANENT for
+            # this offset -- redelivery re-reads the same bytes and reaches the
+            # same verdict. Nacking it seeks back and re-crashes forever: 925
+            # consecutive retries over 7h45m with 177 real records stuck
+            # behind one foreign-tenant probe record, and again at reconnect
+            # attempt 295 on 2026-09-05, with the container healthy the whole
+            # time. Quarantine on the same path an undecodable record takes.
+            #
+            # This is deliberately NOT a widening of the catch below. Only
+            # GatewayRecordRefusedError lands here; a broker timeout, an auth
+            # failure or a serialization bug is transient or global and still
+            # nacks and raises, because committing past THOSE is data loss.
+            await self._quarantine_undecodable_message(
+                direction, source, message, refusal, classification="refused"
+            )
+            return
         except Exception:
             try:
                 await source.nack(message)
@@ -355,16 +373,26 @@ class NodeGatewayDelivery:
         source: ProtocolGatewayConsumer,
         message: ModelTransportMessage,
         error: Exception,
+        classification: str = "undecodable",
     ) -> None:
-        """Dead-letter an undecodable record and commit past it (never redeliver).
+        """Dead-letter a permanently-undeliverable record and commit past it.
+
+        Two callers, one path, because the two failure classes are the same
+        shape: a record that cannot decode and a record this gateway refuses to
+        carry both produce the identical verdict on every redelivery, so
+        seeking back to their offset is an infinite loop rather than a retry.
+        ``classification`` distinguishes them in the log line -- the operator
+        reading it needs to know whether the bytes were malformed or the tenant
+        binding was wrong, because those have different upstream owners.
 
         Commit failure still propagates (uncaught): that is a broker-level
         fault, a different failure class already handled by the existing
         reconnect-supervision loop in ``runtime/gateway_forwarder.py``.
         """
         logger.error(
-            "Gateway undecodable record quarantined direction=%s source_topic=%s "
+            "Gateway %s record quarantined direction=%s source_topic=%s "
             "source_partition=%s source_offset=%s error_type=%s error=%s",
+            classification,
             direction,
             message.topic,
             message.partition,

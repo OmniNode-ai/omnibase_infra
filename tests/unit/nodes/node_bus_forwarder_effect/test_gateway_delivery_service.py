@@ -752,3 +752,135 @@ async def test_watchdog_replacement_task_failure_still_reaches_wait() -> None:
             await asyncio.wait_for(wait_task, timeout=10)
     finally:
         await delivery.stop()
+
+
+# --- OMN-17382: a per-record trust-boundary refusal must not wedge the leg ---
+
+
+def _foreign_tenant_message() -> ModelTransportMessage:
+    """A decodable record whose payload binds a DIFFERENT tenant.
+
+    This is the live shape, not an invented one. `_prepare_outbound` compares
+    ``payload["tenant_id"]`` against the attached tenant slug and refuses on
+    mismatch; the forwarder on the dev lane hit exactly this on a foreign
+    probe record.
+    """
+    identity = uuid4()
+    envelope = ModelEventEnvelope[dict[str, object]](
+        envelope_id=identity,
+        correlation_id=identity,
+        event_type="LlmInferenceResponse",
+        payload={"ok": True, "tenant_id": "some-other-tenant"},
+        metadata=ModelEnvelopeMetadata(tags={}),
+    )
+    return ModelTransportMessage(
+        topic=OUTBOUND_TOPIC,
+        partition=0,
+        offset=11,
+        key=b"tenant-key",
+        value=envelope.model_dump_json().encode("utf-8"),
+        headers={},
+        ack_token=(OUTBOUND_TOPIC, 0, 11),
+    )
+
+
+async def test_foreign_tenant_record_is_quarantined_not_nacked() -> None:
+    """The wedge regression, stated as the outage it reproduces.
+
+    Measured on the dev lane: one foreign-tenant record raised
+    ``outbound payload tenant_id does not match attached tenant`` out of
+    ``_prepare_outbound``; the loop nacked, seeked back, re-read the same
+    bytes, and reached the same verdict -- 925 consecutive failures over
+    7h45m with 177 real records stuck behind it, and again at reconnect
+    attempt 295 after 8799s on 2026-09-05, with the container HEALTHY
+    throughout. Tenant binding is a property of the record, so redelivery
+    cannot change the answer: this is the poison-pill class, and it takes the
+    quarantine path.
+    """
+    events: list[str] = []
+    source = _Source(events)
+    store = _RecordingStore(events)
+    delivery, cloud_bus = _delivery(events, source, store)
+    foreign = _foreign_tenant_message()
+
+    # Must not raise: raising is what stopped the bridge.
+    await delivery.deliver_message("outbound", source, foreign)  # type: ignore[arg-type]
+
+    assert source.committed == [foreign], (
+        "a refused record must be committed past, or the leg re-reads it forever"
+    )
+    assert source.nacked == [], (
+        "nack seeks back to the same offset and re-reaches the same verdict"
+    )
+    assert cloud_bus.sent == [], "a refused record must never cross the boundary"
+
+
+async def test_a_refusal_does_not_block_the_next_good_record() -> None:
+    """The half that matters operationally: 177 records were stuck BEHIND one.
+
+    Asserting only that the refusal is committed would pass even if the loop
+    were left in a broken state. This proves forward progress resumes on the
+    very next record.
+    """
+    events: list[str] = []
+    source = _Source(events)
+    store = _RecordingStore(events)
+    delivery, cloud_bus = _delivery(events, source, store)
+
+    await delivery.deliver_message("outbound", source, _foreign_tenant_message())  # type: ignore[arg-type]
+    good = _message()
+    await delivery.deliver_message("outbound", source, good)  # type: ignore[arg-type]
+
+    assert [topic for topic, _ in cloud_bus.sent] == [WIRE_OUTBOUND_TOPIC]
+    assert good in source.committed
+
+
+async def test_a_transport_fault_still_nacks_and_raises() -> None:
+    """The scope guard: quarantine is for record verdicts, never for faults.
+
+    A broker/publish failure is transient and global. Committing past it would
+    be silent data loss, so it must keep taking the nack-and-raise path -- the
+    behaviour this change deliberately did NOT widen.
+    """
+
+    class _FailingCloudBus(_RecordingBus):
+        async def publish(
+            self,
+            topic: str,
+            key: bytes | None,
+            value: bytes,
+            headers: object | None = None,
+        ) -> None:
+            raise RuntimeError("SYNTHETIC broker unavailable")
+
+    events: list[str] = []
+    source = _Source(events)
+    store = _RecordingStore(events)
+    local_bus = _RecordingBus(events)
+    cloud_bus = _FailingCloudBus(events)
+    forwarder = ServiceGatewayForwarder(
+        config=_config(),
+        local_bus=local_bus,  # type: ignore[arg-type]
+        cloud_bus=cloud_bus,  # type: ignore[arg-type]
+        retry_sleep=_no_sleep,
+    )
+    delivery = NodeGatewayDelivery(
+        config=_config(),
+        forwarder=forwarder,
+        local_consumer=source,  # type: ignore[arg-type]
+        cloud_consumer=source,  # type: ignore[arg-type]
+        idempotency_store=store,
+    )
+    message = _message()
+
+    # RuntimeError, not GatewayRecordRefusedError: the point is that a fault
+    # keeps the old path.
+    with pytest.raises(RuntimeError, match="SYNTHETIC broker unavailable"):
+        await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert source.nacked == [message], "a transport fault must still nack for retry"
+    assert source.committed == [], "never commit past a transport fault -- data loss"
+
+
+async def _no_sleep(_seconds: float) -> None:
+    return None
