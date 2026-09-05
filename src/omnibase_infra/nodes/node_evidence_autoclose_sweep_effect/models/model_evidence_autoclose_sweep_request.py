@@ -264,6 +264,43 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
         ),
     )
 
+    # OMN-16106. Bounded retry for the sweep's Linear reads. Every one of them
+    # is consumed by a fail-closed caller, so a single lost HTTP call ends the
+    # candidate's run as ERROR_LINEAR_API with no verdict reached about it.
+    # Measured on the live 30-minute schedule 2026-09-05: runs 33970676719 and
+    # 33972096907 dropped 8-of-18 and 5-of-13 bound candidates that way, and
+    # OMN-17160 / OMN-17934 errored on the first tick and reached a real
+    # verdict on the second with nothing about them changed. Retrying a
+    # transient fault is therefore not defensive padding — without it the
+    # closer loses roughly 40% of its pool to the network before the flip
+    # predicate is ever consulted.
+    linear_retry_max_attempts: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description=(
+            "Total attempts (not extra retries) for each Linear GraphQL call "
+            "whose failure is retryable: a transport error or timeout, HTTP "
+            "429, HTTP 5xx, or a GraphQL error naming a rate limit. 1 "
+            "restores the pre-OMN-16106 single-shot behaviour. Credential, "
+            "binding and malformed-query failures are NOT retried at any "
+            "value — they reproduce exactly and only burn the budget."
+        ),
+    )
+    linear_retry_base_delay_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=30.0,
+        description=(
+            "First-retry backoff window, doubled per subsequent attempt and "
+            "jittered within its window, capped at 30s per sleep and "
+            "overridden by a sane `Retry-After`. 0.0 is a real value and is "
+            "what tests use — the retry path must be exercisable without "
+            "waiting out a production backoff, exactly as "
+            "`readback_delay_seconds` records for the readback loop."
+        ),
+    )
+
     apply: bool = Field(
         default=False,
         description=(

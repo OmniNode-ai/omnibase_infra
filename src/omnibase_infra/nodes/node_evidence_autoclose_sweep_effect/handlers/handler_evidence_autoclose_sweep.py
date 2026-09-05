@@ -114,6 +114,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import sys
 from collections.abc import Awaitable, Callable
@@ -446,6 +447,30 @@ _LIVE_SURFACE_UNAVAILABLE_SIGNALS: tuple[str, ...] = (
 #: Per-check records on the dod_verify terminal payload. Read for the class-(c)
 #: classifier only; every counter the flip predicate consults is unchanged.
 _DOD_VERIFY_CHECKS_KEY = "checks"
+
+# OMN-16106. Linear transient-failure retry policy defaults. See
+# ``_LinearClient``'s class docstring for the live measurement these exist to
+# answer: 13 of 31 bound candidates across two consecutive scheduled ticks
+# left the run as ERROR_LINEAR_API, and two of them reached a real verdict on
+# the very next tick with nothing about them changed.
+_LINEAR_RETRY_DEFAULT_MAX_ATTEMPTS = 4
+_LINEAR_RETRY_DEFAULT_BASE_DELAY_SECONDS = 1.0
+#: Ceiling on any single sleep, whether computed or server-instructed. The job
+#: budget is 60 minutes and a sweep holds a 1h App token; a backoff longer
+#: than this spends the run rather than saving it.
+_LINEAR_RETRY_MAX_HONOURED_DELAY_S = 30.0
+#: Ceiling on the vendor error text carried into an outcome reason.
+_LINEAR_ERROR_DETAIL_MAX_CHARS = 300
+#: Tokens that identify a rate-limit GraphQL error. Linear answers an
+#: over-budget request with HTTP 200 and an error payload, so status codes
+#: alone cannot classify it.
+_LINEAR_RATE_LIMIT_TOKENS: tuple[str, ...] = (
+    "ratelimit",
+    "rate limit",
+    "too many requests",
+)
+_HTTP_TOO_MANY_REQUESTS = 429
+_HTTP_SERVER_ERROR = 500
 
 # OMN-17658. First-page size of the `children` connection on `_ISSUE_QUERY`. A
 # parent that fills it is treated as UNREADABLE rather than as fully
@@ -1132,22 +1157,137 @@ class _LinearClient:
     Reads ``LINEAR_API_KEY`` from the environment when not passed
     explicitly (mirrors ``GitHubTransport.__init__``'s ``GH_PAT`` fallback
     in ``omnibase_infra.adapters.github.adapter_github_client``).
+
+    TRANSIENT-FAILURE RETRY (OMN-16106)
+    -----------------------------------
+    Every read this client performs is consumed by a FAIL-CLOSED caller: a
+    ``None`` return is read as "could not determine", which the sweep turns
+    into ``ERROR_LINEAR_API`` and the candidate leaves the run with no
+    verdict at all. That is the correct direction for a read that genuinely
+    cannot be resolved. It is the wrong outcome for a read that merely lost
+    a race with a rate limiter.
+
+    Measured on the live schedule, 2026-09-05 (runs 33970676719 @14:03Z and
+    33972096907 @14:32Z, same workflow, 29 minutes apart)::
+
+        14:03Z  OMN-17160 error_linear_api   OMN-17934 error_linear_api
+        14:32Z  OMN-17160 skipped_already_done   OMN-17934 skipped_already_done
+
+    The same ticket, the same query, the same credential, opposite verdicts
+    on consecutive ticks — so the failure is a property of the ATTEMPT, not
+    of the ticket, the binding, or the key. Across those two runs 13 of 31
+    bound candidates (8 of 18, then 5 of 13) ended ``error_linear_api`` and
+    were dropped. A closer that loses ~40% of its candidate pool to a
+    single un-retried HTTP call cannot flip at scale no matter how correct
+    its predicate is.
+
+    So: retryable faults get a bounded, jittered backoff; non-retryable ones
+    still fail closed on the first answer, because retrying a defect
+    reproduces it exactly and only burns the budget (the same reasoning
+    ``EnumDodVerifyUnresolvedCause.retry_eligible`` encodes one layer up).
+
+    Retryable   — transport errors and timeouts (``httpx.TransportError``),
+                  HTTP 429 (``Retry-After`` honoured when it is a sane
+                  integer), HTTP 5xx, and a GraphQL error payload whose
+                  extensions/message name a rate limit.
+    NOT retried — every other 4xx (401/403 is a credential, 404 is a
+                  binding), a body that is not JSON, and any other GraphQL
+                  error, which is a malformed query and deterministic.
+
+    ``last_error`` carries the sanitized terminal reason of the most recent
+    failed call so the caller can say WHY it could not read, instead of the
+    bare "Failed to fetch ..." string every ``error_linear_api`` outcome
+    has carried until now. It is set on every failure and cleared on every
+    success, and it is deliberately NOT a return value: the fail-closed
+    ``None``/``False`` contract of each method is unchanged.
     """
 
     # OMN-14951 gap 2: self-declared secret-ish env-var names read by this
     # boundary file (see scripts/check-env-reads.sh's check_secret_name_declarations).
     required_secrets: tuple[str, ...] = ("LINEAR_API_KEY",)
 
-    def __init__(self, api_key: str | None = None, timeout: float = 15.0) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        timeout: float = 15.0,
+        max_attempts: int = _LINEAR_RETRY_DEFAULT_MAX_ATTEMPTS,
+        base_delay_seconds: float = _LINEAR_RETRY_DEFAULT_BASE_DELAY_SECONDS,
+    ) -> None:
         self._api_key = (
             api_key if api_key is not None else os.environ.get("LINEAR_API_KEY", "")
         )
         self._timeout = timeout
+        self._max_attempts = max(1, max_attempts)
+        self._base_delay_seconds = max(0.0, base_delay_seconds)
+        #: Sanitized terminal reason of the most recent failed call. Empty
+        #: string means the last call succeeded (or none has been made).
+        self.last_error: str = ""
+
+    def apply_retry_policy(self, max_attempts: int, base_delay_seconds: float) -> None:
+        """Adopt the contract-declared retry policy for this run.
+
+        Called once by the handler from the request, because the client is
+        constructed before any request exists (and stays injectable for
+        tests, which construct it with ``base_delay_seconds=0.0`` so the
+        retry path is exercisable without waiting out a real backoff — the
+        same reasoning ``readback_delay_seconds`` records).
+        """
+        self._max_attempts = max(1, max_attempts)
+        self._base_delay_seconds = max(0.0, base_delay_seconds)
+
+    @staticmethod
+    def _retry_after_seconds(response: httpx.Response) -> float | None:
+        """``Retry-After`` as seconds, or None when absent/unparseable/insane.
+
+        Only the delta-seconds form is honoured. An HTTP-date form, a
+        negative value, or one past ``_LINEAR_RETRY_MAX_HONOURED_DELAY_S``
+        is ignored in favour of the computed backoff — a server asking this
+        sweep to sleep for an hour inside a 60-minute job budget is not an
+        instruction worth following.
+        """
+        raw = response.headers.get("Retry-After", "")
+        try:
+            seconds = float(raw.strip())
+        except (TypeError, ValueError):
+            return None
+        if seconds < 0.0 or seconds > _LINEAR_RETRY_MAX_HONOURED_DELAY_S:
+            return None
+        return seconds
+
+    @staticmethod
+    def _graphql_errors_are_rate_limited(errors: object) -> bool:
+        """Whether a GraphQL error payload names a rate limit.
+
+        Linear answers an over-budget request with HTTP 200 and a GraphQL
+        error whose extensions carry a ``RATELIMITED``-family code, so a
+        status-code-only classifier would call it a malformed query and
+        refuse to retry it. Matched on the serialized payload rather than a
+        fixed key path because the envelope shape is the vendor's to
+        change; the token set is narrow enough that a genuine query error
+        cannot match it.
+        """
+        if not errors:
+            return False
+        rendered = json.dumps(errors, default=str).lower()
+        return any(token in rendered for token in _LINEAR_RATE_LIMIT_TOKENS)
+
+    def _backoff_seconds(self, attempt_index: int) -> float:
+        """Exponential backoff with deterministic-ceiling jitter.
+
+        ``attempt_index`` is 0-based over the attempts already spent. Jitter
+        is drawn from the run's own RNG rather than a fixed schedule so two
+        sweeps that collide on the same rate limiter do not re-collide on
+        every subsequent attempt.
+        """
+        window = self._base_delay_seconds * (2.0**attempt_index)
+        window = min(window, _LINEAR_RETRY_MAX_HONOURED_DELAY_S)
+        return window * (0.5 + random.random() / 2.0)
 
     async def _query(
         self, query: str, variables: dict[str, object]
     ) -> dict[str, object] | None:
         if not self._api_key:
+            self.last_error = "LINEAR_API_KEY is not set."
             logger.warning("LINEAR_API_KEY is not set — cannot call Linear API.")
             return None
         headers = {
@@ -1155,21 +1295,81 @@ class _LinearClient:
             "Content-Type": "application/json",
         }
         payload = {"query": query, "variables": variables}
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    _LINEAR_API_URL, json=payload, headers=headers
+        for attempt_index in range(self._max_attempts):
+            retry_after: float | None = None
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    response = await client.post(
+                        _LINEAR_API_URL, json=payload, headers=headers
+                    )
+                status = response.status_code
+                if status == _HTTP_TOO_MANY_REQUESTS or status >= _HTTP_SERVER_ERROR:
+                    self.last_error = f"Linear API returned HTTP {status}."
+                    retry_after = self._retry_after_seconds(response)
+                    retryable = True
+                else:
+                    response.raise_for_status()
+                    data = response.json()
+                    errors = data.get("errors")
+                    if errors:
+                        # A vendor payload, not exception text, so it is
+                        # rendered and bounded here rather than run through
+                        # `sanitize_error_message` (which types an Exception).
+                        self.last_error = (
+                            "Linear API returned GraphQL errors: "
+                            + json.dumps(errors, default=str)[
+                                :_LINEAR_ERROR_DETAIL_MAX_CHARS
+                            ]
+                        )
+                        logger.warning("%s", self.last_error)
+                        retryable = self._graphql_errors_are_rate_limited(errors)
+                    else:
+                        result = data.get("data")
+                        if isinstance(result, dict):
+                            self.last_error = ""
+                            return result
+                        # A 200 with no `data` object is a shape this code
+                        # cannot interpret. Deterministic; not retried.
+                        self.last_error = "Linear API response carried no data object."
+                        return None
+            except httpx.TransportError as exc:
+                # Connect/read/write timeouts, DNS, connection resets — the
+                # whole family whose fault is the attempt, never the query.
+                self.last_error = sanitize_error_message(exc)
+                logger.warning("Linear API transport failure: %s", self.last_error)
+                retryable = True
+            except (httpx.HTTPError, ValueError) as exc:
+                # Every remaining 4xx (credential / binding) and a body that
+                # is not JSON. A retry reproduces these exactly.
+                self.last_error = sanitize_error_message(exc)
+                logger.warning("Linear API call failed: %s", self.last_error)
+                return None
+
+            if not retryable:
+                return None
+            attempts_left = self._max_attempts - attempt_index - 1
+            if attempts_left <= 0:
+                logger.warning(
+                    "Linear API call failed after %d attempt(s): %s",
+                    self._max_attempts,
+                    self.last_error,
                 )
-                response.raise_for_status()
-                data = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Linear API call failed: %s", sanitize_error_message(exc))
-            return None
-        if data.get("errors"):
-            logger.warning("Linear API returned GraphQL errors: %s", data["errors"])
-            return None
-        result = data.get("data")
-        return result if isinstance(result, dict) else None
+                return None
+            delay = (
+                retry_after
+                if retry_after is not None
+                else self._backoff_seconds(attempt_index)
+            )
+            logger.warning(
+                "Linear API call retryable (%s) — attempt %d/%d, sleeping %.2fs.",
+                self.last_error,
+                attempt_index + 1,
+                self._max_attempts,
+                delay,
+            )
+            if delay > 0.0:
+                await asyncio.sleep(delay)
+        return None
 
     async def fetch_issue(self, ticket_id: str) -> dict[str, object] | None:
         """Fetch id/state/labels/team for a ticket. None on any failure."""
@@ -1279,7 +1479,15 @@ class _LinearClient:
                 {"id": issue_id, "first": page_size, "after": cursor},
             )
             if data is None:
-                return None, "Failed to fetch issue state history from Linear."
+                # OMN-16106: name the terminal cause. A reason that says only
+                # "failed" cannot distinguish an exhausted rate-limit budget
+                # from a revoked credential, and both read identically in the
+                # receipt, which is how this defect stayed invisible.
+                detail = f" ({self.last_error})" if self.last_error else ""
+                return (
+                    None,
+                    f"Failed to fetch issue state history from Linear.{detail}",
+                )
             issue = data.get("issue")
             if not isinstance(issue, dict):
                 return None, "Linear returned no issue for the history read."
@@ -1309,6 +1517,25 @@ class _LinearClient:
             return False
         created = data.get("commentCreate")
         return bool(isinstance(created, dict) and created.get("success"))
+
+
+def _linear_error_detail(client: object) -> str:
+    """Parenthesised terminal cause of the last Linear failure, or "".
+
+    OMN-16106. Every ``ERROR_LINEAR_API`` reason said only that a read
+    "failed", which cannot distinguish an exhausted rate-limit budget from a
+    revoked credential — and both render identically in the receipt, which is
+    how the transient-loss defect stayed invisible across 601 scheduled runs.
+
+    Typed on ``_LinearClient`` rather than probed with ``hasattr``: the cause
+    is a property of THIS client, and a duck-typed probe would pick up
+    whatever a future substitute happened to expose. A test double has no HTTP
+    layer and therefore no cause to report, so it renders the empty string and
+    the reason reads exactly as it did before.
+    """
+    if isinstance(client, _LinearClient) and client.last_error:
+        return f" ({client.last_error})"
+    return ""
 
 
 class HandlerEvidenceAutocloseSweep:
@@ -1527,6 +1754,19 @@ class HandlerEvidenceAutocloseSweep:
         self, request: ModelEvidenceAutocloseSweepRequest
     ) -> ModelEvidenceAutocloseSweepResult:
         correlation_id = request.correlation_id or uuid4()
+
+        # OMN-16106. The client is built in __init__, before any request
+        # exists, so the contract-declared retry policy is adopted here — the
+        # one place the request is in hand and before any Linear call is made.
+        # An injected test double has no HTTP layer to retry, so the policy
+        # binds the real client only. isinstance, not hasattr: the policy is a
+        # property of THIS client, and a duck-typed probe would silently adopt
+        # whatever a future substitute happened to expose.
+        if isinstance(self._linear, _LinearClient):
+            self._linear.apply_retry_policy(
+                request.linear_retry_max_attempts,
+                request.linear_retry_base_delay_seconds,
+            )
 
         kill_switch_engaged = self._autoclose_disabled_ctor or bool(
             os.environ.get(_KILL_SWITCH_ENV_VAR, "")
@@ -1963,9 +2203,10 @@ class HandlerEvidenceAutocloseSweep:
             return "unreadable", "Linear issue payload carried no issue id"
         bodies = await self._linear.fetch_comment_bodies(issue_id)
         if bodies is None:
+            detail = _linear_error_detail(self._linear)
             return (
                 "unreadable",
-                "the ticket's existing comments could not be read from Linear",
+                f"the ticket's existing comments could not be read from Linear{detail}",
             )
         if any(marker in body for body in bodies):
             return "duplicate", marker
@@ -2247,7 +2488,10 @@ class HandlerEvidenceAutocloseSweep:
                 companion_pr_number=companion_pr_number,
                 companion_pr_url=companion_pr_url,
                 decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
-                reason="Failed to fetch ticket state/labels from Linear.",
+                reason=(
+                    "Failed to fetch ticket state/labels from Linear."
+                    + _linear_error_detail(self._linear)
+                ),
             )
 
         labels_conn = issue.get("labels")
