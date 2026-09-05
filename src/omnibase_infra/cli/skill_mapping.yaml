@@ -201,6 +201,22 @@ skills:
       # it is not a kill switch: ONEX_AUTOCLOSE_DISABLED still halts the whole
       # run regardless of what this names.
       - {name: exclude, payload_field: exclude_tickets, arg_type: string_list}
+      # OMN-17342. The BACKFILL arm. `--backfill-lookback-hours 0` (the default,
+      # and what every scheduled tick gets) leaves the sweep single-armed. A
+      # non-zero value adds a second enumeration over a wider window and offers
+      # a BOUNDED ROTATING SLICE of it to the identical downstream pipeline --
+      # binding, Linear state, dod_verify, the OMN-16736 AC-coverage guard, the
+      # OMN-15911 behaviour conjunct, flip or gap. It widens which candidates
+      # are asked and changes nothing about what counts as proven. The three
+      # sizing knobs below bound the run: `--backfill-max-candidates` is the
+      # hard per-run cap on verifier calls (the thing that must not grow with
+      # the board), `--backfill-pool-size` caps the wider window's PR-list
+      # pagination, and `--backfill-rotation-minutes` is the cadence the slice
+      # advances on -- set it to the caller's real schedule interval.
+      - {name: backfill-lookback-hours, payload_field: backfill_lookback_hours, arg_type: integer}
+      - {name: backfill-max-candidates, payload_field: backfill_max_candidates, arg_type: integer}
+      - {name: backfill-pool-size, payload_field: backfill_pool_size, arg_type: integer}
+      - {name: backfill-rotation-minutes, payload_field: backfill_rotation_minutes, arg_type: integer}
   # OMN-16536: detect + re-flip Linear's silent GitHub-sync Done-revert
   # pattern. Node-backed in omnibase_infra itself (same locality
   # precedent as node_evidence_autoclose_sweep_effect above -- calls the
