@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Self, cast
 
 import pytest
 import yaml
@@ -322,6 +323,43 @@ def test_loader_rejects_oversized_document_without_echoing_content(
         load_rsd_model_artifact_provenance(path)
 
     assert "RSD model artifact provenance is invalid" in str(error.value)
+
+
+@pytest.mark.unit
+def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _EXAMPLE_PATH.read_bytes()
+
+    class _TrackingReader:
+        def __init__(self, value: bytes) -> None:
+            self._stream = io.BytesIO(value)
+            self.read_sizes: list[int] = []
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self._stream.close()
+
+        def read(self, size: int = -1) -> bytes:
+            self.read_sizes.append(size)
+            return self._stream.read(size)
+
+    reader = _TrackingReader(payload)
+
+    def fail_stat(_path: Path) -> object:
+        raise AssertionError("loader must not stat before opening the descriptor")
+
+    def open_once(_path: Path, mode: str) -> _TrackingReader:
+        assert mode == "rb"
+        return reader
+
+    monkeypatch.setattr(Path, "stat", fail_stat)
+    monkeypatch.setattr(Path, "open", open_once)
+
+    assert load_rsd_model_artifact_provenance(_EXAMPLE_PATH).execute_enabled is False
+    assert reader.read_sizes == [64 * 1024 + 1]
 
 
 @pytest.mark.unit

@@ -124,10 +124,13 @@ def load_rsd_model_artifact_provenance(
 ) -> ModelRsdModelArtifactProvenance:
     """Load one bounded provenance document without filesystem fallbacks."""
     try:
-        if path.stat().st_size > _MAX_PROVENANCE_BYTES:
+        with path.open("rb") as stream:
+            raw_bytes = stream.read(_MAX_PROVENANCE_BYTES + 1)
+        if len(raw_bytes) > _MAX_PROVENANCE_BYTES:
             raise ProtocolConfigurationError("RSD model artifact provenance is invalid")
+        raw_text = raw_bytes.decode("utf-8")
         raw = yaml.load(
-            path.read_text(encoding="utf-8"),
+            raw_text,
             Loader=NoDuplicateSafeLoader,  # noqa: S506
         )
     except (
