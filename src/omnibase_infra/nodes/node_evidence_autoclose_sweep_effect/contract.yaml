@@ -320,6 +320,10 @@ io_operations:
       - history_max_pages
       - readback_max_attempts
       - readback_delay_seconds
+      # OMN-16106: bounded retry for the sweep's own Linear reads. A lost
+      # HTTP call ended a candidate's run as ERROR_LINEAR_API with no verdict.
+      - linear_retry_max_attempts
+      - linear_retry_base_delay_seconds
       - apply
       - max_companions
       - dispatch_cwd
