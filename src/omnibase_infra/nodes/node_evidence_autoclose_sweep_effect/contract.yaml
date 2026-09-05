@@ -148,8 +148,8 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 3
-  patch: 2
-node_version: "1.4.0"
+  patch: 3
+node_version: "1.4.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -181,6 +181,8 @@ handler_routing:
       description: "gh api enumerate -> extract binding -> dod_verify -> Linear flip/comment"
       output_fields:
         - companions_scanned
+        - backfill_pool_size
+        - backfill_candidates_selected
         - bindings_extracted
         - tickets_flipped
         - tickets_gap_posted
@@ -262,6 +264,10 @@ io_operations:
     input_fields:
       - occ_repo
       - lookback_hours
+      - backfill_lookback_hours
+      - backfill_max_candidates
+      - backfill_pool_size
+      - backfill_rotation_minutes
       - apply
       - max_companions
       - dispatch_cwd
@@ -271,6 +277,8 @@ io_operations:
       - exclude_tickets
     output_fields:
       - companions_scanned
+      - backfill_pool_size
+      - backfill_candidates_selected
       - bindings_extracted
       - tickets_flipped
       - tickets_gap_posted
@@ -321,7 +329,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-17"
-  updated: "2026-08-27"
+  updated: "2026-09-05"
   tags:
     - "effect"
     - "linear"
