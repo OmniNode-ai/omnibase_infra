@@ -251,13 +251,15 @@ on:
           untouched: dod_verify's own terminal `verified`, the OMN-16821
           denominator equality, the OMN-15911 behaviour conjunct and the
           OMN-16736 AC-coverage re-read all still gate the write.
-          DELIBERATELY NOT ON THE SCHEDULE, and not a repo variable. Arming the
-          arm for unattended runs is a separate decision that belongs behind
-          the recurring-companion refusal (OMN-17934) and the children conjunct
-          (OMN-17658): a wide arm without those fences would reproduce the
-          OMN-17292 re-flip across the whole backlog instead of once. Until
-          they land this is a dispatch-only rehearsal surface — and a dispatch
-          that leaves `apply` unticked reaches every decision and writes none.
+          ARMING NOTE (OMN-17658, this commit). The paragraph that used to sit
+          here said this input was deliberately not on the schedule, because
+          arming a wide arm without the recurring-companion refusal (OMN-17934)
+          and the children conjunct (OMN-17658) would have reproduced the
+          OMN-17292 re-flip across the whole backlog instead of once. Those
+          fences land in this same commit, so the arm is now armed — and it is
+          armed in the NODE CONTRACT's default, not here. This input remains a
+          per-dispatch override for rehearsal; leaving it at 0 means "pass no
+          flag", which is not the same statement as "the arm is off".
         required: false
         default: '0'
       diagnose_tickets:
@@ -290,9 +292,11 @@ on:
         default: ''
       apply:
         description: >-
-          OMN-16106. WRITE MODE FOR THIS DISPATCH ONLY. The 30-minute
-          SCHEDULE already applies — it does not read this box and cannot. What
-          this decides is whether the run YOU are launching writes. Tick it and
+          OMN-16106 / OMN-17658. WRITE MODE FOR THIS DISPATCH ONLY. The
+          30-minute SCHEDULE does not read this box and cannot; whether a
+          scheduled run writes is decided by the node contract's
+          `scheduled_apply`, which this workflow does not set and cannot.
+          What this decides is whether the run YOU are launching writes. Tick it and
           this dispatch flips every ticket whose evidence clears the predicate
           (Linear state to Done, plus the audit comment carrying the dod_verify
           counters that justified it). Leave it alone — the default — and this
@@ -312,9 +316,11 @@ env:
 
 jobs:
   evidence-autoclose-sweep:
-    # The mode is rendered from the same guard that gates the flag (see
-    # SWEEP_APPLY below), so the label cannot drift from the behaviour.
-    name: Evidence Autoclose Sweep (${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')) && 'APPLY' || 'DRY-RUN' }})
+    # The label renders the TRIGGER, which this file does know. It no longer
+    # renders a scheduled run's write MODE, which since OMN-17658 is the
+    # contract's answer and not this workflow's — a label asserting it would
+    # be a string that reads as a fact and is not one.
+    name: Evidence Autoclose Sweep (${{ github.event_name == 'schedule' && 'SCHEDULE - contract decides' || (github.event.inputs.apply == 'true' && 'DISPATCH APPLY' || 'DISPATCH DRY-RUN') }})
     # Trusted runner required: needs LINEAR_API_KEY and an authenticated gh.
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -339,28 +345,32 @@ jobs:
       contents: read
 
     env:
-      # OMN-16106. THE decision that separates a preview from a mutation,
-      # evaluated exactly once, in the expression context, and handed to the
-      # shell as data rather than as substituted script text.
+      # OMN-17658. THE WORKFLOW NO LONGER DECIDES WHETHER AN UNATTENDED RUN
+      # WRITES. It reports what launched it, and the node's contract decides.
       #
-      # Two branches, and which one fires is decided by the event alone:
-      #   * `github.event_name == 'schedule'` — the unattended closer. A cron
-      #     tick carries no `github.event.inputs` at all, so nothing an input
-      #     could say would enable or disable this; the guard has to name the
-      #     event, and does.
-      #   * the `workflow_dispatch` conjunction is the OPERATOR's choice, and
-      #     it stays a conjunction so a dispatch that leaves the box alone is a
-      #     dry run. That is the diagnostic path, and it is the only read-only
-      #     path left. A boolean workflow_dispatch input arrives in the
-      #     `github` context as the STRING "true"/"false" (the `inputs` context
-      #     types it as a real boolean, but `inputs` is not available in a job
-      #     `name:`, and the guard has to be one expression usable at every
-      #     site or the label can drift from the behaviour).
+      # What was here: a single `SWEEP_APPLY` expression whose first disjunct
+      # was `github.event_name == 'schedule'`. That disjunct was the arming
+      # authority for every write nobody was watching — and it lived in a YAML
+      # expression, outside the contract, outside the type system, and outside
+      # every test that did not parse this file. omnibase_infra#3195 armed the
+      # closer by editing it; OMN-17658's plan row (P1-8, decision 11 / §3b /
+      # F-R5-4) requires the authority to be a declared, typed contract input
+      # instead, so that disarming the closer is a diff with a review and a
+      # test rather than an edit to a string.
       #
-      # What stops a scheduled write is not this expression. It is the flip
-      # predicate, the standing exclusion fence, and ONEX_AUTOCLOSE_DISABLED —
-      # see the header.
-      SWEEP_APPLY: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')) && 'true' || 'false' }}
+      # So there are two variables now and neither is a policy:
+      #
+      #   * SWEEP_TRIGGER — the FACT. Passed to the node as `--trigger`. The
+      #     node pairs it with the contract's `scheduled_apply` to decide.
+      #   * SWEEP_DISPATCH_APPLY — the OPERATOR's explicit request on THIS
+      #     dispatch. It stays a conjunction on the input so a dispatch that
+      #     leaves the box alone is a dry run even while the schedule is armed;
+      #     that is the rehearsal surface, and arming must not remove it.
+      #
+      # There is deliberately no `--scheduled-apply` flag anywhere below. A
+      # workflow that could pass one would be an arming authority again.
+      SWEEP_TRIGGER: ${{ github.event_name == 'schedule' && 'schedule' || 'dispatch' }}
+      SWEEP_DISPATCH_APPLY: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'true' || 'false' }}
 
     steps:
       # OMN-16832. THE credential this job runs under. Everything below that
@@ -1331,9 +1341,9 @@ jobs:
           # is substituted BEFORE bash parses the line, so the input's own
           # characters become shell syntax — a workflow_dispatch string input
           # is attacker-influenced in exactly the way that matters. As an env
-          # var referenced `"${LOOKBACK_HOURS}"` it is a value. The apply
-          # input reaches the shell the same way, via SWEEP_APPLY at job
-          # level.
+          # var referenced `"${LOOKBACK_HOURS}"` it is a value. The dispatch
+          # apply input reaches the shell the same way, via
+          # SWEEP_DISPATCH_APPLY at job level.
           LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '6' }}
           # OMN-17342. Same discipline as LOOKBACK_HOURS and for the same
           # reason: as `${{ ... }}` inside a `run:` body an input's characters
@@ -1416,6 +1426,33 @@ jobs:
           # To halt:    gh variable set ONEX_AUTOCLOSE_DISABLED --repo OmniNode-ai/omnibase_infra --body 1
           # To release: gh variable delete ONEX_AUTOCLOSE_DISABLED --repo OmniNode-ai/omnibase_infra
           ONEX_AUTOCLOSE_DISABLED: ${{ vars.ONEX_AUTOCLOSE_DISABLED }}
+          # OMN-17658 AUTO-DISARM, the persisted half.
+          #
+          # The node disarms ITSELF within a run the moment a candidate proves
+          # that a closer flip on it was already undone by a person: every
+          # later candidate in that run is refused unwritten. That is immediate
+          # but not durable — the next cron tick starts a fresh process.
+          #
+          # This variable is the durable half, and it is deliberately the same
+          # shape as the kill switch above and for the same reason: a repo
+          # variable is reachable from EVERY event, including the scheduled
+          # ones, whereas a `workflow_dispatch` input is missing exactly when
+          # nobody is watching. Set it to the triggering ticket id and every
+          # subsequent scheduled run reaches all of its decisions and writes
+          # none of them, reporting mode=disarmed and naming the trigger. An
+          # operator re-arms by deleting it.
+          #
+          # It is NOT a kill switch and must not be confused with one: a halted
+          # run does zero I/O and produces no receipt, and an operator deciding
+          # whether to re-arm needs the receipt.
+          #
+          # To disarm:  gh variable set ONEX_AUTOCLOSE_DISARMED --repo OmniNode-ai/omnibase_infra --body OMN-17292
+          # To re-arm:  gh variable delete ONEX_AUTOCLOSE_DISARMED --repo OmniNode-ai/omnibase_infra
+          #
+          # Unset renders as "" and the guard below reads that as "not
+          # disarmed", so a repo with no such variable behaves exactly as it
+          # did before this line existed.
+          AUTOCLOSE_DISARMED_BY: ${{ vars.ONEX_AUTOCLOSE_DISARMED }}
         run: |
           set -euo pipefail
           # Fail fast on a missing secret rather than letting every ticket in
@@ -1440,7 +1477,7 @@ jobs:
           # no literal `--apply` at all.
           # OMN-17891. The exclusion enters the same way `--apply` does — only
           # through a shell array, never as a literal on the invocation line —
-          # and it is populated INDEPENDENTLY of SWEEP_APPLY. That was a
+          # and it is populated INDEPENDENTLY of the arming. That was a
           # rehearsal argument when only a dispatch could write; now that the
           # schedule writes it is load-bearing in its own right, because a fence
           # evaluated inside a dispatch-shaped branch would leave every
@@ -1489,28 +1526,71 @@ jobs:
               echo "::warning title=backfill input ignored::backfill_lookback_hours=[${BACKFILL_LOOKBACK_HOURS:-}] is not a non-negative integer. The backfill arm is OFF for this run; the forward window is unaffected."
               ;;
             0)
-              echo "backfill: OFF — single forward window only (the scheduled default)"
+              # OMN-17658. "0" here means THIS RUN passes no backfill flag, so
+              # the node uses its contract-declared default. Since that default
+              # was armed (OMN-17342 arming, gated behind the fences in this
+              # same commit), that is no longer the same statement as "the
+              # backfill arm is off" — and a log line still saying so would be
+              # the OMN-17935 defect reproduced one field over. Turning the arm
+              # off is a contract change, not a dispatch.
+              echo "backfill: no flag passed by this run — the node's contract-declared backfill window applies. The receipt's backfill_pool_size / backfill_candidates_selected report what the arm actually did."
               ;;
             *)
               backfill_args+=(--backfill-lookback-hours "${BACKFILL_LOOKBACK_HOURS}")
               echo "backfill: second enumeration arm ON over ${BACKFILL_LOOKBACK_HOURS}h. A BOUNDED ROTATING SLICE of the companions older than the forward window is offered to the same pipeline; the flip predicate is unchanged. Coverage of the pool is per-slice, not per-run: a ticket absent from this run's outcomes has not been refused, its turn has not come round."
               ;;
           esac
+          # OMN-17658. The DISARM marker enters through an array like every
+          # other value, never as a literal, and it is populated independently
+          # of the trigger: a fence evaluated inside a dispatch-shaped branch
+          # would leave every unattended run unfenced, which is the shape of
+          # gap OMN-16792 AC3 already found once in the kill switch.
+          disarm_args=()
+          if [ -n "${AUTOCLOSE_DISARMED_BY:-}" ]; then
+            disarm_args+=(--disarmed-by "${AUTOCLOSE_DISARMED_BY}")
+            echo "::warning title=DISARMED::ONEX_AUTOCLOSE_DISARMED names ${AUTOCLOSE_DISARMED_BY}. This run reaches every decision and writes NONE of them. Delete the repo variable to re-arm the closer."
+          fi
+          # OMN-17658. `--apply` is the DISPATCH request only. The schedule
+          # passes no arming value at all: `--trigger schedule` states the fact
+          # and the node's contract-declared `scheduled_apply` decides. A
+          # `--scheduled-apply` flag must never appear here — a workflow that
+          # could pass one would be an arming authority again, which is the
+          # thing this ticket moved out of this file.
           apply_args=()
-          if [ "${SWEEP_APPLY}" = "true" ]; then
+          if [ "${SWEEP_DISPATCH_APPLY}" = "true" ]; then
             apply_args+=(--apply)
-            echo "::warning title=APPLY MODE::This dispatch WILL write to Linear. Every ticket whose dod_verify verdict clears the flip predicate is moved to Done and receives the audit comment carrying the counters that justified it. Tickets that do not clear it are commented, never flipped."
-            echo "mode: APPLY (operator-dispatched, github.event.inputs.apply=true)"
+            echo "::warning title=APPLY MODE::This run WILL write to Linear. Every ticket whose dod_verify verdict clears the flip predicate AND every OMN-17658/OMN-17934 fence is moved to Done and receives the audit comment carrying the counters and the bound state-history readback that justified it. Tickets that do not clear them are commented or refused, never flipped."
+          fi
+          # OMN-17935. The provenance is DERIVED from the event, at one site.
+          # The line this replaced read `mode: APPLY (operator-dispatched,
+          # github.event.inputs.apply=true)` unconditionally inside the apply
+          # branch, and since #3195 armed the schedule it asserted an operator
+          # who did not exist on exactly the runs where provenance matters most
+          # — run 33932169358 (event: schedule, no dispatcher, no inputs) said
+          # it while moving four tickets to Done. A string that reads as a fact
+          # and has stopped being one; the same defect class as OMN-16832, one
+          # field over.
+          #
+          # Note what this line does NOT say any more: whether the run writes.
+          # On a schedule that is the CONTRACT's answer, not this file's, and a
+          # log line here asserting it would be the same kind of claim. The
+          # receipt's own `mode` field carries it.
+          if [ "${SWEEP_TRIGGER}" = "schedule" ]; then
+            echo "provenance: SCHEDULED (cron tick, no dispatcher). Whether this run writes is decided by the contract's scheduled_apply, and the sweep receipt's `mode` field reports what it resolved to."
+          elif [ "${SWEEP_DISPATCH_APPLY}" = "true" ]; then
+            echo "provenance: OPERATOR-DISPATCHED with apply ticked — this run writes."
           else
-            echo "mode: DRY-RUN (no Linear mutation; every decision is logged as a preview)"
+            echo "provenance: OPERATOR-DISPATCHED with apply unticked — the diagnostic dry run; every decision is logged as a preview and none is written."
           fi
           # `${arr[@]+"${arr[@]}"}` rather than a bare `"${arr[@]}"`: under
           # `set -u` an empty array expansion is an unbound-variable error on
           # bash < 4.4, and this must not become the reason a dry run fails.
           "${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep \
             --lookback-hours "${LOOKBACK_HOURS}" \
+            --trigger "${SWEEP_TRIGGER}" \
             ${backfill_args[@]+"${backfill_args[@]}"} \
             ${exclude_args[@]+"${exclude_args[@]}"} \
+            ${disarm_args[@]+"${disarm_args[@]}"} \
             ${apply_args[@]+"${apply_args[@]}"}
 
       # OMN-16902, the enforcement half (CLAUDE.md rule 5). Dropping UV_NO_SYNC
@@ -1551,32 +1631,42 @@ jobs:
 
       - name: Post summary
         if: always()
-        # OMN-16106. The mode comes from the same guard as the flag. This step
-        # previously asserted "this workflow never passes --apply" as a
-        # constant; left alone it would have kept asserting it while the run
-        # flipped tickets.
+        # OMN-17658. The summary reports the TRIGGER and points at the receipt
+        # for the mode. It deliberately no longer renders "APPLY"/"DRY-RUN"
+        # from a workflow expression: since the arming authority moved into the
+        # node's contract (`scheduled_apply`), this file does not know what a
+        # scheduled run resolved to, and a summary that asserted it would be
+        # exactly the stale-string defect OMN-17935 records one line over.
         env:
-          SWEEP_MODE: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')) && 'APPLY' || 'DRY-RUN' }}
+          SWEEP_TRIGGER: ${{ github.event_name == 'schedule' && 'schedule' || 'dispatch' }}
+          SWEEP_DISPATCH_APPLY: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') && 'true' || 'false' }}
         run: |
           {
-            echo "## Evidence Autoclose Sweep (OMN-16106, ${SWEEP_MODE})"
+            echo "## Evidence Autoclose Sweep (OMN-16106)"
             echo ""
             echo "Enumerated merged onex_change_control companions, re-ran dod_verify,"
-            echo "and reached a flip/gap decision per bound ticket."
+            echo "and reached a flip/gap/refusal decision per bound ticket."
             echo ""
-            if [ "${SWEEP_MODE}" = "APPLY" ]; then
-              echo "**Linear was written.** Every ticket recorded \`flipped\` below was moved"
-              echo "to Done and received an audit comment naming its merged evidence"
-              echo "companion and the dod_verify counters that justified the flip"
-              echo "(verified / non-probative / failed / behavior-proving). Tickets that"
-              echo "did not clear the predicate were commented with the honest gap, never"
-              echo "flipped. The per-ticket receipt in the sweep step's log is the record."
+            if [ "${SWEEP_TRIGGER}" = "schedule" ]; then
+              echo "**Trigger: the 30-minute schedule.** Whether this run wrote to Linear is"
+              echo "decided by the node contract's \`scheduled_apply\` (OMN-17658) — not by"
+              echo "this workflow, which passes no arming value. The sweep receipt's"
+              echo "\`mode\` field is the answer: \`apply_scheduled\`, \`dry_run\`,"
+              echo "\`disarmed\` or \`halted\`."
+            elif [ "${SWEEP_DISPATCH_APPLY}" = "true" ]; then
+              echo "**Trigger: an operator dispatch with apply ticked. Linear was written.**"
+              echo "Every ticket recorded \`flipped\` below was moved to Done and received an"
+              echo "audit comment naming its merged evidence companion, the dod_verify counters"
+              echo "that justified the flip, and the bound state-history readback proving the"
+              echo "state actually moved (OMN-17658)."
             else
-              echo "No Linear mutation was performed — this dispatch left `apply` unticked,"
-              echo "which is the diagnostic dry run. Every decision in the sweep step's"
-              echo "receipt is a preview of what a writing run would have recorded."
-              echo ""
-              echo "Note: the 30-minute SCHEDULE applies. This mode is reachable only by"
-              echo "dispatching with the box unticked; it is not what unattended runs do."
+              echo "**Trigger: an operator dispatch with apply unticked** — the diagnostic dry"
+              echo "run. Every decision in the sweep step's receipt is a preview of what a"
+              echo "writing run would have recorded."
             fi
+            echo ""
+            echo "Refusals carry their own typed decision: \`skipped_has_children\`,"
+            echo "\`skipped_recurring_companion\`, \`skipped_prior_revert\`,"
+            echo "\`skipped_flip_budget_exhausted\`, \`skipped_disarmed\`,"
+            echo "\`skipped_excluded\` (OMN-17658 / OMN-17934 / OMN-17891)."
           } >> "$GITHUB_STEP_SUMMARY"

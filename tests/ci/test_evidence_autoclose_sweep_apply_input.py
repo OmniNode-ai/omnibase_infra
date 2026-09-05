@@ -72,15 +72,32 @@ SUMMARY_STEP_NAME = "Post summary"
 # and any dispatch-supplied exclusion. It is what `--exclude` is given.
 FENCE_VAR = "FENCE_TICKETS"
 
-# The one expression that decides whether this run mutates Linear. It is
-# written as a single constant here precisely because it appears at more than
-# one site in the workflow (the flag, the job name, the summary) and those
-# sites MUST agree — a run that labels itself DRY-RUN while passing --apply is
-# the defect this constant exists to make impossible.
-APPLY_GUARD = (
-    "github.event_name == 'schedule' || "
-    "(github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true')"
+# OMN-17658 REWRITE. What used to live here was APPLY_GUARD — the single
+# expression `github.event_name == 'schedule' || (workflow_dispatch && inputs
+# .apply == 'true')` that decided whether a run mutated Linear, asserted at
+# three sites so they could not drift apart.
+#
+# That constant is gone because the thing it pinned is gone. Its first
+# disjunct WAS the arming authority for every unattended write, and P1-8
+# (decision 11 / §3b / F-R5-4) requires that authority to be a declared, typed
+# contract input on the node instead of an expression in this file. So the
+# workflow now asserts two much weaker properties, and the third — whether a
+# scheduled run writes — is not this file's to assert at all:
+#
+#   * TRIGGER_EXPR: the FACT of what launched the run, passed to the node.
+#   * DISPATCH_APPLY_EXPR: the operator's explicit request on THIS dispatch.
+#
+# The property that replaces "the three sites agree" is stronger, and it is
+# asserted below: NO site in this workflow may name an arming decision for a
+# scheduled run, because there is nowhere left for such a decision to be
+# correct.
+TRIGGER_EXPR = "github.event_name == 'schedule' && 'schedule' || 'dispatch'"
+DISPATCH_APPLY_EXPR = (
+    "(github.event_name == 'workflow_dispatch' && "
+    "github.event.inputs.apply == 'true') && 'true' || 'false'"
 )
+# The pre-OMN-17658 arming disjunct, spelled once so its RETURN fails loudly.
+RETIRED_SCHEDULE_ARMING_DISJUNCT = "github.event_name == 'schedule' || "
 
 
 def _load_workflow() -> dict[str, Any]:
@@ -166,33 +183,91 @@ def test_the_schedule_still_fires_every_thirty_minutes() -> None:
     )
 
 
-def test_the_scheduled_run_applies() -> None:
-    """A cron tick reaches ``--apply``, by its event name alone.
+def test_the_workflow_no_longer_decides_whether_a_scheduled_run_writes() -> None:
+    """OMN-17658 §3b. The arming authority is the contract, not this file.
 
-    This is the inversion. ``schedule`` carries no ``github.event.inputs`` at
-    all, so an input could never enable it — the guard has to name the event.
-    Asserted both ways: the schedule disjunct is present, AND the guard is not
-    still the dispatch-only form that made every unattended run read-only.
+    REWRITTEN, and the rewrite is the assertion. The previous test here was
+    ``test_the_scheduled_run_applies`` and it required this workflow to carry
+    ``github.event_name == 'schedule'`` inside the expression that gates
+    ``--apply`` — i.e. it required the arming authority for every unattended
+    write to live in a YAML string. omnibase_infra#3195 armed the closer by
+    editing that string, and the plan row that was supposed to authorise
+    arming (P1-8) was still Backlog at the time.
+
+    The property now is an ABSENCE plus a redirection:
+
+      * no expression in this workflow may arm a scheduled write;
+      * the workflow states the trigger and passes it to the node;
+      * there is no ``--scheduled-apply`` flag for it to pass, so it could not
+        arm one even by accident.
+
+    Whether a scheduled run writes is answered by
+    ``ModelEvidenceAutocloseSweepRequest.scheduled_apply``, declared on
+    ``node_evidence_autoclose_sweep_effect/contract.yaml`` and pinned by
+    tests/unit/nodes/node_evidence_autoclose_sweep_effect/
+    test_omn_17658_closer_safety_fences.py.
     """
-    assert "github.event_name == 'schedule'" in APPLY_GUARD, (
-        "the apply guard must name the schedule event — a closer whose "
-        "scheduled run only previews is not closing anything"
+    job = _job()
+    job_env = job.get("env") or {}
+    assert job_env.get("SWEEP_TRIGGER") == "${{ " + TRIGGER_EXPR + " }}", (
+        "the workflow must report WHAT LAUNCHED IT as a plain fact; got "
+        f"{job_env.get('SWEEP_TRIGGER')!r}"
     )
-    guard = (_job().get("env") or {}).get("SWEEP_APPLY") or ""
-    assert APPLY_GUARD in guard, (
-        f"SWEEP_APPLY must carry the canonical guard\n  expected: {APPLY_GUARD}\n"
-        f"  got: {guard}"
+    assert "SWEEP_APPLY" not in job_env, (
+        "SWEEP_APPLY is back. That variable carried the schedule-arming "
+        "disjunct, which is exactly what OMN-17658 moved into the contract"
     )
-    # The pre-ruling form, spelled out so a revert to it fails loudly rather
-    # than silently returning the closer to preview-only.
-    dispatch_only = (
-        "${{ (github.event_name == 'workflow_dispatch' && "
-        "github.event.inputs.apply == 'true') && 'true' || 'false' }}"
+
+    step = _step(SWEEP_STEP_NAME)
+    run = step.get("run") or ""
+    # Comment lines are excluded on purpose: the run body NAMES the forbidden
+    # flag in a comment explaining why it must not exist, and a check that
+    # could not tell a prohibition from its violation would forbid documenting
+    # the rule.
+    live_flag = [
+        line
+        for line in run.splitlines()
+        if "--scheduled-apply" in line and not line.lstrip().startswith("#")
+    ]
+    assert not live_flag, (
+        "a --scheduled-apply flag makes this workflow an arming authority "
+        f"again; the contract's declared default is the only one: {live_flag}"
     )
-    assert guard != dispatch_only, (
-        "SWEEP_APPLY is back to the dispatch-only form: scheduled runs would "
-        "preview forever and nothing would ever close unattended"
+
+    # The retired disjunct must not reappear at ANY site: not the job name,
+    # not an env expression, not the summary. A single grep over the whole
+    # file, because the defect is the disjunct existing here at all.
+    body = SWEEP_WORKFLOW.read_text(encoding="utf-8")
+    offending = [
+        line
+        for line in body.splitlines()
+        if RETIRED_SCHEDULE_ARMING_DISJUNCT in line
+        and not line.lstrip().startswith("#")
+    ]
+    assert not offending, (
+        "the schedule-arming disjunct is back in a live expression — the "
+        f"arming authority has left the contract again:\n{offending}"
     )
+
+
+def test_the_schedule_reaches_the_node_as_a_typed_trigger() -> None:
+    """The fact travels; the decision does not.
+
+    ``--trigger`` is unconditional on the invocation line — every run states
+    what launched it — while ``--apply`` stays inside a guarded array. That
+    asymmetry is the whole design: a fact may be stated unconditionally, a
+    write request may not.
+    """
+    run = _step(SWEEP_STEP_NAME).get("run") or ""
+    assert '--trigger "${SWEEP_TRIGGER}"' in run, (
+        "the sweep must be told what launched it, as a quoted env value"
+    )
+    invocation = [
+        line
+        for line in run.splitlines()
+        if "onex" in line and "evidence_autoclose_sweep" in line
+    ]
+    assert invocation, "could not find the `onex skill` invocation"
 
 
 def test_a_dispatch_can_still_force_a_dry_run() -> None:
@@ -205,13 +280,15 @@ def test_a_dispatch_can_still_force_a_dry_run() -> None:
     that would make every dispatch apply too and leave no read-only path at
     all.
     """
+    job_env = _job().get("env") or {}
     assert (
-        "(github.event_name == 'workflow_dispatch' && "
-        "github.event.inputs.apply == 'true')"
-    ) in APPLY_GUARD, (
-        "the dispatch branch must stay conjoined with the apply input, or a "
-        "dispatch could no longer request a dry run and the rehearsal path "
-        f"would be gone; got {APPLY_GUARD!r}"
+        job_env.get("SWEEP_DISPATCH_APPLY") == "${{ " + DISPATCH_APPLY_EXPR + " }}"
+    ), (
+        "the dispatch write request must stay a CONJUNCTION on the apply "
+        "input. A bare event-name test would make every dispatch write and "
+        "leave no read-only path at all — and the rehearsal path has to "
+        f"survive arming, not be replaced by it. Got "
+        f"{job_env.get('SWEEP_DISPATCH_APPLY')!r}"
     )
     inputs = (_triggers().get("workflow_dispatch") or {}).get("inputs") or {}
     assert inputs.get(APPLY_INPUT, {}).get("default") is False, (
@@ -229,22 +306,23 @@ def test_apply_reaches_the_sweep_only_through_the_guard() -> None:
     still an unconditional flag.
     """
     step = _step(SWEEP_STEP_NAME)
-    env = step.get("env") or {}
-    guard_expr = env.get("SWEEP_APPLY") or (_job().get("env") or {}).get("SWEEP_APPLY")
+    guard_expr = (step.get("env") or {}).get("SWEEP_DISPATCH_APPLY") or (
+        _job().get("env") or {}
+    ).get("SWEEP_DISPATCH_APPLY")
     assert guard_expr, (
-        "the sweep's apply decision must be carried by a SWEEP_APPLY env var so "
-        "the guard is evaluated once, in the expression context, and read as "
-        "data by the shell"
+        "the dispatch write request must be carried by a SWEEP_DISPATCH_APPLY "
+        "env var so the expression is evaluated once, in the expression "
+        "context, and read as data by the shell"
     )
-    assert APPLY_GUARD in guard_expr, (
-        f"SWEEP_APPLY must be computed from the canonical guard\n"
-        f"  expected substring: {APPLY_GUARD}\n"
+    assert DISPATCH_APPLY_EXPR in guard_expr, (
+        f"SWEEP_DISPATCH_APPLY must be the canonical dispatch conjunction\n"
+        f"  expected substring: {DISPATCH_APPLY_EXPR}\n"
         f"  got: {guard_expr}"
     )
 
     run = step.get("run") or ""
-    assert 'if [ "${SWEEP_APPLY}" = "true" ]' in run, (
-        "the run script must branch on SWEEP_APPLY explicitly"
+    assert 'if [ "${SWEEP_DISPATCH_APPLY}" = "true" ]' in run, (
+        "the run script must branch on SWEEP_DISPATCH_APPLY explicitly"
     )
     # Every --apply occurrence must sit inside the guarded branch. The
     # invocation itself must not mention it.
@@ -283,33 +361,78 @@ def test_no_input_is_interpolated_directly_into_the_run_script() -> None:
     )
 
 
-def test_the_run_labels_its_own_mode_from_the_same_guard() -> None:
-    """A run cannot call itself DRY-RUN while flipping tickets.
+def test_no_line_in_this_workflow_asserts_a_mode_it_cannot_know() -> None:
+    """OMN-17935 + OMN-17658. A string that reads as a fact must be one.
 
-    The job name and the step summary are rendered from the identical guard
-    expression that gates the flag, so the label and the behaviour cannot drift
-    apart. Before this, both were the constant string "DRY-RUN".
+    REWRITTEN from ``test_the_run_labels_its_own_mode_from_the_same_guard``,
+    which required the job name and the step summary to render APPLY/DRY-RUN
+    from the same expression that gated the flag. That was the right property
+    while the workflow decided the mode. It no longer does: for a scheduled run
+    the answer lives in the node's contract, so any APPLY/DRY-RUN label
+    rendered here would be an assertion this file cannot support — the same
+    defect one field over as the ``operator-dispatched`` echo OMN-17935
+    records, which asserted a dispatcher that did not exist on run
+    33932169358 while four tickets moved to Done.
+
+    Three properties, all absences or redirections:
+
+      1. the job name renders the TRIGGER, which this file does know;
+      2. no apply-branch line hardcodes a dispatcher;
+      3. the provenance is derived from the event at ONE site, and it says
+         where the write decision actually lives.
     """
-    job = _job()
-    job_name = job.get("name") or ""
-    assert APPLY_GUARD in job_name, (
-        "the job name must render its mode from the canonical apply guard, not "
-        f"state a constant; got {job_name!r}"
+    job_name = _job().get("name") or ""
+    assert "github.event_name == 'schedule'" in job_name, (
+        f"the job name must render the trigger it knows; got {job_name!r}"
     )
-    assert "DRY-RUN" in job_name and "APPLY" in job_name, (
-        f"the job name must be able to render BOTH modes; got {job_name!r}"
+    assert "SCHEDULE" in job_name and "DISPATCH" in job_name, (
+        f"the job name must be able to render both triggers; got {job_name!r}"
+    )
+    assert "SCHEDULE - APPLY" not in job_name and "SCHEDULE APPLY" not in job_name, (
+        "the job name must not assert what a SCHEDULED run's write mode was — "
+        f"the contract decides that and this file cannot see it; got {job_name!r}"
+    )
+
+    run = _step(SWEEP_STEP_NAME).get("run") or ""
+    # 2. AC3 of OMN-17935, red-first against the pre-fix tree: the old line
+    # `echo "mode: APPLY (operator-dispatched, github.event.inputs.apply=true)"`
+    # sat unconditionally inside the apply branch.
+    offending = [
+        line
+        for line in run.splitlines()
+        if "operator-dispatched" in line.lower()
+        and "SWEEP_TRIGGER" not in run.split(line)[0].rsplit("if ", 1)[-1]
+        and "elif" not in line
+        and "echo" in line
+        and "OPERATOR-DISPATCHED" not in line
+    ]
+    assert not offending, (
+        "an apply-branch line claims a dispatcher unconditionally; on a "
+        f"scheduled run there is none: {offending}"
+    )
+    assert 'if [ "${SWEEP_TRIGGER}" = "schedule" ]' in run, (
+        "the provenance must be DERIVED from the event at one site, not "
+        "asserted — OMN-17935 AC2"
+    )
+    assert "provenance: SCHEDULED" in run, (
+        "a scheduled run's log must say it was scheduled — OMN-17935 AC1"
+    )
+    # 4. AC4: the dry-run branch is checked for the same defect in the other
+    # direction. It must not claim a schedule either.
+    assert "provenance: OPERATOR-DISPATCHED with apply unticked" in run, (
+        "the dry-run branch must name its own real provenance rather than "
+        "inherit a claim from the applying one"
     )
 
     summary_step = _step(SUMMARY_STEP_NAME)
-    summary_mode = (summary_step.get("env") or {}).get("SWEEP_MODE") or ""
-    assert APPLY_GUARD in summary_mode, (
-        "the step summary must render its mode from the same guard; a summary "
-        f"that hardcodes DRY-RUN lies on an apply run. Got {summary_mode!r}"
-    )
     summary = summary_step.get("run") or ""
     assert "this workflow never passes --apply" not in summary, (
         "the summary still carries the pre-OMN-16106 claim that this workflow "
         "never applies — that statement is now false"
+    )
+    assert "scheduled_apply" in summary, (
+        "the summary must point a reader at where a scheduled run's write "
+        "decision actually lives, rather than asserting it here"
     )
 
 
@@ -446,7 +569,7 @@ def test_the_fence_binds_the_applying_run_at_the_same_depth_as_apply() -> None:
     """
     run = _step(SWEEP_STEP_NAME).get("run") or ""
     fence_guard = f'if [ -n "${{{FENCE_VAR}}}" ]'
-    apply_guard = 'if [ "${SWEEP_APPLY}" = "true" ]'
+    apply_guard = 'if [ "${SWEEP_DISPATCH_APPLY}" = "true" ]'
     assert fence_guard in run and apply_guard in run
     fence_indent = next(
         len(line) - len(line.lstrip())
@@ -494,15 +617,23 @@ BACKFILL_INPUT = "backfill_lookback_hours"
 BACKFILL_VAR = "BACKFILL_LOOKBACK_HOURS"
 
 
-def test_the_backfill_arm_is_a_dispatch_input_defaulting_to_off() -> None:
-    """The second enumeration arm exists, and it is off unless someone asks.
+def test_the_backfill_arm_is_a_dispatch_override_not_an_arming_authority() -> None:
+    """The input exists as a per-dispatch override. It does not arm anything.
 
-    ``default: '0'`` is the load-bearing half. The arm reaches candidates the
-    forward window structurally cannot, which is the point — and it is also why
-    it must not switch itself on: a wide arm arriving before the recurring-
-    companion refusal (OMN-17934) and the children conjunct (OMN-17658) would
-    reproduce the OMN-17292 re-flip across the whole standing backlog rather
-    than once.
+    REWRITTEN by OMN-17658. This test was
+    ``test_the_backfill_arm_is_a_dispatch_input_defaulting_to_off`` and read
+    ``default: '0'`` as "the arm is off", which was true while the node's
+    contract default was also 0. The arm was deliberately sequenced behind the
+    recurring-companion refusal (OMN-17934) and the children conjunct
+    (OMN-17658), because a wide arm arriving before them would have reproduced
+    the OMN-17292 re-flip across the whole standing backlog rather than once.
+
+    Both fences land in the same commit as this rewrite, so the arm is armed —
+    in the NODE CONTRACT's declared default, which is where an arming authority
+    belongs and where ``scheduled_apply`` also lives. ``default: '0'`` here now
+    means only "this dispatch passes no flag", and the test asserts the input's
+    existence and documentation rather than a claim about arming it cannot
+    make.
     """
     inputs = (_triggers().get("workflow_dispatch") or {}).get("inputs") or {}
     assert BACKFILL_INPUT in inputs, (
@@ -513,7 +644,9 @@ def test_the_backfill_arm_is_a_dispatch_input_defaulting_to_off() -> None:
     )
     spec = inputs[BACKFILL_INPUT]
     assert str(spec.get("default")) == "0", (
-        f"'{BACKFILL_INPUT}' must default to '0' (arm off); got {spec.get('default')!r}"
+        f"'{BACKFILL_INPUT}' must default to '0' — meaning 'this dispatch "
+        "passes no flag', so an untouched box leaves the node on its own "
+        f"contract-declared window; got {spec.get('default')!r}"
     )
     assert spec.get("description"), (
         f"'{BACKFILL_INPUT}' must carry a description — it changes which "
@@ -521,18 +654,22 @@ def test_the_backfill_arm_is_a_dispatch_input_defaulting_to_off() -> None:
     )
 
 
-def test_no_scheduled_run_can_turn_the_backfill_arm_on() -> None:
-    """Off unattended by the STRUCTURE of the expression, not by convention.
+def test_no_scheduled_run_can_change_the_backfill_window_from_this_file() -> None:
+    """The window a scheduled run uses is the contract's, not this file's.
 
-    ``github.event.inputs`` is null on a cron tick, so the fallback half of the
-    env expression is what every scheduled run gets. Asserting the exact
-    expression is what stops the fallback being edited to a non-zero value
-    without anyone noticing that the schedule's reach changed with it.
+    REWRITTEN by OMN-17658; the assertion is byte-identical and its MEANING
+    inverted, which is exactly why the docstring had to change with it.
+    ``github.event.inputs`` is null on a cron tick, so this expression renders
+    ``'0'`` on every scheduled run and the shell passes no backfill flag —
+    that part is unchanged. What changed is what "no flag" means: the node's
+    contract default was 0 (single-armed) and is now armed, so this expression
+    no longer keeps the schedule single-armed, it keeps the schedule's window
+    OUT OF THIS FILE.
 
-    Contrast ``ONEX_AUTOCLOSE_EXCLUDE`` and ``ONEX_AUTOCLOSE_DISABLED``, which
-    are repo VARIABLES precisely so they DO bind unattended runs. The backfill
-    arm is an input for the opposite reason: arming it is a decision, and a
-    decision that binds runs nobody launched is not one this ticket may make.
+    That is still worth pinning, and for the surviving half of the original
+    reason: editing this fallback to a non-zero literal would put a window
+    size back into a YAML expression where the contract cannot see it, and
+    nobody reviewing the contract would know the schedule's reach had changed.
     """
     env = _step(SWEEP_STEP_NAME).get("env") or {}
     assert (
@@ -540,7 +677,8 @@ def test_no_scheduled_run_can_turn_the_backfill_arm_on() -> None:
         == "${{ github.event.inputs.backfill_lookback_hours || '0' }}"
     ), (
         "the backfill window must reach the shell as an env var whose fallback "
-        f"is '0'; got {env.get(BACKFILL_VAR)!r}"
+        "is '0' — i.e. 'this run passes no flag, the contract's window "
+        f"applies'; got {env.get(BACKFILL_VAR)!r}"
     )
     assert BACKFILL_VAR not in set(_job().get("env") or {}), (
         "the backfill window must not be set at job scope, where it would outlive the guard"
@@ -612,4 +750,120 @@ def test_the_backfill_flags_the_cli_accepts_match_the_request_model() -> None:
     assert backfill_fields <= declared, (
         "every backfill field on the request model must be reachable from the "
         f"CLI; missing {sorted(backfill_fields - declared)}"
+    )
+
+
+def test_the_disarm_marker_reaches_an_unattended_run() -> None:
+    """OMN-17658 auto-disarm, the persisted half, and why it is a VARIABLE.
+
+    The node disarms itself within a run the moment a candidate proves a closer
+    flip on it was already undone by a person. That is immediate and not
+    durable — the next cron tick is a fresh process. The durable half has to
+    bind runs nobody launched, and a ``workflow_dispatch`` input renders empty
+    on a cron tick, so it would be missing exactly when it is needed. Same
+    reachability argument, and the same fix, as OMN-16792 AC3 found for the
+    kill switch: a repo variable, plumbed explicitly into the step's
+    environment because ``vars.*`` lives only in the expression context.
+    """
+    env = _step(SWEEP_STEP_NAME).get("env") or {}
+    assert env.get("AUTOCLOSE_DISARMED_BY") == "${{ vars.ONEX_AUTOCLOSE_DISARMED }}", (
+        "the disarm marker must be a repo VARIABLE plumbed into the step env; "
+        f"got {env.get('AUTOCLOSE_DISARMED_BY')!r}"
+    )
+    inputs = (_triggers().get("workflow_dispatch") or {}).get("inputs") or {}
+    assert "disarmed" not in inputs and "disarm" not in inputs, (
+        "the disarm marker must not be a dispatch input — an input renders "
+        "empty on every scheduled run, which is every run that writes "
+        "unattended"
+    )
+
+
+def test_the_disarm_marker_reaches_the_sweep_only_through_a_guarded_array() -> None:
+    """Same property as --apply, --exclude and the backfill flag."""
+    run = _step(SWEEP_STEP_NAME).get("run") or ""
+    assert 'if [ -n "${AUTOCLOSE_DISARMED_BY:-}" ]' in run, (
+        "the disarm flag must be guarded on the marker being non-empty"
+    )
+    assert 'disarm_args+=(--disarmed-by "${AUTOCLOSE_DISARMED_BY}")' in run, (
+        "the marker must reach the CLI as a quoted env value inside an array, "
+        "never interpolated"
+    )
+    invocation = [
+        line
+        for line in run.splitlines()
+        if "onex" in line and "evidence_autoclose_sweep" in line
+    ]
+    assert invocation, "could not find the `onex skill` invocation"
+    for line in invocation:
+        assert "--disarmed-by" not in line, (
+            f"--disarmed-by must never be literal on the invocation line: {line!r}"
+        )
+
+
+def test_the_disarm_binds_at_the_same_depth_as_the_apply_branch() -> None:
+    """A disarm nested inside the apply branch would not bind a scheduled run.
+
+    The same structural property the OMN-17891 fence has, for the same reason:
+    the disarm must be evaluated for every run, not only for the shape of run
+    an operator launched.
+    """
+    run = _step(SWEEP_STEP_NAME).get("run") or ""
+    disarm_guard = 'if [ -n "${AUTOCLOSE_DISARMED_BY:-}" ]'
+    apply_guard = 'if [ "${SWEEP_DISPATCH_APPLY}" = "true" ]'
+    disarm_indent = next(
+        len(line) - len(line.lstrip())
+        for line in run.splitlines()
+        if disarm_guard in line
+    )
+    apply_indent = next(
+        len(line) - len(line.lstrip())
+        for line in run.splitlines()
+        if apply_guard in line
+    )
+    assert disarm_indent == apply_indent, (
+        "the disarm guard must sit at the same nesting depth as the apply "
+        f"guard (sibling, not nested): {disarm_indent} vs {apply_indent}"
+    )
+
+
+def test_the_cli_accepts_every_fence_field_the_request_model_declares() -> None:
+    """A fence the CLI cannot pass is a fence that does not exist in production.
+
+    The node's contract declaring ``disarmed_by_ticket`` is necessary and not
+    sufficient: the workflow reaches the node through ``onex skill``, so a
+    missing entry in ``skill_mapping.yaml`` would make the guarded array above
+    fail at dispatch — loudly, but only in production.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
+        ModelEvidenceAutocloseSweepRequest,
+    )
+
+    mapping = yaml.safe_load(
+        (REPO_ROOT / "src" / "omnibase_infra" / "cli" / "skill_mapping.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    skills = mapping["skills"] if isinstance(mapping, dict) else mapping
+    entry = next(s for s in skills if s.get("skill_name") == "evidence_autoclose_sweep")
+    payload_fields = {arg["payload_field"] for arg in entry["args"]}
+    for field in (
+        "trigger",
+        "disarmed_by_ticket",
+        "max_flips_per_run",
+        "history_page_size",
+        "history_max_pages",
+    ):
+        assert field in payload_fields, (
+            f"skill_mapping.yaml does not expose {field!r} for "
+            "evidence_autoclose_sweep — the workflow could not pass it"
+        )
+    model_fields = set(ModelEvidenceAutocloseSweepRequest.model_fields)
+    assert payload_fields <= model_fields, (
+        "skill_mapping.yaml exposes fields the request model does not declare: "
+        f"{sorted(payload_fields - model_fields)}"
+    )
+    assert "scheduled_apply" not in payload_fields, (
+        "there must be NO CLI flag for scheduled_apply. A caller that could "
+        "pass one would be an arming authority, which is exactly what "
+        "OMN-17658 moved into the contract"
     )

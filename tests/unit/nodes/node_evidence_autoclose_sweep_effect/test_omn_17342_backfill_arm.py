@@ -136,6 +136,12 @@ class _FakeLinear:
                 else {"id": "s1", "name": "In Progress", "type": "started"}
             ),
             "labels": {"nodes": []},
+            # OMN-17658: the children conjunct reads this connection live on every
+            # tick, so the double has to carry it. An absent connection is
+            # deliberately ERROR_LINEAR_API in production — a fence that read a
+            # missing key as "no children" would retire itself the day the query
+            # drifted, so the double must speak the real payload.
+            "children": {"nodes": []},
             "team": {"id": "team-1"},
             "description": None,
         }
@@ -146,6 +152,29 @@ class _FakeLinear:
     async def update_issue_state(self, issue_id: str, state_id: str) -> bool:
         self.state_updates.append((issue_id, state_id))
         return True
+
+    async def fetch_issue_history(
+        self, issue_id: str, page_size: int, max_pages: int
+    ) -> tuple[list[dict[str, object]] | None, str]:
+        """State history that MOVES when the sweep writes (OMN-17658).
+
+        The bound flip readback re-reads this connection and requires a
+        completed segment the pre-write read did not have. A double returning a
+        constant empty history would model a Linear that never records state
+        changes, and would turn every legitimate flip in this file into
+        ERROR_READBACK_UNCONFIRMED — hiding the guard rather than exercising it.
+        """
+        return [
+            {
+                "id": f"entry-{index}",
+                "createdAt": f"2026-09-05T00:00:{index:02d}Z",
+                "actorId": None,
+                "fromState": {"type": "started"},
+                "toState": {"type": "completed"},
+            }
+            for index, (target, _state_id) in enumerate(self.state_updates, start=1)
+            if target == issue_id
+        ], ""
 
     async def create_comment(self, issue_id: str, body: str) -> bool:
         self.comments.append((issue_id, body))
@@ -240,7 +269,10 @@ async def test_a_companion_merged_outside_the_lookback_reaches_a_decision() -> N
     calls = _Calls()
     handler = _handler([fresh, stale], linear, calls)
 
-    single_arm = await handler.handle(_request())
+    # Explicit 0 — the arm is armed by default since OMN-17658, and this leg
+    # is the single-arm CONTROL, so it has to name the value it controls for
+    # rather than rely on a default that has since changed under it.
+    single_arm = await handler.handle(_request(backfill_lookback_hours=0))
     assert _tickets(single_arm) == {"OMN-17872"}, (
         "positive control for the zero below: the forward arm does see the "
         "fresh companion, so an absent OMN-16961 is the window and not the fake"
@@ -256,8 +288,52 @@ async def test_a_companion_merged_outside_the_lookback_reaches_a_decision() -> N
     assert outcome.companion_pr_number == 8179
 
 
-async def test_the_backfill_arm_is_off_unless_asked_for() -> None:
-    """Omitting the field reproduces the single-arm run exactly — zero extra I/O."""
+async def test_backfill_lookback_hours_zero_reproduces_the_single_arm_run() -> None:
+    """An explicit 0 reproduces the single-arm run exactly — zero extra I/O.
+
+    REWRITTEN by OMN-17658, and the rewrite is the point. This test used to be
+    called ``test_the_backfill_arm_is_off_unless_asked_for`` and asserted the
+    property against the field's DEFAULT, because that default was 0: the arm
+    shipped off, deliberately sequenced behind the recurring-companion refusal
+    (OMN-17934) and the children conjunct (OMN-17658), since a wide arm without
+    them would have reproduced the OMN-17292 re-flip across the whole backlog
+    instead of once.
+
+    Both fences are now in the same binary, so the contract default is armed
+    (168h) and "omit the field" no longer means "off". What survives — and what
+    is asserted here — is the separable property that actually matters: 0 is
+    still an OFF value and still costs exactly the I/O the single-armed run
+    cost. An arm that could not be turned off would be a worse arm.
+    """
+    fresh = _pr(8300, "OMN-17872", hours_ago=1)
+    stale = _pr(8179, "OMN-16961", hours_ago=18)
+    linear = _FakeLinear()
+    calls = _Calls()
+    handler = _handler([fresh, stale], linear, calls)
+
+    result = await handler.handle(_request(backfill_lookback_hours=0))
+
+    assert _tickets(result) == {"OMN-17872"}
+    assert calls.dod_verify == ["OMN-17872"]
+    assert linear.issues_fetched == ["OMN-17872"]
+    assert result.backfill_candidates_selected == 0
+
+
+async def test_the_contract_default_is_armed_and_that_is_the_arming_authority() -> None:
+    """OMN-17658 / OMN-17950: omitting the field now reaches the standing backlog.
+
+    The arming lives in the request model's declared default — the contract —
+    and not in an expression in the workflow, which is the same authority split
+    `scheduled_apply` makes for the write decision. A caller that names nothing
+    gets the armed behaviour; turning the arm off is an explicit 0, above.
+    """
+    assert (
+        ModelEvidenceAutocloseSweepRequest(
+            correlation_id=uuid4()
+        ).backfill_lookback_hours
+        > 0
+    )
+
     fresh = _pr(8300, "OMN-17872", hours_ago=1)
     stale = _pr(8179, "OMN-16961", hours_ago=18)
     linear = _FakeLinear()
@@ -266,10 +342,8 @@ async def test_the_backfill_arm_is_off_unless_asked_for() -> None:
 
     result = await handler.handle(_request())
 
-    assert _tickets(result) == {"OMN-17872"}
-    assert calls.dod_verify == ["OMN-17872"]
-    assert linear.issues_fetched == ["OMN-17872"]
-    assert result.backfill_candidates_selected == 0
+    assert _tickets(result) == {"OMN-17872", "OMN-16961"}
+    assert result.backfill_candidates_selected == 1
 
 
 # -- AC2 -----------------------------------------------------------------

@@ -150,6 +150,12 @@ class _StatefulLinear:
             "identifier": _TICKET,
             "state": {"id": "s1", "name": "In Progress", "type": "started"},
             "labels": {"nodes": []},
+            # OMN-17658: the children conjunct reads this connection live on every
+            # tick, so the double has to carry it. An absent connection is
+            # deliberately ERROR_LINEAR_API in production — a fence that read a
+            # missing key as "no children" would retire itself the day the query
+            # drifted, so the double must speak the real payload.
+            "children": {"nodes": []},
             "team": {"id": "team-1"},
             "description": self._description,
         }
@@ -160,6 +166,29 @@ class _StatefulLinear:
     async def update_issue_state(self, issue_id: str, state_id: str) -> bool:
         self.state_updates.append((issue_id, state_id))
         return True
+
+    async def fetch_issue_history(
+        self, issue_id: str, page_size: int, max_pages: int
+    ) -> tuple[list[dict[str, object]] | None, str]:
+        """State history that MOVES when the sweep writes (OMN-17658).
+
+        The bound flip readback re-reads this connection and requires a
+        completed segment the pre-write read did not have. A double returning a
+        constant empty history would model a Linear that never records state
+        changes, and would turn every legitimate flip in this file into
+        ERROR_READBACK_UNCONFIRMED — hiding the guard rather than exercising it.
+        """
+        return [
+            {
+                "id": f"entry-{index}",
+                "createdAt": f"2026-09-05T00:00:{index:02d}Z",
+                "actorId": None,
+                "fromState": {"type": "started"},
+                "toState": {"type": "completed"},
+            }
+            for index, (target, _state_id) in enumerate(self.state_updates, start=1)
+            if target == issue_id
+        ], ""
 
     async def create_comment(self, issue_id: str, body: str) -> bool:
         self.comments.append((issue_id, body))

@@ -217,6 +217,28 @@ skills:
       - {name: backfill-max-candidates, payload_field: backfill_max_candidates, arg_type: integer}
       - {name: backfill-pool-size, payload_field: backfill_pool_size, arg_type: integer}
       - {name: backfill-rotation-minutes, payload_field: backfill_rotation_minutes, arg_type: integer}
+      # OMN-17658. The ARMING SPLIT. `--trigger` carries the FACT (what
+      # launched the run) and the contract's `scheduled_apply` carries the
+      # POLICY (may a run of that class write). There is deliberately NO
+      # `--scheduled-apply` flag: a caller that could pass one would be an
+      # arming authority, which is precisely what this ticket moved out of the
+      # workflow and into the contract. `--apply` (above) is unchanged and
+      # remains the dispatch-time write request.
+      - {name: trigger, payload_field: trigger, arg_type: string}
+      # OMN-17658. The per-run blast-radius bound. Exposed so a rehearsal can
+      # tighten it; it can never widen what the predicate accepts.
+      - {name: max-flips-per-run, payload_field: max_flips_per_run, arg_type: integer}
+      # OMN-17658 auto-disarm, the persisted half. A ticket id whose previous
+      # closer flip was found unsafe. Non-empty makes the run reach every
+      # decision and write none of them, reporting mode=disarmed. Plumbed by
+      # the workflow from the repo variable ONEX_AUTOCLOSE_DISARMED so it binds
+      # the scheduled runs nobody is watching, the same reachability argument
+      # the ONEX_AUTOCLOSE_DISABLED kill switch is a repo variable for.
+      - {name: disarmed-by, payload_field: disarmed_by_ticket, arg_type: string}
+      # OMN-17934 / OMN-17658. The state-history walk both the prior-revert
+      # fence and the bound flip readback are resolved from.
+      - {name: history-page-size, payload_field: history_page_size, arg_type: integer}
+      - {name: history-max-pages, payload_field: history_max_pages, arg_type: integer}
   # OMN-16536: detect + re-flip Linear's silent GitHub-sync Done-revert
   # pattern. Node-backed in omnibase_infra itself (same locality
   # precedent as node_evidence_autoclose_sweep_effect above -- calls the

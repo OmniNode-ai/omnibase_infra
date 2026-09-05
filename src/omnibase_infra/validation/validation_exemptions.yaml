@@ -1199,6 +1199,33 @@ pattern_exemptions:
       - PEP 8 - Naming Conventions (https://peps.python.org/pep-0008/#naming-conventions)
       - CLAUDE.md (File & Class Naming Conventions)
     ticket: OMN-16536
+  # OMN-17658. The two BOUND-READBACK ids on the autoclose outcome. They hold
+  # Linear `stateHistory` entry ids, which the sweep never constructs, never
+  # parses and never resolves — it reads them from the API, compares them for
+  # equality (`readback_entry_id != pre_write_head_entry_id` is the whole
+  # proof) and prints them into the audit comment and the readback log line.
+  # Typing them as UUID would add a parse step, and therefore a failure mode,
+  # to a value that is only ever an opaque token; a Linear id shape change
+  # would then turn a successful, correctly-read-back flip into a validation
+  # error. Empty string is also a real value on both fields (no history yet,
+  # or a non-applying path), which a UUID field cannot express. Same
+  # semantic-identifier class as the ticket_id exemptions above and below.
+  - file_pattern: 'node_evidence_autoclose_sweep_effect/models/model_evidence_autoclose_outcome\.py'
+    violation_pattern: "Field 'pre_write_head_entry_id' should use UUID type instead of str"
+    reason: >
+      pre_write_head_entry_id holds an opaque Linear stateHistory entry id read back from the API and used only for equality comparison and audit display; empty string is a real value (no history, or a non-applying path). Coercing it to UUID would add a parse failure mode to a token the node never resolves.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-17658
+  - file_pattern: 'node_evidence_autoclose_sweep_effect/models/model_evidence_autoclose_outcome\.py'
+    violation_pattern: "Field 'readback_entry_id' should use UUID type instead of str"
+    reason: >
+      readback_entry_id holds an opaque Linear stateHistory entry id read back from the API after the flip and used only for equality comparison against pre_write_head_entry_id and audit display; empty string is a real value (a non-applying path, or a readback that did not confirm). Coercing it to UUID would add a parse failure mode to a token the node never resolves.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-17658
   # ticket_id is a Linear human-readable identifier ("OMN-16536"), never a
   # UUID -- same class of exemption as node_evidence_autoclose_sweep_effect's
   # own ticket_id exemption above.

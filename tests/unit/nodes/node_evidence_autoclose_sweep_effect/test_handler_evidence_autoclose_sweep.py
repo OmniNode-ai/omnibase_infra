@@ -172,6 +172,29 @@ class FakeLinearClient:
         self.state_updates.append((issue_id, state_id))
         return True
 
+    async def fetch_issue_history(
+        self, issue_id: str, page_size: int, max_pages: int
+    ) -> tuple[list[dict[str, object]] | None, str]:
+        """State history that MOVES when the sweep writes (OMN-17658).
+
+        The bound flip readback re-reads this connection and requires a
+        completed segment the pre-write read did not have. A double returning a
+        constant empty history would model a Linear that never records state
+        changes, and would turn every legitimate flip in this file into
+        ERROR_READBACK_UNCONFIRMED — hiding the guard rather than exercising it.
+        """
+        return [
+            {
+                "id": f"entry-{index}",
+                "createdAt": f"2026-09-05T00:00:{index:02d}Z",
+                "actorId": None,
+                "fromState": {"type": "started"},
+                "toState": {"type": "completed"},
+            }
+            for index, (target, _state_id) in enumerate(self.state_updates, start=1)
+            if target == issue_id
+        ], ""
+
     async def create_comment(self, issue_id: str, body: str) -> bool:
         self.comments.append((issue_id, body))
         return True
@@ -197,6 +220,12 @@ def _issue(
         "identifier": "OMN-9999",
         "state": {"id": "state-1", "name": "In Progress", "type": state_type},
         "labels": {"nodes": [{"name": label} for label in labels]},
+        # OMN-17658: the children conjunct reads this connection live on every
+        # tick, so the double has to carry it. An absent connection is
+        # deliberately ERROR_LINEAR_API in production — a fence that read a
+        # missing key as "no children" would retire itself the day the query
+        # drifted, so the double must speak the real payload.
+        "children": {"nodes": []},
         "team": {"id": "team-1"},
         # Linear returns JSON null, not "", for an empty description.
         "description": description,
@@ -1115,7 +1144,13 @@ class TestSweepLevel:
             run_gh_command=gh_fake,
             run_dod_verify_command=dod_fake,
         )
-        result = await handler.handle(_request(max_companions=2))
+        # `backfill_lookback_hours=0` keeps this a single-arm run: the cap
+        # under test is `max_companions`, which bounds the FORWARD window, and
+        # since OMN-17658 armed the backfill default a second arm would add
+        # candidates this assertion is not about.
+        result = await handler.handle(
+            _request(max_companions=2, backfill_lookback_hours=0)
+        )
         assert result.companions_scanned == 2
 
     async def test_gh_timeout_seconds_defaults_to_90_when_not_overridden(self):
@@ -1132,7 +1167,10 @@ class TestSweepLevel:
         handler = HandlerEvidenceAutocloseSweep(
             linear_client=FakeLinearClient(), run_gh_command=fake_run_gh_command
         )
-        await handler.handle(_request())
+        # Single-armed: the backfill arm makes a SECOND enumeration call, and
+        # this assertion is about the timeout each call receives, not how many
+        # calls there are.
+        await handler.handle(_request(backfill_lookback_hours=0))
         assert captured_timeouts == [90]
 
     async def test_gh_timeout_seconds_is_plumbed_from_the_request(self):
