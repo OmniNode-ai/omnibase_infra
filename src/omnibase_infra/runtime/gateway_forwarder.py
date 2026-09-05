@@ -141,6 +141,26 @@ def _materialize_contract_mirror_topics(
         str(key): value for key, value in mirror_topics_object.items()
     }
 
+    # OMN-16979: the egress-redaction gate is resolved from the SAME contract
+    # block and the same selector as the topic set it governs, deliberately
+    # without a selector key of its own. The gate is not a per-deployment
+    # choice -- it is which topics may cross the trust boundary and under what
+    # proof, which is the contract's sole authority. Giving it its own opt-in
+    # key would make "widened but ungoverned" an expressible deployment, and
+    # that is precisely the state OMN-17209 exists to prevent.
+    if forwarder.get("egress_redaction") is not None:
+        raise ValueError(
+            "resolved gateway config must not redeclare egress_redaction; it "
+            "is resolved from the node contract named by mirror_topic_set"
+        )
+    egress_object = gateway_config.get("egress_redaction")
+    if egress_object is not None:
+        if not isinstance(egress_object, dict):
+            raise ValueError("gateway node contract egress_redaction must be a mapping")
+        forwarder["egress_redaction"] = {
+            str(key): value for key, value in egress_object.items()
+        }
+
 
 def _materialize_contract_canary_config(
     raw: dict[str, object],

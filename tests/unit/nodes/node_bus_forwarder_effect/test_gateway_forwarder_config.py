@@ -40,9 +40,18 @@ OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS = (
 
 # Content-bearing omniclaude topics that OD-9 explicitly keeps DENIED pending
 # the scrubbing/projection-transform layer OMN-14323 still owns.
-OD9_DENIED_OMNICLAUDE_TOPICS = (
+# OMN-16979 took the gated decision OD-9 deferred, for exactly two of the five
+# classes below: they are now mirrored outbound, but ONLY behind the
+# `egress_redaction` admission gate, which drops any record the upstream emit
+# seam did not stamp with an admitted `redaction_state`. So the OD-9 content
+# restriction is not relaxed -- it is now enforced per RECORD rather than per
+# TOPIC. The other three stay denied outright.
+OMN16979_GOVERNED_OMNICLAUDE_TOPICS = (
     "onex.evt.omniclaude.prompt-submitted.v1",
     "onex.evt.omniclaude.tool-executed.v1",
+)
+
+OD9_DENIED_OMNICLAUDE_TOPICS = (
     "onex.evt.omniclaude.skill-started.v1",
     "onex.evt.omniclaude.skill-completed.v1",
     "onex.evt.omniclaude.tool-output-captured.v1",
@@ -76,22 +85,40 @@ def test_contract_declares_od9_session_lifecycle_topic_in_outbound(
 def test_contract_does_not_widen_beyond_od9_session_lifecycle_pair(
     topic: str,
 ) -> None:
-    """OMN-16204 scope guard: no other omniclaude topic (prompt/tool/skill
-    content) may be added to mirror_topics.outbound by this change -- those
-    stay DENIED pending OMN-14323's scrubbing layer, per OD-9."""
+    """OMN-16204 scope guard, narrowed by OMN-16979: the remaining omniclaude
+    content classes stay DENIED outright. `tool-output-captured` in particular
+    is the class that carries raw tool OUTPUT -- admitting it is a separate
+    decision behind OMN-17207, never a side effect."""
     contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
     outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
     assert topic not in outbound
 
 
+@pytest.mark.parametrize("topic", OMN16979_GOVERNED_OMNICLAUDE_TOPICS)
+def test_omn16979_widened_topic_is_mirrored_and_governed(topic: str) -> None:
+    """OMN-16979: the widening and the gate are asserted together, never apart.
+
+    A widened topic that is not also governed is the bare passthrough the
+    ticket exists to avoid, so this is one assertion in two halves rather than
+    two independent facts.
+    """
+    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    forwarder = contract["config"]["gateway_forwarder"]
+    assert forwarder["mirror_topics"]["outbound"].count(topic) == 1
+    assert topic in forwarder["egress_redaction"]["governed_topics"]
+
+
 def test_contract_outbound_gains_exactly_two_new_topics() -> None:
     """Falsifiable count check: outbound grew from the pre-OMN-16204 baseline
-    of 6 topics to exactly 8 -- proving nothing beyond the two OD-9 topics
-    was added."""
+    of 6 topics to 8 (OMN-16204's OD-9 pair) and then to exactly 10
+    (OMN-16979's two governed hook classes) -- proving nothing beyond those
+    four was ever added."""
     contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
     outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
-    assert len(outbound) == 8
+    assert len(outbound) == 10
     for topic in OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS:
+        assert topic in outbound
+    for topic in OMN16979_GOVERNED_OMNICLAUDE_TOPICS:
         assert topic in outbound
 
 

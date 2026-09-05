@@ -81,11 +81,25 @@ def test_contract_lane_mirror_covers_every_governed_hook_topic() -> None:
 
 
 def test_contract_cloud_mirror_set_is_not_widened_by_this_ticket() -> None:
-    """OMN-16979 owns widening the cloud set; OMN-17034 must not pre-empt it."""
+    """OMN-16979 owns widening the cloud set; the LANE-MIRROR leg must not
+    pre-empt it.
+
+    OMN-16979 has since landed and widened it deliberately, so the assertion is
+    kept in the form that still falsifies a lane-mirror change: the cloud set
+    may contain a content-bearing hook class only while `egress_redaction`
+    governs it. The lane mirror crosses no trust boundary and must never be the
+    reason a class reaches the cloud.
+    """
     contract = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
-    outbound = set(contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"])
-    assert "onex.evt.omniclaude.tool-executed.v1" not in outbound
-    assert "onex.evt.omniclaude.prompt-submitted.v1" not in outbound
+    forwarder = contract["config"]["gateway_forwarder"]
+    outbound = set(forwarder["mirror_topics"]["outbound"])
+    governed = set(forwarder.get("egress_redaction", {}).get("governed_topics", ()))
+    for topic in (
+        "onex.evt.omniclaude.tool-executed.v1",
+        "onex.evt.omniclaude.prompt-submitted.v1",
+    ):
+        if topic in outbound:
+            assert topic in governed
 
 
 # ---------------------------------------------------------------------------

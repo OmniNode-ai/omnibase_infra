@@ -7,13 +7,13 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 1
-  patch: 4
+  patch: 5
 node_version:
   major: 0
   minor: 1
-  patch: 4
+  patch: 5
 description: >
-  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM). OMN-16459: adds the contract-declared OUTBOUND https_ingest leg -- when a resolved deployment opts in via https_ingest_set, the cloud publish boundary becomes the gateway's single HTTPS ingest route instead of a direct MSK produce (operator ruling 2026-08-24 'replaced with the https doors'; scope ruling 2026-08-30 'one ingress for all calls'). The INBOUND leg is unchanged and still pulls mirror_topics.inbound from the cloud broker, so this does NOT retire the OMN-16449 dnsmasq bastion on its own. No deployment opts in yet; mirror_topics is byte-unchanged (widening is OMN-16979).
+  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM). OMN-16459: adds the contract-declared OUTBOUND https_ingest leg -- when a resolved deployment opts in via https_ingest_set, the cloud publish boundary becomes the gateway's single HTTPS ingest route instead of a direct MSK produce (operator ruling 2026-08-24 'replaced with the https doors'; scope ruling 2026-08-30 'one ingress for all calls'). The INBOUND leg is unchanged and still pulls mirror_topics.inbound from the cloud broker, so this does NOT retire the OMN-16449 dnsmasq bastion on its own. No deployment opts in yet; mirror_topics is byte-unchanged (widening is OMN-16979). OMN-16979: mirror_topics.outbound widened with the two content-bearing omniclaude hook classes (tool-executed.v1, prompt-submitted.v1) behind a new fail-closed egress_redaction admission gate -- a record on a governed topic that does not carry an admitted redaction_state stamped by the upstream emit seam (omnimarket capture_redaction.yaml, OMN-17209/OMN-16019) is DROPPED at this boundary, never forwarded. The gate is the reason the widening is safe: until the upstream seam stamps the field the widened topics admit nothing, and if that seam ever regresses these topics stop crossing rather than start leaking. tool-output-captured/skill-* stay DENIED.
 
 runtime_profiles:
   - canary
@@ -67,6 +67,64 @@ config:
         # separately -- this only arms the contract-declared mirror set.
         - "onex.evt.omniclaude.session-started.v1"
         - "onex.evt.omniclaude.session-ended.v1"
+        # OMN-16979: the two CONTENT-BEARING hook classes. Admitted here only
+        # because `egress_redaction` below governs them -- the config model
+        # refuses this pair in the outbound set without that governance, so
+        # the widening and the gate cannot drift apart. `tool-output-captured`
+        # and the `skill-*` classes stay DENIED; admitting the class that
+        # carries raw tool OUTPUT is a separate decision behind OMN-17207.
+        - "onex.evt.omniclaude.tool-executed.v1"
+        - "onex.evt.omniclaude.prompt-submitted.v1"
+    # ------------------------------------------------------------------
+    # OMN-16979: fail-closed egress redaction for the widened hook classes.
+    # ------------------------------------------------------------------
+    # OMN-17209's framing is why the widening above is not bare: "widening the
+    # payload without landing this contract first ships a credential
+    # pipeline."
+    #
+    # WHERE THE REDACTION ACTUALLY HAPPENS: upstream, at omnimarket's emit
+    # seam. `node_event_emit_effect`'s per-topic transform (the OMN-16019
+    # seam) applies `capture_redaction.yaml` (OMN-17209) and stamps a
+    # `redaction_state` on every governed record. That is the only place that
+    # knows tool semantics -- which field of a `Bash` record is a command name
+    # and which is its output. This node cannot re-derive that judgement and
+    # deliberately does not try; re-implementing it here would be the second
+    # transform OMN-17209 explicitly forbids.
+    #
+    # WHAT THIS BOUNDARY OWNS: refusing to cross anything not provably
+    # redacted. A record on a governed topic whose payload carries no admitted
+    # state is DROPPED with a warning -- never forwarded, and never raised
+    # (see below).
+    #
+    # WHY THAT MAKES THE WIDENING SAFE TO LAND FIRST: until the upstream seam
+    # deploys and starts stamping, these two topics admit NOTHING. Merging
+    # this ahead of the producer opens no hole. And in the other direction, if
+    # that seam is ever removed, bypassed or silently regresses, these topics
+    # STOP crossing rather than start leaking -- the failure mode is loss of
+    # telemetry, not disclosure.
+    #
+    # `raw` is not admissible and the model refuses it structurally rather
+    # than by configuration: it is ArtifactStore's default state (OMN-13152),
+    # carried by 27 of 27 artifact-captured records in the local spool, so a
+    # policy admitting it would read exactly like a working one while gating
+    # nothing. `secret_detected` IS admissible on purpose -- it means the
+    # upstream scrub fired and replaced the value, a stronger guarantee than
+    # `redacted`, not a weaker one.
+    #
+    # A REFUSAL IS A DROP, NEVER AN EXCEPTION. OMN-17382 is the live proof:
+    # on 2026-09-05 a single foreign-tenant probe record raised out of
+    # `_prepare_outbound` and wedged this same outbound leg for 7h45m across
+    # 925 consecutive retries, with 177 real records stuck behind it. A
+    # per-record policy decision must not be able to stop the bridge.
+    egress_redaction:
+      state_field: "redaction_state"
+      admitted_states:
+        - "redacted"
+        - "restricted"
+        - "secret_detected"
+      governed_topics:
+        - "onex.evt.omniclaude.tool-executed.v1"
+        - "onex.evt.omniclaude.prompt-submitted.v1"
     # ------------------------------------------------------------------
     # OMN-17034: the lane-mirror leg.
     # ------------------------------------------------------------------
