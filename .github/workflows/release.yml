@@ -220,8 +220,16 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: omnibase_infra
-          # A release tag may change a workflow. The App token needs this
-          # scope to fast-forward main in that case (OMN-17272).
+          # OMN-16289: a `permission-*` input REPLACES the installation's full
+          # permission set with exactly what is listed. OMN-17272 added
+          # `permission-workflows: write` alone, which silently dropped
+          # `contents: write` -- so the minted token could not push ANY ref and
+          # the fast-forward died on `GH013 ... Cannot update this protected
+          # ref` (omnibase_core run 34065670492, v0.47.5). omnimarket, whose
+          # sync has worked throughout, mints with `permission-contents: write`.
+          # Both scopes are required: contents to move the ref at all, workflows
+          # because a release tag may change a workflow (OMN-17272).
+          permission-contents: write
           permission-workflows: write
 
       - name: Sync main to release tag
@@ -359,8 +367,16 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: omnibase_infra
-          # A release tag may change a workflow. The App token needs this
-          # scope to fast-forward main in that case (OMN-17272).
+          # OMN-16289: a `permission-*` input REPLACES the installation's full
+          # permission set with exactly what is listed. OMN-17272 added
+          # `permission-workflows: write` alone, which silently dropped
+          # `contents: write` -- so the minted token could not push ANY ref and
+          # the fast-forward died on `GH013 ... Cannot update this protected
+          # ref` (omnibase_core run 34065670492, v0.47.5). omnimarket, whose
+          # sync has worked throughout, mints with `permission-contents: write`.
+          # Both scopes are required: contents to move the ref at all, workflows
+          # because a release tag may change a workflow (OMN-17272).
+          permission-contents: write
           permission-workflows: write
 
       - name: Sync main to release tag
