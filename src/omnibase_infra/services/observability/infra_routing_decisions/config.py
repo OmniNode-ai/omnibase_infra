@@ -17,12 +17,27 @@ from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 
-def _default_routing_decided_topic() -> str:
-    return ServiceTopicRegistry.from_defaults().resolve(topic_keys.ROUTING_DECIDED)
+def _default_routing_decision_topic() -> str:
+    """The topic routing decisions are actually published on.
+
+    OMN-16025. This used to resolve ``topic_keys.ROUTING_DECIDED``
+    (``onex.evt.omnibase-infra.routing-decided.v1``), which is emitted only by
+    the legacy ``PluginLlm``/``AdapterModelRouter`` path. That topic does not
+    exist on the dev broker at all -- ``rpk topic describe`` returns no partition
+    row for it -- while ``DELEGATION_ROUTING_DECISION``
+    (``onex.evt.omnibase-infra.routing-decision.v1``), the delegation routing
+    reducer's output, stood at HIGH-WATERMARK 860 with
+    ``infra_routing_decisions`` at 0 rows. Subscribing a topic no producer writes
+    is indistinguishable at runtime from a healthy idle consumer, which is why
+    this survived OMN-8692 being marked Done.
+    """
+    return ServiceTopicRegistry.from_defaults().resolve(
+        topic_keys.DELEGATION_ROUTING_DECISION
+    )
 
 
 def _default_dlq_topic() -> str:
-    topic = get_dlq_topic_for_original(_default_routing_decided_topic())
+    topic = get_dlq_topic_for_original(_default_routing_decision_topic())
     if topic is None:
         raise ValueError("No DLQ topic could be resolved for routing decisions")
     return topic
@@ -52,7 +67,7 @@ class ConfigInfraRoutingDecisionsConsumer(BaseSettings):
         description="Consumer group ID for offset tracking",
     )
     topics: list[str] = Field(
-        default_factory=lambda: [_default_routing_decided_topic()],
+        default_factory=lambda: [_default_routing_decision_topic()],
         description="Kafka topics to consume",
     )
     auto_offset_reset: str = Field(

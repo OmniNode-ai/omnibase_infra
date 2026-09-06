@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Root integration coverage for infra routing decisions topic defaults."""
+"""Root integration coverage for infra routing decisions topic defaults.
+
+OMN-16025 repointed the default from ROUTING_DECIDED (a topic no live producer
+creates) to DELEGATION_ROUTING_DECISION, the routing reducer's real output.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +21,7 @@ from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 @pytest.mark.integration
 def test_routing_decisions_config_resolves_registered_topics() -> None:
     registry = ServiceTopicRegistry.from_defaults()
-    routing_topic = registry.resolve(topic_keys.ROUTING_DECIDED)
+    routing_topic = registry.resolve(topic_keys.DELEGATION_ROUTING_DECISION)
 
     config = ConfigInfraRoutingDecisionsConsumer(
         kafka_bootstrap_servers="localhost:19092",

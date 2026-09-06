@@ -144,6 +144,12 @@ readonly RUNTIME_SERVICES=(
 # consumes every message, commits every offset, and writes nothing, silently.
 # The onex-dev k8s overlay has run these as Deployments since OMN-15905; the
 # compose lane ran zero of them until this ticket.
+# OMN-16025 adds infra-routing-decisions-consumer to the same array for the same
+# reason: it is declared only in docker/docker-compose.dev-lane.yml. It is not a
+# standalone projection RUNNER -- it is the observability consumer that owns
+# infra_routing_decisions -- but it shares the property that makes membership
+# here mandatory and membership in RUNTIME_SERVICES fatal: the service name does
+# not exist in the prod, stability-test or judge merged compose.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-tenant-registry-writer
     projection-delegation-writer
@@ -151,6 +157,7 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
+    infra-routing-decisions-consumer
 )
 
 # OMN-17562: the same six, mirrored onto the PROOF lane.

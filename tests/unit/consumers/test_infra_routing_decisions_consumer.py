@@ -50,25 +50,29 @@ def make_mock_consumer_record(
     return record
 
 
-def make_routing_decided_event() -> dict[str, object]:
+def make_routing_decision_event() -> dict[str, object]:
+    """A live-shaped record: ModelEventEnvelope with the decision under payload.
+
+    OMN-16025 -- the pre-envelope flat dict this helper used to return was never
+    the wire shape on the topic the consumer reads.
+    """
+    cid = str(uuid4())
     return {
-        "correlation_id": str(uuid4()),
-        "selected_provider": "anthropic",
-        "selected_tier": "claude",
-        "selected_model": "claude-opus-4-6",
-        "selection_mode": "round_robin",
-        "fallback_indicator": False,
-        "is_fallback": False,
-        "reason": "primary selection",
-        "candidates_evaluated": 3,
-        "candidate_providers": ["anthropic", "openai", "local"],
-        "task_type": "code",
-        "session_id": str(uuid4()),
-        "latency_ms": 42.5,
+        "payload": {
+            "correlation_id": cid,
+            "task_type": "code",
+            "selected_model": "claude-opus-4-6",
+            "rationale": "primary selection",
+            "tier_name": "claude",
+            "selected_backend_ref": "anthropic",
+        },
+        "envelope_id": str(uuid4()),
+        "correlation_id": cid,
+        "event_type": "omnibase-infra.routing-decision",
     }
 
 
-_TOPIC = "onex.evt.omnibase-infra.routing-decided.v1"
+_TOPIC = "onex.evt.omnibase-infra.routing-decision.v1"
 
 
 # =============================================================================
@@ -152,14 +156,14 @@ class TestMaskDsnPassword:
 
 @pytest.mark.unit
 class TestInfraRoutingDecisionsConsumerParsing:
-    def test_parse_valid_dict_message(
+    def test_parse_valid_envelope_message(
         self, consumer: InfraRoutingDecisionsConsumer
     ) -> None:
-        payload = make_routing_decided_event()
-        record = make_mock_consumer_record(_TOPIC, 0, 0, payload)
+        envelope = make_routing_decision_event()
+        record = make_mock_consumer_record(_TOPIC, 0, 0, envelope)
         result = consumer._parse_message(record)
         assert result is not None
-        assert result["selected_provider"] == payload["selected_provider"]
+        assert result.selected_provider == "anthropic"
 
     def test_parse_invalid_json_returns_none(
         self, consumer: InfraRoutingDecisionsConsumer
@@ -171,18 +175,16 @@ class TestInfraRoutingDecisionsConsumerParsing:
         record.value = b"not-json"
         assert consumer._parse_message(record) is None
 
-    def test_parse_array_wrapped_legacy(
+    def test_parse_array_wrapped_record_returns_none(
         self, consumer: InfraRoutingDecisionsConsumer
     ) -> None:
-        payload = make_routing_decided_event()
+        """OMN-16025: the array-wrapped legacy unwrap is gone with its producer."""
         record = MagicMock()
         record.topic = _TOPIC
         record.partition = 0
         record.offset = 0
-        record.value = json.dumps([payload]).encode("utf-8")
-        result = consumer._parse_message(record)
-        assert result is not None
-        assert result["selected_provider"] == payload["selected_provider"]
+        record.value = json.dumps([make_routing_decision_event()]).encode("utf-8")
+        assert consumer._parse_message(record) is None
 
     def test_parse_multi_item_list_returns_none(
         self, consumer: InfraRoutingDecisionsConsumer
@@ -192,7 +194,7 @@ class TestInfraRoutingDecisionsConsumerParsing:
         record.partition = 0
         record.offset = 0
         record.value = json.dumps(
-            [make_routing_decided_event(), make_routing_decided_event()]
+            [make_routing_decision_event(), make_routing_decision_event()]
         ).encode("utf-8")
         assert consumer._parse_message(record) is None
 
@@ -232,9 +234,9 @@ class TestInfraRoutingDecisionsConsumerBatchProcessing:
         self, consumer: InfraRoutingDecisionsConsumer
     ) -> None:
         records = [
-            make_mock_consumer_record(_TOPIC, 0, 0, make_routing_decided_event()),
-            make_mock_consumer_record(_TOPIC, 0, 1, make_routing_decided_event()),
-            make_mock_consumer_record(_TOPIC, 1, 5, make_routing_decided_event()),
+            make_mock_consumer_record(_TOPIC, 0, 0, make_routing_decision_event()),
+            make_mock_consumer_record(_TOPIC, 0, 1, make_routing_decision_event()),
+            make_mock_consumer_record(_TOPIC, 1, 5, make_routing_decision_event()),
         ]
 
         mock_writer = AsyncMock()
@@ -253,7 +255,7 @@ class TestInfraRoutingDecisionsConsumerBatchProcessing:
         self, consumer: InfraRoutingDecisionsConsumer
     ) -> None:
         records = [
-            make_mock_consumer_record(_TOPIC, 0, 0, make_routing_decided_event()),
+            make_mock_consumer_record(_TOPIC, 0, 0, make_routing_decision_event()),
         ]
 
         mock_writer = AsyncMock()
