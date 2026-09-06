@@ -29,7 +29,22 @@
 # Required GitHub Secrets: none. The deploy-agent HMAC belongs to the runtime
 # deploy EFFECT that emits rebuild-requested, not this upstream start command.
 #
-# Tickets: OMN-8917, OMN-12573, OMN-15009
+# RUNNER ROUTING (OMN-17888) — this job is LAN-BOUND and must not ride the
+# shared trusted-CI seam. The dev control-bus broker declared by the overlay is
+# a tailnet host:port. OMN-16682 retargeted OMNI_TRUSTED_CI_RUNS_ON_JSON to
+# ["ubuntu-latest"] at BOTH org and repo scope on 2026-08-26, which relocated
+# this publisher onto GitHub-hosted compute that cannot resolve that name. Every
+# run since that had a runtime change to publish has failed on a DNS error after
+# a 30-second flush; the runs that "passed" were no-ops with nothing to send.
+#
+# The remedy is the same carve-out already applied to call-occ-autobind.yml
+# (OMN-16691) and to omnimarket's pr-merged-publisher.yml (OMN-17378): a
+# DEDICATED runs-on variable, deliberately left UNSET so the self-hosted literal
+# operates. Fork PRs still route to hosted compute — untrusted code never
+# reaches the fleet — and the script refuses to attempt a LAN publish from a
+# github-hosted runner instead of timing out against an unresolvable name.
+#
+# Tickets: OMN-8917, OMN-12573, OMN-15009, OMN-17888
 
 name: Runtime Rebuild Trigger
 
@@ -53,7 +68,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 5
 
@@ -110,6 +125,10 @@ jobs:
           # commit SHA is the exact ref node_redeploy rebuilds.
           PR_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
           PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          # Runner class is forwarded so the publisher can refuse a LAN publish
+          # from GitHub-hosted compute by name, rather than failing 30 seconds
+          # later on an unresolvable bootstrap host (OMN-17888).
+          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           uv run python scripts/trigger_rebuild_on_merge.py \
             --changed-files "$PR_CHANGED_FILES" \
@@ -120,4 +139,5 @@ jobs:
             --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml" \
             --consumer-model ".ci-bus-overlay/src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py" \
             --runtime-path-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
+            --runner-environment "$CI_RUNNER_ENVIRONMENT" \
             --requested-by "gha/omnibase_infra/pr-$PR_NUMBER"

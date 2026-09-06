@@ -135,8 +135,10 @@ def test_runtime_change_with_broker_unset_fails_closed(
     # RED — the deploy trigger produced nothing and must not be green.
     assert result.exit_code != 0, result.output
     # It got PAST the trigger decision (proves it was a producer expected to emit,
-    # not a no-op) before failing closed.
-    assert "Redeploy triggered" in result.output
+    # not a no-op) before failing closed. The decision line deliberately does NOT
+    # claim delivery -- it is emitted before the flush that can still time out
+    # (OMN-17888), so it reads as an intent and the publication line is separate.
+    assert "delivery NOT yet confirmed" in result.output
     # And it did NOT take the deleted silent-skip path.
     assert _BANNED_SILENT_SKIP_PHRASE not in result.output
 
@@ -149,8 +151,10 @@ def test_zero_delivery_emit_fails_closed(
     _clear_publish_env(monkeypatch)
     overlay, consumer_model = _write_bus_contracts(tmp_path)
 
-    def _fake_publish_zero(**_kwargs: Any) -> int:
-        return 0
+    # publish_redeploy_start_event returns (delivered, broker_coordinates) as of
+    # OMN-17888; a zero-delivery return still has to fail the caller closed.
+    def _fake_publish_zero(**_kwargs: Any) -> tuple[int, str]:
+        return 0, ""
 
     monkeypatch.setattr(
         trigger_module, "publish_redeploy_start_event", _fake_publish_zero
@@ -249,8 +253,10 @@ def test_happy_path_publishes_and_exits_zero(
     _clear_publish_env(monkeypatch)
     overlay, consumer_model = _write_bus_contracts(tmp_path)
 
-    def _fake_publish_one(**_kwargs: Any) -> int:
-        return 1
+    # (delivered, broker_coordinates) as of OMN-17888 -- the coordinates are the
+    # broker-assigned proof the publication line carries.
+    def _fake_publish_one(**_kwargs: Any) -> tuple[int, str]:
+        return 1, "partition=0 offset=17"
 
     monkeypatch.setattr(
         trigger_module, "publish_redeploy_start_event", _fake_publish_one

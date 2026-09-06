@@ -62,6 +62,25 @@ def _import_trigger_module():
 
 
 @pytest.mark.unit
+class _AckMessage:
+    """Minimal confluent-kafka Message stand-in carrying delivery coordinates."""
+
+    def __init__(self, partition: int, offset: int) -> None:
+        self._partition = partition
+        self._offset = offset
+
+    def partition(self) -> int:
+        return self._partition
+
+    def offset(self) -> int:
+        return self._offset
+
+
+def _ack_produce(topic, key, value, on_delivery):  # type: ignore[no-untyped-def]
+    """Acknowledge the produced message the way a live broker would."""
+    on_delivery(None, _AckMessage(partition=0, offset=17))
+
+
 class TestRebuildTriggerLogic:
     """Unit tests for canonical runtime-path and label trigger logic."""
 
@@ -297,9 +316,11 @@ class TestRedeployStartPublish:
         consumer_model = self._write_consumer_model(tmp_path)
         captured: dict[str, Any] = {}
 
-        def _fake_publish(**kwargs: Any) -> int:
+        def _fake_publish(**kwargs: Any) -> tuple[int, str]:
             captured.update(kwargs)
-            return 1
+            # (delivered, broker-assigned coordinates) — OMN-17888: publication
+            # is proven by the offset the broker assigned, not by intent.
+            return 1, "partition=0 offset=17"
 
         monkeypatch.setattr(self.mod, "publish_redeploy_start_event", _fake_publish)
 
@@ -332,6 +353,10 @@ class TestRedeployStartPublish:
         """publish_redeploy_start_event publishes onex.cmd.omnimarket.redeploy-start.v1."""
         mock_producer = MagicMock()
         mock_producer.flush.return_value = None
+        # OMN-17888: a drained flush with no delivery callback is unproven and
+        # now raises, so the fake must acknowledge the message the way a broker
+        # does — with a partition and an offset.
+        mock_producer.produce.side_effect = _ack_produce
 
         with patch("confluent_kafka.Producer", return_value=mock_producer):
             self.mod.publish_redeploy_start_event(
@@ -358,6 +383,7 @@ class TestRedeployStartPublish:
 
         def fake_produce(topic, key, value, on_delivery):
             captured_value.append(value)
+            on_delivery(None, _AckMessage(partition=0, offset=17))
 
         mock_producer.produce.side_effect = fake_produce
         mock_producer.flush.return_value = None
