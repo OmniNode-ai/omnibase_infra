@@ -57,9 +57,86 @@ prepush_table_text() {
   printf '%s\n' "$head_copy"
 }
 
-# prepush_table_rows -- data rows only (comments and blanks dropped).
+# -----------------------------------------------------------------------------
+# Private placement overlay -- OMN-17996 (epic OMN-17992)
+# -----------------------------------------------------------------------------
+# The committed table carries `@private` in ssh_target, uv_abs_path and
+# workroot. Those three are PLACEMENT data -- where a lane runs and under which
+# paths -- and their real values are a lab and cloud address book (RFC1918
+# addresses, a tailnet MagicDNS name, per-host absolute home paths) that must
+# not sit in a public repository. They live in the PRIVATE workspace repo and
+# are hydrated here, joined on the row label.
+#
+# They carry no authority. Authorization is the (label, role, hostname, mode)
+# columns of the committed table, still read from HEAD, still refusing on
+# working-tree divergence, and still re-checked on the remote host by
+# pytest_full_suite_host_guard.py against its own `hostname -s`. So the
+# OMN-16688 "no file on disk to forge" premise is untouched and the overlay
+# needs no digest pin: forging a row here can only redirect where your OWN push
+# runs, and the destination still refuses to authorize unless its real hostname
+# is in the reviewed committed table. That is also why the overlay is read from
+# the working tree rather than from a HEAD -- it has no authority to protect,
+# and reading HEAD would couple this hook to whichever branch the private clone
+# happens to have checked out.
+#
+# Resolution is fail-fast with no default (CLAUDE.md rule 8): there is no
+# fallback path and no built-in address. OMNI_HOME unset, or the file absent,
+# leaves the columns UNRESOLVED -- `-` for ssh_target (the row logs `no-target`
+# and is skipped) and empty for uv/workroot (the row cannot qualify). Lab
+# placement is then SKIPPED and the caller falls through to the pre-existing
+# precedence. It never refuses a push: a placement optimisation that bricks
+# pushes is the failure mode this hook family already rejected once.
+PREPUSH_HOST_OVERLAY_REL="config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+
+# prepush_overlay_path -- absolute path to the private overlay, or rc=1 with a
+# reason on stderr. There is no fallback path and no built-in address.
+prepush_overlay_path() {
+  local path
+  if [ -z "${OMNI_HOME:-}" ]; then
+    printf 'placement overlay unresolved: OMNI_HOME is not set (%s)\n' \
+      "$PREPUSH_HOST_OVERLAY_REL" >&2
+    return 1
+  fi
+  path="${OMNI_HOME}/${PREPUSH_HOST_OVERLAY_REL}"
+  if [ ! -f "$path" ]; then
+    printf 'placement overlay absent at %s\n' "$path" >&2
+    return 1
+  fi
+  printf '%s' "$path"
+}
+
+# prepush_table_rows -- data rows only (comments and blanks dropped), with the
+# `@private` placement columns hydrated from the overlay.
 prepush_table_rows() {
-  prepush_table_text | sed -e 's/#.*$//' -e '/^[[:space:]]*$/d'
+  local overlay
+  overlay="$(prepush_overlay_path 2> /dev/null)" || overlay="/dev/null"
+  prepush_table_text | sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' | awk \
+    -F'\t' -v OFS='\t' -v OVL="$overlay" '
+      # The overlay is matched by FILENAME rather than the NR==FNR idiom on
+      # purpose: an EMPTY or absent overlay (/dev/null) contributes zero
+      # records, and NR==FNR would then be true for the FIRST TABLE ROW and
+      # silently eat it.
+      FILENAME == OVL {
+        line = $0
+        sub(/#.*$/, "", line)
+        if (line ~ /^[ \t]*$/) next
+        split(line, f, "\t")
+        if (f[1] == "") next
+        sshv[f[1]] = f[2]
+        uvv[f[1]] = f[3]
+        wrv[f[1]] = f[4]
+        next
+      }
+      {
+        # Unresolved ssh_target reads as `-`, which every consumer already
+        # treats as "no execution target" and skips. Unresolved uv/workroot
+        # read as empty, which fails the absolute-path and mkdir checks the
+        # consumers already make. Neither is ever assumed usable.
+        if ($4 == "@private") { $4 = ($1 in sshv && sshv[$1] != "") ? sshv[$1] : "-" }
+        if ($6 == "@private") { $6 = ($1 in uvv) ? uvv[$1] : "" }
+        if ($8 == "@private") { $8 = ($1 in wrv) ? wrv[$1] : "" }
+        print
+      }' "$overlay" -
 }
 
 # prepush_field ROW N -- Nth tab-separated field of ROW.

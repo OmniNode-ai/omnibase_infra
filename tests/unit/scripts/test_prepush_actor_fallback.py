@@ -81,14 +81,24 @@ def test_no_capacity_row_hardcodes_an_ssh_login() -> None:
     A ``user@`` here is not a style question: it pins every execution target to
     one person's credentials, and the picker then reports the whole lab
     unreachable for everybody else while their own fit host goes unused. This
-    assertion is what stops the next row from quietly reintroducing it."""
+    assertion is what stops the next row from quietly reintroducing it.
+
+    OMN-17996 moved the VALUE to the private placement overlay, so what this
+    file can still prove is stronger than "no login": the column carries the
+    `@private` token and therefore cannot carry a login, a host, an address or
+    anything else. The same rule is restated in the overlay's own header, which
+    is where a value can now appear at all.
+    """
     for row in _rows():
         if row[1] != "capacity":
             continue
-        assert "@" not in row[3], (
-            f"{row[0]}: ssh_target {row[3]!r} hardcodes a login. Use the bare "
-            "host and let ssh(1) resolve the user from ~/.ssh/config or the "
-            "invoking account (OMN-17280)."
+        assert row[3] == "@private", (
+            f"{row[0]}: ssh_target {row[3]!r} must be the `@private` token. A "
+            "hardcoded login pins every execution target to one person's "
+            "credentials and reports the whole lab unreachable for everybody "
+            "else (OMN-17280); a hardcoded host publishes the lab address book "
+            "from a public repository (OMN-17996). Put the value in "
+            "$OMNI_HOME/config/lab/prepush_hosts.omnibase_infra.overlay.tsv."
         )
 
 
