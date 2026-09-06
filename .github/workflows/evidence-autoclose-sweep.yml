@@ -328,6 +328,10 @@ on:
 env:
   UV_VERSION: "0.8.3"
   PYTHON_VERSION: "3.12"
+  # OMN-17863: only used when no materialised JS project declares a version of
+  # its own. It is a floor for a job that has no JS contract in scope, never a
+  # substitute for the product's own declaration.
+  NODE_VERSION_DEFAULT: "22"
 
 jobs:
   evidence-autoclose-sweep:
@@ -1225,6 +1229,128 @@ jobs:
             done < "${RUNNER_TEMP}/cwd-freshness.tsv"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # -----------------------------------------------------------------
+      # OMN-17863: the Node half of the toolchain
+      # -----------------------------------------------------------------
+      #
+      # Every provisioning step above this point is Python-shaped, because
+      # until now every behaviour check was. `test_passes` is a semantic alias
+      # for `command` (OMN-16824) — dod_verify runs the declared string raw in
+      # its declared cwd — so a contract whose proof is `pnpm test:...` exits
+      # 127 on this job and is recorded `failed=1`. That asserts a product
+      # defect on the strength of the VERIFIER's missing runtime, and reads in
+      # a receipt exactly like the product genuinely failing. It is also
+      # strictly more blocking than the missing proof it would replace, which
+      # is why the OMN-17863 behaviour item was held unpushed rather than
+      # landed into a job that could not execute it.
+      #
+      # Placed AFTER the materialise step on purpose: the version is derived
+      # from the JS projects that were actually cloned, so it is the product's
+      # own declaration rather than a constant in this file that drifts.
+      - name: Derive the Node version the materialised JS projects declare (OMN-17863)
+        id: node-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "${OMNI_HOME}" "${RUNNER_TEMP}/cwd-materialisation.tsv" \
+            >> "$GITHUB_OUTPUT" <<'PYEOF'
+          # ---8<--- OMN-17863 BEGIN node-version-derivation
+          """Resolve one Node version satisfying every materialised JS project.
+
+          Reads each destination's own declaration -- `.nvmrc` first (it is the
+          more specific statement), then `engines.node`. Takes the HIGHEST
+          floor across the set, because a single runtime has to satisfy all of
+          them and the highest floor is the only one that can.
+
+          Prints `version=<x>` for the step output. When no materialised repo
+          declares anything it prints the workflow default rather than failing:
+          a run with no JS contract in scope must not be blocked by the absence
+          of a JS toolchain requirement.
+          """
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          omni_home = Path(sys.argv[1])
+          tsv = Path(sys.argv[2])
+          default = os.environ.get("NODE_VERSION_DEFAULT", "22")
+
+          _FLOOR = re.compile(r"(\d+(?:\.\d+){0,2})")
+
+          def _floor(raw: str) -> tuple[int, ...] | None:
+              match = _FLOOR.search(raw)
+              if match is None:
+                  return None
+              return tuple(int(part) for part in match.group(1).split("."))
+
+          found: list[tuple[tuple[int, ...], str, str]] = []
+          rows = tsv.read_text(encoding="utf-8").splitlines() if tsv.is_file() else []
+          for row in rows:
+              dest = row.split("\t")[0].strip()
+              if not dest:
+                  continue
+              root = omni_home / dest
+              nvmrc = root / ".nvmrc"
+              if nvmrc.is_file():
+                  raw = nvmrc.read_text(encoding="utf-8").strip().lstrip("v")
+                  parsed = _floor(raw)
+                  if parsed is not None:
+                      found.append((parsed, raw, f"{dest}/.nvmrc"))
+                      continue
+              manifest = root / "package.json"
+              if not manifest.is_file():
+                  continue
+              try:
+                  data = json.loads(manifest.read_text(encoding="utf-8"))
+              except ValueError:
+                  print(f"could not parse {manifest}", file=sys.stderr)
+                  continue
+              engines = data.get("engines") if isinstance(data, dict) else None
+              node = engines.get("node") if isinstance(engines, dict) else None
+              if not isinstance(node, str):
+                  continue
+              parsed = _floor(node)
+              if parsed is not None:
+                  found.append((parsed, ".".join(str(n) for n in parsed),
+                                f"{dest}/package.json engines.node ({node})"))
+
+          if found:
+              found.sort()
+              _, version, source = found[-1]
+              print(f"resolved from {source}", file=sys.stderr)
+          else:
+              version = default
+              print("no materialised repo declares a Node version", file=sys.stderr)
+          print(f"version={version}")
+          # ---8<--- OMN-17863 END node-version-derivation
+          PYEOF
+          echo "== Node version derivation =="
+          cat "$GITHUB_OUTPUT" | grep '^version=' || true
+
+      - name: Provision Node for JS behaviour checks (OMN-17863)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      # `setup-node` does not enable corepack and does not ship pnpm, so a job
+      # with Node and no corepack has the same exit 127 by a different route.
+      # corepack is what makes a project's own `packageManager` pin the thing
+      # that actually runs, which is the property the staged toolchain in
+      # node_dod_verify resolves against (it refuses a near-miss version).
+      - name: Enable corepack for the pinned package manager (OMN-17863)
+        shell: bash
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          corepack enable
+          # Provisioning that reports success without being usable is the
+          # failure this repo keeps re-learning (OMN-17307) — assert it.
+          echo "node    $(node --version)"
+          echo "corepack $(corepack --version)"
+
       # OMN-16902, second pass. Materialising ${OMNI_HOME}/omnimarket ARMS the
       # OMN-14060 drift guard, which until then failed open on this runner
       # because no canonical clone existed. Run 33217990549 proved the
@@ -1351,6 +1477,29 @@ jobs:
           # failure rather than a hang.
           GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
           GIT_TERMINAL_PROMPT: "0"
+          # OMN-17863: the JS half of the hermetic behaviour-check
+          # environment. node_dod_verify stages a lock-exact tree per
+          # (project, lockfile) and installs into it with
+          # `pnpm install --frozen-lockfile`; these three place and bound it.
+          #
+          # Under RUNNER_TEMP, not the workspace: a real project's node_modules
+          # is hundreds of megabytes, and inside GITHUB_WORKSPACE it would be
+          # walked by the gate-venv purity assertions and picked up by any
+          # later checkout. It is also where the dispatch venv already lives.
+          DOD_VERIFY_HERMETIC_NODE_ROOT: ${{ runner.temp }}/dod-verify-node
+          # The install is a DOWNLOAD, so it gets its own budget rather than
+          # the 180s per-check ceiling below. Charging a cold pnpm store to the
+          # per-check ceiling kills the check mid-flight and records
+          # CHECK_BUDGET_EXCEEDED — a verifier-side ceiling reported as a fact
+          # about the ticket, which is the confusion OMN-17795 had to unpick.
+          # 900s is the same default the uv sync carries; stated explicitly
+          # here because this job overrides the per-check ceiling and the two
+          # must be visibly separate.
+          DOD_VERIFY_HERMETIC_SYNC_TIMEOUT_S: "900"
+          # corepack asks before fetching a package manager it does not have.
+          # In a scheduled run nobody answers, so that is an indefinite hang
+          # inside the 60-minute job budget, reported as nothing at all.
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
         run: |
           set -uo pipefail
 
@@ -1657,6 +1806,29 @@ jobs:
           # failure rather than a hang.
           GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
           GIT_TERMINAL_PROMPT: "0"
+          # OMN-17863: the JS half of the hermetic behaviour-check
+          # environment. node_dod_verify stages a lock-exact tree per
+          # (project, lockfile) and installs into it with
+          # `pnpm install --frozen-lockfile`; these three place and bound it.
+          #
+          # Under RUNNER_TEMP, not the workspace: a real project's node_modules
+          # is hundreds of megabytes, and inside GITHUB_WORKSPACE it would be
+          # walked by the gate-venv purity assertions and picked up by any
+          # later checkout. It is also where the dispatch venv already lives.
+          DOD_VERIFY_HERMETIC_NODE_ROOT: ${{ runner.temp }}/dod-verify-node
+          # The install is a DOWNLOAD, so it gets its own budget rather than
+          # the 180s per-check ceiling below. Charging a cold pnpm store to the
+          # per-check ceiling kills the check mid-flight and records
+          # CHECK_BUDGET_EXCEEDED — a verifier-side ceiling reported as a fact
+          # about the ticket, which is the confusion OMN-17795 had to unpick.
+          # 900s is the same default the uv sync carries; stated explicitly
+          # here because this job overrides the per-check ceiling and the two
+          # must be visibly separate.
+          DOD_VERIFY_HERMETIC_SYNC_TIMEOUT_S: "900"
+          # corepack asks before fetching a package manager it does not have.
+          # In a scheduled run nobody answers, so that is an indefinite hang
+          # inside the 60-minute job budget, reported as nothing at all.
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
         run: |
           set -euo pipefail
           # Fail fast on a missing secret rather than letting every ticket in
