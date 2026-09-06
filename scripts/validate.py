@@ -81,6 +81,23 @@ KNOWN_ISSUES: dict[str, tuple[str, str]] = {
 }
 
 
+# Wall-clock budget for ``check_architecture.sh``. Sized for a CONTENDED host,
+# not an idle one: the script is a grep sweep over two full checkouts, and on
+# this fleet the launching Mac routinely sits at load1 55-95 while a dozen
+# other lanes hold pre-push slots (rule 21). Measured 2026-09-06 at load1 ~60:
+# the script completed in 137s and exited 0 ("known issues only"), while the
+# 120s budget it used to carry reported ERROR (timeout) and failed the push.
+#
+# That failure mode is the one worth naming, because it is invisible: a
+# timeout is reported identically to a real layering violation, so a gate
+# whose verdict was PASS blocked a push on host contention alone -- and the
+# operator's only remedies are to wait for an idle host or to reach for the
+# bypass this repo forbids. The budget is generous rather than tuned: the
+# check still runs to completion in every case, so a larger budget can only
+# make the gate MORE able to reach a verdict, never less.
+_ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
+
+
 def run_architecture_layers(verbose: bool = False) -> bool:
     """Run architecture layer validation.
 
@@ -121,7 +138,7 @@ def run_architecture_layers(verbose: bool = False) -> bool:
             check=False,
             capture_output=True,
             text=True,
-            timeout=120,  # 120 second timeout for large codebases
+            timeout=_ARCHITECTURE_LAYERS_TIMEOUT_SECONDS,
             shell=False,
         )
 
@@ -147,7 +164,13 @@ def run_architecture_layers(verbose: bool = False) -> bool:
         return passed
 
     except subprocess.TimeoutExpired:
-        print("Architecture Layers: ERROR (timeout after 120s)")
+        print(
+            "Architecture Layers: ERROR (timeout after "
+            f"{_ARCHITECTURE_LAYERS_TIMEOUT_SECONDS}s)"
+        )
+        print("  This is NOT a layering violation -- the check never reached a")
+        print("  verdict. Re-run it directly to see the real result:")
+        print("    bash scripts/check_architecture.sh --no-color")
         print("  Fix: Check if omnibase_core path is accessible")
         print("  Fix: Try running with --verbose to see progress")
         return False
