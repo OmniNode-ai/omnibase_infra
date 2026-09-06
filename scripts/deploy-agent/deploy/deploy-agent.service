@@ -21,6 +21,15 @@
 #   venv, which would cause a Type=notify deadlock (READY=1 never sent → killed
 #   after TimeoutStartSec).
 # Restart=on-failure: restart on non-zero exit; not on clean SIGTERM.
+#
+# DEPLOY_AGENT_ALLOWED_LANES (OMN-16939) is REQUIRED and has no default: the
+#   agent refuses to start without it. This template deliberately does not set
+#   it, because the correct value is a property of the deployment, not of the
+#   template — the installed .201 prod instance gets it from its drop-in
+#   (deploy-agent.service.d/override.conf, `prod`) and the dev instance is a
+#   separate unit (deploy-agent-dev.service, `dev`). A control bus can carry
+#   commands for more than one lane, so "which broker am I on" does not bound
+#   which lane this process may mutate; this variable does.
 
 [Unit]
 Description=ONEX Deploy Agent — Kafka-driven rebuild orchestrator
