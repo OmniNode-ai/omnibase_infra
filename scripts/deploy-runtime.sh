@@ -327,6 +327,7 @@ readonly HEALTH_CHECK_INTERVAL=4
 # =============================================================================
 
 MODE="dry-run"           # dry-run | execute
+EFFECTS_PLAN=""          # typed immutable-image plan; separate mutation boundary
 FORCE=false
 RESTART=false
 # OMN-15218: the raw argv this invocation was called with, captured before
@@ -441,6 +442,14 @@ USAGE
 OPTIONS
     (none)              Dry-run mode (default). Preview what would be deployed.
     --execute           Actually deploy: rsync, write registry, build images.
+    --effects-plan FILE Image-only dev runtime-effects rollout using a typed JSON
+                        plan and the ACTIVE compose configuration. Read-only
+                        preview by default; --execute performs the scoped swap.
+                        No build, dependency preparation, migrations, shared
+                        registry update or retention cleanup. Candidate source,
+                        dependency/configuration parity and rollback are gated.
+                        Cannot combine with --restart/--cold/--force/--prod,
+                        --profile, --print-compose-cmd or build/source overrides.
     --force             Required to overwrite an existing version directory.
     --restart           Restart runtime containers after build (requires --execute).
                         WARM path: recreates only the RUNTIME_SERVICES subset
@@ -548,6 +557,14 @@ parse_args() {
     # Parse command-line arguments and set global mode/flag variables.
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --effects-plan)
+                if [[ -n "${EFFECTS_PLAN}" || -z "${2:-}" || "${2:0:1}" == "-" ]]; then
+                    log_error "--effects-plan requires exactly one plan file"
+                    exit 64
+                fi
+                EFFECTS_PLAN="$2"
+                shift 2
+                ;;
             --execute)
                 MODE="execute"
                 shift
@@ -597,6 +614,26 @@ parse_args() {
                 ;;
         esac
     done
+
+    if [[ -n "${EFFECTS_PLAN}" ]]; then
+        local argument
+        for argument in "${DEPLOY_INVOCATION_ARGS[@]}"; do
+            case "${argument}" in
+                --restart|--cold|--force|--prod|--profile|--print-compose-cmd)
+                    log_error "${argument} conflicts with the effects-only plan"
+                    exit 64
+                    ;;
+            esac
+        done
+        if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" || -n "${DEPLOY_REF:-}" ||
+              -n "${BUILD_SOURCE:-}" || -n "${EXPECTED_BUILD_SOURCE:-}" ||
+              "${DEPLOY_HOTPATCH:-0}" != "0" || "${ALLOW_SIBLING_PIN_DRIFT:-0}" != "0" ||
+              "${ALLOW_UNPINNED_DEPLOY_SOURCE:-0}" != "0" || -n "${HOTPATCH_PREFLIGHT_BYPASS:-}" ]]; then
+            log_error "Effects-only plan conflicts with build/source override environment"
+            exit 64
+        fi
+        return 0
+    fi
 
     # Validate flag combinations
     if [[ "${RESTART}" == true && "${MODE}" != "execute" ]]; then
@@ -1501,90 +1538,19 @@ acquire_lock() {
         # the lock owner and refuse to proceed).
         echo $$ > "${pid_file}"
     else
-        # Lock directory exists -- check for stale lock by verifying the
-        # owning PID is still alive.
+        # Never reclaim a lock during deployment. A missing/empty PID can be
+        # the mkdir-to-publication window of a concurrent scoped deployment;
+        # even a dead PID does not make check-then-remove atomic. Recovery is
+        # an explicit operator action after verifying the recorded owner.
         if [[ -f "${pid_file}" ]]; then
             local lock_pid
             lock_pid="$(cat "${pid_file}" 2>/dev/null || true)"
-            # Validate PID is numeric before using it in kill -0.
-            # A corrupted or empty PID file is treated as a stale lock.
-            if [[ -n "${lock_pid}" ]] && ! [[ "${lock_pid}" =~ ^[0-9]+$ ]]; then
-                log_warn "Stale lock detected (PID file contains non-numeric value: '${lock_pid}')."
-                log_warn "Treating as corrupted lock and cleaning up..."
-                lock_pid=""
-            fi
-            if [[ -z "${lock_pid}" ]] || ! kill -0 "${lock_pid}" 2>/dev/null; then
-                if [[ -n "${lock_pid}" ]]; then
-                    log_warn "Stale lock detected (PID ${lock_pid} is no longer running)."
-                fi
-                log_warn "Cleaning up stale lock and re-acquiring..."
-                # Re-read the PID file before removing the lock directory.
-                # Between the initial stale check and this point, another
-                # process may have legitimately acquired the lock. If the
-                # PID file now contains a live process, abort cleanup.
-                local recheck_pid
-                recheck_pid="$(cat "${pid_file}" 2>/dev/null || true)"
-                if [[ -n "${recheck_pid}" ]] && [[ "${recheck_pid}" =~ ^[0-9]+$ ]] \
-                        && kill -0 "${recheck_pid}" 2>/dev/null; then
-                    log_error "Lock was re-acquired by PID ${recheck_pid} during stale cleanup."
-                    log_error "A concurrent deployment is legitimately running. Exiting."
-                    exit 2
-                fi
-                rm -rf "${LOCK_DIR}"
-                # Retry mkdir in a short loop to handle the race between rm
-                # and mkdir where another process could acquire the lock.
-                local lock_acquired=false
-                local retry
-                for retry in 1 2 3; do
-                    if mkdir "${LOCK_DIR}" 2>/dev/null; then
-                        # Write PID immediately after acquiring the lock to
-                        # eliminate the window where the lock exists without
-                        # a PID file.
-                        echo $$ > "${pid_file}"
-                        lock_acquired=true
-                        break
-                    fi
-                    # Another process grabbed the lock between our rm and mkdir.
-                    # Brief sleep before retrying to avoid tight spin.
-                    log_warn "Lock contention on retry ${retry}/3, waiting..."
-                    sleep 1
-                done
-                if [[ "${lock_acquired}" != true ]]; then
-                    log_error "Another process acquired the lock during stale cleanup."
-                    log_error "A concurrent deployment is legitimately running. Exiting."
-                    exit 2
-                fi
-                # Fall through to set up traps and continue
-            else
-                log_error "Another deployment is in progress (locked by PID ${lock_pid})."
-                log_error "If the previous deployment crashed, remove the lock manually:"
-                log_error "  rm -rf ${LOCK_DIR}"
-                exit 2
-            fi
+            log_error "Deployment lock already exists (recorded PID: ${lock_pid:-unpublished})."
         else
-            # Lock directory exists but has no PID file. This happens when the
-            # script was killed (e.g., SIGKILL) between mkdir and PID write.
-            # Treat as a stale lock and attempt recovery, same as a dead PID.
-            log_warn "Lock directory exists but has no PID file (likely interrupted deployment)."
-            log_warn "Treating as stale lock and cleaning up..."
-            rm -rf "${LOCK_DIR}"
-            local lock_acquired=false
-            local retry
-            for retry in 1 2 3; do
-                if mkdir "${LOCK_DIR}" 2>/dev/null; then
-                    echo $$ > "${pid_file}"
-                    lock_acquired=true
-                    break
-                fi
-                log_warn "Lock contention on retry ${retry}/3, waiting..."
-                sleep 1
-            done
-            if [[ "${lock_acquired}" != true ]]; then
-                log_error "Another process acquired the lock during stale cleanup."
-                log_error "A concurrent deployment is legitimately running. Exiting."
-                exit 2
-            fi
+            log_error "Deployment lock exists with no published PID; ownership is unknown."
         fi
+        log_error "Refusing automatic lock removal. Verify ownership before operator recovery: ${LOCK_DIR}"
+        exit 2
     fi
 
     # Ensure lock is released on exit (normal, error, or signal).
@@ -3508,12 +3474,47 @@ show_summary() {
 # Main
 # =============================================================================
 
+run_scoped_effects_deploy() {
+    # Deliberately never enter generic main's sync/build/registry/cleanup path.
+    # Attribution stays shared; only the scoped executor
+    # may acquire/release the deployment lock for this mode.
+    local repo_root compose_project
+    repo_root="$(resolve_repo_root)"
+    compose_project="$(resolve_compose_project)"
+    if [[ "${compose_project}" != "omnibase-infra" || "${ONEX_DEPLOY_LANE:-dev}" != "dev" ]]; then
+        log_error "Effects-only plans are restricted to the compose-dev lane"
+        return 64
+    fi
+    check_command uv
+    check_command docker
+    # This is admission, not yet a deployment: even --execute evaluates the
+    # attribution guard in check-only mode. The scoped receipt records the real
+    # mutation and outcome after validation rather than a write-ahead claim.
+    local requested_mode="${MODE}"
+    MODE="dry-run"
+    guard_lane_deploy_attribution "${repo_root}" "${compose_project}"
+    # The scoped executor runs the existing hot-patch validator with CANDIDATE
+    # refs for every repo. Host HEADs here do not attest an immutable image.
+    MODE="${requested_mode}"
+    local -a command=(uv run --frozen --project "${repo_root}" python
+        "${repo_root}/scripts/runtime_build/scoped_effects_deploy.py" --plan "${EFFECTS_PLAN}")
+    if [[ "${MODE}" == "execute" ]]; then
+        command+=(--execute)
+    fi
+    "${command[@]}"
+}
+
 main() {
     # Orchestrate the full deployment workflow from validation through verification.
     # OMN-15218: capture raw argv before parse_args consumes it so the attribution
     # record carries the literal command that touched the lane.
     DEPLOY_INVOCATION_ARGS=("$@")
     parse_args "$@"
+
+    if [[ -n "${EFFECTS_PLAN:-}" ]]; then
+        run_scoped_effects_deploy
+        return
+    fi
 
     # Phase 1: Validate prerequisites
     validate_prerequisites

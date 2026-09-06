@@ -60,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -103,6 +104,15 @@ class RepoRefResult:
     dirty: bool  # working tree dirty after the operation
     hotpatch: bool  # deliberately-dirty deploy, labelled not laundered
     before_sha: str = ""  # HEAD before the operation (OMN-17291: old -> new receipt)
+
+
+@dataclass(frozen=True)
+class RepoRefSelection:
+    """One validated immutable source selection, before checkout begins."""
+
+    repo: str
+    path: Path
+    ref: str
 
 
 @dataclass(frozen=True)
@@ -646,15 +656,137 @@ def _parse_name_value(items: list[str], flag: str) -> dict[str, str]:
             raise DeploySourceRefError(
                 f"{flag} expects a non-empty NAME=VALUE, got {item!r}", USAGE_ERROR
             )
+        if name in out:
+            raise DeploySourceRefError(
+                f"{flag} names {name!r} more than once", USAGE_ERROR
+            )
         out[name] = value
     return out
+
+
+def validate_immutable_selections(
+    repos: dict[str, str], repo_refs: dict[str, str]
+) -> tuple[RepoRefSelection, ...]:
+    """Validate the complete selection without invoking git or mutating clones."""
+    missing = repos.keys() - repo_refs.keys()
+    unknown = repo_refs.keys() - repos.keys()
+    if missing or unknown:
+        raise DeploySourceRefError(
+            f"immutable repo pins must cover exactly the selected repos; "
+            f"missing={sorted(missing)}, unknown={sorted(unknown)}",
+            USAGE_ERROR,
+        )
+    selections: list[RepoRefSelection] = []
+    paths: set[Path] = set()
+    for name, path_value in repos.items():
+        ref = repo_refs[name]
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", ref):
+            raise DeploySourceRefError(
+                f"{name}: immutable ref must be a full 40-character commit SHA",
+                USAGE_ERROR,
+            )
+        path = Path(path_value).resolve()
+        if path in paths:
+            raise DeploySourceRefError(
+                f"{name}: multiple repo names select the same clone {path}",
+                USAGE_ERROR,
+            )
+        paths.add(path)
+        selections.append(RepoRefSelection(name, path, ref.lower()))
+    return tuple(selections)
+
+
+def _assert_owned_clean_target(selection: RepoRefSelection) -> None:
+    """Never discard tracked, untracked, or ignored work in immutable mode."""
+    _assert_git_repo(selection.path)
+    if selection.path.stat().st_uid != os.geteuid():
+        raise DeploySourceRefError(
+            f"{selection.repo}: immutable checkout requires an owned disposable clone",
+            CHECKOUT_FAILED,
+        )
+    status = _git(
+        selection.path, "status", "--porcelain", "--untracked-files=all", "--ignored"
+    )
+    if status:
+        raise DeploySourceRefError(
+            f"{selection.repo}: dirty immutable target; refusing to discard work:\n{status}",
+            CHECKOUT_FAILED,
+        )
+
+
+def checkout_immutable_selections(
+    selections: tuple[RepoRefSelection, ...], *, fetch: bool
+) -> list[RepoRefResult]:
+    """Resolve every pin before any checkout, then use non-forcing checkouts.
+
+    Callers supply disposable source clones. Unlike the historical global-ref
+    path, this mode never uses reset/clean/force, including when a target became
+    dirty after the preflight. Fetch may update clone refs, but no working tree
+    is changed until every requested commit has resolved in its own repository.
+    """
+    for selection in selections:
+        _assert_owned_clean_target(selection)
+    for selection in selections:
+        if fetch and "origin" in _git(selection.path, "remote").split():
+            _git(selection.path, "fetch", "--prune", "--tags", "origin")
+        resolved = _resolve_commit(selection.path, selection.ref)
+        if resolved != selection.ref:
+            raise DeploySourceRefError(
+                f"{selection.repo}: requested SHA {selection.ref} resolves to {resolved}, "
+                "not the selected commit",
+                CHECKOUT_FAILED,
+            )
+
+    results: list[RepoRefResult] = []
+    for selection in selections:
+        _assert_owned_clean_target(selection)
+        before_sha = _git(selection.path, "rev-parse", "HEAD")
+        _git(
+            selection.path,
+            "checkout",
+            "--detach",
+            "--no-overwrite-ignore",
+            selection.ref,
+        )
+        head = _git(selection.path, "rev-parse", "HEAD")
+        if head != selection.ref:
+            raise DeploySourceRefError(
+                f"{selection.repo}: HEAD {head} != selected SHA {selection.ref}",
+                CHECKOUT_FAILED,
+            )
+        _assert_owned_clean_target(selection)
+        results.append(
+            RepoRefResult(
+                repo=selection.repo,
+                path=str(selection.path),
+                ref=selection.ref,
+                expected_sha=selection.ref,
+                head_sha=head,
+                dirty=False,
+                hotpatch=False,
+                before_sha=before_sha,
+            )
+        )
+    return results
 
 
 def _cmd_checkout(args: argparse.Namespace) -> int:
     repos = _parse_name_value(args.repo, "--repo")
     repo_refs = _parse_name_value(args.repo_ref or [], "--repo-ref")
+    results: list[RepoRefResult]
 
-    results: list[RepoRefResult] = []
+    if args.require_immutable_refs:
+        if args.ref is not None or args.hotpatch:
+            raise DeploySourceRefError(
+                "immutable per-repo pins cannot be combined with --ref or --hotpatch",
+                USAGE_ERROR,
+            )
+        selections = validate_immutable_selections(repos, repo_refs)
+        results = checkout_immutable_selections(selections, fetch=not args.no_fetch)
+        write_expected_refs(results, Path(args.output))
+        return 0
+
+    results = []
     for name, path in repos.items():
         ref = repo_refs.get(name, args.ref)
         if not args.hotpatch and not ref:
@@ -757,6 +889,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=REF",
         help="per-repo ref override (repeatable); wins over --ref",
+    )
+    p_checkout.add_argument(
+        "--require-immutable-refs",
+        action="store_true",
+        help="require complete per-repo full-SHA pins and owned clean disposable "
+        "clones; resolve all pins before non-forcing checkout (no reset/clean)",
     )
     p_checkout.add_argument(
         "--hotpatch",
