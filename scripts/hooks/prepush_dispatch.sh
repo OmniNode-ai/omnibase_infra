@@ -61,31 +61,25 @@ prepush_table_text() {
 # Private placement overlay -- OMN-17996 (epic OMN-17992)
 # -----------------------------------------------------------------------------
 # The committed table carries `@private` in ssh_target, uv_abs_path and
-# workroot. Those three are PLACEMENT data -- where a lane runs and under which
-# paths -- and their real values are a lab and cloud address book (RFC1918
-# addresses, a tailnet MagicDNS name, per-host absolute home paths) that must
-# not sit in a public repository. They live in the PRIVATE workspace repo and
-# are hydrated here, joined on the row label.
+# workroot. The transport target is resolved from the committed hostname column;
+# private ssh configuration may map that host alias to a lab address, but an
+# unversioned overlay may not choose where a git bundle is copied. The overlay
+# only hydrates the non-transport path values.
 #
-# They carry no authority. Authorization is the (label, role, hostname, mode)
-# columns of the committed table, still read from HEAD, still refusing on
-# working-tree divergence, and still re-checked on the remote host by
-# pytest_full_suite_host_guard.py against its own `hostname -s`. So the
-# OMN-16688 "no file on disk to forge" premise is untouched and the overlay
-# needs no digest pin: forging a row here can only redirect where your OWN push
-# runs, and the destination still refuses to authorize unless its real hostname
-# is in the reviewed committed table. That is also why the overlay is read from
-# the working tree rather than from a HEAD -- it has no authority to protect,
-# and reading HEAD would couple this hook to whichever branch the private clone
-# happens to have checked out.
+# Authorization is the (label, role, hostname, mode) columns of the committed
+# table, still read from HEAD, still refusing on working-tree divergence, and
+# still re-checked on the remote host by pytest_full_suite_host_guard.py against
+# its own `hostname -s`. So the OMN-16688 "no file on disk to forge" premise is
+# untouched: the overlay cannot add a host, redirect a bundle to a different
+# host, or make an unresolved row usable.
 #
 # Resolution is fail-fast with no default (CLAUDE.md rule 8): there is no
 # fallback path and no built-in address. OMNI_HOME unset, or the file absent,
-# leaves the columns UNRESOLVED -- `-` for ssh_target (the row logs `no-target`
-# and is skipped) and empty for uv/workroot (the row cannot qualify). Lab
-# placement is then SKIPPED and the caller falls through to the pre-existing
-# precedence. It never refuses a push: a placement optimisation that bricks
-# pushes is the failure mode this hook family already rejected once.
+# leaves path columns UNRESOLVED and emits a diagnostic. A row with incomplete
+# overlay data is resolved the same way: `-` for ssh_target and empty for
+# uv/workroot, so lab placement is SKIPPED and the caller falls through to the
+# pre-existing precedence. It never refuses a push: a placement optimisation
+# that bricks pushes is the failure mode this hook family already rejected once.
 PREPUSH_HOST_OVERLAY_REL="config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
 
 # prepush_overlay_path -- absolute path to the private overlay, or rc=1 with a
@@ -109,7 +103,7 @@ prepush_overlay_path() {
 # `@private` placement columns hydrated from the overlay.
 prepush_table_rows() {
   local overlay
-  overlay="$(prepush_overlay_path 2> /dev/null)" || overlay="/dev/null"
+  overlay="$(prepush_overlay_path)" || overlay="/dev/null"
   prepush_table_text | sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' | awk \
     -F'\t' -v OFS='\t' -v OVL="$overlay" '
       # The overlay is matched by FILENAME rather than the NR==FNR idiom on
@@ -122,19 +116,27 @@ prepush_table_rows() {
         if (line ~ /^[ \t]*$/) next
         split(line, f, "\t")
         if (f[1] == "") next
-        sshv[f[1]] = f[2]
         uvv[f[1]] = f[3]
         wrv[f[1]] = f[4]
         next
       }
       {
-        # Unresolved ssh_target reads as `-`, which every consumer already
-        # treats as "no execution target" and skips. Unresolved uv/workroot
-        # read as empty, which fails the absolute-path and mkdir checks the
-        # consumers already make. Neither is ever assumed usable.
-        if ($4 == "@private") { $4 = ($1 in sshv && sshv[$1] != "") ? sshv[$1] : "-" }
-        if ($6 == "@private") { $6 = ($1 in uvv) ? uvv[$1] : "" }
-        if ($8 == "@private") { $8 = ($1 in wrv) ? wrv[$1] : "" }
+        needs_private = ($4 == "@private" || $6 == "@private" || $8 == "@private")
+        complete_overlay = (($1 in uvv) && uvv[$1] ~ /^\// && ($1 in wrv) && wrv[$1] ~ /^\//)
+        if (needs_private && !complete_overlay) {
+          print "placement overlay incomplete for " $1 "; skipping row placement" > "/dev/stderr"
+          if ($4 == "@private") { $4 = "-" }
+          if ($6 == "@private") { $6 = "" }
+          if ($8 == "@private") { $8 = "" }
+          print
+          next
+        }
+        # The transport target is the committed hostname. Private ssh config is
+        # where lab addresses and account-specific login details belong; the
+        # unversioned overlay never controls where the git bundle is copied.
+        if ($4 == "@private") { $4 = $3 }
+        if ($6 == "@private") { $6 = uvv[$1] }
+        if ($8 == "@private") { $8 = wrv[$1] }
         print
       }' "$overlay" -
 }

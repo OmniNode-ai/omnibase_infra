@@ -323,8 +323,9 @@ def test_the_public_table_publishes_no_lab_or_cloud_identifier() -> None:
 #: A synthetic placement overlay covering every label in the shipped table.
 #: Reserved-documentation values only -- RFC 5737 addresses, an RFC 6761
 #: `.example` name, `/tmp` paths -- so this fixture can never become the
-#: disclosure the OMN-17996 split exists to prevent, and so a test that prints
-#: a picked row prints nothing real.
+#: disclosure the OMN-17996 split exists to prevent. The ssh_target field is
+#: intentionally ignored by the resolver: transport comes from the committed
+#: hostname column and private ssh config, not the overlay.
 _SYNTHETIC_OVERLAY = (
     "#label\tssh_target\tuv_abs_path\tworkroot\n"
     "h200\thost200.example\t/opt/synthetic/bin/uv\t/tmp/onex-prepush\n"
@@ -451,12 +452,15 @@ def test_hydration_fills_the_placement_columns_from_the_private_overlay(
     assert rows, "expected hydrated rows"
     by_label = {r[0]: r for r in rows}
 
-    assert by_label["h101"][3] == "198.51.100.11", (
-        "ssh_target must come from the overlay, not from the public table"
+    assert by_label["h101"][3] == "stickybeatz", (
+        "ssh_target must come from the committed hostname, not the overlay"
     )
     for row in rows:
         if row[1] != "capacity":
             continue
+        assert row[3] == row[2], (
+            f"{row[0]}: transport must be the committed hostname; got {row[3]!r}"
+        )
         assert row[5].startswith("/"), (
             f"{row[0]}: hydrated uv path must be absolute, got {row[5]!r}"
         )
@@ -519,6 +523,47 @@ def test_the_overlay_is_never_read_from_a_defaulted_location() -> None:
     assert "OMNI_HOME:-/" not in resolver and "OMNI_HOME:-$" not in resolver, (
         "the overlay resolver must not default OMNI_HOME to anything"
     )
+
+
+def test_partial_overlay_row_skips_the_whole_placement_row(
+    table_repo: Path, tmp_path: Path
+) -> None:
+    """A partial overlay row must not produce mixed usable/unusable state.
+
+    A row with a transport target but no path data used to look reachable until
+    later probes failed in less obvious ways. Transport now ignores the overlay,
+    and path hydration is coherent: complete absolute paths make the row usable;
+    anything less is an explicit skip.
+    """
+    home = _omni_home_with_overlay(
+        tmp_path,
+        "#label\tssh_target\tuv_abs_path\tworkroot\n"
+        "h101\t198.51.100.11\t/opt/synthetic/bin/uv\t\n",
+    )
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -uo pipefail\n"
+            f"REPO_ROOT={table_repo}\n"
+            f"log() {{ :; }}\n"
+            f". {LIB}\n"
+            f"prepush_table_rows\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "OMNI_HOME": str(home)},
+    )
+    assert completed.returncode == 0, completed.stderr
+    rows = [line.split("\t") for line in completed.stdout.splitlines() if line]
+    by_label = {r[0]: r for r in rows}
+    assert by_label["h101"][3] == "-"
+    assert by_label["h101"][5] == ""
+    assert by_label["h101"][7] == ""
+    assert "placement overlay incomplete for h101" in completed.stderr
 
 
 #: A table whose rows exist only to exercise the RULES, independent of whichever
