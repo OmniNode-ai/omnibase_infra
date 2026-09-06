@@ -323,6 +323,24 @@ async def _scan_topics_for_correlation(
                 "(absent from the broker, or not readable by this client)",
             )
         end_offsets = await consumer.end_offsets(partitions)
+        # The backward seek is clamped to each partition's OWN log start, not
+        # to 0. A partition whose retention has already reclaimed its head has
+        # a log start above 0, and a seek below it is OFFSET_OUT_OF_RANGE: the
+        # broker rejects the fetch and `auto_offset_reset="latest"` silently
+        # repositions the consumer to the high watermark, past every record
+        # already written -- including the terminal this scan exists to find.
+        # Nothing raises and nothing is logged; the run reports NOT_FOUND,
+        # which reads identically to a chain that never emitted.
+        #
+        # Measured on the .201 dev lane 2026-09-06: the canary had been RED on
+        # every 2h run of the day with `terminal_missing` while the terminal
+        # for each run's own correlation id was on the bus. At 18:2xZ
+        # delegate-skill-completed.v1 stood at LOG-START 67 / HIGH-WATERMARK
+        # 218 and delegate-skill-failed.v1 at 0 / 35; `max(0, 218 - 250)` = 0
+        # was out of range, so the completed partition contributed ZERO records
+        # and the receipt's `terminal_readback_records_scanned` was exactly 35
+        # -- the failed topic, end to end, and nothing else.
+        begin_offsets = await consumer.beginning_offsets(partitions)
 
         # Split the record budget across partitions so one hot partition
         # cannot consume the whole window and hide the record we want.
@@ -330,7 +348,7 @@ async def _scan_topics_for_correlation(
         empty = True
         for partition in partitions:
             end = end_offsets[partition]
-            start = max(0, end - per_partition)
+            start = max(begin_offsets[partition], end - per_partition)
             if start < end:
                 empty = False
             consumer.seek(partition, start)
