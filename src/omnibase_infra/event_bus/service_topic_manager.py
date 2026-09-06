@@ -928,6 +928,40 @@ class TopicProvisioner:
         """
         correlation_id = correlation_id or uuid4()
 
+        # OMN-17372: answer from the memoized state BEFORE opening a connection.
+        #
+        # Everything below the admin ``start()`` that this call needs for an
+        # already-present topic is memoized on the instance: the capacity-bound
+        # policy (``_measured_policy``, memoized since OMN-15395 D4) and the live
+        # broker snapshot (``_existing_topics``, cached since OMN-15395 d, and
+        # folded forward on every create by ``_note_topic_created``). Opening an
+        # ``AIOKafkaAdminClient`` to read two values already in memory made the
+        # CONNECTION O(topics) while the INFORMATION it fetched was O(1).
+        #
+        # That is not free anywhere and it is expensive on a managed broker: on
+        # onex-dev (MSK over IAM SASL) an open+close cycle measured a median of
+        # 0.099 s (n=10, in-cluster, 2026-09-06), and the boot interleave
+        # (``_interleave_contract``, OMN-13237) awaits this method once per
+        # provision topic — 1219 of them on that lane's own boot log.
+        #
+        # Both conditions are required. ``_existing_topics`` is only ever set
+        # AFTER ``_measured_policy`` has run on the same admin client, so the
+        # policy guard is redundant today; it is written explicitly so that a
+        # future path which populates the snapshot some other way cannot
+        # silently skip the capacity measurement.
+        if (
+            self._capacity_probed
+            and self._existing_topics is not None
+            and topic_name in self._existing_topics
+        ):
+            logger.debug(
+                "Topic already exists (cached broker snapshot), no admin "
+                "connection opened: %s",
+                topic_name,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            return True
+
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
             from aiokafka.errors import (
