@@ -278,7 +278,15 @@ class NodeGatewayDelivery:
     ) -> None:
         """Deliver one record while holding the process-wide delivery lock."""
         try:
-            envelope = self._forwarder.decode_message(message)
+            # OMN-17981: the outbound leg synthesises an envelope around a flat
+            # record whose wire headers identify it, so the dedupe key it marks
+            # here is the same one _forward_outbound_message publishes under.
+            # Inbound keeps the strict decode -- see decode_outbound_message.
+            envelope = (
+                self._forwarder.decode_outbound_message(message)
+                if direction == "outbound"
+                else self._forwarder.decode_message(message)
+            )
         except asyncio.CancelledError:
             raise
         except Exception as decode_error:  # noqa: BLE001 — boundary: any decode failure is quarantined, never a bare swallow
