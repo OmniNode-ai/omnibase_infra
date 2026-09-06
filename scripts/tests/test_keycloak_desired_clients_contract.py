@@ -5,11 +5,23 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+import pytest
 
 _CONFIG_PATH = Path(__file__).parents[2] / "docker/keycloak/desired-clients.json"
+_CUSTOMER_HOSTS = frozenset(
+    {
+        "https://omninode.ai",
+        "https://app.omninode.ai",
+        "https://dev.omninode.ai",
+        "https://dev.app.omninode.ai",
+    }
+)
+_CUSTOMER_DEFAULT_SCOPES = ["basic", "web-origins", "roles", "profile", "email"]
 
 
 def _client(config: dict[str, Any], client_id: str) -> dict[str, Any]:
@@ -17,7 +29,7 @@ def _client(config: dict[str, Any], client_id: str) -> dict[str, Any]:
         client for client in config["clients"] if client["clientId"] == client_id
     ]
     assert len(matches) == 1
-    return matches[0]
+    return cast("dict[str, Any]", matches[0])
 
 
 def test_omniweb_allows_the_managed_staging_callback() -> None:
@@ -103,6 +115,8 @@ def test_onex_customer_admits_the_customer_app_host_and_not_the_dashboard() -> N
     config = json.loads(_CONFIG_PATH.read_text())
     customer = _client(config, "onex-customer")
 
+    _assert_onex_customer_exact_redirect_scope_contract(customer)
+
     for host in (
         "https://app.omninode.ai",
         "https://dev.app.omninode.ai",
@@ -121,6 +135,39 @@ def test_onex_customer_admits_the_customer_app_host_and_not_the_dashboard() -> N
         for origin in customer["webOrigins"]
         for host in dashboard_hosts
     )
+
+
+def _assert_onex_customer_exact_redirect_scope_contract(
+    customer: dict[str, Any],
+) -> None:
+    """Pin the public client's complete browser and default-scope contract."""
+    assert set(customer["redirectUris"]) == _CUSTOMER_HOSTS
+    assert set(customer["webOrigins"]) == _CUSTOMER_HOSTS
+    # These are Keycloak's standard browser scopes only: basic identity,
+    # origin handling, roles, profile, and email. Group/composite scopes would
+    # widen the claims a public customer client receives.
+    assert customer["defaultClientScopes"] == _CUSTOMER_DEFAULT_SCOPES
+
+
+@pytest.mark.parametrize("field", ["redirectUris", "webOrigins"])
+def test_onex_customer_exact_hosts_reject_extra_uri(field: str) -> None:
+    """OMN-17849: an extra path/origin must fail the exact-set assertion."""
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = copy.deepcopy(_client(config, "onex-customer"))
+    customer[field].append("https://omninode.ai/anything")
+
+    with pytest.raises(AssertionError):
+        _assert_onex_customer_exact_redirect_scope_contract(customer)
+
+
+def test_onex_customer_exact_scopes_reject_extra_scope() -> None:
+    """OMN-17849: an unapproved composite scope must fail the exact assertion."""
+    config = json.loads(_CONFIG_PATH.read_text())
+    customer = copy.deepcopy(_client(config, "onex-customer"))
+    customer["defaultClientScopes"].append("groups")
+
+    with pytest.raises(AssertionError):
+        _assert_onex_customer_exact_redirect_scope_contract(customer)
 
 
 def test_onex_customer_redirects_do_not_use_wildcard_paths() -> None:
