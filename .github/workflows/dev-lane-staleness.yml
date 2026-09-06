@@ -1,0 +1,110 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# dev-lane-staleness.yml — OMN-17888 AC4
+#
+# WHY THIS EXISTS
+#   OMN-17888's whole finding is that a broken auto-redeploy chain is INVISIBLE.
+#   The publisher logged a line that read like success; the only red was one
+#   post-merge check on an already-merged PR, on a workflow that is not a merge
+#   gate — "structurally ignorable", and ignored across five merges in twelve
+#   hours. AC4 asks for the surface that cannot be ignored that way: a check
+#   that the dev lane's deployed SHA tracks `dev`.
+#
+#   This is that surface, on an hourly cadence, with a visible red.
+#
+# WHY IT WATCHES THE OUTCOME AND NOT THE MECHANISM
+#   Deliberately independent of every layer it reports on. Measured on
+#   2026-09-06 AFTER the OMN-17888 publisher fix landed: five redeploy-start
+#   commands were published, delivered, and consumed (topic watermark 63 -> 68,
+#   orchestrator consumer group LAG 0) — and the lane still did not move,
+#   because omninode-runtime-effects dead-lettered the downstream
+#   prod-promotion-gate-evaluated event with failure_class=no_dispatcher. Every
+#   guard wired to "did the publish succeed" was green through that. A guard
+#   that reads what is RUNNING is not.
+#
+# WHY SELF-HOSTED
+#   Same reasoning as dev-lane-liveness.yml. The fact is the
+#   org.opencontainers.image.revision label on the running container, read off
+#   the .201 docker daemon. GitHub-hosted compute cannot reach it, so a hosted
+#   job could only ever report "I cannot look" — which this guard treats as a
+#   failure, so it would page every hour for the wrong reason. The watcher runs
+#   in a DIFFERENT compose project (the runner fleet) from the watched one
+#   (`omnibase-infra`), which is the fate boundary that matters here.
+#
+#   Residual, stated rather than hidden: if the whole .201 host dies this job is
+#   never scheduled and reports nothing. That case is already covered by
+#   runner-fleet-canary.yml, which runs hosted on the same cadence class.
+#
+# WHY IT RUNS ITS OWN POSITIVE CONTROL
+#   A green staleness check and a broken staleness check look identical. The
+#   control step feeds the guard a known-old SHA and requires it to report
+#   stale, so the green in the step above it is evidence rather than an absence
+#   of output.
+#
+# PR-TIME GUARD
+#   Deliberately no `pull_request` trigger — a PR cannot change what the dev
+#   lane is running, so a PR-time run could only report on somebody else's
+#   state. The PR-time proof is tests/ci/test_dev_lane_staleness.py, which
+#   drives the real verdict functions over the live 2026-09-06 readback and
+#   asserts this file's wiring.
+#
+# Tickets: OMN-17888 (AC4), OMN-16776 (observability is a standing priority),
+#          OMN-15190 (the dev lane is KEEP-ALIVE by operator ruling).
+
+name: dev-lane-staleness
+
+on:
+  schedule:
+    # Hourly at :26, clear of the */15, 7,22,37,52 and 11,41 slots already used
+    # by runner-fleet-canary.yml, dev-lane-liveness.yml and
+    # dev-candidate-delivery-liveness.yml.
+    - cron: "26 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-lane-staleness
+  cancel-in-progress: true
+
+jobs:
+  dev-lane-staleness:
+    name: dev-lane-staleness
+    # See "WHY SELF-HOSTED" above before changing this.
+    runs-on: [self-hosted, omnibase-deploy]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (the guard script)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked). The guard reads commit
+          # distance through the API, so it needs no history at all.
+          persist-credentials: false
+
+      - name: Does the dev lane track dev?
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/check_dev_lane_staleness.py
+
+      - name: Positive control — the guard must fire on a known-old SHA
+        # Runs even when the step above went red: proving the guard fires is
+        # what makes its GREEN readings mean something, and a green run that
+        # skipped its own control is the false assurance this ticket is about.
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The first commit of this repo's dev line is, by construction, more
+          # than three commits and more than two hours behind dev. If the guard
+          # calls THIS fresh, the guard is broken.
+          OLD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits?sha=dev&per_page=1&page=30" --jq '.[0].sha')"
+          echo "positive control probe SHA: ${OLD_SHA}"
+          python3 scripts/ci/check_dev_lane_staleness.py \
+            --deployed-revision "${OLD_SHA}" \
+            --positive-control
