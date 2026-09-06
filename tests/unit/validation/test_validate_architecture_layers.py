@@ -27,7 +27,7 @@ def test_invalid_source_target_is_failure_not_skip(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert run_architecture_layers(verbose=True) is False
-    assert calls[0]["timeout"] == 120
+    assert calls[0]["timeout"] == 600
     assert calls[0]["shell"] is False
 
 

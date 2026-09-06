@@ -573,9 +573,28 @@ project_identity_is_canonical() {
 core_checkout_git() {
     # Pre-push inherits Git variables for the infra worktree. Clear them only
     # while verifying the candidate Core checkout, so its own Git metadata is
-    # authoritative without changing infra worktree discovery below.
-    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
-        -u GIT_COMMON_DIR -u GIT_PREFIX git "$@"
+    # authoritative without changing infra worktree discovery below. Numbered
+    # configuration overrides can spoof remote.origin.url, so clear both their
+    # count and any inherited key/value pairs before source attestation.
+    local env_name
+    local -a clear_git_env=(
+        -u GIT_DIR
+        -u GIT_WORK_TREE
+        -u GIT_INDEX_FILE
+        -u GIT_OBJECT_DIRECTORY
+        -u GIT_COMMON_DIR
+        -u GIT_PREFIX
+        -u GIT_CONFIG_COUNT
+        -u GIT_CONFIG_PARAMETERS
+    )
+    while IFS='=' read -r env_name _; do
+        case "${env_name}" in
+            GIT_CONFIG_KEY_[0-9]*|GIT_CONFIG_VALUE_[0-9]*)
+                clear_git_env+=(-u "${env_name}")
+                ;;
+        esac
+    done < <(env)
+    env "${clear_git_env[@]}" git "$@"
 }
 
 checkout_identity_is_canonical() {

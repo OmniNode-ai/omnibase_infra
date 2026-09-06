@@ -354,6 +354,29 @@ def test_no_argument_linked_source_precedes_omni_home_fallback(
 
 
 @pytest.mark.unit
+def test_no_argument_auto_discovery_rejects_injected_origin_config(
+    tmp_path: Path,
+) -> None:
+    """Numbered Git config cannot attest a decoy fallback as canonical."""
+    fallback_home = tmp_path / "fallback-home"
+    _source_tree(
+        fallback_home,
+        origin_url="git@github.com:OmniNode-ai/not-omnibase-core.git",
+    )
+    env = os.environ.copy()
+    env.pop("OMNIBASE_CORE_PATH", None)
+    env["OMNI_HOME"] = str(fallback_home)
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "remote.origin.url"
+    env["GIT_CONFIG_VALUE_0"] = "git@github.com:OmniNode-ai/omnibase_core.git"
+
+    result = _run_without_path(tmp_path, env=env)
+
+    assert result.returncode == 2
+    assert "no safe fallback exists" in result.stderr
+
+
+@pytest.mark.unit
 def test_fallback_ignores_decoy_sibling_project(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
