@@ -28,6 +28,18 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+# The SERVER's exchange-input audience rule, transcribed from omninode_infra
+# ``docker/onex-api/gateway_auth.py`` (:130-133 for the sets, :316-320 for the
+# two assertions). Deliberately literals rather than an import of the client's
+# own constants: this fake stands in for onex-api, and a fake that imports the
+# thing under test can only ever agree with it. Holding the server's rule
+# independently is what lets these tests catch the client drifting stricter
+# than the server -- the OMN-15922 defect, which a suite sharing one constant
+# would have reported green.
+_EXCHANGE_INPUT_REQUIRED_AUDIENCES = frozenset({"redpanda-events"})
+_EXCHANGE_INPUT_PERMITTED_AUDIENCES = frozenset({"redpanda-events", "onex-api"})
+_KEYCLOAK_ROLE_RESOLVED_AUDIENCES = frozenset({"account"})
+
 
 def encode_jwt(claims: Mapping[str, object]) -> str:
     """Build an unsigned but structurally valid JWT carrying ``claims``."""
@@ -218,8 +230,18 @@ class FakeGatewayTransport:
         Mirrors ``onex-api``'s input contract rather than merely accepting a
         Bearer: the presented token must be one the fake realm issued, must
         not already carry ``gateway-attach`` (the exchange does not consume
-        its own output), and must carry exactly the broker audience once the
-        role-resolved ones are discounted.
+        its own output), and -- once the role-resolved audiences are
+        discounted -- must CONTAIN the broker audience while naming nothing
+        outside the permitted set.
+
+        Two set assertions, not one equality, byte-for-byte
+        ``gateway_auth.validate_exchange_input_claims`` in omninode_infra
+        ``docker/onex-api/gateway_auth.py:316-320`` (OMN-16946). This fake
+        held the pre-OMN-16946 equality until OMN-15922: a fake that mirrors
+        the client's stale rule instead of the server's real one agrees with
+        the client about a refusal the server never makes, which is precisely
+        how the shipped CLI came to refuse a live credential with a green
+        suite behind it.
         """
         self.exchange_count += 1
         if self.exchange_status != 200:
@@ -231,7 +253,10 @@ class FakeGatewayTransport:
         presented_audiences = set(self.audiences)
         if "gateway-attach" in presented_audiences:
             return FakeHttpResponse(401, '{"detail":"Authentication failed"}')
-        if presented_audiences - {"account"} != {"redpanda-events"}:
+        effective = presented_audiences - _KEYCLOAK_ROLE_RESOLVED_AUDIENCES
+        if _EXCHANGE_INPUT_REQUIRED_AUDIENCES - effective:
+            return FakeHttpResponse(401, '{"detail":"Authentication failed"}')
+        if effective - _EXCHANGE_INPUT_PERMITTED_AUDIENCES:
             return FakeHttpResponse(401, '{"detail":"Authentication failed"}')
         token = self._mint_jwt(self.exchange_audiences)
         self.exchanged_tokens.append(token)
