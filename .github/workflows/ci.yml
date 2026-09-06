@@ -548,10 +548,36 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 20
-
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # The architecture-layer validator accepts only an attested Core source
+      # checkout. Pin the input so this Infra PR has a deterministic gate
+      # target rather than silently scanning an installed package or nothing.
+      - name: Checkout canonical omnibase_core source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_core
+          # omnibase_core dev as of 2026-09-06. Update from the authoritative
+          # dev commit before intentionally changing this architecture input.
+          ref: 839e5d524960a4af954553168300971299c14a5f
+          path: .ci/omnibase_core
+          token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Stage canonical omnibase_core source outside the repository
+        run: |
+          # Kept outside the repository because `scripts/validate.py all` also
+          # validates that the project root contains only owned repository files.
+          echo "OMNIBASE_CORE_PATH=$RUNNER_TEMP/omnibase_core/src/omnibase_core" >> "$GITHUB_ENV"
+          if [ -e "$RUNNER_TEMP/omnibase_core" ]; then
+            echo "::error::Refusing to reuse an existing Core source directory."
+            exit 1
+          fi
+          mv -- .ci/omnibase_core "$RUNNER_TEMP/omnibase_core"
+          rmdir -- .ci
+          test -d "$RUNNER_TEMP/omnibase_core/src/omnibase_core"
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
