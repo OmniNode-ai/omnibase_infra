@@ -147,6 +147,53 @@ _PROFILES: dict[str, ModelRuntimeProfile] = {
         name="tenant-projection",
         prefetch_policy="disabled",
     ),
+    # OMN-17985: the seven STANDALONE projection writers already deployed on
+    # onex-dev. Unlike every profile above, the name is NOT what wires these
+    # processes: each is a `python -m <handler>` BaseProjectionRunner with its
+    # own explicit KAFKA_CONSUMER_GROUP, and the runner never reads
+    # RUNTIME_PROFILE. What the name settles is OWNERSHIP -- until it existed,
+    # no contract could declare it, so each writer's contract was ALSO claimed
+    # by a shared runtime (two by `effects`, five by `main` through the
+    # undeclared-defaults-to-main rule).
+    #
+    # They must exist here, not only in core's registry, for two mechanical
+    # reasons this repo enforces: `test_profiles_match_core_registry` asserts
+    # exact set equality with REGISTERED_RUNTIME_PROFILES, and
+    # `test_consumer_attached_profiles_actually_load` requires every
+    # consumer-attached name to resolve through `load_runtime_profile`. Since
+    # OMN-17985 made that function refuse an unknown name, a name core blesses
+    # that this dict lacks is now a hard boot failure rather than a silent
+    # fallback -- which is exactly the drift the parity guard exists to catch.
+    #
+    # prefetch_policy stays "disabled" like every other role-based profile.
+    "projection-writer-delegation": ModelRuntimeProfile(
+        name="projection-writer-delegation",
+        prefetch_policy="disabled",
+    ),
+    "projection-writer-hook-ledger": ModelRuntimeProfile(
+        name="projection-writer-hook-ledger",
+        prefetch_policy="disabled",
+    ),
+    "projection-writer-live-events": ModelRuntimeProfile(
+        name="projection-writer-live-events",
+        prefetch_policy="disabled",
+    ),
+    "projection-writer-registration": ModelRuntimeProfile(
+        name="projection-writer-registration",
+        prefetch_policy="disabled",
+    ),
+    "projection-writer-savings": ModelRuntimeProfile(
+        name="projection-writer-savings",
+        prefetch_policy="disabled",
+    ),
+    "projection-writer-tenant-credentials": ModelRuntimeProfile(
+        name="projection-writer-tenant-credentials",
+        prefetch_policy="disabled",
+    ),
+    "projection-writer-tenant-registry": ModelRuntimeProfile(
+        name="projection-writer-tenant-registry",
+        prefetch_policy="disabled",
+    ),
     "staging": ModelRuntimeProfile(
         name="staging",
         prefetch_policy="best_effort",
