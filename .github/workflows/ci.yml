@@ -542,6 +542,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # The architecture-layer validator accepts only an attested Core source
+      # checkout. Pin the input so this Infra PR has a deterministic gate
+      # target rather than silently scanning an installed package or nothing.
+      - name: Checkout canonical omnibase_core source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_core
+          # omnibase_core dev as of 2026-09-06. Update from the authoritative
+          # dev commit before intentionally changing this architecture input.
+          ref: 839e5d524960a4af954553168300971299c14a5f
+          path: omnibase_core
+          token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
+
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
         with:
