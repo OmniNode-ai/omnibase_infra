@@ -295,7 +295,7 @@ models:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
     effective_date: '2026-05-25'
-    note: 'OMN-16442 2026-08-28: Local model on RTX 5090 .201:8000. Stack changed at the 2026-08-23 reboot - now SGLang + DSpark serving id "qwen3.8" (Qwen3.8-27B NVFP4), max_model_len 122880, ~150-164 t/s decode; was vLLM GPTQ-Int4 131072 ctx ~180 t/s. Single running generation at a time. Zero API cost either way - this note is descriptive, the 0.0 rates are the contract.'
+    note: 'OMN-16999 2026-09-05: Local model on RTX 5090 .201:8000, redeployed BACK to vLLM. Live GET /v1/models -> http=200, served ids exactly {"Qwen3.6-35B-A3B"}, owned_by "vllm", max_model_len 131072. Supersedes the OMN-16442/OMN-16419 note of 2026-08-23 (SGLang + DSpark, id "qwen3.8", 122880) - the second flip in two weeks. Zero API cost either way; this note is descriptive, the 0.0 rates are the contract.'
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0

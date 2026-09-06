@@ -14,16 +14,16 @@ locale: lab
 backends:
   - backend_id: local-coder
     endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
-    served_model_id: "qwen3.8"
+    served_model_id: "Qwen3.6-35B-A3B"
     parameter_count: "27B"
-    context_window: 122880
+    context_window: 131072
     max_tokens: 65536
     timeout_ms: 300000
   - backend_id: local-heavy-reasoning
     endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
-    served_model_id: "qwen3.8"
+    served_model_id: "Qwen3.6-35B-A3B"
     parameter_count: "27B"
-    context_window: 122880
+    context_window: 131072
     max_tokens: 65536
     timeout_ms: 300000
   # OMN-16833: DS-V4-Flash on .200:8101 — previously absent from this overlay, so
@@ -34,6 +34,16 @@ backends:
   # "deepseek-v4-flash", context_length 131072; POST /v1/chat/completions -> HTTP
   # 200; reachable from inside `omninode-runtime` on .201.
   # onex-allow-internal-ip OMN-16833 reason="typed dev-lane delegation contract"
+  # OMN-16999: DECLARED, NOT SERVING. Re-probed 2026-09-05: GET
+  # .200:8101/v1/models -> curl exit 7, http=000. Controls proving the probe ran
+  # and the host is healthy: ping .200 = 2/2 packets 0.0% loss; TCP 22 OPEN,
+  # 8101 CLOSED; `ssh jonah@192.168.86.200 hostname` = "Stickybeatz-Studio.local"
+  # (.200 IS the workstation) and no ds4/llama/vllm process is running there.
+  # A stopped operator-started service, not retired hardware — so the row stays
+  # and `serving: false` renders it as `endpoint_url: null`, the shape
+  # `_load_bifrost_endpoints` skips. Restore by starting the ds4 server,
+  # re-probing, updating tests/fixtures/bifrost_served_models_probe.json, and
+  # flipping this flag.
   - backend_id: local-ds-v4-flash
     endpoint_url: "http://192.168.86.200:8101/v1/chat/completions"
     served_model_id: "deepseek-v4-flash"
@@ -41,3 +51,4 @@ backends:
     context_window: 131072
     max_tokens: 65536
     timeout_ms: 300000
+    serving: false

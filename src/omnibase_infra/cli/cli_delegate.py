@@ -240,6 +240,48 @@ def _accepted_attempt(result: dict[str, object]) -> dict[str, object] | None:
     return None
 
 
+def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
+    """Return this run's delegation payload, or ``None`` if it is not one.
+
+    Two receipt shapes reach here, because ``run_receipt_mode`` builds the typed
+    ``ModelSkillResult[JsonValue]`` receipt ONLY when the run is success-like and
+    otherwise wraps it in a ``ModelReceiptRuntimeSummary``:
+
+    * success-like -> ``result`` IS the delegation result, and ``result_model``
+      names the delegate wire DTO.
+    * anything else -> ``result`` is the summary, and the delegation payload is
+      nested under ``terminal_payload`` (``handler_result`` is the same object).
+
+    OMN-16999: only the first shape was recognised, so a run that escalated past
+    a failed rung -- which terminalizes ``failed`` even when a later attempt is
+    ACCEPTED -- returned silently and wrote nothing. That is the ordinary path,
+    not an edge case: measured live 2026-09-05, a delegation whose local rung was
+    refused by the OMN-16419 attribution guard and whose cloud rung then answered
+    ``"OK"`` at quality 1.0 produced no ``runs/`` directory at all.
+
+    The summary unwrap is scoped to the delegate contract by ``workflow``.
+    ``run_receipt_mode`` is shared with ``onex node``/``onex skill``, and a failed
+    proof run of an unrelated node must be ignored rather than raised on as an
+    unattributed delegation.
+    """
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        return None
+
+    result_model = str(envelope.get("result_model") or "")
+    if "ModelDelegateSkill" in result_model:
+        return result
+    if "ModelReceiptRuntimeSummary" not in result_model:
+        return None
+    if DELEGATE_NODE_NAME not in str(result.get("workflow") or ""):
+        return None
+    for key in ("terminal_payload", "handler_result"):
+        nested = result.get(key)
+        if isinstance(nested, dict) and isinstance(nested.get("attempts"), list):
+            return nested
+    return None
+
+
 def _write_local_run_files(
     *,
     receipt: object,
@@ -259,18 +301,12 @@ def _write_local_run_files(
     envelope = receipt_dump(mode="json")
     if not isinstance(envelope, dict):
         raise ValueError("delegate receipt did not serialize to an object")
-    result = envelope.get("result")
-    if not isinstance(result, dict):
-        raise ValueError("delegate receipt has no structured delegation result")
-    # ``run_receipt_mode`` is shared by ``onex node``/``onex skill`` and the
-    # delegate command. Their proof contracts intentionally return unrelated
-    # typed results; only the delegate wire DTO has route-attribution fields.
     # Scope this writer by the receipt's declared concrete type instead of
     # treating a generic fixture (or another node's result) as a malformed
-    # delegation. A genuine delegate DTO still fails closed below when route
+    # delegation. A genuine delegation still fails closed below when route
     # evidence is absent.
-    result_model = str(envelope.get("result_model") or "")
-    if "ModelDelegateSkill" not in result_model:
+    result = _delegation_result(envelope)
+    if result is None:
         return
     accepted = _accepted_attempt(result)
     if accepted is None:

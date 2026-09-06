@@ -63,6 +63,7 @@ from omnibase_infra.runtime.models.model_batch_publisher_metrics import (
     ModelBatchPublisherMetrics,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    _AUTHORIZED_BINDINGS,
     ModelBifrostLaneBackendBinding,
 )
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
@@ -507,14 +508,30 @@ def _make_pattern_b_broker_config() -> ModelPatternBBrokerConfig:
 
 
 def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
+    """Build the fixture FROM the authorized table, never from restated literals.
+
+    OMN-16999: this factory previously spelled served_model_id/context_window by
+    hand. Every one of those literals is validated against
+    ``_AUTHORIZED_BINDINGS``, so the correction of a drifted served id broke a
+    serialization round-trip test that has nothing to do with model identity —
+    and it broke it on the pre-push full-suite escalation, several repos away
+    from the change. Deriving the values means a future re-probe touches the
+    table and the fixture follows; a round-trip test should exercise
+    serialization, not re-assert routing facts.
+    """
+    backend_key = "local-coder"
+    authorized = _AUTHORIZED_BINDINGS[backend_key]
     return ModelBifrostLaneBackendBinding(
-        backend_id="local-coder",
-        endpoint_url="http://192.168.86.201:8000/v1/chat/completions",
-        served_model_id="qwen3.8",
-        parameter_count="27B",
-        context_window=122_880,
+        backend_id=backend_key,
+        endpoint_url=(
+            f"http://{authorized.host}:{authorized.port}/v1/chat/completions"  # onex-allow-internal-ip OMN-16999 reason="derived from the authorized lab binding table"
+        ),
+        served_model_id=authorized.served_model_id,
+        parameter_count=authorized.parameter_count,
+        context_window=authorized.context_window,
         max_tokens=8_192,
         timeout_ms=30_000,
+        serving=authorized.serving,
     )
 
 
