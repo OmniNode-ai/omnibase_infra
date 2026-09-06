@@ -41,6 +41,9 @@ class EnumNonRetryableErrorCategory(str, Enum):
     Categories:
         AUTHENTICATION_ERROR: Authentication/authorization failures (invalid credentials)
         CONFIGURATION_ERROR: Protocol or service configuration errors
+        CUSTOMER_KEY_REFUSED_ERROR: A customer delegation refused for want of a
+            registered provider key (or because the resolved route would have
+            run on a platform-owned one)
         SECRET_RESOLUTION_ERROR: Secret/credential resolution failures (missing secrets)
         VALIDATION_ERROR: Input/schema validation errors (malformed data)
 
@@ -52,6 +55,10 @@ class EnumNonRetryableErrorCategory(str, Enum):
         - CONFIGURATION_ERROR: Configuration is wrong or incompatible.
           Retrying will not fix malformed configuration. Requires code
           or configuration changes.
+
+        - CUSTOMER_KEY_REFUSED_ERROR: The tenant has registered no provider
+          key, so there is nothing for a retry to authenticate with. Only the
+          customer registering a key changes the outcome (OMN-17372).
 
         - SECRET_RESOLUTION_ERROR: Secret does not exist or is inaccessible.
           Retrying will not create the missing secret. Requires secret
@@ -98,6 +105,35 @@ class EnumNonRetryableErrorCategory(str, Enum):
         Configuration is statically defined. Retrying will not fix
         malformed or incompatible configuration. Requires code or
         configuration changes and redeployment.
+    """
+
+    CUSTOMER_KEY_REFUSED_ERROR = "CustomerKeyRefusedError"
+    """A customer delegation refused at the routing terminus (OMN-17372).
+
+    Raised by ``omnimarket.routing.customer_key_terminus`` when:
+    - The tenant has registered no provider key and the surface offers no
+      credential-free terminus
+    - The resolved route would have authenticated customer work with an
+      OmniNode platform-owned key, which customer work may never use
+
+    Why non-retryable:
+        Neither condition is a transient one. The first is fixed only by the
+        CUSTOMER registering a provider key; the second only by correcting a
+        routing overlay on our side. A caller obeying ``retryable`` on this
+        failure retries a state no retry can reach — which is exactly what the
+        live ``onex-dev`` refusal did before this member existed, publishing
+        ``retryable=true`` on a delegation terminal whose remediation reads
+        "Register a provider key for this tenant and retry."
+
+    Named here rather than special-cased in ``classify_boundary_failure``
+    because this enum is the runtime's ONE answer to "is this worth retrying":
+    the consume boundary, DLQ replay's ``NON_RETRYABLE_ERRORS`` and the event
+    bus all resolve it through ``is_non_retryable``. A refusal that this enum
+    did not name would be quarantined by one surface and replayed by another.
+    Membership is by class NAME, which is what survives the dispatch engine's
+    flattening of the exception into text — omnibase_infra neither imports nor
+    may import the omnimarket class itself (repo layering: infra is below the
+    node packages).
     """
 
     SECRET_RESOLUTION_ERROR = "SecretResolutionError"
@@ -208,6 +244,12 @@ class EnumNonRetryableErrorCategory(str, Enum):
             cls.CONFIGURATION_ERROR: (
                 "Configuration error - configuration is wrong or incompatible. "
                 "Requires code or configuration changes and redeployment."
+            ),
+            cls.CUSTOMER_KEY_REFUSED_ERROR: (
+                "Customer key refusal - the tenant has no registered provider "
+                "key, or the resolved route would have used a platform-owned "
+                "one. Requires the customer to register a provider key, or a "
+                "routing overlay correction."
             ),
             cls.SECRET_RESOLUTION_ERROR: (
                 "Secret resolution failure - secret does not exist or is inaccessible. "
