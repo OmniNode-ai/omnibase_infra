@@ -722,6 +722,22 @@ repos:
       # OMN-10820: Block Any in handler handle()/~__init__() signatures.
       # Budget starts at 0 (current codebase is clean). Decrement target: stay at 0.
       # Suppress a justified exception with: # substrate-allow: <reason>
+      # OMN-15468: DispatchResultApplier's two contract-derived routing inputs
+      # (published_events map, declared failure terminal) both default to EMPTY,
+      # and an empty failure-terminal list makes the failure-verdict guard inert
+      # while logging nothing. A hand-built applier therefore boots green and
+      # silently republishes failure verdicts onto the contract's SUCCESS
+      # terminal — measured live on the .201 dev lane as 18 of the trailing 25
+      # records on delegate-skill-completed.v1. Construction must go through
+      # build_contract_result_applier / build_static_result_applier.
+      # SYNC with the ci.yml step 'Check result-applier construction gate (OMN-15468)'.
+      - id: contract-result-applier-construction
+        name: DispatchResultApplier is built through its contract factory (OMN-15468)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.contract_result_applier_construction src/omnibase_infra
+        language: system
+        files: ^src/omnibase_infra/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: handler-any-signature
         name: Block Any in handler signatures (OMN-10820)
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra

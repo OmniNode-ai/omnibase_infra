@@ -80,6 +80,7 @@ _ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
 
 __all__ = [
     "apply_failure_terminal_guard",
+    "declared_failure_terminal_topics",
     "envelope_terminal_payload",
     "extract_terminal_event_topics",
     "load_terminal_event_topics",
@@ -308,6 +309,48 @@ def resolve_terminal_retryable(event: object) -> bool | None:
     if isinstance(stated, bool):
         return stated
     return None
+
+
+def declared_failure_terminal_topics(
+    contract_path: Path,
+    *,
+    success_topic: str,
+    publishable_topics: Sequence[str],
+) -> tuple[str, ...]:
+    """Return a contract's declared FAILURE terminal topics (OMN-15468 AC2).
+
+    A failure terminal is any contract-declared terminal topic that is (a) not
+    the success terminal the applier falls back to and (b) actually publishable
+    by this contract. Both conditions matter: publishing to an undeclared topic
+    would violate the contract's own publish allowlist, and re-routing to the
+    success terminal would be a no-op.
+
+    Read through :func:`load_terminal_event_topics` — the SAME reader the
+    Pattern B broker's subscription set is built from — so an applier's idea of
+    which topics are terminal cannot drift from the broker's.
+
+    Lives here, keyed by contract PATH rather than by a discovered-contract
+    model, because the appliers that lost this derivation were built in
+    ``service_kernel`` from a manifest entry and in the registration plugin from
+    a package-local ``contract.yaml``; a helper that only accepted
+    ``ModelDiscoveredContract`` is exactly why those call sites hand-rolled
+    their own applier and silently shipped an inert guard.
+    """
+    publishable = {
+        topic.strip()
+        for topic in publishable_topics
+        if isinstance(topic, str) and topic.strip()
+    }
+    if not publishable:
+        return ()
+    declared = load_terminal_event_topics(contract_path)
+    return tuple(
+        sorted(
+            topic
+            for topic in declared
+            if topic != success_topic and topic in publishable
+        )
+    )
 
 
 def apply_failure_terminal_guard(
