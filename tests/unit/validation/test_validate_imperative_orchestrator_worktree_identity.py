@@ -38,12 +38,22 @@ _ACCEPTED_H2_NODES = {
 
 
 @pytest.mark.unit
-def test_descriptive_worktree_identity_recognizes_accepted_arch004_entries() -> None:
+def test_descriptive_worktree_identity_recognizes_accepted_arch004_entries(
+    tmp_path: Path,
+) -> None:
     """A linked worktree basename must not replace its committed repo identity."""
     repo_name = validate._canonical_repository_name(_REPO_ROOT)
 
     assert repo_name == "omnibase_infra"
-    assert _REPO_ROOT.name != repo_name
+
+    descriptive_worktree = tmp_path / "omnibase_infra-ticket-description"
+    descriptive_worktree.mkdir()
+    (descriptive_worktree / "pyproject.toml").write_text(
+        "[project]\nname = 'omnibase_infra'\nversion = '0.0.0'\n",
+        encoding="utf-8",
+    )
+    assert descriptive_worktree.name != repo_name
+    assert validate._canonical_repository_name(descriptive_worktree) == repo_name
 
     baseline = load_baseline(_REPO_ROOT / BASELINE_RELATIVE_PATH)
     assert {f"{repo_name}::{node}" for node in _ACCEPTED_H2_NODES}.issubset(baseline)
