@@ -2623,21 +2623,40 @@ async def bootstrap() -> int:
         # dispatching messages through it.
         plugin_activation_start = time.time()
         auto_wiring_result_appliers = {}
+        # OMN-15468: contracts whose applier below is a PRE-MANIFEST fallback,
+        # built before the discovery manifest exists and therefore without the
+        # contract's ``published_events`` map. The manifest-derived loop further
+        # down UPGRADES these in place once the contract is available; a
+        # non-placeholder registration (the intent/projection appliers derived
+        # later) still takes precedence and is never overwritten. Without this
+        # set, the `continue` on "already registered" meant the hand-rolled
+        # fallback WON permanently, which is how node_delegate_skill_orchestrator
+        # ran in production with class-based routing dead and the
+        # failure-verdict guard inert.
+        premanifest_placeholder_appliers: set[str] = set()
 
         if event_bus is not None:
             from omnibase_infra.enums.generated.enum_omnimarket_topic import (
                 EnumOmnimarketTopic,
             )
             from omnibase_infra.runtime.service_dispatch_result_applier import (
-                DispatchResultApplier,
+                build_static_result_applier,
             )
 
             auto_wiring_result_appliers["build_loop_orchestrator"] = (
-                DispatchResultApplier(
+                build_static_result_applier(
                     event_bus=event_bus,
                     output_topic=EnumOmnimarketTopic.EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1.value,
+                    # The build_loop_orchestrator contract declares ONE terminal
+                    # event and no failure terminal, and it declares no
+                    # ``published_events`` either — so the manifest-derived loop
+                    # below skips it and this fallback is its permanent applier.
+                    # Stated explicitly rather than defaulted: there is no
+                    # failure topic to re-route a failure verdict to.
+                    failure_terminal_topics=(),
                 )
             )
+            premanifest_placeholder_appliers.add("build_loop_orchestrator")
             logger.info(
                 "Build-loop orchestrator terminal result applier registered "
                 "(contract=build_loop_orchestrator, correlation_id=%s)",
@@ -2648,15 +2667,26 @@ async def bootstrap() -> int:
             # Without this applier the handler result is silently discarded and the CLI adapter
             # times out waiting for onex.evt.omnimarket.delegate-skill-completed.v1 (OMN-11996).
             auto_wiring_result_appliers["node_delegate_skill_orchestrator"] = (
-                DispatchResultApplier(
+                build_static_result_applier(
                     event_bus=event_bus,
                     output_topic=EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value,
                     allowed_output_topics=[
                         EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value,
                         EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value,
                     ],
+                    # OMN-15468: the contract's declared failure terminal. This
+                    # fallback cannot read published_events (no manifest yet), so
+                    # class-based routing is unavailable here — but the
+                    # payload-verdict guard IS available, and without this
+                    # argument it was inert: on the .201 dev lane 18 of the
+                    # trailing 25 records on delegate-skill-completed.v1 carried
+                    # status="failed" with a typed terminal_failure_cause.
+                    failure_terminal_topics=(
+                        EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value,
+                    ),
                 )
             )
+            premanifest_placeholder_appliers.add("node_delegate_skill_orchestrator")
             logger.info(
                 "Delegate-skill orchestrator terminal result applier registered "
                 "(contract=node_delegate_skill_orchestrator, correlation_id=%s)",
@@ -3093,12 +3123,15 @@ async def bootstrap() -> int:
                         load_published_events_map,
                     )
                     from omnibase_infra.runtime.service_dispatch_result_applier import (
-                        DispatchResultApplier,
+                        build_contract_result_applier,
                     )
 
                     for _contract in filtered_manifest.contracts:
-                        if _contract.name in auto_wiring_result_appliers:
-                            # Explicit registration takes precedence.
+                        if (
+                            _contract.name in auto_wiring_result_appliers
+                            and _contract.name not in premanifest_placeholder_appliers
+                        ):
+                            # A purpose-built registration takes precedence.
                             continue
                         if (
                             _contract.event_bus is None
@@ -3112,17 +3145,33 @@ async def bootstrap() -> int:
                         if not _pe_map:
                             continue
                         _topics = tuple(_contract.event_bus.publish_topics)
+                        _upgraded = _contract.name in premanifest_placeholder_appliers
+                        # OMN-15468: built through the ONE contract-derived
+                        # factory, so this applier carries BOTH the
+                        # published_events map (class-based routing to a
+                        # declared `…Failed` topic) and the contract's declared
+                        # failure terminal (the payload-verdict guard's
+                        # re-route destination) — the two inputs the
+                        # hand-rolled construction here used to omit.
                         auto_wiring_result_appliers[_contract.name] = (
-                            DispatchResultApplier(
+                            build_contract_result_applier(
                                 event_bus=event_bus,
+                                contract_path=Path(_contract.contract_path),
+                                publish_topics=_topics,
                                 output_topic=_topics[0],
                                 output_topic_map=_pe_map,
                                 allowed_output_topics=_topics,
                             )
                         )
+                        premanifest_placeholder_appliers.discard(_contract.name)
                         logger.info(
-                            "Auto-wiring result applier registered from published_events "
+                            "Auto-wiring result applier %s from published_events "
                             "(contract=%s, node_type=%s, topics=%s, correlation_id=%s)",
+                            (
+                                "UPGRADED from pre-manifest fallback"
+                                if _upgraded
+                                else "registered"
+                            ),
                             _contract.name,
                             _contract.node_type,
                             _topics,
@@ -3154,6 +3203,9 @@ async def bootstrap() -> int:
                         )
                         from omnibase_infra.runtime.intent_effects import (
                             IntentEffectDispatchBridge,
+                        )
+                        from omnibase_infra.runtime.service_dispatch_result_applier import (
+                            build_static_result_applier,
                         )
                         from omnibase_infra.runtime.service_intent_executor import (
                             IntentExecutor,
@@ -3249,10 +3301,18 @@ async def bootstrap() -> int:
                                     IntentEffectDispatchBridge(_effect_handler),
                                 )
                             auto_wiring_result_appliers[_contract.name] = (
-                                DispatchResultApplier(
+                                build_static_result_applier(
                                     event_bus=event_bus,
                                     output_topic=config.output_topic,
                                     intent_executor=_executor,
+                                    # OMN-15468: an audit/projection consumer's
+                                    # applier delivers INTENTS to a durable write
+                                    # effect; its ``output_topic`` is the runtime
+                                    # config's generic output topic, not a
+                                    # contract terminal. There is no failure
+                                    # terminal to re-route a verdict to, stated
+                                    # here rather than defaulted.
+                                    failure_terminal_topics=(),
                                 )
                             )
                             logger.info(

@@ -1081,7 +1081,10 @@ class ServiceRegistration:
                 load_published_events_map,
             )
             from omnibase_infra.runtime.service_dispatch_result_applier import (
+                # Imported for the DI registration key below, never constructed
+                # here — OMN-15468 routes construction through the factory.
                 DispatchResultApplier,
+                build_contract_result_applier,
             )
             from omnibase_infra.runtime.service_intent_executor import (
                 IntentExecutor,
@@ -1141,9 +1144,17 @@ class ServiceRegistration:
             # Create dispatch result applier for output event publishing + intent delegation.
             # Generic contract auto-wiring owns subscriptions; this publisher-only path
             # uses config.event_bus for publish_envelope.
-            result_applier = DispatchResultApplier(
+            # OMN-15468: built through the ONE contract-derived factory so this
+            # applier also carries the contract's DECLARED failure terminal. Built
+            # by hand it had an inert failure-verdict guard — the same omission
+            # that let node_delegate_skill_orchestrator republish failures onto
+            # its success terminal on the .201 dev lane.
+            result_applier = build_contract_result_applier(
                 # Why: Runtime wiring validates and narrows this payload shape before use.
                 event_bus=config.event_bus,  # type: ignore[arg-type]
+                contract_path=contract_path,
+                publish_topics=tuple(published_events_map.values())
+                or (config.output_topic,),
                 output_topic=config.output_topic,
                 intent_executor=intent_executor,
                 topic_router=_TOPIC_ROUTER,

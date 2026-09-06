@@ -139,6 +139,7 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelWiringOutcome,
 )
 from omnibase_infra.runtime.contract_terminal_events import (
+    declared_failure_terminal_topics,
     envelope_terminal_payload,
     load_terminal_event_topics,
 )
@@ -8949,7 +8950,7 @@ async def _subscribe_contract_topics(
         load_published_events_map,
     )
     from omnibase_infra.runtime.service_dispatch_result_applier import (
-        DispatchResultApplier,
+        build_contract_result_applier,
     )
     from omnibase_infra.utils import compute_consumer_group_id
 
@@ -8991,20 +8992,20 @@ async def _subscribe_contract_topics(
         # Resolved from the contract's own discovered path, so the map is read
         # from the installed contract regardless of cwd.
         output_topic_map = load_published_events_map(contract.contract_path)
-        effective_result_applier = DispatchResultApplier(
+        # OMN-15468 AC2: built through the ONE contract-derived factory so this
+        # path and every applier registered by ``service_kernel`` derive the
+        # same two routing inputs — the published_events map (class-based
+        # routing to a declared ``…Failed`` topic) and the contract's DECLARED
+        # failure terminal (the payload-verdict guard's re-route destination).
+        # Hand-rolling either here is what let the kernel's by-NAME
+        # registration ship an applier with both missing and no warning.
+        effective_result_applier = build_contract_result_applier(
             event_bus=event_bus,
+            contract_path=contract.contract_path,
+            publish_topics=contract.event_bus.publish_topics,
             output_topic=output_topic,
             output_topic_map=output_topic_map,
             allowed_output_topics=contract.event_bus.publish_topics,
-            # OMN-15468 AC2: hand the applier the contract's DECLARED failure
-            # terminal so a returned model that states a failure verdict cannot
-            # be republished onto the success terminal by map-miss fallback.
-            # Read through the same single reader the Pattern B broker's
-            # subscription set is built from, so the two cannot disagree about
-            # which topics are terminal for this contract.
-            failure_terminal_topics=_declared_failure_terminal_topics(
-                contract, success_topic=output_topic
-            ),
         )
     node_identity = ModelNodeIdentity(
         env=environment,
@@ -9266,14 +9267,10 @@ def _declared_failure_terminal_topics(
     """
     if contract.event_bus is None or not contract.event_bus.publish_topics:
         return ()
-    publishable = set(contract.event_bus.publish_topics)
-    declared = load_terminal_event_topics(contract.contract_path)
-    return tuple(
-        sorted(
-            topic
-            for topic in declared
-            if topic != success_topic and topic in publishable
-        )
+    return declared_failure_terminal_topics(
+        contract.contract_path,
+        success_topic=success_topic,
+        publishable_topics=contract.event_bus.publish_topics,
     )
 
 

@@ -322,6 +322,17 @@ jobs:
       - name: Check mixed-category routing gate (OMN-14605)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
 
+      # OMN-15468: an applier built outside its factory silently loses BOTH
+      # re-route mechanisms — the published_events map (class-based routing to a
+      # declared `…Failed` topic) and the contract's declared failure terminal
+      # (the payload-verdict guard's destination). Empty defaults, no warning:
+      # on the .201 dev lane 18 of the trailing 25 records on
+      # delegate-skill-completed.v1 carried status="failed" with a typed
+      # terminal_failure_cause. SYNC with pre-commit hook
+      # 'contract-result-applier-construction'.
+      - name: Check result-applier construction gate (OMN-15468)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.contract_result_applier_construction src/omnibase_infra
+
       # OMN-16939: the dispatcher-side sibling of the subscribe-wiring ratchet. A
       # declared subscribe_topic that resolves to NO registered dispatcher for its own
       # (category, message type) is consumed, DLQ'd and COMMITTED on every message —

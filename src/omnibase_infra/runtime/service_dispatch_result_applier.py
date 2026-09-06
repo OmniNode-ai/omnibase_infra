@@ -43,8 +43,9 @@ Related:
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4, uuid5
 
@@ -62,6 +63,7 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 )
 from omnibase_infra.runtime.contract_terminal_events import (
     apply_failure_terminal_guard,
+    declared_failure_terminal_topics,
 )
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
@@ -833,4 +835,151 @@ class DispatchResultApplier:
             )
 
 
-__all__: list[str] = ["DispatchResultApplier"]
+def build_contract_result_applier(
+    *,
+    event_bus: ProtocolEventBusLike,
+    contract_path: Path,
+    publish_topics: Sequence[str],
+    output_topic: str | None = None,
+    terminal_event: str | None = None,
+    intent_executor: IntentExecutor | None = None,
+    clock: Callable[[], datetime] | None = None,
+    projection_effect: ProtocolProjectionEffect | None = None,
+    topic_router: dict[str, str] | None = None,
+    output_topic_map: Mapping[str, str] | None = None,
+    output_event_handler: Callable[[BaseModel], Awaitable[BaseModel | None]]
+    | None = None,
+    allowed_output_topics: Iterable[str] | None = None,
+) -> DispatchResultApplier:
+    """Build an applier whose routing inputs are DERIVED FROM THE CONTRACT.
+
+    OMN-15468. Both mechanisms that keep a failure-verdict return value off the
+    SUCCESS terminal are contract-derived, and both were being lost by every
+    applier built outside ``handler_wiring``:
+
+    * ``output_topic_map`` (from ``published_events``) is what routes a
+      ``…Failed`` return CLASS to the failure topic. An applier built without
+      it resolves EVERY returned class to the single ``output_topic`` fallback,
+      so class-based routing is dead, not merely unused.
+    * ``failure_terminal_topics`` (from the contract's terminal declarations)
+      is what lets :func:`apply_failure_terminal_guard` re-route a payload that
+      STATES a failure. An applier built without it has an inert guard, and the
+      guard is silent about it — an empty tuple takes the
+      ``len(...) != 1`` branch and logs nothing.
+
+    Live proof this mattered: ``service_kernel`` hand-registered an applier for
+    ``node_delegate_skill_orchestrator`` with neither input, and that
+    registration takes precedence over the contract-derived wiring in
+    ``_subscribe_contract_topics``. On the ``.201`` dev lane, 18 of the trailing
+    25 records on ``onex.evt.omnimarket.delegate-skill-completed.v1`` carried
+    ``status="failed"`` with a typed ``terminal_failure_cause``, published by
+    this applier with no re-route and no warning.
+
+    Deriving here — at ONE factory both the kernel and the auto-wiring call —
+    is what makes the two mechanisms impossible to construct away.
+
+    Args:
+        event_bus: Event bus for publishing output events.
+        contract_path: Path to the contract YAML the applier serves. Read for
+            ``published_events`` and the terminal declarations.
+        publish_topics: The contract's declared ``event_bus.publish_topics``.
+        output_topic: Explicit success/fallback topic. Defaults to the
+            contract's ``terminal_event`` when publishable, else the first
+            publish topic — the same precedence ``handler_wiring`` uses.
+        terminal_event: The contract's declared top-level terminal event, used
+            only to resolve ``output_topic`` when it is not passed.
+        output_topic_map: Overrides the ``published_events`` derivation. Pass
+            only when the map is already loaded; ``None`` derives it.
+        allowed_output_topics: Overrides the publish-topic allowlist.
+
+    Returns:
+        A ``DispatchResultApplier`` carrying both contract-derived routing
+        inputs.
+    """
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        load_published_events_map,
+    )
+
+    topics = tuple(
+        topic.strip()
+        for topic in publish_topics
+        if isinstance(topic, str) and topic.strip()
+    )
+    if not topics:
+        raise RuntimeHostError(
+            "build_contract_result_applier: contract at "
+            f"{contract_path} declares no publish topics; an applier with no "
+            "destination cannot deliver a dispatch result."
+        )
+    resolved_output_topic = output_topic or (
+        terminal_event if terminal_event in topics else topics[0]
+    )
+    derived_map = (
+        dict(output_topic_map)
+        if output_topic_map is not None
+        else load_published_events_map(contract_path, logger)
+    )
+    return DispatchResultApplier(
+        event_bus=event_bus,
+        output_topic=resolved_output_topic,
+        intent_executor=intent_executor,
+        clock=clock,
+        projection_effect=projection_effect,
+        topic_router=topic_router,
+        output_topic_map=derived_map,
+        output_event_handler=output_event_handler,
+        allowed_output_topics=(
+            topics if allowed_output_topics is None else allowed_output_topics
+        ),
+        failure_terminal_topics=declared_failure_terminal_topics(
+            contract_path,
+            success_topic=resolved_output_topic,
+            publishable_topics=topics,
+        ),
+    )
+
+
+def build_static_result_applier(
+    *,
+    event_bus: ProtocolEventBusLike,
+    output_topic: str,
+    failure_terminal_topics: Sequence[str],
+    allowed_output_topics: Iterable[str] | None = None,
+    intent_executor: IntentExecutor | None = None,
+    clock: Callable[[], datetime] | None = None,
+    projection_effect: ProtocolProjectionEffect | None = None,
+    topic_router: dict[str, str] | None = None,
+    output_topic_map: Mapping[str, str] | None = None,
+    output_event_handler: Callable[[BaseModel], Awaitable[BaseModel | None]]
+    | None = None,
+) -> DispatchResultApplier:
+    """Build an applier for a call site that has no contract path to read.
+
+    ``failure_terminal_topics`` is REQUIRED here, with no default. That is the
+    whole point of this entry point: a caller that cannot derive the contract's
+    failure terminal must still state, in the source, which topic a
+    failure-verdict return value belongs on — or state ``()`` deliberately,
+    which is a legible declaration that this contract HAS no failure terminal
+    rather than an omission nobody notices. The empty default on
+    ``DispatchResultApplier.__init__`` is what let three call sites ship an
+    inert guard (OMN-15468).
+    """
+    return DispatchResultApplier(
+        event_bus=event_bus,
+        output_topic=output_topic,
+        intent_executor=intent_executor,
+        clock=clock,
+        projection_effect=projection_effect,
+        topic_router=topic_router,
+        output_topic_map=dict(output_topic_map) if output_topic_map else None,
+        output_event_handler=output_event_handler,
+        allowed_output_topics=allowed_output_topics,
+        failure_terminal_topics=failure_terminal_topics,
+    )
+
+
+__all__: list[str] = [
+    "DispatchResultApplier",
+    "build_contract_result_applier",
+    "build_static_result_applier",
+]
