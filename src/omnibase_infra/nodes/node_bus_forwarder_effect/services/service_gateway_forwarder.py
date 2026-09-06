@@ -88,6 +88,33 @@ class ProtocolGatewayPublisher(Protocol):
         """Publish bytes to a topic."""
 
 
+class GatewayRecordRefusedError(ValueError):
+    """One record is not this gateway's to carry -- a DROP, never a wedge.
+
+    OMN-17382, measured on this exact leg. A single foreign-tenant record on
+    the dev bus raised ``outbound payload tenant_id does not match attached
+    tenant`` out of :meth:`ServiceGatewayForwarder._prepare_outbound`. The
+    delivery loop nacked, seeked back to the same offset, and re-read the same
+    record: 925 consecutive failures over 7h45m with 177 real records stuck
+    behind it, and on 2026-09-05 the same signature again at reconnect attempt
+    295 after 8799s, while the container reported healthy throughout.
+
+    Redelivery cannot change the verdict. Tenant binding is a property of the
+    RECORD, so a refusal is permanent for that offset, which makes it the same
+    poison-pill class the undecodable path (OMN-15748) already quarantines:
+    log, best-effort dead-letter, commit past it, keep the bridge alive.
+    ``egress_admits`` already returns ``False`` rather than raising for exactly
+    this reason (see its docstring); this type extends that rule to the
+    remaining per-record trust-boundary refusals, which were the ones actually
+    wedging the leg.
+
+    NOT used for infrastructure faults. A broker timeout, an auth failure, or
+    a serialization bug is transient or global, and MUST keep raising so the
+    loop retries -- silently committing past those is data loss. The
+    distinction is exactly "is this verdict a property of the record".
+    """
+
+
 def egress_admits(
     policy: ModelGatewayEgressRedaction | None,
     envelope: ModelEventEnvelope[dict[str, object]],
@@ -413,13 +440,19 @@ class ServiceGatewayForwarder:
         identity = self._config.tenant_identity
         canonical_topic = strip_topic_prefix(identity.tenant_slug, wire_topic)
         if canonical_topic not in self._config.mirror_topics.inbound:
-            raise ValueError("canonical_topic is not declared for inbound mirroring")
+            raise GatewayRecordRefusedError(
+                "canonical_topic is not declared for inbound mirroring"
+            )
 
         tags = envelope.metadata.tags
         if tags.get("source_tenant_id") != str(identity.tenant_id):
-            raise ValueError("envelope tenant_id does not match attached tenant")
+            raise GatewayRecordRefusedError(
+                "envelope tenant_id does not match attached tenant"
+            )
         if tags.get("source_tenant_principal_id") != str(identity.principal_id):
-            raise ValueError("envelope principal_id does not match attached tenant")
+            raise GatewayRecordRefusedError(
+                "envelope principal_id does not match attached tenant"
+            )
 
         gateway_envelope = ModelGatewayEnvelope(
             tenant_id=identity.tenant_id,
@@ -466,11 +499,13 @@ class ServiceGatewayForwarder:
         """
         identity = self._config.tenant_identity
         if canonical_topic not in self._config.mirror_topics.outbound:
-            raise ValueError("canonical_topic is not declared for outbound mirroring")
+            raise GatewayRecordRefusedError(
+                "canonical_topic is not declared for outbound mirroring"
+            )
 
         payload_tenant = envelope.payload.get("tenant_id")
         if payload_tenant is not None and payload_tenant != identity.tenant_slug:
-            raise ValueError(
+            raise GatewayRecordRefusedError(
                 "outbound payload tenant_id does not match attached tenant"
             )
 
@@ -479,14 +514,14 @@ class ServiceGatewayForwarder:
         if existing_tenant_id is not None and existing_tenant_id != str(
             identity.tenant_id
         ):
-            raise ValueError(
+            raise GatewayRecordRefusedError(
                 "outbound envelope tenant_id does not match attached tenant"
             )
         existing_principal_id = tags.get("source_tenant_principal_id")
         if existing_principal_id is not None and existing_principal_id != str(
             identity.principal_id
         ):
-            raise ValueError(
+            raise GatewayRecordRefusedError(
                 "outbound envelope principal_id does not match attached tenant"
             )
 

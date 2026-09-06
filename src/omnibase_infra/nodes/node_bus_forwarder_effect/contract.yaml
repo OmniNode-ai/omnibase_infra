@@ -45,6 +45,20 @@ config:
       supported_flavors:
         - "containerized"
         - "lightweight"
+    # OMN-17201: this set declares what CROSSES the boundary; it does not
+    # create anything. The physical tenant-prefixed wire topic is minted by
+    # omninode_infra docker/onex-api/kafka_topic_provisioner.py over
+    # topic_constants.py::DEFAULT_TENANT_CANONICAL_TOPICS, and
+    # `omninode-dev-msk` runs auto.create.topics.enable=false, so a topic
+    # declared here but absent there is not created late -- its subscriber
+    # crash-loops on UnknownTopicOrPartitionError. That is exactly what
+    # happened to the cloud hook-ledger writer on 2026-09-05 after the
+    # OMN-16204/OMN-16979 widenings below landed without the matching
+    # provisioning change. The two surfaces are now pinned to each other from
+    # both sides: tests/unit/nodes/node_bus_forwarder_effect/
+    # test_provisioning_sync_omn17201.py here, FORWARDER_MIRROR_TOPIC_UNION
+    # there. Widening this set REQUIRES the omninode_infra half in the same
+    # change, plus a tenant_topics_backfill run for tenants that already exist.
     mirror_topics:
       inbound:
         - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
