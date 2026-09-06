@@ -1649,6 +1649,9 @@ def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup(
         'IS_FULL="false"\n'
         'PATHS=("tests/unit/runtime/")\n'
         'PATHS_STR="tests/unit/runtime/ "\n'
+        'ORDINARY_PATHS=("tests/unit/runtime/")\n'
+        'ORDINARY_PATHS_STR="tests/unit/runtime/ "\n'
+        "RUNNABLE_INTEGRATION_PATHS=()\n"
         'PREPUSH_PYTEST_ARGS=""\n'
         "REMOTE_FULL_SUITE_VERIFIED=0\n"
         "REMOTE_LAB_RUN_VERDICT=0\n"
@@ -1664,6 +1667,8 @@ def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup(
         + _hook_func("selection_is_whole_suite")
         + _hook_func("guard_full_suite_host")
         + _hook_func("prepush_hook_cleanup")
+        + _hook_func("run_prepush_ordinary_tests")
+        + _hook_func("run_prepush_partitioned_tests")
         + _impacted_selection_branch()
         + 'printf "RC=%s\\n" "$RC"\n'
         "prepush_hook_cleanup\n"
@@ -2618,8 +2623,11 @@ def test_the_local_leg_restores_a_developer_shell_path_too() -> None:
     assert "export PATH" in hook
 
     export_at = hook.index('PATH="$_prepush_devpath"')
-    first_pytest = hook.index("exec uv run pytest")
-    assert export_at < first_pytest, (
+    execution_start = hook.index("if ! type prepush_developer_shell_path")
+    first_pytest_dispatch = hook.index(
+        'run_prepush_partitioned_tests "', execution_start
+    )
+    assert export_at < first_pytest_dispatch, (
         "PATH must be exported before any local pytest invocation, not after"
     )
 
