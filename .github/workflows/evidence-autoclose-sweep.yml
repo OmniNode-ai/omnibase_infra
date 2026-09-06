@@ -60,7 +60,7 @@
 #   To fence:   gh variable set ONEX_AUTOCLOSE_EXCLUDE --repo OmniNode-ai/omnibase_infra --body 'OMN-1,OMN-2'
 #   To release: gh variable delete ONEX_AUTOCLOSE_EXCLUDE --repo OmniNode-ai/omnibase_infra
 #
-# WHAT THE FENCE MAY ASSERT — narrowed 2026-09-05, node_version 1.6.0.
+# WHAT THE FENCE MAY ASSERT — narrowed 2026-09-05, node_version 1.7.0.
 # Operator ruling, firm, 2026-09-05T20:45:51Z (omni_home
 # `docs/tracking/ROLLING_WORK_LEDGER.md:3372`): ticket closure is
 # ownership-agnostic. When the acceptance criteria are met on live evidence the
@@ -73,9 +73,12 @@
 # read, so a fenced ticket produces no verdict and nothing on the board says
 # why. A standing list does not go stale in a visible direction — it stops
 # adjudicating, indefinitely. This variable carried 26 ids selected by who was
-# working them; it was emptied when this version landed, and it is not a place
-# to park ownership again. Entries are expected to be removed within hours, as
-# the CLAIM row that justified each one terminates.
+# working them; node_version 1.7.0 NARROWED it, it did not empty it. Measured
+# 2026-09-06 via `gh variable get ONEX_AUTOCLOSE_EXCLUDE --repo
+# OmniNode-ai/omnibase_infra`: 13 ids remain, and every one of the 13 is backed
+# by a ledger CLAIM row. It is not a place to park ownership again. Entries are
+# expected to be removed within hours, as the CLAIM row that justified each one
+# terminates — a residual that stops shrinking is the failure mode to look for.
 #
 # All of the above is pinned by
 # `tests/ci/test_evidence_autoclose_sweep_apply_input.py` (CLAUDE.md rule 5 —

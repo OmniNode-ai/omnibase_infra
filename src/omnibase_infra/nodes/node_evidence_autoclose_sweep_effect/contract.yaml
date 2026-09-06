@@ -227,8 +227,10 @@
 #     evidence the ticket is closed, whoever it is assigned to. The only thing
 #     `exclude_tickets` may assert is that another lane is writing this ticket
 #     right now, evidenced by a live ledger CLAIM row. It had accumulated 26
-#     ids selected by who was working them; that list was emptied when this
-#     version landed.
+#     ids selected by who was working them; node_version 1.7.0 NARROWED that
+#     list, it did not empty it. Measured 2026-09-06: 13 ids remain, each
+#     backed by a ledger CLAIM row. A residual that stops shrinking is the
+#     failure mode to look for.
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
