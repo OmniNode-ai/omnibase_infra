@@ -354,18 +354,19 @@ def test_no_argument_linked_source_precedes_omni_home_fallback(
 
 
 @pytest.mark.unit
-def test_no_argument_auto_discovery_uses_repo_local_core_checkout(
+def test_environment_override_accepts_canonical_source_outside_workspace(
     tmp_path: Path,
 ) -> None:
-    """CI may place the attested Core source checkout beneath this repository."""
-    infra_root = tmp_path / "omnibase_infra"
-    infra_root.mkdir()
-    core = _source_tree(infra_root)
+    """CI can stage the attested source outside the validated repository root."""
+    runner_temp = tmp_path / "runner-temp"
+    core = _source_tree(runner_temp)
+    workspace = tmp_path / "omnibase_infra"
+    workspace.mkdir()
 
     env = os.environ.copy()
-    env.pop("OMNIBASE_CORE_PATH", None)
+    env["OMNIBASE_CORE_PATH"] = str(core)
     env.pop("OMNI_HOME", None)
-    result = _run_without_path(infra_root, env=env)
+    result = _run_without_path(workspace, env=env)
 
     assert result.returncode == 0, result.stderr
     assert str(core) in result.stdout

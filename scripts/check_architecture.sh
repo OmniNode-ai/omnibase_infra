@@ -687,7 +687,6 @@ find_omnibase_core_path() {
     fi
     local_paths+=(
         "./src/omnibase_core"
-        "./omnibase_core/src/omnibase_core"
         "../omnibase_core/src/omnibase_core"
         "../omnibase_core"
     )
