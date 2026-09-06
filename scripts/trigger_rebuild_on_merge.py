@@ -522,6 +522,27 @@ def publish_redeploy_start_event(
     return 1, delivery_coordinates
 
 
+def emit_github_output(published: bool, source_sha: str, runtime_lane: str) -> None:
+    """Record the publish DECISION where a downstream job can read it (OMN-17888 AC4).
+
+    AC4 asks that a delivered-but-not-applied redeploy surface as lane staleness.
+    The convergence job that does that must only run when this script actually
+    published a command — a no-op run has no redeploy to wait for. That fact
+    lives here and nowhere else, so it is written out rather than re-derived by
+    a second copy of the classifier.
+
+    Additive and inert outside GitHub Actions: with GITHUB_OUTPUT unset this
+    writes nothing and changes no exit code.
+    """
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"published={str(published).lower()}\n")
+        handle.write(f"source_sha={source_sha}\n")
+        handle.write(f"runtime_lane={runtime_lane}\n")
+
+
 @click.command()
 @click.option(
     "--changed-files",
@@ -636,6 +657,7 @@ def main(
         click.echo(
             "No rebuild trigger: no runtime_change label or runtime path changes detected."
         )
+        emit_github_output(False, source_sha, runtime_lane)
         sys.exit(0)
 
     # OMN-17888: this line records the DECISION, never the delivery. It is
@@ -652,6 +674,7 @@ def main(
 
     if dry_run:
         click.echo("(dry-run: skipping Kafka publish)")
+        emit_github_output(False, source_sha, runtime_lane)
         sys.exit(0)
 
     # A live publish targets the lane's LAN / tailnet broker. A github-hosted
@@ -762,6 +785,11 @@ def main(
         f"(correlation_id={corr_id}, delivered={delivered}, "
         f"{delivery_coordinates})"
     )
+
+    # Only reached once the broker has ACKed the command. Publication is the
+    # ONLY thing this records; whether the lane then applies it is the question
+    # the downstream convergence job answers (OMN-17888 AC4).
+    emit_github_output(True, source_sha, runtime_lane)
 
 
 if __name__ == "__main__":

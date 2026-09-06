@@ -71,6 +71,13 @@ jobs:
         || fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 5
+    # Consumed by verify-lane-converged below: AC4 requires a
+    # delivered-but-not-applied redeploy to surface on the SAME run that
+    # published it, and only this job knows whether a command was published.
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      source_sha: ${{ steps.publish.outputs.source_sha }}
+      runtime_lane: ${{ steps.publish.outputs.runtime_lane }}
 
     steps:
       - name: Checkout code
@@ -115,6 +122,7 @@ jobs:
           shared-env-enabled: "true"
 
       - name: Trigger node_redeploy if runtime change detected
+        id: publish
         # All potentially attacker-controlled inputs (labels, base_ref, sha) are
         # passed through environment variables to prevent shell injection.
         env:
@@ -141,3 +149,67 @@ jobs:
             --runtime-path-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
             --runner-environment "$CI_RUNNER_ENVIRONMENT" \
             --requested-by "gha/omnibase_infra/pr-$PR_NUMBER"
+
+  # OMN-17888 AC4 — publication is not application.
+  #
+  # The publisher above proves a command reached the broker. It cannot prove the
+  # lane ran it, and on 2026-09-06 that difference was the whole outage: five
+  # commands were delivered and consumed (redeploy-start watermark 63 -> 68,
+  # orchestrator consumer group LAG 0) while omninode-runtime-effects
+  # dead-lettered the downstream prod-promotion-gate-evaluated event with
+  # failure_class=no_dispatcher, and the dev lane never moved. Nothing went red.
+  #
+  # This job closes that gap on the same run: it waits a bounded window for the
+  # lane to report the merge SHA as its running image revision, and fails when
+  # it does not. The hourly dev-lane-staleness.yml is the standing surface; this
+  # is the per-merge one.
+  verify-lane-converged:
+    name: Verify dev lane applied the redeploy
+    needs: trigger-rebuild
+    # Only when a command was actually published, and only for the dev lane. A
+    # no-op trigger run has nothing to wait for, and merges to main target the
+    # stability-test lane, which this guard deliberately does not read.
+    if: >-
+      needs.trigger-rebuild.outputs.published == 'true' &&
+      needs.trigger-rebuild.outputs.runtime_lane == 'dev'
+    # The lane's docker daemon is on the LAN; hosted compute cannot see it.
+    # Unconditional self-hosted rather than the fork fallback the publisher
+    # uses, because the checkout below is pinned to the trusted base ref, so no
+    # fork-authored code executes on the fleet.
+    runs-on: [self-hosted, omnibase-deploy]
+    # 25-minute convergence wait + margin. The wait bound is derived from
+    # checked-in contracts: node_redeploy_orchestrator and
+    # node_redeploy_deploy_effect each declare timeout_ms: 660000 (11 min).
+    timeout-minutes: 30
+    steps:
+      - name: Checkout the guard from the trusted base ref
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # NEVER the merge ref: a merged fork PR would put fork-authored code
+          # on the self-hosted fleet. The base branch is repo-owned code.
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+
+      # Repo invariant (tests/ci/test_ci_workflow_resilience.py): every job in
+      # this workflow resolves Python through the shared CI env action, never
+      # ad hoc. The guard itself is stdlib-only, but the invariant is about the
+      # environment, not the dependency count.
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-dev-lane-staleness
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      - name: Wait for the dev lane to report the merge SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/check_dev_lane_staleness.py \
+            --expect-revision "$MERGE_SHA" \
+            --wait-timeout 25m \
+            --poll-interval 60s
