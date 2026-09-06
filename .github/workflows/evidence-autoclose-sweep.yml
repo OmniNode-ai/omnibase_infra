@@ -1614,10 +1614,20 @@ jobs:
           DOD_VERIFY_CHECK_TIMEOUT_S: "180"
           # OMN-17658 AUTO-DISARM, the persisted half.
           #
-          # The node disarms ITSELF within a run the moment a candidate proves
-          # that a closer flip on it was already undone by a person: every
+          # The node disarms ITSELF within a run in exactly one case, narrowed
+          # by OMN-16106 D3: this run WROTE a Done and its own readback then
+          # saw a person move the ticket back out of a completed state. Every
           # later candidate in that run is refused unwritten. That is immediate
           # but not durable — the next cron tick starts a fresh process.
+          #
+          # It used to fire on the prior-revert fence instead — on the closer
+          # correctly REFUSING to re-assert a verdict a person had reversed.
+          # That refusal is recomputed from unchanged evidence on every tick,
+          # so the in-run disarm it triggered recurred forever with nothing to
+          # decay it: from 2026-09-06T03:36Z the OMN-17556 hold reported
+          # `mode=disarmed`, `tickets_flipped: 0` and `skipped_disarmed` on
+          # every other candidate, on every scheduled run, fleet-wide. The
+          # fence working is not the mechanism losing standing.
           #
           # This variable is the durable half, and it is deliberately the same
           # shape as the kill switch above and for the same reason: a repo

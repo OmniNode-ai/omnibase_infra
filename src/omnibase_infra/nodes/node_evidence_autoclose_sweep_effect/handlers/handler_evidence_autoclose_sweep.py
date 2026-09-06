@@ -37,12 +37,18 @@ Pipeline
    description is structurally invisible to it, so "3/3 verified, 0 failed"
    says nothing at all about a fourth criterion nobody ever encoded — the
    OMN-14362 lesson. So before ANY flip path (dry-run included) the
-   ticket's description is re-read: an unchecked markdown checkbox, or an
-   acceptance-criteria section listing more items than dod_verify had
-   checks, withholds the flip and records GAP_AC_COVERAGE naming the
-   criteria. Conservative in exactly one direction on purpose — a false
-   hold costs a comment and a human glance, a false flip writes an unearned
-   Done onto the board.
+   ticket's description is re-read. Three shapes withhold the flip and
+   record GAP_AC_COVERAGE naming the criteria: an unchecked markdown
+   checkbox; an acceptance-criteria section listing more items than
+   dod_verify returned VERIFIED PROBATIVE checks; and non-probative checks
+   outnumbering the verified probative ones. The last two are OMN-16106 D3,
+   and they exist because the denominator used to be ``total_checks`` —
+   which made the guard depend on whether an author wrote criteria as
+   checkboxes or as prose bullets rather than on the evidence. Criteria are
+   read under an Acceptance/Definition-of-Done heading in either form.
+   Conservative in exactly one direction on purpose — a false hold costs a
+   comment and a human glance, a false flip writes an unearned Done onto
+   the board.
 7. PROOF-CLASS GUARD (OMN-15911). A green tally does not say what the green
    legs PROVED. Before OMN-15911 a `gh pr view --json state` read and an
    executed test suite both terminated in the same `verified`, so
@@ -392,8 +398,10 @@ query IssueComments($id: String!, $after: String) {
 #     on the verdict fingerprint that comment carries. The `actorId` shape is
 #     KEPT as a second, independent branch: it is the only thing that can
 #     identify a pre-OMN-17658 flip, which has no marker.
-#   * the RUN DISARM — the first such candidate stops the rest of the run
-#     writing.
+#   * the RUN DISARM — OMN-16106 D3: NOT this fence. A prior-revert skip holds
+#     the ticket it names and nothing else. The run is disarmed only by a flip
+#     this run WROTE whose own readback then saw it reverted (see
+#     `_revert_entry_since`).
 #   * the BOUND READBACK — the pre-write newest entry id, compared against the
 #     completed segment the write is supposed to have produced.
 #
@@ -550,7 +558,7 @@ _CHECK_STATUS_SUPERSEDED = "superseded"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.7.0"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.8.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -843,6 +851,38 @@ def _completed_entry_since(history: list[dict[str, object]], head_entry_id: str)
     return ""
 
 
+def _revert_entry_since(history: list[dict[str, object]], entry_id: str) -> str:
+    """Id of a ``completed -> non-completed`` entry NEWER than ``entry_id``.
+
+    OMN-16106 D3. The mirror of ``_completed_entry_since``, and the ONLY
+    condition that disarms a run. The walk stops at ``entry_id`` itself, so
+    reversals older than the segment this run's flip produced — the ordinary
+    history of a ticket that has been reopened before — cannot match. What can
+    match is a reversal that landed AFTER this run's own write: the closer
+    wrote a Done and, inside its own readback window, a person took it back.
+
+    An empty ``entry_id`` returns "" rather than scanning the whole history.
+    Without that guard the first reversal anywhere in the ticket's past would
+    read as "reverted during this run", which is the same over-broad
+    attribution this ticket exists to remove.
+    """
+    if not entry_id:
+        return ""
+    for entry in _newest_first(history):
+        if str(entry.get("id") or "") == entry_id:
+            return ""
+        from_state = entry.get("fromState")
+        to_state = entry.get("toState")
+        if not isinstance(from_state, dict) or not isinstance(to_state, dict):
+            continue
+        if str(from_state.get("type")) != "completed":
+            continue
+        if str(to_state.get("type")) == "completed":
+            continue
+        return str(entry.get("id") or "")
+    return ""
+
+
 def _newest_revert_entry_id(history: list[dict[str, object]]) -> str:
     """Id of the newest ``completed -> non-completed`` transition, or "".
 
@@ -1127,6 +1167,14 @@ _AC_HEADING_TEXTS = frozenset(
         "acceptance",
         "ac",
         "acs",
+        # OMN-16106 D3. The same section under its other standing name. A
+        # ticket that writes "Definition of done" instead of "Acceptance
+        # criteria" is making the identical statement, and reading only one
+        # spelling is the same formatting-dependence this revision removes
+        # from the coverage rule below.
+        "definition of done",
+        "definition of done (dod)",
+        "dod",
     }
 )
 
@@ -1190,18 +1238,55 @@ def _acceptance_criteria_items(description: str) -> list[str]:
 
 
 def _ac_coverage_gap(
-    description: str, total_checks: int
+    description: str,
+    verified_count: int,
+    non_probative_count: int,
 ) -> tuple[str, tuple[str, ...]]:
     """Decide whether ``description`` carries criteria dod_verify did not cover.
 
     Returns ``(reason, uncovered)``. An empty ``reason`` means no gap was
-    found and the flip may proceed. Two rules, checked in order:
+    found and the flip may proceed. Three rules, checked in order:
 
     1. ANY unchecked markdown task item (``- [ ]``) -- the author's own
        "not done" marker, which a contract verifier never reads.
     2. The acceptance-criteria section lists MORE items than dod_verify had
-       checks. Which specific ones are uncovered cannot be known from a count,
-       so every listed item is named and the arithmetic is stated.
+       VERIFIED PROBATIVE checks. Which specific ones are uncovered cannot be
+       known from a count, so every listed item is named and the arithmetic is
+       stated.
+    3. The non-probative checks OUTNUMBER the verified probative ones, so the
+       corpus that was supposed to prove those criteria mostly proved nothing.
+
+    OMN-16106 D3 — WHY THE DENOMINATOR CHANGED, and why rule 3 exists.
+    ------------------------------------------------------------------
+    Rule 2 used to compare against ``total_checks``, which includes the
+    non-probative entries. That made the coverage bound trivially satisfiable
+    by a contract padded with provenance checks, and it made the whole guard
+    depend on FORMATTING rather than on evidence: a ticket writing its criteria
+    as ``- [ ]`` boxes was caught by rule 1 whatever its counters said, while
+    the identical criteria written as prose bullets fell through to a rule 2
+    whose denominator had been inflated past any plausible item count.
+
+    Measured, 2026-09-06, on the two tickets the same scheduled sweep judged
+    minutes apart:
+
+      * OMN-17201 -- checkbox criteria. Rule 1 fired. HELD.
+      * OMN-17556 -- ``## Acceptance``, four PROSE bullets, dod_verify 4/22
+        with 18 non-probative and 0 failed. Rule 1 could not fire (no boxes);
+        rule 2 asked ``4 > 22`` and said no. FLIPPED, and a person reverted it
+        two minutes later: one of four bindings had been migrated and 30 DSN
+        env materializations remained.
+
+    The only difference between the two was markdown. Under the rules above,
+    OMN-17556 is held by rule 3 (18 non-probative against 4 verified), and
+    OMN-17976 -- 4 numbered criteria, dod_verify 4/6 with 2 non-probative --
+    still flips: 4 criteria against 4 verified probative checks, and the
+    non-probative pair is a bounded minority of the corpus.
+
+    Both new bounds are COUNTING bounds on the same claim -- "every acceptance
+    criterion is covered by at least one verified probative check". A count
+    cannot prove the mapping, but it can refute it, and refuting it is the
+    direction that matters: a false hold costs a comment and a human glance, a
+    false flip writes an unearned Done onto the board.
 
     An empty/absent description is NOT a gap: Linear returns null for a ticket
     with no body, and treating "no criteria written down" as "criteria we
@@ -1227,13 +1312,30 @@ def _ac_coverage_gap(
         )
 
     items = tuple(_acceptance_criteria_items(description))
-    if len(items) > total_checks:
+    if not items:
+        return "", ()
+    if len(items) > verified_count:
         return (
             f"The Linear description's acceptance-criteria section lists "
-            f"{len(items)} item(s) but dod_verify covered only {total_checks} "
-            f"check(s) -- at least {len(items) - total_checks} criterion(s) is "
-            "not receipt-proven. Which ones cannot be told from a count, so all "
-            "listed items are named below.",
+            f"{len(items)} item(s) but dod_verify returned only "
+            f"{verified_count} VERIFIED probative check(s) -- at least "
+            f"{len(items) - verified_count} criterion(s) cannot be covered by "
+            "one. Which ones cannot be told from a count, so all listed items "
+            "are named below. (Non-probative checks are excluded from this "
+            "denominator on purpose: a check that could not have failed for a "
+            "product reason covers no criterion.)",
+            items,
+        )
+    if non_probative_count > verified_count:
+        return (
+            f"dod_verify returned {non_probative_count} non-probative check(s) "
+            f"against {verified_count} verified probative one(s), so most of "
+            "the corpus that was supposed to prove this ticket's "
+            f"{len(items)} acceptance criterion(s) proved nothing. A "
+            "non-probative check executed and exited 0 in a way it could not "
+            "have avoided, so it carries no product verdict; with them in the "
+            "majority, 'every criterion is covered by a verified probative "
+            "check' is not supportable from these counts.",
             items,
         )
 
@@ -2423,21 +2525,39 @@ class HandlerEvidenceAutocloseSweep:
             # cannot disagree.
             if outcome.decision is EnumEvidenceAutocloseDecision.FLIPPED:
                 flip_budget = max(0, flip_budget - 1)
-            if (
-                outcome.decision is EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
-                and not disarm_ticket
-            ):
-                # AUTO-DISARM. One candidate proving that a closer flip was
-                # already undone by a person is enough to stop the REST of this
-                # run writing — not merely to refuse that ticket. A mechanism
-                # that has been overruled once has no standing to keep writing
-                # under the same predicate on the same tick.
+            if outcome.flip_reverted_during_run and not disarm_ticket:
+                # AUTO-DISARM, narrowed by OMN-16106 D3 to the ONE shape that
+                # earns it: this run wrote a Done and its own readback then saw
+                # a person move the ticket back out of a completed state. The
+                # fences did not hold, so the remaining candidates get no
+                # further writes on this tick.
+                #
+                # It used to fire on SKIPPED_PRIOR_REVERT instead — on the
+                # fence WORKING. That conflated "the closer overrode a human"
+                # with "the closer correctly refused to override a human", and
+                # only the first of those costs the mechanism its standing. The
+                # measured cost of the conflation: OMN-17556 was flipped by run
+                # 34008532058, adjudicated back by a person at 03:22:47Z, and
+                # from 03:36Z every scheduled tick recomputed the identical
+                # refusal (fingerprint dd4745aa23025542) from unchanged
+                # evidence and disarmed the whole fleet with it. Because the
+                # disarm is recomputed per tick from in-run state rather than
+                # persisted, nothing decayed it: runs 34009400454 and
+                # 34010596242 both reported `tickets_flipped: 0` with every
+                # other candidate `skipped_disarmed`. A correct refusal on one
+                # ticket now holds THAT ticket and nothing else.
                 disarm_ticket = outcome.ticket_id
-                disarm_reason = outcome.reason
+                disarm_reason = (
+                    f"this run flipped {outcome.ticket_id} Done and its own "
+                    "readback then observed the ticket moved back out of a "
+                    "completed state. A person overruled this mechanism while "
+                    "the run was still going, so no further flip is written on "
+                    "this tick."
+                )
                 logger.warning(
-                    "DISARMED by %s — refusing every remaining flip in this run. %s",
+                    "DISARMED by %s — this run's own flip was reverted inside its "
+                    "readback window; refusing every remaining flip in this run.",
                     outcome.ticket_id,
-                    outcome.reason,
                 )
 
         flipped = sum(
@@ -3183,7 +3303,9 @@ class HandlerEvidenceAutocloseSweep:
             # an honest preview of what --apply would do).
             description_raw = issue.get("description")
             description = description_raw if isinstance(description_raw, str) else ""
-            ac_gap_reason, uncovered = _ac_coverage_gap(description, total_checks)
+            ac_gap_reason, uncovered = _ac_coverage_gap(
+                description, verified_count, non_probative_count
+            )
             if ac_gap_reason:
                 return await self._ac_coverage_outcome(
                     ticket_id=ticket_id,
@@ -3595,6 +3717,19 @@ class HandlerEvidenceAutocloseSweep:
                     linear_comment_posted=unconfirmed_comment,
                     applied=True,
                 )
+            # OMN-16106 D3. THE ONE CONDITION THAT DISARMS THE RUN, read from
+            # the readback that just succeeded rather than from a separate
+            # fetch: is there a `completed -> non-completed` transition NEWER
+            # than the segment this write produced? If so, this run wrote a
+            # Done and a person took it back while the run was still going —
+            # the fences did not hold, and the remaining candidates get no
+            # further writes. `post_history` is the last page read by the loop
+            # above, which is the same connection `readback_entry_id` came
+            # from, so the two conclusions cannot disagree.
+            reverted_during_run = bool(
+                _revert_entry_since(post_history or [], readback_entry_id)
+            )
+
             # No dedup gate on the flip audit comment (OMN-16808) — see above.
             # `_FLIP_COMMENT_CLASS_MARKER` (OMN-17658 F-R5-8) is stamped so a
             # LATER run can identify a closer-authored Done by reading the
@@ -3644,6 +3779,7 @@ class HandlerEvidenceAutocloseSweep:
                 verdict_fingerprint=fingerprint,
                 pre_write_head_entry_id=pre_write_head_entry_id,
                 readback_entry_id=readback_entry_id,
+                flip_reverted_during_run=reverted_during_run,
                 linear_comment_posted=commented,
                 applied=True,
             )

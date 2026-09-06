@@ -588,8 +588,12 @@ class TestPriorRevertFenceReadsTheMarkerNotTheActorId:
         # The refusal names the fingerprint it matched — the evidence did not
         # change, which is the whole reason the re-flip is refused.
         assert _FLIP_FINGERPRINT in result.outcomes[0].reason
-        # And one such candidate disarms the rest of the run (OMN-17658).
-        assert result.disarm_triggered_by == "OMN-17957"
+        # OMN-16106 D3. And it does NOT disarm the run. This is the fence
+        # WORKING — the closer declined to re-assert a verdict a person had
+        # reversed — and a mechanism that refused correctly on one ticket has
+        # lost no standing on any other. It used to disarm here, which is how
+        # one held ticket stopped the whole fleet from 2026-09-06T03:36Z on.
+        assert result.disarm_triggered_by == ""
 
     async def test_a_revert_with_no_closer_flip_comment_is_not_this_fences_business(
         self,
