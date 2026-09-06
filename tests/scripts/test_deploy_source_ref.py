@@ -73,6 +73,107 @@ def _make_behind_dirty_repo(path: Path) -> tuple[str, str]:
     return sha_a, sha_b
 
 
+@pytest.mark.unit
+def test_immutable_checkout_resolves_all_pins_before_any_checkout(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    before_first, target_first = _make_behind_dirty_repo(first)
+    _make_behind_dirty_repo(second)
+    (first / "untracked.txt").unlink()
+    (second / "untracked.txt").unlink()
+    rc = mod.main(
+        [
+            "checkout",
+            "--require-immutable-refs",
+            "--no-fetch",
+            "--repo",
+            f"first={first}",
+            "--repo",
+            f"second={second}",
+            "--repo-ref",
+            f"first={target_first}",
+            "--repo-ref",
+            f"second={'f' * 40}",
+            "--output",
+            str(tmp_path / "refs.json"),
+        ]
+    )
+    assert rc == mod.CHECKOUT_FAILED
+    assert _git(first, "rev-parse", "HEAD") == before_first
+    assert not (tmp_path / "refs.json").exists()
+
+
+@pytest.mark.unit
+def test_immutable_checkout_never_uses_destructive_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    _before, target = _make_behind_dirty_repo(repo)
+    (repo / "untracked.txt").unlink()
+    original_git = mod._git
+    calls: list[tuple[str, ...]] = []
+
+    def record_git(path: Path, *args: str) -> str:
+        calls.append(args)
+        return original_git(path, *args)
+
+    monkeypatch.setattr(mod, "_git", record_git)
+    rc = mod.main(
+        [
+            "checkout",
+            "--require-immutable-refs",
+            "--no-fetch",
+            "--repo",
+            f"repo={repo}",
+            "--repo-ref",
+            f"repo={target}",
+            "--output",
+            str(tmp_path / "refs.json"),
+        ]
+    )
+    assert rc == 0
+    assert _git(repo, "rev-parse", "HEAD") == target
+    assert not any(args[0] in {"reset", "clean"} for args in calls)
+    assert not any("--force" in args for args in calls)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("invalid", ["duplicate", "unknown", "missing", "branch"])
+def test_immutable_selection_validation_precedes_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def no_git(_path: Path, *args: str) -> str:
+        calls.append(args)
+        raise AssertionError("invalid selections must not reach git")
+
+    monkeypatch.setattr(mod, "_git", no_git)
+    refs = ["repo=" + "a" * 40]
+    if invalid == "duplicate":
+        refs += refs
+    elif invalid == "unknown":
+        refs.append("other=" + "b" * 40)
+    elif invalid == "missing":
+        refs = []
+    else:
+        refs = ["repo=dev"]
+    command = [
+        "checkout",
+        "--require-immutable-refs",
+        "--repo",
+        f"repo={tmp_path / 'repo'}",
+        "--output",
+        str(tmp_path / "refs.json"),
+    ]
+    for ref in refs:
+        command.extend(["--repo-ref", ref])
+    assert mod.main(command) == mod.USAGE_ERROR
+    assert calls == []
+
+
 # ---------------------------------------------------------------------------
 # The load-bearing RED: exists-but-WRONG (behind + dirty) leaks a stale SHA.
 # ---------------------------------------------------------------------------
