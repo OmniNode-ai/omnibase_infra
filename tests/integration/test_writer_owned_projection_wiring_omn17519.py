@@ -80,9 +80,10 @@ from omnibase_infra.runtime.auto_wiring.models.model_handler_routing_entry impor
 )
 from omnibase_infra.topology import load_topology_profile
 
-# The lane whose boot this gate reproduces. Its `tenant_projection` binding
-# declares `dsn_env: ONEX_TENANT_DB_URL`, which no onex-dev manifest binds.
+# The lane whose boot this gate reproduces. Its `tenant_projection` binding is
+# store-carried, so shared onex-dev pods must not require a tenant DSN in env.
 _ONEX_DEV_PROFILE = "onex-dev"
+_TENANT_PROJECTION_SECRET_REF = "database.tenant_projection.dsn"
 
 # Contracts the OMN-15905 dedicated-writer Deployments own on onex-dev
 # (k8s/onex-dev/runtime/deployment-omnimarket-projection-*-writer.yaml). Named
@@ -183,11 +184,13 @@ def _tenant_domain_target(
         topology,
     )
     assert any(
-        binding.dsn_env == "ONEX_TENANT_DB_URL" for binding in target.bindings
+        binding.secret_ref == _TENANT_PROJECTION_SECRET_REF
+        for binding in target.bindings
     ), (
-        "The onex-dev topology no longer routes a tenant-domain write to "
-        f"ONEX_TENANT_DB_URL (got {[b.dsn_env for b in target.bindings]}); this "
-        "gate would no longer reproduce the OMN-17519 boot failure."
+        "The onex-dev topology no longer routes a tenant-domain write to the "
+        f"tenant_projection store binding (got "
+        f"{[b.carrier_description for b in target.bindings]}); this gate would "
+        "no longer reproduce the OMN-17519 boot failure."
     )
     return target
 
@@ -211,10 +214,10 @@ def _projection_contracts_with_db_io() -> list[ModelDiscoveredContract]:
 def test_zero_route_entry_needs_no_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     """The assertion that was RED before the fix, on the real raise site.
 
-    With ``ONEX_TENANT_DB_URL`` unset — the onex-dev pod's actual environment —
-    building the projection dispatch callback for an entry this process cannot
-    dispatch used to raise ``ValueError: Projection handler requires topology
-    bindings with configured DSNs: tenant_projection:ONEX_TENANT_DB_URL``.
+    With no tenant credential in the onex-dev pod environment, building the
+    projection dispatch callback for an entry this process cannot dispatch used
+    to raise ``ValueError: Projection handler requires topology bindings with
+    configured DSNs`` for the tenant_projection binding.
     """
     monkeypatch.delenv("ONEX_TENANT_DB_URL", raising=False)
     target = _tenant_domain_target(_onex_dev_topology())
@@ -242,7 +245,10 @@ def test_dispatchable_entry_still_fails_closed_on_a_missing_dsn(
     monkeypatch.delenv("ONEX_TENANT_DB_URL", raising=False)
     target = _tenant_domain_target(_onex_dev_topology())
 
-    with pytest.raises(ValueError, match="ONEX_TENANT_DB_URL"):
+    with pytest.raises(
+        ValueError,
+        match=r"tenant_projection:secret_ref=database\.tenant_projection\.dsn",
+    ):
         _make_projection_dispatch_callback(
             _StubHandler(),
             target,

@@ -125,6 +125,19 @@ _PROFILES: dict[str, ModelRuntimeProfile] = {
         name="canary",
         prefetch_policy="disabled",
     ),
+    # OMN-17556: the consolidated TENANT-domain projection writer. It is the
+    # ONE process holding the tenant_projection binding's store-resolved
+    # credential, so every contract that resolves that binding names this
+    # profile and nothing else. Role identity matters here for the same reason
+    # it matters for effects/workers: the resolved profile name is what decides
+    # ownership, and falling through to "default" would put a second claimant
+    # on main-owned topics. prefetch_policy stays "disabled" like every other
+    # role-based profile -- the credential is resolved at the binding boundary
+    # through SecretResolver, not prefetched into the kernel.
+    "tenant-projection": ModelRuntimeProfile(
+        name="tenant-projection",
+        prefetch_policy="disabled",
+    ),
     "staging": ModelRuntimeProfile(
         name="staging",
         prefetch_policy="best_effort",
