@@ -84,12 +84,21 @@ jobs:
           # distance through the API, so it needs no history at all.
           persist-credentials: false
 
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-dev-lane-staleness
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
       - name: Does the dev lane track dev?
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/check_dev_lane_staleness.py
+          uv run python scripts/ci/check_dev_lane_staleness.py
 
       - name: Positive control — the guard must fire on a known-old SHA
         # Runs even when the step above went red: proving the guard fires is
@@ -105,6 +114,6 @@ jobs:
           # calls THIS fresh, the guard is broken.
           OLD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits?sha=dev&per_page=1&page=30" --jq '.[0].sha')"
           echo "positive control probe SHA: ${OLD_SHA}"
-          python3 scripts/ci/check_dev_lane_staleness.py \
+          uv run python scripts/ci/check_dev_lane_staleness.py \
             --deployed-revision "${OLD_SHA}" \
             --positive-control
