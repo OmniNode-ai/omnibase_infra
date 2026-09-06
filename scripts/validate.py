@@ -31,6 +31,7 @@ Usage:
 """
 
 import argparse
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -113,15 +114,15 @@ def _repository_root(cwd: Path) -> Path | None:
     """
     resolved_cwd = cwd.resolve()
     expected_root = Path(__file__).resolve().parent.parent
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        print("Imperative Orchestrators: ERROR (git-worktree-root-unresolved)")
+        return None
+
     try:
         result = subprocess.run(
             [
-                "/usr/bin/env",
-                "-i",
-                "PATH=/usr/bin:/bin",
-                "GIT_CONFIG_NOSYSTEM=1",
-                "GIT_TERMINAL_PROMPT=0",
-                "/usr/bin/git",
+                git_executable,
                 "-C",
                 str(resolved_cwd),
                 "rev-parse",
@@ -129,6 +130,10 @@ def _repository_root(cwd: Path) -> Path | None:
             ],
             capture_output=True,
             check=True,
+            env={
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+            },
             text=True,
             timeout=10,
         )
