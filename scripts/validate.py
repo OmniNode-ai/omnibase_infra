@@ -31,6 +31,7 @@ Usage:
 """
 
 import argparse
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -103,21 +104,38 @@ _ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
 
 
 def _repository_root(cwd: Path) -> Path | None:
-    """Resolve the nearest Git worktree root at or above ``cwd``.
+    """Resolve this validator's physical Git worktree root from ``cwd``.
 
-    A linked worktree records its root in a ``.git`` file while an ordinary
-    checkout uses a ``.git`` directory. Both are repository metadata; neither
-    depends on a caller-selected checkout basename. A validator invoked outside
-    a worktree must fail closed rather than infer a root from its current path.
+    A filesystem entry called ``.git`` does not establish repository identity:
+    it can be an empty marker in a nested directory. Ask Git for the worktree
+    root, then require the physical result to be the repository that owns this
+    script. A validator invoked outside that worktree must fail closed.
     """
     resolved_cwd = cwd.resolve()
-    for candidate in (resolved_cwd, *resolved_cwd.parents):
-        if (candidate / ".git").exists():
-            return candidate
+    expected_root = Path(__file__).resolve().parent.parent
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(resolved_cwd), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=10,
+        )
+        git_root = Path(result.stdout.strip()).resolve(strict=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(
+            "Imperative Orchestrators: ERROR "
+            f"(cannot resolve Git worktree root from {resolved_cwd}: {exc})"
+        )
+        return None
+
+    if git_root == expected_root:
+        return git_root
 
     print(
         "Imperative Orchestrators: ERROR "
-        f"(cannot resolve repository root from Git metadata above {resolved_cwd})"
+        f"(Git worktree root {git_root} does not match validator repository "
+        f"{expected_root})"
     )
     return None
 

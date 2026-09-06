@@ -32,7 +32,7 @@ _ACCEPTED_H2_NODES = {
 
 @pytest.fixture
 def validate_module(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Load the script for one test without leaving a module in ``sys.modules``."""
+    """Load the script without leaking module or import-path state between tests."""
     spec = importlib.util.spec_from_file_location(
         "omnibase_infra_validate", _VALIDATE_PATH
     )
@@ -40,6 +40,7 @@ def validate_module(monkeypatch: pytest.MonkeyPatch) -> Any:
         raise ImportError(f"Could not load validator from {_VALIDATE_PATH}")
 
     module = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
     monkeypatch.setitem(sys.modules, "omnibase_infra_validate", module)
     spec.loader.exec_module(module)
     return module
@@ -74,12 +75,29 @@ def test_arch004_identity_uses_git_root_from_nested_worktree_directory(
     """ARCH-004 runs from a nested directory against the worktree baseline."""
     monkeypatch.chdir(_REPO_ROOT / "scripts")
 
+    assert validate_module._repository_root(Path.cwd()) == _REPO_ROOT.resolve()
+
     assert validate_module.run_imperative_orchestrators(
         files=[
             "src/omnibase_infra/nodes/node_chain_orchestrator/handlers/"
             "handler_chain_replay_complete.py"
         ]
     )
+
+
+@pytest.mark.unit
+def test_arch004_identity_fails_closed_for_a_fake_nested_git_marker(
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A nested filesystem marker cannot replace the validator's Git root."""
+    fake_checkout = tmp_path / "fake-checkout"
+    (fake_checkout / ".git").mkdir(parents=True)
+    (fake_checkout / "pyproject.toml").write_text(
+        "[project]\nname = 'omnibase_infra'\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(fake_checkout)
+
+    assert validate_module._repository_root(Path.cwd()) is None
 
 
 @pytest.mark.unit
