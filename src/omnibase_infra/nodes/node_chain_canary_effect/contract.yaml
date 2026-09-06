@@ -23,6 +23,11 @@
 #     ingress HTTP response, and the receipt carries a status per
 #     OMN-16025 chain link
 #   - OMN-16025: the five-link delegation gate this canary reports against
+#   - OMN-16931 (regression, 2026-09-06): the readback's backward seek
+#     clamped to offset 0 instead of to the partition's log start, so a
+#     truncated terminal topic was skipped entirely and every scheduled run
+#     of the day reported TERMINAL_MISSING while the terminal for its own
+#     correlation id sat on the bus. Clamped to beginning_offsets.
 #   - OMN-16963: paid link 2's debt. Link 2 now has a real leg — a
 #     correlation-scoped readback of delegation_workflow_state — and a
 #     non-passing link 2 fails the SCALAR verdict, not only
@@ -41,11 +46,22 @@ node_type: "EFFECT_GENERIC"
 # fix — every non-passing projection and ledger outcome is now a verdict the
 # handler can actually emit, and LEDGER_REPLAY_UNREADABLE closes the last
 # EnumLedgerReplayStatus member (ERROR) that had no declared page.
+#
+# 1.2.0 -> 1.2.1: fix, no declared surface change. The correlation-scoped
+# readback's backward seek was clamped to offset 0, which is a valid floor
+# only for a partition that has never been truncated. Once retention advanced
+# a terminal topic's log start above 0 the seek was OFFSET_OUT_OF_RANGE, the
+# broker refused the fetch, and auto_offset_reset="latest" silently
+# repositioned the consumer past every record already written — so the run
+# emitted TERMINAL_MISSING for a terminal that was on the bus. Clamped to each
+# partition's own beginning offset. No verdict, input or output changed; the
+# verdicts this node already declares are simply reachable for the right
+# reasons again.
 contract_version:
   major: 1
   minor: 2
-  patch: 0
-node_version: "1.2.0"
+  patch: 1
+node_version: "1.2.1"
 description: >
   Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, and checks the platform quarantine sink for the same id. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof.
 
