@@ -104,7 +104,39 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # by a real actor. Somebody disagreed with a previous close, and re-closing
     # it from the same mechanism is exactly the disagreement being overruled by
     # a cron tick. Read live from `stateHistory`, never inferred.
+    #
+    # OMN-16106 D2. Reached by TWO independent branches now. The original one
+    # asks whether the reverted Done was written with a null `actorId`, on the
+    # premise that an integration write has no actor; that premise is FALSE for
+    # this sweep — `LINEAR_API_KEY` is a personal key and Linear attributes its
+    # writes to that user, measured live on OMN-17957 — so it never fired on
+    # the population it was built for. The second branch reads what is actually
+    # durable: the closer's own audit comment (`_FLIP_COMMENT_CLASS_MARKER`)
+    # carrying the verdict fingerprint, plus any completed -> non-completed
+    # transition on the ticket. Same verdict + a reversal = refuse. A CHANGED
+    # verdict has a different fingerprint and is free to close, so the hold is
+    # on re-asserting an overruled statement, not on the ticket forever.
     SKIPPED_PRIOR_REVERT = "skipped_prior_revert"
+    # OMN-16106, D1. The ticket's own description (or a Linear-linked
+    # attachment) CITES a product PR that is not merged. This is the OMN-13856
+    # done-flip guard's `pr_not_merged` refusal, replicated: that guard runs at
+    # the tool seam of an interactive Linear write and correctly refused this
+    # exact flip on OMN-17957 at 17:21:23Z, and the closer -- which writes
+    # through the Linear API from a GitHub Actions runner and never crosses
+    # that seam -- flipped the same ticket twice anyway, because nothing in its
+    # predicate asks whether the work the ticket cites actually landed.
+    #
+    # dod_verify cannot supply this: it verifies the OCC contract's checks, and
+    # an acceptance criterion whose evidence is "this PR is merged" is
+    # structurally invisible to it when the citation lives only in the ticket
+    # body. Evidence-companion (`onex_change_control`) refs are excluded on the
+    # OMN-14641 reasoning -- a receipt companion neither satisfies nor blocks a
+    # product ticket's Done.
+    #
+    # HELD, never judged: the ticket is left exactly as it was and re-offered
+    # on the next tick, so the merge of the cited PR is all that is needed to
+    # close it -- no human relaunch.
+    SKIPPED_REFERENCED_PR_UNMERGED = "skipped_referenced_pr_unmerged"
     # OMN-17658. `max_flips_per_run` was already spent by earlier candidates in
     # this run. The bound is a blast-radius cap, not a verdict: the candidate
     # reached no decision about its evidence and the next run will offer it
@@ -138,6 +170,27 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # reached on a path that was already going to refuse the flip — it is
     # never consulted before a write.
     SKIPPED_LIVE_SURFACE_UNAVAILABLE = "skipped_live_surface_unavailable"
+    # OMN-16106, class (d). The sibling hold, and a DIFFERENT fact from the
+    # one above: no check reported an unreachable surface, because the check
+    # that would have read it never ran at all. The verdict carries a SKIPPED
+    # entry (with or without a typed `unverifiable_cause`) or an unbindable
+    # derived overlay (OMN-17323), dod_verify proved no behaviour, and nothing
+    # failed.
+    #
+    # This is the shape the class-(c) hold could not reach, and it is the one
+    # the staging-blocked population actually terminates in. OMN-17201 —
+    # writer at replicas 0, four MSK wire topics absent — came back from run
+    # 33993316390 as 3/30 verified, 0 failed, 26 non-probative, 0
+    # behaviour-proving, terminal status `skipped`, and was gap-commented
+    # twice within half an hour with "your acceptance criterion is not met".
+    # Nothing failed; nothing was learned either.
+    #
+    # Spelled separately from SKIPPED_LIVE_SURFACE_UNAVAILABLE on purpose. "I
+    # read the surface and it was dead" and "I never ran the check" are
+    # different facts, and an operator triaging a hold needs to know which one
+    # they are looking at. Both are holds: nothing written, candidate
+    # re-offered next tick.
+    SKIPPED_LIVE_CHECK_NOT_EXECUTED = "skipped_live_check_not_executed"
     # OMN-17658 bound readback. `issueUpdate` reported success but the
     # post-write read of the ticket's own state history did not show a
     # completed segment that the pre-write read did not already have. Recorded

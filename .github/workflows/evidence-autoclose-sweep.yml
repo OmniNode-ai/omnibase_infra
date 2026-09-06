@@ -60,10 +60,22 @@
 #   To fence:   gh variable set ONEX_AUTOCLOSE_EXCLUDE --repo OmniNode-ai/omnibase_infra --body 'OMN-1,OMN-2'
 #   To release: gh variable delete ONEX_AUTOCLOSE_EXCLUDE --repo OmniNode-ai/omnibase_infra
 #
-# A hand-maintained standing list goes stale in the direction of refusing to
-# close a ticket that is genuinely done — the safe direction, but still a cost.
-# Feeding it mechanically from `scripts/triage_fences.py` `fenced_tickets` is
-# the OMN-17891 follow-on slice; the typed input is the same either way.
+# WHAT THE FENCE MAY ASSERT — narrowed 2026-09-05, node_version 1.6.0.
+# Operator ruling, firm, 2026-09-05T20:45:51Z (omni_home
+# `docs/tracking/ROLLING_WORK_LEDGER.md:3372`): ticket closure is
+# ownership-agnostic. When the acceptance criteria are met on live evidence the
+# ticket is closed, whoever it is assigned to; assignee and fence ownership
+# never hold a Done-eligible ticket open. So the only thing either fence may
+# assert is a CONCURRENT WRITE — another lane is writing this ticket right now,
+# evidenced by a live ledger CLAIM row inside this run's window.
+#
+# A refusal here is silent: `skipped_excluded` is recorded before any Linear
+# read, so a fenced ticket produces no verdict and nothing on the board says
+# why. A standing list does not go stale in a visible direction — it stops
+# adjudicating, indefinitely. This variable carried 26 ids selected by who was
+# working them; it was emptied when this version landed, and it is not a place
+# to park ownership again. Entries are expected to be removed within hours, as
+# the CLAIM row that justified each one terminates.
 #
 # All of the above is pinned by
 # `tests/ci/test_evidence_autoclose_sweep_apply_input.py` (CLAUDE.md rule 5 —
@@ -990,6 +1002,11 @@ jobs:
           cache="${RUNNER_TEMP}/cwd-repo-cache"
           mkdir -p "${cache}"
           : > "${RUNNER_TEMP}/cwd-materialisation.tsv"
+          # OMN-17975: one row per destination recording whether dod_verify can
+          # establish that tree's freshness. Read back into the step summary
+          # below so a clone that could NOT be normalised is named in the run's
+          # own record rather than inferred later from a refused check.
+          : > "${RUNNER_TEMP}/cwd-freshness.tsv"
 
           while IFS=$'\t' read -r dest repo; do
             [ -n "${dest:-}" ] || continue
@@ -1002,6 +1019,17 @@ jobs:
               echo "  ${dest}: ALREADY_PRESENT_GATE_CHECKOUT"
               printf '%s\t%s\t%s\n' "${dest}" "${repo}" "ALREADY_PRESENT_GATE_CHECKOUT" \
                 >> "${RUNNER_TEMP}/cwd-materialisation.tsv"
+              # OMN-17975. See the block at the bottom of this loop for why.
+              # This tree IS `github.workspace`, so `--no-move` is doubly
+              # required here: the gate venv was synced against this source, and
+              # the post-sweep purity assertion would otherwise be measuring a
+              # different tree than the one it installed.
+              freshness_out="$("${GITHUB_WORKSPACE}/scripts/ci/normalize_product_clone.sh" --no-move \
+                "${target}" "https://github.com/OmniNode-ai/${repo}.git" dev 2>&1)" \
+                && freshness_rc=0 || freshness_rc=$?
+              echo "    freshness: ${freshness_out}"
+              printf '%s\t%s\t%s\n' "${dest}" "${freshness_rc}" "${freshness_out%%$'\n'*}" \
+                >> "${RUNNER_TEMP}/cwd-freshness.tsv"
               continue
             fi
             # Containment, asserted before anything destructive runs.
@@ -1051,6 +1079,54 @@ jobs:
             echo "  ${dest}: ${status} -> ${target}"
             printf '%s\t%s\t%s\n' "${dest}" "${repo}" "${status}" \
               >> "${RUNNER_TEMP}/cwd-materialisation.tsv"
+
+            # OMN-17975. Everything above produces a DETACHED HEAD, and a
+            # detached tree is one dod_verify refuses to execute in.
+            #
+            # `REUSED_OMNIMARKET_CHECKOUT` and `REUSED_OCC_CHECKOUT` copy an
+            # `actions/checkout` tree pinned to a resolved SHA; `CLONED_DEV`
+            # produces a branch but a `cp -a` of a cached copy carries whatever
+            # state the cache had. `EvidenceCollector` establishes freshness by
+            # reading `@{upstream}`, which fails outright on a detached HEAD
+            # ("fatal: HEAD does not point to a branch") — so the resolution is
+            # UNKNOWN, the cause is PRODUCT_CLONE_FRESHNESS_UNKNOWN, and the
+            # check is refused UNEXECUTED. Since OMN-16434 mints exactly one
+            # cwd-anchored behaviour proof per companion, that refusal landed on
+            # the ONLY behaviour-proving check every candidate had, and
+            # `behavior_proving_count` was 0 for the whole corpus across 24
+            # consecutive scheduled runs.
+            #
+            # Measured on the runner, dispatch dry-run 33997616996,
+            # 2026-09-05T23:05:36Z, against OMN-17907:
+            #   [skipped] dod-occ-diff-derived-behavior-proof:
+            #   PRODUCT_CLONE_NOT_FRESH: ... upstream <none> ... The command was
+            #   NOT executed.
+            #
+            # `--no-move`, deliberately, on EVERY dest — the defect is the
+            # missing upstream, not the commit. Two things downstream are pinned
+            # to the SHA these trees already carry: the OMN-14060 drift guard
+            # asserted in the next step requires
+            # `${OMNI_HOME}/omnimarket` HEAD == the commit co-installed into the
+            # dispatch venv, and the gate venv is synced against
+            # `github.workspace`. Fast-forwarding either would hard-fail the job
+            # on a race that only happens when a repo's `dev` advances during
+            # the run. So this establishes the upstream WITHOUT moving anything,
+            # and a tree that has genuinely fallen behind is reported BEHIND and
+            # left alone — its checks stay refused on the honest, pre-existing
+            # terms rather than being executed against a tree nobody chose.
+            #
+            # A failure here is a warning, not a job failure, for the same
+            # reason: the outcome it leaves is exactly the outcome that was
+            # already happening.
+            freshness_out="$("${GITHUB_WORKSPACE}/scripts/ci/normalize_product_clone.sh" --no-move \
+              "${target}" "https://github.com/OmniNode-ai/${repo}.git" dev 2>&1)" \
+              && freshness_rc=0 || freshness_rc=$?
+            echo "    freshness: ${freshness_out}"
+            if [ "${freshness_rc}" -ne 0 ]; then
+              echo "::warning::OMN-17975 ${dest}: freshness could not be established (exit ${freshness_rc}). Behaviour checks pinned at this cwd stay refused as PRODUCT_CLONE_NOT_FRESH."
+            fi
+            printf '%s\t%s\t%s\n' "${dest}" "${freshness_rc}" "${freshness_out%%$'\n'*}" \
+              >> "${RUNNER_TEMP}/cwd-freshness.tsv"
           done < "${RUNNER_TEMP}/cwd-dests.tsv"
 
           # One environment per repo, in that repo, built by that repo's own
@@ -1086,6 +1162,18 @@ jobs:
             while IFS=$'\t' read -r dest repo status; do
               echo "| \`${dest}\` | ${repo} | ${status} |"
             done < "${RUNNER_TEMP}/cwd-materialisation.tsv"
+            echo ""
+            echo "### OMN-17975 product-clone freshness"
+            echo ""
+            echo "A dest whose \`exit\` is not 0 has no establishable freshness, so every"
+            echo "behaviour check pinned there is refused UNEXECUTED as PRODUCT_CLONE_NOT_FRESH"
+            echo "and cannot contribute to \`behavior_proving_count\`."
+            echo ""
+            echo "| dest | exit | detail |"
+            echo "| --- | --- | --- |"
+            while IFS=$'\t' read -r dest rc detail; do
+              echo "| \`${dest}\` | ${rc} | ${detail} |"
+            done < "${RUNNER_TEMP}/cwd-freshness.tsv"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # OMN-16902, second pass. Materialising ${OMNI_HOME}/omnimarket ARMS the
@@ -1426,6 +1514,47 @@ jobs:
           # To halt:    gh variable set ONEX_AUTOCLOSE_DISABLED --repo OmniNode-ai/omnibase_infra --body 1
           # To release: gh variable delete ONEX_AUTOCLOSE_DISABLED --repo OmniNode-ai/omnibase_infra
           ONEX_AUTOCLOSE_DISABLED: ${{ vars.ONEX_AUTOCLOSE_DISABLED }}
+          # OMN-17975. The per-check subprocess ceiling, named from a
+          # measurement instead of inherited from a default nobody sized for
+          # this job.
+          #
+          # OMN-17795 made this bound overridable and deliberately left the
+          # 30s default in `evidence_collector.py:217` alone, so a raise here
+          # cannot shift any other host's verdict timing. Nothing ever set the
+          # override, so this job ran every behaviour check under a ceiling
+          # authored for a developer laptop.
+          #
+          # It has not been the binding constraint here — the clone-freshness
+          # defect above meant these commands were never executed at all — but
+          # it becomes one the moment they are, and these are the three
+          # measurements it is sized against:
+          #
+          #   11,375 ms  the OMN-17907 behaviour command executed end to end on
+          #              a GitHub runner (onex_change_control receipt
+          #              drift/dod_receipts/OMN-17907/
+          #              dod-occ-diff-derived-behavior-proof/
+          #              test_passes.supersede.2310.yaml: exit_code 0,
+          #              duration_ms 11375, "13 passed in 0.68s" — i.e. ~10.7s
+          #              of `uv run` resolution and collection, 0.68s of test).
+          #   19,850 ms  the same shape of check on the one run it reached
+          #              VERIFIED across 36 controlled runs
+          #              (evidence_collector.py:205-212), 18.3s of it import
+          #              and collection overhead.
+          #   77,000 ms  a hand-timed control of the identical command at host
+          #              load 54 (same comment block).
+          #
+          # 180s is ~16x the clean measurement and ~2.3x the worst observed. The
+          # per-run arithmetic that keeps this inside `timeout-minutes: 60`:
+          # `max_companions` caps enumeration at 50, OMN-16434 mints at most one
+          # cwd-anchored behaviour check per companion, and the measured
+          # population that actually reaches dod_verify is far smaller (5 of 29
+          # in scheduled run 33996170457 — the rest are skipped_already_done,
+          # excluded, or parents). At 180s the realistic worst case is ~15
+          # minutes of behaviour checks against a ~50-minute budget. A raise
+          # past this point would need the job timeout raised in the same
+          # change, because a job killed at 60 minutes reports nothing at all,
+          # which is a strictly worse signal than a named CHECK_BUDGET_EXCEEDED.
+          DOD_VERIFY_CHECK_TIMEOUT_S: "180"
           # OMN-17658 AUTO-DISARM, the persisted half.
           #
           # The node disarms ITSELF within a run the moment a candidate proves

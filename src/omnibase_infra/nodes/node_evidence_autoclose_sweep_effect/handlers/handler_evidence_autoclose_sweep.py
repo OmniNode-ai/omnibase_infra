@@ -100,6 +100,40 @@ Pipeline
    read runs in BOTH modes: it is a read, so DRY-RUN stays zero-write, and a
    DRY-RUN report is then an honest preview of what ``--apply`` would post.
 
+Holds: what the sweep refuses to SAY, not only what it refuses to write
+-----------------------------------------------------------------------
+A gap comment asserts "your acceptance criterion is not met". Two verdict
+shapes cannot support that sentence, and both are HELD instead — nothing
+written, nothing judged, candidate re-offered on the next tick:
+
+* ``SKIPPED_LIVE_SURFACE_UNAVAILABLE`` (class c) — a check RAN and the
+  surface it reads was dead (see ``_live_surface_unavailable``).
+* ``SKIPPED_LIVE_CHECK_NOT_EXECUTED`` (class d) — nothing failed, nothing
+  proved behaviour, and a check never ran at all (see
+  ``_live_check_not_executed``). This is the shape the staging-blocked
+  population actually terminates in; class (c) fired zero times against it
+  across runs 33986056683, 33991898262 and 33993316390.
+
+Both classifiers have exactly one call site each, both placed after every
+flip path has already returned, so neither hold is reachable from a write.
+That placement is the invariant and a test reads the source to enforce it.
+
+The gap-comment fingerprint keys on the SET OF CHECKS that withheld the flip
+plus this node's contract version, not on the verdict counters — see
+``_gap_fingerprint_parts`` for the OMN-17201 regrade that minted the same
+statement twice.
+
+Fences: closure is ownership-agnostic
+-------------------------------------
+Operator ruling, firm, 2026-09-05T20:45:51Z, recorded at omni_home
+``docs/tracking/ROLLING_WORK_LEDGER.md:3372``: when the acceptance criteria
+are met on live evidence the ticket is closed, whoever it is assigned to;
+assignee and fence ownership never hold a Done-eligible ticket open. This
+node accordingly reads no assignee, no ownership signal and no ledger. The
+only per-candidate refusal it can reach is ``exclude_tickets``, a caller
+assertion whose sole admissible meaning is a CONCURRENT WRITE — another lane
+is writing this ticket right now, evidenced by a live ledger CLAIM row.
+
 Non-blocking Design
 --------------------
 Per-ticket failures (Linear API errors, dod_verify crashes) are recorded in
@@ -286,6 +320,12 @@ query GetIssue($id: String!) {
     # would truncate, so the guard treats a full page as unreadable rather than
     # as "these are all the children" (see `_open_children`).
     children(first: 100) { nodes { id identifier state { id name type } } }
+    # OMN-16106 D1. The Linear GitHub integration links a PR as an ATTACHMENT,
+    # not as a `#N` mention in the body, so a ticket whose product PR is linked
+    # but never cited would clear the cited-PR conjunct on an empty ref set —
+    # which is the OMN-14582 false-Done shape the done-flip guard closed by
+    # reading exactly this connection (`augment_description_with_attachments`).
+    attachments(first: 50) { nodes { url } }
   }
 }
 """
@@ -334,12 +374,24 @@ query IssueComments($id: String!, $after: String) {
 # one readback are all resolved from:
 #
 #   * the PRIOR-REVERT fence — did a closer flip on this ticket already get
-#     undone by a real person? `actorId` is null for an integration/API write
-#     (which is what this sweep's LINEAR_API_KEY mutation is) and set for a
-#     human, so "a completed segment opened with actorId null and closed by an
-#     entry carrying an actorId" is exactly the shape of "the closer said Done
-#     and somebody disagreed". Same discrimination
-#     node_sync_revert_watchdog_effect makes, one direction over.
+#     undone by a real person?
+#
+#     The `actorId`-null half of that fence rests on a premise that is FALSE,
+#     measured live on 2026-09-05T20:33Z against OMN-17957: every entry in that
+#     ticket's history — including the sweep's OWN flip at 19:36:02.430Z —
+#     carries `actorId 7a850ce1-f95e-431f-b4e3-62f7449f04c0`. `LINEAR_API_KEY`
+#     is a PERSONAL api key, and Linear attributes its writes to the user who
+#     minted it, exactly like a human's. So "a completed segment opened with
+#     actorId null" never matches a flip this closer writes, and the fence was
+#     structurally dead for the population it exists to protect: OMN-17957 was
+#     flipped, reverted by the audit lane at 19:28:17Z, and re-flipped eight
+#     minutes later with a byte-identical verdict.
+#
+#     `_prior_revert_reason` therefore anchors on `_FLIP_COMMENT_CLASS_MARKER`
+#     — the closer's own signature, written by the closer, on the ticket — and
+#     on the verdict fingerprint that comment carries. The `actorId` shape is
+#     KEPT as a second, independent branch: it is the only thing that can
+#     identify a pre-OMN-17658 flip, which has no marker.
 #   * the RUN DISARM — the first such candidate stops the rest of the run
 #     writing.
 #   * the BOUND READBACK — the pre-write newest entry id, compared against the
@@ -402,6 +454,31 @@ _COMPANION_PRODUCT_PR_RE = re.compile(r"\bfor\s+([\w.-]+/[\w.-]+)#(\d+)\b")
 # above is still what the fence reads. Both agree on the OMN-17292 case.
 _FLIP_COMMENT_CLASS_MARKER = "<!-- onex-autoclose class=flipped -->"
 
+# OMN-16106 D2. The fingerprint line every flip audit comment ends with. It is
+# what makes "the closer has already said exactly this about this ticket"
+# readable off the ticket itself, months later, by a run that shares no state
+# with the run that wrote it.
+_FLIP_FINGERPRINT_RE = re.compile(r"Verdict fingerprint ([0-9a-f]{16})\b")
+
+# OMN-16106 D1. The three cited-PR spellings, and the evidence-companion repo
+# that is filtered out of the set. See `_cited_product_pr_refs`.
+_CITED_PR_URL_RE = re.compile(
+    r"https?://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)", re.IGNORECASE
+)
+_CITED_PR_OWNER_REPO_HASH_RE = re.compile(
+    r"\b(OmniNode-ai/[\w.-]+)#(\d+)\b", re.IGNORECASE
+)
+_CITED_PR_BARE_NUMBER_RE = re.compile(
+    r"\b(?:pr|pull(?:\s+request)?)\b[:\s-]*#(\d+)\b", re.IGNORECASE
+)
+_WEAK_SIGNAL_PR_REPOS = frozenset({"onex_change_control"})
+
+# Upper bound on the cited-PR refs one candidate may be checked against. A
+# description citing more than this is not checked partially and waved through:
+# it is HELD, because a partially-verified citation set is exactly the reading
+# that let the OMN-17957 flip through.
+_MAX_CITED_PR_REFS = 25
+
 # Page cap for the comment-history read. Exhausting it WITHOUT reaching the end
 # of the connection is an unreadable history, not an empty one — the caller
 # fails closed. 5 x 100 comfortably exceeds any real ticket's comment count;
@@ -445,8 +522,35 @@ _LIVE_SURFACE_UNAVAILABLE_SIGNALS: tuple[str, ...] = (
 )
 
 #: Per-check records on the dod_verify terminal payload. Read for the class-(c)
-#: classifier only; every counter the flip predicate consults is unchanged.
+#: and class-(d) classifiers and for the gap fingerprint; every counter the
+#: flip predicate consults is unchanged.
 _DOD_VERIFY_CHECKS_KEY = "checks"
+
+# The per-check fields this module reads, named once. They are declared on
+# `ModelEvidenceCheckResult` in omnimarket; the closer sees them as JSON.
+_CHECK_ID_KEY = "evidence_id"
+_CHECK_STATUS_KEY = "status"
+_CHECK_MESSAGE_KEY = "message"
+#: OMN-16788. Why a check could not be EVALUATED AT ALL. Typed, and only ever
+#: present on a SKIPPED result — `ModelEvidenceCheckResult._cause_requires_skipped`
+#: rejects the combination structurally, which is why this module keys on the
+#: pair and never on a status spelled "unverifiable" (no producer emits one).
+_CHECK_UNVERIFIABLE_CAUSE_KEY = "unverifiable_cause"
+#: OMN-17323. A verifier-derived `::pr-live-state` overlay whose binder derived
+#: no (repo, pr) pair: synthetic, never executed, and incapable of passing.
+_CHECK_UNBINDABLE_OVERLAY_KEY = "unbindable_derived_overlay"
+
+#: Per-check statuses, as `EnumEvidenceCheckStatus` spells them.
+_CHECK_STATUS_VERIFIED = "verified"
+_CHECK_STATUS_FAILED = "failed"
+_CHECK_STATUS_SKIPPED = "skipped"
+_CHECK_STATUS_SUPERSEDED = "superseded"
+
+#: This node's own `contract.yaml` `node_version`, part of the gap-comment
+#: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
+#: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
+#: cannot drift into describing a rule the closer no longer applies.
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.7.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -675,12 +779,16 @@ def _closer_flip_was_reverted(history: list[dict[str, object]]) -> str:
     would be a fence on the wrong thing; what must not be overruled by a cron
     tick is a person disagreeing with THIS MECHANISM's close.
 
-    A pre-OMN-17658 flip is only distinguishable this way. Flips written from
-    this commit onward also carry ``_FLIP_COMMENT_CLASS_MARKER`` on their audit
-    comment, which is the stronger anchor; it is not read here because it would
-    cost a comment-history call on every candidate to identify a condition the
-    ``actorId`` shape already identifies for the whole corpus, including the
-    OMN-17292 case this fence exists for.
+    OMN-16106: this branch is now the SECOND of two, and the weaker one. Its
+    premise — "``actorId`` is null for this sweep's own writes" — is false, and
+    was measured false on 2026-09-05T20:33Z: every history entry on OMN-17957,
+    including the sweep's 19:36:02.430Z flip, carries a real ``actorId``
+    because ``LINEAR_API_KEY`` is a personal key. It is kept because it is the
+    only thing that can identify a PRE-OMN-17658 flip, which has no audit
+    comment to anchor on; a flip written from that commit onward carries
+    ``_FLIP_COMMENT_CLASS_MARKER`` and is caught by the marker-anchored branch
+    in ``_process_ticket`` instead, which is where the comment-history read is
+    paid — scoped to candidates that have actually been reverted.
     """
     ordered = _newest_first(history)
     for index, entry in enumerate(ordered):
@@ -733,6 +841,111 @@ def _completed_entry_since(history: list[dict[str, object]], head_entry_id: str)
         if isinstance(to_state, dict) and str(to_state.get("type")) == "completed":
             return entry_id
     return ""
+
+
+def _newest_revert_entry_id(history: list[dict[str, object]]) -> str:
+    """Id of the newest ``completed -> non-completed`` transition, or "".
+
+    Author-agnostic on purpose. WHO reopened the ticket is a separate question
+    from WHETHER it was reopened, and conflating the two is what left the
+    OMN-17934 fence unable to see the 2026-09-05 audit revert.
+    """
+    for entry in _newest_first(history):
+        from_state = entry.get("fromState")
+        to_state = entry.get("toState")
+        if not isinstance(from_state, dict) or not isinstance(to_state, dict):
+            continue
+        if str(from_state.get("type")) != "completed":
+            continue
+        if str(to_state.get("type")) == "completed":
+            continue
+        return str(entry.get("id") or "")
+    return ""
+
+
+def _prior_flip_fingerprints(bodies: tuple[str, ...]) -> frozenset[str]:
+    """Verdict fingerprints this closer has already flipped this ticket on.
+
+    Read from the closer's OWN audit comments — the ones carrying
+    ``_FLIP_COMMENT_CLASS_MARKER`` — and nothing else. A human comment that
+    happens to quote a fingerprint is not the closer having said it.
+    """
+    found: set[str] = set()
+    for body in bodies:
+        if _FLIP_COMMENT_CLASS_MARKER not in body:
+            continue
+        found.update(match.group(1) for match in _FLIP_FINGERPRINT_RE.finditer(body))
+    return frozenset(found)
+
+
+def _cited_product_pr_refs(
+    description: str, attachment_urls: tuple[str, ...]
+) -> tuple[tuple[str | None, int], ...]:
+    """Product-PR references this ticket cites, de-duplicated, order-stable.
+
+    A replication of the OMN-13856 done-flip guard's ``parse_pr_refs`` +
+    ``is_weak_signal_ref`` pair (``omniclaude`` ``linear_done_verify.py``),
+    reproduced here rather than imported because that guard is a Claude Code
+    ``PreToolUse`` hook in another repo, above this one in the layer graph, and
+    this handler runs on a GitHub Actions runner that has no omniclaude
+    checkout. The three shapes are the three the guard measured live:
+
+      * a full ``https://github.com/<owner>/<repo>/pull/<n>`` URL;
+      * ``OmniNode-ai/<repo>#<n>`` — what Linear's rich-text layer rewrites a
+        pasted PR URL into, deleting the literal ``github.com`` substring
+        (OMN-14882). This is the spelling OMN-17957's AC-5 carries;
+      * a bare ``PR #<n>`` / ``pull request #<n>``, which resolves to no repo
+        and is returned with ``None`` — unresolvable, never assumed merged. The
+        adjacent PR token is required (OMN-15025): a bare ``#4`` in prose is
+        "Rule #4", and a fence that false-holds is still a defect.
+
+    ``onex_change_control`` refs are dropped (OMN-14641): an evidence companion
+    is a receipt, not the shipped work, and neither satisfies nor blocks a
+    product ticket's Done.
+    """
+    refs: dict[tuple[str | None, int], None] = {}
+
+    for match in _CITED_PR_URL_RE.finditer(description):
+        repo = f"{match.group(1)}/{match.group(2)}"
+        refs[(repo, int(match.group(3)))] = None
+    for url in attachment_urls:
+        for match in _CITED_PR_URL_RE.finditer(url):
+            repo = f"{match.group(1)}/{match.group(2)}"
+            refs[(repo, int(match.group(3)))] = None
+    for match in _CITED_PR_OWNER_REPO_HASH_RE.finditer(description):
+        refs[(match.group(1), int(match.group(2)))] = None
+    for match in _CITED_PR_BARE_NUMBER_RE.finditer(description):
+        number = int(match.group(1))
+        if any(existing == number for _, existing in refs):
+            continue
+        refs[(None, number)] = None
+
+    return tuple(
+        (repo, number)
+        for repo, number in refs
+        if (repo or "").rsplit("/", 1)[-1].lower() not in _WEAK_SIGNAL_PR_REPOS
+    )
+
+
+def _attachment_urls(issue: dict[str, object]) -> tuple[str, ...]:
+    """URLs of the ticket's Linear attachments; empty when the key is absent.
+
+    Absent is treated as empty rather than as unreadable, deliberately: the
+    description is the binding citation surface and the attachment connection
+    only ADDS refs. A payload shape without it (an older cache, a test double)
+    must not become a run-wide refusal.
+    """
+    connection = issue.get("attachments")
+    if not isinstance(connection, dict):
+        return ()
+    nodes = connection.get("nodes")
+    if not isinstance(nodes, list):
+        return ()
+    return tuple(
+        str(node.get("url"))
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("url"), str)
+    )
 
 
 def _mode_for(
@@ -1065,20 +1278,167 @@ def _live_surface_unavailable(verdict: dict[str, object]) -> tuple[str, str]:
     per-check records have carried that message all along; the closer simply
     never looked at them, reading only the counters beside them.
     """
-    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
-    if not isinstance(checks, list):
-        return "", ""
-    for check in checks:
-        if not isinstance(check, dict):
+    for check in _check_records(verdict):
+        status = _check_status(check)
+        eligible = status == _CHECK_STATUS_FAILED or (
+            status == _CHECK_STATUS_SKIPPED
+            and check.get(_CHECK_UNVERIFIABLE_CAUSE_KEY) is not None
+        )
+        # `status: "unverifiable"` is retained ONLY because this classifier
+        # shipped reading it (OMN-16106 / #3214) and removing a tolerated
+        # spelling is not this change's business. It is dead: EnumEvidence
+        # CheckStatus is verified|failed|skipped|superseded|non_probative, so
+        # no verifier has ever produced it, and reading it was half the reason
+        # the hold fired zero times in runs 33986056683, 33991898262 and
+        # 33993316390. The live spelling is the pair above.
+        eligible = eligible or status == "unverifiable"
+        if not eligible:
             continue
-        status = str(check.get("status", "")).strip().lower()
-        if status not in ("failed", "unverifiable"):
-            continue
-        message = str(check.get("message") or "").lower()
+        message = str(check.get(_CHECK_MESSAGE_KEY) or "").lower()
         for signal in _LIVE_SURFACE_UNAVAILABLE_SIGNALS:
             if signal in message:
-                return str(check.get("evidence_id") or "<unnamed check>"), signal
+                return _check_id(check), signal
     return "", ""
+
+
+def _check_records(verdict: dict[str, object]) -> tuple[dict[str, object], ...]:
+    """The per-check records, or nothing when the payload cannot be read.
+
+    Every consumer of `checks` in this module goes through here so that an
+    unreadable shape means the same thing in all of them: no attribution, no
+    hold, no fingerprint contribution — the pre-existing behaviour, never a
+    silent swallow.
+    """
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return ()
+    return tuple(check for check in checks if isinstance(check, dict))
+
+
+def _check_status(check: dict[str, object]) -> str:
+    return str(check.get(_CHECK_STATUS_KEY, "")).strip().lower()
+
+
+def _check_id(check: dict[str, object]) -> str:
+    return str(check.get(_CHECK_ID_KEY) or "<unnamed check>")
+
+
+def _live_check_not_executed(verdict: dict[str, object]) -> tuple[str, str]:
+    """The first check the run never executed.
+
+    Returns ``(evidence_id, why)``, or ``("", "")`` when every check ran.
+
+    OMN-16106, class (d). Its sibling above asks whether a check that RAN was
+    reading a dead surface. This asks the prior question — did the check run
+    at all — and it is the one the staging-blocked population answers "no"
+    to. A ticket whose live probe never executed has told the closer nothing
+    about its acceptance criterion, and "your acceptance criterion is not
+    met" is not a statement the run earned.
+
+    Two shapes count as "did not execute", and both are positively recorded
+    by the verifier rather than inferred from message text (the OMN-16788
+    rule):
+
+    * ``status == "skipped"`` — the check was not run. A typed
+      ``unverifiable_cause`` is quoted as the reason when present, because
+      "the credential could not read branch protection" is a different
+      operator action from "the probe was skipped"; its absence is not a
+      reason to treat the skip as informative.
+    * ``unbindable_derived_overlay`` — OMN-17323's synthetic
+      ``::pr-live-state`` overlay, which was never executed and can never
+      pass whatever status it carries.
+
+    What deliberately does NOT count is ``non_probative``. Such a check RAN
+    and exited 0; its exit status simply could not have gone the other way
+    for a product reason (OMN-15391). Holding on it would silence the
+    merge-state-only corpus — the exact population `gap_no_behavior_proof`
+    exists to report — so the boundary is drawn at execution, not at
+    probative value. ``superseded`` does not count either: a later item in
+    the same contract carries that verdict (OMN-15382).
+    """
+    for check in _check_records(verdict):
+        status = _check_status(check)
+        if check.get(_CHECK_UNBINDABLE_OVERLAY_KEY) is True:
+            return _check_id(check), "unbindable derived overlay (never executed)"
+        if status != _CHECK_STATUS_SKIPPED:
+            continue
+        cause = check.get(_CHECK_UNVERIFIABLE_CAUSE_KEY)
+        return _check_id(check), (
+            str(cause) if cause is not None else "the check did not execute"
+        )
+    return "", ""
+
+
+def _withheld_check_ids(verdict: dict[str, object]) -> tuple[str, ...]:
+    """Every check that is standing between this ticket and a Done flip.
+
+    Sorted and de-duplicated, so it is a SET and not a transcript: check
+    order is a verifier implementation detail and must not change what the
+    closer considers the same statement.
+
+    `verified` is excluded because it withholds nothing, and `superseded`
+    because a later item in the contract carries its verdict and it is
+    already out of `total_checks` (OMN-15390). Everything else — failed,
+    skipped, non-probative — is a check the flip predicate is still waiting
+    on, whichever of those three it happens to be graded as this rotation.
+    """
+    return tuple(
+        sorted(
+            {
+                _check_id(check)
+                for check in _check_records(verdict)
+                if _check_status(check)
+                not in (_CHECK_STATUS_VERIFIED, _CHECK_STATUS_SUPERSEDED)
+            }
+        )
+    )
+
+
+def _gap_fingerprint_parts(
+    verdict: dict[str, object],
+    *,
+    total_checks: int,
+    verified_count: int,
+    failed_count: int,
+    non_probative_count: int,
+) -> tuple[str, ...]:
+    """The identity of a gap statement: contract version + withheld check set.
+
+    OMN-16808 keyed this on the verdict's COUNTERS, and OMN-17201 measured
+    what that costs. Between run 33991898262 (21:06Z) and run 33993316390
+    (21:35Z) two of its checks moved from `failed` to `non_probative` with
+    nothing about the ticket changing — a regrade, not news. The counters
+    moved, so the digest moved, so the closer wrote the same unmet-criterion
+    assertion onto the ticket a second time within half an hour.
+
+    What a gap comment actually says is *these checks are what is standing
+    between this ticket and Done*. That is a set of ids. Two verdicts that
+    withhold the flip on the same checks are the same statement, and the same
+    statement is not repeated; a check entering or leaving the set is real
+    news and gets a fresh comment.
+
+    The node's contract version joins the key because the RULE that reads
+    those checks can change underneath a ticket. A closer that has learned to
+    say something new must be able to say it, and a version bump is exactly
+    the event that makes a standing statement stale.
+
+    FALLBACK, and it is fail-safe rather than fail-open: a verdict carrying
+    counters but no readable per-check records keys on the counters as
+    before. Keying such a payload on an empty set would make every gap on
+    that ticket identical, which trades a duplicate-on-regrade for a silence
+    the reader cannot distinguish from agreement.
+    """
+    withheld = _withheld_check_ids(verdict)
+    if withheld:
+        return (_GAP_FINGERPRINT_CONTRACT_VERSION, "withheld", *withheld)
+    return (
+        _GAP_FINGERPRINT_CONTRACT_VERSION,
+        "counters",
+        str(total_checks),
+        str(verified_count),
+        str(failed_count),
+        str(non_probative_count),
+    )
 
 
 def _gap_shortfall(
@@ -2129,6 +2489,20 @@ class HandlerEvidenceAutocloseSweep:
                 EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
                 EnumEvidenceAutocloseDecision.SKIPPED_FLIP_BUDGET_EXHAUSTED,
                 EnumEvidenceAutocloseDecision.SKIPPED_DISARMED,
+                # OMN-16106 D1. Same bucket, same reasoning: an unmerged cited
+                # PR is a statement about whether this mechanism may act, not a
+                # verdict on the ticket's evidence.
+                EnumEvidenceAutocloseDecision.SKIPPED_REFERENCED_PR_UNMERGED,
+                # OMN-16106 classes (c) and (d). Both holds belong here for the
+                # same reason: the run reached no opinion about the ticket's
+                # evidence, so a hold is a skip and never a gap. Class (c) was
+                # in NO bucket when it shipped, so a run that held a candidate
+                # reported `flipped + gap_posted + skipped + errored` one short
+                # of the outcomes it carried. `test_every_decision_is_tallied
+                # _in_exactly_one_bucket` is what stops the next decision being
+                # added without a bucket.
+                EnumEvidenceAutocloseDecision.SKIPPED_LIVE_SURFACE_UNAVAILABLE,
+                EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED,
             )
         )
         errored = sum(
@@ -2847,6 +3221,179 @@ class HandlerEvidenceAutocloseSweep:
                 behavior_proving_count=behavior_proving_count,
             )
 
+            # OMN-16106 D1. THE CITED-PR MERGE CONJUNCT — the OMN-13856
+            # done-flip guard's `pr_not_merged` refusal, replicated.
+            #
+            # That guard sits on the Linear MCP tool seam and refused this exact
+            # flip on OMN-17957 at 2026-09-05T17:21:23Z, correctly: AC-5 cited
+            # `OmniNode-ai/knowledge-base-internal#125`, which was open. The
+            # closer writes through the Linear HTTP API from an Actions runner,
+            # never crosses that seam, and flipped the ticket fourteen minutes
+            # later — then again at 19:36:02Z after the audit lane reverted it.
+            # Two mechanisms, one board, opposite answers, and the one with no
+            # human in front of it won.
+            #
+            # dod_verify cannot supply this conjunct: it verifies the OCC
+            # contract's checks, and a criterion whose evidence is "this PR
+            # merged" is invisible to it when the citation lives only in the
+            # ticket body. Fails CLOSED on a read failure, for the reason every
+            # other fence here does — "I could not check" must never resolve to
+            # "so I will flip it".
+            cited_refs = _cited_product_pr_refs(description, _attachment_urls(issue))
+            if len(cited_refs) > _MAX_CITED_PR_REFS:
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.SKIPPED_REFERENCED_PR_UNMERGED,
+                    reason=(
+                        f"pr_not_merged — the ticket cites {len(cited_refs)} "
+                        f"product PRs, above the {_MAX_CITED_PR_REFS} this "
+                        "conjunct will read in one candidate. Held rather than "
+                        "partially checked: a citation set verified in part is "
+                        "the reading that let the OMN-17957 flip through."
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                    verdict_fingerprint=fingerprint,
+                    pre_write_head_entry_id=pre_write_head_entry_id,
+                )
+            unmerged_citations: list[str] = []
+            for cited_repo, cited_number in cited_refs:
+                if cited_repo is None:
+                    # The guard blocks on an unresolvable ref and so does this.
+                    # "I cannot tell which repo this is" is not "it merged".
+                    unmerged_citations.append(
+                        f"#{cited_number}: no repo resolves from this citation "
+                        "— cite the full GitHub URL, or `OmniNode-ai/<repo>#N`"
+                    )
+                    continue
+                cited_payload, cited_error = await self._run_gh_command(
+                    ["gh", "api", f"repos/{cited_repo}/pulls/{cited_number}"],
+                    request.gh_timeout_seconds,
+                )
+                if not isinstance(cited_payload, dict):
+                    return ModelEvidenceAutocloseOutcome(
+                        ticket_id=ticket_id,
+                        companion_pr_number=companion_pr_number,
+                        companion_pr_url=companion_pr_url,
+                        decision=EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
+                        reason=(
+                            f"Could not read the cited PR {cited_repo}#"
+                            f"{cited_number}, so the OMN-13856 cited-PR merge "
+                            "conjunct could not be resolved: "
+                            f"{cited_error or 'no payload'}"
+                        ),
+                        dod_verify_total_checks=total_checks,
+                        dod_verify_verified_count=verified_count,
+                        dod_verify_failed_count=failed_count,
+                        dod_verify_non_probative_count=non_probative_count,
+                        dod_verify_behavior_proving_count=behavior_proving_count,
+                        verdict_fingerprint=fingerprint,
+                        pre_write_head_entry_id=pre_write_head_entry_id,
+                    )
+                if not cited_payload.get("merged_at"):
+                    state = str(cited_payload.get("state") or "unknown").upper()
+                    unmerged_citations.append(
+                        f"{cited_repo}#{cited_number}: state={state}, merged_at=null"
+                    )
+            if unmerged_citations:
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.SKIPPED_REFERENCED_PR_UNMERGED,
+                    reason=(
+                        "pr_not_merged — the ticket cites product PR(s) that "
+                        "have not merged, which is the OMN-13856 done-flip "
+                        "guard's refusal and is not a fact dod_verify's checks "
+                        "can see: "
+                        + "; ".join(unmerged_citations)
+                        + ". Held, not judged: merging the cited PR is all "
+                        "this candidate needs — the next tick re-offers it."
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                    verdict_fingerprint=fingerprint,
+                    pre_write_head_entry_id=pre_write_head_entry_id,
+                )
+
+            # OMN-16106 D2. THE PRIOR-REVERT FENCE, ANCHORED ON THE CLOSER'S
+            # OWN MARK rather than on a null `actorId`.
+            #
+            # `_closer_flip_was_reverted` above already ran and, for every flip
+            # this closer writes, cannot fire: measured 2026-09-05T20:33Z, the
+            # sweep's own 19:36:02.430Z flip on OMN-17957 carries a real
+            # `actorId` because `LINEAR_API_KEY` is a personal key. So the
+            # 19:28:17Z audit revert was invisible to it and the identical
+            # verdict was re-applied eight minutes later.
+            #
+            # This branch reads the two facts that ARE durable on the ticket:
+            # a completed -> non-completed transition in its history (whoever
+            # made it), and the closer's own audit comment carrying THIS
+            # verdict's fingerprint. Both together mean: this mechanism already
+            # said exactly this, somebody moved it back, and nothing about the
+            # evidence has changed since. A CHANGED verdict has a different
+            # fingerprint and is free to close — the hold is on re-asserting a
+            # verdict that was overruled, not on the ticket forever.
+            #
+            # Scoped to candidates that HAVE been reverted, so the ordinary
+            # candidate pays no comment read at all.
+            if _newest_revert_entry_id(history):
+                prior_bodies = await self._linear.fetch_comment_bodies(issue_id)
+                if prior_bodies is None:
+                    return ModelEvidenceAutocloseOutcome(
+                        ticket_id=ticket_id,
+                        companion_pr_number=companion_pr_number,
+                        companion_pr_url=companion_pr_url,
+                        decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                        reason=(
+                            "This ticket has been moved out of a completed "
+                            "state at least once, and its comment history — "
+                            "where a prior closer flip is identified — could "
+                            "not be read, so the prior-revert fence cannot be "
+                            "resolved." + _linear_error_detail(self._linear)
+                        ),
+                        dod_verify_total_checks=total_checks,
+                        dod_verify_verified_count=verified_count,
+                        dod_verify_failed_count=failed_count,
+                        dod_verify_non_probative_count=non_probative_count,
+                        dod_verify_behavior_proving_count=behavior_proving_count,
+                        verdict_fingerprint=fingerprint,
+                        pre_write_head_entry_id=pre_write_head_entry_id,
+                    )
+                if fingerprint in _prior_flip_fingerprints(prior_bodies):
+                    return ModelEvidenceAutocloseOutcome(
+                        ticket_id=ticket_id,
+                        companion_pr_number=companion_pr_number,
+                        companion_pr_url=companion_pr_url,
+                        decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                        reason=(
+                            "this closer already flipped this ticket Done on "
+                            f"verdict fingerprint {fingerprint} — its own audit "
+                            "comment carrying that fingerprint is on the ticket "
+                            "— and the ticket has since been moved back out of "
+                            "a completed state. The evidence has not changed, "
+                            "so re-applying the identical verdict would "
+                            "overrule that reversal with a cron tick. A "
+                            "different verdict gets a different fingerprint and "
+                            "is free to close."
+                        ),
+                        dod_verify_total_checks=total_checks,
+                        dod_verify_verified_count=verified_count,
+                        dod_verify_failed_count=failed_count,
+                        dod_verify_non_probative_count=non_probative_count,
+                        dod_verify_behavior_proving_count=behavior_proving_count,
+                        verdict_fingerprint=fingerprint,
+                        pre_write_head_entry_id=pre_write_head_entry_id,
+                    )
+
             # OMN-17658. THE PER-RUN FLIP BUDGET, checked here and not earlier:
             # a candidate that would only have gapped still gets its gap
             # comment, so the budget bounds WRITES OF DONE and nothing else.
@@ -3139,6 +3686,56 @@ class HandlerEvidenceAutocloseSweep:
                 dod_verify_behavior_proving_count=behavior_proving_count,
             )
 
+        # OMN-16106 class (d). The sibling question, and the one the real
+        # staging-blocked population answers: did the check RUN? A verdict
+        # that proved no behaviour, failed nothing, and carries a check that
+        # never executed has learned nothing about this ticket — so it says
+        # nothing, and the candidate comes back on the next tick.
+        #
+        # The three conjuncts are each load-bearing:
+        #   * `behavior_proving_count == 0` — a run that DID execute the
+        #     claimed behaviour learned something, and its shortfall is a real
+        #     statement about the ticket even with a skip beside it.
+        #   * `failed_count == 0` — a check that ran and went red on a
+        #     reachable surface is a genuine unmet AC and stays a gap. The
+        #     class-(c) hold above has already taken the failures that name a
+        #     dead surface, so what is left here is a real red.
+        #   * a non-executed check exists — without one there is nothing
+        #     unlearned, and an all-non-probative or merge-state-only corpus
+        #     keeps the gap comment that describes it.
+        #
+        # Placed HERE for the same reason class (c) is: after every flip path
+        # has already returned, so the hold is structurally unreachable from a
+        # write. That placement is the invariant, not the classifier.
+        if behavior_proving_count == 0 and failed_count == 0:
+            unrun_check, unrun_why = _live_check_not_executed(verdict)
+            if unrun_check:
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=(
+                        EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED
+                    ),
+                    reason=(
+                        f"HELD, not judged: check '{unrun_check}' never executed "
+                        f"({unrun_why}), nothing failed, and no check proved "
+                        "behavior — so this run learned nothing about the "
+                        "acceptance criteria it was asked about. No comment "
+                        "posted and no state written; the candidate is "
+                        "re-offered on the next tick and flips on its own once "
+                        "the check can run. dod_verify counters at the hold: "
+                        f"{verified_count}/{total_checks} verified, "
+                        f"{non_probative_count} non-probative, 0 failed, "
+                        f"terminal status {verify_status!r}."
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                )
+
         # Gap path.
         shortfall = _gap_shortfall(
             verify_status=verify_status,
@@ -3166,19 +3763,19 @@ class HandlerEvidenceAutocloseSweep:
             # while its own verdict said 1.
             dod_verify_behavior_proving_count=behavior_proving_count,
         )
-        # OMN-16821: `non_probative_count` joins the OMN-16808 dedup
-        # fingerprint because the STATEMENT now varies with it. Two verdicts
-        # sharing (total, verified, failed) and differing in non-probative
-        # count produce different `shortfall` wording, so keying without it
-        # would let a stale comment suppress the corrected one — the dedup
-        # gate must track what was said, not merely which counts were seen.
+        # The dedup key is the SET OF CHECKS that withheld the flip, plus this
+        # node's contract version — not the counters. See
+        # `_gap_fingerprint_parts` for the OMN-17201 measurement that moved it
+        # and for the counters fallback that keeps an unreadable payload
+        # idempotent.
         marker = _sweep_comment_marker(
             EnumEvidenceAutocloseDecision.GAP_POSTED,
-            (
-                str(total_checks),
-                str(verified_count),
-                str(failed_count),
-                str(non_probative_count),
+            _gap_fingerprint_parts(
+                verdict,
+                total_checks=total_checks,
+                verified_count=verified_count,
+                failed_count=failed_count,
+                non_probative_count=non_probative_count,
             ),
         )
         return await self._emit_gap_comment(

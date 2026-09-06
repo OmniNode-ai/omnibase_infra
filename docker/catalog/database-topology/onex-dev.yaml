@@ -15,8 +15,8 @@ databases:
         principal: onex_api
       tenant_projection:
         database_ref: application
-        dsn_env: ONEX_TENANT_DB_URL
         principal: tenant_projection_writer
+        secret_ref: database.tenant_projection.dsn
     checksum_ledger: canonical
     checksum_ledgers:
       canonical:
@@ -347,5 +347,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 0e01755c1dc17827d763b60c287617357be7a2393123df2575d9278be73a1816
   repository: OmniNode-ai/omnibase_infra
-  sha256: 432b4c96ba960d749989c3b7b41da956808f1feb8cc9467589b353eb3b2b7e33
+  sha256: 4d455b0595819f312e5c7fb130f3b18945da4656004a79695fa46ee9aacd7ffb
 topology_instance: onex-dev

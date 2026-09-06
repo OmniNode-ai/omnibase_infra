@@ -81,20 +81,21 @@ KNOWN_ISSUES: dict[str, tuple[str, str]] = {
 }
 
 
-# Wall-clock budget for ``check_architecture.sh``. Sized for a CONTENDED host,
-# not an idle one: the script is a grep sweep over two full checkouts, and on
-# this fleet the launching Mac routinely sits at load1 55-95 while a dozen
-# other lanes hold pre-push slots (rule 21). Measured 2026-09-06 at load1 ~60:
-# the script completed in 137s and exited 0 ("known issues only"), while the
-# 120s budget it used to carry reported ERROR (timeout) and failed the push.
+# OMN-17556: wall-clock budget for the architecture-layer subprocess. This was
+# a hardcoded 120s. The check is not slow -- run directly on an idle tree it
+# exits 0 in well under a minute -- but the budget is fixed while the host's
+# load is not, and this repo's launching host routinely sits at load 68-85 with
+# many concurrent lanes. Under that contention the subprocess overran 120s on
+# two consecutive pushes and printed "ERROR (timeout after 120s)", which is not
+# a verdict: the gate returned False having measured nothing, and the identical
+# tree exited 0 when re-run outside the budget. A gate that reports a red it
+# never measured is what trains people to reach for --no-verify, so the budget
+# is raised rather than the gate weakened. A real violation still fails, and a
+# timeout is still a hard failure; 600s only ever absorbs host contention.
 #
-# That failure mode is the one worth naming, because it is invisible: a
-# timeout is reported identically to a real layering violation, so a gate
-# whose verdict was PASS blocked a push on host contention alone -- and the
-# operator's only remedies are to wait for an idle host or to reach for the
-# bypass this repo forbids. The budget is generous rather than tuned: the
-# check still runs to completion in every case, so a larger budget can only
-# make the gate MORE able to reach a verdict, never less.
+# Deliberately a module constant and not an environment read: this repo gates
+# new os.environ/os.getenv reads (OMN-13566), and a knob here would be one more
+# lever that looks like a legitimate way to make a gate stop complaining.
 _ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
 
 
@@ -173,6 +174,12 @@ def run_architecture_layers(verbose: bool = False) -> bool:
         print("    bash scripts/check_architecture.sh --no-color")
         print("  Fix: Check if omnibase_core path is accessible")
         print("  Fix: Try running with --verbose to see progress")
+        print(
+            "  NOTE: this is a wall-clock budget, not a verdict -- a timeout "
+            "proves nothing about the tree. Re-run the check directly "
+            "(uv run python scripts/validate.py architecture_layers) before "
+            "concluding anything about layering."
+        )
         return False
     except FileNotFoundError:
         print("Architecture Layers: SKIP (bash not available)")

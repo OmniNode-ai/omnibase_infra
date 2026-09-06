@@ -11,6 +11,16 @@
 # migration (104, OMN-17792) is RETIRED until OMN-17923 carries this principal
 # to the provisioning seam -- the declaration stays; see
 # docker/migrations/forward/_ledger/retired-flat-migrations.tsv.
+# `tenant_projection` (OMN-17556) carries `secret_ref`, NOT `dsn_env`. No
+# onex-dev pod may hold a tenant_projection_writer DSN in its environment
+# (operator ruling 2026-09-03); the runtime resolves the logical name
+# `database.tenant_projection.dsn` through SecretResolver at the binding
+# boundary, in the ONE process that owns the binding -- the
+# RUNTIME_PROFILE=tenant-projection writer. The shared main and effects pods
+# never resolve it, because every contract that needs it moved to that profile,
+# so they carry no credential at all. Carrier exclusivity is enforced by the
+# model, not by convention: tests/unit/topology/
+# test_omn17556_store_resolved_binding.py.
 active_preset: application-cloud
 databases:
   application:
@@ -29,8 +39,8 @@ databases:
         principal: onex_api
       tenant_projection:
         database_ref: application
-        dsn_env: ONEX_TENANT_DB_URL
         principal: tenant_projection_writer
+        secret_ref: database.tenant_projection.dsn
     checksum_ledger: canonical
     checksum_ledgers:
       canonical:
