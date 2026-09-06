@@ -63,6 +63,9 @@ from omnibase_infra.cli.cli_delegate import (
     resolve_default_bus,
     run_delegate,
 )
+from omnibase_infra.cli.model_receipt_runtime_summary import (
+    ModelReceiptRuntimeSummary,
+)
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     check_omnimarket_drift,
@@ -1773,6 +1776,164 @@ class TestLocalRunArtifacts:
         )
         _write_local_run_files(
             receipt=receipt,
+            state_root=tmp_path,
+            prompt="proof",
+            task_type="research",
+        )
+        assert not (tmp_path / "runs").exists()
+
+
+class TestLocalRunArtifactsOnEscalatedRun:
+    """A run that escalated past a failed rung still wrote no artifacts (OMN-16999).
+
+    THE DEFECT. ``receipt_mode`` builds the typed ``ModelSkillResult[JsonValue]``
+    receipt only when ``status.is_success_like``; otherwise it wraps the run in a
+    ``ModelReceiptRuntimeSummary`` whose ``result_model`` is that summary class.
+    ``_write_local_run_files`` keyed its type guard on the string
+    ``"ModelDelegateSkill"``, so on every non-success receipt it returned
+    silently and wrote nothing.
+
+    That is not a rare path — it is the ordinary one. Measured live on this
+    workstation 2026-09-05, before the binding repoint in this same ticket:
+
+        attempt 1  local-heavy-reasoning  model_attribution_mismatch  -> climb
+        attempt 2  cloud-gemini-pro       quality_gate_passed=true    -> ACCEPT
+
+    The delegation returned the answer ``"OK"`` from an ACCEPTED attempt, and
+    still terminalized ``status=failed`` / ``terminal_failure_cause=provider_error``
+    because an earlier attempt had errored. So the customer got an answer, the
+    receipt named the route that produced it, and ``.onex_state/runs/`` did not
+    exist — which is exactly the B5 gap this ticket was opened for, surviving the
+    writer that was supposed to close it.
+
+    The accepted attempt is the contract, not the overall status: an escalation
+    that ends in an accepted answer is an answer that must be written down.
+    """
+
+    @staticmethod
+    def _summary_receipt(
+        *, accepted: bool = True, workflow: str | None = None
+    ) -> ModelSkillResult[ModelReceiptRuntimeSummary]:
+        """The shape ``receipt_mode`` emits for a run that terminalized failed."""
+        correlation_id = uuid.uuid4()
+        terminal_payload: dict[str, object] = {
+            "correlation_id": str(correlation_id),
+            "task_type": "research",
+            "provider": (
+                "https://generativelanguage.googleapis.com/v1beta/openai/"
+                "chat/completions"
+            ),
+            "model_name": "gemini-2.5-flash",
+            "response": "OK",
+            "error_message": "delegation terminalized as failed: provider_error",
+            "attempts": [
+                {
+                    "tier": "local",
+                    "backend_id": "local-heavy-reasoning",
+                    "model_id": "Qwen3.6-35B-A3B",
+                    "quality_gate_passed": False,
+                    "acceptance_decision": "climb",
+                },
+                {
+                    "tier": "cheap_cloud",
+                    "backend_id": "cloud-gemini-pro",
+                    "model_id": "gemini-2.5-flash",
+                    "quality_gate_passed": accepted,
+                    "acceptance_decision": "accept" if accepted else "climb",
+                },
+            ],
+        }
+        summary = ModelReceiptRuntimeSummary(
+            workflow_result="failed",
+            exit_code=1,
+            workflow=(
+                workflow
+                if workflow is not None
+                else "/site-packages/omnimarket/nodes/"
+                "node_delegate_skill_orchestrator/contract.yaml"
+            ),
+            terminal_payload=terminal_payload,
+            handler_result=terminal_payload,
+            error="",
+            capture_log="",
+        )
+        return ModelSkillResult[ModelReceiptRuntimeSummary](
+            skill_name=cli_delegate.DELEGATE_NODE_NAME,
+            node_name=cli_delegate.DELEGATE_NODE_NAME,
+            status=EnumSkillResultStatus.FAILED,
+            correlation_id=correlation_id,
+            run_id=uuid.uuid4(),
+            exit_code=1,
+            duration_ms=94_687,
+            result=summary,
+            result_model=(
+                "omnibase_infra.cli.model_receipt_runtime_summary."
+                "ModelReceiptRuntimeSummary"
+            ),
+            runtime_identity=collect_runtime_identity(config_source="test"),
+        )
+
+    def test_writes_artifacts_for_the_accepted_attempt_of_a_failed_run(
+        self, tmp_path: Path
+    ) -> None:
+        receipt = self._summary_receipt()
+
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="Reply with exactly: OK",
+            task_type="research",
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        assert (run_dir / "result.txt").read_text(encoding="utf-8") == "OK"
+
+        receipt_data = json.loads(
+            (run_dir / "receipt.json").read_text(encoding="utf-8")
+        )
+        # Route identity is the ACCEPTED attempt's, never the first attempted
+        # rung's -- attributing this answer to local-heavy-reasoning would be a
+        # lie about which model produced it.
+        assert receipt_data["backend_id"] == "cloud-gemini-pro"
+        assert receipt_data["model"] == "gemini-2.5-flash"
+        assert receipt_data["routing_tier"] == "cheap_cloud"
+        assert receipt_data["endpoint"].startswith(
+            "https://generativelanguage.googleapis.com/"
+        )
+        assert receipt_data["receipt_id"] == str(receipt.correlation_id)
+        # The run really did terminalize failed; the artifact says so rather
+        # than laundering an escalated run into a clean success.
+        assert receipt_data["status"] == EnumSkillResultStatus.FAILED.value
+
+        run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert run_data["prompt"] == "Reply with exactly: OK"
+        assert run_data["lane"] == "cheap_cloud"
+        assert run_data["correlation_id"] == str(receipt.correlation_id)
+
+    def test_refuses_a_failed_run_with_no_accepted_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        """Fail-closed survives the unwrap: no accepted rung, no artifacts."""
+        with pytest.raises(ValueError, match="no accepted routing attempt"):
+            _write_local_run_files(
+                receipt=self._summary_receipt(accepted=False),
+                state_root=tmp_path,
+                prompt="Reply with exactly: OK",
+                task_type="research",
+            )
+        assert not (tmp_path / "runs").exists()
+
+    def test_ignores_a_failed_run_of_some_other_node(self, tmp_path: Path) -> None:
+        """The unwrap is scoped to the delegate contract, not to any summary.
+
+        ``run_receipt_mode`` is shared with ``onex node``/``onex skill``. A
+        failed proof run of an unrelated node must not be mistaken for an
+        unattributed delegation and raise.
+        """
+        _write_local_run_files(
+            receipt=self._summary_receipt(
+                workflow="/site-packages/omnimarket/nodes/node_gap_compute/contract.yaml"
+            ),
             state_root=tmp_path,
             prompt="proof",
             task_type="research",
