@@ -296,6 +296,44 @@ def test_no_argument_resolution_uses_core_sibling_of_linked_worktree(
 
 
 @pytest.mark.unit
+def test_normal_checkout_discovers_canonical_sibling_core_without_explicit_path(
+    tmp_path: Path,
+) -> None:
+    """An ordinary checkout discovers its canonical Core sibling without overrides."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    core = _source_tree(workspace)
+
+    infra_repo = workspace / "omnibase_infra"
+    infra_repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(infra_repo)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(infra_repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+        check=True,
+    )
+
+    env = os.environ.copy()
+    env.pop("OMNIBASE_CORE_PATH", None)
+    env.pop("OMNI_HOME", None)
+    result = _run_without_path(infra_repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert str(core) in result.stdout
+
+
+@pytest.mark.unit
 def test_no_argument_linked_source_precedes_omni_home_fallback(
     tmp_path: Path,
 ) -> None:

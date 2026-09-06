@@ -35,6 +35,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from packaging.utils import InvalidName, canonicalize_name
+
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -100,13 +102,35 @@ KNOWN_ISSUES: dict[str, tuple[str, str]] = {
 _ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
 
 
+def _repository_root(cwd: Path) -> Path | None:
+    """Resolve the nearest Git worktree root at or above ``cwd``.
+
+    A linked worktree records its root in a ``.git`` file while an ordinary
+    checkout uses a ``.git`` directory. Both are repository metadata; neither
+    depends on a caller-selected checkout basename. A validator invoked outside
+    a worktree must fail closed rather than infer a root from its current path.
+    """
+    resolved_cwd = cwd.resolve()
+    for candidate in (resolved_cwd, *resolved_cwd.parents):
+        if (candidate / ".git").exists():
+            return candidate
+
+    print(
+        "Imperative Orchestrators: ERROR "
+        f"(cannot resolve repository root from Git metadata above {resolved_cwd})"
+    )
+    return None
+
+
 def _canonical_repository_name(repo_root: Path) -> str | None:
     """Return the baseline repository key declared by this repository.
 
     A worktree directory is intentionally caller-selected, so its basename is
     not a stable architecture-ratchet identity. The committed project metadata
-    is the repository-owned value that the baseline keys use instead. Missing
-    or malformed metadata is an error: the ratchet must not guess a key.
+    is the repository-owned value that the baseline keys use instead. The
+    PEP 503 distribution spelling is normalized to the baseline's underscore
+    key convention. Missing or malformed metadata is an error: the ratchet
+    must not guess a key.
     """
     metadata_path = repo_root / "pyproject.toml"
     try:
@@ -128,7 +152,14 @@ def _canonical_repository_name(repo_root: Path) -> str | None:
         print("Imperative Orchestrators: ERROR (missing project.name metadata)")
         return None
 
-    return name
+    try:
+        return canonicalize_name(name, validate=True).replace("-", "_")
+    except InvalidName as exc:
+        print(
+            "Imperative Orchestrators: ERROR "
+            f"(invalid project.name metadata {name!r}: {exc})"
+        )
+        return None
 
 
 def run_architecture_layers(verbose: bool = False) -> bool:
@@ -649,7 +680,9 @@ def run_imperative_orchestrators(
 
     from pathlib import Path as _Path
 
-    repo_root = _Path.cwd()
+    repo_root = _repository_root(_Path.cwd())
+    if repo_root is None:
+        return False
     repo_name = _canonical_repository_name(repo_root)
     if repo_name is None:
         return False
