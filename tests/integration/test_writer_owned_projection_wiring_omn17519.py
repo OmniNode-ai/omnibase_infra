@@ -182,12 +182,38 @@ def _tenant_domain_target(
         ),
         topology,
     )
-    assert any(
-        binding.dsn_env == "ONEX_TENANT_DB_URL" for binding in target.bindings
-    ), (
-        "The onex-dev topology no longer routes a tenant-domain write to "
-        f"ONEX_TENANT_DB_URL (got {[b.dsn_env for b in target.bindings]}); this "
-        "gate would no longer reproduce the OMN-17519 boot failure."
+    # OMN-17556: this used to assert the binding carried
+    # ``dsn_env == "ONEX_TENANT_DB_URL"``. That env var is gone -- the onex-dev
+    # tenant_projection binding now carries ``secret_ref`` and the runtime
+    # resolves it through SecretResolver at the binding boundary, in the one
+    # process that owns it. What this fixture actually needs is unchanged and
+    # is what is asserted here: that a tenant-domain write really does select a
+    # binding whose credential is NOT present in the wiring environment, which
+    # is the condition the OMN-17519 boot failure is reproduced from. A
+    # store-resolved carrier satisfies that more strongly than a missing env
+    # var did, because the credential is absent from every pod by construction
+    # rather than by omission.
+    #
+    # Pinning the carrier NAME rather than a specific value is deliberate: the
+    # gate must keep reproducing the failure across a carrier migration, and
+    # asserting on one env var name is exactly what made it go red on the PR
+    # that retired that name.
+    store_resolved = [
+        binding.secret_ref for binding in target.bindings if binding.secret_ref
+    ]
+    env_carried = [binding.dsn_env for binding in target.bindings if binding.dsn_env]
+    assert store_resolved or env_carried, (
+        "The onex-dev topology routes a tenant-domain write to a binding that "
+        "declares NEITHER carrier "
+        f"(dsn_env={[b.dsn_env for b in target.bindings]}, "
+        f"secret_ref={[b.secret_ref for b in target.bindings]}); this gate "
+        "would no longer reproduce the OMN-17519 boot failure."
+    )
+    assert not env_carried, (
+        "The onex-dev tenant_projection binding is carrying a DSN environment "
+        f"variable again: {env_carried}. Per the 2026-09-03 operator ruling no "
+        "onex-dev pod may hold a tenant DSN in its environment; the binding "
+        "must name a store-resolved secret_ref (OMN-17556)."
     )
     return target
 
@@ -238,11 +264,20 @@ def test_dispatchable_entry_still_fails_closed_on_a_missing_dsn(
     against a build that deleted the requirement outright — which is the
     "make the handler tolerate a missing binding" defensive default this fix
     exists to avoid.
+
+    OMN-17556: the unresolvable-credential condition is now a store-resolved
+    ``secret_ref`` in a process that wired no ``SecretResolver``, rather than an
+    absent ``ONEX_TENANT_DB_URL``. The requirement being proven is identical —
+    a dispatched entry whose binding cannot produce a DSN must raise, not
+    degrade — and the match string follows the carrier so this stays a real
+    non-vacuity proof instead of pinning a retired env var name. The env
+    deletion is kept: it proves the raise does not come from a stray value in
+    the runner's environment.
     """
     monkeypatch.delenv("ONEX_TENANT_DB_URL", raising=False)
     target = _tenant_domain_target(_onex_dev_topology())
 
-    with pytest.raises(ValueError, match="ONEX_TENANT_DB_URL"):
+    with pytest.raises(ValueError, match="tenant_projection"):
         _make_projection_dispatch_callback(
             _StubHandler(),
             target,
