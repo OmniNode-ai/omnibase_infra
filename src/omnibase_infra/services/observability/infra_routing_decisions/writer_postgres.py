@@ -3,12 +3,11 @@
 # no-migration: migration 080_create_infra_routing_decisions already in this PR
 """PostgreSQL writer for infra routing decisions (OMN-8692).
 
-Persists routing-decided events to infra_routing_decisions table.
+Persists routing-decision events to infra_routing_decisions table.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from uuid import UUID, uuid4
 
@@ -23,6 +22,9 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.services.observability.infra_routing_decisions.model_routing_decision_ingest import (
+    ModelInfraRoutingDecisionIngest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,7 @@ logger = logging.getLogger(__name__)
 class WriterInfraRoutingDecisionsPostgres(MixinAsyncCircuitBreaker):
     """PostgreSQL writer for infra routing decisions.
 
-    Writes routing-decided events to the infra_routing_decisions table.
+    Writes routing-decision events to the infra_routing_decisions table.
     UPSERT key: correlation_id (partial unique index — NULL correlation_ids
     are always inserted as new rows).
     """
@@ -57,13 +59,22 @@ class WriterInfraRoutingDecisionsPostgres(MixinAsyncCircuitBreaker):
 
     async def write_routing_decisions(
         self,
-        events: list[dict[str, object]],
+        events: list[ModelInfraRoutingDecisionIngest],
         correlation_id: UUID | None = None,
     ) -> int:
-        """Write a batch of routing-decided events to infra_routing_decisions.
+        """Write a batch of routing-decision rows to infra_routing_decisions.
 
-        Events with a correlation_id use ON CONFLICT DO UPDATE (upsert by
-        correlation_id). Events without a correlation_id are always inserted.
+        Rows with a correlation_id use ON CONFLICT DO UPDATE (upsert by
+        correlation_id). Rows without one are always inserted.
+
+        OMN-16025: the INSERT names only the columns a routing decision actually
+        carries. ``selection_mode``, ``fallback_indicator``, ``is_fallback``,
+        ``candidates_evaluated``, ``candidate_providers``, ``session_id`` and
+        ``latency_ms`` are NOT in the wire model, so they take the defaults
+        migration 080 declares rather than being filled with a plausible
+        constant -- a row asserting ``selection_mode='round_robin'`` about a
+        contract-driven tier decision would be a fabricated fact, and this table
+        exists to be read as evidence.
 
         Returns the number of rows in the batch.
         """
@@ -89,91 +100,30 @@ class WriterInfraRoutingDecisionsPostgres(MixinAsyncCircuitBreaker):
             INSERT INTO infra_routing_decisions (
                 correlation_id,
                 selected_provider, selected_tier, selected_model,
-                selection_mode, fallback_indicator, is_fallback, reason,
-                candidates_evaluated, candidate_providers,
-                task_type, session_id, latency_ms
+                reason, task_type
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (correlation_id)
             WHERE correlation_id IS NOT NULL
             DO UPDATE SET
                 selected_provider  = EXCLUDED.selected_provider,
                 selected_tier      = EXCLUDED.selected_tier,
                 selected_model     = EXCLUDED.selected_model,
-                selection_mode     = EXCLUDED.selection_mode,
-                fallback_indicator = EXCLUDED.fallback_indicator,
-                is_fallback        = EXCLUDED.is_fallback,
                 reason             = EXCLUDED.reason,
-                candidates_evaluated = EXCLUDED.candidates_evaluated,
-                candidate_providers = EXCLUDED.candidate_providers,
                 task_type          = EXCLUDED.task_type,
-                session_id         = EXCLUDED.session_id,
-                latency_ms         = EXCLUDED.latency_ms,
                 projected_at       = NOW()
         """
 
-        def _safe_uuid(val: object) -> UUID | None:
-            if val is None:
-                return None
-            if isinstance(val, UUID):
-                return val
-            try:
-                return UUID(str(val))
-            except (ValueError, AttributeError):
-                return None
-
-        def _safe_str(val: object, default: str = "") -> str:
-            if val is None:
-                return default
-            return str(val)
-
-        def _safe_bool(val: object, default: bool = False) -> bool:
-            if isinstance(val, bool):
-                return val
-            if isinstance(val, int):
-                return bool(val)
-            return default
-
-        def _safe_int(val: object, default: int = 0) -> int:
-            if val is None:
-                return default
-            try:
-                return int(str(val))
-            except (TypeError, ValueError):
-                return default
-
-        def _safe_float_or_none(val: object) -> float | None:
-            if val is None:
-                return None
-            try:
-                return float(str(val))
-            except (TypeError, ValueError):
-                return None
-
-        def _serialize_list(val: object) -> str | None:
-            if val is None:
-                return None
-            if isinstance(val, (list, tuple)):
-                return json.dumps(list(val))
-            return None
-
         rows = [
             (
-                _safe_uuid(e.get("correlation_id")),
-                _safe_str(e.get("selected_provider")),
-                _safe_str(e.get("selected_tier")),
-                _safe_str(e.get("selected_model")),
-                _safe_str(e.get("selection_mode"), "round_robin"),
-                _safe_bool(e.get("fallback_indicator")),
-                _safe_bool(e.get("is_fallback")),
-                _safe_str(e.get("reason")),
-                _safe_int(e.get("candidates_evaluated")),
-                _serialize_list(e.get("candidate_providers")),
-                e.get("task_type"),
-                e.get("session_id"),
-                _safe_float_or_none(e.get("latency_ms")),
+                event.correlation_id,
+                event.selected_provider,
+                event.selected_tier,
+                event.selected_model,
+                event.reason,
+                event.task_type,
             )
-            for e in events
+            for event in events
         ]
 
         try:

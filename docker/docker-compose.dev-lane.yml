@@ -3,8 +3,8 @@
 #
 # WHAT THIS IS FOR
 # ----------------
-# Everything the DEV/LAB LANE gets and no other lane may inherit. Five things
-# as of OMN-17562, each with its own block below and each here for the same
+# Everything the DEV/LAB LANE gets and no other lane may inherit. Six things
+# as of OMN-16025, each with its own block below and each here for the same
 # fail-closed reason:
 #
 #   1. OMN-15379 — the migration lane indicator (this block).
@@ -13,6 +13,8 @@
 #   4. OMN-17448 / OMN-17562 — the standalone projection writer services.
 #   5. OMN-17562 — the strict semantic container probe on those same three
 #      kernel services, with autoheal disarmed in the same block.
+#   6. OMN-16025 — the infra routing-decision projection consumer, which was
+#      declared in docker/catalog and in no compose file, so it ran on no lane.
 #
 # The header used to say "it carries exactly ONE thing". That stopped being
 # true at (2) and is corrected here rather than left to mislead the next reader
@@ -815,4 +817,92 @@ services:
       - "com.omninode.layer=runtime"
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-17562"
+      - "autoheal=true"
+  # ===========================================================================
+  # (6) OMN-16025 — the infra routing-decision projection consumer.
+  # ===========================================================================
+  #
+  # WHY IT IS HERE AND NOT IN docker-compose.infra.yml
+  # --------------------------------------------------
+  # Same reason as the six writers above. The base file is merged by every
+  # lane, and `scripts/deploy-runtime.sh` names RUNTIME_SERVICES verbatim in a
+  # lane-agnostic `up -d --no-deps`, so a service in the base plus an entry in
+  # that array is a change to the prod, stability-test and judge deploy paths.
+  # This service belongs to DEV_LANE_ONLY_RUNTIME_SERVICES and to this file, and
+  # a later decision to run it on another lane is that lane's own ticket.
+  #
+  # WHAT IT FIXES
+  # -------------
+  # `infra_routing_decisions` sat at 0 rows while
+  # `onex.evt.omnibase-infra.routing-decision.v1` stood at HIGH-WATERMARK 860 on
+  # this lane (measured 2026-09-06). Three independent breaks, all closed
+  # together by OMN-16025:
+  #
+  #   1. the consumer resolved `topic_keys.ROUTING_DECIDED`
+  #      (`onex.evt.omnibase-infra.routing-decided.v1`), which does not exist as
+  #      a topic on the broker at all;
+  #   2. it read each record as a flat decision dict, while live records are
+  #      ModelEventEnvelope-wrapped with the decision under `payload`;
+  #   3. and it was declared ONLY in docker/catalog (bundles.yaml +
+  #      services/infra-routing-decisions-consumer.yaml) and in NO compose file,
+  #      so it ran on zero lanes. This block is (3).
+  #
+  # It reads the omnibase_infra database, not omnidash_analytics, so it does NOT
+  # merge *dev_lane_analytics_env — infra_routing_decisions lives in
+  # omnibase_infra (migration 080) and the role_omnidash identity has no grant
+  # on it.
+  infra-routing-decisions-consumer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    container_name: omninode-infra-routing-decisions-consumer
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - omnibase_infra.services.observability.infra_routing_decisions.consumer
+    environment:
+      OMNIBASE_INFRA_ROUTING_DECISIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      OMNIBASE_INFRA_ROUTING_DECISIONS_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
+      OMNIBASE_INFRA_ROUTING_DECISIONS_HEALTH_CHECK_PORT: "8097"
+      OMNIBASE_INFRA_ROUTING_DECISIONS_HEALTH_CHECK_HOST: "0.0.0.0"
+      OMNIBASE_INFRA_ROUTING_DECISIONS_BATCH_SIZE: "100"
+      OMNIBASE_INFRA_ROUTING_DECISIONS_BATCH_TIMEOUT_MS: "1000"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8097/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=infra-routing-decisions-consumer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-16025"
       - "autoheal=true"
