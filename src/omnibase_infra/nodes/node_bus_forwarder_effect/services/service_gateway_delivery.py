@@ -8,16 +8,25 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal, Protocol
 
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
 from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
 from omnibase_infra.idempotency import ProtocolIdempotencyStore
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayEgressHealth,
     ModelGatewayForwarderConfig,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_egress_health import (
+    publish_egress_health,
+    record_delivery,
+    record_denial,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
+    GatewayEgressDeniedError,
     GatewayRecordRefusedError,
     ServiceGatewayForwarder,
 )
@@ -71,17 +80,41 @@ def _build_quarantine_payload(
     direction: Literal["outbound", "inbound"],
     message: ModelTransportMessage,
     error: Exception,
+    classification: str,
+    context: Mapping[str, str] | None = None,
 ) -> bytes:
-    """Serialize an undecodable record's forensic context for the DLQ."""
+    """Serialize a quarantined record's forensic context for the DLQ.
+
+    ``failure_class`` carries the caller's classification rather than a
+    constant: the three classes that reach this path -- a record that cannot
+    decode, a record this gateway refuses to carry, and a record the
+    DESTINATION refused to authorize (OMN-17201) -- have three different
+    upstream owners, and the DLQ consumer cannot tell them apart from the
+    bytes alone.
+
+    ``context`` carries typed, caller-supplied facts as their own fields
+    instead of relying on the message string. This is not a way around
+    ``sanitize_error_message`` -- that redactor exists because an arbitrary
+    exception string may have interpolated a credential, and it stays applied
+    to ``error_message`` verbatim. ``context`` is the opposite case: a fixed
+    set of values the CALLER already holds as typed attributes, none of them
+    sourced from the record payload. It was added because the redactor is a
+    substring matcher over the whole message and ``authorization`` is one of
+    its patterns, so an authorization-denial reason redacts to its own type
+    name -- structurally correct and operationally useless, since the operator
+    needs the topic and the principal to know which ACL to grant.
+    """
     payload: dict[str, object] = {
         "original_topic": message.topic,
         "original_partition": message.partition,
         "original_offset": message.offset,
         "direction": direction,
-        "failure_class": "gateway_undecodable_record",
+        "failure_class": f"gateway_{classification.replace('-', '_')}_record",
         "error_type": type(error).__name__,
         "error_message": sanitize_error_message(error),
     }
+    if context:
+        payload.update(context)
     return json.dumps(payload).encode("utf-8")
 
 
@@ -113,11 +146,18 @@ class NodeGatewayDelivery:
         idempotency_store: ProtocolIdempotencyStore,
         poll_timeout_ms: int = 1_000,
         watchdog_stale_seconds: float | None = None,
+        egress_health_path: Path | None = None,
     ) -> None:
         self._config = config
         self._forwarder = forwarder
         self._local_consumer = local_consumer
         self._cloud_consumer = cloud_consumer
+        # OMN-17201: outbound egress denial/delivery counters. Always counted
+        # in process; published to a file only when a path is given, which is
+        # what the container healthcheck reads (see
+        # ``service_gateway_egress_health``).
+        self._egress_health_path = egress_health_path
+        self._egress_health = ModelGatewayEgressHealth()
         self._idempotency_store = idempotency_store
         self._poll_timeout_ms = poll_timeout_ms
         # The two directional loops share one process and one durable marker
@@ -333,6 +373,14 @@ class NodeGatewayDelivery:
                 correlation_id=envelope.correlation_id,
             )
             await source.commit(message)
+            if direction == "outbound":
+                # OMN-17201: only the outbound leg's health is in question --
+                # inbound publishes to the local broker, which is not the
+                # surface an authorization denial appears on.
+                self._egress_health = record_delivery(
+                    self._egress_health, now=datetime.now(UTC)
+                )
+                publish_egress_health(self._egress_health, self._egress_health_path)
             logger.info(
                 "Gateway delivery acknowledged envelope_id=%s direction=%s "
                 "source_topic=%s source_partition=%s source_offset=%s",
@@ -344,6 +392,35 @@ class NodeGatewayDelivery:
             )
         except asyncio.CancelledError:
             raise
+        except GatewayEgressDeniedError as denial:
+            # OMN-17201: the destination broker ANSWERED, with a verdict about
+            # (topic, principal). Redelivery re-derives the same destination
+            # topic and is refused identically -- measured live as attempt=7
+            # delay_seconds=30.0 with outbound TOTAL-LAG at 523 and the
+            # container reporting healthy. Quarantine on the same path the
+            # OMN-17382 refusal takes, and COUNT it: a leg that drains its lag
+            # entirely into the dead letter queue must stop reading healthy.
+            self._egress_health = record_denial(
+                self._egress_health,
+                topic=denial.topic,
+                tenant_id=denial.tenant_id,
+                principal_id=denial.principal_id,
+                now=datetime.now(UTC),
+            )
+            publish_egress_health(self._egress_health, self._egress_health_path)
+            await self._quarantine_undecodable_message(
+                direction,
+                source,
+                message,
+                denial,
+                classification="egress-denied",
+                context={
+                    "denied_topic": denial.topic,
+                    "denied_tenant_id": denial.tenant_id,
+                    "denied_principal_id": denial.principal_id,
+                },
+            )
+            return
         except GatewayRecordRefusedError as refusal:
             # OMN-17382: a per-record trust-boundary refusal is PERMANENT for
             # this offset -- redelivery re-reads the same bytes and reaches the
@@ -354,9 +431,12 @@ class NodeGatewayDelivery:
             # time. Quarantine on the same path an undecodable record takes.
             #
             # This is deliberately NOT a widening of the catch below. Only
-            # GatewayRecordRefusedError lands here; a broker timeout, an auth
-            # failure or a serialization bug is transient or global and still
-            # nacks and raises, because committing past THOSE is data loss.
+            # GatewayRecordRefusedError lands here; a broker timeout, a
+            # connection or SASL-handshake failure, or a serialization bug is
+            # transient or global and still nacks and raises, because
+            # committing past THOSE is data loss. A per-topic authorization
+            # DENIAL is not one of those -- it is the subclass handled just
+            # above (OMN-17201).
             await self._quarantine_undecodable_message(
                 direction, source, message, refusal, classification="refused"
             )
@@ -382,16 +462,19 @@ class NodeGatewayDelivery:
         message: ModelTransportMessage,
         error: Exception,
         classification: str = "undecodable",
+        context: Mapping[str, str] | None = None,
     ) -> None:
         """Dead-letter a permanently-undeliverable record and commit past it.
 
-        Two callers, one path, because the two failure classes are the same
-        shape: a record that cannot decode and a record this gateway refuses to
-        carry both produce the identical verdict on every redelivery, so
+        Three callers, one path, because the three failure classes are the same
+        shape: a record that cannot decode, a record this gateway refuses to
+        carry, and a record the DESTINATION broker refuses to authorize
+        (OMN-17201) all produce the identical verdict on every redelivery, so
         seeking back to their offset is an infinite loop rather than a retry.
-        ``classification`` distinguishes them in the log line -- the operator
-        reading it needs to know whether the bytes were malformed or the tenant
-        binding was wrong, because those have different upstream owners.
+        ``classification`` distinguishes them in the log line and in the DLQ
+        payload -- the operator reading it needs to know whether the bytes were
+        malformed, the tenant binding was wrong, or an ACL is missing on the
+        far side, because those have three different owners.
 
         Commit failure still propagates (uncaught): that is a broker-level
         fault, a different failure class already handled by the existing
@@ -399,7 +482,7 @@ class NodeGatewayDelivery:
         """
         logger.error(
             "Gateway %s record quarantined direction=%s source_topic=%s "
-            "source_partition=%s source_offset=%s error_type=%s error=%s",
+            "source_partition=%s source_offset=%s error_type=%s error=%s%s",
             classification,
             direction,
             message.topic,
@@ -407,6 +490,9 @@ class NodeGatewayDelivery:
             message.offset,
             type(error).__name__,
             sanitize_error_message(error),
+            "".join(
+                f" {key}={value}" for key, value in sorted((context or {}).items())
+            ),
         )
         sender = getattr(source, "send", None)
         if callable(sender):
@@ -417,7 +503,11 @@ class NodeGatewayDelivery:
                         dlq_topic,
                         message.key,
                         _build_quarantine_payload(
-                            direction=direction, message=message, error=error
+                            direction=direction,
+                            message=message,
+                            error=error,
+                            classification=classification,
+                            context=context,
                         ),
                         {"original_topic": message.topic.encode("utf-8")},
                     )

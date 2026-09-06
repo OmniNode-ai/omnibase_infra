@@ -31,9 +31,12 @@ Usage:
 """
 
 import argparse
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
+
+from packaging.utils import InvalidName, canonicalize_name
 
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -100,13 +103,52 @@ KNOWN_ISSUES: dict[str, tuple[str, str]] = {
 _ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
 
 
+def _repository_root(cwd: Path) -> Path | None:
+    """Resolve this validator's physical Git worktree root from ``cwd``.
+
+    A filesystem entry called ``.git`` does not establish repository identity:
+    it can be an empty marker in a nested directory. Ask Git for the worktree
+    root, then require the physical result to be the repository that owns this
+    script. A validator invoked outside that worktree must fail closed.
+    """
+    resolved_cwd = cwd.resolve()
+    expected_root = Path(__file__).resolve().parent.parent
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(resolved_cwd), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=10,
+        )
+        git_root = Path(result.stdout.strip()).resolve(strict=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(
+            "Imperative Orchestrators: ERROR "
+            f"(cannot resolve Git worktree root from {resolved_cwd}: {exc})"
+        )
+        return None
+
+    if git_root == expected_root:
+        return git_root
+
+    print(
+        "Imperative Orchestrators: ERROR "
+        f"(Git worktree root {git_root} does not match validator repository "
+        f"{expected_root})"
+    )
+    return None
+
+
 def _canonical_repository_name(repo_root: Path) -> str | None:
     """Return the baseline repository key declared by this repository.
 
     A worktree directory is intentionally caller-selected, so its basename is
     not a stable architecture-ratchet identity. The committed project metadata
-    is the repository-owned value that the baseline keys use instead. Missing
-    or malformed metadata is an error: the ratchet must not guess a key.
+    is the repository-owned value that the baseline keys use instead. The
+    PEP 503 distribution spelling is normalized to the baseline's underscore
+    key convention. Missing or malformed metadata is an error: the ratchet
+    must not guess a key.
     """
     metadata_path = repo_root / "pyproject.toml"
     try:
@@ -128,7 +170,14 @@ def _canonical_repository_name(repo_root: Path) -> str | None:
         print("Imperative Orchestrators: ERROR (missing project.name metadata)")
         return None
 
-    return name
+    try:
+        return canonicalize_name(name, validate=True).replace("-", "_")
+    except InvalidName as exc:
+        print(
+            "Imperative Orchestrators: ERROR "
+            f"(invalid project.name metadata {name!r}: {exc})"
+        )
+        return None
 
 
 def run_architecture_layers(verbose: bool = False) -> bool:
@@ -649,7 +698,9 @@ def run_imperative_orchestrators(
 
     from pathlib import Path as _Path
 
-    repo_root = _Path.cwd()
+    repo_root = _repository_root(_Path.cwd())
+    if repo_root is None:
+        return False
     repo_name = _canonical_repository_name(repo_root)
     if repo_name is None:
         return False

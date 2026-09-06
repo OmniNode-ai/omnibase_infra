@@ -426,7 +426,10 @@ async def test_real_outbound_consumer_loop_does_not_reforward_degraded_status() 
             )
         }
     )
-    local_bus = TransportGatewayBus(shared_local_transport)  # type: ignore[arg-type]
+    local_bus = TransportGatewayBus(
+        shared_local_transport,  # type: ignore[arg-type]
+        identity=config.tenant_identity,
+    )
     forwarder = ServiceGatewayForwarder(
         config=config,
         local_bus=local_bus,

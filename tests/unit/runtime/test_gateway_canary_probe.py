@@ -14,6 +14,7 @@ import asyncio
 import json
 import time
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -24,10 +25,16 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
+    ModelGatewayEgressHealth,
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
     ModelGatewayMirrorTopics,
     ModelGatewayTenantIdentity,
+)
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_egress_health import (
+    publish_egress_health,
+    record_delivery,
+    record_denial,
 )
 from omnibase_infra.runtime import gateway_canary_probe
 
@@ -43,6 +50,32 @@ def _canary(**overrides: object) -> ModelGatewayCanaryConfig:
     }
     values.update(overrides)
     return ModelGatewayCanaryConfig(**values)  # type: ignore[arg-type]
+
+
+def _forwarder_config() -> ModelGatewayForwarderConfig:
+    """The same forwarder config the other cases build inline (OMN-17201)."""
+    return ModelGatewayForwarderConfig(
+        tenant_identity=ModelGatewayTenantIdentity(
+            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+            tenant_slug="acme",
+            principal_id="t-33333333333333333333333333333333",
+        ),
+        cloud_bus=ModelGatewayCloudBusConfig(
+            broker_provider_id=UUID("22222222-2222-2222-2222-222222222222"),
+            cloud_broker_ref="gateway.cloud.kafka.broker",
+            cloud_auth_ref="gateway.cloud.kafka.msk_iam",
+            acl_provisioner_ref="gateway.cloud.kafka.authorization",
+            msk_region_ref="gateway.cloud.kafka.msk_region",
+            sasl_mechanism="AWS_MSK_IAM",
+        ),
+        local_transport_flavor="containerized",
+        dedupe_store_path=Path.cwd() / "gateway-test.sqlite3",
+        mirror_topics=ModelGatewayMirrorTopics(
+            inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
+            outbound=("onex.evt.omnibase-infra.gateway-heartbeat.v1",),
+        ),
+        canary=_canary(),
+    )
 
 
 def _bus_config() -> ModelKafkaEventBusConfig:
@@ -384,7 +417,13 @@ async def test_probe_reports_overall_fail_when_either_leg_fails(
     monkeypatch.setattr(gateway_canary_probe, "check_canary_leg", _fake_check)
 
     state_path = tmp_path / "state.json"
-    passed, report = await gateway_canary_probe.probe(config, state_path=state_path)
+    passed, report = await gateway_canary_probe.probe(
+        config,
+        state_path=state_path,
+        # OMN-17201: no denial state published, so the egress leg abstains
+        # and these cases still assert only the two broker legs.
+        egress_health_path=state_path.parent / "absent-egress-health.json",
+    )
 
     assert passed is False
     assert "PASS" in report and "local" in report
@@ -447,13 +486,23 @@ async def test_probe_serves_cached_result_within_cadence(tmp_path: Path) -> None
                 auto_offset_reset="earliest",
             ),
         )
-        passed, report = await gateway_canary_probe.probe(config, state_path=state_path)
+        passed, report = await gateway_canary_probe.probe(
+            config,
+            state_path=state_path,
+            # OMN-17201: no denial state published, so the egress leg abstains
+            # and these cases still assert only the two broker legs.
+            egress_health_path=state_path.parent / "absent-egress-health.json",
+        )
     finally:
         gateway_canary_probe.run_canary_check = original  # type: ignore[assignment]
 
     assert calls["count"] == 0
     assert passed is True
-    assert report == "PASS: cached"
+    # OMN-17201: the cached BROKER report is replayed verbatim and the egress
+    # leg is appended fresh. The egress leg is deliberately not cached -- it
+    # costs one local file read, and caching it would delay the "nothing is
+    # crossing" verdict by up to a full cadence.
+    assert report == "PASS: cached\nPASS: egress leg: no denial state published yet"
 
 
 @pytest.mark.asyncio
@@ -521,7 +570,13 @@ async def test_probe_never_serves_a_cached_failure(tmp_path: Path) -> None:
                 auto_offset_reset="earliest",
             ),
         )
-        passed, report = await gateway_canary_probe.probe(config, state_path=state_path)
+        passed, report = await gateway_canary_probe.probe(
+            config,
+            state_path=state_path,
+            # OMN-17201: no denial state published, so the egress leg abstains
+            # and these cases still assert only the two broker legs.
+            egress_health_path=state_path.parent / "absent-egress-health.json",
+        )
     finally:
         gateway_canary_probe.run_canary_check = original  # type: ignore[assignment]
 
@@ -556,3 +611,142 @@ def test_canary_config_total_deadline_seconds_accounts_for_connect_and_send() ->
         readback_deadline_seconds=12,
     )
     assert canary.total_deadline_seconds == pytest.approx(2 * 15 + 12)
+
+
+@pytest.mark.asyncio
+async def test_probe_fails_when_every_outbound_record_is_denied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-17201: both broker legs green must not add up to a healthy container.
+
+    This is the blind spot the quarantine introduces and the reason the egress
+    leg exists. Both broker legs produce to the CANARY topic, which is
+    authorized -- so on the live lab forwarder they passed continuously
+    (``Up 46 minutes (healthy)``, ``RestartCount 0``) while every real
+    outbound record was refused with ``TOPIC_AUTHORIZATION_FAILED`` and
+    outbound TOTAL-LAG sat at 523. Once the denial is quarantined instead of
+    retried the lag drains too, so without this leg there is no signal left at
+    all.
+    """
+    config = ModelGatewayForwarderRuntimeConfig(
+        forwarder=_forwarder_config(),
+        local_bus=ModelKafkaEventBusConfig(
+            bootstrap_servers="redpanda:9092",
+            environment="gateway-local",
+            enable_auto_commit=False,
+            auto_offset_reset="earliest",
+        ),
+        cloud_bus=ModelKafkaEventBusConfig(
+            bootstrap_servers="b-1.example.kafka.amazonaws.com:9098",
+            environment="gateway-cloud",
+            security_protocol="SASL_SSL",
+            sasl_mechanism="AWS_MSK_IAM",
+            msk_region="us-east-1",
+            enable_auto_commit=False,
+            auto_offset_reset="earliest",
+        ),
+    )
+
+    async def _both_legs_pass(
+        _config: ModelGatewayForwarderRuntimeConfig,
+    ) -> tuple[
+        gateway_canary_probe.ModelCanaryLegResult,
+        gateway_canary_probe.ModelCanaryLegResult,
+    ]:
+        return (
+            gateway_canary_probe.ModelCanaryLegResult(
+                leg="local", passed=True, detail="local leg produce+readback confirmed"
+            ),
+            gateway_canary_probe.ModelCanaryLegResult(
+                leg="cloud", passed=True, detail="cloud leg produce+readback confirmed"
+            ),
+        )
+
+    monkeypatch.setattr(gateway_canary_probe, "run_canary_check", _both_legs_pass)
+
+    egress_health_path = tmp_path / "egress-health.json"
+    publish_egress_health(
+        record_denial(
+            ModelGatewayEgressHealth(),
+            topic="tenant-beta.onex.evt.omniclaude.session-started.v1",
+            tenant_id="11111111-1111-1111-1111-111111111111",
+            principal_id="t-33333333333333333333333333333333",
+            now=datetime.now(UTC),
+        ),
+        egress_health_path,
+    )
+
+    passed, report = await gateway_canary_probe.probe(
+        config,
+        state_path=tmp_path / "state.json",
+        egress_health_path=egress_health_path,
+    )
+
+    assert passed is False, "a leg delivering nothing must not report healthy"
+    assert "PASS: local leg" in report
+    assert "PASS: cloud leg" in report
+    assert "FAIL: egress leg" in report
+    assert "session-started" in report, "the report must name the denied topic"
+
+
+@pytest.mark.asyncio
+async def test_probe_passes_when_records_are_crossing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control for the leg above: it must not fail an ordinary lane.
+
+    Without this, a bug that made the egress leg always fail would still pass
+    the test above and would take the gateway container down permanently.
+    """
+    config = ModelGatewayForwarderRuntimeConfig(
+        forwarder=_forwarder_config(),
+        local_bus=ModelKafkaEventBusConfig(
+            bootstrap_servers="redpanda:9092",
+            environment="gateway-local",
+            enable_auto_commit=False,
+            auto_offset_reset="earliest",
+        ),
+        cloud_bus=ModelKafkaEventBusConfig(
+            bootstrap_servers="b-1.example.kafka.amazonaws.com:9098",
+            environment="gateway-cloud",
+            security_protocol="SASL_SSL",
+            sasl_mechanism="AWS_MSK_IAM",
+            msk_region="us-east-1",
+            enable_auto_commit=False,
+            auto_offset_reset="earliest",
+        ),
+    )
+
+    async def _both_legs_pass(
+        _config: ModelGatewayForwarderRuntimeConfig,
+    ) -> tuple[
+        gateway_canary_probe.ModelCanaryLegResult,
+        gateway_canary_probe.ModelCanaryLegResult,
+    ]:
+        return (
+            gateway_canary_probe.ModelCanaryLegResult(
+                leg="local", passed=True, detail="local leg produce+readback confirmed"
+            ),
+            gateway_canary_probe.ModelCanaryLegResult(
+                leg="cloud", passed=True, detail="cloud leg produce+readback confirmed"
+            ),
+        )
+
+    monkeypatch.setattr(gateway_canary_probe, "run_canary_check", _both_legs_pass)
+
+    egress_health_path = tmp_path / "egress-health.json"
+    publish_egress_health(
+        record_delivery(ModelGatewayEgressHealth(), now=datetime.now(UTC)),
+        egress_health_path,
+    )
+
+    passed, report = await gateway_canary_probe.probe(
+        config,
+        state_path=tmp_path / "state.json",
+        egress_health_path=egress_health_path,
+    )
+
+    assert passed is True
+    assert "PASS: egress leg" in report

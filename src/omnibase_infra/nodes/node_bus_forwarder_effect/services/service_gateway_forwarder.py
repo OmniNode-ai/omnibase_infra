@@ -275,11 +275,70 @@ class GatewayRecordRefusedError(ValueError):
     remaining per-record trust-boundary refusals, which were the ones actually
     wedging the leg.
 
-    NOT used for infrastructure faults. A broker timeout, an auth failure, or
-    a serialization bug is transient or global, and MUST keep raising so the
-    loop retries -- silently committing past those is data loss. The
-    distinction is exactly "is this verdict a property of the record".
+    NOT used for infrastructure faults. A broker timeout, a connection or
+    SASL-handshake failure, or a serialization bug is transient or global, and
+    MUST keep raising so the loop retries -- silently committing past those is
+    data loss. The distinction is exactly "is this verdict a property of the
+    record".
+
+    OMN-17201 narrows one word of the paragraph above. It previously said "an
+    auth failure" without qualification, which conflated two different
+    verdicts. A connection/handshake auth failure IS global and transient and
+    still retries. A per-topic AUTHORIZATION DENIAL is not: the broker
+    answered, and it answered about (topic, principal). The destination topic
+    is derived from the record, so the denial is reached identically on every
+    redelivery -- see :class:`GatewayEgressDeniedError`.
     """
+
+
+class GatewayEgressDeniedError(GatewayRecordRefusedError):
+    """The destination broker denied this record's topic for our identity.
+
+    OMN-17201, measured live on the lab forwarder (compose project
+    ``omninode-gateway``, image revision ``2ea74bc4de76``) on 2026-09-06:
+    aiokafka logged ``Topic
+    tenant-beta-gateway-canary-...onex.evt.omniclaude.session-started.v1 is
+    not authorized for this client`` and ``TransportGatewayBus.publish``
+    blanket-mapped every ``KafkaError`` -- this one included -- onto
+    ``InfraUnavailableError``. That type means "transient", so
+    ``_publish_with_delivery_retry`` retained the record and retried it
+    forever (observed at attempt=7, delay_seconds=30.0). The single outbound
+    direction task is serialised behind that one record, so outbound
+    TOTAL-LAG on the local group climbed 0 -> 284 in ~35 min (523 by the time
+    the fix was written, 510 of it on ``onex.evt.omniclaude.tool-executed.v1``
+    -- a topic that was never denied, merely stuck behind one that was) while
+    the container reported ``healthy``.
+
+    A ``TOPIC_AUTHORIZATION_FAILED`` is a broker ANSWER, not a broker outage.
+    It is a verdict about ``(topic, principal)``, and the destination topic is
+    a pure function of the record's source topic and the attached tenant
+    slug. Redelivery therefore reaches the identical verdict, which makes this
+    the same poison-pill class the undecodable path (OMN-15748) and the
+    foreign-tenant refusal (OMN-17382) already quarantine.
+
+    Dropping is not free: a record quarantined here would have crossed if the
+    ACL were later granted. That trade is deliberate and is why this class is
+    counted rather than only logged -- see
+    ``service_gateway_egress_health.ServiceGatewayEgressHealth``. A leg whose
+    records are all being denied MUST read unhealthy; silently draining lag
+    into a dead letter queue while reporting healthy would be a worse failure
+    than the wedge it replaces.
+    """
+
+    def __init__(
+        self,
+        *,
+        topic: str,
+        tenant_id: str,
+        principal_id: str,
+    ) -> None:
+        super().__init__(
+            "destination broker denied topic authorization for this identity: "
+            f"topic={topic} tenant_id={tenant_id} principal_id={principal_id}"
+        )
+        self.topic = topic
+        self.tenant_id = tenant_id
+        self.principal_id = principal_id
 
 
 def egress_admits(
