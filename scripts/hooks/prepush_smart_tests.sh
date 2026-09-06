@@ -1115,8 +1115,8 @@ REASON="$(read_sel full_suite_reason 2> /dev/null || true)"
 # Most of that tree needs a live service (Postgres, a broker, a running lane)
 # that a developer's machine does not have, so those paths are deferred to CI,
 # which runs them. Filter them out here, visibly, rather than handing pytest a
-# selection it cannot execute. Keep this function self-contained (no globals):
-# it is extracted and EXECUTED by
+# selection it cannot execute. The allowlist classifier and this stream filter
+# are extracted and EXECUTED together by
 # tests/unit/scripts/test_prepush_smart_tests_seam.py.
 #
 # OMN-16825 NARROWING -- the classifier, not an override. "Lives under
@@ -1139,25 +1139,22 @@ REASON="$(read_sel full_suite_reason 2> /dev/null || true)"
 # `chain/` do NOT match. The allowlist's premise (these suites declare no
 # live-service marker) is itself asserted by the seam test, so a Postgres-backed
 # test dropped into chains/ reddens CI instead of every developer's pre-push.
+is_prepush_allowlisted_integration_path() {
+  # The complete, audited local-integration allowlist. A path segment match
+  # accepts both the chains directory and its descendants, never a prefix lookalike.
+  case "${1}/" in
+    tests/integration/chains/*) return 0 ;;
+  esac
+  return 1
+}
+
 filter_prepush_runnable_paths() {
-  local p prefix keep
-  # Integration subtrees proven service-free and therefore locally runnable.
-  local -a locally_runnable_integration_prefixes=(
-    "tests/integration/chains/"
-  )
+  local p
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     case "$p" in
       tests/integration/*)
-        keep=0
-        for prefix in "${locally_runnable_integration_prefixes[@]}"; do
-          # Append '/' to $p so a bare directory selection ("…/chains") matches
-          # the prefix on a segment boundary exactly as "…/chains/" does.
-          case "${p}/" in
-            "$prefix"*) keep=1 ;;
-          esac
-        done
-        [ "$keep" -eq 1 ] || continue
+        is_prepush_allowlisted_integration_path "$p" || continue
         ;;
     esac
     printf '%s\n' "$p"
@@ -1171,31 +1168,39 @@ while IFS= read -r p; do
   fi
 done < <(read_sel selected_paths)
 
-PATHS=()
-PATHS_STR=""
-DEFERRED_STR=""
-# OMN-16825: the subset of PATHS that lives under tests/integration/ -- i.e. the
-# allowlisted, service-free integration suites. Tracked separately because the
-# fail-closed FULL-suite escalation runs a fixed target (tests/unit/) that does
-# NOT contain them; without appending these, escalating would run FEWER of the
-# impacted tests than the narrow selection did. An escalation must never be a
-# coverage downgrade.
-RUNNABLE_INTEGRATION_PATHS=()
-RUNNABLE_INTEGRATION_STR=""
-# Guard the array expansions: bash 3.2 (macOS system bash) errors on
-# "${arr[@]}" for an empty array under `set -u`.
-if [ "${#ALL_PATHS[@]}" -gt 0 ]; then
+partition_prepush_runnable_paths() {
+  PATHS=()
+  PATHS_STR=""
+  DEFERRED_STR=""
+  # Paths outside tests/integration/. These must be marker-filtered because
+  # some service-dependent tests intentionally live beside their unit seams.
+  ORDINARY_PATHS=()
+  ORDINARY_PATHS_STR=""
+  # The explicit allowlisted, service-free integration lane is kept separately:
+  # tests/unit/ does not cover it during full-suite escalation.
+  RUNNABLE_INTEGRATION_PATHS=()
+  RUNNABLE_INTEGRATION_STR=""
+
+  [ "${#ALL_PATHS[@]}" -gt 0 ] || return 0
   while IFS= read -r p; do
-    if [ -n "$p" ]; then
-      PATHS+=("$p")
-      PATHS_STR="${PATHS_STR}${p} "
-      case "$p" in
-        tests/integration/*)
-          RUNNABLE_INTEGRATION_PATHS+=("$p")
-          RUNNABLE_INTEGRATION_STR="${RUNNABLE_INTEGRATION_STR}${p} "
-          ;;
-      esac
-    fi
+    [ -n "$p" ] || continue
+    case "$p" in
+      tests/integration/*)
+        # Defense in depth: even if the stream filter changes, an integration
+        # path enters the unfiltered lane only through the audited allowlist.
+        is_prepush_allowlisted_integration_path "$p" || continue
+        PATHS+=("$p")
+        PATHS_STR="${PATHS_STR}${p} "
+        RUNNABLE_INTEGRATION_PATHS+=("$p")
+        RUNNABLE_INTEGRATION_STR="${RUNNABLE_INTEGRATION_STR}${p} "
+        ;;
+      *)
+        PATHS+=("$p")
+        PATHS_STR="${PATHS_STR}${p} "
+        ORDINARY_PATHS+=("$p")
+        ORDINARY_PATHS_STR="${ORDINARY_PATHS_STR}${p} "
+        ;;
+    esac
   done < <(printf '%s\n' "${ALL_PATHS[@]}" | filter_prepush_runnable_paths)
   for p in "${ALL_PATHS[@]}"; do
     case " $PATHS_STR " in
@@ -1203,7 +1208,9 @@ if [ "${#ALL_PATHS[@]}" -gt 0 ]; then
       *) DEFERRED_STR="${DEFERRED_STR}${p} " ;;
     esac
   done
-fi
+}
+
+partition_prepush_runnable_paths
 
 log "selection: is_full_suite=${IS_FULL} reason=${REASON:-none} paths=[ ${PATHS_STR}] (feature-flag=${FLAG})"
 if [ -n "$DEFERRED_STR" ]; then
@@ -1281,6 +1288,78 @@ scrub_prepush_override_env() {
   unset ENABLE_SMART_TESTS || true
 }
 
+# The local hook is deliberately split into two pytest invocations. A path is
+# not a trustworthy proxy for a test's runtime needs: migration-fence tests are
+# integration-marked but live under tests/scripts/, so --ignore alone leaves
+# them eligible and can start a real forward-migration runner. Conversely,
+# tests/integration/chains/ is the narrowly allowlisted, service-free chain
+# gate and is itself integration-marked. Run ordinary targets with a final
+# marker deselection, then run that explicit allowlist separately without it.
+#
+# Keep `-m not integration` AFTER PREPUSH_PYTEST_ARGS. pytest accepts repeated
+# marker options; putting the enforced policy last means an entry override such
+# as PREPUSH_PYTEST_ARGS='-m integration' cannot re-enable service-dependent
+# tests in the child process.
+run_prepush_ordinary_tests() {
+  local _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
+  scrub_prepush_override_env
+  # shellcheck disable=SC2086
+  exec uv run pytest "$@" --ignore=tests/integration --tb=short ${_pytest_extra_args} -m "not integration"
+}
+
+run_prepush_allowlisted_integration_tests() {
+  local _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
+  scrub_prepush_override_env
+  # shellcheck disable=SC2086
+  exec uv run pytest "$@" --ignore=tests/integration --tb=short ${_pytest_extra_args}
+}
+
+# Execute the two partitioned local lanes. MODE communicates whether ordinary
+# unit coverage is needed here: a remotely verified full unit suite covers the
+# ordinary lane but NOT tests/integration/chains/, so "covered" intentionally
+# still executes the latter. Keeping the decision in this hook function gives
+# its token-level seam a single executable source of truth.
+run_prepush_partitioned_tests() {
+  local mode="$1"
+  local rc=0
+
+  case "$mode" in
+    full)
+      log "running FULL ordinary unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-} -m not integration"
+      (
+        run_prepush_ordinary_tests "$FULL_SUITE_TARGET"
+      ) || rc=$?
+      ;;
+    impacted)
+      if [ "${#ORDINARY_PATHS[@]}" -gt 0 ]; then
+        log "running impacted ordinary subset: uv run pytest ${ORDINARY_PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-} -m not integration"
+        (
+          run_prepush_ordinary_tests "${ORDINARY_PATHS[@]}"
+        ) || rc=$?
+      else
+        log "no ordinary impacted tests selected; skipping the empty ordinary pytest invocation."
+      fi
+      ;;
+    covered)
+      # The caller logged the remote full-unit evidence. Do not duplicate that
+      # unit run locally, but deliberately fall through to the chain lane.
+      ;;
+    *)
+      log "ERROR: invalid local pre-push partition mode '${mode}'"
+      return 2
+      ;;
+  esac
+
+  if [ "$rc" -eq 0 ] && [ "${#RUNNABLE_INTEGRATION_PATHS[@]}" -gt 0 ]; then
+    log "running allowlisted service-free integration suite: uv run pytest ${RUNNABLE_INTEGRATION_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
+    (
+      run_prepush_allowlisted_integration_tests "${RUNNABLE_INTEGRATION_PATHS[@]}"
+    ) || rc=$?
+  fi
+
+  return "$rc"
+}
+
 # =============================================================================
 # PATH parity with the remote leg (OMN-17549)
 # =============================================================================
@@ -1336,22 +1415,12 @@ if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
     else
       log "FULL unit suite satisfied by the remote GitHub-hosted full-suite pass; not re-running it locally."
     fi
-  else
-    # OMN-16825: $FULL_SUITE_TARGET is tests/unit/, which does NOT contain the
-    # allowlisted service-free integration suites. Append them so the
-    # fail-closed escalation stays a strict SUPERSET of the narrow selection it
-    # replaces -- an escalation that ran FEWER of the impacted tests than the
-    # narrowing would be a coverage downgrade wearing the word "full". The
-    # escalation still runs $FULL_SUITE_TARGET itself (single-sourced with
-    # selection_is_whole_suite above); this only ADDS to it. bash 3.2 under
-    # `set -u` errors on "${arr[@]}" for an empty array, hence the ${arr[@]+...}
-    # guard rather than a bare expansion.
-    log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} ${RUNNABLE_INTEGRATION_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
     (
-      _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
-      scrub_prepush_override_env
-      # shellcheck disable=SC2086
-      exec uv run pytest "${FULL_SUITE_TARGET}" ${RUNNABLE_INTEGRATION_PATHS[@]+"${RUNNABLE_INTEGRATION_PATHS[@]}"} --ignore=tests/integration --tb=short ${_pytest_extra_args}
+      run_prepush_partitioned_tests "covered"
+    ) || RC=$?
+  else
+    (
+      run_prepush_partitioned_tests "full"
     ) || RC=$?
   fi
 elif [ "${#PATHS[@]}" -gt 0 ]; then
@@ -1379,13 +1448,12 @@ elif [ "${#PATHS[@]}" -gt 0 ]; then
     else
       log "impacted selection is whole-suite-equivalent and is covered by the remote GitHub-hosted full-suite pass; not re-running it locally."
     fi
-  else
-    log "running impacted subset: uv run pytest ${PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
     (
-      _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
-      scrub_prepush_override_env
-      # shellcheck disable=SC2086
-      exec uv run pytest "${PATHS[@]}" --ignore=tests/integration --tb=short ${_pytest_extra_args}
+      run_prepush_partitioned_tests "covered"
+    ) || RC=$?
+  else
+    (
+      run_prepush_partitioned_tests "impacted"
     ) || RC=$?
   fi
 else
