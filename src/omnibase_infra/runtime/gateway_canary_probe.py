@@ -14,7 +14,16 @@ The probe checks the local leg and the cloud leg independently and reports
 each leg's outcome on its own line, so ``docker inspect ...State.Health.Log``
 distinguishes "local leg healthy, cloud leg dead" from "both legs healthy" --
 the acceptance criterion this ticket names explicitly. Overall exit is
-non-zero if either leg fails.
+non-zero if any leg fails.
+
+OMN-17201 adds a third leg, ``egress``, which dials nothing: it reads the
+denial/delivery counters the forwarder process publishes to
+``--egress-health-file``. It exists because the two broker legs structurally
+cannot see the failure that ticket's quarantine introduces. Both of them
+produce to the CANARY topic, which is authorized; a forwarder whose real
+traffic topics are all refused by the destination broker quarantines every
+record, drains its lag into the dead letter queue, and passes both broker legs
+while delivering nothing.
 
 To avoid spamming either broker, a real check only runs once every
 contract-declared ``canary.cadence_seconds``; between real checks this process
@@ -35,6 +44,7 @@ import logging
 import sys
 import time
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 from uuid import uuid4
@@ -48,6 +58,11 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayCanaryConfig,
     ModelGatewayForwarderRuntimeConfig,
+)
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_egress_health import (
+    DEFAULT_EGRESS_HEALTH_PATH,
+    evaluate_egress_health,
+    load_egress_health,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     prefix_topic,
@@ -238,6 +253,27 @@ async def check_canary_leg(
                 logger.warning("canary probe: %s leg transport close failed", leg)
 
 
+def check_egress_leg(egress_health_path: Path) -> ModelCanaryLegResult:
+    """Read the forwarder's own egress-denial counters and rule on them.
+
+    The third leg, and the only one that does not dial a broker. OMN-17201
+    made an authorization-denied record quarantine-and-commit instead of
+    wedging the leg -- which fixes the outage but creates a new blind spot the
+    other two legs structurally cannot see. Both of them produce to the CANARY
+    topic, which is authorized; a leg whose real traffic topics are all denied
+    passes both of them while delivering nothing and draining its lag into the
+    dead letter queue.
+
+    Synchronous and file-only on purpose: this leg must add no broker round
+    trip to a healthcheck whose timeout budget is already tight (OMN-16557).
+    """
+    passed, detail = evaluate_egress_health(
+        load_egress_health(egress_health_path),
+        now=datetime.now(UTC),
+    )
+    return ModelCanaryLegResult(leg="egress", passed=passed, detail=detail)
+
+
 async def run_canary_check(
     config: ModelGatewayForwarderRuntimeConfig,
 ) -> tuple[ModelCanaryLegResult, ModelCanaryLegResult]:
@@ -309,31 +345,53 @@ def _write_state(
         logger.warning("canary probe: failed to persist state to %s", state_path)
 
 
+def _render_leg(result: ModelCanaryLegResult) -> str:
+    return f"{'PASS' if result.passed else 'FAIL'}: {result.detail}"
+
+
 async def probe(
     config: ModelGatewayForwarderRuntimeConfig,
     *,
     state_path: Path,
+    egress_health_path: Path,
     force: bool = False,
 ) -> tuple[bool, str]:
     """Return ``(passed, report)``, consulting/refreshing the cadence cache.
 
     Only a cached PASS may be served early; a cached FAIL always triggers an
     immediate fresh real check (OMN-16420 -- see ``_load_cached_passing_state``).
+
+    The cadence cache covers the two BROKER legs only. The egress leg
+    (OMN-17201) is re-evaluated on every tick, cached or not, because it costs
+    one local file read and no broker round trip -- caching it would delay the
+    "nothing is crossing" verdict by up to a full cadence for no saving. For
+    the same reason its verdict is deliberately kept OUT of the written cache:
+    caching a FAIL there would force a fresh broker produce+readback on every
+    15s healthcheck tick for as long as the denial lasts, which is exactly the
+    broker spam the cadence exists to prevent.
     """
     canary = config.forwarder.canary
+    egress_result = check_egress_leg(egress_health_path)
     if not force:
         cached = _load_cached_passing_state(state_path, canary.cadence_seconds)
         if cached is not None:
-            return True, cached
+            return egress_result.passed, "\n".join((cached, _render_leg(egress_result)))
 
     local_result, cloud_result = await run_canary_check(config)
-    passed = local_result.passed and cloud_result.passed
-    report = "\n".join(
-        f"{'PASS' if result.passed else 'FAIL'}: {result.detail}"
-        for result in (local_result, cloud_result)
+    broker_passed = local_result.passed and cloud_result.passed
+    broker_report = "\n".join(
+        _render_leg(result) for result in (local_result, cloud_result)
     )
-    _write_state(state_path, passed=passed, report=report, checked_at=time.time())
-    return passed, report
+    _write_state(
+        state_path,
+        passed=broker_passed,
+        report=broker_report,
+        checked_at=time.time(),
+    )
+    return (
+        broker_passed and egress_result.passed,
+        "\n".join((broker_report, _render_leg(egress_result))),
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -354,6 +412,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("/tmp/gateway-canary-probe-state.json"),  # noqa: S108 -- container-local scratch state
         help="Cadence cache so repeated healthcheck ticks do not spam the brokers",
+    )
+    parser.add_argument(
+        "--egress-health-file",
+        type=Path,
+        default=Path(DEFAULT_EGRESS_HEALTH_PATH),
+        help=(
+            "Path the forwarder process publishes its egress denial/delivery "
+            "counters to (OMN-17201). Must match the value passed to "
+            "onex-gateway-forwarder --egress-health-file"
+        ),
     )
     parser.add_argument(
         "--force",
@@ -386,7 +454,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         broker_ref_map_path=args.broker_ref_map,
     )
     passed, report = asyncio.run(
-        probe(config, state_path=args.state_file, force=args.force)
+        probe(
+            config,
+            state_path=args.state_file,
+            egress_health_path=args.egress_health_file,
+            force=args.force,
+        )
     )
     print(report)  # noqa: T201 -- captured by `docker inspect ...State.Health.Log`
     sys.exit(0 if passed else 1)

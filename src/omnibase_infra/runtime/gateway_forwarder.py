@@ -19,7 +19,11 @@ from typing import Literal
 
 import httpx
 import yaml
-from aiokafka.errors import KafkaError
+from aiokafka.errors import (
+    ClusterAuthorizationFailedError,
+    KafkaError,
+    TopicAuthorizationFailedError,
+)
 
 from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
@@ -32,11 +36,16 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
     ModelGatewayHttpsIngestConfig,
+    ModelGatewayTenantIdentity,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_delivery import (
     NodeGatewayDelivery,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_egress_health import (
+    DEFAULT_EGRESS_HEALTH_PATH,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
+    GatewayEgressDeniedError,
     ProtocolGatewayPublisher,
     ServiceGatewayForwarder,
 )
@@ -604,6 +613,7 @@ async def run_gateway_forwarder(
     shutdown_event: asyncio.Event,
     resolve_secret: Callable[[str], Awaitable[str | None]],
     ready_path: Path | None = None,
+    egress_health_path: Path | None = None,
 ) -> None:
     """Run the bridge until ``shutdown_event`` is set, then close both legs.
 
@@ -656,7 +666,8 @@ async def run_gateway_forwarder(
                 auto_offset_reset=config.lane_mirror_buses[lane].auto_offset_reset,
             )
 
-    local_bus = TransportGatewayBus(local_transport)
+    identity = config.forwarder.tenant_identity
+    local_bus = TransportGatewayBus(local_transport, identity=identity)
     # OMN-16459: the OUTBOUND publish boundary is whatever the resolved contract
     # says it is. ``cloud_transport`` stays a KafkaTransport either way -- it is
     # still the INBOUND consumer (mirror_topics.inbound is pulled from the cloud
@@ -664,7 +675,7 @@ async def run_gateway_forwarder(
     # bastion.
     cloud_outbound, ingest_client = await select_outbound_publish_transport(
         config,
-        kafka_bus=TransportGatewayBus(cloud_transport),
+        kafka_bus=TransportGatewayBus(cloud_transport, identity=identity),
         resolve_secret=resolve_secret,
     )
     idempotency_store = StoreIdempotencySqlite(config.forwarder.dedupe_store_path)
@@ -679,6 +690,10 @@ async def run_gateway_forwarder(
         local_consumer=local_transport,
         cloud_consumer=cloud_transport,
         idempotency_store=idempotency_store,
+        # OMN-17201: where the container healthcheck reads the outbound
+        # denial/delivery counters from. Passing no path still counts in
+        # process; it just publishes nothing.
+        egress_health_path=egress_health_path,
     )
 
     if ready_path is not None:
@@ -714,7 +729,7 @@ async def run_gateway_forwarder(
                     config=lane_mirror_config,
                     source_consumer=lane_mirror_source,
                     mirror_producers={
-                        lane: TransportGatewayBus(transport)
+                        lane: TransportGatewayBus(transport, identity=identity)
                         for lane, transport in lane_mirror_producers.items()
                     },
                     idempotency_store=idempotency_store,
@@ -926,11 +941,43 @@ async def _publish_gateway_status(
         logger.exception("Gateway %s status publish failed", status)
 
 
-class TransportGatewayBus:
-    """Adapt the pull transport producer to the forwarder's publish boundary."""
+# OMN-17201: the broker ANSWERED, and it answered about (topic, principal).
+# These are not connectivity failures and they are not transient -- retrying
+# the identical produce for the identical principal reaches the identical
+# verdict. Everything else in the KafkaError tree stays transient and keeps
+# the retain-and-retry path, because committing past a real broker fault is
+# data loss.
+#
+# Deliberately NOT in this tuple: SaslAuthenticationFailedError and the
+# connection-level auth errors. Those are global (nothing publishes at all)
+# and are frequently transient -- a credential refresh or an IAM Roles
+# Anywhere session rotation clears them -- so they must keep retrying rather
+# than quarantining every record that arrives during the gap.
+_EGRESS_AUTHORIZATION_DENIED_ERRORS: tuple[type[KafkaError], ...] = (
+    TopicAuthorizationFailedError,
+    ClusterAuthorizationFailedError,
+)
 
-    def __init__(self, producer: ProtocolTransportProducer) -> None:
+
+class TransportGatewayBus:
+    """Adapt the pull transport producer to the forwarder's publish boundary.
+
+    Also the place the destination broker's error taxonomy is classified into
+    the gateway's own: transient (retain and retry) versus a permanent
+    per-record verdict (quarantine). Before OMN-17201 this class mapped EVERY
+    ``KafkaError`` onto ``InfraUnavailableError``, which the delivery retry
+    treats as transient -- so a ``TOPIC_AUTHORIZATION_FAILED`` wedged the
+    outbound leg forever behind one record.
+    """
+
+    def __init__(
+        self,
+        producer: ProtocolTransportProducer,
+        *,
+        identity: ModelGatewayTenantIdentity,
+    ) -> None:
         self._producer = producer
+        self._identity = identity
 
     async def publish(
         self,
@@ -967,6 +1014,12 @@ class TransportGatewayBus:
             raise TypeError("gateway transport headers must map string keys to bytes")
         try:
             await self._producer.send(topic, key, value, encoded_headers)
+        except _EGRESS_AUTHORIZATION_DENIED_ERRORS as exc:
+            raise GatewayEgressDeniedError(
+                topic=topic,
+                tenant_id=str(self._identity.tenant_id),
+                principal_id=self._identity.principal_id,
+            ) from exc
         except KafkaError as exc:
             raise InfraUnavailableError(
                 f"gateway destination broker unavailable for topic {topic}"
@@ -1016,6 +1069,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "mapping of contract cloud_broker_ref names to resolved "
             "bootstrap_servers strings). Resolved at the effect boundary; "
             "required, no default -- the process fails closed without it"
+        ),
+    )
+    parser.add_argument(
+        "--egress-health-file",
+        type=Path,
+        default=Path(DEFAULT_EGRESS_HEALTH_PATH),
+        help=(
+            "Where to publish outbound egress denial/delivery counters "
+            "(OMN-17201). The container healthcheck reads the same path; pass "
+            "the identical value to onex-gateway-canary-probe"
         ),
     )
     return parser
