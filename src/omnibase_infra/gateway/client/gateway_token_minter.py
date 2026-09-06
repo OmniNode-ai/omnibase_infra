@@ -50,10 +50,15 @@ WHAT THE AUDIENCE CHECKS ARE, AND ARE NOT
     merely compatible with it:
 
     * the exchange INPUT rule is ``gateway_auth.validate_exchange_input_
-      claims`` -- ``aud`` minus the role-resolved audiences must EQUAL
-      ``{"redpanda-events"}``, and an ``aud`` already carrying
-      ``gateway-attach`` is refused outright (the exchange does not consume
-      its own output).
+      claims`` -- ``aud`` already carrying ``gateway-attach`` is refused
+      outright (the exchange does not consume its own output); then ``aud``
+      minus the role-resolved audiences must CONTAIN every audience in
+      ``EXCHANGE_INPUT_REQUIRED_AUDIENCES`` and name nothing outside
+      ``EXCHANGE_INPUT_PERMITTED_AUDIENCES``. TWO set assertions, not one
+      equality: the tenant's single ``t-*`` credential is presented at two
+      resource servers, so it legitimately names both ``redpanda-events`` and
+      ``onex-api`` (OMN-16946). Mirroring that as equality is what made this
+      client refuse a credential the gateway had just accepted (OMN-15922).
     * the attach rule is exact SET equality with ``{"gateway-attach"}``. A
       superset is rejected at the gateway, so it is rejected here -- a client
       that accepted more than the gateway does would report success and then
@@ -91,9 +96,10 @@ from omnibase_infra.protocols.protocol_gateway_transport import (
 )
 
 __all__ = [
+    "EXCHANGE_INPUT_PERMITTED_AUDIENCES",
+    "EXCHANGE_INPUT_REQUIRED_AUDIENCES",
     "GATEWAY_ATTACH_AUDIENCES",
     "GATEWAY_TOKEN_EXCHANGE_PATH",
-    "MACHINE_CREDENTIAL_AUDIENCES",
     "ROLE_RESOLVED_AUDIENCES",
     "GatewayTokenMinter",
 ]
@@ -104,12 +110,40 @@ __all__ = [
 # deployment knob -- which is why it is a constant here rather than config.
 GATEWAY_ATTACH_AUDIENCES: Final[frozenset[str]] = frozenset({"gateway-attach"})
 
-# Exact audience set the EXCHANGE requires of its input, mirrored from
-# gateway_auth.EXCHANGE_INPUT_EXPECTED_AUDIENCES (== {BROKER_TOKEN_AUDIENCE})
-# and stamped by keycloak_client_manager on the per-tenant machine client.
-# Same contract-term reasoning as above: it is what the server compares
-# against, so it is a constant, not configuration a caller could widen.
-MACHINE_CREDENTIAL_AUDIENCES: Final[frozenset[str]] = frozenset({"redpanda-events"})
+# The EXCHANGE's input rule is TWO sets, not one exact set, and this client
+# mirrors both because the server applies both (omninode_infra
+# docker/onex-api/gateway_auth.py:130-133 -- EXCHANGE_INPUT_REQUIRED_AUDIENCES
+# / EXCHANGE_INPUT_PERMITTED_AUDIENCES -- asserted at :316-320).
+#
+# A tenant's ``t-*`` P0B client is its ONE durable machine credential and it
+# is presented at two resource servers: the broker edge (``redpanda-events``)
+# and onex-api's REST surface (``onex-api``). The provisioner stamps both
+# (``keycloak_client_manager._build_protocol_mappers``), so a real granted
+# token is observed as ``aud=["redpanda-events", "onex-api", "account"]``.
+#
+# This client previously asserted ``effective == {"redpanda-events"}``. The
+# server stopped asserting that in OMN-16946 -- it deadlocked bootstrap -- but
+# the mirror here was never moved with it, so the shipped CLI refused, with
+# ONEX_CORE_163_AUTHENTICATION_ERROR, a credential the gateway itself had
+# accepted with HTTP 200 (OMN-15922 DoD 2, measured on staging 2026-09-05).
+# A client mirror STRICTER than the rule it mirrors cannot mint for any tenant
+# the server would honour, and it fails at the hop that looks like a bad
+# credential rather than the hop that would name a real one.
+#
+# The two assertions, each fail-closed and each matching a named server line:
+#   REQUIRED is a subset of effective  -> it IS a broker-class P0B credential
+#   effective is a subset of PERMITTED -> it names nothing we do not mint
+# PERMITTED stays a closed, code-owned allowlist rather than membership: an
+# IdP-side mapper adding an audience nobody has thought of yet is still
+# refused here, exactly as it is refused at the gateway. Widening to the
+# server's real rule is not widening past it.
+EXCHANGE_INPUT_REQUIRED_AUDIENCES: Final[frozenset[str]] = frozenset(
+    {"redpanda-events"}
+)
+
+EXCHANGE_INPUT_PERMITTED_AUDIENCES: Final[frozenset[str]] = frozenset(
+    {"redpanda-events", "onex-api"}
+)
 
 # Audiences Keycloak adds on its own from realm role resolution rather than
 # from any audience mapper we declare. Discounted before the input comparison
@@ -294,14 +328,29 @@ class GatewayTokenMinter:
                 error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
             )
         effective = audiences - ROLE_RESOLVED_AUDIENCES
-        if effective != MACHINE_CREDENTIAL_AUDIENCES:
+        if EXCHANGE_INPUT_REQUIRED_AUDIENCES - effective:
             raise ModelOnexError(
                 "the granted machine token carries audience "
-                f"{sorted(effective)} but the attach-token exchange requires "
-                f"exactly {sorted(MACHINE_CREDENTIAL_AUDIENCES)} (set equality "
-                f"after discounting {sorted(ROLE_RESOLVED_AUDIENCES)}). The "
+                f"{sorted(effective)}, which is missing "
+                f"{sorted(EXCHANGE_INPUT_REQUIRED_AUDIENCES - effective)} -- the "
+                "attach-token exchange only accepts a broker-class credential "
+                f"(after discounting {sorted(ROLE_RESOLVED_AUDIENCES)}). The "
                 f"Keycloak client '{self._credential.client_id}' is not the "
                 "tenant's provisioned machine client.",
+                error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
+            )
+        unpermitted = effective - EXCHANGE_INPUT_PERMITTED_AUDIENCES
+        if unpermitted:
+            raise ModelOnexError(
+                "the granted machine token carries audience "
+                f"{sorted(unpermitted)}, which the attach-token exchange does "
+                f"not permit (allowed: "
+                f"{sorted(EXCHANGE_INPUT_PERMITTED_AUDIENCES)}, after "
+                f"discounting {sorted(ROLE_RESOLVED_AUDIENCES)}). An audience "
+                "mapper on the Keycloak client "
+                f"'{self._credential.client_id}' has drifted from what this "
+                "platform mints -- this is a provisioning defect, not a bad "
+                "secret.",
                 error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
             )
 

@@ -6,8 +6,11 @@ Two hops, two audience assertions, and they mirror two DIFFERENT server-side
 rules:
 
 * the exchange INPUT rule (``gateway_auth.validate_exchange_input_claims``):
-  ``aud`` minus the role-resolved audiences must EQUAL ``{"redpanda-events"}``,
-  and a token already carrying ``gateway-attach`` is refused outright;
+  ``aud`` minus the role-resolved audiences must CONTAIN ``redpanda-events``
+  and name nothing outside ``{"redpanda-events", "onex-api"}``, and a token
+  already carrying ``gateway-attach`` is refused outright. Two set assertions,
+  not one equality -- see OMN-16946, and OMN-15922 for the equality mirror
+  that refused the live credential the server had just accepted;
 * the attach rule (``gateway_auth.py::_assert_exact_audience``): exact SET
   equality against ``{"gateway-attach"}``, list- or string-valued ``aud``
   normalised first.
@@ -34,9 +37,10 @@ from pydantic import SecretStr
 
 from omnibase_core.errors.model_onex_error import ModelOnexError
 from omnibase_infra.gateway.client.gateway_token_minter import (
+    EXCHANGE_INPUT_PERMITTED_AUDIENCES,
+    EXCHANGE_INPUT_REQUIRED_AUDIENCES,
     GATEWAY_ATTACH_AUDIENCES,
     GATEWAY_TOKEN_EXCHANGE_PATH,
-    MACHINE_CREDENTIAL_AUDIENCES,
     ROLE_RESOLVED_AUDIENCES,
     GatewayTokenMinter,
 )
@@ -75,11 +79,23 @@ def test_the_contract_audience_set_is_exactly_gateway_attach() -> None:
     assert frozenset({"gateway-attach"}) == GATEWAY_ATTACH_AUDIENCES
 
 
-def test_the_exchange_input_audience_set_is_exactly_the_broker_audience() -> None:
-    """Mirrors gateway_auth.EXCHANGE_INPUT_EXPECTED_AUDIENCES."""
-    assert frozenset({"redpanda-events"}) == MACHINE_CREDENTIAL_AUDIENCES
+def test_the_exchange_input_audience_sets_mirror_the_servers_two_sets() -> None:
+    """Byte-for-byte the server's own constants (OMN-16946).
+
+    ``gateway_auth.EXCHANGE_INPUT_REQUIRED_AUDIENCES`` /
+    ``EXCHANGE_INPUT_PERMITTED_AUDIENCES`` in omninode_infra
+    ``docker/onex-api/gateway_auth.py``. Two sets, not one: the input rule is
+    REQUIRED-is-a-subset plus effective-is-a-subset-of-PERMITTED, never
+    equality. Pinning both here is what stops this client drifting stricter
+    than the server again.
+    """
+    assert frozenset({"redpanda-events"}) == EXCHANGE_INPUT_REQUIRED_AUDIENCES
+    assert (
+        frozenset({"redpanda-events", "onex-api"}) == EXCHANGE_INPUT_PERMITTED_AUDIENCES
+    )
+    assert EXCHANGE_INPUT_REQUIRED_AUDIENCES <= EXCHANGE_INPUT_PERMITTED_AUDIENCES
     assert frozenset({"account"}) == ROLE_RESOLVED_AUDIENCES
-    assert not (MACHINE_CREDENTIAL_AUDIENCES & GATEWAY_ATTACH_AUDIENCES)
+    assert not (EXCHANGE_INPUT_PERMITTED_AUDIENCES & GATEWAY_ATTACH_AUDIENCES)
 
 
 async def test_a_machine_grant_is_exchanged_for_an_attach_token(
@@ -155,11 +171,57 @@ async def test_an_attach_audience_credential_is_refused_as_exchange_input(
     assert fake_transport.json_requests == []
 
 
-async def test_a_dual_audience_credential_is_refused_because_the_input_rule_is_set_equality(
+async def test_the_p0b_dual_audience_credential_is_accepted_because_the_server_accepts_it(
     fake_transport: FakeGatewayTransport,
 ) -> None:
-    """Superset is not "good enough" -- the exchange rejects it, so we do too."""
-    fake_transport.audiences = ["redpanda-events", "onex-api"]
+    """The live P0B credential, and the whole of OMN-15922 DoD 2.
+
+    The provisioner stamps BOTH ``redpanda-events`` and ``onex-api`` on a
+    tenant's one durable ``t-*`` machine client, because that credential is
+    presented at two resource servers. The exchange accepts exactly that
+    (``gateway_auth.validate_exchange_input_claims``: REQUIRED is a subset of
+    the effective set, and the effective set is a subset of PERMITTED). This
+    client asserted bare equality with ``{"redpanda-events"}`` instead, so it
+    refused locally -- with ONEX_CORE_163_AUTHENTICATION_ERROR -- a credential
+    the gateway had accepted with HTTP 200 minutes earlier. A client mirror
+    stricter than the rule it mirrors is a client that cannot mint for any
+    tenant the server would honour.
+    """
+    fake_transport.audiences = ["redpanda-events", "onex-api", "account"]
+
+    token = await _minter(fake_transport).token_for(now=fake_transport.now)
+
+    assert token.audiences == GATEWAY_ATTACH_AUDIENCES
+    assert fake_transport.exchange_count == 1
+
+
+async def test_an_audience_outside_the_permitted_set_is_still_refused(
+    fake_transport: FakeGatewayTransport,
+) -> None:
+    """PERMITTED is a closed allowlist, not membership.
+
+    Widening to accept the server's real rule must not widen past it: an
+    IdP-side mapper adding an audience this platform does not mint is the
+    case ``EXCHANGE_INPUT_PERMITTED_AUDIENCES`` exists to fail closed on, and
+    the server fails closed on it at ``effective - PERMITTED``.
+    """
+    fake_transport.audiences = ["redpanda-events", "some-other-resource"]
+
+    with pytest.raises(ModelOnexError) as caught:
+        await _minter(fake_transport).token_for(now=fake_transport.now)
+
+    message = str(caught.value)
+    assert "some-other-resource" in message
+    assert fake_transport.exchange_count == 0
+
+
+async def test_a_credential_without_the_broker_audience_is_refused(
+    fake_transport: FakeGatewayTransport,
+) -> None:
+    """REQUIRED is a subset assertion: an ``onex-api``-only token is not a
+    broker-class P0B credential, and the server says so at
+    ``REQUIRED - effective``."""
+    fake_transport.audiences = ["onex-api"]
 
     with pytest.raises(ModelOnexError) as caught:
         await _minter(fake_transport).token_for(now=fake_transport.now)
