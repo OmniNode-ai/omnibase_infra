@@ -115,28 +115,32 @@ def _repository_root(cwd: Path) -> Path | None:
     expected_root = Path(__file__).resolve().parent.parent
     try:
         result = subprocess.run(
-            ["git", "-C", str(resolved_cwd), "rev-parse", "--show-toplevel"],
+            [
+                "/usr/bin/env",
+                "-i",
+                "PATH=/usr/bin:/bin",
+                "GIT_CONFIG_NOSYSTEM=1",
+                "GIT_TERMINAL_PROMPT=0",
+                "/usr/bin/git",
+                "-C",
+                str(resolved_cwd),
+                "rev-parse",
+                "--show-toplevel",
+            ],
             capture_output=True,
             check=True,
             text=True,
             timeout=10,
         )
         git_root = Path(result.stdout.strip()).resolve(strict=True)
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(
-            "Imperative Orchestrators: ERROR "
-            f"(cannot resolve Git worktree root from {resolved_cwd}: {exc})"
-        )
+    except (OSError, subprocess.SubprocessError):
+        print("Imperative Orchestrators: ERROR (git-worktree-root-unresolved)")
         return None
 
     if git_root == expected_root:
         return git_root
 
-    print(
-        "Imperative Orchestrators: ERROR "
-        f"(Git worktree root {git_root} does not match validator repository "
-        f"{expected_root})"
-    )
+    print("Imperative Orchestrators: ERROR (git-worktree-root-mismatch)")
     return None
 
 
