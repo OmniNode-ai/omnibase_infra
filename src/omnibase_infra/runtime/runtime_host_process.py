@@ -164,6 +164,7 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     validate_runtime_local_ingress_payload,
 )
 from omnibase_infra.runtime.runtime_profile import (
+    resolve_runtime_profile_name,
     resolve_secret_resolver_config_path,
 )
 from omnibase_infra.runtime.secret_resolver import SecretResolver
@@ -265,6 +266,17 @@ _RAW_EVENT_PROJECTION_CONSUMER_PURPOSES: frozenset[str] = frozenset(
 
 
 def _current_runtime_profile_name() -> str:
+    """Profile name used to match a config's ``enabled_profiles`` list.
+
+    OMN-17985 deliberately leaves this read alone rather than routing it through
+    ``resolve_runtime_profile_name()``. Its unset fallback is ``"default"``, not
+    the ownership default ``"main"``, and it is compared against operator-written
+    ``enabled_profiles`` lists -- so changing the fallback would silently change
+    which configs activate when the variable is unset. That is a gating change,
+    not the validation change this ticket is making. It is safe to leave: an
+    unregistered value can no longer reach a booted runtime, because
+    ``load_runtime_profile`` refuses it during kernel boot.
+    """
     raw_profile = os.getenv("RUNTIME_PROFILE")
     if raw_profile is None:
         return "default"
@@ -587,7 +599,7 @@ def _baseline_subscription_wiring_disabled(runtime_profile: str | None = None) -
     fail readiness on unassigned partitions they do not need to serve.
     """
     if runtime_profile is None:
-        runtime_profile = os.environ.get("RUNTIME_PROFILE", "main")
+        runtime_profile = resolve_runtime_profile_name()
     return runtime_profile.strip().lower() != "main"
 
 
@@ -599,7 +611,7 @@ def _raw_contract_owned_by_runtime_profile(
     if not isinstance(raw_contract, dict):
         return True
     if runtime_profile is None:
-        runtime_profile = os.environ.get("RUNTIME_PROFILE", "main")
+        runtime_profile = resolve_runtime_profile_name()
     return runtime_profile_owns_contract(raw_contract, runtime_profile)
 
 
@@ -689,7 +701,7 @@ async def _wire_package_node_subscriptions(
                 "RuntimeHostProcess: skipping Kafka subscription for "
                 "runtime-profile-owned contract node=%s profile=%s",
                 node_name,
-                runtime_profile or os.environ.get("RUNTIME_PROFILE", "main"),
+                runtime_profile or resolve_runtime_profile_name(),
             )
             continue
 
@@ -3814,7 +3826,7 @@ class RuntimeHostProcess:
                 "Skipping live handler subscription for runtime-profile-owned "
                 "contract: node=%s profile=%s",
                 node_name,
-                os.environ.get("RUNTIME_PROFILE", "main"),
+                resolve_runtime_profile_name(),
             )
             return
         if _requires_raw_event_projection_wiring(event_bus_data):
@@ -6186,7 +6198,7 @@ class RuntimeHostProcess:
                     "Skipping event_bus subcontract wiring for "
                     "runtime-profile-owned contract: handler=%s profile=%s",
                     descriptor.name or handler_type,
-                    os.environ.get("RUNTIME_PROFILE", "main"),
+                    resolve_runtime_profile_name(),
                 )
                 continue
             if _requires_raw_event_projection_wiring(raw_event_bus):
@@ -6304,7 +6316,7 @@ class RuntimeHostProcess:
             contracts=contracts,
             event_bus_wiring=self._event_bus_wiring,
             already_wired_names=already_wired,
-            runtime_profile=os.environ.get("RUNTIME_PROFILE", "main"),
+            runtime_profile=resolve_runtime_profile_name(),
         )
 
         logger.info(
@@ -6347,7 +6359,7 @@ class RuntimeHostProcess:
             logger.info(
                 "Baseline contract-registry subscription wiring skipped for "
                 "runtime profile '%s'",
-                os.environ.get("RUNTIME_PROFILE", "main"),
+                resolve_runtime_profile_name(),
             )
             return
 

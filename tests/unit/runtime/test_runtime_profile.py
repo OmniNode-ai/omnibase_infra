@@ -10,6 +10,7 @@ from omnibase_core.constants.constants_runtime_profiles import (
     CONSUMER_ATTACHED_RUNTIME_PROFILES,
     REGISTERED_RUNTIME_PROFILES,
 )
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.runtime_profile import _PROFILES, load_runtime_profile
 
 
@@ -19,8 +20,16 @@ def test_runtime_lane_profiles_preserve_identity() -> None:
         assert load_runtime_profile(profile_name).name == profile_name
 
 
-def test_unknown_runtime_profile_still_falls_back_to_default() -> None:
-    assert load_runtime_profile("unknown-lane").name == "default"
+def test_unknown_runtime_profile_is_refused() -> None:
+    """OMN-17985: this assertion is INVERTED from its previous form.
+
+    It used to assert the fallback (``.name == "default"``). The fallback is
+    what let a pod carrying an unregistered profile boot Ready and wire zero
+    contracts, so the behaviour it pinned is the defect. See
+    ``test_runtime_profile_fail_closed.py`` for the full case.
+    """
+    with pytest.raises(ProtocolConfigurationError):
+        load_runtime_profile("unknown-lane")
 
 
 def test_profiles_match_core_registry() -> None:

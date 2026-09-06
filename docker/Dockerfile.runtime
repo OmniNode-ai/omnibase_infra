@@ -25,7 +25,9 @@
 #   docker run -p 8085:8085 omnibase-infra-runtime
 #
 # Environment variables:
-#   RUNTIME_PROFILE   - Runtime profile selection (default: all)
+#   RUNTIME_PROFILE   - Runtime ROLE identity (default: main). One of the names
+#                       registered in REGISTERED_RUNTIME_PROFILES; an
+#                       unregistered value is refused at boot (OMN-17985).
 #   ONEX_CONTRACTS_DIR - Contract configuration directory (default: /app/contracts)
 #   ONEX_LOG_LEVEL    - Logging level (default: INFO)
 #   ONEX_ENVIRONMENT  - Environment name (default: local)
@@ -626,8 +628,14 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     # Workspace root used by ONEX probe and repo-sync nodes inside the runtime
     OMNI_HOME=/app \
-    # Runtime profile selection (all | minimal | kafka | secrets)
-    RUNTIME_PROFILE=all \
+    # Runtime ROLE identity (OMN-17985). Was "all", a stale service-selection
+    # value from a different meaning of this variable that no registry knows:
+    # any container from this image that did not override it matched no
+    # contract's runtime_profiles list and was != "main", so the auto-wiring
+    # ownership filter skipped EVERY contract and the process wired nothing
+    # while still passing readiness. "main" is the auto-wiring default the code
+    # actually applies. Deployed lanes all override this explicitly.
+    RUNTIME_PROFILE=main \
     # Contract configuration directory
     ONEX_CONTRACTS_DIR=/app/contracts \
     # Runtime contract directory for omnibase_core.get_runtime_contracts_dir()

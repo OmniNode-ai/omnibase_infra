@@ -31,7 +31,9 @@ The ``prefetch_policy`` field governs ``ConfigPrefetcher`` wiring:
 
 Profile data is built at module import time (``_PROFILES``).  New profiles
 can be registered by constructing a ``ModelRuntimeProfile`` and inserting it
-into ``_PROFILES``; the ``load_runtime_profile()`` helper handles fallback.
+into ``_PROFILES``.  ``load_runtime_profile()`` resolves a name to a profile
+and REFUSES an unregistered one (OMN-17985); ``resolve_runtime_profile_name()``
+is the single validated read of the variable for ownership decisions.
 
 Lane-scoped secret-policy override (OMN-14951):
     ``RUNTIME_PROFILE`` encodes topic-ownership ROLE identity (main / effects /
@@ -62,7 +64,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.errors import ProtocolConfigurationError
+
 logger = logging.getLogger(__name__)
+
+# OMN-17985: the ownership default when RUNTIME_PROFILE is unset. This is the
+# value the auto-wiring ownership filter has always used, kept exactly so that
+# consolidating the reads changes validation and nothing else.
+_OWNERSHIP_DEFAULT_PROFILE = "main"
 
 # OMN-14951: lane-scoped override, independent of RUNTIME_PROFILE. See module
 # docstring "Lane-scoped secret-policy override" section for why this must
@@ -159,31 +168,77 @@ _PROFILES: dict[str, ModelRuntimeProfile] = {
 # so the invariant is enforced at test/CI time instead of at import).
 
 
+def _resolve_profile(raw: str) -> ModelRuntimeProfile:
+    """Normalize *raw* and return its profile, or refuse (OMN-17985)."""
+    name = raw.strip().lower()
+    profile = _PROFILES.get(name)
+    if profile is None:
+        raise ProtocolConfigurationError(
+            f"Unknown RUNTIME_PROFILE {name!r}. A runtime profile is ROLE "
+            f"IDENTITY: the auto-wiring ownership filter keeps a contract only "
+            f"when the profile is named in the contract's `runtime_profiles` "
+            f"list, or the profile is 'main'. An unregistered name satisfies "
+            f"neither, so every contract would be skipped and the process would "
+            f"wire nothing while still passing readiness. Known profiles: "
+            f"{sorted(_PROFILES)}"
+        )
+    return profile
+
+
+def resolve_runtime_profile_name() -> str:
+    """Return the validated ROLE IDENTITY carried by ``RUNTIME_PROFILE``.
+
+    This is the single resolution point for every reader of that variable that
+    needs an ownership identity (OMN-17985). Before it existed the variable was
+    read raw in a dozen places with two different fallbacks -- ``"main"`` at the
+    auto-wiring ownership filter, ``"default"`` at the boot banner -- so the
+    process could describe itself as one role while wiring as another, and
+    neither read validated the value at all.
+
+    Unset or blank resolves to ``"main"``, which is the ownership default the
+    auto-wiring filter has always applied; consolidating the reads is meant to
+    add validation, not to move that default. An unknown value is refused on the
+    same terms as :func:`load_runtime_profile`.
+
+    Returns:
+        The normalized, registered profile name.
+
+    Raises:
+        ProtocolConfigurationError: If the value is not a registered profile.
+    """
+    raw = os.getenv("RUNTIME_PROFILE") or _OWNERSHIP_DEFAULT_PROFILE
+    if not raw.strip():
+        raw = _OWNERSHIP_DEFAULT_PROFILE
+    return _resolve_profile(raw).name
+
+
 def load_runtime_profile(profile_name: str | None = None) -> ModelRuntimeProfile:
     """Return the ``ModelRuntimeProfile`` for *profile_name*.
 
     If *profile_name* is ``None`` the ``RUNTIME_PROFILE`` environment variable
-    is consulted.  Unknown names fall back to the ``"default"`` profile and a
-    warning is emitted so operators can detect misconfiguration without
-    crashing the runtime.
+    is consulted; unset or blank resolves to the ``"default"`` profile.
+
+    An UNKNOWN name is refused (OMN-17985). It used to fall back to
+    ``"default"`` with a warning, which discarded the role identity the value
+    carries while the process went on to pass readiness. Because the auto-wiring
+    ownership filter separately keeps a contract only when the profile is in the
+    contract's declared list or the profile is ``"main"``, an unregistered name
+    matches neither: every contract is skipped, the manifest empties, zero
+    subscriptions are wired, and nothing downstream reports an error. A role the
+    runtime cannot resolve is not a milder role, it is an unknown deployment, so
+    the boot fails instead.
 
     Args:
         profile_name: Explicit override; defaults to ``RUNTIME_PROFILE`` env var.
 
     Returns:
         ``ModelRuntimeProfile`` for the resolved name.
+
+    Raises:
+        ProtocolConfigurationError: If the resolved name is not in ``_PROFILES``.
     """
     raw = profile_name or os.getenv("RUNTIME_PROFILE") or "default"
-    name = raw.strip().lower()
-    profile = _PROFILES.get(name)
-    if profile is None:
-        logger.warning(
-            "Unknown RUNTIME_PROFILE %r — falling back to 'default' profile "
-            "(prefetch_policy=disabled).  Known profiles: %s",
-            name,
-            list(_PROFILES),
-        )
-        profile = _PROFILES["default"]
+    profile = _resolve_profile(raw)
 
     # OMN-14951: ONEX_SECRET_POLICY is a lane-scoped override, independent of
     # RUNTIME_PROFILE's role identity. See module docstring.
@@ -235,5 +290,6 @@ def resolve_secret_resolver_config_path() -> str:
 __all__ = [
     "ModelRuntimeProfile",
     "load_runtime_profile",
+    "resolve_runtime_profile_name",
     "resolve_secret_resolver_config_path",
 ]

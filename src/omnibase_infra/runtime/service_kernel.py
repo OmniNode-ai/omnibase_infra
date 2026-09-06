@@ -178,6 +178,7 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_profile import (
     load_runtime_profile,
+    resolve_runtime_profile_name,
     resolve_secret_resolver_config_path,
 )
 from omnibase_infra.runtime.util_container_wiring import (
@@ -269,7 +270,7 @@ def _contract_registry_subscription_wiring_disabled(
     """Return True when kernel contract-registry subscriptions should not run."""
     raw_profile = runtime_profile
     if raw_profile is None:
-        raw_profile = os.getenv("RUNTIME_PROFILE") or "main"
+        raw_profile = resolve_runtime_profile_name()
     profile = raw_profile.strip().lower()
     return profile not in {"", "main"}
 
@@ -2992,7 +2993,10 @@ async def bootstrap() -> int:
             )
 
             if manifest.total_discovered > 0:
-                runtime_profile = os.getenv("RUNTIME_PROFILE", "main")
+                # OMN-17985: was a RAW os.getenv read that never consulted the
+                # profile resolved at boot, so an unregistered value reached the
+                # ownership filter unvalidated and emptied the manifest.
+                runtime_profile = resolve_runtime_profile_name()
                 ownership_result = filter_manifest_for_runtime_profile(
                     manifest=manifest,
                     runtime_profile=runtime_profile,
@@ -4254,7 +4258,7 @@ async def bootstrap() -> int:
             getattr(event_bus, "subscribe", None)
         )
         if contract_router is not None and has_subscribe:
-            runtime_profile = os.getenv("RUNTIME_PROFILE", "main")
+            runtime_profile = resolve_runtime_profile_name()
             if _contract_registry_subscription_wiring_disabled(runtime_profile):
                 logger.info(
                     "Contract registry event consumer wiring skipped for "
@@ -4455,7 +4459,10 @@ async def bootstrap() -> int:
         plugin_names = [p.plugin_id for p in activated_plugins]
 
         # Runtime profile for operator disambiguation (OMN-3591)
-        runtime_profile = os.getenv("RUNTIME_PROFILE", "default")
+        # OMN-17985: this defaulted to "default" while every ownership read
+        # defaulted to "main", so the banner could name a role the process was
+        # not wiring as.
+        runtime_profile = resolve_runtime_profile_name()
 
         banner_lines = [
             "=" * 60,
@@ -4533,7 +4540,7 @@ async def bootstrap() -> int:
                     event_bus=event_bus,
                     report=auto_wiring_report,
                     manifest=auto_wiring_manifest_for_subscriptions,
-                    runtime_profile=os.getenv("RUNTIME_PROFILE", "main"),
+                    runtime_profile=resolve_runtime_profile_name(),
                     topic=_manifest_topic,
                     correlation_id=correlation_id,
                     image_digest=os.getenv("ONEX_IMAGE_DIGEST"),
