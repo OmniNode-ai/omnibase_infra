@@ -197,5 +197,4 @@ pre-commit install
 ## See Also
 
 - [CLAUDE.md](../CLAUDE.md) - Agent architecture and development rules
-- [Implementation patterns](https://github.com/OmniNode-ai/knowledge-base-internal) - `reference/omnibase-infra-*` in the internal knowledge base
 - [README.md](../README.md) - Project overview and setup

@@ -47,11 +47,10 @@ in the tree — this section is the pointer, and the `kb-doc-gate` check
 | Home | What is there |
 |------|---------------|
 | [`OmniNode-ai/knowledge-base`](https://github.com/OmniNode-ai/knowledge-base) (public) | Platform documentation anyone can read: `architecture/`, `reference/`, `guides/`, `runbooks/`, and the ADR ledger. This repository's pages are prefixed `omnibase-infra-`. |
-| [`OmniNode-ai/knowledge-base-internal`](https://github.com/OmniNode-ai/knowledge-base-internal) (private, teammates) | Documentation that names real internal topology, the lab and CI fleet, deploy lanes, or the secrets manager — same `omnibase-infra-` prefix under `reference/` and `runbooks/`. |
 
 | Need | Where |
 |------|-------|
-| Run locally / first-time bootstrap | `runbooks/omnibase-infra-quickstart.md`, `runbooks/omnibase-infra-full-platform-setup.md` (internal) |
+| Run locally / first-time bootstrap | `runbooks/omnibase-infra-quickstart.md`; the full bootstrap sequence is not part of this repository |
 | Understand the handler architecture | `reference/omnibase-infra-handler-protocol-driven-architecture.md` (internal) |
 | Work on contracts | `reference/omnibase-infra-contract-yaml-reference.md` (public) |
 | Node archetypes and registration | `reference/omnibase-infra-node-archetypes.md` (internal), `reference/omnibase-infra-node-registration-orchestrator.md` (public) |
@@ -119,8 +118,7 @@ make help
 `make` targets detect a missing/stopped Docker daemon and emit an actionable
 error before doing anything destructive. They also detect a missing
 `~/.omnibase/.env` and point at remediation rather than failing with a stack
-trace. The full first-time bootstrap sequence is
-`runbooks/omnibase-infra-full-platform-setup.md` in the internal knowledge base.
+trace. The full first-time bootstrap sequence is not part of this repository.
 
 ### Development and testing
 
@@ -139,8 +137,8 @@ uv run onex-status
 ```
 
 Some operational flows require Docker, Kafka/Redpanda, PostgreSQL, Valkey, and
-the secrets manager. See `runbooks/omnibase-infra-full-platform-setup.md` and
-`runbooks/omnibase-infra-infisical-secrets.md` in the internal knowledge base.
+the secrets manager. The runbooks for bringing those up are not part of this
+repository.
 
 ## Runtime Shape
 
@@ -165,9 +163,9 @@ this `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `SECURITY.md`, anything under
 `kb-doc-gate` required check enforces that list in `strict` mode, so a new
 document under `docs/` fails CI rather than quietly re-growing the tree.
 
-New prose goes to [the public knowledge base](https://github.com/OmniNode-ai/knowledge-base) by default, and to
-[the internal knowledge base](https://github.com/OmniNode-ai/knowledge-base-internal) when it names real internal topology, the
-lab or CI fleet, deploy lanes, or the secrets manager. Dated point-in-time
+New prose goes to [the public knowledge base](https://github.com/OmniNode-ai/knowledge-base) by default. Prose that
+would name real internal topology, the lab or CI fleet, deploy lanes, or the
+secrets manager does not go to a public destination at all. Dated point-in-time
 artifacts — evidence bundles, audit snapshots, run transcripts — are not
 documentation and are not migrated; definition-of-done evidence is tracked in
 the change-control evidence system.
