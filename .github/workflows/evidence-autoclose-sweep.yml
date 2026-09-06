@@ -899,6 +899,58 @@ jobs:
       # once and copied to its dests, and worktree-shaped dests are deliberately
       # NOT pre-synced — they are historical, rarely adjudicated, and `uv run`
       # provisions them on demand now that UV_NO_SYNC is gone.
+      # OMN-17976. The git credential, provisioned ONCE and pointed at from
+      # every step that spawns git -- which is more steps than it looks.
+      #
+      # This helper used to be written inline in the materialise step below and
+      # exported only there. That covered the clone. It did not cover the
+      # SECOND fetch, the one `EvidenceCollector` runs for ITSELF: step 2 of its
+      # freshness predicate is `git fetch <remote> <branch>`, spawned from
+      # inside the sweep, inheriting the SWEEP step's environment. That
+      # environment had GH_TOKEN and no GIT_ASKPASS, so git fell back to
+      # prompting and died.
+      #
+      # Public repos never showed it -- an anonymous https fetch of omnimarket
+      # or omnibase_core needs no credential, which is why OMN-17907 and
+      # OMN-17975 executed and flipped. Every `omninode_infra`-homed check hit
+      # it, measured on run 34004893099 at 2026-09-06T01:53:04Z, three
+      # candidates in a row (OMN-17201, OMN-17556, OMN-17515):
+      #
+      #   PRODUCT_CLONE_NOT_FRESH: ... upstream origin/dev, behind None; git
+      #   fetch origin dev failed ...: fatal: could not read Username for
+      #   'https://github.com': No such device or address
+      #
+      # `upstream origin/dev` in that message is OMN-17975 working: the refusal
+      # had already moved off step 1. This closes step 2.
+      #
+      # It is NOT the OMN-16832 token-scope residual: the same run's capability
+      # probe reports `READ_PULLS OmniNode-ai/omninode_infra: OK` and the clone
+      # succeeded. The credential simply never reached the process that needed
+      # it second.
+      #
+      # Discipline preserved, not relaxed: the token is still never written into
+      # a clone's config, never placed on a command line, and never printed. The
+      # helper emits it only when git asks for a password, and only in a step
+      # that already carries GH_TOKEN -- a step without it gets an empty answer
+      # and the same honest failure as before.
+      - name: Provision the git credential helper (OMN-17976)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/git-askpass.sh" <<'EOS'
+          #!/usr/bin/env bash
+          case "$1" in
+            Username*|username*) printf '%s\n' "x-access-token" ;;
+            *) printf '%s\n' "${GH_TOKEN}" ;;
+          esac
+          EOS
+          chmod +x "${RUNNER_TEMP}/git-askpass.sh"
+          if [ ! -x "${RUNNER_TEMP}/git-askpass.sh" ]; then
+            echo "::error::the git credential helper is not executable; every private-repo fetch this job makes would fall back to prompting and be recorded as an unexecuted PRODUCT_CLONE_NOT_FRESH refusal (OMN-17976)." >&2
+            exit 1
+          fi
+          echo "git credential helper provisioned at ${RUNNER_TEMP}/git-askpass.sh"
+
       - name: Derive and materialise the cwd repo set the OCC contracts name (OMN-16902)
         shell: bash
         env:
@@ -987,15 +1039,9 @@ jobs:
           fi
 
           # Credentials reach git through GIT_ASKPASS only: never written into
-          # a clone's config, never on a command line, never in the log.
-          cat > "${RUNNER_TEMP}/git-askpass.sh" <<'EOS'
-          #!/usr/bin/env bash
-          case "$1" in
-            Username*|username*) printf '%s\n' "x-access-token" ;;
-            *) printf '%s\n' "${GH_TOKEN}" ;;
-          esac
-          EOS
-          chmod +x "${RUNNER_TEMP}/git-askpass.sh"
+          # a clone's config, never on a command line, never in the log. The
+          # helper itself is provisioned by its own step above (OMN-17976) so
+          # the SWEEP can point at the same file -- see that step for why.
           export GIT_ASKPASS="${RUNNER_TEMP}/git-askpass.sh"
           export GIT_TERMINAL_PROMPT=0
 
@@ -1294,6 +1340,14 @@ jobs:
           # make the diagnostic lie about the thing it exists to diagnose.
           ONEX_CC_REPO_PATH: ${{ github.workspace }}/.occ-src
           DIAGNOSE_TICKETS: ${{ github.event.inputs.diagnose_tickets }}
+          # OMN-17976: `EvidenceCollector` spawns `git fetch` for itself as step 2
+          # of its product-clone freshness predicate. Without these two it
+          # prompts and dies, and every private-repo-homed behaviour check is
+          # recorded as an unexecuted PRODUCT_CLONE_NOT_FRESH refusal.
+          # GIT_TERMINAL_PROMPT=0 keeps a credential-less fetch a fast, named
+          # failure rather than a hang.
+          GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           set -uo pipefail
 
@@ -1582,6 +1636,14 @@ jobs:
           # disarmed", so a repo with no such variable behaves exactly as it
           # did before this line existed.
           AUTOCLOSE_DISARMED_BY: ${{ vars.ONEX_AUTOCLOSE_DISARMED }}
+          # OMN-17976: `EvidenceCollector` spawns `git fetch` for itself as step 2
+          # of its product-clone freshness predicate. Without these two it
+          # prompts and dies, and every private-repo-homed behaviour check is
+          # recorded as an unexecuted PRODUCT_CLONE_NOT_FRESH refusal.
+          # GIT_TERMINAL_PROMPT=0 keeps a credential-less fetch a fast, named
+          # failure rather than a hang.
+          GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           set -euo pipefail
           # Fail fast on a missing secret rather than letting every ticket in
