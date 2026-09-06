@@ -10,11 +10,12 @@ must never be required from ordinary runtime producers or consumers.
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Literal, Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -28,6 +29,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
     ModelGatewayHeartbeat,
+    ModelGatewayTenantIdentity,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     strip_topic_prefix,
@@ -45,6 +47,171 @@ logger = logging.getLogger(__name__)
 # direct local-only publish (DEGRADED status, and the G3 heartbeat local
 # mirror) that was never meant to leave this cluster at all.
 _LOCAL_ONLY_DIRECTIONS = frozenset({"cloud-to-local", "local-mirror"})
+
+# OMN-17981: the two mandatory identity headers ``ModelEventHeaders`` declares
+# and ``event_bus_kafka._model_headers_to_kafka`` stamps on every ONEX publish.
+# These are the SAME headers #3205 keys the lane mirror on -- reading them here
+# rather than re-deriving an identity is what keeps the two legs' idempotency
+# keys equal for one record, so a record that crossed the mirror and the cloud
+# leg is deduped on the same value on both.
+_MESSAGE_ID_HEADER = "message_id"
+_CORRELATION_ID_HEADER = "correlation_id"
+_EVENT_TYPE_HEADER = "event_type"
+_TIMESTAMP_HEADER = "timestamp"
+
+
+def _header_text(headers: object, name: str) -> str | None:
+    """One wire header as text, or None when it is absent or unreadable."""
+    if not isinstance(headers, Mapping):
+        return None
+    raw = headers.get(name)
+    if isinstance(raw, bytes):
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
+def _header_uuid(headers: object, name: str) -> UUID | None:
+    """One wire header as a UUID, or None when absent or not a UUID.
+
+    Refused rather than defaulted: minting an identity for a record that does
+    not carry one would make the durable dedupe marker meaningless and turn the
+    leg's at-least-once promise into a coin flip on redelivery. That is the
+    same reasoning ``NodeLaneMirror._record_identity`` records for the mirror.
+    """
+    text = _header_text(headers, name)
+    if text is None:
+        return None
+    try:
+        return UUID(text)
+    except ValueError:
+        return None
+
+
+def decode_envelope_strict(
+    message: object,
+) -> ModelEventEnvelope[dict[str, object]]:
+    """Decode the canonical envelope, raising when the record is not one.
+
+    Module-level (not a method) for the same reason ``_stamp_local_only`` is:
+    ``ServiceGatewayForwarder`` sits at the ONEX pattern validator's
+    method-count bound, and the OMN-17981 outbound seam below needs a method
+    slot more than this does.
+    """
+    value = getattr(message, "value", message)
+    if isinstance(value, ModelEventEnvelope):
+        return ModelEventEnvelope[dict[str, object]].model_validate(value)
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    if not isinstance(value, bytes):
+        raise TypeError("gateway bus message value must be bytes or string")
+    return ModelEventEnvelope[dict[str, object]].model_validate_json(value)
+
+
+def synthesize_outbound_envelope(
+    message: object,
+    identity: ModelGatewayTenantIdentity,
+) -> ModelEventEnvelope[dict[str, object]] | None:
+    """Wrap a flat outbound record in an envelope, or return None to quarantine.
+
+    OMN-17981, measured on the ``omninode-gateway`` lane 2026-09-06: the
+    omniclaude hook edge publishes a FLAT hook payload with the envelope
+    metadata in Kafka HEADERS, and ``ModelEventEnvelope`` is ``extra="forbid"``
+    with ``payload`` required, so ``decode_envelope_strict`` rejected 61 of 61 records
+    on ``onex.evt.omniclaude.tool-executed.v1`` while the ``inference-response``
+    control topic delivered 82. Across the container's entire prior life there
+    was never one outbound acknowledgement on any of the four hook topics.
+
+    OMN-17919 fixed the same wire-shape mismatch on the lane mirror (#3205) by
+    keying it on the ``message_id`` header, and scoped the trust-boundary legs
+    out because they "genuinely do need the envelope, for the tenant
+    transform". They do -- so this builds the envelope the transform needs
+    instead of relaxing the transform.
+
+    This does NOT weaken the trust boundary, in three specific ways:
+
+    * The flat record becomes the ``payload`` verbatim, which is exactly where
+      :meth:`ServiceGatewayForwarder._prepare_outbound` reads ``tenant_id``
+      from. A record claiming a foreign tenant still refuses.
+    * No ``source_tenant_id`` / ``source_tenant_principal_id`` metadata tag is
+      stamped here. ``_prepare_outbound``'s two tag checks therefore run
+      against absence, exactly as they do today for every real
+      ``inference-response`` record, and ``_prepare_outbound`` remains the only
+      writer of those tags.
+    * The tenant DIMENSION on the envelope comes from the attach config
+      (``identity.tenant_slug``) and never from the untrusted record.
+
+    Returns ``None`` -- never a partial envelope -- when the record carries no
+    usable identity, so the caller re-raises the original decode failure and
+    the existing quarantine path handles it unchanged.
+    """
+    headers = getattr(message, "headers", None)
+    envelope_id = _header_uuid(headers, _MESSAGE_ID_HEADER)
+    correlation_id = _header_uuid(headers, _CORRELATION_ID_HEADER)
+    if envelope_id is None or correlation_id is None:
+        return None
+
+    value = getattr(message, "value", None)
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    if not isinstance(value, bytes):
+        return None
+    try:
+        payload = json.loads(value)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    # A JSON array or scalar is not a hook payload. ``payload`` is typed
+    # ``dict[str, object]`` downstream and ``_prepare_outbound`` does a
+    # ``.get("tenant_id")`` on it, so anything else is refused rather than
+    # coerced into a shape the tenant check cannot read.
+    if not isinstance(payload, dict) or not all(
+        isinstance(key, str) for key in payload
+    ):
+        return None
+
+    source_topic = getattr(message, "topic", None)
+    source_partition = getattr(message, "partition", None)
+    source_offset = getattr(message, "offset", None)
+    metadata = ModelEnvelopeMetadata(
+        tags={
+            # The marker exists so a downstream reader can tell a synthesised
+            # envelope from a producer-minted one without guessing, and so the
+            # class is countable in the log rather than invisible.
+            "gateway_synthesized_envelope": "true",
+            "gateway_synthesized_source_topic": str(source_topic),
+            "gateway_synthesized_source_partition": str(source_partition),
+            "gateway_synthesized_source_offset": str(source_offset),
+        }
+    )
+    return ModelEventEnvelope[dict[str, object]](
+        payload=payload,
+        envelope_id=envelope_id,
+        correlation_id=correlation_id,
+        envelope_timestamp=_header_timestamp(headers),
+        event_type=_header_text(headers, _EVENT_TYPE_HEADER),
+        metadata=metadata,
+        tenant_id=identity.tenant_slug,
+    )
+
+
+def _header_timestamp(headers: object) -> datetime:
+    """The producer's own emit time when the wire carries a readable one.
+
+    Falls back to now: the timestamp is provenance, not identity, so an
+    unparseable one must not cost the record its crossing the way a missing
+    ``message_id`` does.
+    """
+    text = _header_text(headers, _TIMESTAMP_HEADER)
+    if text is not None:
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            pass
+    return datetime.now(UTC)
 
 
 def _stamp_local_only(
@@ -180,7 +347,7 @@ class ServiceGatewayForwarder:
 
     async def _forward_outbound_message(self, message: object) -> None:
         source_topic = self._message_topic(message)
-        envelope = self._decode_message(message)
+        envelope = self.decode_outbound_message(message)
         direction = envelope.metadata.tags.get("gateway_direction")
         if direction in _LOCAL_ONLY_DIRECTIONS:
             logger.debug(
@@ -207,14 +374,14 @@ class ServiceGatewayForwarder:
     def validate_outbound_message(self, message: object) -> None:
         """Validate an outbound trust-boundary message without publishing it."""
         source_topic = self._message_topic(message)
-        envelope = self._decode_message(message)
+        envelope = self.decode_outbound_message(message)
         direction = envelope.metadata.tags.get("gateway_direction")
         if direction not in _LOCAL_ONLY_DIRECTIONS:
             self._prepare_outbound(envelope, source_topic)
 
     async def _consume_inbound_message(self, message: object) -> None:
         wire_topic = self._message_topic(message)
-        envelope = self._decode_message(message)
+        envelope = decode_envelope_strict(message)
         if envelope.metadata.tags.get("gateway_direction") == "local-to-cloud":
             logger.debug(
                 "Skipping gateway loopback on cloud topic %s",
@@ -237,7 +404,7 @@ class ServiceGatewayForwarder:
     def validate_inbound_message(self, message: object) -> None:
         """Validate an inbound trust-boundary message without publishing it."""
         wire_topic = self._message_topic(message)
-        envelope = self._decode_message(message)
+        envelope = decode_envelope_strict(message)
         if envelope.metadata.tags.get("gateway_direction") != "local-to-cloud":
             self._prepare_inbound(envelope, wire_topic)
 
@@ -247,7 +414,40 @@ class ServiceGatewayForwarder:
         message: object,
     ) -> ModelEventEnvelope[dict[str, object]]:
         """Decode the canonical envelope used as the durable dedupe key source."""
-        return cls._decode_message(message)
+        return decode_envelope_strict(message)
+
+    def decode_outbound_message(
+        self,
+        message: object,
+    ) -> ModelEventEnvelope[dict[str, object]]:
+        """Decode an outbound record, synthesising an envelope for a flat one.
+
+        Strict decode first, so a real producer-minted envelope is completely
+        untouched by this path and keeps its own ``envelope_id`` -- synthesis
+        is a fallback for the shape that would otherwise be quarantined, never
+        an alternative representation of a record that already decodes.
+
+        Outbound ONLY, deliberately. An inbound record arrives from cloud
+        across the tenant trust boundary, and what ``_prepare_inbound``
+        validates is the ``source_tenant_id`` / ``source_tenant_principal_id``
+        tags the cloud side stamped on the envelope. A synthesised envelope has
+        no such tags to check, so synthesising there would convert a validated
+        record into an unvalidated one -- which is the boundary this node
+        exists to hold. Inbound keeps the strict decode and keeps quarantining.
+        """
+        try:
+            return decode_envelope_strict(message)
+        except Exception:
+            synthesized = synthesize_outbound_envelope(
+                message,
+                self._config.tenant_identity,
+            )
+            if synthesized is None:
+                # No usable identity on the wire: re-raise the ORIGINAL decode
+                # failure so the caller's quarantine reason still names the
+                # real cause instead of a synthesis-specific one.
+                raise
+            return synthesized
 
     def _build_status_envelope(
         self,
@@ -399,17 +599,6 @@ class ServiceGatewayForwarder:
                 )
                 await self._retry_sleep(delay)
                 delay = min(delay * 2, self._config.forward_retry_max_seconds)
-
-    @staticmethod
-    def _decode_message(message: object) -> ModelEventEnvelope[dict[str, object]]:
-        value = getattr(message, "value", message)
-        if isinstance(value, ModelEventEnvelope):
-            return ModelEventEnvelope[dict[str, object]].model_validate(value)
-        if isinstance(value, str):
-            value = value.encode("utf-8")
-        if not isinstance(value, bytes):
-            raise TypeError("gateway bus message value must be bytes or string")
-        return ModelEventEnvelope[dict[str, object]].model_validate_json(value)
 
     @staticmethod
     def _encode_envelope(
