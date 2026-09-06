@@ -572,7 +572,17 @@ check_sibling_lock_pins() {
         --repo "omnibase-core=${omni_home}/omnibase_core"
         --repo "omnibase-spi=${omni_home}/omnibase_spi"
         --repo "omnibase-compat=${omni_home}/omnibase_compat"
-        --repo "onex-change-control=${omni_home}/onex_change_control"
+        # OMN-16296 (#2822) removed onex_change_control from the sibling clone
+        # manifest -- it is no longer installed into the runtime image, so
+        # check_sibling_lock_pins.py's DEFAULT_PACKAGE_REPO_DIRS no longer
+        # carries "onex-change-control" and argparse REJECTS it outright:
+        #   error: argument --repo: unknown package 'onex-change-control'
+        # deploy-runtime.sh's copy of this argv was updated in that PR; this
+        # one was not, which made every BUILD_SOURCE=workspace gateway deploy
+        # exit 1 in the preflight, before the build. Measured on .201
+        # 2026-09-06 while deploying omnibase_infra#3221 to unwedge the
+        # forwarder's outbound leg (OMN-17201). Keep this list identical to
+        # deploy-runtime.sh's check_sibling_lock_pins() guard_args.
         --output "${provenance_out}"
         --build-source workspace
     )

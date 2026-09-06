@@ -951,3 +951,37 @@ def test_deploy_gateway_runs_sibling_lock_pin_preflight_in_workspace_mode() -> N
     assert "--lock" in deploy_script
     assert "--output" in deploy_script
     assert "--provenance-out" not in deploy_script
+
+
+@pytest.mark.unit
+def test_lock_pin_preflight_argv_matches_deploy_runtime_package_set() -> None:
+    """The --repo package set must be one check_sibling_lock_pins.py accepts.
+
+    OMN-16296 (#2822) dropped ``onex_change_control`` from the sibling clone
+    manifest -- it is no longer installed into the runtime image, so
+    ``check_sibling_lock_pins.py``'s ``DEFAULT_PACKAGE_REPO_DIRS`` no longer
+    carries ``onex-change-control`` and its argparse ``--repo`` validator
+    rejects it. That PR updated ``deploy-runtime.sh``'s copy of this argv and
+    missed ``deploy-gateway.sh``'s, so every ``BUILD_SOURCE=workspace`` gateway
+    deploy died in the preflight with::
+
+        error: argument --repo: unknown package 'onex-change-control';
+               expected one of [...]
+
+    before reaching the build. Measured on .201 on 2026-09-06 while deploying
+    omnibase_infra#3221 to unwedge the forwarder's outbound cloud leg
+    (OMN-17201). This asserts the two scripts stay in lockstep against the
+    checker's own accepted-package map rather than against a copied literal.
+    """
+    from scripts.runtime_build.check_sibling_lock_pins import (
+        DEFAULT_PACKAGE_REPO_DIRS,
+    )
+
+    deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    requested = set(re.findall(r'--repo "([a-z0-9-]+)=\$\{omni_home\}/', deploy_script))
+    assert requested, "no --repo package arguments found in deploy-gateway.sh"
+    unknown = requested - set(DEFAULT_PACKAGE_REPO_DIRS)
+    assert not unknown, (
+        "deploy-gateway.sh passes --repo packages check_sibling_lock_pins.py "
+        f"rejects: {sorted(unknown)}"
+    )
