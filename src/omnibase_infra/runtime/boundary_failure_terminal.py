@@ -69,6 +69,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.enums.enum_non_retryable_error_category import (
     EnumNonRetryableErrorCategory,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 __all__ = [
     "ModelBoundaryFailureTerminal",
@@ -103,6 +104,18 @@ _BOUNDARY_WRAPPER_CLASS_NAMES: frozenset[str] = frozenset(
         "UndeliverableDispatchOutputError",
     }
 )
+
+# Character budget for the CUSTOMER-facing reason. Same 500 as
+# ``sanitize_error_string``'s default, deliberately: this is not a bigger
+# budget, it is the same budget spent on the cause instead of on a dispatch
+# trace. The live OMN-17372 refusal spent 260 of its 500 characters naming a
+# Kafka topic and a dispatcher id and then truncated the customer's remediation
+# off the end.
+_MAX_CUSTOMER_REASON_CHARS = 500
+
+# The marker ``sanitize_error_string`` appends when it truncates. Reused rather
+# than re-spelled so a caller cannot tell the two truncation sites apart.
+_TRUNCATION_MARKER = "... [truncated]"
 
 
 class ModelBoundaryFailureTerminal(BaseModel):
@@ -172,8 +185,11 @@ class ModelBoundaryFailureTerminal(BaseModel):
     failure_reason: str = Field(
         ...,
         description=(
-            "Sanitized human-readable cause. Read by the Pattern B broker's "
-            "_terminal_error_message and surfaced to the caller."
+            "Sanitized human-readable cause, CUSTOMER-FACING. Read by the "
+            "Pattern B broker's _terminal_error_message and surfaced to the "
+            "caller, so it is the attributed cause's own message and not the "
+            "boundary wrapper's dispatch trace (OMN-17372) — no topic name, no "
+            "dispatcher id. The wrapper stays on the boundary's ERROR log line."
         ),
     )
     origin_topic: str = Field(
@@ -242,6 +258,66 @@ def _first_onex_code(exc: BaseException) -> str | None:
     return None
 
 
+def _customer_facing_reason(
+    exc: BaseException, *, failure_class: str, fallback: str
+) -> str:
+    """The attributed CAUSE's own message, recovered from the wrapper (OMN-17372).
+
+    ``fallback`` is what the boundary passed — ``sanitize_error_message(exc)``,
+    i.e. the wrapper's whole message, truncated to 500 characters. When a
+    wrapper is what the boundary caught, that string is an internal dispatch
+    trace: it leads with ``HandlerDispatchFailureError``, names the consumed
+    Kafka topic and the dispatcher id, and spends the budget before reaching the
+    sentence the caller can act on. Live on ``onex-dev`` the keyless-customer
+    refusal reached the customer as::
+
+        HandlerDispatchFailureError: dispatch to topic=onex.cmd.… returned
+        status=handler_error … CustomerKeyRefusedError:
+        [ONEX_MARKET_CUSTOMER_PROVIDER_KEY_ABSENT] … no provider key is
+        registered f... [truncated]
+
+    — internal topology on a customer response body, and the remediation gone.
+
+    **The unwrap is deliberately narrow.** It fires only when the attributed
+    ``failure_class`` is NOT the class the boundary caught, which is exactly the
+    "a wrapper hid the cause" case. Every other failure shape in the runtime
+    keeps publishing the reason the boundary composed, byte-identical.
+
+    **It reads the RAW exception, so it re-sanitizes.** ``fallback`` has already
+    been through ``sanitize_error_message``; the text extracted here has not, and
+    that helper collapses a whole message on any of its sensitive substrings.
+    A candidate the sanitizer redacts is therefore discarded in favour of
+    ``fallback`` — unwrapping must never be a way around a redaction.
+
+    Returns ``fallback`` unchanged whenever no cause can be recovered: an absent
+    unwrap is reported as absent, never approximated.
+    """
+    if failure_class == type(exc).__name__:
+        return fallback
+    marker = f"{failure_class}: "
+    for item in _exception_chain(exc):
+        message = str(item)
+        if type(item).__name__ == failure_class:
+            candidate = message
+        else:
+            index = message.find(marker)
+            if index < 0:
+                continue
+            candidate = message[index + len(marker) :]
+        candidate = candidate.strip()
+        if not candidate:
+            continue
+        sanitized = sanitize_error_string(
+            candidate, max_length=_MAX_CUSTOMER_REASON_CHARS
+        )
+        if sanitized != candidate and not sanitized.endswith(_TRUNCATION_MARKER):
+            # The sanitizer replaced rather than truncated: it found something
+            # sensitive. Publish the already-sanitized wrapper instead.
+            return fallback
+        return sanitized
+    return fallback
+
+
 def classify_boundary_failure(
     exc: BaseException,
     *,
@@ -269,6 +345,14 @@ def classify_boundary_failure(
     defect. The direction of the bias is also deliberate: this decides whether a
     caller should try again, and wrongly saying "retryable" costs an unbounded
     retry loop while wrongly saying "not retryable" costs one surfaced error.
+
+    ``failure_reason`` is likewise a FALLBACK once a wrapper is in play. It is
+    the boundary's ``sanitize_error_message(exc)`` — the wrapper's own dispatch
+    trace — and this terminal is read by customer-facing surfaces, so
+    :func:`_customer_facing_reason` replaces it with the attributed cause's own
+    message where one can be recovered (OMN-17372). The trace is not lost: the
+    boundary logs it verbatim at ``ERROR`` against the same correlation, which
+    is where a topic name and a dispatcher id belong.
     """
     candidates = _candidate_class_names(exc)
     retryable = not any(
@@ -278,11 +362,14 @@ def classify_boundary_failure(
         (name for name in candidates if name not in _BOUNDARY_WRAPPER_CLASS_NAMES),
         None,
     )
+    attributed_class = specific or type(exc).__name__
     return ModelBoundaryFailureTerminal(
         correlation_id=correlation_id,
-        failure_class=specific or type(exc).__name__,
+        failure_class=attributed_class,
         failure_code=_first_onex_code(exc) or failure_code,
         retryable=retryable,
-        failure_reason=failure_reason,
+        failure_reason=_customer_facing_reason(
+            exc, failure_class=attributed_class, fallback=failure_reason
+        ),
         origin_topic=topic,
     )
