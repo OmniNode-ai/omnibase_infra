@@ -182,7 +182,6 @@ _EXPECTED_BINDING_DSN_ENVS = {
     },
     "onex-dev": {
         "onex_api": "OMNINODE_CLOUD_DB_URL",
-        "tenant_projection": "ONEX_TENANT_DB_URL",
         "app_dashboard": "DATABASE_URL",
         "omninode_runtime_service": "OMNINODE_INTERNAL_DB_URL",
     },
@@ -192,6 +191,30 @@ _EXPECTED_BINDING_DSN_ENVS = {
         "app_dashboard": "DATABASE_URL",
         "omninode_runtime_service": "OMNINODE_INTERNAL_DB_URL",
     },
+}
+# OMN-17556: bindings whose credential is carried by the SECRET STORE, not by a
+# process env var. Pinned per instance exactly as the env carriers above are,
+# so a silent carrier swap in either direction is drift and fails this check.
+#
+# Only `onex-dev`/`tenant_projection` has moved. That is deliberate and is the
+# whole migration for this ticket:
+#
+#   * It is the binding with no env carrier anywhere on the plane -- no
+#     onex-dev manifest ever bound ONEX_TENANT_DB_URL, which is what held the
+#     shared runtime in CrashLoopBackOff under ONEX_WIRING_STRICT_MODE
+#     (OMN-17519/OMN-17557). Every other binding has a working env carrier
+#     today, so moving it here would be a live credential-path change with no
+#     incident driving it.
+#   * `local` keeps `dsn_env` because the compose lanes materialize it from the
+#     host .env, and the compose files are OMN-17562's lane, not this one.
+#   * `onex-prod` keeps `dsn_env` because a prod credential-path change needs a
+#     prod promotion gate this ticket does not open.
+_EXPECTED_BINDING_SECRET_REFS = {
+    "local": {},
+    "onex-dev": {
+        "tenant_projection": "database.tenant_projection.dsn",
+    },
+    "onex-prod": {},
 }
 
 
@@ -350,8 +373,23 @@ def validate_application_database_invariants(
                 f"Binding '{binding_name}' principal drift: expected "
                 f"'{expected_principal}', got '{binding.principal}'"
             )
-        expected_dsn_env = _EXPECTED_BINDING_DSN_ENVS[topology_instance][binding_name]
-        if binding.dsn_env != expected_dsn_env:
+        # OMN-17556: exactly one carrier per binding, pinned per instance. The
+        # model already rejects both-set/neither-set at load time; this asserts
+        # WHICH carrier this instance is contracted to use, so a binding
+        # silently migrating between store and env is drift either way.
+        expected_secret_ref = _EXPECTED_BINDING_SECRET_REFS[topology_instance].get(
+            binding_name
+        )
+        expected_dsn_env = _EXPECTED_BINDING_DSN_ENVS[topology_instance].get(
+            binding_name
+        )
+        if expected_secret_ref is not None:
+            if binding.secret_ref != expected_secret_ref:
+                raise ValueError(
+                    f"Binding '{binding_name}' secret_ref drift: expected "
+                    f"'{expected_secret_ref}', got '{binding.secret_ref}'"
+                )
+        elif binding.dsn_env != expected_dsn_env:
             raise ValueError(
                 f"Binding '{binding_name}' dsn_env drift: expected "
                 f"'{expected_dsn_env}', got '{binding.dsn_env}'"
@@ -508,6 +546,43 @@ def validate_omnibase_infra_database_invariants(
             )
 
 
+def _drop_undeclared_binding_carriers(dumped: dict[str, object]) -> None:
+    """Strip each binding's UNUSED credential-carrier key, in place.
+
+    OMN-17556. The binding model now declares two mutually-exclusive carriers
+    (``dsn_env`` / ``secret_ref``) and sets exactly one, so a plain dump gives
+    every env-carried binding a ``secret_ref: null`` line. That would be a
+    pure-noise diff across every downstream projection -- including the compose
+    lanes, which are OMN-17562's files and not this ticket's -- and it would
+    advertise a carrier the binding does not have.
+
+    Scoped to the two carrier keys on purpose. A blanket ``exclude_none=True``
+    was the obvious move and is WRONG: it also strips ``schema: null`` from
+    DATABASE-scoped grants, which the checked-in projections carry and the
+    byte-for-byte regeneration test asserts. Measured, not reasoned about --
+    that variant failed both projection tests.
+
+    Not lossy: an absent key and an explicit null both mean "not declared", and
+    the model rejects a binding declaring NEITHER carrier at load time, so a
+    projection can never silently lose the one that was set.
+    """
+    databases = dumped.get("databases")
+    if not isinstance(databases, dict):
+        return
+    for database in databases.values():
+        if not isinstance(database, dict):
+            continue
+        bindings = database.get("bindings")
+        if not isinstance(bindings, dict):
+            continue
+        for binding in bindings.values():
+            if not isinstance(binding, dict):
+                continue
+            for carrier in ("dsn_env", "secret_ref"):
+                if binding.get(carrier) is None:
+                    binding.pop(carrier, None)
+
+
 def render_database_projection(
     environment: str,
     topology_root: Path | None = None,
@@ -524,6 +599,7 @@ def render_database_projection(
         profile_catalog_path=profile_catalog_path,
     )
     dumped = topology.model_dump(mode="json")
+    _drop_undeclared_binding_carriers(dumped)
     databases = cast("dict[str, object]", dumped["databases"])
     return {
         "schema_version": "1.0",
@@ -672,7 +748,15 @@ def validate_docker_catalog_parity(
         )
 
     services_dir = repo_root / "docker" / "catalog" / "services"
-    application_dsn_envs = {binding.dsn_env for binding in database.bindings.values()}
+    # OMN-17556: store-carried bindings contribute no env name. `local` has
+    # none today, so this is a type-level guard rather than a behavior change --
+    # but it must not become `""`, which would match every manifest with an
+    # empty required_env entry and silently widen the discovered-consumer set.
+    application_dsn_envs = {
+        binding.dsn_env
+        for binding in database.bindings.values()
+        if binding.dsn_env is not None
+    }
     discovered_dsn_consumers: set[str] = set()
     for manifest_path in services_dir.glob("*.yaml"):
         manifest = _load_manifest(manifest_path)
@@ -711,6 +795,13 @@ def validate_docker_catalog_parity(
                 raise ValueError(
                     f"Docker service '{service_name}' references unknown topology "
                     f"binding '{binding_name}'"
+                )
+            if binding.dsn_env is None:
+                raise ValueError(
+                    f"Docker service '{service_name}' references binding "
+                    f"'{binding_name}', which is store-carried (secret_ref "
+                    f"{binding.secret_ref!r}) on this instance and therefore "
+                    "has no env var for a compose service to consume"
                 )
             if binding.dsn_env not in env_names:
                 raise ValueError(
