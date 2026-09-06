@@ -84,6 +84,11 @@ services:
       - /tmp/gateway-forwarder-ready
       - --broker-ref-map
       - /run/gateway/broker-ref-map.yaml
+      # OMN-17201: the egress denial/delivery counters the healthcheck below
+      # reads. Both sides name the same path explicitly rather than relying on
+      # the shared default, so a change to either is visible here.
+      - --egress-health-file
+      - /tmp/gateway-egress-health.json
     environment:
       AWS_PROFILE: "${GATEWAY_AWS_PROFILE:-gateway}"
       AWS_CONFIG_FILE: "/run/aws/config"
@@ -171,7 +176,12 @@ services:
       # canary.readback_deadline_seconds change in contract.yaml (manual
       # sync -- the compose file cannot reference the contract at build
       # time, see OMN-15762).
-      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml"]
+      # OMN-17201: --egress-health-file adds a third, broker-free leg that
+      # reads the forwarder's own denial counters. Both broker legs produce to
+      # the CANARY topic, which is authorized, so neither can see a forwarder
+      # whose real traffic topics are all denied -- it quarantines every
+      # record, drains its lag into the DLQ, and passes both broker legs.
+      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml", "--egress-health-file", "/tmp/gateway-egress-health.json"]
       interval: 15s
       timeout: 45s
       retries: 4
