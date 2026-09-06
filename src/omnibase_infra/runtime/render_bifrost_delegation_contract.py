@@ -242,6 +242,21 @@ def _merge_lane_overlay(
                 f"Bifrost base backend {binding.backend_key!r} model_name {base_model!r} "
                 f"does not match overlay served_model_id {binding.advertised_model!r}"
             )
+        if not binding.serving:
+            # OMN-16999: a DECLARED-but-dark rung. Write the disabled shape —
+            # the same ``endpoint_url: null`` a cloud lane's local backends get
+            # — so ``_load_bifrost_endpoints`` skips it and routing never offers
+            # it, while ``routing_rules``/``default_backends`` naming this
+            # backend stay resolvable. model_name is still asserted above and
+            # still written below, so the binding survives in the artifact and
+            # the rung is restored by flipping one flag, not by reconstructing
+            # it. The probe is skipped for the obvious reason: probing an
+            # endpoint already proven dark would only fail the render.
+            backend["endpoint_url"] = None
+            backend["model_name"] = binding.advertised_model
+            backend["max_tokens"] = binding.max_tokens
+            backend["timeout_ms"] = binding.timeout_ms
+            continue
         if verify:
             failure = endpoint_probe(
                 binding.endpoint_url,

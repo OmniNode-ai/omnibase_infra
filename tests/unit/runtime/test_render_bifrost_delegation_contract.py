@@ -36,7 +36,9 @@ def test_renderer_has_only_the_overlay_contract_arguments() -> None:
     )
 
 
-def _write_base_contract(path: Path, *, coder_model: str | None = "qwen3.8") -> None:
+def _write_base_contract(
+    path: Path, *, coder_model: str | None = "Qwen3.6-35B-A3B"
+) -> None:
     path.write_text(
         yaml.safe_dump(
             {
@@ -49,7 +51,7 @@ def _write_base_contract(path: Path, *, coder_model: str | None = "qwen3.8") -> 
                     },
                     {
                         "backend_id": "local-heavy-reasoning",
-                        "model_name": "qwen3.8",
+                        "model_name": "Qwen3.6-35B-A3B",
                         "endpoint_url_env": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
                         "required": True,
                     },
@@ -98,12 +100,16 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
     by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
     for backend_id in ("local-coder", "local-heavy-reasoning"):
         assert by_id[backend_id]["endpoint_url"] == _ENDPOINT
-        assert by_id[backend_id]["model_name"] == "qwen3.8"
+        assert by_id[backend_id]["model_name"] == "Qwen3.6-35B-A3B"
         assert by_id[backend_id]["max_tokens"] == 65_536
         assert by_id[backend_id]["timeout_ms"] == 300_000
-    # OMN-16833: escalation's large-window local rung must render a COMPLETE
-    # endpoint_url. Before this ticket it rendered null and was dropped at load.
-    assert by_id["local-ds-v4-flash"]["endpoint_url"] == _DS_V4_ENDPOINT
+    # OMN-16833 required this rung to render a COMPLETE endpoint_url; OMN-16999
+    # re-marked it serving=False after .200:8101 answered http=000, so it now
+    # renders the DISABLED shape instead: endpoint_url null (what
+    # `_load_bifrost_endpoints` skips) with model_name, max_tokens and
+    # timeout_ms preserved so the binding survives and the rung is restored by
+    # flipping one flag rather than being reconstructed.
+    assert by_id["local-ds-v4-flash"]["endpoint_url"] is None
     assert by_id["local-ds-v4-flash"]["model_name"] == "deepseek-v4-flash"
     assert by_id["local-ds-v4-flash"]["max_tokens"] == 65_536
     assert by_id["local-ds-v4-flash"]["timeout_ms"] == 300_000
@@ -220,7 +226,7 @@ def test_base_model_mismatch_fails_instead_of_dropping_served_id(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "base.yaml"
-    _write_base_contract(source, coder_model="qwen3.8-27b")
+    _write_base_contract(source, coder_model="Qwen3.6-35B-A3B-27b")
 
     with pytest.raises(ProtocolConfigurationError, match="does not match overlay"):
         render_bifrost_delegation_contract(
@@ -246,7 +252,7 @@ def test_unbound_base_model_is_materialized_from_the_typed_served_id(
 
     contract = yaml.safe_load(target.read_text(encoding="utf-8"))
     by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
-    assert by_id["local-coder"]["model_name"] == "qwen3.8"
+    assert by_id["local-coder"]["model_name"] == "Qwen3.6-35B-A3B"
 
 
 @pytest.mark.unit
@@ -258,7 +264,7 @@ def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
         endpoint_url: str, model_name: str, timeout: float
     ) -> str | None:
         assert (endpoint_url, model_name) in {
-            (_ENDPOINT, "qwen3.8"),
+            (_ENDPOINT, "Qwen3.6-35B-A3B"),
             (_DS_V4_ENDPOINT, "deepseek-v4-flash"),
         }
         assert timeout > 0
@@ -318,14 +324,14 @@ def _write_mixed_base_contract(
                 "backends": [
                     {
                         "backend_id": "local-coder",
-                        "model_name": "qwen3.8",
+                        "model_name": "Qwen3.6-35B-A3B",
                         "endpoint_url_env": "BIFROST_LOCAL_CODER_ENDPOINT_URL",
                         "endpoint_url": None,
                         "tier": "local",
                     },
                     {
                         "backend_id": "local-heavy-reasoning",
-                        "model_name": "qwen3.8",
+                        "model_name": "Qwen3.6-35B-A3B",
                         "endpoint_url_env": "BIFROST_LOCAL_CODER_ENDPOINT_URL",
                         "endpoint_url": None,
                         "tier": "local",

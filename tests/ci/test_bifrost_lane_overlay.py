@@ -65,7 +65,7 @@ def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
 
     # OMN-16833: the lane serves more than one local rung, so these are pinned
     # per-backend rather than as single-valued sets.  Live readback 2026-08-28:
-    # .201:8000 -> "qwen3.8" (max_model_len 122880); .200:8101 -> "deepseek-v4-flash"
+    # .201:8000 -> "Qwen3.6-35B-A3B" (max_model_len 131072); .200:8101 -> "deepseek-v4-flash"
     # (context_length 131072).
     by_id = {binding.backend_key: binding for binding in overlay.backends}
     assert set(by_id) == {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
@@ -73,9 +73,9 @@ def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
     for backend_key in ("local-coder", "local-heavy-reasoning"):
         binding = by_id[backend_key]
         assert binding.endpoint_url == "http://192.168.86.201:8000/v1/chat/completions"
-        assert binding.advertised_model == "qwen3.8"
+        assert binding.advertised_model == "Qwen3.6-35B-A3B"
         assert binding.parameter_count == "27B"
-        assert binding.context_window == 122_880
+        assert binding.context_window == 131_072
 
     ds_v4 = by_id["local-ds-v4-flash"]
     assert ds_v4.endpoint_url == "http://192.168.86.200:8101/v1/chat/completions"

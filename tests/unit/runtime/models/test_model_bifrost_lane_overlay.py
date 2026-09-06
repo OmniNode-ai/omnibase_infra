@@ -21,24 +21,26 @@ _QWEN_ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
 _DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
 
 # Per-backend authorized shape, mirroring the live 2026-08-28 readback recorded in
-# OMN-16833: .201:8000 serves ``qwen3.8`` (max_model_len 122880) and .200:8101 serves
+# OMN-16833: .201:8000 serves ``Qwen3.6-35B-A3B`` (max_model_len 131072) and .200:8101 serves
 # ``deepseek-v4-flash`` (context_length 131072).
 _SHAPES: dict[str, dict[str, object]] = {
     "local-coder": {
         "endpoint_url": _QWEN_ENDPOINT,
-        "served_model_id": "qwen3.8",
+        "served_model_id": "Qwen3.6-35B-A3B",
         "parameter_count": "27B",
-        "context_window": 122_880,
+        "context_window": 131_072,
         "max_tokens": 65_536,
         "timeout_ms": 300_000,
+        "serving": True,
     },
     "local-heavy-reasoning": {
         "endpoint_url": _QWEN_ENDPOINT,
-        "served_model_id": "qwen3.8",
+        "served_model_id": "Qwen3.6-35B-A3B",
         "parameter_count": "27B",
-        "context_window": 122_880,
+        "context_window": 131_072,
         "max_tokens": 65_536,
         "timeout_ms": 300_000,
+        "serving": True,
     },
     "local-ds-v4-flash": {
         "endpoint_url": _DS_V4_ENDPOINT,
@@ -47,6 +49,10 @@ _SHAPES: dict[str, dict[str, object]] = {
         "context_window": 131_072,
         "max_tokens": 65_536,
         "timeout_ms": 300_000,
+        # OMN-16999: declared but not serving — .200:8101 answered http=000 on
+        # the 2026-09-05 probe. `serving` is validated against the authorized
+        # table exactly like every other field, so this shape has to carry it.
+        "serving": False,
     },
 }
 
@@ -78,7 +84,7 @@ def test_valid_overlay_has_exact_authorized_lab_bindings() -> None:
         "local-ds-v4-flash",
     ]
     assert {binding.advertised_model for binding in overlay.backends} == {
-        "qwen3.8",
+        "Qwen3.6-35B-A3B",
         "deepseek-v4-flash",
     }
     assert overlay.model_dump(by_alias=True)["backends"][0] == _binding()
@@ -105,7 +111,10 @@ def test_active_backend_keys_cover_every_bindable_local_backend() -> None:
         # local-coder / local-heavy-reasoning are pinned to .201:8000.
         ("local-coder", "http://192.168.86.201:8001/v1/chat/completions"),
         ("local-coder", "http://192.168.86.201:8000/v1"),
-        ("local-coder", "http://192.168.86.201:8000/v1/chat/completions?model=qwen3.8"),
+        (
+            "local-coder",
+            "http://192.168.86.201:8000/v1/chat/completions?model=Qwen3.6-35B-A3B",
+        ),
         ("local-coder", "http://user@192.168.86.201:8000/v1/chat/completions"),
         ("local-coder", "http://localhost:8000/v1/chat/completions"),
         ("local-coder", "http://192.168.86.200:8000/v1/chat/completions"),
@@ -140,10 +149,10 @@ def test_incomplete_or_unauthorized_endpoint_is_rejected(
 @pytest.mark.parametrize(
     ("backend_id", "field", "value"),
     [
-        ("local-coder", "served_model_id", "qwen3.8-27b"),
+        ("local-coder", "served_model_id", "Qwen3.6-35B-A3B-27b"),
         ("local-coder", "parameter_count", "27b"),
         ("local-coder", "context_window", 32_768),
-        ("local-coder", "max_tokens", 122_881),
+        ("local-coder", "max_tokens", 131_073),
         ("local-coder", "endpoint_url_env", "BIFROST_LOCAL_CODER_ENDPOINT_URL"),
         ("local-coder", "secret_ref", "infisical://local-coder"),
         # OMN-16833: the DS-V4-Flash served id is ``deepseek-v4-flash``, NOT the

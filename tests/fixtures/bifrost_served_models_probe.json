@@ -1,0 +1,48 @@
+{
+  "_comment": [
+    "OMN-16999. A RECORDED /v1/models readback per authorized lab endpoint.",
+    "This file is the evidence that pins _AUTHORIZED_BINDINGS to live truth.",
+    "It exists because the .201 served id has now flipped TWICE with nothing in",
+    "the repo able to notice: OMN-16419 changed it Qwen3.6-35B-A3B -> qwen3.8 on",
+    "2026-08-23 after a reboot, and by 2026-09-05 the endpoint had been redeployed",
+    "SGLang -> vLLM and served Qwen3.6-35B-A3B again. Both times every static test",
+    "stayed green while every local delegation attempt was refused by the",
+    "OMN-16419 fail-closed attribution guard and climbed to the metered ceiling.",
+    "",
+    "UPDATING THIS FILE IS THE POINT, NOT A CHORE. When an endpoint is",
+    "re-deployed, re-probe it and paste the readback here in the same commit that",
+    "changes the binding table. Never edit the binding table alone: the paired",
+    "test asserts the two agree, so an unaccompanied edit fails CI instead of",
+    "shipping a rung that 404s on its first call.",
+    "",
+    "Never hand-write a `served_model_ids` list. It must be the `data[].id` values",
+    "the endpoint actually returned."
+  ],
+  "probes": [
+    {
+      "endpoint": "http://192.168.86.201:8000/v1/models",
+      "probed_at": "2026-09-05T23:12:00Z",
+      "command": "curl -sS -m 10 -w '\\nhttp=%{http_code} t=%{time_total}\\n' http://192.168.86.201:8000/v1/models",
+      "http_status": 200,
+      "reachable": true,
+      "served_model_ids": ["Qwen3.6-35B-A3B"],
+      "owned_by": "vllm",
+      "root": "/data/inference/hf-cache/Qwen3.6-35B-A3B-GPTQ-Int4",
+      "max_model_len": 131072,
+      "control": "This probe IS the positive control for the method: http=200 in 0.017s with a parseable body, on the same host, same curl invocation and same session as the http=000 row below."
+    },
+    {
+      "endpoint": "http://192.168.86.200:8101/v1/models",
+      "probed_at": "2026-09-05T23:12:00Z",
+      "command": "curl -sS -m 10 -w '\\nhttp=%{http_code} t=%{time_total}\\n' http://192.168.86.200:8101/v1/models",
+      "http_status": 0,
+      "reachable": false,
+      "served_model_ids": [],
+      "curl_exit": 7,
+      "curl_error": "Failed to connect to 192.168.86.200 port 8101 after 11 ms: Couldn't connect to server",
+      "control": "http=000 is indistinguishable from a probe that never ran, so it carries its own controls (CLAUDE.md rule 16): ping 192.168.86.200 = 2/2 packets received, 0.0% loss, 0.189ms avg; TCP 22 OPEN while TCP 8101 and 8000 are CLOSED; `ssh jonah@192.168.86.200 hostname` returns Stickybeatz-Studio.local, i.e. .200 is the workstation itself, and `ps aux | grep -i 'ds4|llama|vllm|sglang'` returns no rows there. The host is healthy; the model server is not running. Nothing was restarted (read-only scope).",
+      "declared_served_model_id": "deepseek-v4-flash",
+      "declared_note": "Recorded from the OMN-16833 2026-08-28 readback. Retained so the rung is restored by flipping `serving`, not by reconstructing the binding. It is NOT treated as a live readback by the paired test."
+    }
+  ]
+}
