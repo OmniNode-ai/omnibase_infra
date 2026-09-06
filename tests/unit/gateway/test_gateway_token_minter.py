@@ -215,6 +215,31 @@ async def test_an_audience_outside_the_permitted_set_is_still_refused(
     assert fake_transport.exchange_count == 0
 
 
+async def test_a_token_carrying_only_role_resolved_audiences_is_refused(
+    fake_transport: FakeGatewayTransport,
+) -> None:
+    """The effective set can be EMPTY, and that is a refusal, not a pass.
+
+    ``account`` is discounted before the comparison, so a token carrying
+    nothing else reduces to an empty effective set. Empty is a distinct
+    branch from the ``onex-api``-only case above: it is the one input for
+    which ``EXCHANGE_INPUT_REQUIRED_AUDIENCES - effective`` is the whole
+    REQUIRED set and the error path renders ``sorted(effective)`` as an
+    empty list. A subset assertion written as ``REQUIRED <= effective``
+    reads as satisfiable-by-vacuum to anyone skimming it, so the vacuum case
+    is pinned rather than assumed. The server refuses it at the same line.
+    """
+    fake_transport.audiences = ["account"]
+
+    with pytest.raises(ModelOnexError) as caught:
+        await _minter(fake_transport).token_for(now=fake_transport.now)
+
+    message = str(caught.value)
+    assert "[]" in message
+    assert "redpanda-events" in message
+    assert fake_transport.exchange_count == 0
+
+
 async def test_a_credential_without_the_broker_audience_is_refused(
     fake_transport: FakeGatewayTransport,
 ) -> None:

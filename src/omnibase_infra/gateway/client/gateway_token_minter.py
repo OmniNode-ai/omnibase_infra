@@ -147,8 +147,19 @@ EXCHANGE_INPUT_PERMITTED_AUDIENCES: Final[frozenset[str]] = frozenset(
 
 # Audiences Keycloak adds on its own from realm role resolution rather than
 # from any audience mapper we declare. Discounted before the input comparison
-# because the server discounts them (gateway_auth.KEYCLOAK_ROLE_RESOLVED_
-# AUDIENCES); not discounting them would reject every real token.
+# because the server discounts them; not discounting them would reject every
+# real token.
+#
+# Pinned like the two sets above, and to the same file and revision:
+# omninode_infra docker/onex-api/gateway_auth.py:152 declares
+# KEYCLOAK_ROLE_RESOLVED_AUDIENCES = frozenset({"account"}), and :316 is the
+# single place the server applies it. Verified equal on both halves --
+# the same one member, and the server has exactly one discount set, so there
+# is no second server-side discount this client is failing to mirror. That
+# matters because the discount feeds BOTH assertions below: an audience the
+# server discounts and this client does not would land in `effective` and be
+# refused by the PERMITTED branch as a provisioning defect, which is the
+# same false-refusal shape this whole change exists to remove.
 ROLE_RESOLVED_AUDIENCES: Final[frozenset[str]] = frozenset({"account"})
 
 # onex-api's attach-token exchange, mirrored from main.GATEWAY_TOKEN_EXCHANGE_
@@ -334,9 +345,15 @@ class GatewayTokenMinter:
                 f"{sorted(effective)}, which is missing "
                 f"{sorted(EXCHANGE_INPUT_REQUIRED_AUDIENCES - effective)} -- the "
                 "attach-token exchange only accepts a broker-class credential "
-                f"(after discounting {sorted(ROLE_RESOLVED_AUDIENCES)}). The "
-                f"Keycloak client '{self._credential.client_id}' is not the "
-                "tenant's provisioned machine client.",
+                f"(after discounting {sorted(ROLE_RESOLVED_AUDIENCES)}). Two "
+                "different causes produce this, and they have opposite fixes: "
+                f"either '{self._credential.client_id}' is not the tenant's "
+                "provisioned machine client at all, or it IS that client and "
+                "its broker audience mapper has been dropped. Read the "
+                "client's mappers before doing anything else. Do NOT rotate "
+                "the credential to try to clear this -- a missing mapper is "
+                "not a compromised secret, and rotation neither restores the "
+                "mapper nor diagnoses which of the two cases you are in.",
                 error_code=EnumCoreErrorCode.AUTHENTICATION_ERROR,
             )
         unpermitted = effective - EXCHANGE_INPUT_PERMITTED_AUDIENCES

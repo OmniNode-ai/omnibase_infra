@@ -139,6 +139,22 @@ def run_architecture_layers(verbose: bool = False) -> bool:
             check=False,
             capture_output=True,
             text=True,
+            # OMN-17556: this was a hardcoded 120s. The check itself is not
+            # slow -- run directly on an idle tree it exits 0 in well under a
+            # minute -- but the wall-clock budget is fixed while the host's
+            # load is not. On a launching host at load 68-85 (many concurrent
+            # lanes, the normal steady state here) the subprocess overran 120s
+            # on two consecutive pushes and reported
+            # "ERROR (timeout after 120s)", which is NOT a verdict: the gate
+            # returned False having proven nothing, and the same tree passed
+            # exit 0 when re-run outside the budget. A gate that reports a
+            # red it did not measure trains people to route around it, which
+            # is the one thing a gate must never do.
+            #
+            # The budget is now generous by default and overridable for the
+            # genuinely slow case. This does not weaken the check: a real
+            # violation still fails, and a timeout is still a hard failure --
+            # it just no longer fires on host contention alone.
             timeout=_ARCHITECTURE_LAYERS_TIMEOUT_SECONDS,
             shell=False,
         )
@@ -169,9 +185,6 @@ def run_architecture_layers(verbose: bool = False) -> bool:
             "Architecture Layers: ERROR (timeout after "
             f"{_ARCHITECTURE_LAYERS_TIMEOUT_SECONDS}s)"
         )
-        print("  This is NOT a layering violation -- the check never reached a")
-        print("  verdict. Re-run it directly to see the real result:")
-        print("    bash scripts/check_architecture.sh --no-color")
         print("  Fix: Check if omnibase_core path is accessible")
         print("  Fix: Try running with --verbose to see progress")
         print(
