@@ -490,8 +490,25 @@ class TestRecurrenceFence:
 
 @pytest.mark.asyncio
 class TestAutoDisarm:
-    async def test_a_prior_revert_disarms_the_rest_of_the_run(self) -> None:
-        """One unsafe flip found mid-run stops the run writing, not just that ticket."""
+    async def test_a_prior_revert_holds_that_ticket_and_disarms_nothing(self) -> None:
+        """OMN-16106 D3. The fence WORKING costs the run nothing.
+
+        This assertion is the inverse of the one it replaces. A prior-revert
+        skip is the closer declining to re-assert a verdict a person reversed;
+        the mechanism was not overruled, it deferred. Treating that as grounds
+        to stop the whole run conflated "the closer overrode a human" with "the
+        closer correctly refused to override a human", and only the first of
+        those costs the mechanism its standing.
+
+        Measured cost of the conflation: run 34008532058 flipped OMN-17556, a
+        person adjudicated it back at 2026-09-06T03:22:47Z, and from 03:36Z
+        every scheduled tick recomputed the identical refusal (fingerprint
+        dd4745aa23025542) from unchanged evidence and disarmed the fleet with
+        it. The disarm is in-run state recomputed per tick, not a persisted
+        variable, so nothing decayed it: runs 34009400454 and 34010596242 both
+        reported `tickets_flipped: 0` with every other candidate
+        `skipped_disarmed`.
+        """
         linear = FakeLinear(
             issues={
                 "OMN-17292": _issue(issue_id="issue-a", identifier="OMN-17292"),
@@ -504,9 +521,12 @@ class TestAutoDisarm:
                 ),
                 "issue-b": [],
             },
+            post_flip_histories={
+                "issue-b": _history(("e-b", "started", "completed", "bot"))
+            },
         )
         # Companions are offered newest-first by the enumerator; 8300 (the
-        # reverted ticket) is scanned first and must disarm 8301.
+        # reverted ticket) is scanned first and must NOT affect 8301.
         handler = _handler(
             linear,
             _gh_fake(
@@ -525,12 +545,114 @@ class TestAutoDisarm:
 
         result = await handler.handle(_request())
 
+        assert result.mode is EnumEvidenceAutocloseMode.APPLY_DISPATCHED
+        assert result.disarm_triggered_by == ""
+        assert result.disarm_reason == ""
+        decisions = [o.decision for o in result.outcomes]
+        # The refused ticket is held, and ONLY it.
+        assert decisions[0] is EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
+        assert result.outcomes[0].ticket_id == "OMN-17292"
+        assert not result.outcomes[0].flip_reverted_during_run
+        # Every other candidate reaches the decision it would have reached had
+        # OMN-17292 never been enumerated -- the positive control on the
+        # narrowing, without which "nothing disarmed" is also satisfied by
+        # "nothing was adjudicated".
+        assert decisions[1] is EnumEvidenceAutocloseDecision.FLIPPED
+        assert EnumEvidenceAutocloseDecision.SKIPPED_DISARMED not in decisions
+        assert linear.state_updates == [("issue-b", "state-done")]
+        assert result.tickets_flipped == 1
+
+    async def test_a_flip_reverted_inside_its_own_readback_window_disarms(
+        self,
+    ) -> None:
+        """OMN-16106 D3. The ONE shape that still earns a fleet disarm.
+
+        This run wrote a Done and its own readback then saw the ticket moved
+        back out of a completed state. The fences did not hold -- the closer
+        overrode a person and was overruled back while the run was still
+        going -- so the remaining candidates get no further writes.
+        """
+        linear = FakeLinear(
+            issues={
+                "OMN-17292": _issue(issue_id="issue-a", identifier="OMN-17292"),
+                "OMN-17872": _issue(issue_id="issue-b", identifier="OMN-17872"),
+            },
+            histories={"issue-a": [], "issue-b": []},
+            post_flip_histories={
+                # The flip's own segment (`e-a`), and a reversal NEWER than it.
+                "issue-a": _history(
+                    ("e-a", "started", "completed", "bot"),
+                    ("e-a-undo", "completed", "started", "human-actor-uuid"),
+                ),
+                "issue-b": _history(("e-b", "started", "completed", "bot")),
+            },
+        )
+        handler = _handler(
+            linear,
+            _gh_fake(
+                [
+                    _merged_companion(8300, "OMN-17292"),
+                    _merged_companion(8301, "OMN-17872"),
+                ],
+                {
+                    8300: ["contracts/OMN-17292.yaml"],
+                    8301: ["contracts/OMN-17872.yaml"],
+                },
+                _clean_product_prs(),
+            ),
+            _dod_fake(_flip_clearing_receipt()),
+        )
+
+        result = await handler.handle(_request())
+
+        decisions = [o.decision for o in result.outcomes]
+        # The first candidate genuinely flipped -- the write happened and the
+        # readback confirmed it -- and was then reverted under this run.
+        assert decisions[0] is EnumEvidenceAutocloseDecision.FLIPPED
+        assert result.outcomes[0].flip_reverted_during_run
         assert result.mode is EnumEvidenceAutocloseMode.DISARMED
         assert result.disarm_triggered_by == "OMN-17292"
-        decisions = [o.decision for o in result.outcomes]
-        assert decisions[0] is EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
+        assert "readback" in result.disarm_reason
+        # And the rest of the run writes nothing.
         assert decisions[1] is EnumEvidenceAutocloseDecision.SKIPPED_DISARMED
-        assert linear.state_updates == []
+        assert linear.state_updates == [("issue-a", "state-done")]
+
+    async def test_an_older_reversal_is_not_a_during_run_revert(self) -> None:
+        """`_revert_entry_since` stops at the flip's own segment.
+
+        A ticket that was reopened at some point in its past and has since been
+        re-proven is the ordinary case the prior-revert fence already
+        adjudicates. Reading its history as "reverted during this run" would
+        reinstate the same over-broad attribution from the other direction.
+        """
+        linear = FakeLinear(
+            issues={"OMN-17872": _issue(issue_id="issue-b", identifier="OMN-17872")},
+            histories={"issue-b": []},
+            post_flip_histories={
+                "issue-b": _history(
+                    # An OLD reversal, then this run's flip on top of it.
+                    ("old-undo", "completed", "started", "human-actor-uuid"),
+                    ("e-b", "started", "completed", "bot"),
+                )
+            },
+        )
+        handler = _handler(
+            linear,
+            _gh_fake(
+                [_merged_companion(8301, "OMN-17872")],
+                {8301: ["contracts/OMN-17872.yaml"]},
+                _clean_product_prs(),
+            ),
+            _dod_fake(_flip_clearing_receipt()),
+        )
+
+        result = await handler.handle(_request())
+
+        assert [o.decision for o in result.outcomes] == [
+            EnumEvidenceAutocloseDecision.FLIPPED
+        ]
+        assert not result.outcomes[0].flip_reverted_during_run
+        assert result.disarm_triggered_by == ""
 
     async def test_the_persisted_marker_disarms_before_the_first_candidate(
         self,
@@ -561,6 +683,146 @@ class TestAutoDisarm:
         assert [o.decision for o in result.outcomes] == [
             EnumEvidenceAutocloseDecision.SKIPPED_DISARMED
         ]
+
+
+# ------------------ (c2) the measured verdict shapes, OMN-16106 D3 ---
+
+
+def _receipt(
+    *,
+    total: int,
+    verified: int,
+    non_probative: int,
+    behavior: int = 1,
+) -> dict[str, object]:
+    """A dod_verify receipt with the counters spelled out by the caller."""
+    receipt = _flip_clearing_receipt()
+    verdict = receipt["result"]
+    assert isinstance(verdict, dict)
+    verdict.update(
+        {
+            "total_checks": total,
+            "verified_count": verified,
+            "failed_count": 0,
+            "non_probative_count": non_probative,
+            "behavior_proving_count": behavior,
+        }
+    )
+    return receipt
+
+
+# The two descriptions, transcribed to their load-bearing shape: the heading
+# spelling, the bullet style, and the item count. OMN-17556 writes four PROSE
+# bullets under `## Acceptance`; OMN-17976 writes four NUMBERED items under
+# `## Acceptance criteria`.
+_OMN_17556_DESCRIPTION = """## Target shape
+
+Each binding declares a store path in place of an env-var slot.
+
+## Acceptance
+
+* `grep -rn '_DB_URL'` returns zero env-var materializations of a resolved DSN.
+* All four bindings connect on onex-dev with `current_user` attestation passing.
+* A CI gate rejects reintroduction of a materialized `*_DB_URL` env.
+* The `.201` compose lanes carry parity with the k8s resolver change.
+
+## Out of scope
+
+Credential rotation policy.
+"""
+
+_OMN_17976_DESCRIPTION = """## The cause
+
+The materialise step exports `GIT_ASKPASS` only within that step.
+
+## Acceptance criteria
+
+1. The sweep step and the diagnose step both export a git credential path.
+2. Proven by execution: a diagnostic run reaches a real verdict.
+3. A test pins that the sweep step carries the credential wiring.
+4. A scheduled tick reaches `behavior_proving_count > 0` unattended.
+"""
+
+
+@pytest.mark.asyncio
+class TestTheMeasuredVerdictShapes:
+    """The two tickets the same sweep judged minutes apart on 2026-09-06.
+
+    Neither shape has an unchecked checkbox, so rule 1 of the AC-coverage
+    guard cannot fire on either. Under the old `total_checks` denominator the
+    guard's second rule could not fire on OMN-17556 either (`4 > 22` is false),
+    and it flipped -- a person reverted it two minutes later. The ONLY
+    difference between the two tickets that the old predicate could see was
+    markdown formatting.
+    """
+
+    async def test_the_omn_17556_shape_does_not_flip(self) -> None:
+        """RED. 4/22 verified, 18 non-probative, prose bullets."""
+        linear = FakeLinear(
+            issues={
+                "OMN-17556": _issue(
+                    identifier="OMN-17556", description=_OMN_17556_DESCRIPTION
+                )
+            },
+            histories={"issue-1": []},
+        )
+        handler = _handler(
+            linear,
+            _gh_fake(
+                [_merged_companion(8327, "OMN-17556")],
+                {8327: ["contracts/OMN-17556.yaml"]},
+                _clean_product_prs(),
+            ),
+            _dod_fake(_receipt(total=22, verified=4, non_probative=18)),
+        )
+
+        result = await handler.handle(_request())
+
+        assert [o.decision for o in result.outcomes] == [
+            EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+        ]
+        assert result.tickets_flipped == 0
+        assert linear.state_updates == []
+        # The four prose bullets are named, so the receipt says WHAT was
+        # unproven rather than only that something was.
+        assert len(result.outcomes[0].uncovered_acceptance_criteria) == 4
+        # And the refusal states the arithmetic that produced it.
+        assert "18" in result.outcomes[0].reason
+
+    async def test_the_omn_17976_shape_still_flips(self) -> None:
+        """Positive control. 4/6 verified, 2 non-probative, all covered.
+
+        Without this the RED above is also satisfied by a guard that holds
+        everything, which would be a worse failure than the one it fixes.
+        """
+        linear = FakeLinear(
+            issues={
+                "OMN-17976": _issue(
+                    identifier="OMN-17976", description=_OMN_17976_DESCRIPTION
+                )
+            },
+            histories={"issue-1": []},
+            post_flip_histories={
+                "issue-1": _history(("e-1", "started", "completed", "bot"))
+            },
+        )
+        handler = _handler(
+            linear,
+            _gh_fake(
+                [_merged_companion(8328, "OMN-17976")],
+                {8328: ["contracts/OMN-17976.yaml"]},
+                _clean_product_prs(),
+            ),
+            _dod_fake(_receipt(total=6, verified=4, non_probative=2)),
+        )
+
+        result = await handler.handle(_request())
+
+        assert [o.decision for o in result.outcomes] == [
+            EnumEvidenceAutocloseDecision.FLIPPED
+        ]
+        assert result.tickets_flipped == 1
+        assert linear.state_updates == [("issue-1", "state-done")]
 
 
 # -------------------------------- (d) flip budget + the bound readback ---

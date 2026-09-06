@@ -905,39 +905,100 @@ class TestAcCoverageGapFunction:
     """The guard predicate itself: conservative, and silent when it should be."""
 
     def test_empty_description_is_never_a_gap(self):
-        assert _ac_coverage_gap("", 3) == ("", ())
-        assert _ac_coverage_gap("   \n\n  ", 3) == ("", ())
+        assert _ac_coverage_gap("", 3, 0) == ("", ())
+        assert _ac_coverage_gap("   \n\n  ", 3, 0) == ("", ())
 
     def test_unchecked_checkbox_is_a_gap_and_is_named(self):
         reason, uncovered = _ac_coverage_gap(
-            "## Acceptance Criteria\n- [x] wired\n- [ ] proven on the live lane\n", 2
+            "## Acceptance Criteria\n- [x] wired\n- [ ] proven on the live lane\n",
+            2,
+            0,
         )
         assert reason
         assert uncovered == ("proven on the live lane",)
 
     def test_unchecked_checkbox_outside_an_ac_section_still_holds(self):
         """A criterion does not have to live under a heading to be a criterion."""
-        reason, uncovered = _ac_coverage_gap("Notes\n\n- [ ] follow-up gate\n", 5)
+        reason, uncovered = _ac_coverage_gap("Notes\n\n- [ ] follow-up gate\n", 5, 0)
         assert reason
         assert uncovered == ("follow-up gate",)
 
-    def test_ac_section_longer_than_total_checks_is_a_gap(self):
+    def test_ac_section_longer_than_verified_probative_checks_is_a_gap(self):
         reason, uncovered = _ac_coverage_gap(
-            "## Acceptance Criteria\n- alpha\n- beta\n- gamma\n", 2
+            "## Acceptance Criteria\n- alpha\n- beta\n- gamma\n", 2, 0
         )
         assert reason
         assert "3" in reason and "2" in reason
         assert uncovered == ("alpha", "beta", "gamma")
 
     def test_fully_covered_ac_section_is_not_a_gap(self):
-        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n- beta\n", 2) == (
+        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n- beta\n", 2, 0) == (
             "",
             (),
         )
 
     def test_more_checks_than_listed_acs_is_not_a_gap(self):
         """dod_verify covering MORE than the description lists is fine."""
-        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n", 4) == ("", ())
+        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n", 4, 0) == ("", ())
+
+    # -- OMN-16106 D3 -----------------------------------------------------
+
+    def test_non_probative_checks_do_not_count_toward_coverage(self):
+        """The denominator is VERIFIED PROBATIVE checks, not `total_checks`.
+
+        The OMN-17556 arithmetic exactly: four criteria, twenty-two checks, of
+        which eighteen were non-probative. Under the old `total_checks`
+        denominator this asked `4 > 22` and released the flip.
+        """
+        reason, uncovered = _ac_coverage_gap(
+            "## Acceptance\n- alpha\n- beta\n- gamma\n- delta\n- epsilon\n",
+            4,
+            18,
+        )
+        assert reason
+        assert "5" in reason and "4" in reason
+        assert uncovered == ("alpha", "beta", "gamma", "delta", "epsilon")
+
+    def test_non_probative_checks_in_the_majority_are_a_gap(self):
+        """The bounded-minority conjunct, on the exact OMN-17556 counters.
+
+        Four prose criteria and four verified probative checks satisfy the
+        counting bound above outright — this is the second bound, and it is the
+        one that actually holds OMN-17556.
+        """
+        reason, uncovered = _ac_coverage_gap(
+            "## Acceptance\n- alpha\n- beta\n- gamma\n- delta\n", 4, 18
+        )
+        assert reason
+        assert "18" in reason and "4" in reason
+        assert uncovered == ("alpha", "beta", "gamma", "delta")
+
+    def test_a_bounded_minority_of_non_probative_checks_still_flips(self):
+        """Positive control: the OMN-17976 counters must NOT be held.
+
+        Four numbered criteria, four verified probative checks, two
+        non-probative. Both bounds hold, so the guard is silent.
+        """
+        assert _ac_coverage_gap(
+            "## Acceptance criteria\n1. alpha\n2. beta\n3. gamma\n4. delta\n", 4, 2
+        ) == ("", ())
+
+    def test_non_probative_majority_with_no_criteria_section_is_not_a_gap(self):
+        """The bounded-minority bound is ABOUT criteria, so it needs some.
+
+        A ticket whose description declares no acceptance criteria at all was
+        never covered by this guard, and the new conjunct must not quietly turn
+        it into a blanket hold on every such ticket.
+        """
+        assert _ac_coverage_gap("Just a paragraph of context.\n", 1, 9) == ("", ())
+
+    def test_definition_of_done_is_read_as_an_acceptance_heading(self):
+        """The same section under its other standing name (OMN-16106 D3)."""
+        reason, uncovered = _ac_coverage_gap(
+            "## Definition of Done\n- alpha\n- beta\n- gamma\n", 1, 0
+        )
+        assert reason
+        assert uncovered == ("alpha", "beta", "gamma")
 
 
 @pytest.mark.unit

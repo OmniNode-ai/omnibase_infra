@@ -530,3 +530,28 @@ def test_every_decision_is_tallied_in_exactly_one_bucket() -> None:
             "decision belongs to exactly one of flipped/gap_posted/skipped/"
             "errored"
         )
+
+    # OMN-16106 D3. The partition above says every decision is COUNTED once.
+    # This says no decision also carries a run-level effect it was never
+    # supposed to have. The auto-disarm used to key on
+    # `SKIPPED_PRIOR_REVERT` — a member of the `skipped` bucket — so one
+    # correctly-refused ticket silently converted every remaining candidate in
+    # the run into `SKIPPED_DISARMED`. A decision is a statement about ONE
+    # candidate; the only thing that may stop the run is a flip this run wrote
+    # and then watched a person undo.
+    disarm_start = handle_source.index("if outcome.flip_reverted_during_run")
+    disarm_source = handle_source[
+        disarm_start : handle_source.index("flipped = sum(", disarm_start)
+    ]
+    named = [
+        decision.name
+        for decision in EnumEvidenceAutocloseDecision
+        if f"EnumEvidenceAutocloseDecision.{decision.name}" in disarm_source
+    ]
+    assert named == [], (
+        f"the run-disarm trigger reads decision(s) {named}. A per-candidate "
+        "decision must never disarm the run: the OMN-17556 refusal was "
+        "recomputed from unchanged evidence on every tick, so keying the "
+        "disarm on it stopped the fleet indefinitely. The trigger is "
+        "`outcome.flip_reverted_during_run` and nothing else."
+    )

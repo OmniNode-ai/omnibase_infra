@@ -96,6 +96,33 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
             "confirm — which is ERROR_READBACK_UNCONFIRMED, never FLIPPED."
         ),
     )
+    # OMN-16106 D3. THE RUN-DISARM SIGNAL, and the only one.
+    #
+    # Set only on a FLIPPED outcome whose own post-write readback found the
+    # ticket moved back OUT of a completed state again — i.e. this run wrote a
+    # Done and, inside its own readback window, somebody undid it. That is the
+    # closer having overruled a person and been overruled back while the run
+    # was still going: the fences did NOT hold, so the rest of the run has no
+    # standing to keep writing under the same predicate.
+    #
+    # It is deliberately NOT set by SKIPPED_PRIOR_REVERT. A prior-revert skip
+    # is the fence WORKING — the closer declined to re-assert a verdict a
+    # person had reversed — and a mechanism that refused correctly on one
+    # ticket has lost no standing on any other. Conflating "the closer
+    # overrode a human" with "the closer correctly refused to override a
+    # human" is what disarmed the whole fleet from 2026-09-06T03:36Z onward:
+    # the OMN-17556 refusal was recomputed from unchanged evidence on every
+    # tick, so the disarm recurred forever and no other candidate was ever
+    # adjudicated.
+    flip_reverted_during_run: bool = Field(
+        default=False,
+        description=(
+            "True when this run flipped the ticket Done and its own readback "
+            "then observed a completed -> non-completed transition newer than "
+            "the segment the flip produced. The one condition that disarms "
+            "the remainder of the run."
+        ),
+    )
     verdict_fingerprint: str = Field(
         default="",
         description=(
