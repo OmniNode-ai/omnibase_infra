@@ -17,6 +17,16 @@ trusted_runner_variable:
   # dedicated OMNI_OCC_AUTOBIND_RUNS_ON_JSON knob with a literal
   # '["self-hosted","omnibase-ci"]' fallback (OMN-16691), because they publish to
   # the tailnet-only dev-lane broker that only the self-hosted fleet can reach.
+  #
+  # OMN-17888 adds the second such carve-out: runtime-rebuild-trigger.yml reads
+  # OMNI_RUNTIME_REBUILD_RUNS_ON_JSON on the same terms. It publishes the
+  # post-merge redeploy-start command to that same tailnet-only dev-lane broker,
+  # and it had been reading the seam above -- so the 2026-08-26 flip relocated it
+  # onto GitHub-hosted compute, where librdkafka cannot resolve the bootstrap
+  # name. Every run since that had a runtime change to publish failed; dev-lane
+  # auto-redeploy delivered nothing for ten days. BOTH dedicated knobs are meant
+  # to stay UNSET so the self-hosted literal operates; neither is audited above,
+  # because an unset variable is the intended state and a set one is the defect.
   expected_json: '["ubuntu-latest"]'
 public_pr_runner_variable:
   name: OMNI_PUBLIC_PR_RUNS_ON_JSON

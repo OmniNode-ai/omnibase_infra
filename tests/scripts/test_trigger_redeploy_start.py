@@ -64,6 +64,20 @@ def trigger_module() -> Any:
     return _load_trigger_module()
 
 
+class _DeliveredMessage:
+    """Minimal confluent-kafka Message stand-in carrying delivery coordinates."""
+
+    def __init__(self, partition: int, offset: int) -> None:
+        self._partition = partition
+        self._offset = offset
+
+    def partition(self) -> int:
+        return self._partition
+
+    def offset(self) -> int:
+        return self._offset
+
+
 class _CapturingProducer:
     """Fake confluent-kafka Producer capturing the published topic + payload."""
 
@@ -88,10 +102,33 @@ class _CapturingProducer:
                 "payload": json.loads(value.decode("utf-8")),
             }
         )
-        on_delivery(None, None)
+        on_delivery(None, _DeliveredMessage(partition=0, offset=17))
 
     def flush(self, timeout: float) -> int:
         return 0
+
+
+class _SilentProducer(_CapturingProducer):
+    """Producer whose flush drains but whose delivery callback never fires.
+
+    This is the OMN-17378 green-but-silent shape: no broker-assigned offset,
+    therefore no proof of publication, therefore not a success.
+    """
+
+    def produce(
+        self,
+        topic: str,
+        key: bytes,
+        value: bytes,
+        on_delivery: Any,
+    ) -> None:
+        self.produced.append(
+            {
+                "topic": topic,
+                "key": key,
+                "payload": json.loads(value.decode("utf-8")),
+            }
+        )
 
 
 def _code_lines(source: str) -> str:
@@ -183,11 +220,12 @@ def test_cli_publishes_redeploy_start_with_main_lane(
 
     captured: dict[str, Any] = {}
 
-    def _fake_publish(**kwargs: Any) -> int:
+    def _fake_publish(**kwargs: Any) -> tuple[int, str]:
         captured.update(kwargs)
-        # publish_redeploy_start_event returns the delivered count; the caller
-        # asserts it is >=1 (RT-5 fail-closed on zero output).
-        return 1
+        # publish_redeploy_start_event returns (delivered, coordinates); the
+        # caller asserts delivered >=1 (RT-5 fail-closed on zero output) and
+        # prints the broker-assigned coordinates as the publication proof.
+        return 1, "partition=0 offset=17"
 
     monkeypatch.setattr(trigger_module, "publish_redeploy_start_event", _fake_publish)
 
@@ -267,3 +305,210 @@ def test_workflow_passes_triggering_lane_and_ref_not_origin_main() -> None:
     assert "github.event.pull_request.base.ref" in code
     assert "--source-sha" in code
     assert "github.event.pull_request.merge_commit_sha" in code
+
+
+# ---------------------------------------------------------------------------
+# OMN-17888: the publisher is LAN-bound and must say so
+#
+# The dev control-bus lane declares a tailnet broker. OMN-16682 retargeted the
+# shared OMNI_TRUSTED_CI_RUNS_ON_JSON seam to ["ubuntu-latest"] at org AND repo
+# scope on 2026-08-26, which relocated this job onto GitHub-hosted compute that
+# cannot resolve that name. Every run since that had a runtime change to publish
+# failed on a DNS error after a 30-second flush; the runs that read green were
+# no-ops with nothing to send. These tests pin BOTH halves of the remedy: the
+# dedicated runner knob, and a refusal that names the routing defect instead of
+# timing out against an unresolvable host.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_workflow_pins_the_publisher_to_the_lan_fleet() -> None:
+    """The trusted arm must NOT read the shared trusted-CI runner seam."""
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
+    ).read_text()
+    code = _code_lines(workflow)
+
+    # A dedicated knob, deliberately left unset so the self-hosted literal wins.
+    assert "vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON" in code
+    assert '\'["self-hosted","omnibase-ci"]\'' in code
+    # The shared seam is what moved this LAN-bound publisher onto hosted compute.
+    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" not in code
+    # Fork PRs still route to hosted compute — untrusted code never reaches the
+    # fleet — and that arm is still gated on the fork predicate.
+    assert "vars.OMNI_PUBLIC_PR_RUNS_ON_JSON" in code
+    assert "head.repo.full_name != github.repository" in code
+    # The runner class reaches the script so it can refuse by name.
+    assert "runner.environment" in code
+    assert "--runner-environment" in code
+
+
+@pytest.mark.unit
+def test_cli_refuses_a_live_publish_from_a_github_hosted_runner(
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A hosted runner cannot reach the lane broker; refuse before producing."""
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+    overlay, consumer_model = _write_bus_contracts(tmp_path)
+
+    def _explode(**_kwargs: Any) -> None:
+        raise AssertionError("must not construct a producer on a hosted runner")
+
+    monkeypatch.setattr(trigger_module, "publish_redeploy_start_event", _explode)
+
+    result = CliRunner().invoke(
+        trigger_module.main,
+        [
+            "--changed-files",
+            "src/omnibase_infra/nodes/node_runtime_sweep/handler.py",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
+            "--base-branch",
+            "dev",
+            "--source-sha",
+            "deadbeef",
+            "--bus-lane",
+            "dev",
+            "--bus-overlay",
+            str(overlay),
+            "--consumer-model",
+            str(consumer_model),
+            "--runner-environment",
+            "github-hosted",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "refusing to publish from a github-hosted runner" in result.output
+    assert "OMNI_RUNTIME_REBUILD_RUNS_ON_JSON" in result.output
+
+
+@pytest.mark.unit
+def test_cli_publishes_normally_from_the_self_hosted_fleet(
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The refusal is scoped to hosted compute; the fleet path is unchanged."""
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+    overlay, consumer_model = _write_bus_contracts(tmp_path)
+
+    def _fake_publish(**_kwargs: Any) -> tuple[int, str]:
+        return 1, "partition=0 offset=64"
+
+    monkeypatch.setattr(trigger_module, "publish_redeploy_start_event", _fake_publish)
+
+    result = CliRunner().invoke(
+        trigger_module.main,
+        [
+            "--changed-files",
+            "src/omnibase_infra/nodes/node_runtime_sweep/handler.py",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
+            "--base-branch",
+            "dev",
+            "--source-sha",
+            "deadbeef",
+            "--bus-lane",
+            "dev",
+            "--bus-overlay",
+            str(overlay),
+            "--consumer-model",
+            str(consumer_model),
+            "--runner-environment",
+            "self-hosted",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "partition=0 offset=64" in result.output
+
+
+@pytest.mark.unit
+def test_decision_line_does_not_claim_delivery(
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pre-flush line records the DECISION, never the publication.
+
+    "Redeploy triggered: ..." was emitted before a 30-second flush that then
+    timed out with the command undelivered, so anyone reading the step summary
+    saw a receipt for a message that never left the runner. A surrogate for the
+    behaviour is not the behaviour.
+    """
+
+    def _explode(**_kwargs: Any) -> None:
+        raise AssertionError("dry-run must not publish")
+
+    monkeypatch.setattr(trigger_module, "publish_redeploy_start_event", _explode)
+
+    result = CliRunner().invoke(
+        trigger_module.main,
+        [
+            "--changed-files",
+            "src/omnimarket/nodes/foo/handler.py",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
+            "--base-branch",
+            "dev",
+            "--source-sha",
+            "cafe",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Redeploy triggered" not in result.output
+    assert "delivery NOT yet confirmed" in result.output
+    assert "runtime_lane=dev" in result.output
+
+
+@pytest.mark.unit
+def test_publish_reports_broker_assigned_coordinates(
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A publish is proven by the offset the broker assigned it, not by intent."""
+    import types
+
+    monkeypatch.setitem(
+        sys.modules,
+        "confluent_kafka",
+        types.SimpleNamespace(Producer=_CapturingProducer),
+    )
+
+    delivered, coordinates = trigger_module.publish_redeploy_start_event(
+        bootstrap_servers="broker:9092",
+        username="",
+        password="",
+        runtime_lane="dev",
+        build_source="workspace",
+        source_sha="abc1234",
+        correlation_id="d35d0dd8-e1a5-4fa7-a323-b1704ee44406",
+        requested_by="gha/omnibase_infra/pr-42",
+    )
+
+    assert delivered == 1
+    assert coordinates == "partition=0 offset=17"
+
+
+@pytest.mark.unit
+def test_publish_fails_closed_when_no_delivery_callback_fires(
+    trigger_module: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A drained queue with no acknowledgement is unproven, not successful."""
+    import types
+
+    monkeypatch.setitem(
+        sys.modules, "confluent_kafka", types.SimpleNamespace(Producer=_SilentProducer)
+    )
+
+    with pytest.raises(
+        RuntimeError, match=r"no broker-assigned offset, so publication is unproven"
+    ):
+        trigger_module.publish_redeploy_start_event(
+            bootstrap_servers="broker:9092",
+            username="",
+            password="",
+            runtime_lane="dev",
+            build_source="workspace",
+            source_sha="abc1234",
+            correlation_id="d35d0dd8-e1a5-4fa7-a323-b1704ee44406",
+            requested_by="gha/omnibase_infra/pr-42",
+        )

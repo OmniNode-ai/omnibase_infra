@@ -35,6 +35,16 @@
 #   KAFKA_BOOTSTRAP_SERVERS   -- drift guard / from-secret broker only
 #   KAFKA_SASL_USERNAME       -- SASL username / API key (cloud broker only)
 #   KAFKA_SASL_PASSWORD       -- SASL password / API secret (cloud broker only)
+#   RUNNER_ENVIRONMENT        -- GitHub Actions runner class, forwarded by the
+#                                workflow as --runner-environment (OMN-17888)
+#
+# RUNNER REACHABILITY (OMN-17888): the dev control-bus lane declares a LAN /
+# tailnet broker. A GitHub-hosted runner is not on that network, so librdkafka
+# cannot even resolve the name and the 30-second flush expires with the command
+# undelivered. That is a ROUTING defect, not a broker outage, and it must say so
+# in one line rather than as a DNS error buried under a flush timeout. This
+# script therefore refuses to attempt a live publish from a github-hosted runner
+# and names the remedy (route the job to the LAN fleet).
 #
 # Usage:
 #   python scripts/trigger_rebuild_on_merge.py \
@@ -444,12 +454,17 @@ def publish_redeploy_start_event(
     source_sha: str,
     correlation_id: str,
     requested_by: str,
-) -> int:
+) -> tuple[int, str]:
     """Publish a strict redeploy-start command to node_redeploy_orchestrator.
 
-    Returns the number of commands delivered (``1`` on success). Raises on any
-    delivery failure so the caller can assert a non-zero emit count — a producer
-    that delivers nothing must fail closed, never report success.
+    Returns ``(delivered, coordinates)`` where ``delivered`` is the number of
+    commands the broker acknowledged (``1`` on success) and ``coordinates`` is
+    the broker-assigned ``partition=<p> offset=<o>`` proof of that acceptance.
+    Raises on any delivery failure so the caller can assert a non-zero emit
+    count — a producer that delivers nothing must fail closed, never report
+    success. A drained queue that produced no delivery callback is also a
+    failure: with no broker-assigned offset there is no proof of publication
+    (the OMN-17378 green-but-silent shape).
     """
     from confluent_kafka import Producer
 
@@ -466,11 +481,18 @@ def publish_redeploy_start_event(
     )
 
     delivery_error: BaseException | None = None
+    delivery_coordinates: str | None = None
 
-    def _on_delivery(err: object, _msg: object) -> None:
-        nonlocal delivery_error
+    def _on_delivery(err: object, msg: object) -> None:
+        nonlocal delivery_error, delivery_coordinates
         if err is not None:
             delivery_error = RuntimeError(str(err))
+            return
+        partition = getattr(msg, "partition", None)
+        offset = getattr(msg, "offset", None)
+        partition_value = partition() if callable(partition) else partition
+        offset_value = offset() if callable(offset) else offset
+        delivery_coordinates = f"partition={partition_value} offset={offset_value}"
 
     message = json.dumps(payload, default=str).encode("utf-8")
     key = f"gha-redeploy/{correlation_id}".encode()
@@ -490,9 +512,14 @@ def publish_redeploy_start_event(
             f"Kafka delivery timed out: {remaining} message(s) remain "
             "undelivered after the 30 second flush"
         )
+    if delivery_coordinates is None:
+        raise RuntimeError(
+            "Kafka flush drained without a delivery callback: no "
+            "broker-assigned offset, so publication is unproven"
+        )
 
     # Exactly one redeploy-start command was delivered; the caller asserts N>0.
-    return 1
+    return 1, delivery_coordinates
 
 
 @click.command()
@@ -550,6 +577,15 @@ def publish_redeploy_start_event(
     help="Path to omniclaude's canonical deploy-gate validator source",
 )
 @click.option(
+    "--runner-environment",
+    default="",
+    help=(
+        "GitHub Actions RUNNER_ENVIRONMENT of the executing job. "
+        "'github-hosted' cannot reach the LAN control bus and is refused "
+        "before a live publish is attempted (OMN-17888)."
+    ),
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
@@ -566,6 +602,7 @@ def main(
     bus_overlay: Path | None,
     consumer_model: Path | None,
     runtime_path_validator: Path,
+    runner_environment: str,
     dry_run: bool,
 ) -> None:
     """Publish a node_redeploy_orchestrator start command if a PR contains runtime changes.
@@ -601,8 +638,14 @@ def main(
         )
         sys.exit(0)
 
+    # OMN-17888: this line records the DECISION, never the delivery. It is
+    # emitted before a 30-second flush that can time out with the command
+    # undelivered, so wording it as "Redeploy triggered" made an intent read as
+    # a receipt. The only publication evidence is the final "Published
+    # redeploy-start ..." line, which carries the broker-assigned coordinates.
     click.echo(
-        f"Redeploy triggered: runtime_lane={runtime_lane} source_branch={base_branch} "
+        f"Runtime change detected (delivery NOT yet confirmed): "
+        f"runtime_lane={runtime_lane} source_branch={base_branch} "
         f"source_sha={source_sha} correlation_id={corr_id} labels={label_list} "
         f"files_matched={runtime_paths}"
     )
@@ -610,6 +653,23 @@ def main(
     if dry_run:
         click.echo("(dry-run: skipping Kafka publish)")
         sys.exit(0)
+
+    # A live publish targets the lane's LAN / tailnet broker. A github-hosted
+    # runner is not on that network: the name does not resolve, the flush
+    # expires, and the run reds 30 seconds later with a DNS error that reads
+    # like a broker outage. Refuse first and name the real defect, so a runner
+    # re-route (Operating Rule 14) cannot silently relocate this publisher off
+    # the fleet again (OMN-17888, same class as OMN-17378).
+    if runner_environment.strip() == "github-hosted":
+        click.echo(
+            "ERROR: refusing to publish from a github-hosted runner — the "
+            f"{bus_lane or 'dev'} control-bus broker is LAN/tailnet-only and is "
+            "unreachable from GitHub-hosted compute. Route this job to the "
+            "self-hosted omnibase-ci fleet (OMNI_RUNTIME_REBUILD_RUNS_ON_JSON) "
+            "rather than the shared trusted-CI runner seam.",
+            err=True,
+        )
+        sys.exit(1)
 
     injected_broker = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
     username = os.environ.get("KAFKA_SASL_USERNAME", "")
@@ -673,7 +733,7 @@ def main(
         sys.exit(1)
 
     try:
-        delivered = publish_redeploy_start_event(
+        delivered, delivery_coordinates = publish_redeploy_start_event(
             bootstrap_servers=bootstrap_servers,
             username=username,
             password=password,
@@ -699,7 +759,8 @@ def main(
 
     click.echo(
         f"Published redeploy-start to {TOPIC} "
-        f"(correlation_id={corr_id}, delivered={delivered})"
+        f"(correlation_id={corr_id}, delivered={delivered}, "
+        f"{delivery_coordinates})"
     )
 
 
