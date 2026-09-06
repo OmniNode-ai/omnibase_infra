@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -70,9 +71,12 @@ def test_pep503_identity_recognizes_accepted_arch004_entries(
 
 @pytest.mark.unit
 def test_arch004_identity_uses_git_root_from_nested_worktree_directory(
-    validate_module: Any, monkeypatch: pytest.MonkeyPatch
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """ARCH-004 runs from a nested directory against the worktree baseline."""
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "untrusted-git-dir"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "untrusted-work-tree"))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     monkeypatch.chdir(_REPO_ROOT / "scripts")
 
     assert validate_module._repository_root(Path.cwd()) == _REPO_ROOT.resolve()
@@ -98,6 +102,59 @@ def test_arch004_identity_fails_closed_for_a_fake_nested_git_marker(
     monkeypatch.chdir(fake_checkout)
 
     assert validate_module._repository_root(Path.cwd()) is None
+
+
+@pytest.mark.unit
+def test_arch004_identity_fails_closed_for_a_genuine_foreign_git_root(
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A real nested foreign repository cannot become this validator's root."""
+    foreign_repo = tmp_path / "outer" / "nested-foreign-repository"
+    foreign_repo.parent.mkdir(parents=True)
+    subprocess.run(
+        [
+            "/usr/bin/env",
+            "-i",
+            "PATH=/usr/bin:/bin",
+            "GIT_CONFIG_NOSYSTEM=1",
+            "/usr/bin/git",
+            "init",
+            str(foreign_repo),
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    monkeypatch.chdir(foreign_repo)
+
+    assert validate_module._repository_root(Path.cwd()) is None
+
+
+@pytest.mark.unit
+def test_arch004_identity_does_not_expose_subprocess_failure_details(
+    validate_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Git failures report a stable code rather than subprocess command details."""
+    sensitive_detail = "do-not-expose-this-subprocess-command"
+
+    def raise_git_failure(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", sensitive_detail],
+            stderr="do-not-expose-this-subprocess-stderr",
+        )
+
+    monkeypatch.setattr(validate_module.subprocess, "run", raise_git_failure)
+
+    assert validate_module._repository_root(tmp_path) is None
+
+    output = capsys.readouterr().out
+    assert output == "Imperative Orchestrators: ERROR (git-worktree-root-unresolved)\n"
+    assert sensitive_detail not in output
 
 
 @pytest.mark.unit
