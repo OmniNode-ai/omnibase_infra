@@ -133,6 +133,12 @@ class _GoesIdleConsumer:
     async def commit(self) -> None:
         self.commits += 1
 
+    async def commit_offsets(self, offsets: object) -> None:
+        """OMN-17896: the handler now commits an explicit offset map of the
+        records that COMPLETED, never the consumer's bare position."""
+        self.commits += 1
+        self.committed_offsets = dict(offsets)  # type: ignore[arg-type]
+
 
 class _ImmediatelyIdleConsumer(_GoesIdleConsumer):
     """Idle from the first record on -- the topic was already quiet when the

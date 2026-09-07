@@ -58,6 +58,22 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     SKIPPED_NO_BINDING = "skipped_no_binding"
     # More than one distinct ticket id bound to the same merged companion.
     SKIPPED_AMBIGUOUS_BINDING = "skipped_ambiguous_binding"
+    # OMN-16106 Item 1. THE OFFER PATH'S NAMED REFUSAL. A caller nominated this
+    # ticket in `offer_tickets` and the search for its newest merged OCC
+    # companion came back empty — the ticket has no merged evidence companion
+    # at all, or none this run's credential can see.
+    #
+    # It is a distinct value rather than a reuse of SKIPPED_NO_BINDING because
+    # the two say different things and only one of them is a hygiene finding.
+    # SKIPPED_NO_BINDING means a companion WAS read and carried no resolvable
+    # ticket id — a defect in that companion. This means no companion was found
+    # to read, which is a statement about the TICKET's evidence base and is the
+    # ordinary answer for a ticket whose work has not landed yet. Reporting
+    # nothing at all would be worse than either: an offered ticket absent from
+    # the outcomes is indistinguishable from one the run never considered, and
+    # a restrictive selector's whole value is that its receipt reconciles every
+    # nominated ticket to exactly one terminal outcome.
+    SKIPPED_NO_OFFER_COMPANION = "skipped_no_offer_companion"
     # The sweep reached the same gap verdict it has ALREADY posted on this
     # ticket, and did not repeat itself (OMN-16808). Enumeration is a bare
     # `now - lookback_hours` window with no cursor, so one merged companion sits

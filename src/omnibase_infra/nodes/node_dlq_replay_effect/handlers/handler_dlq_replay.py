@@ -47,6 +47,10 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_result 
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_result import (
     ModelDlqReplayRunResult,
 )
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_record import (
+    DlqDrainRecord,
+    ModelUnparseableDlqRecord,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.dlq.service_dlq_tracking import ServiceDlqTracking
@@ -181,6 +185,16 @@ class HandlerDlqReplay:
             results: list[ModelDlqReplayResult] = []
             count = 0
             uncommitted = 0
+            # OMN-17896: the offsets whose handling actually COMPLETED, per
+            # partition, as a contiguous prefix. A partition is BLOCKED by the
+            # first record on it that did not complete, so a later success can
+            # never commit past an earlier failure. Both commits below use
+            # this map; a bare ``commit()`` commits the consumer's POSITION —
+            # every record the iterator has already handed out, including one
+            # whose handling never finished — so any early exit advanced past
+            # the in-flight record.
+            completed: dict[tuple[str, int], int] = {}
+            blocked: set[tuple[str, int]] = set()
             limit = self._config.limit
             max_records = self._config.max_records_per_run
             effective_limit = max_records if limit is None else min(limit, max_records)
@@ -223,12 +237,21 @@ class HandlerDlqReplay:
                         )
                         break
 
-                    results.append(await self._process_message(message))
+                    if isinstance(message, ModelUnparseableDlqRecord):
+                        result = await self._quarantine_unparseable(message)
+                    else:
+                        result = await self._process_message(message)
+                    results.append(result)
+                    self._mark_offset(message, result, completed, blocked)
                     count += 1
                     uncommitted += 1
 
-                    if not self._config.dry_run and uncommitted >= commit_every:
-                        await self._consumer.commit()
+                    if (
+                        not self._config.dry_run
+                        and uncommitted >= commit_every
+                        and completed
+                    ):
+                        await self._consumer.commit_offsets(completed)
                         uncommitted = 0
             finally:
                 # Release the iterator deterministically. After a timeout the
@@ -239,8 +262,8 @@ class HandlerDlqReplay:
                 if aclose is not None:
                     await aclose()
 
-            if uncommitted and not self._config.dry_run:
-                await self._consumer.commit()
+            if uncommitted and not self._config.dry_run and completed:
+                await self._consumer.commit_offsets(completed)
 
             return self._summarize(results)
         finally:
@@ -272,6 +295,116 @@ class HandlerDlqReplay:
             stop = getattr(dependency, "stop", None)
             if stop is not None:
                 await stop()
+
+    def _mark_offset(
+        self,
+        message: DlqDrainRecord,
+        result: ModelDlqReplayResult,
+        completed: dict[tuple[str, int], int],
+        blocked: set[tuple[str, int]],
+    ) -> None:
+        """Record whether this record's offset may be committed (OMN-17896).
+
+        A record COMPLETED when it reached a durable terminal outcome — it was
+        replayed, it was durably quarantined, or the run is a dry run and
+        published nothing at all. A ``FAILED`` result means the record is
+        durable NOWHERE: neither replayed nor quarantined. Advancing past it
+        would be the silent drop §4 rule 1 of the lab repair plan forbids,
+        reached through the quarantine path rather than through a ``continue``.
+        Its partition is blocked for the rest of the batch so no later success
+        can commit over it.
+        """
+        # ``ModelDlqMessage`` carries no DLQ topic of its own — this consumer
+        # drains exactly one, named by the config — while the unparseable
+        # record carries its own so the two shapes key identically.
+        topic = (
+            message.dlq_topic
+            if isinstance(message, ModelUnparseableDlqRecord)
+            else self._config.dlq_topic
+        )
+        key = (topic, message.dlq_partition)
+        if key in blocked:
+            return
+        if result.status == EnumReplayStatus.FAILED:
+            blocked.add(key)
+            return
+        completed[key] = message.dlq_offset + 1
+
+    async def _quarantine_unparseable(
+        self, record: ModelUnparseableDlqRecord
+    ) -> ModelDlqReplayResult:
+        """Durably quarantine a record that could not be parsed (OMN-17896).
+
+        The publish is CONFIRMED — the broker's own record metadata is bound
+        here — before the caller is allowed to mark the offset committable. A
+        failed publish yields ``FAILED``, which blocks the partition, so the
+        record is redelivered rather than acked on a quarantine that never
+        happened.
+        """
+        quarantine_correlation_id = generate_replay_correlation_id()
+
+        if self._config.dry_run:
+            return ModelDlqReplayResult(
+                correlation_id=quarantine_correlation_id,
+                original_topic=record.dlq_topic,
+                status=EnumReplayStatus.PENDING,
+                message=f"DRY RUN - would quarantine unparseable: {record.reason}",
+                replay_correlation_id=quarantine_correlation_id,
+            )
+
+        try:
+            confirmation = (
+                await self._quarantine_producer.quarantine_unparseable_record(
+                    record, quarantine_correlation_id
+                )
+            )
+        except Exception as exc:
+            logger.exception(
+                "FAILED to quarantine unparseable DLQ record at %s/%s/%s -- the "
+                "offset is WITHHELD so the record is redelivered",
+                record.dlq_topic,
+                record.dlq_partition,
+                record.dlq_offset,
+            )
+            return ModelDlqReplayResult(
+                correlation_id=quarantine_correlation_id,
+                original_topic=record.dlq_topic,
+                status=EnumReplayStatus.FAILED,
+                message=f"Quarantine of unparseable record failed: {exc}",
+                replay_correlation_id=quarantine_correlation_id,
+            )
+
+        if confirmation is None:
+            logger.error(
+                "Quarantine publish for the unparseable DLQ record at %s/%s/%s "
+                "returned no confirmation; treating it as NOT durable and "
+                "withholding the offset (OMN-17896)",
+                record.dlq_topic,
+                record.dlq_partition,
+                record.dlq_offset,
+            )
+            return ModelDlqReplayResult(
+                correlation_id=quarantine_correlation_id,
+                original_topic=record.dlq_topic,
+                status=EnumReplayStatus.FAILED,
+                message="Quarantine of unparseable record was not confirmed",
+                replay_correlation_id=quarantine_correlation_id,
+            )
+
+        logger.info(
+            "QUARANTINED unparseable DLQ record at %s/%s/%s (%s)",
+            record.dlq_topic,
+            record.dlq_partition,
+            record.dlq_offset,
+            record.reason,
+        )
+        return ModelDlqReplayResult(
+            correlation_id=quarantine_correlation_id,
+            original_topic=record.dlq_topic,
+            status=EnumReplayStatus.QUARANTINED,
+            message=f"Quarantined unparseable record: {record.reason}",
+            replay_correlation_id=quarantine_correlation_id,
+        )
 
     async def _process_message(self, message: ModelDlqMessage) -> ModelDlqReplayResult:
         eligible, reason = should_replay(message, self._config)
@@ -337,7 +470,7 @@ class HandlerDlqReplay:
             )
 
         try:
-            await self._quarantine_producer.quarantine_message(
+            confirmation = await self._quarantine_producer.quarantine_message(
                 message, reason, quarantine_correlation_id
             )
         except Exception as exc:
@@ -356,6 +489,31 @@ class HandlerDlqReplay:
                 original_topic=message.original_topic,
                 status=EnumReplayStatus.FAILED,
                 message=f"Quarantine failed: {exc}",
+                replay_correlation_id=quarantine_correlation_id,
+            )
+
+        if confirmation is None:
+            # OMN-17896: a publish that returns no confirmation has not been
+            # shown to be durable, and an offset may only advance on a
+            # CONFIRMED publication. Recording FAILED here blocks the
+            # partition, so the record is redelivered rather than acked on a
+            # quarantine nobody can prove happened.
+            await self._record(
+                message,
+                EnumReplayStatus.FAILED,
+                quarantine_correlation_id,
+                error_message="Quarantine publish returned no confirmation",
+            )
+            logger.error(
+                "Quarantine publish for %s returned no confirmation; treating "
+                "it as NOT durable and withholding the offset",
+                message.correlation_id,
+            )
+            return ModelDlqReplayResult(
+                correlation_id=message.correlation_id,
+                original_topic=message.original_topic,
+                status=EnumReplayStatus.FAILED,
+                message="Quarantine was not confirmed",
                 replay_correlation_id=quarantine_correlation_id,
             )
 
