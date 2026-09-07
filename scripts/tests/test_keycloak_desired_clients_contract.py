@@ -32,12 +32,20 @@ def _client(config: dict[str, Any], client_id: str) -> dict[str, Any]:
     return cast("dict[str, Any]", matches[0])
 
 
-def test_omniweb_allows_the_managed_staging_callback() -> None:
+def test_omniweb_web_origins_exactly_cover_managed_ingress_hosts() -> None:
     config = json.loads(_CONFIG_PATH.read_text())
     omniweb = _client(config, "omniweb")
 
     assert "https://dev.app.omninode.ai/*" in omniweb["redirectUris"]
-    assert "https://dev.app.omninode.ai" in omniweb["webOrigins"]
+    assert omniweb["webOrigins"] == [
+        "https://app.omninode.ai",
+        "https://omninode.ai",
+        "https://www.omninode.ai",
+        "https://dev.app.omninode.ai",
+        "https://dev.omninode.ai",
+        "http://localhost:3000",
+        "http://localhost:8080",
+    ]
 
 
 def test_omniweb_user_identity_claim_contract() -> None:

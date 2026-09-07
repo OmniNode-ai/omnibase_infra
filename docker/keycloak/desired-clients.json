@@ -19,7 +19,10 @@
       ],
       "webOrigins": [
         "https://app.omninode.ai",
+        "https://omninode.ai",
+        "https://www.omninode.ai",
         "https://dev.app.omninode.ai",
+        "https://dev.omninode.ai",
         "http://localhost:3000",
         "http://localhost:8080"
       ],
