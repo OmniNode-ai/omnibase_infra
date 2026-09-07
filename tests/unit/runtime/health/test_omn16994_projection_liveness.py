@@ -42,6 +42,8 @@ from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract 
 from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
     ModelDbTableDeclaration,
 )
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
+from omnibase_infra.event_bus.models.model_publish_receipt import ModelPublishReceipt
 from omnibase_infra.models.observability import (
     ModelConsumerFlowDelta,
     ModelNodeFlowWindow,
@@ -753,7 +755,25 @@ class TestInducedCredentialFailureFlipsTheEndpoint:
         counters.drain(node_id=node_id, now=base)  # priming
 
         dlq_bus = MagicMock(spec=ProtocolEventBusLike)
-        dlq_bus.publish = AsyncMock(return_value=None)
+        # [OMN-17862] Returns a coordinate, as BOTH shipped buses do
+        # (`EventBusKafka.publish` and `EventBusInmemory.publish` are annotated
+        # `-> ModelPublishReceipt`). It returned None, which no real bus does,
+        # and `_route_projection_error_to_dlq` now CONFIRMS the receipt before
+        # reporting the quarantine durable -- canonical invariant 7, a publish
+        # return is not durability -- so a coordinate-less return correctly
+        # reports False. This test needs a SUCCESSFUL DLQ route to saturate the
+        # counter it is actually about, so the double is taught the real
+        # contract rather than the assertion being relaxed.
+        dlq_bus.publish = AsyncMock(
+            return_value=ModelPublishReceipt(
+                topic="onex.dlq.omnibase-infra.quarantine.v1",
+                partition=0,
+                offset=0,
+                cluster="test-cluster",
+                produced_at=datetime.now(UTC),
+                transport=EnumInfraTransportType.INMEMORY,
+            )
+        )
         for _ in range(DLQ_SATURATION_MIN_MESSAGES):
             counters.record_in(consumer_group, PROJECTION_TOPIC)
             with active_flow_key(consumer_group, PROJECTION_TOPIC):

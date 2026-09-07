@@ -46,6 +46,7 @@ Exports:
     ProjectionNotMaterializedError: Projection write-path failure — offset must not advance (OMN-17379)
     ProjectionQueryRowBudgetError: Projection read matched more rows than the seam materialises — a ProjectionNotMaterializedError subclass, so the offset is withheld (OMN-17888)
     ProjectionTenantContextError: Projection write refused — no tenant resolved under enforcement
+    QuarantinePublishUnconfirmedError: A refused event's quarantine publication was not confirmed — offset must not advance (OMN-17862)
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -163,6 +164,7 @@ from omnibase_infra.errors.error_projection import (
     ProjectionNotMaterializedError,
     ProjectionQueryRowBudgetError,
     ProjectionTenantContextError,
+    QuarantinePublishUnconfirmedError,
 )
 from omnibase_infra.errors.error_schema_fingerprint import (
     SchemaFingerprintMismatchError,
@@ -193,6 +195,7 @@ __all__: list[str] = [
     "ProjectionNotMaterializedError",
     "ProjectionQueryRowBudgetError",
     "ProjectionTenantContextError",
+    "QuarantinePublishUnconfirmedError",
     # Binding resolution errors
     "BindingResolutionError",
     "ChainPropagationError",

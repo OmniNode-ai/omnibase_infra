@@ -40,12 +40,15 @@ every one of those events into nothing while reporting healthy.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import ProjectionNotMaterializedError
+from omnibase_infra.event_bus.models.model_publish_receipt import ModelPublishReceipt
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     ProjectionDispatchSinks,
     _make_projection_dispatch_callback,
@@ -101,8 +104,30 @@ def _run_projection(handler: object, published: list[tuple]) -> object:
     """Drive the real projection dispatch callback over the live envelope."""
 
     class FakeEventBus:
-        async def publish(self, topic: str, key: object, value: bytes) -> None:
+        """OMN-17862: reports a coordinate, as BOTH shipped buses do.
+
+        ``EventBusKafka.publish`` and ``EventBusInmemory.publish`` are both
+        annotated ``-> ModelPublishReceipt``; this double returned ``None``,
+        which no real bus does. Once the DLQ arm stopped discarding the receipt
+        -- canonical invariant 7, a publish return is not durability -- a
+        coordinate-less return became UNCONFIRMED and correctly withheld the
+        offset. Teaching the double the real contract is the fix; leaving it
+        under-implemented would have made every DLQ-and-advance assertion here
+        a statement about a transport that does not exist.
+        """
+
+        async def publish(
+            self, topic: str, key: object, value: bytes
+        ) -> ModelPublishReceipt:
             published.append((topic, key, value))
+            return ModelPublishReceipt(
+                topic=topic,
+                partition=0,
+                offset=len(published) - 1,
+                cluster="test-cluster",
+                produced_at=datetime.now(UTC),
+                transport=EnumInfraTransportType.INMEMORY,
+            )
 
     callback = _make_projection_dispatch_callback(
         handler,
