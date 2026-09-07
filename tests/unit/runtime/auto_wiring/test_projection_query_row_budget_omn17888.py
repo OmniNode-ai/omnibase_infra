@@ -293,9 +293,16 @@ def test_shipped_bounds_fit_the_runtime_container_budget() -> None:
     on the DEV lane measured ~462 MiB, leaving ~1,051 MiB of headroom. The
     per-row cost of the retained copy measured 284 B (24.8 MiB / 91,571 rows).
     The seam's worst case is therefore
-    ``PROJECTION_HANDLER_MAX_INFLIGHT * PROJECTION_QUERY_MAX_ROWS * 284 B``,
-    which must stay well inside that headroom -- 256 MiB is the share allotted
-    to it. Raising either constant without redoing this arithmetic fails here.
+    ``PROJECTION_HANDLER_MAX_INFLIGHT * PROJECTION_QUERY_MAX_ROWS * 284 B``.
+
+    THIS ASSERTION WAS WRONG AS SHIPPED, in the way a loose bound always is: the
+    docstring said the share was 256 MiB, the module comment said 256 MiB, the
+    real product is 270.84 MiB, and the assertion admitted anything up to 300
+    MiB -- so three mutually inconsistent numbers all passed together. The share
+    is now stated as the product itself, 271 MiB, which is 25.8% of the measured
+    headroom. ``test_the_declared_memory_share_is_the_arithmetic_to_the_byte``
+    in ``test_projection_ordered_read_omn17888.py`` pins it as an equality;
+    this test keeps the containment statement it was written to make.
     """
     measured_bytes_per_row = 284
     worst_case = (
@@ -303,13 +310,13 @@ def test_shipped_bounds_fit_the_runtime_container_budget() -> None:
         * PROJECTION_QUERY_MAX_ROWS
         * measured_bytes_per_row
     )
-    assert worst_case <= 300 * 1024 * 1024, (
-        f"worst-case projection read = {worst_case / 1024 / 1024:.0f} MiB "
-        "exceeds the 300 MiB share of the 1,051 MiB container headroom"
+    assert worst_case <= 271 * 1024 * 1024, (
+        f"worst-case projection read = {worst_case / 1024 / 1024:.2f} MiB "
+        "exceeds the declared 271 MiB share of the 1,051 MiB container headroom"
     )
-    # And it must still admit the live hot session, or the bound is a refusal
-    # of legitimate traffic dressed up as a memory fix.
-    assert PROJECTION_QUERY_MAX_ROWS > 91_633
+    # The measured baseline plus the whole share must still leave the container
+    # room to work in, which is the statement the share is FOR.
+    assert 462 + (worst_case / 1024 / 1024) < 1_536
 
 
 def test_blocking_projection_invocations_are_bounded(
