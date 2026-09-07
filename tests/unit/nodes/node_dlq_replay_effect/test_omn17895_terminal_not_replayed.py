@@ -139,7 +139,12 @@ def test_an_ordinary_record_is_still_replayed() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "original_value",
-    ["", "not json at all", "[1, 2, 3]", "null"],
+    # OMN-17896 removed "" from this list. An empty body is now refused, by a
+    # DIFFERENT and earlier clause (the empty-body clause), and that refusal is
+    # asserted below rather than deleted -- so this case's real property, "the
+    # TERMINAL guard adds a refusal and never withdraws eligibility", is still
+    # covered for every value the terminal guard itself cannot classify.
+    ["not json at all", "[1, 2, 3]", "null"],
 )
 def test_an_unparseable_value_is_not_mistaken_for_a_terminal(
     original_value: str,
@@ -152,3 +157,13 @@ def test_an_unparseable_value_is_not_mistaken_for_a_terminal(
     """
     eligible, _ = should_replay(_dlq_message(original_value), _config())
     assert eligible is True
+
+
+@pytest.mark.unit
+def test_an_empty_value_is_refused_by_the_empty_body_clause_not_this_guard() -> None:
+    """OMN-17896: an empty body is refused, and the reason names the empty
+    body rather than the terminal guard — the two refusals stay distinct."""
+    eligible, reason = should_replay(_dlq_message(""), _config())
+    assert eligible is False
+    assert "empty" in reason.lower(), reason
+    assert "terminal" not in reason.lower(), reason

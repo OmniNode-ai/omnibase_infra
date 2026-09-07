@@ -14,6 +14,12 @@
 # Related Tickets:
 #   - OMN-12619: contract-native DLQ replay node + quarantine
 #   - OMN-12618: Divergent Transport & Runtime Convergence (epic)
+#   - OMN-17896: the drain refuses a DLQ record whose original body cannot be
+#     established rather than inventing an empty one (which was published back
+#     to the original topic as a zero-byte record), classifies a JSON decode
+#     failure as terminal, quarantines every record it cannot parse instead of
+#     skipping it, and commits an explicit offset map of the records that
+#     completed rather than the consumer's position.
 name: "node_dlq_replay_effect"
 contract_name: "node_dlq_replay_effect"
 node_name: "node_dlq_replay_effect"
@@ -23,11 +29,11 @@ contract_version:
   patch: 0
 node_version:
   major: 1
-  minor: 0
-  patch: 3
+  minor: 1
+  patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history.
+  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history. OMN-17896: a record whose original body cannot be established is refused at parse and quarantined with its RAW BYTES intact rather than replayed as a fabricated empty body; a record that cannot be JSON-decoded is quarantined rather than skipped; and the offset advances only on a CONFIRMED quarantine or replay publish, via an explicit per-partition offset map of the records that completed, never the consumer's bare position.
 
 # Event bus subscription/publication
 event_bus:
