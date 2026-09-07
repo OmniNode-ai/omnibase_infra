@@ -160,6 +160,33 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     infra-routing-decisions-consumer
 )
 
+# OMN-18012: dev-lane Kafka clients that are declared in the BASE compose file
+# and that no deploy path restarted.
+#
+# Distinct from DEV_LANE_ONLY_RUNTIME_SERVICES above, and deliberately not
+# folded into it: those services are declared ONLY in
+# docker-compose.dev-lane.yml. context-audit-consumer is declared in
+# docker-compose.infra.yml -- it exists on every lane -- it is simply absent
+# from RUNTIME_SERVICES, so it was never in any restart set anywhere. On the
+# dev lane it had been up 2 weeks across every intervening deploy (measured
+# 2026-09-07), which was harmless while the broker accepted PLAINTEXT and is
+# not harmless now: phase B binds SASL credentials on it in the overlay, and a
+# container that is never recreated never reads a new environment. It would
+# have kept running as a PLAINTEXT client against a listener that now refuses
+# it -- escape 1's own failure mode, reintroduced by the change meant to
+# prevent it.
+#
+# Appended in the DEV branch only. The array is consulted nowhere else, so
+# prod, stability-test and judge restart sets are byte-identical to before;
+# those lanes' brokers have no SASL and need no recreate.
+#
+# This is a restart-scope list, not a claim about declaration site. If a future
+# lane authenticates its broker, it gets its own array here rather than an
+# entry in this one.
+readonly DEV_LANE_EXTRA_BROKER_CLIENTS=(
+    context-audit-consumer
+)
+
 # OMN-17562: the same six, mirrored onto the PROOF lane.
 #
 # A SEPARATE array, not a shared one appended for both lanes, and emphatically
@@ -246,7 +273,10 @@ resolve_lane_runtime_services() {
             # Bare `omnibase-infra` -> the dev lane, which loads
             # docker-compose.dev-lane.yml through resolve_compose_file_args()'s
             # fall-through.
-            lane_only_services=("${DEV_LANE_ONLY_RUNTIME_SERVICES[@]}")
+            lane_only_services=(
+                "${DEV_LANE_ONLY_RUNTIME_SERVICES[@]}"
+                "${DEV_LANE_EXTRA_BROKER_CLIENTS[@]}"
+            )
             ;;
         docker-compose.stability-test.yml)
             lane_only_services=("${STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES[@]}")
