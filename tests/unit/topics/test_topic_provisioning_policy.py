@@ -83,6 +83,14 @@ class TestProfileDerivation:
             bootstrap_servers="broker-1.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism=mechanism,
+            # OMN-18012 made PLAIN/SCRAM fail closed without credentials, and
+            # that is correct -- a SASL client with no principal is a
+            # misconfiguration, not a default. The subject of this test is the
+            # RF ceiling, not auth, so the fixture supplies the two fields the
+            # validator now requires. Synthetic values: no principal here
+            # resolves anywhere.
+            sasl_plain_username="synthetic-test-principal",
+            sasl_plain_password="synthetic-test-secret",
         )
         policy = ModelTopicProvisioningPolicy.from_kafka_config(config)
         assert policy.capacity_replication_factor is None
@@ -107,6 +115,12 @@ class TestSaslClusterIsNotAssumedSingleNode:
             bootstrap_servers="b-1.example:9096,b-2.example:9096,b-3.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism="SCRAM-SHA-512",
+            # See the note in TestProfileDerivation: OMN-18012's fail-closed
+            # credential requirement is the correct behaviour; this fixture is
+            # about replication factor, so it supplies synthetic credentials
+            # rather than weakening the validator.
+            sasl_plain_username="synthetic-test-principal",
+            sasl_plain_password="synthetic-test-secret",
         )
         return ModelTopicProvisioningPolicy.from_kafka_config(config)
 
