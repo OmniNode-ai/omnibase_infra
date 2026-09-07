@@ -31,7 +31,6 @@ Usage:
 """
 
 import argparse
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -104,44 +103,55 @@ _ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
 
 
 def _repository_root(cwd: Path) -> Path | None:
-    """Resolve this validator's physical Git worktree root from ``cwd``.
+    """Resolve the script-owned worktree root when ``cwd`` is safely contained.
 
-    A filesystem entry called ``.git`` does not establish repository identity:
-    it can be an empty marker in a nested directory. Ask Git for the worktree
-    root, then require the physical result to be the repository that owns this
-    script. A validator invoked outside that worktree must fail closed.
+    The ARCH-004 baseline belongs to this validator's checkout, not to an
+    arbitrary repository selected by the caller's Git configuration. Require
+    the script-owned root to have a canonical ``.git`` directory or a linked
+    worktree gitfile, require ``cwd`` to remain below that root, and refuse any
+    nested Git marker that would establish a different repository identity.
     """
     resolved_cwd = cwd.resolve()
     expected_root = Path(__file__).resolve().parent.parent
+
     try:
-        result = subprocess.run(
-            [
-                "/usr/bin/env",
-                "-i",
-                "PATH=/usr/bin:/bin",
-                "GIT_CONFIG_NOSYSTEM=1",
-                "GIT_TERMINAL_PROMPT=0",
-                "/usr/bin/git",
-                "-C",
-                str(resolved_cwd),
-                "rev-parse",
-                "--show-toplevel",
-            ],
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=10,
-        )
-        git_root = Path(result.stdout.strip()).resolve(strict=True)
-    except (OSError, subprocess.SubprocessError):
+        resolved_cwd.relative_to(expected_root)
+    except ValueError:
+        print("Imperative Orchestrators: ERROR (git-worktree-root-mismatch)")
+        return None
+
+    root_marker = expected_root / ".git"
+    try:
+        if root_marker.is_dir():
+            root_marker_is_valid = (root_marker / "HEAD").is_file()
+        elif root_marker.is_file():
+            marker_text = root_marker.read_text(encoding="utf-8").strip()
+            marker_prefix = "gitdir: "
+            if not marker_text.startswith(marker_prefix):
+                root_marker_is_valid = False
+            else:
+                git_dir = Path(marker_text.removeprefix(marker_prefix))
+                if not git_dir.is_absolute():
+                    git_dir = expected_root / git_dir
+                root_marker_is_valid = (git_dir.resolve(strict=True) / "HEAD").is_file()
+        else:
+            root_marker_is_valid = False
+    except (OSError, RuntimeError, UnicodeError):
+        root_marker_is_valid = False
+
+    if not root_marker_is_valid:
         print("Imperative Orchestrators: ERROR (git-worktree-root-unresolved)")
         return None
 
-    if git_root == expected_root:
-        return git_root
+    current = resolved_cwd
+    while current != expected_root:
+        nested_marker = current / ".git"
+        if nested_marker.is_file() or nested_marker.is_dir():
+            print("Imperative Orchestrators: ERROR (git-worktree-root-mismatch)")
+            return None
+        current = current.parent
 
-    print("Imperative Orchestrators: ERROR (git-worktree-root-mismatch)")
-    return None
+    return expected_root
 
 
 def _canonical_repository_name(repo_root: Path) -> str | None:
