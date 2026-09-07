@@ -47,7 +47,7 @@ hosted_runner_allowlist:
   - path: .github/workflows/omnigate.yml
     reason: "Fork-only untrusted PR verification must not execute on self-hosted runners."
   - path: .github/workflows/runner-fleet-canary.yml
-    reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors."
+    reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors. OMN-18031 EXTENDS THIS ENTRY: the same file now also carries the saturation monitor's `saturation-record` job, hosted on the identical rationale -- a monitor that queues behind the saturation it reports on cannot report on it. The third job in this file, `lab-load-probe`, is deliberately NOT covered here: it is self-hosted on purpose (a hosted runner has no route to the lab's tailnet/RFC1918 addresses) and routes through the standard OMNI_RUNNER_SELECTOR_V1 block, so this entry does not silently widen to cover it."
   - path: .github/workflows/model-review-capability-canary.yml
     reason: "OMN-17876: capability contract evidence must stay on hosted compute until separately authorized live runner selection."
   - path: .github/workflows/runner-broker-dispatch-wedge-rerun.yml
@@ -58,5 +58,124 @@ hosted_runner_allowlist:
     reason: "OMN-16906: the dev-candidate delivery guard is a pure GitHub-REST probe that touches no lane and no tailnet host, and it must not share fate with the self-hosted fleet -- a delivery outage caused by fleet saturation is exactly the case where a self-hosted watcher would be queued behind the thing it reports on. Same isolation rationale as runner-fleet-canary.yml above."
   - path: .github/workflows/deliver-dev-candidate-to-staging.yml
     reason: "OMN-17534: the candidate-boot-gate job creates and destroys a kind cluster and side-loads a multi-gigabyte runtime image. The self-hosted omnibase-ci fleet on .201 runs the lab lanes off the same Docker daemon, so a per-candidate ephemeral cluster there would contend with -- and could disturb -- the lanes the lab depends on. The other three jobs in this workflow are unaffected: two are `uses:` calls into already-allowlisted workflows and the announce job routes through OMNI_TRUSTED_CI_RUNS_ON_JSON as before."
+  - path: .github/workflows/runner-route-reusable.yml
+    reason: "OMN-18031: the per-run routing decision job. It must not share fate with the fleet it routes onto -- a router queued behind a saturated fleet would decide, minutes late, that the fleet is saturated. Same isolation rationale as runner-fleet-canary.yml above. It is also the surface that enforces fork isolation (OMN-16683/16684) before any capacity signal is read, so it must be reachable on an untrusted PR, where self-hosted is prohibited outright."
+  - path: .github/workflows/runner-route-probe.yml
+    reason: "OMN-18031 gate P1: the live proof that `needs.<job>.outputs` resolves inside `runs-on`, for both a normal job and a reusable-workflow job. A survey of all five routing repos on 2026-09-07 found zero prior uses of that wiring (196 files carrying the seam selector were the positive control), so the assumption the whole design rests on is proven here rather than assumed. Its two `route-*` jobs and the proof gate are hosted; its two `consume-*` jobs resolve their runs-on FROM the route output and are hosted today only because the seam ceiling is hosted."
   - path: .github/workflows/shared-env-runner-parity.yml
     reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
+# OMN-18031 — per-run routing thresholds for the hosted `route` job.
+#
+# The route job (scripts/ci/runner_route_decision.py) decides, once per run,
+# between the lab fleet labels and GitHub-hosted, from live org-runner capacity
+# and lab host load. The `trusted_runner_variable` above is read as a CEILING:
+# routing may only ever DOWNGRADE from what the seam already allows, never
+# widen. Nothing here writes any Actions variable (CLAUDE.md rule 14,
+# single-owner).
+#
+# THE MECHANISM IS INERT AT THESE VALUES AND THAT IS DELIBERATE. With
+# expected_json '["ubuntu-latest"]' the decision returns `seam_ceiling_hosted`
+# on every run and placement is byte-identical to today. Flipping the seam is a
+# separate single-owner claim (OMN-16682), not this ticket.
+#
+# Every key below is REQUIRED: the loader raises on a missing one rather than
+# defaulting (CLAUDE.md rule 8), because a silently-defaulted threshold is how a
+# routing gate quietly stops gating.
+route:
+  policy_version: 1
+  runner_group: omnibase-ci
+  lab_labels: ["self-hosted", "omnibase-ci"]
+  hosted_labels: ["ubuntu-latest"]
+  # Headroom FLOOR, not a capacity match. A measured CI fan-out in this repo is
+  # ~47 jobs (run 34093238556 ran 47/47 hosted); 12 idle runners is the margin
+  # below which routing stops adding load to the fleet.
+  min_idle_runners: 12
+  # Deliberately well below the observed peak: busy was measured swinging
+  # 65 -> 42 -> 19 -> 13 -> 10 of 88 inside ~2 minutes on 2026-09-07
+  # (10:22-10:24Z). A threshold near the peak would flap every run.
+  max_busy_fraction: 0.80
+  # A separate, LOWER trust floor than the fleet canary's own
+  # RUNNER_CANARY_MAX_OFFLINE ("5" against expected_count 88): the canary asks
+  # "is the fleet healthy", this asks "is it big enough to route onto at all".
+  min_online_runners: 60
+  # A hosted route job cannot reach the lab (the pre-push probe reaches it over
+  # ssh to tailnet/RFC1918 addresses), so the lab record arrives asynchronously
+  # from the saturation monitor and is freshness-bounded. Consequence, named
+  # rather than hidden: the lab signal is up to 10 minutes old by construction.
+  # Stale is unknown, and unknown routes hosted.
+  lab_record_max_age_seconds: 600
+  # COPIED VERBATIM from the pre-push picker's committed defaults --
+  # PREPUSH_LOAD_THRESHOLD:-1.0 (scripts/hooks/prepush_smart_tests.sh) and
+  # PREPUSH_MIN_FREE_MEM_MB:-4096 (scripts/hooks/prepush_dispatch.sh) -- so the
+  # lab has ONE definition of "too loaded", shared by pre-push placement and CI
+  # routing, rather than two that drift apart. Load ranks, memory ADMITS
+  # (OMN-17392: a host at 0.10x load with 2.5 GiB free ranked FIRST under a
+  # CPU-only picker and cost an OMN-17316 landing hours of OOM kills).
+  max_lab_load_ratio: 1.0
+  min_lab_free_mem_mib: 4096
+  # MEASURED RESIDUAL, recorded rather than tuned away (2026-09-07, live).
+  # Dry runs executed ON the lab host read it at load1 48.76 / 32 cores =
+  # 1.524x with 58765 MiB free -- CPU-hot and memory-rich at the same time,
+  # because that host IS the 88-container runner fleet. Four consecutive
+  # samples over ~2 minutes all decided `lab_saturated` on the ratio alone.
+  #
+  # So the two consumers of this threshold are not asking the same question.
+  # Pre-push asks "can I add a heavy test suite to this host", and 1.0x is the
+  # right answer there. CI routing asks "can the fleet accept one more job",
+  # and the fleet is DESIGNED to run hot -- a ratio floor calibrated for the
+  # first question may refuse the lab almost always for the second.
+  #
+  # It is deliberately NOT loosened here. The value is copied verbatim so the
+  # lab has one definition of "too loaded", and changing it is a placement
+  # decision that can only be measured once the seam actually permits
+  # self-hosted -- which is OMN-16682, not this ticket. Landing a looser number
+  # now would be tuning against a mechanism that is inert, with no way to
+  # observe whether the new value was right. Re-derive it with the seam flip,
+  # against real placement, and if the two questions genuinely need two
+  # numbers, split the key then rather than silently widening this one.
+  # Workflows whose ROUTED jobs must stay hosted regardless of capacity.
+  #
+  # THIS IS DELIBERATELY NOT `hosted_runner_allowlist` ABOVE, and conflating the
+  # two is a real defect that a dry run against live data caught before merge.
+  # That list means "this FILE contains at least one job that is intentionally
+  # bare `runs-on: ubuntu-latest`", which is why `.github/workflows/ci.yml` is
+  # on it -- for the single lightweight CI Summary aggregator job. Reusing it
+  # here would have pinned all 54 jobs of ci.yml hosted forever and made the
+  # entire mechanism a no-op on its largest consumer, while every test still
+  # passed. The two lists answer different questions and must stay separate.
+  #
+  # Membership here means: even once the seam permits self-hosted, this
+  # workflow's routed jobs stay on GitHub-hosted compute, because something
+  # other than capacity requires it -- fate-isolation from the fleet being
+  # monitored, clean egress for an ECR push, or fork-only untrusted execution.
+  hosted_workflows:
+    - .github/workflows/runner-route-reusable.yml
+    - .github/workflows/runner-route-probe.yml
+    - .github/workflows/runner-fleet-canary.yml
+    - .github/workflows/runner-broker-dispatch-wedge-rerun.yml
+    - .github/workflows/pr-ci-zombie-detector.yml
+    - .github/workflows/dev-candidate-delivery-liveness.yml
+    - .github/workflows/model-review-capability-canary.yml
+    - .github/workflows/omnigate.yml
+    - .github/workflows/build-and-push-runtime.yml
+    - .github/workflows/build-workspace-candidate-runtime.yml
+    - .github/workflows/shared-env-runner-parity.yml
+  # OMN-18031 G7 — saturation monitor thresholds. Higher than the routing
+  # thresholds above on purpose: routing reacts to a single instantaneous read
+  # and biases toward the cheap error, while an ALERT must survive the
+  # volatility that read has. sustained_samples: 4 at the canary's */5 cadence
+  # is a 20-minute sustain.
+  saturation_alert:
+    busy_fraction_threshold: 0.85
+    lab_load_ratio_threshold: 1.5
+    min_lab_free_mem_mib: 4096
+    sustained_samples: 4
+    # THE SAMPLE COUNT ALONE DOES NOT MEAN "20 MINUTES", and saying so would be
+    # a soft claim. Measured 2026-09-07T11:0xZ: four consecutive canary runs
+    # (queued 10:25, 10:34, 10:46, 11:02Z) were all still QUEUED behind the
+    # GitHub-hosted backlog, so samples arrive at whatever rate that queue
+    # drains, not at the */5 the cron requests. A count-only counter would
+    # therefore alert on four samples that might span four minutes or four
+    # hours. This floor makes the word "sustained" true: a breach must ALSO
+    # span this much wall-clock, read from the records' own sampled_at.
+    sustained_min_span_seconds: 900

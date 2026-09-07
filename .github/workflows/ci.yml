@@ -113,6 +113,45 @@ env:
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
+  # =============================================================================
+  # Per-run runner routing (OMN-18031)
+  # =============================================================================
+  # Decides ONCE PER RUN, from live org-runner capacity and the most recent lab
+  # load record, which runs-on label set the heavy jobs below should use. The
+  # trusted seam variable is the CEILING: this can only ever DOWNGRADE from what
+  # OMNI_TRUSTED_CI_RUNS_ON_JSON already allows, never widen (CLAUDE.md rule 14
+  # -- nothing here writes any Actions variable).
+  #
+  # IT IS INERT TODAY AND THAT IS THE POINT. With the seam at its current live
+  # value of '["ubuntu-latest"]' (the deliberate OMN-16682 re-flip) this job
+  # decides `seam_ceiling_hosted` on every run and every job below keeps the
+  # placement it has. Landing it proves the mechanism safe and records a
+  # decision artifact per run; changing placement is a separate single-owner
+  # claim on the seam, which is OMN-16682 and not this ticket.
+  #
+  # CONSUMERS ARE NOT WIRED IN THIS PR. Every job below still reads the
+  # OMNI_RUNNER_SELECTOR_V1 expression directly. They move to
+  # `runs-on: ${{ fromJSON(needs.route.outputs.labels) }}` only after gate P1 --
+  # the live proof in runner-route-probe.yml that `needs.<job>.outputs` resolves
+  # inside `runs-on` for a reusable-workflow job -- has passed on real runs. A
+  # survey of all five routing repos found zero prior uses of that wiring.
+  #
+  # Registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS as
+  # "Runner Route (OMN-18031) / route". THAT REGISTRATION IS HALF THE
+  # MECHANISM: this repo requires exactly one context (CI Summary), and an
+  # unregistered job that is `skipped` or absent yields SUCCESS -- so without
+  # it, deleting this job would silently retire the routing decision on a green
+  # run, which is the same silent-retirement shape the Event Chain Gate and
+  # Subscribe Wiring Health entries already document there.
+  route:
+    name: Runner Route (OMN-18031)
+    uses: ./.github/workflows/runner-route-reusable.yml
+    with:
+      workflow_path: .github/workflows/ci.yml
+    secrets:
+      RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+
   # OCC preflight is the first non-OCC CI dependency. If central OCC
   # evidence is missing or red, no runner-heavy validation jobs fan out.
   occ-preflight:
