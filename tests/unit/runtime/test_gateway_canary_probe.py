@@ -423,6 +423,9 @@ async def test_probe_reports_overall_fail_when_either_leg_fails(
         # OMN-17201: no denial state published, so the egress leg abstains
         # and these cases still assert only the two broker legs.
         egress_health_path=state_path.parent / "absent-egress-health.json",
+        # OMN-17201: likewise for the lane-mirror leg -- an absent counters file
+        # is a forwarder with no lane mirror configured, which abstains.
+        lane_mirror_health_path=state_path.parent / "absent-lane-mirror-health.json",
     )
 
     assert passed is False
@@ -492,17 +495,24 @@ async def test_probe_serves_cached_result_within_cadence(tmp_path: Path) -> None
             # OMN-17201: no denial state published, so the egress leg abstains
             # and these cases still assert only the two broker legs.
             egress_health_path=state_path.parent / "absent-egress-health.json",
+            lane_mirror_health_path=(
+                state_path.parent / "absent-lane-mirror-health.json"
+            ),
         )
     finally:
         gateway_canary_probe.run_canary_check = original  # type: ignore[assignment]
 
     assert calls["count"] == 0
     assert passed is True
-    # OMN-17201: the cached BROKER report is replayed verbatim and the egress
-    # leg is appended fresh. The egress leg is deliberately not cached -- it
-    # costs one local file read, and caching it would delay the "nothing is
-    # crossing" verdict by up to a full cadence.
-    assert report == "PASS: cached\nPASS: egress leg: no denial state published yet"
+    # OMN-17201: the cached BROKER report is replayed verbatim and BOTH
+    # file-only legs are appended fresh. Neither is cached -- each costs one
+    # local file read, and caching them would delay the "nothing is crossing"
+    # verdict by up to a full cadence.
+    assert report == (
+        "PASS: cached\n"
+        "PASS: egress leg: no denial state published yet\n"
+        "PASS: lane-mirror leg: no lane mirror configured or nothing published"
+    )
 
 
 @pytest.mark.asyncio
@@ -576,6 +586,9 @@ async def test_probe_never_serves_a_cached_failure(tmp_path: Path) -> None:
             # OMN-17201: no denial state published, so the egress leg abstains
             # and these cases still assert only the two broker legs.
             egress_health_path=state_path.parent / "absent-egress-health.json",
+            lane_mirror_health_path=(
+                state_path.parent / "absent-lane-mirror-health.json"
+            ),
         )
     finally:
         gateway_canary_probe.run_canary_check = original  # type: ignore[assignment]
@@ -681,6 +694,7 @@ async def test_probe_fails_when_every_outbound_record_is_denied(
         config,
         state_path=tmp_path / "state.json",
         egress_health_path=egress_health_path,
+        lane_mirror_health_path=tmp_path / "absent-lane-mirror-health.json",
     )
 
     assert passed is False, "a leg delivering nothing must not report healthy"
@@ -746,6 +760,7 @@ async def test_probe_passes_when_records_are_crossing(
         config,
         state_path=tmp_path / "state.json",
         egress_health_path=egress_health_path,
+        lane_mirror_health_path=tmp_path / "absent-lane-mirror-health.json",
     )
 
     assert passed is True

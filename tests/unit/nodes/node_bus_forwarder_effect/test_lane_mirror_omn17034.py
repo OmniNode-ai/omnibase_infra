@@ -320,6 +320,20 @@ def test_no_lane_leg_is_addressed_by_the_bare_redpanda_alias() -> None:
     relationship against the source lane's own compose file rather than a
     string this deployment can satisfy while still being wrong.
 
+    AMENDED AGAIN BY OMN-17201. The dev half of that same disproven belief
+    survived the first amendment: this test still required the DEV leg to start
+    with ``omnibase-infra-redpanda:``. It fired on 2026-09-06T20:44:38Z. The dev
+    broker container was recreated; while it was gone the only container
+    answering the shared ``redpanda`` alias was the STABILITY broker; the dev
+    producer's reconnect re-resolved onto the source lane and stayed there for
+    three hours, acknowledging every record against the broker it was reading
+    from. A unique container name is no more sufficient for the dev leg than it
+    was for the source leg, for the identical reason, and the assertion is
+    removed on the identical grounds. The dev leg now dials the dev lane's
+    external listener; the listener-level invariant that replaces this
+    assertion is
+    ``test_lane_mirror_omn17919_advertised_listener.py::test_mirror_target_dials_the_dev_lane_external_listener``.
+
     What survives here is the part that was always true and is still enforced:
     no leg may be addressed by the bare alias itself.
     """
@@ -332,9 +346,6 @@ def test_no_lane_leg_is_addressed_by_the_bare_redpanda_alias() -> None:
             f"lane-mirror leg {endpoint!r} uses the bare `redpanda` alias, which "
             "resolves on both lane networks this forwarder is joined to"
         )
-    assert resolved["lane_mirror_buses"]["dev"]["bootstrap_servers"].startswith(
-        "omnibase-infra-redpanda:"
-    )
 
 
 def test_dns_bastion_joins_every_lane_network_the_forwarder_resolves_on() -> None:

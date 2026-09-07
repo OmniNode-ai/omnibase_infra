@@ -64,6 +64,11 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_egr
     evaluate_egress_health,
     load_egress_health,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_lane_mirror_health import (
+    DEFAULT_LANE_MIRROR_HEALTH_PATH,
+    evaluate_lane_mirror_health,
+    load_lane_mirror_health,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     prefix_topic,
 )
@@ -274,6 +279,27 @@ def check_egress_leg(egress_health_path: Path) -> ModelCanaryLegResult:
     return ModelCanaryLegResult(leg="egress", passed=passed, detail=detail)
 
 
+def check_lane_mirror_leg(lane_mirror_health_path: Path) -> ModelCanaryLegResult:
+    """Read the forwarder's lane-mirror counters and rule on them (OMN-17201).
+
+    The fourth leg, and like the egress leg it dials no broker. The two canary
+    legs produce to the canary topic and read it back on the SAME lane, so
+    neither of them can observe the lane-mirror leg at all: a mirror that
+    acknowledges every record against the wrong broker passes both, while the
+    destination lane's high-water mark never moves. That was the live state on
+    .201 for three hours on 2026-09-06.
+
+    Absence passes: a two-leg forwarder declares no ``lane_mirror`` and writes
+    no counters, and failing closed on a missing file would make the
+    healthcheck depend on the writer having run.
+    """
+    passed, detail = evaluate_lane_mirror_health(
+        load_lane_mirror_health(lane_mirror_health_path),
+        now=datetime.now(UTC),
+    )
+    return ModelCanaryLegResult(leg="lane-mirror", passed=passed, detail=detail)
+
+
 async def run_canary_check(
     config: ModelGatewayForwarderRuntimeConfig,
 ) -> tuple[ModelCanaryLegResult, ModelCanaryLegResult]:
@@ -354,6 +380,7 @@ async def probe(
     *,
     state_path: Path,
     egress_health_path: Path,
+    lane_mirror_health_path: Path,
     force: bool = False,
 ) -> tuple[bool, str]:
     """Return ``(passed, report)``, consulting/refreshing the cadence cache.
@@ -372,10 +399,14 @@ async def probe(
     """
     canary = config.forwarder.canary
     egress_result = check_egress_leg(egress_health_path)
+    mirror_result = check_lane_mirror_leg(lane_mirror_health_path)
+    file_legs = (egress_result, mirror_result)
+    file_passed = all(result.passed for result in file_legs)
+    file_report = "\n".join(_render_leg(result) for result in file_legs)
     if not force:
         cached = _load_cached_passing_state(state_path, canary.cadence_seconds)
         if cached is not None:
-            return egress_result.passed, "\n".join((cached, _render_leg(egress_result)))
+            return file_passed, "\n".join((cached, file_report))
 
     local_result, cloud_result = await run_canary_check(config)
     broker_passed = local_result.passed and cloud_result.passed
@@ -389,8 +420,8 @@ async def probe(
         checked_at=time.time(),
     )
     return (
-        broker_passed and egress_result.passed,
-        "\n".join((broker_report, _render_leg(egress_result))),
+        broker_passed and file_passed,
+        "\n".join((broker_report, file_report)),
     )
 
 
@@ -421,6 +452,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "Path the forwarder process publishes its egress denial/delivery "
             "counters to (OMN-17201). Must match the value passed to "
             "onex-gateway-forwarder --egress-health-file"
+        ),
+    )
+    parser.add_argument(
+        "--lane-mirror-health-file",
+        type=Path,
+        default=Path(DEFAULT_LANE_MIRROR_HEALTH_PATH),
+        help=(
+            "Path the forwarder process publishes its lane-mirror "
+            "delivery-verification counters to (OMN-17201). Must match the "
+            "value passed to onex-gateway-forwarder --lane-mirror-health-file"
         ),
     )
     parser.add_argument(
@@ -458,6 +499,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             config,
             state_path=args.state_file,
             egress_health_path=args.egress_health_file,
+            lane_mirror_health_path=args.lane_mirror_health_file,
             force=args.force,
         )
     )

@@ -33,6 +33,8 @@ primitives (``poll`` / ``commit`` / ``nack`` / ``send``). The mapping to Kafka:
   redelivery (Kafka ``seek``; conformance
   ``test_nack_redelivers_from_offset_including_later``).
 * ``send``   -> ``AIOKafkaProducer.send_and_wait`` (awaits the broker ack).
+* ``send_with_coordinate`` -> the same call, returning the ``(topic,
+  partition, offset)`` the broker assigned (OMN-17201).
 
 Two settings are FORCED for these NEW transport consumers and are deliberately not
 read from the shared config (plan S3): ``enable_auto_commit=False`` (the runtime,
@@ -526,9 +528,42 @@ class KafkaTransport:
                 parameter="producer",
                 value=None,
             )
+        await self.send_with_coordinate(topic, key, value, headers)
+
+    async def send_with_coordinate(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: Mapping[str, bytes],
+    ) -> tuple[str, int, int]:
+        """Publish one event and return the ``(topic, partition, offset)`` it took.
+
+        OMN-17201. ``send`` satisfies ``ProtocolTransportProducer`` and returns
+        nothing, which is the right shape for every caller that only needs "the
+        broker took it". The gateway lane mirror needs strictly more: an
+        acknowledgement proves A broker took the record, never that the
+        INTENDED broker did, and the coordinate is the only thing on the
+        acknowledgement that can be compared against what the mirror's own
+        source consumer later reads. ``AIOKafkaProducer.send_and_wait`` has
+        always returned this metadata; this method stops discarding it.
+        """
+        if self._producer is None:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="send",
+                target_name="kafka_transport",
+            )
+            raise ProtocolConfigurationError(
+                "KafkaTransport producer used before start(); await start() first.",
+                context=context,
+                parameter="producer",
+                value=None,
+            )
         kafka_headers: list[tuple[str, bytes]] | None = [
             (key_, value_) for key_, value_ in headers.items()
         ] or None
-        await self._producer.send_and_wait(
+        metadata = await self._producer.send_and_wait(
             topic, value=value, key=key, headers=kafka_headers
         )
+        return (metadata.topic, metadata.partition, metadata.offset)

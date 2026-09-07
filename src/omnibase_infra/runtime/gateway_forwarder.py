@@ -36,6 +36,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
     ModelGatewayHttpsIngestConfig,
+    ModelGatewayPublishReceipt,
     ModelGatewayTenantIdentity,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_delivery import (
@@ -48,6 +49,10 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_for
     GatewayEgressDeniedError,
     ProtocolGatewayPublisher,
     ServiceGatewayForwarder,
+)
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_lane_mirror_health import (
+    DEFAULT_LANE_MIRROR_HEALTH_PATH,
+    publish_lane_mirror_health,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     prefix_topic,
@@ -480,7 +485,13 @@ class TransportGatewayHttpsIngest:
         key: bytes | None,
         value: bytes,
         headers: object | None = None,
-    ) -> None:
+    ) -> ModelGatewayPublishReceipt | None:
+        """Publish over the HTTPS ingest route.
+
+        Returns ``None``: this route answers with an HTTP status, not a broker
+        coordinate, and OMN-17201's contract is that a publisher which cannot
+        report where the record landed says so rather than inventing one.
+        """
         idempotency_key = self._idempotency_key(value)
         record: dict[str, object] = {
             "topic": topic,
@@ -518,6 +529,9 @@ class TransportGatewayHttpsIngest:
                 f"with status {response.status_code}; retrying a rejection cannot "
                 "succeed, so this is not raised as the retryable class"
             )
+        # The route answers with an HTTP status, not a broker coordinate. A
+        # publisher that cannot say where the record landed says so.
+        return None
 
     def _idempotency_key(self, value: bytes) -> str:
         """Read the content-addressed envelope id the route deduplicates on."""
@@ -614,6 +628,7 @@ async def run_gateway_forwarder(
     resolve_secret: Callable[[str], Awaitable[str | None]],
     ready_path: Path | None = None,
     egress_health_path: Path | None = None,
+    lane_mirror_health_path: Path | None = None,
 ) -> None:
     """Run the bridge until ``shutdown_event`` is set, then close both legs.
 
@@ -704,6 +719,7 @@ async def run_gateway_forwarder(
     delivery_started = False
     heartbeat_task: asyncio.Task[None] | None = None
     lane_mirror_task: asyncio.Task[None] | None = None
+    lane_mirror_guard_task: asyncio.Task[None] | None = None
     try:
         await idempotency_store.start()
         store_started = True
@@ -724,17 +740,33 @@ async def run_gateway_forwarder(
             name="gateway-forwarder-heartbeat",
         )
         if lane_mirror_config is not None and lane_mirror_source is not None:
+            lane_mirror = NodeLaneMirror(
+                config=lane_mirror_config,
+                source_consumer=lane_mirror_source,
+                mirror_producers={
+                    lane: TransportGatewayBus(transport, identity=identity)
+                    for lane, transport in lane_mirror_producers.items()
+                },
+                idempotency_store=idempotency_store,
+            )
             lane_mirror_task = asyncio.create_task(
-                NodeLaneMirror(
-                    config=lane_mirror_config,
-                    source_consumer=lane_mirror_source,
-                    mirror_producers={
-                        lane: TransportGatewayBus(transport, identity=identity)
-                        for lane, transport in lane_mirror_producers.items()
-                    },
-                    idempotency_store=idempotency_store,
-                ).run(shutdown_event),
+                lane_mirror.run(shutdown_event),
                 name="gateway-forwarder-lane-mirror",
+            )
+            # OMN-17201: publishes the delivery-verification counters and is the
+            # only thing that can clear a lane the mirror refused. A refusal
+            # means that lane's producer is talking to the source broker, and
+            # the only in-process repair is to drop the connection and
+            # re-bootstrap at the CONFIGURED address.
+            lane_mirror_guard_task = asyncio.create_task(
+                _run_lane_mirror_guard(
+                    mirror=lane_mirror,
+                    producers=lane_mirror_producers,
+                    shutdown_event=shutdown_event,
+                    interval_seconds=config.forwarder.heartbeat_interval_seconds,
+                    health_path=lane_mirror_health_path,
+                ),
+                name="gateway-forwarder-lane-mirror-guard",
             )
 
         if ready_path is not None:
@@ -755,6 +787,10 @@ async def run_gateway_forwarder(
     finally:
         if ready_path is not None:
             ready_path.unlink(missing_ok=True)
+        if lane_mirror_guard_task is not None and not lane_mirror_guard_task.done():
+            lane_mirror_guard_task.cancel()
+        if lane_mirror_guard_task is not None:
+            await asyncio.gather(lane_mirror_guard_task, return_exceptions=True)
         if lane_mirror_task is not None and not lane_mirror_task.done():
             lane_mirror_task.cancel()
         if lane_mirror_task is not None:
@@ -985,7 +1021,7 @@ class TransportGatewayBus:
         key: bytes | None,
         value: bytes,
         headers: object | None = None,
-    ) -> None:
+    ) -> ModelGatewayPublishReceipt | None:
         encoded_headers: Mapping[str, bytes]
         if headers is None:
             encoded_headers = {}
@@ -1013,7 +1049,21 @@ class TransportGatewayBus:
         else:
             raise TypeError("gateway transport headers must map string keys to bytes")
         try:
+            # OMN-17201: the coordinate, not just the acknowledgement. A
+            # transport that can report where the destination broker put the
+            # record does; one that cannot (``ProtocolTransportProducer`` at
+            # large) still satisfies the boundary by returning ``None``.
+            if isinstance(self._producer, KafkaTransport):
+                destination = await self._producer.send_with_coordinate(
+                    topic, key, value, encoded_headers
+                )
+                return ModelGatewayPublishReceipt(
+                    topic=destination[0],
+                    partition=destination[1],
+                    offset=destination[2],
+                )
             await self._producer.send(topic, key, value, encoded_headers)
+            return None
         except _EGRESS_AUTHORIZATION_DENIED_ERRORS as exc:
             raise GatewayEgressDeniedError(
                 topic=topic,
@@ -1024,6 +1074,71 @@ class TransportGatewayBus:
             raise InfraUnavailableError(
                 f"gateway destination broker unavailable for topic {topic}"
             ) from exc
+
+
+async def _run_lane_mirror_guard(
+    *,
+    mirror: NodeLaneMirror,
+    producers: Mapping[str, KafkaTransport],
+    shutdown_event: asyncio.Event,
+    interval_seconds: int,
+    health_path: Path | None,
+) -> None:
+    """Publish the mirror's counters and repair a lane it refused (OMN-17201).
+
+    Two jobs on one cadence because they are one contract: the counters are how
+    a refused lane becomes visible outside the process, and the recreate is the
+    only thing that can end the refusal.
+
+    The repair is deliberately a producer RECREATE, not a retry. A mirror lane
+    is refused when a record this process published to it was read back off the
+    SOURCE lane at the coordinate it was written to -- proof that the lane's
+    producer is connected to the source broker. A Kafka client bootstraps at
+    the configured address once and thereafter follows the ADVERTISED address
+    it is handed, and on .201 both lane brokers advertise the bare name
+    ``redpanda`` while this forwarder is joined to both lane networks.
+    Retrying the same connection reaches the same broker; only dropping it and
+    bootstrapping again at the configured address can land elsewhere.
+
+    A recreate that lands on the wrong broker again re-refuses on the next echo,
+    so this cannot paper over a genuinely mis-addressed lane:
+    ``loop_detected_total`` keeps climbing and the healthcheck's verdict for a
+    process that has ever detected a loop is sticky.
+    """
+    while not shutdown_event.is_set():
+        publish_lane_mirror_health(mirror.health, health_path)
+        for lane, reason in sorted(mirror.refused_lanes.items()):
+            transport = producers.get(lane)
+            if transport is None:  # pragma: no cover - construction guarantees it
+                continue
+            logger.error(
+                "Lane mirror guard recreating lane=%s producer -- lane refused "
+                "(%s). No source offset was committed while the lane was "
+                "refused, so the retry loses nothing.",
+                lane,
+                reason,
+            )
+            try:
+                await transport.close()
+                await transport.start()
+            except Exception:
+                logger.exception(
+                    "Lane mirror guard could not recreate lane=%s producer; the "
+                    "lane stays refused and the source stays uncommitted",
+                    lane,
+                )
+                continue
+            mirror.clear_lane_refusal(lane)
+            logger.warning(
+                "Lane mirror guard recreated lane=%s producer and cleared the "
+                "refusal; the held records redeliver from the source",
+                lane,
+            )
+        publish_lane_mirror_health(mirror.health, health_path)
+        try:
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
 
 
 async def _run_heartbeat_loop(
@@ -1081,6 +1196,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "the identical value to onex-gateway-canary-probe"
         ),
     )
+    parser.add_argument(
+        "--lane-mirror-health-file",
+        type=Path,
+        default=Path(DEFAULT_LANE_MIRROR_HEALTH_PATH),
+        help=(
+            "Where to publish the lane-mirror delivery-verification counters "
+            "(OMN-17201): per-lane consumed-vs-confirmed source offsets, "
+            "accepted-then-failed records, and any detected "
+            "mirror-into-its-own-source loop. The container healthcheck reads "
+            "the same path"
+        ),
+    )
     return parser
 
 
@@ -1098,6 +1225,13 @@ async def _async_main(args: argparse.Namespace) -> None:
         shutdown_event=shutdown_event,
         resolve_secret=AdapterEnvSecretStore().get_secret,
         ready_path=args.ready_file,
+        # OMN-17201: both health surfaces were argparse-only until now.
+        # ``--egress-health-file`` was parsed, documented in compose, read
+        # by the container healthcheck -- and never handed to the
+        # forwarder, so the file the healthcheck reads was never written
+        # by this entrypoint at all.
+        egress_health_path=args.egress_health_file,
+        lane_mirror_health_path=args.lane_mirror_health_file,
     )
 
 

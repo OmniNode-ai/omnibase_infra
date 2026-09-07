@@ -29,6 +29,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
     ModelGatewayHeartbeat,
+    ModelGatewayPublishReceipt,
     ModelGatewayTenantIdentity,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
@@ -251,8 +252,17 @@ class ProtocolGatewayPublisher(Protocol):
         key: bytes | None,
         value: bytes,
         headers: object | None = None,
-    ) -> None:
-        """Publish bytes to a topic."""
+    ) -> ModelGatewayPublishReceipt | None:
+        """Publish bytes to a topic and report where the destination put them.
+
+        OMN-17201 widened the return from ``None``. Every caller that only
+        needs "the broker took it" ignores the value and is unaffected; the
+        lane mirror needs the destination COORDINATE, because an
+        acknowledgement proves a broker took the record and never that the
+        intended broker did. ``None`` is a legitimate answer from a transport
+        that has no broker coordinates to report (the HTTPS ingest route), and
+        a publisher must return ``None`` rather than invent one.
+        """
 
 
 class GatewayRecordRefusedError(ValueError):

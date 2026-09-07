@@ -89,6 +89,11 @@ services:
       # the shared default, so a change to either is visible here.
       - --egress-health-file
       - /tmp/gateway-egress-health.json
+      # OMN-17201: the lane-mirror delivery-verification counters. Same
+      # both-sides-name-the-path discipline as the egress file above -- the
+      # healthcheck below reads exactly this path.
+      - --lane-mirror-health-file
+      - /tmp/gateway-lane-mirror-health.json
     environment:
       AWS_PROFILE: "${GATEWAY_AWS_PROFILE:-gateway}"
       AWS_CONFIG_FILE: "/run/aws/config"
@@ -181,7 +186,7 @@ services:
       # the CANARY topic, which is authorized, so neither can see a forwarder
       # whose real traffic topics are all denied -- it quarantines every
       # record, drains its lag into the DLQ, and passes both broker legs.
-      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml", "--egress-health-file", "/tmp/gateway-egress-health.json"]
+      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml", "--egress-health-file", "/tmp/gateway-egress-health.json", "--lane-mirror-health-file", "/tmp/gateway-lane-mirror-health.json"]
       interval: 15s
       timeout: 45s
       retries: 4

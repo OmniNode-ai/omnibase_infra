@@ -113,6 +113,27 @@ def _advertised_listeners(compose_path: Path) -> dict[str, str]:
     return listeners
 
 
+_EXTERNAL_BIND_RE = re.compile(
+    r"--kafka[-_]addr[^\n]*?external://0\.0\.0\.0:(?P<port>\d+)"
+)
+
+
+def _external_bind_port(compose_path: Path) -> str:
+    """The port a lane's EXTERNAL Kafka listener binds, read from its compose file.
+
+    The advertised external HOST of the dev lane is a deploy-time
+    ``${DEV_REDPANDA_ADVERTISE_HOST}`` interpolation and is genuinely unknowable
+    from this repo. The external PORT is not: it is a literal on the bind
+    address. That asymmetry is what lets the dev mirror target be checked at all
+    -- the host must be verified against the running deployment, the port is
+    verifiable here, and the port alone is what separates the dev broker from
+    the stability broker on the shared Tailscale address.
+    """
+    match = _EXTERNAL_BIND_RE.search(compose_path.read_text(encoding="utf-8"))
+    assert match, f"no external kafka bind address found in {compose_path}"
+    return match.group("port")
+
+
 def _host_of(endpoint: str) -> str:
     """`host:port` -> `host` (the compose specs here are never IPv6 literals)."""
     return endpoint.rsplit(":", 1)[0]
@@ -213,12 +234,14 @@ def test_mirror_target_leg_is_not_the_source_lane() -> None:
         "advertised endpoints; the mirror would republish stability's records "
         "onto stability"
     )
-    # The dev target keeps its unique container name: the forwarder is joined to
-    # the dev network, so `omnibase-infra-redpanda` bootstraps unambiguously.
-    # Its re-resolution of dev's advertised bare `redpanda` lands on dev because
-    # dev is the network Docker answers that alias from -- correct today, and
-    # recorded as a residual on OMN-17919 rather than left implicit.
-    assert dev_target.startswith("omnibase-infra-redpanda:")
+    # THE RESIDUAL THIS BLOCK USED TO RECORD HAS SINCE FIRED (OMN-17201,
+    # 2026-09-06T20:44:38Z): the dev broker container was recreated, and while
+    # it was gone the only container answering the shared `redpanda` alias was
+    # the STABILITY broker, so the dev producer's reconnect re-resolved onto the
+    # source lane and stayed there for three hours -- acknowledging every record
+    # against the broker it was reading from. The dev target no longer keeps its
+    # container name; see `test_mirror_target_dials_the_dev_lane_external_listener`.
+    assert _host_of(dev_target) != _host_of(stability["internal"])
 
 
 def test_source_leg_is_plaintext_like_the_listener_it_dials() -> None:
@@ -233,3 +256,66 @@ def test_source_leg_is_plaintext_like_the_listener_it_dials() -> None:
     # to consume the backlog the group never read (OMN-15781).
     assert source["auto_offset_reset"] == "earliest"
     assert source["enable_auto_commit"] is False
+
+
+def test_mirror_target_dials_the_dev_lane_external_listener() -> None:
+    """The dev mirror target must dial a listener the source lane cannot answer for.
+
+    This is the assertion that fails on the parent commit. There the dev target
+    was `omnibase-infra-redpanda:9092` -- the dev lane's INTERNAL listener,
+    whose advertised host is the bare `redpanda` that BOTH lane brokers carry as
+    a Docker network alias and BOTH advertise back. A client bootstrapped there
+    is handed `redpanda:9092` and re-resolves it to whichever lane network
+    Docker's embedded DNS answers from, which is why a dev-broker recreate was
+    enough to move the whole producer onto the source lane.
+
+    The invariant is the same one the source leg already obeys, and it is a
+    RELATIONSHIP, not a string: dial a listener whose advertised address no
+    other lane the forwarder is joined to can also claim. Two halves are checked
+    here, and the third is checked against the running deployment because it is
+    the only place it exists.
+
+    1. PORT -- verifiable from this repo. The dev target must be on the dev
+       lane's external published port, not the internal 9092 that both lanes
+       share. The two lanes are reachable at the same Tailscale address, so the
+       port is what distinguishes the brokers.
+    2. HOST -- must not be the ambiguous internal advertised name, and must not
+       be the source lane's own external endpoint (that would be the mirror
+       republishing stability onto stability).
+    3. The advertised host itself is a deploy-time
+       `${DEV_REDPANDA_ADVERTISE_HOST}` render, so it is proven live rather than
+       here (recorded in `beta-gateway-canary.yaml` beside the value, measured
+       .201 2026-09-07 read-only). A stale pin fails LOUDLY -- no connection, a
+       frozen confirmed watermark, a failing healthcheck leg -- where the
+       container name failed silently. The runtime destination guard in
+       `test_lane_mirror_omn17201_destination_verification.py` is the second
+       layer and needs no address at all.
+    """
+    config = _gateway_config()
+    dev_target = config["lane_mirror_buses"]["dev"]["bootstrap_servers"]
+    source = config["lane_mirror_source_bus"]["bootstrap_servers"]
+    dev = _advertised_listeners(_DEV_COMPOSE)
+    stability = _advertised_listeners(_STABILITY_COMPOSE)
+
+    dev_external_port = _external_bind_port(_DEV_COMPOSE)
+    internal_port = dev["internal"].rsplit(":", 1)[1]
+    assert dev_external_port != internal_port, (
+        "premise broken: the dev lane's external and internal listeners share a "
+        "port, so the port cannot distinguish the brokers"
+    )
+    assert dev_target.endswith(f":{dev_external_port}"), (
+        "the dev mirror target must bootstrap on the dev lane's EXTERNAL "
+        f"listener (port {dev_external_port}); the internal listener's "
+        f"advertised host {_host_of(dev['internal'])!r} is shared with the "
+        f"source lane. configured={dev_target!r}"
+    )
+
+    assert _host_of(dev_target) != _host_of(dev["internal"]), (
+        "the dev mirror target is addressed at the ambiguous internal advertised "
+        "name; a reconnect resolves it to whichever lane network answers first"
+    )
+    assert dev_target != source, "the mirror would republish the source onto itself"
+    assert dev_target != stability["external"], (
+        "the dev mirror target is the SOURCE lane's external endpoint -- the "
+        "mirror would republish stability's records onto stability"
+    )
