@@ -83,8 +83,14 @@ class TestProfileDerivation:
             bootstrap_servers="broker-1.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism=mechanism,
-            sasl_plain_username="fixture-user",
-            sasl_plain_password="fixture-password",
+            # OMN-18012 made a credential-less PLAIN/SCRAM config a
+            # ProtocolConfigurationError at construction. These fixtures assert
+            # what the PROVISIONING POLICY derives from a mechanism, not what
+            # the client authenticates with, so they now name the credentials
+            # the model requires rather than asserting policy on a config that
+            # could never connect.
+            sasl_plain_username="fixture-principal",
+            sasl_plain_password="fixture-secret",  # pragma: allowlist secret
         )
         policy = ModelTopicProvisioningPolicy.from_kafka_config(config)
         assert policy.capacity_replication_factor is None
@@ -109,8 +115,10 @@ class TestSaslClusterIsNotAssumedSingleNode:
             bootstrap_servers="b-1.example:9096,b-2.example:9096,b-3.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism="SCRAM-SHA-512",
-            sasl_plain_username="fixture-user",
-            sasl_plain_password="fixture-password",
+            # OMN-18012, same reason as above: SCRAM without credentials no
+            # longer constructs.
+            sasl_plain_username="fixture-principal",
+            sasl_plain_password="fixture-secret",  # pragma: allowlist secret
         )
         return ModelTopicProvisioningPolicy.from_kafka_config(config)
 

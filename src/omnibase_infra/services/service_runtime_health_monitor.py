@@ -87,9 +87,16 @@ def _discover_contracts() -> ProtocolAutoWiringManifestLike:
     from omnibase_infra.runtime.auto_wiring.profile_ownership import (
         filter_manifest_for_runtime_profile,
     )
+    from omnibase_infra.runtime.runtime_profile import resolve_runtime_profile_name
 
     manifest = discover_contracts()
-    runtime_profile = os.getenv("RUNTIME_PROFILE", "main")
+    # OMN-17985: the ONE validated read of RUNTIME_PROFILE for an ownership
+    # decision. The raw environment read this replaces spelled the same "main"
+    # default but skipped the registry check, so an unregistered role name was
+    # filtered against a list no contract declares -- every contract skipped,
+    # the manifest empty -- and this monitor would report that as a finding
+    # about the FLEET rather than as the misconfiguration it is.
+    runtime_profile = resolve_runtime_profile_name()
     ownership_result = filter_manifest_for_runtime_profile(
         manifest=manifest,
         runtime_profile=runtime_profile,
@@ -108,13 +115,17 @@ def _filter_manifest_for_runtime_profile(
     from omnibase_infra.runtime.auto_wiring.profile_ownership import (
         filter_manifest_for_runtime_profile,
     )
+    from omnibase_infra.runtime.runtime_profile import resolve_runtime_profile_name
 
     if not isinstance(manifest, ModelAutoWiringManifest):
         return manifest
 
+    # OMN-17985: same validated read as `_discover_contracts` above. Unset and
+    # blank still resolve to "main" -- consolidating adds the registry check,
+    # it does not move the ownership default.
     ownership_result = filter_manifest_for_runtime_profile(
         manifest=manifest,
-        runtime_profile=os.environ.get("RUNTIME_PROFILE", "main"),
+        runtime_profile=resolve_runtime_profile_name(),
     )
     if ownership_result.skipped_contracts:
         logger.debug(
