@@ -8,7 +8,8 @@
 #
 # Detects artifact-relevant changes from three surfaces:
 #   1. GitHub PR webhook events (via onex.evt.github.pr-webhook.v1)
-#   2. Contract file system events (watchdog, local dev)
+#   2. Contract file system events (watchdog, local dev) — ContractFileWatcher,
+#      services/contract_file_watcher.py, NOT a bus handler (OMN-18013)
 #   3. Manual reconcile commands (via onex.cmd.artifact.reconcile.v1)
 #
 # Publishes ModelUpdateTrigger to onex.evt.artifact.change-detected.v1.
@@ -64,14 +65,15 @@ handler_routing:
         - trigger_id
         - trigger_type
         - changed_files
-    # OMN-18013: the HandlerContractFileWatcher entry was REMOVED from
-    # handler_routing. It is a filesystem watchdog (MD5 hash tracking over
-    # contract.yaml on disk, driven from node.py), not a bus consumer — it has no
-    # dispatch entrypoint at all. Listed as an operation_match entry with no
-    # `topic:`, _topics_for_handler_entry assigned it EVERY subscribe topic, so a
-    # single entry spanned both the .cmd. and the .evt. topic. The class, its
-    # node.py call site and its tests are unchanged; only the false claim that the
-    # bus dispatches to it is gone.
+    # OMN-18013: the contract file watcher entry was REMOVED from
+    # handler_routing and the module moved to
+    # services/contract_file_watcher.py as ContractFileWatcher.
+    # It is a filesystem watchdog (MD5 hash tracking over contract.yaml on
+    # disk), not a bus consumer — it has no dispatch entrypoint at all. Listed
+    # as an operation_match entry with no `topic:`, _topics_for_handler_entry
+    # assigned it EVERY subscribe topic of this node, so one entry spanned both
+    # the .cmd. and the .evt. topic. Its behaviour and its tests are unchanged;
+    # only the false claim that the bus dispatches to it is gone.
     - operation: "artifact.manual_trigger"
       topic: "onex.cmd.artifact.reconcile.v1"
       handler:
@@ -136,7 +138,7 @@ dependencies:
   - name: "watchdog"
     type: "library"
     library: "watchdog"
-    description: "Filesystem event monitoring (required for HandlerContractFileWatcher)"
+    description: "Filesystem event monitoring (required for ContractFileWatcher)"
     required: true
   - name: "event_publisher"
     type: "protocol"

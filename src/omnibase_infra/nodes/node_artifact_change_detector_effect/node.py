@@ -4,10 +4,12 @@
 
 This node follows the ONEX declarative pattern:
     - DECLARATIVE effect driven by contract.yaml
-    - Three handlers for different change detection surfaces:
-        1. HandlerPRWebhookIngestion — GitHub PR webhook events
-        2. HandlerContractFileWatcher — watchdog-based filesystem watcher
-        3. HandlerManualTrigger — CLI-initiated manual reconcile commands
+    - Two BUS handlers, one per subscribe topic (OMN-18013):
+        1. HandlerPRWebhookIngestion — onex.evt.github.pr-webhook.v1
+        2. HandlerManualTrigger — onex.cmd.artifact.reconcile.v1
+    - One non-bus service: ContractFileWatcher (watchdog filesystem
+      watcher, services/contract_file_watcher.py). It has no dispatch
+      entrypoint and therefore no handler_routing entry.
     - Publishes ModelUpdateTrigger to onex.evt.artifact.change-detected.v1
     - Lightweight shell — all logic in handlers
 
@@ -24,10 +26,12 @@ from omnibase_core.nodes.node_effect import NodeEffect
 class NodeArtifactChangeDetectorEffect(NodeEffect):
     """Declarative effect node that detects artifact-relevant changes.
 
-    Three change detection surfaces (defined in contract.yaml handler_routing):
+    Two bus change-detection surfaces (defined in contract.yaml handler_routing):
         - ``artifact.ingest_pr_webhook``: Ingest GitHub PR webhook events
-        - ``artifact.watch_contracts``: Filesystem-based contract change detection
         - ``artifact.manual_trigger``: CLI manual reconcile command ingestion
+
+    Filesystem-based contract change detection is NOT a routing surface: it is
+    ``ContractFileWatcher`` under ``services/``.
 
     All routing and execution logic is driven by contract.yaml.
     NO custom routing code.

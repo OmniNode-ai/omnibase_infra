@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 # Default glob pattern for watched contract files
 _CONTRACT_GLOB = "contract.yaml"
 
-__all__ = ["HandlerContractFileWatcher"]
+__all__ = ["ContractFileWatcher"]
 
 
 def _md5_of_file(path: Path) -> str | None:
@@ -129,7 +129,7 @@ class HandlerContractFileEvent(FileSystemEventHandler):
                 self._pending.append(Path(str(dest_path)))
 
 
-class HandlerContractFileWatcher:
+class ContractFileWatcher:
     """Watchdog-based handler for detecting contract.yaml file changes.
 
     Watches all ``contract.yaml`` files under ``watch_root`` (recursively).
@@ -172,12 +172,12 @@ class HandlerContractFileWatcher:
         # a hard dependency failure, not a configuration failure).
         if not _WATCHDOG_AVAILABLE:
             raise ImportError(
-                "watchdog is required for HandlerContractFileWatcher. "
+                "watchdog is required for ContractFileWatcher. "
                 "Install it with: uv add 'watchdog'"
             )
-        # watch_root/source_repo resolution is deferred to start() so that
-        # the no-arg constructor required for auto-wiring succeeds even when
-        # ONEX_WATCH_ROOT is not set at import time.
+        # watch_root/source_repo resolution is deferred to start() so the
+        # no-argument constructor succeeds; the values come from the contract's
+        # `config:` block at call time.
         self._watch_root_arg = watch_root
         self._source_repo_arg = source_repo
         self._watch_root: Path | None = None  # resolved in start()
@@ -207,7 +207,7 @@ class HandlerContractFileWatcher:
             if h is not None:
                 self._file_hashes[path.resolve()] = h
         logger.debug(
-            "HandlerContractFileWatcher: seeded %d contract files under %s",
+            "ContractFileWatcher: seeded %d contract files under %s",
             len(self._file_hashes),
             self._watch_root,
         )
@@ -274,7 +274,7 @@ class HandlerContractFileWatcher:
             trigger = self._build_trigger(changed)
             await self._trigger_queue.put(trigger)
             logger.info(
-                "HandlerContractFileWatcher: emitted trigger %s for %d changed contracts",
+                "ContractFileWatcher: emitted trigger %s for %d changed contracts",
                 trigger.trigger_id,
                 len(changed),
             )
@@ -298,30 +298,26 @@ class HandlerContractFileWatcher:
         """Start the watchdog observer and seed initial file hashes.
 
         Raises:
-            RuntimeError: If neither ``watch_root`` nor ``ONEX_WATCH_ROOT`` is set.
+            RuntimeError: If ``watch_root`` was not supplied (contract `config.watch_root`).
             FileNotFoundError: If the resolved ``watch_root`` does not exist.
         """
-        import os
-
-        env_watch_root = os.environ.get("ONEX_WATCH_ROOT")  # ONEX_EXCLUDE: env
-        if self._watch_root_arg is not None:
-            self._watch_root = self._watch_root_arg
-        elif env_watch_root:
-            self._watch_root = Path(env_watch_root)
-        else:
+        # OMN-18013 (closing the OMN-9058 residual recorded for this file in
+        # .secretresolver_allowlist): watch_root and source_repo come from the
+        # contract's own `config:` block -- watch_root, source_repo -- passed to
+        # the constructor, never from ONEX_WATCH_ROOT / ONEX_SOURCE_REPO. Both
+        # env reads are gone; there is no env fallback left to disagree with the
+        # contract.
+        if self._watch_root_arg is None:
             raise RuntimeError(
-                "HandlerContractFileWatcher requires `watch_root` or ONEX_WATCH_ROOT"
+                "ContractFileWatcher requires `watch_root`; it is declared in "
+                "this node's contract.yaml under `config.watch_root`"
             )
-        self._source_repo = (
-            self._source_repo_arg
-            or os.environ.get(  # ONEX_EXCLUDE: env
-                "ONEX_SOURCE_REPO", "omnibase_infra"
-            )
-        )
+        self._watch_root = self._watch_root_arg
+        self._source_repo = self._source_repo_arg or "omnibase_infra"
 
         if not self._watch_root.exists():
             raise FileNotFoundError(
-                f"HandlerContractFileWatcher: watch_root does not exist: {self._watch_root}"
+                f"ContractFileWatcher: watch_root does not exist: {self._watch_root}"
             )
 
         self._loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
@@ -340,7 +336,7 @@ class HandlerContractFileWatcher:
         self._running = True
 
         logger.info(
-            "HandlerContractFileWatcher: started watching %s (debounce=%.1fs)",
+            "ContractFileWatcher: started watching %s (debounce=%.1fs)",
             self._watch_root,
             self._debounce_seconds,
         )
@@ -354,7 +350,7 @@ class HandlerContractFileWatcher:
             self._observer.stop()
             self._observer.join()
             self._observer = None
-        logger.info("HandlerContractFileWatcher: stopped")
+        logger.info("ContractFileWatcher: stopped")
 
     async def get_pending_triggers(self) -> list[ModelUpdateTrigger]:
         """Drain all pending triggers from the internal queue.
