@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# User-scope systemd unit for the DEV-LANE ONEX deploy agent (OMN-16939).
+#
+# Install (the documented control path — same as the base unit):
+#   cp deploy-agent-dev.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now deploy-agent-dev.service
+#
+# WHY A SECOND UNIT EXISTS
+#
+# deploy-agent.service's tracked drop-in (deploy-agent.service.d/override.conf,
+# OMN-15181 Finding 3) deliberately pins that process to the PROD control bus
+# (192.168.86.201:49092). Its own header records the tradeoff verbatim: "this
+# process cannot serve both lanes at once", with a per-lane instance named as
+# the way out (OMN-13810). This IS that per-lane instance for dev.
+#
+# The consequence of only having the prod-pinned unit was measured on
+# 2026-09-06: onex.cmd.deploy.rebuild-requested.v1 on the DEV broker had zero
+# consumer groups while four correctly-formed, HMAC-signed rebuild commands sat
+# on it unconsumed, so the dev lane could not track `dev` over the bus no matter
+# how healthy the redeploy FSM upstream of it became.
+#
+# This unit does NOT touch deploy-agent.service. Prod's unit keeps its bus, its
+# port (8099) and its state dir; this one takes 8098 and its own state dir, so
+# the two can be enabled at the same time without a single-flight or port
+# collision. The Kafka consumer group id is the same on both, which is correct:
+# they are on different brokers, so the groups are different groups.
+#
+# LANE FENCE (required, fail-closed)
+#
+# DEPLOY_AGENT_ALLOWED_LANES is not decoration. The dev control bus carries
+# BOTH dev and stability-test rebuild commands by design — see
+# .github/workflows/runtime-rebuild-trigger.yml: "Control-bus routing is
+# independent of the requested runtime lane. Both dev and stability-test
+# commands enter through the dev control bus." Without the fence, a
+# stability-test command landing on the dev broker would be executed by this
+# agent against the stability-test lane, which is a governed lane this process
+# has no business mutating. deploy_agent.lane_policy refuses to start when the
+# variable is unset — there is no default.
+#
+# The rest of the [Service] block is the base unit's, verbatim in intent:
+# canonical repo copy for both the working directory and the interpreter (the
+# OMN-13760 drift this repo already fixed once), no WatchdogSec (a rebuild is a
+# minutes-long synchronous subprocess that blocks the event loop; a liveness
+# watchdog cannot tell it apart from a hang), Type=simple, Restart=on-failure.
+
+[Unit]
+Description=ONEX Deploy Agent (dev lane) — Kafka-driven rebuild orchestrator
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent
+EnvironmentFile=/home/jonah/.omnibase/.env
+Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
+Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev
+Environment=DEPLOY_AGENT_PORT=8098
+Environment=DEPLOY_AGENT_ALLOWED_LANES=dev
+Environment=KAFKA_BOOTSTRAP_SERVERS=192.168.86.201:19092
+Environment=KAFKA_ENVIRONMENT=dev
+ExecStartPre=/bin/sh -c 'fuser -k 8098/tcp || true'
+ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/.venv/bin/python -m deploy_agent
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deploy-agent-dev
+
+[Install]
+WantedBy=default.target

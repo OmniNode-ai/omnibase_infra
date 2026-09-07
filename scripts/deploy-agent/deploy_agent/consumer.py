@@ -13,17 +13,25 @@ from kafka import KafkaConsumer
 from deploy_agent.auth import verify_command
 from deploy_agent.events import (
     TOPIC_REBUILD_REQUESTED,
+    EnumRuntimeLane,
     ModelRebuildRequested,
 )
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
+from deploy_agent.lane_policy import (
+    LaneNotAllowedError,
+    assert_lane_allowed,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DeployConsumer:
     def __init__(
-        self, kafka_config: ModelDeployAgentKafkaConfig, job_store: JobStore
+        self,
+        kafka_config: ModelDeployAgentKafkaConfig,
+        job_store: JobStore,
+        allowed_lanes: frozenset[EnumRuntimeLane],
     ) -> None:
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
@@ -34,6 +42,11 @@ class DeployConsumer:
             value_deserializer=lambda m: json.loads(m.decode("utf-8")),
         )
         self.job_store = job_store
+        self.allowed_lanes = allowed_lanes
+        logger.info(
+            "Deploy agent lane fence: %s",
+            ",".join(sorted(lane.value for lane in self.allowed_lanes)),
+        )
 
     def poll_and_accept(self) -> tuple[ModelRebuildRequested | None, str | None]:
         """Poll for one command.
@@ -46,11 +59,12 @@ class DeployConsumer:
         1. Poll message
         2. Verify HMAC signature
         3. Validate payload (schema, scope, services legality)
-        4. Check busy (has_active_job) -> reject "busy"
-        5. Check dedup (is_duplicate) -> reject "duplicate"
-        6. Persist job state (accepted)
-        7. Commit Kafka offset
-        8. Return (command, None)
+        4. Check the lane fence -> reject "lane_not_allowed"
+        5. Check busy (has_active_job) -> reject "busy"
+        6. Check dedup (is_duplicate) -> reject "duplicate"
+        7. Persist job state (accepted)
+        8. Commit Kafka offset
+        9. Return (command, None)
         """
         records = self.consumer.poll(timeout_ms=1000)
         if not records:
@@ -92,28 +106,42 @@ class DeployConsumer:
             self.consumer.commit()
             return None, "invalid_payload"
 
-        # Step 4: Check busy
+        # Step 4: Lane fence (OMN-16939). The dev control bus carries both dev
+        # and stability-test rebuild commands, so "which bus am I on" does not
+        # bound which lane this process may mutate. The offset is committed:
+        # the command is not for this agent and re-reading it forever would
+        # stall every command behind it.
+        try:
+            assert_lane_allowed(cmd.runtime_lane, self.allowed_lanes)
+        except LaneNotAllowedError as e:
+            logger.warning(
+                "Rejecting command %s: lane_not_allowed (%s)", cmd.correlation_id, e
+            )
+            self.consumer.commit()
+            return None, "lane_not_allowed"
+
+        # Step 5: Check busy
         if self.job_store.has_active_job():
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
             self.consumer.commit()
             return None, "busy"
 
-        # Step 5: Check dedup
+        # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
             logger.info("Rejecting command %s: duplicate", cmd.correlation_id)
             self.consumer.commit()
             return None, "duplicate"
 
-        # Step 6: Persist job state
+        # Step 7: Persist job state
         self.job_store.accept(
             correlation_id=cmd.correlation_id,
             command=command_payload,
         )
 
-        # Step 7: Commit offset
+        # Step 8: Commit offset
         self.consumer.commit()
 
-        # Step 8: Return accepted command
+        # Step 9: Return accepted command
         logger.info("Accepted command %s (scope=%s)", cmd.correlation_id, cmd.scope)
         return cmd, None
 

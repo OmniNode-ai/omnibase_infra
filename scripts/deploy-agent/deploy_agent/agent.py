@@ -32,6 +32,7 @@ from deploy_agent.executor import (
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
+from deploy_agent.lane_policy import load_allowed_lanes_from_env
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
     PublishCircuitBreaker,
@@ -64,6 +65,10 @@ class DeployAgent:
         self._skip_self_update = skip_self_update
         self._publish_cb = PublishCircuitBreaker()
         self._kafka_config = load_deploy_agent_kafka_config_from_env()
+        # OMN-16939: fail closed at process construction, before the health
+        # port binds and long before a command is polled. An agent that has
+        # not declared which lanes it may deploy must not start at all.
+        self._allowed_lanes = load_allowed_lanes_from_env()
 
     def _get_state(self) -> str:
         return self._state
@@ -74,9 +79,10 @@ class DeployAgent:
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         )
         logger.info(
-            "Deploy agent starting (state_dir=%s, kafka=%s)",
+            "Deploy agent starting (state_dir=%s, kafka=%s, allowed_lanes=%s)",
             STATE_DIR,
             self._kafka_config.bootstrap_servers,
+            ",".join(sorted(lane.value for lane in self._allowed_lanes)),
         )
 
         # Step 1: Recover crashed jobs
@@ -113,6 +119,7 @@ class DeployAgent:
         consumer = DeployConsumer(
             kafka_config=self._kafka_config,
             job_store=self.job_store,
+            allowed_lanes=self._allowed_lanes,
         )
 
         # Handle signals

@@ -90,6 +90,76 @@ def test_arch004_identity_uses_git_root_from_nested_worktree_directory(
 
 
 @pytest.mark.unit
+def test_arch004_identity_uses_trusted_git_with_sanitized_environment(
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Portable trusted Git binaries keep the selector isolated from state."""
+    resolved_git = tmp_path / "homebrew" / "bin" / "git"
+    captured: dict[str, object] = {}
+
+    def run_git(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout=f"{_REPO_ROOT.resolve()}\n",
+        )
+
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "untrusted-git-dir"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "untrusted-work-tree"))
+    monkeypatch.setenv("PATH", str(tmp_path / "attacker-bin"))
+    monkeypatch.setattr(
+        validate_module,
+        "_TRUSTED_GIT_EXECUTABLES",
+        (tmp_path / "attacker-bin" / "git", resolved_git),
+    )
+    monkeypatch.setattr(validate_module.os, "access", lambda path, mode: True)
+    monkeypatch.setattr(
+        validate_module.Path, "is_file", lambda path: path == resolved_git
+    )
+    monkeypatch.setattr(validate_module.subprocess, "run", run_git)
+
+    assert (
+        validate_module._repository_root(_REPO_ROOT / "scripts") == _REPO_ROOT.resolve()
+    )
+    assert captured["command"] == [
+        str(resolved_git),
+        "-C",
+        str((_REPO_ROOT / "scripts").resolve()),
+        "rev-parse",
+        "--show-toplevel",
+    ]
+    assert captured["env"] == {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+@pytest.mark.unit
+def test_arch004_identity_fails_closed_without_a_trusted_git_executable(
+    validate_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A missing portable Git binary remains a generic fail-closed error."""
+    monkeypatch.setattr(
+        validate_module,
+        "_TRUSTED_GIT_EXECUTABLES",
+        (tmp_path / "missing-git",),
+    )
+
+    assert validate_module._repository_root(tmp_path) is None
+    assert capsys.readouterr().out == (
+        "Imperative Orchestrators: ERROR (git-worktree-root-unresolved)\n"
+    )
+
+
+@pytest.mark.unit
 def test_arch004_identity_fails_closed_for_a_fake_nested_git_marker(
     validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
