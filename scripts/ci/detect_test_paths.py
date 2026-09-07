@@ -361,6 +361,15 @@ def _resolve(
             if path.startswith(source_prefix):
                 selected.add(collocated_root)
 
+        # OMN-18012: BOUNDARY source -> its integration proof. Also an `if`,
+        # not an `elif`: a boundary file keeps every unit mapping it already
+        # had and GAINS the integration suite. The unit mapping is the mocked
+        # half; the point of this edge is that the mocked half is exactly what
+        # was green while the boundary was broken.
+        for source, targets in config.boundary_integration_tests.items():
+            if path == source or (source.endswith("/") and path.startswith(source)):
+                selected.update(targets)
+
     expanded: set[str] = set(direct_modules)
     for module in direct_modules:
         expanded.update(config.adjacency[module].reverse_deps)

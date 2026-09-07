@@ -39,7 +39,26 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 from . import redpanda_sasl_harness as harness
 
-pytestmark = [pytest.mark.integration, pytest.mark.slow]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+    # OMN-18012 -- this suite now RUNS somewhere, so its execution budget has to
+    # be real. The governed pre-push remote leg ships `--timeout=60
+    # --timeout-method=signal` (PREPUSH_REMOTE_POLICY_FLAGS) and this repo's own
+    # `test-parallel` CI job runs the same value; both are sized for unit tests.
+    # The module-scoped fixture below boots a REAL Redpanda container against a
+    # 120s readiness budget, and pytest-timeout counts fixture setup against the
+    # first test, so a 60s watchdog kills the boot and reports a red that is a
+    # statement about the WATCHDOG, not about the tree. A per-suite marker beats
+    # widening the global flag: the 60s watchdog stays exactly as tight for
+    # everything else.
+    pytest.mark.timeout(600),
+    # Both tests share the module-scoped broker. Under `-n4 --dist=loadgroup`
+    # an ungrouped module can split across workers, which starts a SECOND
+    # container to prove the same fact and doubles the boot cost inside the
+    # budget above.
+    pytest.mark.xdist_group("omn18012_redpanda_sasl"),
+]
 
 
 @pytest.fixture(scope="module")

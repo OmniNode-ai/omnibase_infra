@@ -369,6 +369,63 @@ def test_the_selection_paths_receipt_field_stays_paths_only(tmp_path: Path) -> N
     assert out.stdout.splitlines() == ["tests/"], out.stdout + out.stderr
 
 
+# =============================================================================
+# OMN-18012 -- the off-box integration selection travels with the argv
+# =============================================================================
+# The defect: before this change ``prepush_remote_argv`` emitted only what the
+# LOCAL lanes would have run, and the local lanes had already dropped every
+# service-dependent integration path. The remote leg therefore reproduced the
+# local blind spot exactly, which is why "placed off-box" had to be built here
+# and not only in the hook.
+
+
+@pytest.mark.parametrize(
+    ("is_full", "expected_head"),
+    [(True, "tests/"), (False, "tests/unit/cli/")],
+    ids=["full-escalation", "narrow-selection"],
+)
+def test_the_offbox_integration_paths_are_appended_to_both_argv_branches(
+    tmp_path: Path, is_full: bool, expected_head: str
+) -> None:
+    repo = _synth_repo(tmp_path)
+    out = _run(
+        repo,
+        f"IS_FULL={is_full}\n"
+        'FULL_SUITE_TARGET="tests/"\n'
+        "RUNNABLE_INTEGRATION_PATHS=()\n"
+        'PATHS=("tests/unit/cli/")\n'
+        'OFFBOX_INTEGRATION_PATHS=("tests/integration/customer_path/")\n'
+        'PREPUSH_PICK_CORES="32"\n'
+        "prepush_remote_argv",
+    )
+    argv = out.stdout.splitlines()
+    assert argv[0] == expected_head, argv
+    assert argv[-1] == "tests/integration/customer_path/", argv
+
+
+def test_an_absent_offbox_array_does_not_abort_an_un_revendored_consumer(
+    tmp_path: Path,
+) -> None:
+    """This file is VENDORED into omnibase_core and omnimarket and advances in
+    separate PRs. A bare ``${#OFFBOX_INTEGRATION_PATHS[@]}`` here is an
+    unbound-variable abort under ``set -u`` in any consumer whose
+    prepush_smart_tests.sh has not been re-vendored yet -- i.e. this one line
+    would brick every heavy push in two repos for the length of a review."""
+    repo = _synth_repo(tmp_path)
+    out = _run(
+        repo,
+        "IS_FULL=True\n"
+        'FULL_SUITE_TARGET="tests/"\n'
+        "RUNNABLE_INTEGRATION_PATHS=()\n"
+        "PATHS=()\n"
+        'PREPUSH_PICK_CORES="32"\n'
+        "prepush_remote_argv",
+    )
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert out.stdout.splitlines() == ["tests/"], out.stdout + out.stderr
+    assert "unbound variable" not in out.stderr
+
+
 def test_the_policy_flags_cannot_make_an_empty_selection_look_runnable(
     tmp_path: Path,
 ) -> None:

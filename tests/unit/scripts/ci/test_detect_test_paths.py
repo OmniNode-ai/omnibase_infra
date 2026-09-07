@@ -14,6 +14,7 @@ from scripts.ci.detect_test_paths import (
     is_collectable_test_file_name,
     resolve_test_paths,
 )
+from scripts.ci.test_selection_loader import load_adjacency_map
 from scripts.ci.test_selection_models import EnumFullSuiteReason, ModelTestSelection
 
 pytestmark = pytest.mark.unit
@@ -956,3 +957,85 @@ def test_shared_module_escalation_unchanged_by_coverage_invariant() -> None:
     )
     assert selection.is_full_suite is True
     assert selection.full_suite_reason == EnumFullSuiteReason.SHARED_MODULE
+
+
+# =============================================================================
+# OMN-18012 -- BOUNDARY source -> its integration proof
+# =============================================================================
+# The second half of escape 6, and it is independent of the pre-push hook: the
+# adjacency map can only ever emit `tests/unit/<module>/`, so a change to a
+# boundary module selected its MOCKS and nothing else. Measured against dev
+# before this change: `src/omnibase_infra/event_bus/kafka_auth.py` emitted
+# seven tests/unit/* directories and ZERO integration paths, while the only
+# suite in the repo that exercises that module against a real auth-required
+# broker is tests/integration/customer_path/.
+
+
+def test_a_boundary_source_change_selects_its_integration_suite() -> None:
+    """The named test of the ticket: a boundary change selects its integration tests."""
+    selection = compute_selection(
+        changed_files=["src/omnibase_infra/event_bus/kafka_auth.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert "tests/integration/customer_path/" in selection.selected_paths
+
+
+def test_the_boundary_edge_is_additive_not_a_replacement() -> None:
+    """The unit mapping is the MOCKED half, and it is exactly what stayed green
+    while the boundary was broken. The boundary file keeps every unit target it
+    already had and GAINS the integration suite."""
+    selection = compute_selection(
+        changed_files=["src/omnibase_infra/event_bus/kafka_auth.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert "tests/unit/event_bus/" in selection.selected_paths
+    assert "tests/integration/customer_path/" in selection.selected_paths
+
+
+def test_a_non_boundary_file_in_the_same_module_gains_nothing() -> None:
+    """NEGATIVE CONTROL. The mapping is per-file and hand-curated; it must not
+    behave like a wildcard over the module, or every event_bus edit would take
+    a lab slot."""
+    selection = compute_selection(
+        changed_files=["src/omnibase_infra/event_bus/kafka_transport.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert "tests/unit/event_bus/" in selection.selected_paths
+    assert not [
+        p for p in selection.selected_paths if p.startswith("tests/integration/")
+    ]
+
+
+def test_every_boundary_target_exists_on_disk() -> None:
+    """A mapping to a directory that does not exist hands pytest a path that
+    aborts collection with exit 5. `_resolve` filters missing targets, so a
+    stale entry would be silently INERT -- which is the failure mode this
+    whole ticket exists to remove. Assert the entries are live."""
+    config = load_adjacency_map(ADJ)
+    assert config.boundary_integration_tests, "the mapping must not be empty"
+    for source, targets in config.boundary_integration_tests.items():
+        assert (REPO_ROOT / source.rstrip("/")).exists(), source
+        for target in targets:
+            assert (REPO_ROOT / target).is_dir(), target
+
+
+def test_a_boundary_target_outside_tests_integration_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Fail-closed on the config itself: this edge costs a lab slot, so it may
+    only ever point at an integration directory."""
+    raw = ADJ.read_text(encoding="utf-8").replace(
+        "  src/omnibase_infra/event_bus/kafka_auth.py:\n    - tests/integration/customer_path/\n",
+        "  src/omnibase_infra/event_bus/kafka_auth.py:\n    - tests/unit/event_bus/\n",
+        1,
+    )
+    bad = tmp_path / "adjacency.yaml"
+    bad.write_text(raw, encoding="utf-8")
+    with pytest.raises(
+        ValueError, match="must be a directory under tests/integration/"
+    ):
+        load_adjacency_map(bad)
