@@ -402,3 +402,239 @@ def test_the_runner_variables_are_supplied_through_env() -> None:
         assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in joined, workflow_name
         body = _decide_step(workflow_name, job)["run"]
         assert "--seam-json" in body and "--public-json" in body, workflow_name
+
+
+# --- G6: the first heavy-job consumer of the route output -------------------
+#
+# `lint` is the ONE job whose placement now resolves from the route decision.
+# The tests below pin three separate things, because they fail independently:
+# that the consumer is wired at all, that its blast radius is still one job,
+# and that moving it did not relocate fork isolation to a call site.
+
+LINT_RUNS_ON = "${{ fromJSON(needs.route.outputs.labels) }}"
+SELECTOR_V2_MARKER = "OMNI_RUNNER_SELECTOR_V2"
+
+
+def test_lint_resolves_its_placement_from_the_route_output() -> None:
+    lint = _workflow("ci.yml")["jobs"]["lint"]
+    assert lint["runs-on"].strip() == LINT_RUNS_ON
+    assert lint["name"] == "Lint"
+
+
+def test_lint_declares_the_needs_edge_its_expression_requires() -> None:
+    """Without `needs: route` the expression resolves to nothing and the job
+    fails to SCHEDULE -- which does not surface as a test failure anywhere.
+    """
+    lint = _workflow("ci.yml")["jobs"]["lint"]
+    assert "route" in lint["needs"]
+    assert "occ-preflight" in lint["needs"], "the pre-existing OCC edge was dropped"
+
+
+def test_lint_carries_the_v2_selector_marker() -> None:
+    """The marker is how runner placement is FOUND. Every survey to date was a
+    grep for the V1 string; an unmarked consumer is invisible to the next one.
+    """
+    text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    index = next(i for i, line in enumerate(lines) if LINT_RUNS_ON in line)
+    assert SELECTOR_V2_MARKER in "\n".join(lines[max(0, index - 6) : index])
+
+
+def test_lint_is_the_only_route_consumer_in_ci_yml() -> None:
+    """Blast radius. One cheap always-running job proves the mechanism; the
+    other heavy jobs move only on separate evidence, so a routing defect cannot
+    take the whole fan-out with it.
+    """
+    jobs = _workflow("ci.yml")["jobs"]
+    consumers = sorted(
+        name
+        for name, job in jobs.items()
+        if isinstance(job, dict)
+        and isinstance(job.get("runs-on"), str)
+        and "outputs.labels" in job["runs-on"]
+    )
+    assert consumers == ["lint"]
+
+
+def test_the_other_heavy_jobs_still_read_the_seam_directly() -> None:
+    """The corollary of the test above, asserted positively: V1 was not removed
+    from the jobs that were left alone. A migration that quietly blanked their
+    selectors would also satisfy the "only lint consumes route" assertion.
+    """
+    text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    assert text.count("OMNI_RUNNER_SELECTOR_V1") >= 3
+
+
+def test_lints_runs_on_names_no_runner_variable_at_all() -> None:
+    """Fork isolation must NOT be restated at the call site. It lives once,
+    inside the decision module (step S1). A consumer that re-implements the fork
+    branch re-opens the hole the single implementation exists to close.
+    """
+    runs_on = _workflow("ci.yml")["jobs"]["lint"]["runs-on"]
+    for variable in (
+        "OMNI_PUBLIC_PR_RUNS_ON_JSON",
+        "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+        "OMNI_REQUIRED_CI_RUNS_ON_JSON",
+    ):
+        assert variable not in runs_on
+
+
+def test_fork_pr_isolation_still_holds_for_the_lint_workflow_path() -> None:
+    """The behavioural half of the test above. For a fork PR the route output
+    IS the public variable's labels, so lint's placement on a fork is decided by
+    the same knob the V1 expression read -- before any capacity signal.
+    """
+    route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))["route"]
+    result = route.decide(
+        event_name="pull_request",
+        head_repo="a-fork/omnibase_infra",
+        repository="OmniNode-ai/omnibase_infra",
+        workflow_path=".github/workflows/ci.yml",
+        # A seam that DOES permit the lab, so the assertion is about fork
+        # isolation and not about today's inert hosted ceiling.
+        seam_json='["self-hosted","omnibase-ci"]',
+        public_json='["ubuntu-latest"]',
+        fleet={"ok": True, "online": 88, "busy": 0, "total": 88},
+        lab={
+            "ok": True,
+            "age_seconds": 5,
+            "hosts": [{"label": "h201", "ratio": 0.1, "free_mem_mib": 40000}],
+        },
+        policy=policy,
+        allowlist=[],
+    )
+    assert result.reason == "fork_isolation"
+    assert result.labels == ["ubuntu-latest"]
+    assert "self-hosted" not in result.labels
+
+
+def test_a_misconfigured_public_variable_cannot_widen_a_fork_onto_the_fleet() -> None:
+    """Positive control on the guard above: even if the public variable itself
+    named the fleet, a fork PR still lands hosted.
+    """
+    route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))["route"]
+    result = route.decide(
+        event_name="pull_request",
+        head_repo="a-fork/omnibase_infra",
+        repository="OmniNode-ai/omnibase_infra",
+        workflow_path=".github/workflows/ci.yml",
+        seam_json='["self-hosted","omnibase-ci"]',
+        public_json='["self-hosted","omnibase-ci"]',
+        fleet={"ok": True, "online": 88, "busy": 0, "total": 88},
+        lab={
+            "ok": True,
+            "age_seconds": 5,
+            "hosts": [{"label": "h201", "ratio": 0.1, "free_mem_mib": 40000}],
+        },
+        policy=policy,
+        allowlist=[],
+    )
+    assert result.reason == "fork_isolation"
+    assert "self-hosted" not in result.labels
+
+
+def test_the_lint_gate_name_is_unchanged_so_ci_summary_still_matches() -> None:
+    """CI Summary is the single required context here. A renamed job is an
+    absent gate, and an unregistered absent gate yields SUCCESS.
+    """
+    gate = _load("ci_summary_gate", "scripts/ci/ci_summary_gate.py")
+    assert "Lint" in gate.STRICT_GATE_JOBS
+
+
+# --- the V2 marker audit pass ----------------------------------------------
+
+
+def test_the_selector_marker_pass_is_wired_into_local_workflows() -> None:
+    """Rule 5: an unwired check is advisory and gets ignored."""
+    source = (REPO_ROOT / "scripts" / "audit-runner-routing.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def audit_selector_markers(" in source
+    assert "findings.extend(audit_selector_markers(args.repo_root))" in source
+
+
+def _marker_findings(tmp_path: Path, body: str) -> list[str]:
+    audit = _load("audit_runner_routing", "scripts/audit-runner-routing.py")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True, exist_ok=True)
+    (workflows / "fixture.yml").write_text(body, encoding="utf-8")
+    return [f.message for f in audit.audit_selector_markers(tmp_path)]
+
+
+def test_the_marker_pass_fires_on_an_unmarked_route_consumer(tmp_path: Path) -> None:
+    messages = " ".join(
+        _marker_findings(
+            tmp_path,
+            "name: f\non: [push]\njobs:\n"
+            "  route:\n    runs-on: ubuntu-latest\n    outputs:\n"
+            "      labels: x\n    steps: [{run: 'true'}]\n"
+            "  consume:\n    needs: route\n"
+            "    runs-on: ${{ fromJSON(needs.route.outputs.labels) }}\n"
+            "    steps: [{run: 'true'}]\n",
+        )
+    )
+    assert "carries no OMNI_RUNNER_SELECTOR_V2 marker" in messages
+
+
+def test_the_marker_pass_fires_on_a_marker_left_behind_by_a_revert(
+    tmp_path: Path,
+) -> None:
+    """A job reverted to the seam expression keeps a marker that now lies --
+    worse than no marker, because a survey counts it as migrated.
+    """
+    messages = " ".join(
+        _marker_findings(
+            tmp_path,
+            "name: f\non: [push]\njobs:\n"
+            "  consume:\n"
+            "    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job.\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps: [{run: 'true'}]\n",
+        )
+    )
+    assert "no runs-on below it resolves from a route output" in messages
+
+
+def test_the_marker_pass_fires_on_a_half_finished_migration(tmp_path: Path) -> None:
+    """V1 comment over a V2 expression: the comment contradicts the code."""
+    messages = " ".join(
+        _marker_findings(
+            tmp_path,
+            "name: f\non: [push]\njobs:\n"
+            "  route:\n    runs-on: ubuntu-latest\n    outputs:\n"
+            "      labels: x\n    steps: [{run: 'true'}]\n"
+            "  consume:\n    needs: route\n"
+            "    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted\n"
+            "    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job.\n"
+            "    runs-on: ${{ fromJSON(needs.route.outputs.labels) }}\n"
+            "    steps: [{run: 'true'}]\n",
+        )
+    )
+    assert "still carries the OMNI_RUNNER_SELECTOR_V1 marker" in messages
+
+
+def test_the_marker_pass_accepts_a_correctly_marked_consumer(tmp_path: Path) -> None:
+    """The negative control for the three positives above: a checker that
+    always finds something is as useless as one that never does.
+    """
+    assert (
+        _marker_findings(
+            tmp_path,
+            "name: f\non: [push]\njobs:\n"
+            "  route:\n    runs-on: ubuntu-latest\n    outputs:\n"
+            "      labels: x\n    steps: [{run: 'true'}]\n"
+            "  consume:\n    needs: route\n"
+            "    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job.\n"
+            "    runs-on: ${{ fromJSON(needs.route.outputs.labels) }}\n"
+            "    steps: [{run: 'true'}]\n",
+        )
+        == []
+    )
+
+
+def test_the_marker_pass_is_clean_against_the_real_tree() -> None:
+    audit = _load("audit_runner_routing", "scripts/audit-runner-routing.py")
+    findings = audit.audit_selector_markers(REPO_ROOT)
+    assert findings == [], [f"{f.scope}: {f.message}" for f in findings]
