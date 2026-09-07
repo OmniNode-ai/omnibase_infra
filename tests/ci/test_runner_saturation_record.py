@@ -300,3 +300,63 @@ def test_unreadable_timestamps_fail_closed_to_silence() -> None:
     """An unreadable clock is not evidence a breach was sustained."""
     window = [_record(busy_fraction=0.99, sampled_at="not-a-timestamp")] * 6
     assert sat.evaluate_alerts(window, ALERT_POLICY) == []
+
+
+# --- condition 3 counts an ALLOWLIST, and lab_unknown is not on it ---------
+
+
+@pytest.mark.parametrize(
+    "inert_reason",
+    [
+        "lab_unknown",
+        "probe_error:missing_token",
+        "probe_error:timeout",
+        "probe_error:internal:ValueError",
+        "never_widen_violation",
+    ],
+)
+def test_condition_3_does_not_fire_on_a_reason_that_is_not_lab_pressure(
+    inert_reason: str,
+) -> None:
+    """A hosted decision is not automatically evidence the lab is slammed.
+
+    MEASURED DEFECT, not a hypothetical. Condition 3 first counted a DENYLIST --
+    every hosted reason except ``seam_ceiling_hosted``, ``fork_isolation`` and
+    ``policy_allowlist``. Run live on 2026-09-07T12:22Z against a fully healthy
+    fleet (88 online, 4 busy) and a fully healthy lab host (0.669x load, 66013
+    MiB free), it raised ``route_fallback_sustained`` on ``lab_unknown``.
+
+    ``lab_unknown`` is the reason on EVERY run until the monitor has produced
+    its first lab record for the route job to read -- which is to say, from the
+    day this lands. A denylist therefore reproduces exactly the "fires on every
+    sample from the day it lands and is muted long before it matters" failure
+    the module docstring claims to have avoided by excluding
+    ``seam_ceiling_hosted``, one reason over. ``probe_error:missing_token`` is
+    permanent on any run without the fleet-status secret and is a probe fault,
+    not lab pressure.
+
+    A denylist fails OPEN: every reason nobody thought of silently becomes an
+    alert. The allowlist fails closed.
+    """
+    window = _window([_record(route_reason=inert_reason)] * 12)
+    assert sat.evaluate_alerts(window, ALERT_POLICY) == []
+
+
+@pytest.mark.parametrize(
+    "pressure_reason", ["fleet_saturated", "fleet_degraded", "lab_saturated"]
+)
+def test_condition_3_positive_control_every_allowlisted_reason_does_fire(
+    pressure_reason: str,
+) -> None:
+    """Mandatory counterpart: the allowlist must not have muted the condition.
+
+    A condition-3 that alerted on NOTHING would satisfy the test above for every
+    parameter while leaving the operator's actual question -- "how do we know if
+    the lab runners start getting slammed" -- unanswered, and would look
+    identical on a green run. Each allowlisted reason is asserted to fire on its
+    own, so dropping any one of the three is a failing test rather than a
+    quieter monitor.
+    """
+    window = _window([_record(route_reason=pressure_reason)] * 12)
+    alerts = sat.evaluate_alerts(window, ALERT_POLICY)
+    assert "route_fallback_sustained" in [a.condition for a in alerts]

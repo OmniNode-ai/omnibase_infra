@@ -92,14 +92,6 @@ REQUIRED_ALERT_KEYS: tuple[str, ...] = (
     "sustained_samples",
 )
 
-# Reasons that are a CORRECT permanent hosted decision rather than evidence the
-# lab is under pressure. The saturation monitor must not count these as
-# fallbacks, or it would alert continuously from the moment it lands (the seam
-# is hosted today) and be muted long before the seam ever flips.
-NON_SATURATION_REASONS: frozenset[str] = frozenset(
-    {"seam_ceiling_hosted", "fork_isolation", "policy_allowlist"}
-)
-
 
 @dataclass(frozen=True)
 class RouteDecision:

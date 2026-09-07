@@ -65,9 +65,34 @@ REQUIRED_ALERT_KEYS: tuple[str, ...] = (
     "sustained_min_span_seconds",
 )
 
-# Hosted decisions that are CORRECT and permanent, not evidence of pressure.
-NON_SATURATION_REASONS: frozenset[str] = frozenset(
-    {"seam_ceiling_hosted", "fork_isolation", "policy_allowlist"}
+# The route reasons that ARE positive evidence the lab is under pressure.
+# Condition 3 counts these and nothing else.
+#
+# THIS IS AN ALLOWLIST, AND THAT IS THE FIX FOR A MEASURED DEFECT. It shipped
+# first as a denylist -- "any hosted reason except seam_ceiling_hosted,
+# fork_isolation and policy_allowlist is saturation". A denylist FAILS OPEN:
+# every reason nobody thought of silently becomes a saturation alert, and two
+# already did.
+#
+#   `lab_unknown` is the reason on EVERY run until the monitor has produced its
+#   first lab record for the route job to read -- i.e. from the moment this
+#   lands. Measured 2026-09-07T12:22Z against a fully healthy fleet (88 online,
+#   4 busy) and a healthy lab host (0.669x load, 66013 MiB free), the denylist
+#   form raised `route_fallback_sustained`. That is precisely the "fires on
+#   every sample from the day it lands and is muted long before it matters"
+#   failure this module's own docstring claims to have avoided by excluding
+#   `seam_ceiling_hosted` -- reintroduced one reason over.
+#
+#   `probe_error:*` is a probe FAULT, not lab pressure (`missing_token` is
+#   permanent on any run without the fleet-status secret), and reporting it
+#   under a saturation headline points the reader at the wrong system.
+#
+# An allowlist fails closed: a new reason raises no alert until someone decides
+# it is one. It was also DUPLICATED into runner_route_decision.py, which has no
+# consumer for it; that copy is deleted rather than kept in sync, because two
+# definitions of one policy is the drift this repo's gates exist to stop.
+SATURATION_FALLBACK_REASONS: frozenset[str] = frozenset(
+    {"fleet_saturated", "fleet_degraded", "lab_saturated"}
 )
 
 
@@ -213,8 +238,11 @@ def evaluate_alerts(
         reason = (sample.get("route") or {}).get("recent_reason")
         if not isinstance(reason, str):
             return False
-        # Inert and permanently-correct hosted decisions are not saturation.
-        return reason not in NON_SATURATION_REASONS and reason != "capacity_available"
+        # ALLOWLIST, not a denylist: only reasons that are positive evidence of
+        # lab pressure count. See SATURATION_FALLBACK_REASONS for the measured
+        # defect that a denylist produced (`lab_unknown` alerting on a fully
+        # healthy fleet and a fully healthy lab, from the day this lands).
+        return reason in SATURATION_FALLBACK_REASONS
 
     def probe_missing(sample: dict[str, Any]) -> bool:
         return (sample.get("lab") or {}).get("probe") == "unavailable"
