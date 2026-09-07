@@ -32,6 +32,15 @@ The fix is at the condition, never a timeout and never a default-open:
 * :func:`test_every_eligibility_filter_reports_its_exclusion` closes the CLASS
   by failing if a future filter is added to the interleave without one.
 
+#3281 (OMN-18013, ``41dd3c5e``) landed on ``dev`` while this branch was open and
+deleted ``node_contract_resolver_bridge``'s subscribe declaration outright, on
+the separate ground that a subscription no ``handler_routing`` entry can be
+assigned dispatches nothing. That removes the measured INSTANCE; it does not
+touch the CLASS — five interleave filters the gate never mirrored are still
+five. Section A therefore holds the property on a fixture (RED on the parent
+commit either way), and section B asserts over the real tree what is true after
+#3281: no shipped contract is both required and provably skipped by boot.
+
 Related Tickets:
     - OMN-17372: readiness must require the wired command topics.
     - OMN-17534: the candidate boot gate this wedged.
@@ -63,6 +72,9 @@ from omnibase_infra.event_bus.model_contract_attach_result import (
     ModelContractAttachResult,
 )
 from omnibase_infra.protocols import ProtocolEventBusLike
+from omnibase_infra.runtime.auto_wiring.discovery import (
+    discover_contracts_from_paths,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     subscribe_wired_contract_topics,
     wire_from_manifest,
@@ -83,6 +95,7 @@ from omnibase_infra.runtime.health.contract_attach_readiness_gate import (
     ContractAttachReadinessGate,
     contract_subscribes_a_command_topic,
     derive_required_contract_names,
+    is_command_topic,
 )
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
@@ -128,11 +141,17 @@ def _import_by_name(_module: str, class_name: str) -> type:
 
 
 def _bridge_contract() -> ModelDiscoveredContract:
-    """The shipped ``node_contract_resolver_bridge`` shape.
+    """The shape ``node_contract_resolver_bridge`` carried at 0.38.21.
 
-    Subscribes a command topic and declares NO ``handler_routing``: it is a
+    Subscribes a command topic and declares NO ``handler_routing``: it was a
     transitional HTTP bridge served by its own process (OMN-2756), and nothing
-    anywhere attaches a Kafka consumer to its command topic.
+    anywhere attached a Kafka consumer to its command topic.
+
+    Kept as a FIXTURE, not read from the tree. #3281 (OMN-18013) deleted that
+    subscribe declaration on ``dev`` while this branch was open, so the shipped
+    contract no longer carries the shape — but the CLASS is unchanged and this
+    fixture is what holds the RED-on-parent property. See section B for what the
+    shipped contract asserts now.
     """
     return ModelDiscoveredContract(
         name=_BRIDGE,
@@ -312,18 +331,17 @@ def test_control_a_command_contract_with_handler_routing_is_still_required() -> 
 
 
 # ===========================================================================
-# B. The live instance — the shipped contract that actually broke every lane
+# B. The shipped tree — what is TRUE of the real contracts, today
 # ===========================================================================
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
 
 
 def _repo_contract(node_dir: str) -> dict[str, Any]:
     path = (
-        Path(__file__).resolve().parents[4]
-        / "src"
-        / "omnibase_infra"
-        / "nodes"
-        / node_dir
-        / "contract.yaml"
+        _repo_root() / "src" / "omnibase_infra" / "nodes" / node_dir / "contract.yaml"
     )
     assert path.is_file(), f"contract not found: {path}"
     parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -331,17 +349,69 @@ def _repo_contract(node_dir: str) -> dict[str, Any]:
     return parsed
 
 
-def test_the_shipped_resolver_bridge_is_the_shape_this_ticket_describes() -> None:
-    """Pin the live instance, so a contract change re-opens this test, not /ready."""
+def _shipped_manifest(monkeypatch: pytest.MonkeyPatch) -> ModelAutoWiringManifest:
+    """Parse every shipped ``contract.yaml`` with the REAL discovery parser.
+
+    ``discover_contracts_from_paths`` is the shipped parser; the kernel's
+    entry-point discovery funnels into the same ``_parse_contract``. File reads
+    only — no broker, no network, no handler import — so this is a unit test
+    that nonetheless reads the tree the way boot does.
+
+    The two lane-shaped env filters are neutralised so the set under test is the
+    repository, not the machine: ``ONEX_ACTIVE_RUNTIME_PACKAGES`` (an allowlist
+    that would drop contracts) and ``ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED`` (an
+    opt-in that would add the dormant cloud-gateway leg, OMN-13809).
+    """
+    monkeypatch.delenv("ONEX_ACTIVE_RUNTIME_PACKAGES", raising=False)
+    monkeypatch.delenv("ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED", raising=False)
+
+    paths = sorted((_repo_root() / "src" / "omnibase_infra").rglob("contract.yaml"))
+    assert len(paths) > 50, (
+        f"only {len(paths)} contract.yaml files found under src/omnibase_infra — "
+        "the sweep below would be vacuously green"
+    )
+    manifest = discover_contracts_from_paths(list(paths))
+    assert manifest.errors == (), (
+        f"shipped contracts failed to parse: {manifest.errors}"
+    )
+    return manifest
+
+
+def test_the_shipped_resolver_bridge_no_longer_declares_the_wedging_shape() -> None:
+    """The measured instance is gone — #3281 deleted it — and that is recorded here.
+
+    ``node_contract_resolver_bridge`` WAS the live instance of this class: at
+    0.38.21 it subscribed ``onex.cmd.platform.contract-resolve-requested.v1``
+    and declared no ``handler_routing``, so ``_prepare_contract_wiring`` marked
+    it SKIPPED, it could never report an attach result, and it pinned ``/ready``
+    at 503 for the life of the process on the .201 dev lane.
+
+    #3281 (OMN-18013, ``41dd3c5e``, merged into ``dev`` while this branch was
+    open) then deleted the subscribe declaration outright, on the separate and
+    correct ground that a subscription no ``handler_routing`` entry can ever be
+    assigned dispatches nothing. Asserting the OLD shape here would be asserting
+    a deleted bug back into the tree, so this test pins what is true instead:
+    the bridge declares NO command subscription AND NO ``handler_routing``, and
+    is therefore outside the required set by both halves of the predicate.
+
+    The CLASS is untouched by that deletion: five interleave filters the gate
+    never mirrored are still five, and section A proves the property on a
+    fixture that is RED on the parent commit. The sweep below proves it over the
+    real tree. Neither depends on this one contract.
+    """
     contract = _repo_contract("node_contract_resolver_bridge")
 
-    subscribe_topics = contract["event_bus"]["subscribe_topics"]
-    assert _BRIDGE_COMMAND_TOPIC in subscribe_topics, (
-        "the fixture above no longer models the shipped contract"
+    subscribe_topics = contract["event_bus"]["subscribe_topics"] or []
+    command_topics = [t for t in subscribe_topics if is_command_topic(t)]
+    assert command_topics == [], (
+        "node_contract_resolver_bridge subscribes a command topic again "
+        f"({command_topics}) — if it still declares no handler_routing it is "
+        "once more the wedging shape #3281 removed, and the exclusion path in "
+        "section A is what keeps /ready off 503"
     )
     assert "handler_routing" not in contract, (
         "node_contract_resolver_bridge now declares handler_routing — it is no "
-        "longer structurally skipped, and this ticket's premise needs re-reading"
+        "longer structurally skipped, and this ticket's history needs re-reading"
     )
 
 
@@ -349,6 +419,120 @@ def test_control_a_shipped_contract_that_does_declare_handler_routing() -> None:
     """POSITIVE CONTROL: the probe above is not vacuously true of every contract."""
     contract = _repo_contract("node_merge_gate_effect")
     assert "handler_routing" in contract
+
+
+def test_no_shipped_contract_is_required_that_boot_provably_skips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ticket's property, over the REAL manifest: required ⊆ attempted.
+
+    Runs the shipped ``derive_required_contract_names`` over every contract in
+    the repository and intersects the result with the contracts
+    ``_prepare_contract_wiring`` refuses BEFORE any wiring runs — no
+    ``handler_routing`` (SKIPPED, "No handler_routing declared in contract") or
+    ``plugin_managed`` (the contract owns its own subscription, OMN-10864).
+
+    A non-empty intersection is exactly the OMN-17372 defect in the shipped
+    tree: that contract is required, can never produce a
+    ``ModelContractAttachResult``, and pins ``/ready`` at 503 with no timeout to
+    expire. On the parent commit the intersection contained
+    ``node_contract_resolver_bridge``.
+    """
+    manifest = _shipped_manifest(monkeypatch)
+    required = derive_required_contract_names(manifest)
+
+    skipped_before_wiring = {
+        contract.name
+        for contract in manifest.contracts
+        if contract.handler_routing is None
+        or (contract.event_bus is not None and contract.event_bus.plugin_managed)
+    }
+
+    # POSITIVE CONTROL: both sides are populated, so an empty intersection means
+    # "the sets are disjoint", never "one of them was empty".
+    assert required, (
+        "derive_required_contract_names returned nothing over the real tree"
+    )
+    assert skipped_before_wiring, (
+        "no shipped contract is skipped before wiring — the intersection below "
+        "cannot distinguish a fix from an empty probe"
+    )
+
+    wedging = sorted(required & skipped_before_wiring)
+    assert wedging == [], (
+        f"the readiness gate requires {wedging}, which the boot interleave "
+        "provably never attempts: no ModelContractAttachResult can ever be "
+        "produced for them, so /ready serves 503 for the life of the process"
+    )
+
+
+def test_every_required_shipped_contract_has_a_dispatcher_to_attach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A required contract must carry at least one routing entry to attach.
+
+    Stronger than the predicate, deliberately: ``contract_subscribes_a_command_topic``
+    only asks whether ``handler_routing`` is ``None``. A contract with a
+    PRESENT but EMPTY routing block would pass that and still be dropped by the
+    interleave's zero-registered-dispatchers filter — one of the five that are
+    report-only. If this ever fails, the required set has drifted from the
+    eligible set again through a shape the contract-alone predicate cannot see.
+    """
+    manifest = _shipped_manifest(monkeypatch)
+    required = derive_required_contract_names(manifest)
+    by_name = {contract.name: contract for contract in manifest.contracts}
+
+    routing_less: list[str] = []
+    for name in sorted(required):
+        routing = by_name[name].handler_routing
+        if routing is None or not routing.handlers:
+            routing_less.append(name)
+    assert routing_less == [], (
+        f"required contracts with no routing entry to attach: {routing_less}"
+    )
+
+
+def test_every_shipped_command_contract_excluded_from_required_has_a_documented_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing drops out of the required set for an undocumented reason.
+
+    Every contract that subscribes a command topic is either required, or
+    excluded for one of the two reasons decidable from the contract alone. A
+    third reason appearing here means the predicate grew a filter that the
+    interleave does not report, which is how the two copies diverged the first
+    time.
+    """
+    manifest = _shipped_manifest(monkeypatch)
+    required = derive_required_contract_names(manifest)
+    by_name = {contract.name: contract for contract in manifest.contracts}
+
+    command_subscribing = {
+        contract.name
+        for contract in manifest.contracts
+        if contract.event_bus is not None
+        and any(
+            is_command_topic(topic) for topic in contract.event_bus.subscribe_topics
+        )
+    }
+    assert command_subscribing, (
+        "no shipped contract subscribes a command topic — the gate would be "
+        "inert and this sweep vacuous"
+    )
+
+    undocumented: list[str] = []
+    for name in sorted(command_subscribing - required):
+        contract = by_name[name]
+        plugin_managed = (
+            contract.event_bus is not None and contract.event_bus.plugin_managed
+        )
+        if not (plugin_managed or contract.handler_routing is None):
+            undocumented.append(name)
+
+    assert undocumented == [], (
+        f"command-subscribing contracts excluded from the required set for no "
+        f"documented reason: {undocumented}"
+    )
 
 
 # ===========================================================================

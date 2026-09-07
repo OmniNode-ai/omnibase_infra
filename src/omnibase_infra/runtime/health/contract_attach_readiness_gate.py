@@ -141,12 +141,18 @@ def contract_subscribes_a_command_topic(contract: ModelDiscoveredContract) -> bo
         # outcome-is-not-WIRED filter and it can never report a result — the
         # identical failure mode as plugin_managed above.
         #
-        # This is not hypothetical: ``node_contract_resolver_bridge``
-        # subscribes ``onex.cmd.platform.contract-resolve-requested.v1`` and
-        # declares no handler_routing (it is a transitional HTTP bridge served
+        # This was not hypothetical: ``node_contract_resolver_bridge``
+        # subscribed ``onex.cmd.platform.contract-resolve-requested.v1`` and
+        # declared no handler_routing (it is a transitional HTTP bridge served
         # by its own process, OMN-2756). It made every runtime from 0.38.21
         # onward serve /ready 503 permanently — 154 of 155 required contracts
         # ATTACHED, zero NOT_READY, zero FAILED, one contract pending forever.
+        #
+        # #3281 (OMN-18013) has since deleted that subscribe declaration, so
+        # the measured instance is gone. The exclusion stays: it is decidable
+        # from the contract alone, it is the identical failure mode as
+        # plugin_managed, and the next contract to declare a command topic
+        # without handler_routing must not wedge /ready a second time.
         return False
     return any(is_command_topic(topic) for topic in event_bus.subscribe_topics)
 
