@@ -110,21 +110,55 @@ def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
                     f"{name} drifted to {org_actual!r}; expected {variable['expected_json']!r}",
                 )
             )
+    overrides = variable.get("repository_overrides") or {}
+    if not isinstance(overrides, dict):
+        raise ValueError(
+            "trusted_runner_variable.repository_overrides must be a mapping"
+        )
     for repo in policy.get("repositories", []):
         repo_name = str(repo)
+        # OMN-18031: a repo shadow the policy DECLARES is an asserted value in
+        # its own right, not drift from the org value. Without this the audit
+        # cannot tell a deliberate per-repo divergence from the silent drift it
+        # exists to catch, so a legitimate one produces a permanent red -- and a
+        # permanently red audit is the failure mode OMN-16727 recorded, where
+        # the job exits on the first finding set and masks every later surface.
+        override = overrides.get(repo_name)
+        if override is None:
+            repo_expected_raw = str(variable["expected_json"])
+        else:
+            if not isinstance(override, dict):
+                raise ValueError(f"repository_overrides[{repo_name}] must be a mapping")
+            if not str(override.get("revert_when", "")).strip():
+                raise ValueError(
+                    f"repository_overrides[{repo_name}] must carry a revert_when: "
+                    "a declared divergence with no stated end is indistinguishable "
+                    "from drift to the next lane"
+                )
+            repo_expected_raw = str(override["expected_json"])
+        repo_expected = _canonical_json(repo_expected_raw)
         actual = _variable_value(_variables(["--repo", f"{ORG}/{repo_name}"]), name)
         if actual is None:
+            if override is not None:
+                findings.append(
+                    Finding(
+                        repo_name,
+                        f"{name} has no repo shadow but the policy declares an "
+                        f"override of {repo_expected_raw!r}; the repo silently "
+                        f"inherits the org value instead",
+                    )
+                )
             continue
         try:
             normalized = _canonical_json(actual)
         except json.JSONDecodeError:
             findings.append(Finding(repo_name, f"{name} is not valid JSON: {actual!r}"))
             continue
-        if normalized != expected:
+        if normalized != repo_expected:
             findings.append(
                 Finding(
                     repo_name,
-                    f"{name} drifted to {actual!r}; expected {variable['expected_json']!r}",
+                    f"{name} drifted to {actual!r}; expected {repo_expected_raw!r}",
                 )
             )
     return findings
