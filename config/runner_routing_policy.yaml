@@ -28,6 +28,29 @@ trusted_runner_variable:
   # to stay UNSET so the self-hosted literal operates; neither is audited above,
   # because an unset variable is the intended state and a set one is the defect.
   expected_json: '["ubuntu-latest"]'
+  # OMN-18031: expected_json above is the ORG assertion and the default for every
+  # repo shadow. repository_overrides declares a shadow that is deliberately
+  # different, so the hourly audit can tell an authorized per-repo divergence
+  # from the silent drift it exists to catch. An override is not a hole: the
+  # audit holds the repo to the override value, still judges the org value on
+  # expected_json above, and refuses an override with no revert_when.
+  repository_overrides:
+    omnimarket:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      # Interim load-balancing relief, 2026-09-07T12:04:30Z. At the moment of the
+      # flip these two repos held 78 queued hosted runs between them (omnimarket
+      # 23 queued / 0 in progress, omnibase_infra 55 queued / 4 in progress) while
+      # all 30 runners in the self-hosted omnibase-ci group were online and zero
+      # were busy. The label set is the one in force before the 2026-08-27 re-flip
+      # (OMN-16682, commit 8ce11d51 removed `expected_json: '["self-hosted",
+      # "omnibase-ci"]'` from this file).
+      revert_when: >-
+        Operator, verbatim, 2026-09-07 in-session: "we can toggle them back off when the queue clears and the lab runners are operational again" -- "for load balaning that is". So: revert when (a) the hosted queue has drained AND (b) the OMN-18031 per-run router is live and enforced in this repo, at which point DELETE the repo shadow entirely so the router's seam ceiling governs rather than leaving a pinned value behind. Authorization is the OPERATOR-CONSENT row in the omni_home rolling work ledger, lane=trusted-seam-flip-market-infra.
+    omnibase_infra:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      # Same flip, same timestamp, same rationale -- see the omnimarket entry.
+      revert_when: >-
+        Operator, verbatim, 2026-09-07 in-session: "we can toggle them back off when the queue clears and the lab runners are operational again" -- "for load balaning that is". So: revert when (a) the hosted queue has drained AND (b) the OMN-18031 per-run router is live and enforced in this repo, at which point DELETE the repo shadow entirely so the router's seam ceiling governs rather than leaving a pinned value behind. Authorization is the OPERATOR-CONSENT row in the omni_home rolling work ledger, lane=trusted-seam-flip-market-infra.
 public_pr_runner_variable:
   name: OMNI_PUBLIC_PR_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'
