@@ -34,6 +34,16 @@ pytestmark = [pytest.mark.unit]
 
 TOPIC = "onex.evt.test-producer.example-event.v1"  # onex-topic-allow: unit fixture
 
+# OMN-18012: ``ModelKafkaEventBusConfig`` refuses a PLAIN/SCRAM mechanism carrying
+# no credentials -- a client handed a mechanism and nothing to authenticate with
+# is not a config any broker would accept, so the model no longer builds one.
+# Every fixture below asserts a REPLICATION-FACTOR policy, never authentication,
+# so its transport only has to be well-formed. These are synthetic values that
+# exist to make the config constructible; they are never a real credential and
+# never reach a broker.
+SASL_FIXTURE_USERNAME = "omn15395-fixture"
+SASL_FIXTURE_PASSWORD = "omn15395-fixture-secret"
+
 
 class TestProfileDerivation:
     """The profile comes from the live Kafka config, not a caller-supplied label."""
@@ -83,6 +93,8 @@ class TestProfileDerivation:
             bootstrap_servers="broker-1.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism=mechanism,
+            sasl_plain_username=SASL_FIXTURE_USERNAME,
+            sasl_plain_password=SASL_FIXTURE_PASSWORD,
         )
         policy = ModelTopicProvisioningPolicy.from_kafka_config(config)
         assert policy.capacity_replication_factor is None
@@ -107,6 +119,8 @@ class TestSaslClusterIsNotAssumedSingleNode:
             bootstrap_servers="b-1.example:9096,b-2.example:9096,b-3.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism="SCRAM-SHA-512",
+            sasl_plain_username=SASL_FIXTURE_USERNAME,
+            sasl_plain_password=SASL_FIXTURE_PASSWORD,
         )
         return ModelTopicProvisioningPolicy.from_kafka_config(config)
 
