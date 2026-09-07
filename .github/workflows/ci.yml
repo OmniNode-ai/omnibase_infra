@@ -3793,7 +3793,11 @@ jobs:
           cache-enabled: "false"
 
       - name: Pre-pull the harness broker image
-        run: docker pull redpandadata/redpanda:v24.2.7
+        # Digest-pinned, and identical to REDPANDA_IMAGE in
+        # tests/integration/customer_path/redpanda_sasl_harness.py -- a
+        # floating tag lets two runners resolve two different images.
+        # test_omn18012_harness_runner_topology.py asserts the two agree.
+        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
 
       - name: Run customer-path boundary tests
         env:
