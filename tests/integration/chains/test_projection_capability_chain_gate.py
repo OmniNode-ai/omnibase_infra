@@ -89,6 +89,7 @@ import json
 import logging
 import sys
 import types
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
@@ -325,6 +326,15 @@ def _install_recording_psycopg2(
 
         def fetchall(self) -> list[dict[str, object]]:
             return []
+
+        # OMN-17888: a real DB-API cursor is iterable, and the projection read
+        # seam now streams it instead of calling fetchall() -- one live copy of
+        # the result set instead of two. A double that implements only
+        # fetchall() is not a cursor; it silently modelled the very allocation
+        # shape the seam was fixed to stop making, and it raised
+        # "'FakeCursor' object is not iterable" through the real dispatch path.
+        def __iter__(self) -> Iterator[dict[str, object]]:
+            return iter(self.fetchall())
 
         def fetchone(self) -> tuple[str, str]:
             return ("omninode_runtime", "omnidash_analytics")
