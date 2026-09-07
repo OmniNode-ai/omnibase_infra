@@ -641,6 +641,33 @@ def _excluded_tickets(request: ModelEvidenceAutocloseSweepRequest) -> set[str]:
     }
 
 
+def _offered_tickets(
+    request: ModelEvidenceAutocloseSweepRequest,
+) -> tuple[str, ...]:
+    """The OMN-16106 restrictive selector, normalised once and order-stable.
+
+    Same normalisation as ``_excluded_tickets`` and for the same reason: the
+    value is typed into a ``workflow_dispatch`` box or spliced from a script,
+    so ``omn-16831`` and a trailing space are the expected shapes rather than
+    edge cases. Unlike the fence this is a SEQUENCE, not a set — a receipt that
+    reconciles every nominated ticket to one terminal outcome is far easier to
+    read against the caller's own list when the order survives — so duplicates
+    are collapsed here rather than left to produce two outcomes for one ticket.
+
+    Empty means "no offer was made", which is the discovery-preserving path.
+    A list of nothing but whitespace normalises to empty and therefore also
+    means that: a caller who passes ``--offer ' '`` gets the ordinary sweep,
+    never a run that adjudicates nothing while looking like it selected
+    something.
+    """
+    seen: dict[str, None] = {}
+    for candidate in request.offer_tickets:
+        normalised = candidate.strip().upper()
+        if normalised:
+            seen.setdefault(normalised, None)
+    return tuple(seen)
+
+
 def _rotation_tick(now: datetime, rotation_minutes: int) -> int:
     """Which rotation period ``now`` falls in, counted from the epoch.
 
@@ -2263,6 +2290,113 @@ class HandlerEvidenceAutocloseSweep:
                 break
         return merged, ""
 
+    async def _fetch_offer_companion(
+        self, repo: str, ticket_id: str, gh_timeout_seconds: int
+    ) -> tuple[dict[str, object] | None, str]:
+        """Newest MERGED companion for one nominated ticket, resolved directly.
+
+        OMN-16106 Item 1. This is the only reason the offer path can reach a
+        ticket the two window arms cannot: it asks GitHub for the companion by
+        ticket id instead of enumerating a time range and filtering it. A
+        companion merged 40 days ago, outside the 200-item pool and outside the
+        current five-wide slice, resolves here in one call.
+
+        Returns ``(pr, error)`` with the same fail-closed contract as
+        ``_fetch_pr_files``: a non-empty ``error`` means the lookup FAILED and
+        the caller must record ERROR_GITHUB_API, never "this ticket has no
+        companion". ``(None, "")`` is the one honest absence — the search
+        succeeded and returned no merged pull request.
+
+        Two shape details are load-bearing, both properties of the search
+        endpoint rather than of the pulls endpoint:
+
+        * ``merged_at`` lives under each item's ``pull_request`` sub-object,
+          not at the top level. Reading the top-level key would silently find
+          nothing on every real payload.
+        * ``sort=updated`` is NOT merge order. A stale companion touched
+          yesterday sorts above the one that actually merged last, so the
+          result is re-sorted on ``merged_at`` here and the first item is never
+          trusted.
+        """
+        path = (
+            f"search/issues?q=repo:{repo}+is:pr+is:merged+{ticket_id}"
+            "&sort=updated&order=desc&per_page=100"
+        )
+        wanted = ticket_id.strip().upper()
+        data, error = await self._run_gh_command(
+            ["gh", "api", path], gh_timeout_seconds
+        )
+        if data is None:
+            return None, (
+                error
+                or f"gh api returned no data resolving the companion for {ticket_id}"
+            )
+        if not isinstance(data, dict):
+            return None, (
+                f"gh api returned a non-mapping search payload resolving "
+                f"{ticket_id} — refusing to read it as 'no companion'"
+            )
+        items = data.get("items")
+        if not isinstance(items, list):
+            return None, (
+                f"gh api search payload for {ticket_id} carried no 'items' "
+                "list — refusing to read an uninterpretable payload as 'no "
+                "companion'"
+            )
+        merged: list[dict[str, object]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            pull_request = item.get("pull_request")
+            if not isinstance(pull_request, dict):
+                # An issue, not a pull request. `is:pr` should have excluded
+                # it; skipping rather than erroring keeps a widened query from
+                # becoming a refusal.
+                continue
+            merged_at = str(pull_request.get("merged_at") or "")
+            if not merged_at:
+                continue
+            # THE FILTER, and it is not optional. `search/issues` is a
+            # FULL-TEXT query, never an exact-id lookup: GitHub tokenises
+            # `OMN-99999` and returns loosely related pull requests. Measured
+            # live on the first real dispatch of this path (run 34157024050,
+            # 2026-09-07): an offer for a ticket with NO companion at all came
+            # back with OMN-16007's companion (OCC#6448), and the run went on
+            # to adjudicate OMN-16007 — a ticket nobody nominated — carrying
+            # `enumeration_arm: offer`. The second dispatch did the same with
+            # OMN-15669. Both were harmless only because the tickets were
+            # already completed and the run was a dry run.
+            #
+            # A restrictive selector that reaches outside its own nomination is
+            # unbounded in exactly the direction the design claims to bound, so
+            # the title must BIND the nominated ticket through the same
+            # `_extract_ticket_binding` the window arms use. Anything else is
+            # discarded here, which leaves the nominated ticket with the honest
+            # "no companion" outcome it should have had. This does not depend
+            # on search semantics, because search semantics are not ours to
+            # pin.
+            title_binding, _title_ambiguous = _extract_ticket_binding(
+                str(item.get("title") or ""), []
+            )
+            if title_binding is None or title_binding.strip().upper() != wanted:
+                continue
+            merged.append(
+                {
+                    "number": _as_int(item.get("number")),
+                    "html_url": str(item.get("html_url") or ""),
+                    "title": str(item.get("title") or ""),
+                    "merged_at": merged_at,
+                    "updated_at": str(item.get("updated_at") or merged_at),
+                }
+            )
+        if not merged:
+            return None, ""
+        merged.sort(
+            key=lambda pr: (str(pr.get("merged_at") or ""), _as_int(pr.get("number"))),
+            reverse=True,
+        )
+        return merged[0], ""
+
     async def _fetch_pr_files(
         self, repo: str, number: int, gh_timeout_seconds: int
     ) -> tuple[list[str], str]:
@@ -2393,80 +2527,175 @@ class HandlerEvidenceAutocloseSweep:
             "%Y-%m-%dT%H:%M:%SZ"
         )
 
-        companions, enum_error = await self._fetch_merged_companions(
-            request.occ_repo,
-            since_iso,
-            request.max_companions,
-            request.gh_timeout_seconds,
-        )
-        if enum_error:
-            return ModelEvidenceAutocloseSweepResult(
-                correlation_id=correlation_id,
-                dry_run=not effective_apply,
-                mode=(
-                    EnumEvidenceAutocloseMode.DISARMED
-                    if started_disarmed
-                    else _mode_for(effective_apply, request.trigger)
-                ),
-                disarm_triggered_by=disarm_ticket,
-                disarm_reason=disarm_reason,
-                flip_budget_remaining=flip_budget,
-                success=False,
-                error_message=f"GitHub enumeration failed: {enum_error}",
-            )
-
-        # OMN-17342. The second arm. Off unless asked for, and when it is off
-        # every line below reduces to exactly the single-arm run: an empty
-        # slice, an empty pool, both counters 0.
-        forward_numbers = {_as_int(pr.get("number")) for pr in companions}
-        backfill_pool: list[dict[str, object]] = []
-        backfill_slice: list[dict[str, object]] = []
-        backfill_error = ""
-        if request.backfill_lookback_hours > 0:
-            backfill_since_iso = (
-                now - timedelta(hours=request.backfill_lookback_hours)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
-            wider, backfill_error = await self._fetch_merged_companions(
-                request.occ_repo,
-                backfill_since_iso,
-                request.backfill_pool_size,
-                request.gh_timeout_seconds,
-            )
-            # Everything the forward arm is already handling this run is removed
-            # here rather than de-duplicated later, so the pool the slice
-            # rotates over is exactly the population the forward window cannot
-            # reach. Otherwise the slice would spend part of its budget on
-            # candidates that were about to be processed anyway, and the drain
-            # rate reported in the receipt would overstate itself.
-            backfill_pool = [
-                pr for pr in wider if _as_int(pr.get("number")) not in forward_numbers
-            ]
-            # Oldest first, then by number. Deterministic so a retry inside the
-            # same rotation period re-examines the same slice, and oldest-first
-            # because the far end of the pool is the part that has been out of
-            # reach longest and would otherwise stay there.
-            backfill_pool.sort(
-                key=lambda pr: (
-                    str(pr.get("merged_at") or ""),
-                    _as_int(pr.get("number")),
-                )
-            )
-            backfill_slice = _rotating_slice(
-                backfill_pool,
-                request.backfill_max_candidates,
-                _rotation_tick(now, request.backfill_rotation_minutes),
-            )
-
         outcomes: list[ModelEvidenceAutocloseOutcome] = []
         seen_tickets: set[str] = set()
         bindings_extracted = 0
 
-        # Forward first, unconditionally. The freshest companion for a ticket is
-        # the one whose verdict should be recorded, and `seen_tickets` resolves
-        # a collision in favour of whichever arm reaches it first.
-        candidates: list[tuple[dict[str, object], EnumEvidenceAutocloseArm]] = [
-            (pr, EnumEvidenceAutocloseArm.FORWARD) for pr in companions
-        ] + [(pr, EnumEvidenceAutocloseArm.BACKFILL) for pr in backfill_slice]
+        companions: list[dict[str, object]] = []
+        backfill_pool: list[dict[str, object]] = []
+        backfill_slice: list[dict[str, object]] = []
+        backfill_error = ""
+        candidates: list[tuple[dict[str, object], EnumEvidenceAutocloseArm]] = []
+        # PR number -> the ticket the CALLER nominated it for. Empty for every
+        # window-arm candidate, because no caller nominated those.
+        offer_bindings: dict[int, str] = {}
+
+        # OMN-16106 Item 1. THE RESTRICTIVE SELECTOR, and the branch IS the
+        # design. A non-empty `offer_tickets` REPLACES discovery outright: no
+        # forward window is enumerated, no backfill pool is paginated, no slice
+        # is taken. A selector that instead PREPENDED its nominations to the
+        # ordinary candidate list would let a one-ticket request drag an
+        # unscoped five-wide applying run along behind it, which is exactly
+        # what a bounded pilot must not be able to do by accident.
+        #
+        # What it does not change is anything downstream. Each resolved
+        # companion is appended to the SAME `candidates` list the two window
+        # arms feed, so it passes through the same title short-circuit, the
+        # same exclusion fence, the same changed-file binding check and the
+        # same `_process_ticket` -- verifier, AC coverage, behaviour conjunct,
+        # children, cited PR, prior revert, label, disarm, flip budget, comment
+        # dedup and bound readback all still gate the write.
+        offered = _offered_tickets(request)
+        if offered:
+            excluded = _excluded_tickets(request)
+            for offered_ticket in offered:
+                # Exclusion wins over nomination, and wins BEFORE the search.
+                # The fence asserts "another lane is writing this ticket right
+                # now", which the node cannot derive; a caller who names a
+                # ticket in both lists has contradicted themselves, and the
+                # safe reading of a contradiction is the refusal. Placing it
+                # ahead of `_fetch_offer_companion` keeps the refusal free of
+                # GitHub I/O as well as of Linear I/O.
+                if offered_ticket in excluded:
+                    seen_tickets.add(offered_ticket)
+                    outcomes.append(
+                        ModelEvidenceAutocloseOutcome(
+                            ticket_id=offered_ticket,
+                            decision=EnumEvidenceAutocloseDecision.SKIPPED_EXCLUDED,
+                            reason=(
+                                f"{offered_ticket} was offered to this run AND "
+                                "named on the caller-supplied exclusion list. "
+                                "The exclusion wins: refused before the "
+                                "companion search and before any Linear read, "
+                                "so no verdict was reached about this ticket."
+                            ),
+                            enumeration_arm=EnumEvidenceAutocloseArm.OFFER,
+                        )
+                    )
+                    continue
+                companion, offer_error = await self._fetch_offer_companion(
+                    request.occ_repo, offered_ticket, request.gh_timeout_seconds
+                )
+                if offer_error:
+                    seen_tickets.add(offered_ticket)
+                    outcomes.append(
+                        ModelEvidenceAutocloseOutcome(
+                            ticket_id=offered_ticket,
+                            decision=EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
+                            reason=(
+                                "Could not resolve a merged OCC companion for "
+                                f"offered ticket {offered_ticket}: "
+                                f"{offer_error}. A failed lookup is not an "
+                                "absence -- this run reached no verdict about "
+                                "this ticket."
+                            ),
+                            enumeration_arm=EnumEvidenceAutocloseArm.OFFER,
+                        )
+                    )
+                    continue
+                if companion is None:
+                    seen_tickets.add(offered_ticket)
+                    outcomes.append(
+                        ModelEvidenceAutocloseOutcome(
+                            ticket_id=offered_ticket,
+                            decision=EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION,
+                            reason=(
+                                "No merged evidence companion in "
+                                f"{request.occ_repo} names {offered_ticket}, so "
+                                "there is nothing for this run to bind a "
+                                "verdict to. Recorded rather than dropped: a "
+                                "nominated ticket absent from the outcomes "
+                                "would be indistinguishable from one the run "
+                                "never considered."
+                            ),
+                            enumeration_arm=EnumEvidenceAutocloseArm.OFFER,
+                        )
+                    )
+                    continue
+                offer_bindings[_as_int(companion.get("number"))] = offered_ticket
+                candidates.append((companion, EnumEvidenceAutocloseArm.OFFER))
+        else:
+            companions, enum_error = await self._fetch_merged_companions(
+                request.occ_repo,
+                since_iso,
+                request.max_companions,
+                request.gh_timeout_seconds,
+            )
+            if enum_error:
+                return ModelEvidenceAutocloseSweepResult(
+                    correlation_id=correlation_id,
+                    dry_run=not effective_apply,
+                    mode=(
+                        EnumEvidenceAutocloseMode.DISARMED
+                        if started_disarmed
+                        else _mode_for(effective_apply, request.trigger)
+                    ),
+                    disarm_triggered_by=disarm_ticket,
+                    disarm_reason=disarm_reason,
+                    flip_budget_remaining=flip_budget,
+                    success=False,
+                    error_message=f"GitHub enumeration failed: {enum_error}",
+                )
+
+            # OMN-17342. The second arm. Off unless asked for, and when it is
+            # off every line below reduces to exactly the single-arm run: an
+            # empty slice, an empty pool, both counters 0.
+            forward_numbers = {_as_int(pr.get("number")) for pr in companions}
+            if request.backfill_lookback_hours > 0:
+                backfill_since_iso = (
+                    now - timedelta(hours=request.backfill_lookback_hours)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                wider, backfill_error = await self._fetch_merged_companions(
+                    request.occ_repo,
+                    backfill_since_iso,
+                    request.backfill_pool_size,
+                    request.gh_timeout_seconds,
+                )
+                # Everything the forward arm is already handling this run is
+                # removed here rather than de-duplicated later, so the pool the
+                # slice rotates over is exactly the population the forward
+                # window cannot reach. Otherwise the slice would spend part of
+                # its budget on candidates that were about to be processed
+                # anyway, and the drain rate reported in the receipt would
+                # overstate itself.
+                backfill_pool = [
+                    pr
+                    for pr in wider
+                    if _as_int(pr.get("number")) not in forward_numbers
+                ]
+                # Oldest first, then by number. Deterministic so a retry inside
+                # the same rotation period re-examines the same slice, and
+                # oldest-first because the far end of the pool is the part that
+                # has been out of reach longest and would otherwise stay there.
+                backfill_pool.sort(
+                    key=lambda pr: (
+                        str(pr.get("merged_at") or ""),
+                        _as_int(pr.get("number")),
+                    )
+                )
+                backfill_slice = _rotating_slice(
+                    backfill_pool,
+                    request.backfill_max_candidates,
+                    _rotation_tick(now, request.backfill_rotation_minutes),
+                )
+
+            # Forward first, unconditionally. The freshest companion for a
+            # ticket is the one whose verdict should be recorded, and
+            # `seen_tickets` resolves a collision in favour of whichever arm
+            # reaches it first.
+            candidates = [
+                (pr, EnumEvidenceAutocloseArm.FORWARD) for pr in companions
+            ] + [(pr, EnumEvidenceAutocloseArm.BACKFILL) for pr in backfill_slice]
 
         for pr, arm in candidates:
             number = _as_int(pr.get("number"))
@@ -2567,6 +2796,46 @@ class HandlerEvidenceAutocloseSweep:
                 )
                 continue
             ticket_id, ambiguous = _extract_ticket_binding(title, files)
+
+            # OMN-16106. THE NOMINATION GUARD, past the title filter and past
+            # the changed-file listing — the stronger of the two binding
+            # signals. `_fetch_offer_companion` already refuses a companion
+            # whose TITLE binds another ticket; this refuses one whose FILES
+            # do, and it is the net rather than the belt: if the two signals
+            # disagree for a nominated candidate the run must decline, not
+            # adjudicate whichever one it happens to resolve to.
+            #
+            # The refusal is attributed to the NOMINATED ticket, not to the
+            # companion's own binding. An outcome carrying the impostor's
+            # ticket id would report a verdict about a ticket the caller never
+            # named, which is the defect this guard exists to remove — reported
+            # rather than committed.
+            offered_for = offer_bindings.get(number, "")
+            if offered_for and (
+                ambiguous
+                or ticket_id is None
+                or ticket_id.strip().upper() != offered_for
+            ):
+                seen_tickets.add(offered_for)
+                outcomes.append(
+                    ModelEvidenceAutocloseOutcome(
+                        ticket_id=offered_for,
+                        companion_pr_number=number,
+                        companion_pr_url=url,
+                        decision=EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION,
+                        reason=(
+                            f"The companion resolved for offered ticket "
+                            f"{offered_for} does not bind it: its changed-file "
+                            f"listing resolves to "
+                            f"{ticket_id or 'no ticket'}"
+                            f"{' (ambiguous)' if ambiguous else ''}. Refusing "
+                            "to adjudicate a ticket this run was not asked "
+                            "about."
+                        ),
+                        enumeration_arm=arm,
+                    )
+                )
+                continue
 
             if ambiguous:
                 outcomes.append(
@@ -2697,6 +2966,11 @@ class HandlerEvidenceAutocloseSweep:
                 EnumEvidenceAutocloseDecision.SKIPPED_ALREADY_DONE,
                 EnumEvidenceAutocloseDecision.SKIPPED_NO_BINDING,
                 EnumEvidenceAutocloseDecision.SKIPPED_AMBIGUOUS_BINDING,
+                # OMN-16106 Item 1. A nominated ticket with no merged
+                # companion. A skip for the same reason as the four above: the
+                # run formed no opinion about this ticket's evidence, it found
+                # no evidence to form one from.
+                EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION,
                 # OMN-16808: the gap is real and still open, but this run said
                 # nothing new. A skip, not a gap post — counting it under
                 # `gap_posted` would report comments that were never written.
@@ -2781,7 +3055,20 @@ class HandlerEvidenceAutocloseSweep:
                 if backfill_error
                 else ""
             ),
-            companions_scanned=len(companions) + len(backfill_slice),
+            # OMN-16106 Item 1. In offer mode `companions` and `backfill_slice`
+            # are both empty by construction -- no window was enumerated -- so
+            # this counts the directly-resolved offers instead. A receipt that
+            # reported 0 companions scanned on a run that adjudicated three
+            # nominated tickets would understate exactly what the run did.
+            companions_scanned=(
+                len(companions) + len(backfill_slice)
+                if not offered
+                else sum(
+                    1
+                    for _pr, arm in candidates
+                    if arm is EnumEvidenceAutocloseArm.OFFER
+                )
+            ),
             backfill_pool_size=len(backfill_pool),
             backfill_candidates_selected=len(backfill_slice),
             bindings_extracted=bindings_extracted,

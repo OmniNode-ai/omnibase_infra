@@ -2127,22 +2127,45 @@ class ProjectionDatabaseBindingTarget:
 #   container memory limit                              1,536 MiB
 #   post-subscription baseline RSS, measured              ~462 MiB
 #   headroom                                            ~1,051 MiB
-#   share allotted to projection reads                     256 MiB
 #   retained cost per row, measured (24.8 MiB / 91,571)      284 B
+#   share claimed by projection reads (the line below)      271 MiB
 #
-# The seam's worst case is MAX_INFLIGHT * MAX_ROWS * 284 B = 271 MiB, which is
-# the whole point of pairing the two: bounding rows alone leaves the loop's
-# default executor free to multiply it by 32, and bounding concurrency alone
-# leaves each call unbounded. `tests/unit/runtime/auto_wiring/
-# test_projection_query_row_budget_omn17888.py` pins this arithmetic, so
-# raising either constant without redoing it fails.
+# THE DECLARED SHARE WAS WRONG UNTIL NOW, and the test that was supposed to
+# pin it did not catch that. The block said "share allotted 256 MiB", the very
+# next sentence said the worst case is 271 MiB, and
+# `test_shipped_bounds_fit_the_runtime_container_budget` asserted a THIRD
+# number, `<= 300 MiB`, while its own docstring repeated 256. Three numbers,
+# no contradiction detected, because the loose bound admitted all of them.
+# The arithmetic is exact and is now stated once:
 #
-# MAX_ROWS also deliberately clears the live hot session (91,633 rows in
-# `session_replay_snapshots` as of 2026-09-07, growing ~800/hour): a bound that
-# refused today's legitimate traffic would be an availability regression
-# dressed up as a memory fix. It leaves roughly six weeks of runway, and it
-# fires as a named refusal rather than as an OOM kill when it is crossed. The
-# repair when that happens is the caller, not this number.
+#   MAX_INFLIGHT * MAX_ROWS * 284 B = 8 * 125,000 * 284 = 284,000,000 B
+#                                   = 270.84 MiB
+#
+# 271 MiB is the real share and is what the test asserts, to the byte. It is
+# 25.8% of the measured 1,051 MiB headroom, leaving ~780 MiB unclaimed, so the
+# correction is a restatement of what already ships and not a widening.
+# Pairing the two constants is the whole point: bounding rows alone leaves the
+# loop's default executor free to multiply it by 32, and bounding concurrency
+# alone leaves each call unbounded.
+#
+# WHAT MAX_ROWS IS NOT. The previous revision of this block justified 125,000
+# as "clears the live hot session (91,633 rows ... growing ~800/hour) ... about
+# six weeks of runway". Both figures were wrong. Re-measured on the .201 dev
+# lane 2026-09-07T15:53Z, that same `session_id`
+# (9787a4a3-ec49-4819-8bdc-5044efb94550) held 100,441 of
+# `session_replay_snapshots`' 103,468 rows and was growing ~3,029 rows/hour --
+# 3.8x the stated rate. The runway was therefore not six weeks but about eight
+# HOURS: the bound would have been crossed around 2026-09-08T00:00Z, after
+# which every event on the busiest session would have been refused.
+#
+# That number is no longer load-bearing, because the caller was repaired in the
+# same change (OMN-17888 D1): `HandlerProjectionSessionReplay.project` used to
+# re-read the WHOLE session on EVERY event -- O(n^2) in session length -- and
+# now issues two indexed single-row reads instead (an equality lookup on
+# `snapshot_id`, and `ORDER BY sequence DESC LIMIT 1` through the ordered-read
+# capability added on this seam below). No caller in the tree now asks this
+# seam an unbounded question. MAX_ROWS is a backstop against the NEXT such
+# caller, not a schedule; when it fires, the repair is that caller.
 PROJECTION_QUERY_MAX_ROWS: Final[int] = 125_000
 
 # `asyncio.to_thread` dispatches onto the running loop's DEFAULT executor,
@@ -2151,6 +2174,23 @@ PROJECTION_QUERY_MAX_ROWS: Final[int] = 125_000
 # count rather than a declared number, and py-spy caught 32 live `asyncio_N`
 # threads with 86% of sampled stacks inside one projection query.
 PROJECTION_HANDLER_MAX_INFLIGHT: Final[int] = 8
+
+# OMN-17888 second pass. Streaming the cursor removed the PYTHON-object term of
+# the per-call allocation but not the libpq one: a psycopg2 cursor with no
+# `name=` is CLIENT-side, so `PQexec` buffers the entire result set inside the
+# connection's PGresult before `for record in cursor` yields its first row.
+# Iterating that is iterating a buffer that already exists -- the per-row budget
+# below cannot refuse rows libpq has already paid for, and the 200.7 MiB of
+# driver rows measured on this seam had a libpq peer nobody accounted for.
+#
+# The read below therefore DECLAREs a server-side (named) cursor and FETCHes it
+# in `itersize` batches, so the client holds at most this many rows at once and
+# the per-row budget is checked against rows that have actually been paid for.
+# 1,000 rows at the measured 284 B is ~277 KiB of client buffer per in-flight
+# read (~2.2 MiB across all 8), against 284,000,000 B if the whole budget were
+# ever buffered. psycopg2's own default is 2,000; this is stated rather than
+# inherited because it is now part of the memory arithmetic above.
+PROJECTION_QUERY_CURSOR_ITERSIZE: Final[int] = 1_000
 
 # Keyed by the running loop rather than constructed once at import: an
 # asyncio.Semaphore binds itself to the first loop that awaits it, and the test
@@ -2782,10 +2822,31 @@ class ProjectionTableOperation:
         )
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
+        """Read rows, optionally ORDERed by one column and LIMITed.
+
+        OMN-17888. ``order_by``/``descending``/``limit`` are the minimal typed
+        capability a caller needs to ask for THE LATEST ROW rather than for the
+        whole partition it would then sort in Python. They are keyword-only and
+        default to the previous behaviour exactly, so every existing caller is
+        byte-unchanged; a caller that supplies none issues the same statement it
+        always did.
+        """
         self._assert_read_declared()
-        return self._adapter._execute_query(self._target, filters, tenant_context=None)
+        return self._adapter._execute_query(
+            self._target,
+            filters,
+            tenant_context=None,
+            order_by=order_by,
+            descending=descending,
+            limit=limit,
+        )
 
 
 class TenantProjectionTableOperation(ProjectionTableOperation):
@@ -2888,7 +2949,12 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
         )
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         self._assert_read_declared()
         context = self._context()
@@ -2913,6 +2979,9 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
                 attributed_filters,
                 tenant_context=None,
                 recorded_scope=_recorded_tenant_scope(attributed_filters),
+                order_by=order_by,
+                descending=descending,
+                limit=limit,
             )
         supplied_tenant = attributed_filters.get("tenant_id")
         if supplied_tenant is not None:
@@ -2922,6 +2991,9 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
             self._target,
             attributed_filters,
             tenant_context=context,
+            order_by=order_by,
+            descending=descending,
+            limit=limit,
         )
 
 
@@ -2939,10 +3011,17 @@ class InternalProjectionTableOperation(ProjectionTableOperation):
         return super().upsert(conflict_key, row)
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         _reject_canonical_tenant_field(filters, domain=self._target.domain)
-        return super().query(filters)
+        return super().query(
+            filters, order_by=order_by, descending=descending, limit=limit
+        )
 
 
 class CatalogProjectionTableOperation(ProjectionTableOperation):
@@ -2953,10 +3032,17 @@ class CatalogProjectionTableOperation(ProjectionTableOperation):
         return super().upsert(conflict_key, row)
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         _reject_canonical_tenant_field(filters, domain=self._target.domain)
-        return super().query(filters)
+        return super().query(
+            filters, order_by=order_by, descending=descending, limit=limit
+        )
 
 
 class ProjectionBindingConnections:
@@ -3033,6 +3119,31 @@ class ProjectionBindingConnections:
     def ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("Projection database adapter is closed")
+
+    @contextlib.contextmanager
+    def read_transaction(self, conn: object) -> Iterator[None]:
+        """Open an explicit transaction block for one unscoped read.
+
+        OMN-17888. The read seam DECLAREs a server-side cursor, and PostgreSQL
+        refuses ``DECLARE CURSOR`` outside a transaction block. The one form
+        that is legal in autocommit -- ``WITH HOLD`` -- materialises the entire
+        result into a server-side tuplestore at commit, which moves the buffer
+        onto the server rather than removing it. The connections this adapter
+        owns sit in autocommit (``get`` sets it), so an unscoped read opens its
+        own transaction and always ends it: committed on success, rolled back on
+        any exception, autocommit restored in ``finally`` either way. Exactly the
+        lifecycle ``tenant_transaction`` guarantees, minus the GUC -- a read that
+        named no tenant scope must not acquire one here.
+        """
+        conn.autocommit = False  # type: ignore[attr-defined]
+        try:
+            yield
+            conn.commit()  # type: ignore[attr-defined]
+        except BaseException:
+            conn.rollback()  # type: ignore[attr-defined]
+            raise
+        finally:
+            conn.autocommit = True  # type: ignore[attr-defined]
 
     @contextlib.contextmanager
     def tenant_transaction(self, conn: object, tenant_scope: str) -> Iterator[None]:
@@ -3202,6 +3313,9 @@ class ProjectionDatabaseOperations:
         *,
         tenant_context: VerifiedProjectionTenantAuthority | None,
         recorded_scope: str | None = None,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         # Schema/table originate in validated typed declarations, never request data.
         select_sql = f'SELECT * FROM "{target.physical_schema}"."{target.table.name}"'  # noqa: S608
@@ -3214,11 +3328,41 @@ class ProjectionDatabaseOperations:
                 raise ValueError(f"Invalid filter keys: {bad_keys!r}")
             select_sql += " WHERE " + " AND ".join(f'"{key}" = %s' for key in filters)
             params = list(filters.values())
+        # OMN-17888. The ORDERED, LIMITED read is the shape a caller uses to ask a
+        # BOUNDED question -- "the latest row of this session" -- instead of
+        # reading the session and sorting it in Python. It is not a silent
+        # truncation of an unbounded question: the caller states the ordering and
+        # the count, so a short answer is the answer it asked for. That is the
+        # exact distinction the budget refusal below preserves, and why the two
+        # coexist rather than one replacing the other.
+        if order_by is not None:
+            if not _TABLE_NAME_RE.fullmatch(str(order_by)):
+                raise ValueError(f"Invalid order_by column: {order_by!r}")
+            direction = "DESC" if descending else "ASC"
+            select_sql += f' ORDER BY "{order_by}" {direction}'
+        elif descending:
+            raise ValueError("descending requires an order_by column")
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+                raise ValueError(f"limit must be a positive int, got {limit!r}")
+            select_sql += " LIMIT %s"
+            params = [*params, limit]
         conn = self._binding_connections.get(target.read_binding)
 
         def _query() -> list[dict[str, object]]:
             cursor_factory = self._extras.RealDictCursor  # type: ignore[attr-defined]
-            with conn.cursor(cursor_factory=cursor_factory) as cursor:  # type: ignore[attr-defined]
+            # A SERVER-side (named) cursor. OMN-17888 second pass: with no
+            # `name=`, psycopg2 issues `PQexec` and libpq buffers the ENTIRE
+            # result set inside the connection's PGresult before the loop below
+            # sees its first row -- so streaming removed the Python-object copy
+            # and left the libpq copy, and the per-row budget could only refuse
+            # rows the process had already paid for. DECLARE + FETCH in
+            # `itersize` batches makes the client-side peak a constant.
+            cursor_name = f"onex_projection_read_{uuid4().hex}"
+            with conn.cursor(  # type: ignore[attr-defined]
+                name=cursor_name, cursor_factory=cursor_factory
+            ) as cursor:
+                cursor.itersize = PROJECTION_QUERY_CURSOR_ITERSIZE
                 cursor.execute(select_sql, params or None)
                 # OMN-17888. Two separate defects lived on this one line, which
                 # read `[dict(record) for record in cursor.fetchall()]`:
@@ -3238,9 +3382,11 @@ class ProjectionDatabaseOperations:
                 #     bound below is checked PER ROW, before the row is kept, so
                 #     the refusal never first allocates the thing it refuses.
                 #
-                # The refusal is deliberate over a `LIMIT`: a truncated result
-                # is indistinguishable from a complete one at the call site, so
-                # a limit would trade an OOM for silently wrong projections.
+                # The refusal is deliberate over appending a `LIMIT` the caller
+                # did not ask for: a truncated result is indistinguishable from
+                # a complete one at the call site, so an implicit limit would
+                # trade an OOM for silently wrong projections. An EXPLICIT
+                # `limit=` above is the opposite -- the caller named the bound.
                 rows: list[dict[str, object]] = []
                 for record in cursor:
                     if len(rows) >= PROJECTION_QUERY_MAX_ROWS:
@@ -3259,7 +3405,12 @@ class ProjectionDatabaseOperations:
 
         scope = _statement_tenant_scope(tenant_context, recorded_scope)
         if scope is None:
-            return _query()
+            # A named cursor cannot be DECLAREd outside a transaction block, and
+            # the connections here sit in autocommit, so the unscoped read opens
+            # (and always ends) its own. The scoped path below is already inside
+            # one.
+            with self._binding_connections.read_transaction(conn):
+                return _query()
         with self._binding_connections.tenant_transaction(conn, scope):
             return _query()
 
@@ -3267,9 +3418,17 @@ class ProjectionDatabaseOperations:
         return self._operation(table).upsert(conflict_key, row)
 
     def query(
-        self, table: str, filters: dict[str, object] | None = None
+        self,
+        table: str,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
-        return self._operation(table).query(filters)
+        return self._operation(table).query(
+            filters, order_by=order_by, descending=descending, limit=limit
+        )
 
 
 # OMN-16874: the capability a runner-shaped handler declares to opt IN to

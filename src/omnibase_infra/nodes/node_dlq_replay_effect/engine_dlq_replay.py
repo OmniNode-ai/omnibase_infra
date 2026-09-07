@@ -19,24 +19,31 @@ it is not reimplemented; it is moved.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaConnectionError, KafkaError
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from omnibase_infra.enums import EnumNonRetryableErrorCategory
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
+from omnibase_infra.event_bus.mixin_kafka_dlq import DLQ_UNREADABLE_VALUE_MARKER
 from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_type import (
     EnumDlqReplayFilterType,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
     ModelDlqMessage,
+)
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_record import (
+    DlqDrainRecord,
+    DlqRecordUnparseableError,
+    ModelUnparseableDlqRecord,
 )
 from omnibase_infra.utils.util_datetime import is_timezone_aware
 
@@ -206,6 +213,29 @@ def should_replay(
     existing non-replayable path (OMN-12619), so it stays durable and
     reclassifiable rather than being dropped.
     """
+    # OMN-17896: the empty-body clause comes FIRST because an empty body is
+    # not a record that MIGHT succeed on a second look -- it is one that is
+    # guaranteed to fail in every consumer of the original topic. Publishing
+    # it produced ~4 zero-byte records/s on the dev lane and 5,535 decode
+    # errors per five minutes, and no other clause in this predicate would
+    # ever have stopped it.
+    if not message.original_value.strip():
+        return (
+            False,
+            "Empty original body: the DLQ record carries no original message "
+            "body, so replaying it would publish a zero-byte record that no "
+            "consumer of the original topic can decode (OMN-17896)",
+        )
+
+    if message.original_value == DLQ_UNREADABLE_VALUE_MARKER:
+        return (
+            False,
+            "Unreadable original body: the DLQ record records that the "
+            f"original value could not be read ({DLQ_UNREADABLE_VALUE_MARKER}); "
+            "those marker bytes are a statement, not a body, and must not be "
+            "published to the original topic (OMN-17896)",
+        )
+
     if _is_boundary_failure_terminal(message.original_value):
         return (
             False,
@@ -311,17 +341,69 @@ class DLQConsumer:
                 self._consumer = None
 
     async def commit(self) -> None:
-        """Commit consumed offsets — only call after durable handling."""
+        """Commit the consumer's POSITION — only call after durable handling.
+
+        Retained for callers that genuinely mean "everything handed out of the
+        iterator completed". ``HandlerDlqReplay`` no longer uses it: a bare
+        position commit advances past any record that was in flight when the
+        loop exited (OMN-17896). Use :meth:`commit_offsets` instead.
+        """
         if self._started and self._consumer is not None:
             await self._consumer.commit()
 
-    async def consume_messages(self) -> AsyncIterator[ModelDlqMessage]:
+    async def commit_offsets(self, offsets: Mapping[tuple[str, int], int]) -> None:
+        """Commit an EXPLICIT offset map built from completed records only.
+
+        ``offsets`` maps ``(topic, partition)`` to the next offset to read —
+        i.e. one past the last record whose handling completed. Committing this
+        rather than the position is what makes a deadline, a cancellation or a
+        failed quarantine publish a REDELIVERY rather than a silent loss
+        (OMN-17896; §4 must-not item 18 of the lab repair plan).
+        """
+        if not offsets:
+            return
+        if self._started and self._consumer is not None:
+            await self._consumer.commit(
+                {
+                    TopicPartition(topic, partition): next_offset
+                    for (topic, partition), next_offset in offsets.items()
+                }
+            )
+
+    async def consume_messages(self) -> AsyncIterator[DlqDrainRecord]:
+        """Yield each DLQ record, parsed — or, when it cannot be parsed, as a
+        typed ``ModelUnparseableDlqRecord`` carrying its raw bytes.
+
+        OMN-17896. This generator performs NO durable write, deliberately. It
+        is driven through ``asyncio.wait_for(anext(...), timeout=remaining)``
+        in ``HandlerDlqReplay.run()``, so anything awaited here is inside that
+        timeout: a deadline landing mid-publish would CANCEL the publish, the
+        handler would catch ``TimeoutError`` as the ordinary idle-topic case,
+        break, and commit — losing the very record the publish was meant to
+        make durable. So the refusal is carried out as a VALUE and the handler
+        quarantines it on its own frame.
+
+        Nothing is skipped. The two bare ``continue`` statements that used to
+        drop a null-valued record and an undecodable-JSON record are gone: the
+        consumer's position has already advanced past both by the time this
+        body runs, so a skip here is a record the trailing commit erases.
+        """
         if not self._started or self._consumer is None:
             raise RuntimeError("Consumer not started")
         try:
             async for msg in self._consumer:
                 if msg.value is None:
                     logger.warning("Null DLQ message value at offset %s", msg.offset)
+                    yield ModelUnparseableDlqRecord(
+                        dlq_topic=self.config.dlq_topic,
+                        dlq_partition=msg.partition,
+                        dlq_offset=msg.offset,
+                        raw_value=None,
+                        reason=(
+                            "DLQ record carries a null value, so no original "
+                            "message can be established from it"
+                        ),
+                    )
                     continue
                 try:
                     decoded_value = msg.value.decode("utf-8")
@@ -333,12 +415,38 @@ class DLQConsumer:
                     logger.warning(
                         "Failed to parse DLQ message at offset %s: %s", msg.offset, exc
                     )
+                    yield ModelUnparseableDlqRecord(
+                        dlq_topic=self.config.dlq_topic,
+                        dlq_partition=msg.partition,
+                        dlq_offset=msg.offset,
+                        raw_value=msg.value,
+                        reason=f"DLQ record body is not JSON: {exc}",
+                    )
                     continue
-                yield ModelDlqMessage.from_kafka_message(
-                    payload=payload,
-                    dlq_offset=msg.offset,
-                    dlq_partition=msg.partition,
-                )
+                try:
+                    parsed = ModelDlqMessage.from_kafka_message(
+                        payload=payload,
+                        dlq_offset=msg.offset,
+                        dlq_partition=msg.partition,
+                    )
+                except (DlqRecordUnparseableError, ValidationError) as exc:
+                    # ONLY these two typed refusals. Never a bare
+                    # ``except Exception``: that would swallow programming
+                    # errors into the quarantine path and hide them.
+                    logger.warning(
+                        "Refusing unparseable DLQ record at offset %s: %s",
+                        msg.offset,
+                        exc,
+                    )
+                    yield ModelUnparseableDlqRecord(
+                        dlq_topic=self.config.dlq_topic,
+                        dlq_partition=msg.partition,
+                        dlq_offset=msg.offset,
+                        raw_value=msg.value,
+                        reason=f"DLQ record could not be parsed: {exc}",
+                    )
+                    continue
+                yield parsed
         except asyncio.CancelledError:
             logger.info("DLQ consumption cancelled")
             raise
@@ -409,6 +517,18 @@ class DLQProducer:
                 ("correlation_id", str(message.correlation_id).encode("utf-8")),
             ]
 
+        # OMN-17896: last-resort refusal. ``should_replay`` already refuses an
+        # empty or unreadable body, so this is unreachable in the wired path --
+        # it is here so that no future caller can publish a zero-byte record
+        # through this producer without saying so out loud.
+        if not message.original_value.strip():
+            raise DlqRecordUnparseableError(
+                "Refusing to replay a record with no original body: encoding it "
+                "would publish a zero-byte record onto "
+                f"{message.original_topic} that no consumer can decode "
+                "(OMN-17896)"
+            )
+
         key = (
             message.original_key.encode("utf-8", errors="replace")
             if message.original_key
@@ -470,8 +590,9 @@ class DLQQuarantineProducer:
         quarantine_correlation_id: UUID,
         source_dlq_topic: str,
     ) -> dict[str, object]:
-        """Build the durable quarantine record payload."""
+        """Build the durable quarantine record payload for a PARSED message."""
         return {
+            "quarantine_class": "parsed_dlq_record",
             "quarantine_correlation_id": str(quarantine_correlation_id),
             "quarantined_at": datetime.now(UTC).isoformat(),
             "quarantined_by": "node_dlq_replay_effect",
@@ -486,16 +607,53 @@ class DLQQuarantineProducer:
             "original_payload": message.raw_payload,
         }
 
+    @staticmethod
+    def build_unparseable_quarantine_payload(
+        record: ModelUnparseableDlqRecord,
+        quarantine_correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Build the durable quarantine payload for a record that would not parse.
+
+        OMN-17896. ``build_quarantine_payload`` reads ``original_topic``,
+        ``correlation_id``, ``error_type``, ``retry_count`` and ``raw_payload``
+        off a constructed ``ModelDlqMessage`` — the exact object whose
+        construction just failed — so it cannot express this record, and
+        inventing those five values would be the fabricated default this whole
+        change exists to remove. The bytes are carried base64-encoded because
+        they are, by definition, not known to be text; the encoding is named in
+        the record rather than assumed. ``quarantine_class`` keeps this
+        distinguishable from a parsed quarantine so a later reclassifier can
+        tell "this could not be parsed" from "this was parsed and refused".
+        """
+        raw = record.raw_value
+        return {
+            "quarantine_class": "unparseable_dlq_record",
+            "quarantine_correlation_id": str(quarantine_correlation_id),
+            "quarantined_at": datetime.now(UTC).isoformat(),
+            "quarantined_by": "node_dlq_replay_effect",
+            "reason": record.reason,
+            "source_dlq_topic": record.dlq_topic,
+            "source_dlq_offset": record.dlq_offset,
+            "source_dlq_partition": record.dlq_partition,
+            "original_raw_value_encoding": "base64",
+            "original_raw_value_b64": (
+                None if raw is None else base64.b64encode(raw).decode("ascii")
+            ),
+            "original_raw_value_bytes": None if raw is None else len(raw),
+        }
+
     async def quarantine_message(
         self,
         message: ModelDlqMessage,
         reason: str,
         quarantine_correlation_id: UUID,
-    ) -> None:
+    ) -> object:
         """Publish a non-replayable message to the quarantine topic.
 
         Raises on publish failure; the caller must NOT record QUARANTINED
-        success unless this returns normally.
+        success unless this returns normally. Returns the broker's own record
+        metadata — the CONFIRMATION of publication — so the caller binds a
+        durability fact rather than the mere absence of an exception.
         """
         if not self._started or self._producer is None:
             raise RuntimeError("Quarantine producer not started")
@@ -513,13 +671,48 @@ class DLQQuarantineProducer:
         ]
         key = str(message.correlation_id).encode("utf-8")
         value = json.dumps(payload).encode("utf-8")
-        await self._producer.send_and_wait(
+        return await self._producer.send_and_wait(
+            self.config.quarantine_topic, value=value, key=key, headers=headers
+        )
+
+    async def quarantine_unparseable_record(
+        self,
+        record: ModelUnparseableDlqRecord,
+        quarantine_correlation_id: UUID,
+    ) -> object:
+        """Publish an UNPARSEABLE DLQ record, raw bytes intact (OMN-17896).
+
+        Raises on publish failure. Returns the broker's record metadata so the
+        caller can bind the confirmation before advancing any offset.
+        """
+        if not self._started or self._producer is None:
+            raise RuntimeError("Quarantine producer not started")
+
+        payload = self.build_unparseable_quarantine_payload(
+            record, quarantine_correlation_id
+        )
+        headers: list[tuple[str, bytes]] = [
+            ("x-quarantine-reason", record.reason.encode("utf-8")),
+            (
+                "x-quarantine-correlation-id",
+                str(quarantine_correlation_id).encode("utf-8"),
+            ),
+            ("x-quarantine-class", b"unparseable_dlq_record"),
+        ]
+        # No correlation id exists for a record that would not parse, so the
+        # key is its DLQ coordinate — deterministic, and never invented.
+        key = (
+            f"{record.dlq_topic}:{record.dlq_partition}:{record.dlq_offset}"
+        ).encode()
+        value = json.dumps(payload).encode("utf-8")
+        return await self._producer.send_and_wait(
             self.config.quarantine_topic, value=value, key=key, headers=headers
         )
 
 
 __all__ = [
     "DLQ_REPLAY_CONSUMER_GROUP",
+    "DLQ_UNREADABLE_VALUE_MARKER",
     "DLQConsumer",
     "DLQProducer",
     "DLQQuarantineProducer",

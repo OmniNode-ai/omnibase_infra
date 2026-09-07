@@ -44,6 +44,7 @@ class EnumNonRetryableErrorCategory(str, Enum):
         CUSTOMER_KEY_REFUSED_ERROR: A customer delegation refused for want of a
             registered provider key (or because the resolved route would have
             run on a platform-owned one)
+        JSON_DECODE_ERROR: The message body is not JSON at all (OMN-17896)
         SECRET_RESOLUTION_ERROR: Secret/credential resolution failures (missing secrets)
         VALIDATION_ERROR: Input/schema validation errors (malformed data)
 
@@ -67,6 +68,9 @@ class EnumNonRetryableErrorCategory(str, Enum):
         - VALIDATION_ERROR: Input data is malformed or violates schema.
           Retrying with the same data will always fail. Requires data
           correction at the source.
+
+        - JSON_DECODE_ERROR: The bytes are not JSON. No amount of retrying
+          turns them into JSON. Requires correction at the producer.
 
     Example:
         >>> from omnibase_infra.enums import EnumNonRetryableErrorCategory
@@ -149,6 +153,23 @@ class EnumNonRetryableErrorCategory(str, Enum):
         The secret either doesn't exist or is inaccessible by policy.
         Retrying will not create the missing secret. Requires secret
         provisioning or policy changes.
+    """
+
+    JSON_DECODE_ERROR = "JSONDecodeError"
+    """The message body could not be JSON-decoded at all (OMN-17896).
+
+    Raised when:
+    - The body is zero bytes (``Expecting value: line 1 column 1 (char 0)``)
+    - The body is truncated or is not JSON in any form
+
+    Why non-retryable:
+        A structurally undecodable body is undecodable on every attempt. Its
+        absence from this set is what let the dev lane replay a ZERO-BYTE
+        record five times per chain instead of exiting on the first pass:
+        measured 2026-09-07, 5,535 ``JSONDecodeError`` lines in a five-minute
+        window out of 27,109, every distinct correlation id appearing 16 times.
+        The replay cap bounded each chain; it never stopped new ones being
+        minted, so the topic sustained ~4 guaranteed-undecodable records/s.
     """
 
     VALIDATION_ERROR = "ValidationError"
@@ -258,6 +279,11 @@ class EnumNonRetryableErrorCategory(str, Enum):
             cls.VALIDATION_ERROR: (
                 "Validation error - input data is malformed or violates schema. "
                 "Requires data correction at the source."
+            ),
+            cls.JSON_DECODE_ERROR: (
+                "JSON decode failure - the message body is not JSON (an empty "
+                "body decodes to nothing at all). Retrying cannot make it "
+                "JSON; requires correction at the producer."
             ),
         }
         return descriptions.get(error_type, "Unknown error category")
