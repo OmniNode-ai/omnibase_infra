@@ -272,14 +272,22 @@ class TestDockerfileSecurity:
         )
 
         gosu_pos = entrypoint_content.index('exec gosu omniinfra "$0" "$@"')
-        for marker in (
-            "stamp_fingerprint",
-            "render_bifrost_delegation_contract",
-            'exec "$@"',
-        ):
-            assert gosu_pos < entrypoint_content.index(marker), (
-                f"Privilege drop must happen before {marker}"
-            )
+        # OMN-17372 collapsed the schema stamp, both renders and the kernel
+        # start into ONE warm interpreter, so the three separate markers this
+        # used to walk (stamp_fingerprint, render_bifrost_delegation_contract,
+        # `exec "$@"`) are now a single launch. The invariant is unchanged and
+        # in fact easier to state: nothing the preflight does -- and it does
+        # everything -- may run as root.
+        preflight_launch = (
+            'exec python -m omnibase_infra.runtime.entrypoint_preflight "$@"'
+        )
+        assert preflight_launch in entrypoint_content, (
+            "Entrypoint must launch the boot preflight; if this moved, re-anchor "
+            "the privilege-drop ordering assertion below on its replacement"
+        )
+        assert gosu_pos < entrypoint_content.index(preflight_launch), (
+            "Privilege drop must happen before the boot preflight runs"
+        )
 
     def test_root_user_is_entrypoint_bootstrap_only(self) -> None:
         """Verify root user is documented as bootstrap-only.
