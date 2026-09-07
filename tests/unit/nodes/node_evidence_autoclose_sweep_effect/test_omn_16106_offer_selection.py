@@ -405,6 +405,108 @@ async def test_a_nominated_ticket_with_no_merged_companion_gets_a_named_outcome(
     assert linear.reads == []
 
 
+async def test_a_fuzzy_search_hit_for_another_ticket_is_never_accepted() -> None:
+    """Found live, on the first real dispatch of this path (run 34157024050).
+
+    ``gh api search/issues?q=repo:...+is:pr+is:merged+OMN-99999`` is a FULL-TEXT
+    query, not an exact-id lookup. GitHub tokenises ``OMN-99999`` and returns
+    loosely related pull requests, so a dispatch offering a ticket with no
+    companion at all came back with ``OMN-16007``'s companion (OCC#6448) — and
+    the run then adjudicated ``OMN-16007``, a ticket nobody nominated, with
+    ``enumeration_arm: offer`` on the outcome. The second dispatch did the same
+    thing with ``OMN-15669``.
+
+    It was harmless only because both were already ``completed`` and the run was
+    a dry run. Under apply, a restrictive selector that reaches a ticket outside
+    its own nomination is the worst failure this field can have: it is
+    unbounded in exactly the direction the design claims to bound.
+
+    The fix does not depend on search semantics, because search semantics are
+    not ours to pin. The resolved companion must BIND the nominated ticket
+    through the same ``_extract_ticket_binding`` the window arms use, and a
+    companion that binds anything else is discarded — leaving the nominated
+    ticket with the honest "no companion" outcome it should have had.
+    """
+    # The search returns a perfectly real, perfectly merged companion — for a
+    # ticket the caller never named.
+    linear = _RecordingLinear()
+    gh = _GhRecorder(
+        search_items={
+            _AGED: [_search_item(_UNLISTED, _UNLISTED_PR, timedelta(days=40))]
+        }
+    )
+    handler, verified = _handler(linear, gh)
+
+    result = await handler.handle(_request(offer_tickets=(_AGED,)))
+
+    assert [o.ticket_id for o in result.outcomes] == [_AGED], (
+        "the run adjudicated a ticket that was not offered — a restrictive "
+        "selector reached outside its own nomination"
+    )
+    assert (
+        result.outcomes[0].decision
+        is EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION
+    )
+    assert result.tickets_flipped == 0
+    assert linear.reads == []
+    assert verified == []
+
+
+async def test_a_search_hit_binding_a_second_ticket_is_discarded_and_the_right_one_kept() -> (
+    None
+):
+    """The filter discards the impostor without discarding the real answer."""
+    linear = _RecordingLinear()
+    gh = _GhRecorder(
+        search_items={
+            _AGED: [
+                _search_item(_UNLISTED, _UNLISTED_PR, timedelta(days=1)),
+                _search_item(_AGED, _AGED_PR, timedelta(days=40)),
+            ]
+        }
+    )
+    handler, _verified = _handler(linear, gh)
+
+    result = await handler.handle(_request(offer_tickets=(_AGED,)))
+
+    assert [o.ticket_id for o in result.outcomes] == [_AGED]
+    assert result.outcomes[0].companion_pr_number == _AGED_PR
+    assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
+
+
+async def test_a_companion_whose_files_bind_a_different_ticket_is_refused() -> None:
+    """Defence in depth, past the title filter.
+
+    The title filter runs on the search payload; the changed-file listing is
+    fetched afterwards and is the stronger binding signal. If the two disagree
+    for an offered candidate, the run must refuse rather than adjudicate
+    whichever one it happens to resolve to.
+    """
+    linear = _RecordingLinear()
+    gh = _GhRecorder()
+    # The companion's title binds the aged ticket; its contract file does not.
+    original = gh.__call__
+
+    async def mismatched(args: list[str], timeout: float) -> tuple[Any, str]:
+        if "/files" in args[2]:
+            gh.paths.append(args[2])
+            return [{"filename": f"contracts/{_UNLISTED}.yaml"}], ""
+        return await original(args, timeout)
+
+    handler, verified = _handler(linear, mismatched)  # type: ignore[arg-type]
+
+    result = await handler.handle(_request(offer_tickets=(_AGED,)))
+
+    assert result.tickets_flipped == 0
+    assert [o.ticket_id for o in result.outcomes] == [_AGED]
+    assert result.outcomes[0].decision in (
+        EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION,
+        EnumEvidenceAutocloseDecision.SKIPPED_AMBIGUOUS_BINDING,
+    )
+    assert linear.state_updates == []
+    assert verified == []
+
+
 async def test_a_failed_offer_resolution_is_a_github_error_not_an_absence() -> None:
     """ "I could not look" must never resolve to "there is nothing there"."""
     linear = _RecordingLinear()

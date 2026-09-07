@@ -2322,6 +2322,7 @@ class HandlerEvidenceAutocloseSweep:
             f"search/issues?q=repo:{repo}+is:pr+is:merged+{ticket_id}"
             "&sort=updated&order=desc&per_page=100"
         )
+        wanted = ticket_id.strip().upper()
         data, error = await self._run_gh_command(
             ["gh", "api", path], gh_timeout_seconds
         )
@@ -2354,6 +2355,30 @@ class HandlerEvidenceAutocloseSweep:
                 continue
             merged_at = str(pull_request.get("merged_at") or "")
             if not merged_at:
+                continue
+            # THE FILTER, and it is not optional. `search/issues` is a
+            # FULL-TEXT query, never an exact-id lookup: GitHub tokenises
+            # `OMN-99999` and returns loosely related pull requests. Measured
+            # live on the first real dispatch of this path (run 34157024050,
+            # 2026-09-07): an offer for a ticket with NO companion at all came
+            # back with OMN-16007's companion (OCC#6448), and the run went on
+            # to adjudicate OMN-16007 — a ticket nobody nominated — carrying
+            # `enumeration_arm: offer`. The second dispatch did the same with
+            # OMN-15669. Both were harmless only because the tickets were
+            # already completed and the run was a dry run.
+            #
+            # A restrictive selector that reaches outside its own nomination is
+            # unbounded in exactly the direction the design claims to bound, so
+            # the title must BIND the nominated ticket through the same
+            # `_extract_ticket_binding` the window arms use. Anything else is
+            # discarded here, which leaves the nominated ticket with the honest
+            # "no companion" outcome it should have had. This does not depend
+            # on search semantics, because search semantics are not ours to
+            # pin.
+            title_binding, _title_ambiguous = _extract_ticket_binding(
+                str(item.get("title") or ""), []
+            )
+            if title_binding is None or title_binding.strip().upper() != wanted:
                 continue
             merged.append(
                 {
@@ -2511,6 +2536,9 @@ class HandlerEvidenceAutocloseSweep:
         backfill_slice: list[dict[str, object]] = []
         backfill_error = ""
         candidates: list[tuple[dict[str, object], EnumEvidenceAutocloseArm]] = []
+        # PR number -> the ticket the CALLER nominated it for. Empty for every
+        # window-arm candidate, because no caller nominated those.
+        offer_bindings: dict[int, str] = {}
 
         # OMN-16106 Item 1. THE RESTRICTIVE SELECTOR, and the branch IS the
         # design. A non-empty `offer_tickets` REPLACES discovery outright: no
@@ -2594,6 +2622,7 @@ class HandlerEvidenceAutocloseSweep:
                         )
                     )
                     continue
+                offer_bindings[_as_int(companion.get("number"))] = offered_ticket
                 candidates.append((companion, EnumEvidenceAutocloseArm.OFFER))
         else:
             companions, enum_error = await self._fetch_merged_companions(
@@ -2767,6 +2796,46 @@ class HandlerEvidenceAutocloseSweep:
                 )
                 continue
             ticket_id, ambiguous = _extract_ticket_binding(title, files)
+
+            # OMN-16106. THE NOMINATION GUARD, past the title filter and past
+            # the changed-file listing — the stronger of the two binding
+            # signals. `_fetch_offer_companion` already refuses a companion
+            # whose TITLE binds another ticket; this refuses one whose FILES
+            # do, and it is the net rather than the belt: if the two signals
+            # disagree for a nominated candidate the run must decline, not
+            # adjudicate whichever one it happens to resolve to.
+            #
+            # The refusal is attributed to the NOMINATED ticket, not to the
+            # companion's own binding. An outcome carrying the impostor's
+            # ticket id would report a verdict about a ticket the caller never
+            # named, which is the defect this guard exists to remove — reported
+            # rather than committed.
+            offered_for = offer_bindings.get(number, "")
+            if offered_for and (
+                ambiguous
+                or ticket_id is None
+                or ticket_id.strip().upper() != offered_for
+            ):
+                seen_tickets.add(offered_for)
+                outcomes.append(
+                    ModelEvidenceAutocloseOutcome(
+                        ticket_id=offered_for,
+                        companion_pr_number=number,
+                        companion_pr_url=url,
+                        decision=EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION,
+                        reason=(
+                            f"The companion resolved for offered ticket "
+                            f"{offered_for} does not bind it: its changed-file "
+                            f"listing resolves to "
+                            f"{ticket_id or 'no ticket'}"
+                            f"{' (ambiguous)' if ambiguous else ''}. Refusing "
+                            "to adjudicate a ticket this run was not asked "
+                            "about."
+                        ),
+                        enumeration_arm=arm,
+                    )
+                )
+                continue
 
             if ambiguous:
                 outcomes.append(
