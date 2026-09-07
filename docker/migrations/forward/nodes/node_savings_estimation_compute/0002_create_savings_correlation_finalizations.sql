@@ -96,7 +96,7 @@ ALTER TABLE omninode_internal.savings_correlation_finalizations ADD COLUMN IF NO
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
+        SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'omninode_internal.savings_correlation_finalizations'::regclass AND contype = 'p'
     ) THEN
         ALTER TABLE omninode_internal.savings_correlation_finalizations
