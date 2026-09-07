@@ -488,7 +488,14 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                     + StepResponse type alias in transition_reducer (OMN-10780)
 # - 152 (2026-05-10): interactive executor + result models (OMN-10782)
 # - 154 (2026-05-21): projection freshness SLA monitor (OMN-11200)
-INFRA_MAX_UNIONS = 154
+# - 155 (2026-09-07): ONE alias, DlqDrainRecord, for what the DLQ drain yields
+#                     (OMN-17896). The drain now surfaces a record it could not
+#                     parse as a typed ModelUnparseableDlqRecord instead of
+#                     skipping it, so the generator's yield type and the
+#                     handler's parameter are genuinely two-shaped. Declared as
+#                     a single `type` alias used at both seams rather than the
+#                     union spelled twice, so this ratchet moves by exactly one.
+INFRA_MAX_UNIONS = 155
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

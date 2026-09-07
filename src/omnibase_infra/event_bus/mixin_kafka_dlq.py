@@ -120,6 +120,16 @@ _REPLAY_COUNT_HEADER: str = "x-replay-count"
 # replay-eligibility check, forcing quarantine instead of blind replay.
 _REPLAY_COUNT_PARSE_FAILURE_SENTINEL: int = 2**31 - 1
 
+# OMN-17896: what a DLQ record writes when the failed message's value could not
+# be established. NEVER an empty string: the replay engine reads this field
+# back and publishes it to the original topic, so an empty string there becomes
+# a ZERO-BYTE record that no consumer can decode -- measured at ~4 records/s on
+# the dev lane, 200 of 200 sampled records zero-byte and replay-stamped. The
+# marker is a statement that the body is unknown, and ``should_replay`` refuses
+# it for exactly that reason. Same shape as the ``"<decode_failed>"`` and
+# ``"<non-serializable>"`` markers this module already writes.
+DLQ_UNREADABLE_VALUE_MARKER: str = "<unreadable_value>"
+
 
 def _extract_replay_count_from_raw_headers(raw_msg: object) -> int:
     """Read the replay lineage count off a DLQ-bound message, if present.
@@ -864,7 +874,17 @@ class MixinKafkaDlq:
 
         # Extract raw data from Kafka message
         raw_key = getattr(raw_msg, "key", None)
-        raw_value = getattr(raw_msg, "value", b"")
+        # OMN-17896: NO silent empty default here. ``getattr(raw_msg, "value",
+        # b"")`` turned "the value could not be read" into "the value was
+        # empty" and wrote that claim into a DURABLE DLQ record; the replay
+        # engine then encoded that empty string and published a ZERO-BYTE
+        # record back onto the original topic (dev lane 2026-09-07: 200 of 200
+        # sampled records both zero-byte and replay-stamped, ~4/s sustained,
+        # 5,535 decode errors in five minutes). A sentinel keeps "absent" and
+        # "genuinely empty" distinguishable, and ``None`` is unreadable too --
+        # ``str(None)`` would have written the four literal bytes ``None``.
+        _value_unset = object()
+        raw_value: object = getattr(raw_msg, "value", _value_unset)
         raw_offset = getattr(raw_msg, "offset", None)
         raw_partition = getattr(raw_msg, "partition", None)
 
@@ -880,14 +900,17 @@ class MixinKafkaDlq:
         except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             key_str = "<decode_failed>"
 
-        try:
-            value_str = (
-                raw_value.decode("utf-8", errors="replace")
-                if isinstance(raw_value, bytes)
-                else str(raw_value)
-            )
-        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
-            value_str = "<decode_failed>"
+        if raw_value is _value_unset or raw_value is None:
+            value_str = DLQ_UNREADABLE_VALUE_MARKER
+        else:
+            try:
+                value_str = (
+                    raw_value.decode("utf-8", errors="replace")
+                    if isinstance(raw_value, bytes)
+                    else str(raw_value)
+                )
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
+                value_str = "<decode_failed>"
 
         # Build DLQ message with failure metadata
         dlq_payload: dict[str, object] = {
