@@ -46,11 +46,21 @@
 --   omnimarket's scripts/application-relation-ownership.yaml (landed first, as
 --   the OMN-15361 ownership gate requires).
 --
--- WHY THERE IS NO OMN-15376 SHAPE-RECONCILIATION BLOCK
---   0001 carries one because its tables predate this migration tree and could
---   already exist with a drifted shape on a long-lived lane. This relation is
---   net-new and has never existed anywhere, so CREATE TABLE IF NOT EXISTS is
---   the whole story and a reconciliation block would be dead code.
+-- WHY THERE IS AN OMN-15376 SHAPE-RECONCILIATION BLOCK ON A NET-NEW TABLE
+--   A first draft omitted it, reasoning that the relation has never existed
+--   anywhere so nothing can have drifted. tests/ci/
+--   test_node_migration_shape_reconciliation.py rejected that, and it is right
+--   to: "net-new" is a claim about the repository, not about any particular
+--   lane. A lane that ran this file from a branch, an experiment, or a rolled
+--   back deploy can already hold a table of this name with a different shape,
+--   and CREATE TABLE IF NOT EXISTS SILENTLY NO-OPS against it -- after which
+--   the first column-dependent statement raises `column "<col>" does not
+--   exist` and ON_ERROR_STOP=1 kills the whole migration Job there. The
+--   argument for skipping the block is exactly the argument that makes the
+--   failure invisible until a lane deploy dies, so the block is here and the
+--   gate is not exempted. On the fresh-create path every guarded add is a
+--   no-op, so both paths end at the same schema. No DROP, no recreate, no
+--   TRUNCATE.
 --
 -- ONE-TIME EFFECT ON A LANE THAT ALREADY HAS ESTIMATES
 --   This table starts empty, so a session already present in `savings_estimates`
@@ -68,6 +78,33 @@ CREATE TABLE IF NOT EXISTS omninode_internal.savings_correlation_finalizations (
     correlation_id UUID NOT NULL,
     finalized_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ---- BEGIN OMN-15376 shape reconciliation: omninode_internal.savings_correlation_finalizations ----
+-- Columns are added WITHOUT NOT NULL: on a drifted pre-existing table with
+-- rows, ADD COLUMN ... NOT NULL with no default raises. The CREATE TABLE above
+-- carries the full constraint set on the fresh-create path, which is the path
+-- every lane is actually on; these guarded adds exist to keep a drifted lane
+-- from dying at the first column-dependent statement, not to re-derive the
+-- constraints.
+ALTER TABLE omninode_internal.savings_correlation_finalizations ADD COLUMN IF NOT EXISTS session_id TEXT;
+ALTER TABLE omninode_internal.savings_correlation_finalizations ADD COLUMN IF NOT EXISTS correlation_id UUID;
+ALTER TABLE omninode_internal.savings_correlation_finalizations ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ DEFAULT NOW();
+
+-- The primary key is what makes the ON CONFLICT (session_id) in
+-- HandlerSavingsCorrelation._record_finalization legal, so a drifted table
+-- without it would fail every marker write rather than fail visibly here.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'omninode_internal.savings_correlation_finalizations'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE omninode_internal.savings_correlation_finalizations
+            ADD CONSTRAINT savings_correlation_finalizations_pkey PRIMARY KEY (session_id);
+    END IF;
+END$$;
+
+-- ---- END OMN-15376 shape reconciliation: omninode_internal.savings_correlation_finalizations ----
 
 -- The anti-join probes by session_id, which the primary key already serves.
 -- This index serves the operational question instead ("what did the batch
