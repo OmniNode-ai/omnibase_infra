@@ -338,3 +338,244 @@ def test_an_unrelated_docker_run_failure_is_not_retried(
         harness.start_redpanda_sasl()
     assert "no such image" in str(failure.value)
     assert len(docker.run_argv()) == 1
+
+
+# ---------------------------------------------------------------------------
+# WHICH broker: a declared one is adopted, and nothing is started
+# ---------------------------------------------------------------------------
+#
+# Operator ruling, 2026-09-07: the harness must not start a Redpanda container
+# on a host that already runs one. The tests below pin the whole resolution
+# order and, just as importantly, pin that every failure of a DECLARED broker
+# is loud -- an incomplete, unreachable or unauthenticated declaration must
+# never fall through to starting a private container, because a gate that goes
+# green on a broker nobody declared says nothing about the one that was.
+
+
+class _FakeExec:
+    """Answers ``docker exec ... rpk`` by whether credentials were passed."""
+
+    def __init__(self, *, authed_rc: int = 0, anon_rc: int = 1) -> None:
+        self.calls: list[list[str]] = []
+        self.authed_rc = authed_rc
+        self.anon_rc = anon_rc
+
+    def __call__(self, cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(cmd))
+        if cmd[:2] == ["docker", "exec"]:
+            credentialled = any(a.startswith("user=") for a in cmd)
+            rc = self.authed_rc if credentialled else self.anon_rc
+            out = "CLUSTER\n" if rc == 0 else ""
+            err = "" if rc == 0 else "unable to request metadata: SASL required\n"
+            return subprocess.CompletedProcess(cmd, rc, out, err)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    def run_argv(self) -> list[list[str]]:
+        return [c for c in self.calls if c[:2] == ["docker", "run"]]
+
+
+# Resolved inside the helper, not at import: on the parent commit these names
+# do not exist, and a module-level lookup would abort collection of the whole
+# file instead of failing the nine assertions that are actually new.
+def _declared_defaults() -> dict[str, str]:
+    return {
+        harness.DECLARED_BOOTSTRAP_ENV: "redpanda.lab.internal:19092",
+        harness.DECLARED_CONTAINER_ENV: "omnibase-infra-redpanda-1",
+        harness.DECLARED_USERNAME_ENV: "lane-principal",
+        harness.DECLARED_PASSWORD_ENV: "lane-secret",
+        harness.DECLARED_MECHANISM_ENV: "SCRAM-SHA-512",
+    }
+
+
+def _declare(monkeypatch: pytest.MonkeyPatch, **overrides: str | None) -> None:
+    for name in (
+        harness.DECLARED_BOOTSTRAP_ENV,
+        harness.DECLARED_CONTAINER_ENV,
+        harness.DECLARED_INTERNAL_ENV,
+        harness.DECLARED_USERNAME_ENV,
+        harness.DECLARED_PASSWORD_ENV,
+        harness.DECLARED_MECHANISM_ENV,
+        harness.ADVERTISE_HOST_ENV,
+        harness.TESTCONTAINERS_HOST_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    values = _declared_defaults()
+    for key, override in overrides.items():
+        if override is None:
+            values.pop(key, None)
+        else:
+            values[key] = override
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_a_declared_broker_is_adopted_and_no_container_is_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ruling, stated as an assertion: declared means nothing is started."""
+    _declare(monkeypatch)
+    exec_fake = _FakeExec()
+    monkeypatch.setattr(subprocess, "run", exec_fake)
+    monkeypatch.setattr(harness, "_tcp_reachable", lambda *_a, **_k: True)
+
+    broker = harness.resolve_broker()
+
+    assert exec_fake.run_argv() == [], (
+        "a broker was DECLARED and the harness started a container anyway"
+    )
+    assert broker.owned is False
+    assert broker.bootstrap == "redpanda.lab.internal:19092"
+    assert broker.container == "omnibase-infra-redpanda-1"
+    # The declared credentials, not the harness's synthetic constants, are what
+    # the client env and in-container rpk carry.
+    assert broker.env()["KAFKA_SASL_USERNAME"] == "lane-principal"
+    assert broker.env()["KAFKA_SASL_MECHANISM"] == "SCRAM-SHA-512"
+    assert any("user=lane-principal" in a for c in exec_fake.calls for a in c)
+
+
+def test_resolve_broker_starts_a_container_only_when_nothing_is_declared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The developer-laptop / hosted-runner branch is the FALLBACK, not the
+    default -- and it still advertises a caller-reachable host."""
+    for name in (
+        harness.DECLARED_BOOTSTRAP_ENV,
+        harness.ADVERTISE_HOST_ENV,
+        harness.TESTCONTAINERS_HOST_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    docker = _FakeDocker()
+    _install(monkeypatch, docker, reachable=True)
+
+    broker = harness.resolve_broker()
+
+    assert docker.run_argv(), "nothing was declared and no container was started"
+    assert broker.owned is True
+    assert _GATEWAY in _flag(docker.run_argv()[0], "--advertise-kafka-addr")
+
+
+def test_an_incomplete_declaration_fails_fast_and_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A half-declared broker is an error, never a silent private container."""
+    _declare(monkeypatch, **{harness.DECLARED_USERNAME_ENV: None})
+    exec_fake = _FakeExec()
+    monkeypatch.setattr(subprocess, "run", exec_fake)
+    monkeypatch.setattr(harness, "_tcp_reachable", lambda *_a, **_k: True)
+
+    with pytest.raises(harness.HarnessError) as raised:
+        harness.resolve_broker()
+
+    assert harness.DECLARED_USERNAME_ENV in str(raised.value)
+    assert exec_fake.run_argv() == []
+
+
+def test_an_unreachable_declared_broker_fails_and_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reachability is proven on the CLIENT path before any test runs.
+
+    This is the OMN-18012 check itself, applied to the adopted broker: the
+    in-container probe answers from the one namespace where the address is
+    always right.
+    """
+    _declare(monkeypatch)
+    exec_fake = _FakeExec()
+    monkeypatch.setattr(subprocess, "run", exec_fake)
+    monkeypatch.setattr(harness, "_tcp_reachable", lambda *_a, **_k: False)
+
+    with pytest.raises(harness.HarnessError) as raised:
+        harness.resolve_broker()
+
+    message = str(raised.value)
+    assert harness.DECLARED_BOOTSTRAP_ENV in message
+    assert "redpanda.lab.internal:19092" in message
+    assert exec_fake.run_argv() == []
+
+
+def test_a_declared_broker_that_does_not_enforce_auth_fails_naming_3276(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SASL requirement does not soften for an adopted broker.
+
+    A no-auth broker makes every assertion in this suite vacuous, so it is a
+    loud failure that names the blocker -- never a skip.
+    """
+    _declare(monkeypatch)
+    exec_fake = _FakeExec(authed_rc=0, anon_rc=0)
+    monkeypatch.setattr(subprocess, "run", exec_fake)
+    monkeypatch.setattr(harness, "_tcp_reachable", lambda *_a, **_k: True)
+
+    with pytest.raises(harness.HarnessError) as raised:
+        harness.resolve_broker()
+
+    message = str(raised.value)
+    assert "UNAUTHENTICATED" in message
+    assert "#3276" in message
+    assert exec_fake.run_argv() == []
+
+
+def test_a_declared_broker_whose_credentials_are_refused_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _declare(monkeypatch)
+    exec_fake = _FakeExec(authed_rc=1, anon_rc=1)
+    monkeypatch.setattr(subprocess, "run", exec_fake)
+    monkeypatch.setattr(harness, "_tcp_reachable", lambda *_a, **_k: True)
+
+    with pytest.raises(harness.HarnessError) as raised:
+        harness.resolve_broker()
+
+    assert harness.DECLARED_USERNAME_ENV in str(raised.value)
+
+
+def test_an_adopted_broker_is_never_torn_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tearing down a broker the harness was handed takes down the lane."""
+    calls: list[list[str]] = []
+
+    def record(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", record)
+    harness.stop_redpanda(
+        harness.RedpandaSasl(container="lab-broker", port=19092, owned=False)
+    )
+    assert calls == []
+
+    harness.stop_redpanda(
+        harness.RedpandaSasl(container="omn18012-rp-abc", port=19092, owned=True)
+    )
+    assert calls and calls[0] == ["docker", "rm", "-f", "omn18012-rp-abc"]
+
+
+def test_the_advertise_host_override_wins_over_detection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit override covers a topology neither branch describes."""
+    monkeypatch.delenv(harness.TESTCONTAINERS_HOST_ENV, raising=False)
+    monkeypatch.setenv(harness.ADVERTISE_HOST_ENV, "10.9.9.9")
+    monkeypatch.setattr(harness, "_self_container_id", lambda: None)
+    assert harness.resolve_docker_host_address() == "10.9.9.9"
+
+    monkeypatch.delenv(harness.ADVERTISE_HOST_ENV, raising=False)
+    monkeypatch.setenv(harness.TESTCONTAINERS_HOST_ENV, "10.8.8.8")
+    assert harness.resolve_docker_host_address() == "10.8.8.8"
+
+
+def test_a_malformed_declaration_is_rejected_by_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One host:port, because the harness opens a socket to it."""
+    _declare(monkeypatch, **{harness.DECLARED_BOOTSTRAP_ENV: "a:1,b:2"})
+    exec_fake = _FakeExec()
+    monkeypatch.setattr(subprocess, "run", exec_fake)
+    monkeypatch.setattr(harness, "_tcp_reachable", lambda *_a, **_k: True)
+
+    with pytest.raises(harness.HarnessError) as raised:
+        harness.resolve_broker()
+
+    assert harness.DECLARED_BOOTSTRAP_ENV in str(raised.value)
+    assert exec_fake.run_argv() == []
