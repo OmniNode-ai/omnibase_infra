@@ -217,6 +217,19 @@ skills:
       # it is not a kill switch: ONEX_AUTOCLOSE_DISABLED still halts the whole
       # run regardless of what this names.
       - {name: exclude, payload_field: exclude_tickets, arg_type: string_list}
+      # OMN-16106. THE RESTRICTIVE SELECTOR. `string_list` splits on commas, so
+      # `--offer OMN-16831,OMN-17397` is the wire form -- the same typed
+      # comma-list shape as `--exclude`, deliberately, so neither has to be
+      # re-parsed inside the node. Omitting it (the default, and what every
+      # scheduled tick gets) leaves the forward window and the rotating
+      # backfill slice exactly as they are. Passing it REPLACES that discovery:
+      # only the named tickets are adjudicated, each resolved to its newest
+      # merged OCC companion directly, which is what reaches a companion
+      # outside the freshness window, outside the pool cap and outside the
+      # current slice. It selects WHO is asked and never widens what the flip
+      # predicate accepts; `--exclude` still wins over an offer, before any
+      # GitHub or Linear I/O about it.
+      - {name: offer, payload_field: offer_tickets, arg_type: string_list}
       # OMN-17342. The BACKFILL arm. `--backfill-lookback-hours 0` (the default,
       # and what every scheduled tick gets) leaves the sweep single-armed. A
       # non-zero value adds a second enumeration over a wider window and offers

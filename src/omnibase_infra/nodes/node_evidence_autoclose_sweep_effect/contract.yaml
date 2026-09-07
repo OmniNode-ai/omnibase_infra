@@ -350,6 +350,12 @@ error_handling:
 
       recoverable: false
       retry_strategy: "none"
+    - name: "OFFERED_TICKET_HAS_NO_COMPANION"
+      description: >
+        A caller nominated this ticket in `offer_tickets` and the direct search for its newest merged OCC companion returned nothing — the ticket has no merged evidence companion at all, or none this run's credential can see (OMN-16106). Recorded as SKIPPED_NO_OFFER_COMPANION and counted under tickets_skipped. Deliberately distinct from SKIPPED_NO_BINDING, which means a companion WAS read and carried no resolvable ticket id — a hygiene defect in that companion. This says no companion was found to read, which is a statement about the TICKET's evidence base and is the ordinary answer for work that has not landed. It is recorded rather than dropped because a restrictive selector's value is that its receipt reconciles every nominated ticket to exactly one terminal outcome: an offered ticket absent from the outcomes would be indistinguishable from one the run never considered. A FAILED search is ERROR_GITHUB_API, never this — "I could not look" must never resolve to "there is nothing there".
+
+      recoverable: false
+      retry_strategy: "none"
     - name: "PARENT_HAS_OPEN_CHILDREN"
       description: >
         The ticket is a parent with at least one child not in a completed/canceled state, read live from Linear on this tick (OMN-17658 F-R5-7). Recorded as SKIPPED_HAS_CHILDREN and counted under tickets_skipped. A parent is not done while its own decomposition is open, and dod_verify structurally cannot know that — it verifies the checks in the PARENT's OCC contract, and a child ticket carries its own separate acceptance criteria that never appear there. A `children` connection that cannot be interpreted (absent, malformed, or a full first page that may be truncated) is ERROR_LINEAR_API, never "no children".
@@ -437,6 +443,12 @@ io_operations:
       - gh_timeout_seconds
       - close_if_done_label
       - exclude_tickets
+      # OMN-16106 Item 1. The RESTRICTIVE selector. Empty preserves discovery;
+      # non-empty REPLACES it with a direct newest-merged-companion resolution
+      # per nominated ticket, routed through the identical binding check and
+      # per-ticket pipeline. It selects who is asked; it can never widen what
+      # the flip predicate accepts, and `exclude_tickets` wins over it.
+      - offer_tickets
     output_fields:
       - mode
       - disarm_triggered_by

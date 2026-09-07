@@ -26,6 +26,18 @@ class EnumEvidenceAutocloseArm(StrEnum):
 
     FORWARD = "forward"
     BACKFILL = "backfill"
+    # OMN-16106 Item 1. The RESTRICTIVE arm. Neither a window nor a slice: the
+    # caller named the ticket and its newest merged companion was resolved
+    # directly, so this arm makes NO coverage claim at all — not "nothing
+    # recent was missed" and not "this slice was examined". It claims only
+    # "these named tickets were adjudicated on this run".
+    #
+    # It is a third value rather than a flag on the outcome because the two
+    # existing arms are read as coverage evidence. An offered decision recorded
+    # as FORWARD would make a receipt assert a freshness window the run never
+    # enumerated, which is the same class of claim as a label that reads as a
+    # fact and is not one.
+    OFFER = "offer"
 
 
 __all__ = ["EnumEvidenceAutocloseArm"]

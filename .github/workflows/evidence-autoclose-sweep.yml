@@ -305,6 +305,39 @@ on:
           supplies it and owns its accuracy.
         required: false
         default: ''
+      offer:
+        description: >-
+          OMN-16106. RESTRICTIVE SELECTOR. Comma-separated ticket ids (e.g.
+          "OMN-16831,OMN-17397") this run must adjudicate INSTEAD of its
+          ordinary discovery. Empty (the default, and the value every scheduled
+          tick carries) leaves the forward window and the rotating backfill
+          slice exactly as they are.
+          Non-empty REPLACES discovery — it is not prepended to it. No forward
+          window is enumerated, no backfill pool is paginated, no slice is
+          taken: each named ticket's NEWEST MERGED OCC companion is resolved
+          directly, which reaches a companion outside the freshness window,
+          outside the 200-item pool and outside the current five-wide slice.
+          Filtering the slice never could. A selector that ADDED to discovery
+          would let a one-ticket request drag an unscoped five-wide applying
+          run along behind it, which is exactly what a bounded pilot must not
+          be able to do by accident.
+          It widens WHO is asked and changes nothing about WHAT counts. The
+          resolved companion goes through the identical changed-file binding
+          check and the identical per-ticket pipeline, so the verifier, the
+          AC-coverage guard, the behaviour conjunct, the children conjunct, the
+          cited-PR conjunct, the prior-revert fence, the label gate, the
+          disarm, the flip budget, the comment dedup and the bound readback all
+          still gate the write. `exclude` above wins over an offer, and wins
+          before the companion search runs.
+          There is deliberately no standing repo variable for this. The
+          standing fence ONEX_AUTOCLOSE_EXCLUDE is a variable because a FENCE
+          must reach the runs nobody is watching; an OFFER selects what a run
+          acts on, so a standing one would silently narrow every scheduled tick
+          to a fixed list and stop the closer adjudicating the board — a
+          restriction nobody typed, on every run nobody sees. Per-dispatch or
+          it does not exist.
+        required: false
+        default: ''
       apply:
         description: >-
           OMN-16106 / OMN-17658. WRITE MODE FOR THIS DISPATCH ONLY. The
@@ -324,6 +357,47 @@ on:
         required: false
         type: boolean
         default: false
+
+# OMN-16106 Item 0 — ONE APPLYING SWEEP AT A TIME.
+#
+# This file had no concurrency key at all, so two runs of a writer whose job is
+# to move tickets to Done could overlap: a cron tick and an operator dispatch,
+# or two cron ticks when one runs long against a `dod_verify` budget of ~15s
+# per candidate. Overlapping applying runs read the flip budget, the ticket
+# state, the comment history and the prior-revert history INDEPENDENTLY, so
+# `max_flips_per_run` stops bounding the fleet and the OMN-16808
+# read-before-write comment dedup races itself.
+#
+# WORKFLOW SCOPE, and a LITERAL group. Every trigger of this file — the `*/30`
+# cron and every manual dispatch — is one group member. A group rendered from
+# an expression (`${{ github.event_name }}`, `${{ github.ref }}`) reads like
+# serialization and puts the scheduled writer and the dispatched writer in
+# different groups, which is the same as having no key for the one overlap that
+# matters.
+#
+# `cancel-in-progress: false` because pre-empting this writer is not safe: the
+# run being cancelled may have written a Done and not yet read it back, which
+# is the exact shape that produces ERROR_READBACK_UNCONFIRMED and the OMN-16106
+# rollback path. Waiting is correct; cancelling is not.
+#
+# WHAT THIS DOES NOT DO, stated rather than implied. GitHub keeps one RUNNING
+# member plus at most one PENDING member per group, and a later queued run
+# REPLACES the earlier pending one — the replaced run is cancelled, not
+# deferred. A cancelled pending run is not a completed run. So a pilot must
+# reconcile every selected ticket to a terminal outcome and re-offer whatever a
+# replacement discarded, after re-reading binding, ticket state, claims and the
+# five-flip budget. No YAML key can discharge that, and a comment here claiming
+# otherwise would be a string that reads as a fact and is not one.
+#
+# It also serializes a DIAGNOSTIC dispatch against an applying run, which is a
+# conservative cost accepted deliberately for this first landing: applying-mode
+# selection is not resolvable before job start, so a separate diagnostic group
+# would have to be chosen from an input that a scheduled run does not carry.
+# Splitting the groups waits on a test proving no writer can escape the common
+# one.
+concurrency:
+  group: evidence-autoclose-apply
+  cancel-in-progress: false
 
 env:
   UV_VERSION: "0.8.3"
@@ -1671,6 +1745,18 @@ jobs:
           # "no standing exclusions" — a repo with no such variable behaves
           # exactly as it did before this line existed.
           STANDING_EXCLUDE_TICKETS: ${{ vars.ONEX_AUTOCLOSE_EXCLUDE }}
+          # OMN-16106. Same discipline as EXCLUDE_TICKETS and for the same
+          # reason: a workflow_dispatch STRING input is operator-typed text,
+          # and `${{ ... }}` pasted into a `run:` body is substituted before
+          # bash parses the line, so its characters would become shell syntax.
+          # As `"${OFFER_TICKETS}"` it is a value. Renders as the empty string
+          # on schedule (no inputs), which the guard below reads as "no offer"
+          # — so every scheduled tick keeps its ordinary forward + backfill
+          # discovery, by the structure of the expression rather than by a
+          # convention someone has to remember. There is no vars.* counterpart
+          # here on purpose: a standing offer would narrow every unattended run
+          # to a fixed list.
+          OFFER_TICKETS: ${{ github.event.inputs.offer || '' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # OMN-16846 changed what UV_NO_SYNC was for; OMN-16902 removed it.
           #
@@ -1887,6 +1973,24 @@ jobs:
           else
             echo "fence: none — no ticket is excluded from this run"
           fi
+          # OMN-16106. The RESTRICTIVE SELECTOR enters through a shell array
+          # like every other value, never as a literal on the invocation line,
+          # so an unconditional flag and a guarded one cannot read the same in
+          # a diff. Empty (every scheduled tick) leaves the array empty and the
+          # run keeps its ordinary discovery.
+          offer_tickets=""
+          for candidate in ${OFFER_TICKETS//,/ }; do
+            [ -n "${candidate}" ] || continue
+            offer_tickets="${offer_tickets:+${offer_tickets},}${candidate}"
+          done
+          OFFER_LIST="${offer_tickets}"
+          offer_args=()
+          if [ -n "${OFFER_LIST}" ]; then
+            offer_args+=(--offer "${OFFER_LIST}")
+            echo "::warning title=RESTRICTIVE OFFER::This run adjudicates ONLY ${OFFER_LIST}. Ordinary discovery is REPLACED, not extended: no forward window is enumerated, no backfill pool is paginated and no slice is taken. Each named ticket's newest merged OCC companion is resolved directly and routed through the unchanged binding check and flip predicate. A ticket absent from this run's outcomes was not refused — it was not asked."
+          else
+            echo "offer: none — this run uses its ordinary forward-window and rotating-backfill discovery"
+          fi
           # OMN-17342. The backfill flag enters the way `--apply` and
           # `--exclude` do — only through a shell array, never as a literal on
           # the invocation line — so a guard and an unconditional flag cannot
@@ -1972,6 +2076,7 @@ jobs:
             --trigger "${SWEEP_TRIGGER}" \
             ${backfill_args[@]+"${backfill_args[@]}"} \
             ${exclude_args[@]+"${exclude_args[@]}"} \
+            ${offer_args[@]+"${offer_args[@]}"} \
             ${disarm_args[@]+"${disarm_args[@]}"} \
             ${apply_args[@]+"${apply_args[@]}"}
 
