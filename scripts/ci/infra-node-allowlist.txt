@@ -7,7 +7,6 @@
 src/omnibase_infra/nodes/node_architecture_validator/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_architecture_validator/handlers/handler_architecture_validation.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_artifact_change_detector_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
-src/omnibase_infra/nodes/node_artifact_change_detector_effect/handlers/handler_contract_file_watcher.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_artifact_change_detector_effect/handlers/handler_manual_trigger.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_artifact_change_detector_effect/handlers/handler_pr_webhook_ingestion.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_artifact_reconciliation_orchestrator/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
