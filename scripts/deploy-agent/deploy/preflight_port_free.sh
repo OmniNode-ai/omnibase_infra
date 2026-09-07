@@ -28,6 +28,24 @@
 # `lsof` is the fallback. Both are run WITHOUT elevation, so a holder owned by
 # another user may be reported without its pid -- that is still a refusal, just
 # a less specific one.
+#
+# A tool that fails to RUN is not a tool that found nothing. `ss` exits 0 for a
+# successful query whether or not it matched; any non-zero status means the
+# query did not happen (unsupported filter syntax on an older iproute2, a
+# netlink error, /proc/net unreadable in a restricted namespace). `lsof` is the
+# exception that has to be special-cased: it exits 1 when the query ran and
+# matched nothing, so only exit >= 2 is a failure there. Getting this wrong is
+# how a fail-closed check silently becomes fail-open.
+#
+# LIMIT, stated rather than implied: this is a diagnostic refusal, NOT a port
+# reservation. It proves the port free at time T; ExecStart binds at some later
+# T+d and nothing holds the port across that gap. The authoritative arbiter is
+# and remains the bind in ExecStart, which fails the unit if it loses a race.
+# What the preflight buys is a legible, early, non-destructive refusal that
+# names the holder, instead of a bind error with no attribution -- and, unlike
+# the form it replaces, it never disturbs the process it found. The two agent
+# units bind different ports (8098 dev, 8099 prod), so they cannot contend with
+# each other; the residual race is against an unrelated process.
 
 set -eu
 
@@ -46,12 +64,27 @@ if [ "${PORT}" -lt 1 ] || [ "${PORT}" -gt 65535 ]; then
 fi
 
 HOLDERS=''
+PROBE_RC=0
 
+# stderr from the probe is deliberately NOT discarded: when the query fails,
+# the reason belongs in the journal right next to the refusal.
 if command -v ss >/dev/null 2>&1; then
   # -H no header, -l listening, -t tcp, -n numeric, -p show the owning process.
-  HOLDERS="$(ss -Hltnp "sport = :${PORT}" 2>/dev/null || true)"
+  HOLDERS="$(ss -Hltnp "sport = :${PORT}")" || PROBE_RC=$?
+  if [ "${PROBE_RC}" -ne 0 ]; then
+    echo "preflight_port_free: 'ss' exited ${PROBE_RC} querying port ${PORT}, so the" >&2
+    echo "  port's state is unproven. Refusing to start (fail-closed)." >&2
+    exit 2
+  fi
 elif command -v lsof >/dev/null 2>&1; then
-  HOLDERS="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)"
+  # lsof exits 1 when the query ran and matched nothing -- that is the "free"
+  # answer, not a failure. Only exit >= 2 means the query itself did not run.
+  HOLDERS="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN)" || PROBE_RC=$?
+  if [ "${PROBE_RC}" -gt 1 ]; then
+    echo "preflight_port_free: 'lsof' exited ${PROBE_RC} querying port ${PORT}, so the" >&2
+    echo "  port's state is unproven. Refusing to start (fail-closed)." >&2
+    exit 2
+  fi
 else
   echo "preflight_port_free: neither 'ss' nor 'lsof' is available, so freedom of" >&2
   echo "  port ${PORT} cannot be proven. Refusing to start (fail-closed)." >&2

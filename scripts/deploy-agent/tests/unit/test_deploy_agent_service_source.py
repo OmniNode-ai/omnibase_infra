@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Systemd unit must execute deploy-agent code from the canonical repo copy."""
 
+import os
 import shutil
 import socket
 import subprocess
@@ -270,8 +271,99 @@ def test_preflight_refuses_and_names_the_holder_without_stopping_it() -> None:
         assert result.returncode == 1, (result.returncode, result.stderr)
         assert f"port {port} is already in use" in result.stderr
         assert "Refusing to start" in result.stderr
+        # "Names the holder" is the whole point of replacing the kill-first
+        # form, so assert the identity actually reaches stderr rather than
+        # only that *some* refusal was printed. The holder here is this very
+        # pytest process, so an unprivileged probe can always attribute it.
+        assert str(os.getpid()) in result.stderr, result.stderr
         # The holder must still be listening: the preflight observes, never acts.
         holder.setblocking(False)
         with socket.socket() as client:
             client.settimeout(2)
             client.connect(("127.0.0.1", port))
+
+
+def _write_stub(directory: Path, name: str, body: str) -> None:
+    stub = directory / name
+    stub.write_text(body)
+    stub.chmod(0o755)
+
+
+def test_preflight_fails_closed_when_the_probe_tool_errors(tmp_path: Path) -> None:
+    """A probe that fails to RUN is exit 2, never a silent "port is free".
+
+    Both probes were previously invoked as ``$(... 2>/dev/null || true)``, which
+    maps *every* tool failure -- unsupported filter syntax on an older
+    iproute2, a netlink error, /proc/net unreadable in a restricted namespace
+    -- onto an empty holder list and therefore onto exit 0. That is fail-OPEN,
+    and it silently contradicted the docblock's fail-closed contract. Shim both
+    tools onto failing stubs and assert the refusal (hostile-reviewer MAJOR
+    fp=b71ceadd2319).
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _write_stub(bindir, "ss", '#!/bin/sh\necho "ss: netlink error" >&2\nexit 1\n')
+    # lsof exit 1 means "ran, matched nothing"; 2 is a genuine failure.
+    _write_stub(bindir, "lsof", '#!/bin/sh\necho "lsof: fatal" >&2\nexit 2\n')
+
+    result = subprocess.run(
+        [str(_PREFLIGHT), "8098"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PATH": str(bindir)},
+    )
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert "unproven" in result.stderr, result.stderr
+
+
+def test_preflight_fails_closed_when_no_probe_tool_exists(tmp_path: Path) -> None:
+    """No `ss` and no `lsof` is unprovable, so it refuses (exit 2)."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = subprocess.run(
+        [str(_PREFLIGHT), "8098"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PATH": str(empty)},
+    )
+    assert result.returncode == 2, (result.returncode, result.stderr)
+    assert "neither 'ss' nor 'lsof'" in result.stderr
+
+
+def test_lsof_no_match_exit_1_is_free_not_an_error(tmp_path: Path) -> None:
+    """Negative control for the test above: lsof's exit 1 must stay "free".
+
+    `lsof` exits 1 when the query ran and matched nothing. Treating every
+    non-zero probe status as a failure would turn the common "port is free"
+    case into a permanent refusal, so the lsof branch must special-case it.
+    Only `lsof` is on PATH here, which forces the fallback branch.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _write_stub(bindir, "lsof", "#!/bin/sh\nexit 1\n")
+
+    result = subprocess.run(
+        [str(_PREFLIGHT), "8098"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PATH": str(bindir)},
+    )
+    assert result.returncode == 0, (result.returncode, result.stderr)
+
+
+def test_units_bound_the_fail_fast_restart_loop() -> None:
+    """A refusal must stop, not re-refuse every RestartSec forever.
+
+    Restart=on-failure with RestartSec=5 spaces five restarts over ~25s, which
+    never trips systemd's default start limit of 5 starts in 10s -- so before
+    this the unit would re-run the refusing preflight every five seconds for as
+    long as the collision lasted (hostile-reviewer MINOR fp=b58479fbe9d6).
+    """
+    for unit_name in ("deploy-agent.service", "deploy-agent-dev.service"):
+        text = (_DEPLOY_DIR / unit_name).read_text()
+        directives = [ln.strip() for ln in text.splitlines()]
+        assert "StartLimitIntervalSec=300" in directives, unit_name
+        assert "StartLimitBurst=5" in directives, unit_name
