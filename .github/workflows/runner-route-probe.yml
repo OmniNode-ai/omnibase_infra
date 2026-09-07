@@ -68,15 +68,27 @@ jobs:
         env:
           RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          # Passed as data, never interpolated into the shell body -- see the
+          # long note in runner-route-reusable.yml. A JSON array rendered into
+          # a quoted argv loses its inner quotes and reaches the module as
+          # non-JSON, which is how the merged pilot's first live decision came
+          # back `probe_error:seam_unparseable` on run 34131479134.
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          SEAM_JSON: >-
+            ${{ (github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON)
+                || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}
+          PUBLIC_JSON: ${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}
         run: |
           set -uo pipefail
           python3 scripts/ci/runner_route_decision.py \
-            --event-name "${{ github.event_name }}" \
-            --head-repo "${{ github.event.pull_request.head.repo.full_name }}" \
-            --repository "${{ github.repository }}" \
+            --event-name "${EVENT_NAME}" \
+            --head-repo "${HEAD_REPO}" \
+            --repository "${REPOSITORY}" \
             --workflow-path ".github/workflows/runner-route-probe.yml" \
-            --seam-json "${{ vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}" \
-            --public-json "${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}" \
+            --seam-json "${SEAM_JSON}" \
+            --public-json "${PUBLIC_JSON}" \
             --policy config/runner_routing_policy.yaml || true
           if ! grep -q '^labels=' "${GITHUB_OUTPUT}"; then
             echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
