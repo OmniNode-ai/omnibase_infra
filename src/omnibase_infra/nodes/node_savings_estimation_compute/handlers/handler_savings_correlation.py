@@ -44,23 +44,39 @@ savings from delegate-skill dispatch evaluation) is intentionally OUT of
 scope here — it is covered by the active OMN-15800 savings.v1 dashboard
 workstream.
 
-The one cross-domain read, and why it is guarded (OMN-16770)
-------------------------------------------------------------
-Four of the five relations ``_find_ready_sessions`` joins are INTERNAL-domain
-and granted to this pool's principal. The fifth, ``savings_estimates``, is
-not: it is TENANT-domain, under ``FORCE ROW LEVEL SECURITY`` with a policy
-predicated on the ``app.tenant_id`` GUC, and this pool connects as
-``omninode_runtime`` — NOSUPERUSER, NOBYPASSRLS, non-owner by design
-(OMN-16843). Because the handler takes a RAW injected ``asyncpg`` pool rather
-than a contract-declared table operation, that read never passes through
-``ProjectionTableOperation._assert_read_declared``, the seam that fails closed
-on an undeclared relation. Nothing could refuse it at declaration time, so it
-was only ever going to surface at runtime.
+Idempotency is INTERNAL-domain, and why (OMN-16770)
+---------------------------------------------------
+``_find_ready_sessions`` decides which sessions are still un-finalized with an
+anti-join. Until OMN-16770's durable close that anti-join read
+``savings_estimates`` — a TENANT relation under ``FORCE ROW LEVEL SECURITY``
+with a policy predicated on the ``app.tenant_id`` GUC, which this node neither
+owns nor writes, over a pool that connects as ``omninode_runtime``
+(NOSUPERUSER, NOBYPASSRLS, non-owner by design, OMN-16843).
 
-``_assert_idempotency_read_is_scoped`` is that missing refusal, moved to the
-last place it can still be made: the connection itself, immediately before the
-statement that depends on it. See
-:class:`SavingsCorrelationUnscopedReadError` for why a ``GRANT`` is not the
+Row-level security fails OPEN from the caller's side: with no GUC bound the
+policy evaluates to NULL for every row, the subquery matches nothing, and
+``NOT EXISTS`` becomes universally true — every session reads as never
+finalized and the batch re-publishes an estimate for every session on every
+tick. A bare ``GRANT SELECT`` is what produces that, not what fixes it. So
+``_assert_idempotency_read_is_scoped`` refuses instead, and because this node
+carries no tenant attribution of its own to bind (neither signal table has a
+``tenant_id`` column; inventing one is what the OMN-16831 ruling forbids), the
+refusal was permanent — 480 refusals in four hours on the ``.201`` dev lane,
+and no estimate ever produced on any lane.
+
+The close is to stop reading a TENANT relation for INTERNAL idempotency at
+all. This node now records each estimate it publishes in
+``omninode_internal.savings_correlation_finalizations``
+(``0002_create_savings_correlation_finalizations.sql``, ownership declared in
+omnimarket's ``scripts/application-relation-ownership.yaml``) and anti-joins
+THAT — a relation it owns, writes, and can read truthfully under its own
+binding.
+
+The seam is unchanged and still runs on the same connection immediately before
+the candidate query. It is not deleted and not softened: it now passes BY
+CONSTRUCTION, and it still refuses if the relation the anti-join reads ever
+becomes unanswerable again. See
+:class:`SavingsCorrelationUnscopedReadError` for why a ``GRANT`` was never the
 fix.
 
 Ticket: OMN-16293, OMN-16770
@@ -129,13 +145,18 @@ DEFAULT_QUERY_TIMEOUT: float = 10.0
 #: platform compares ``tenant_id`` against.
 TENANT_GUC: str = "app.tenant_id"
 
-#: The one relation ``_find_ready_sessions`` reads that this node neither owns
-#: nor writes. It is TENANT-domain, written cross-repo by omnibase_infra's
-#: vendored ``node_projection_savings`` over the tenant binding, and put under
-#: ``ENABLE`` + ``FORCE ROW LEVEL SECURITY`` by
-#: ``081_savings_estimates_rls_tenant_isolation.sql`` with the policy
-#: ``tenant_id = current_setting('app.tenant_id', true)``.
-IDEMPOTENCY_RELATION: str = "savings_estimates"
+#: This node's own record of what it has already published, created by
+#: ``0002_create_savings_correlation_finalizations.sql``. INTERNAL-domain: no
+#: ``tenant_id`` column and no row-level security, because finalization is a
+#: fact about this node's publishing rather than about a tenant. It replaces
+#: the TENANT relation ``savings_estimates`` that ``_find_ready_sessions``
+#: used to anti-join — the relation this node neither owns nor writes, and
+#: could never read truthfully under its own binding (OMN-16770).
+FINALIZATION_RELATION: str = "omninode_internal.savings_correlation_finalizations"
+
+#: The relation the seam probes. It is the relation the anti-join reads — a
+#: guard aimed anywhere else is a no-op — so these are one name, not two.
+IDEMPOTENCY_RELATION: str = FINALIZATION_RELATION
 
 #: Both premises in ONE round trip, so they are answered at the same instant,
 #: on the same pooled connection that is about to run the anti-join. Reading
@@ -151,15 +172,22 @@ _TENANT_SCOPE_PROBE_SQL = """
 class SavingsCorrelationUnscopedReadError(RuntimeHostError):
     """The idempotency read cannot be trusted, so the batch refuses to run.
 
-    OMN-16770. ``_find_ready_sessions`` closes its candidate query with
+    OMN-16770. ``_find_ready_sessions`` closes its candidate query with an
+    anti-join, and this class is what refuses when that anti-join cannot be
+    answered truthfully.
 
-        ``AND NOT EXISTS (SELECT 1 FROM savings_estimates se WHERE ...)``
-
-    an anti-join over a FORCE-RLS relation whose policy is predicated on the
-    ``app.tenant_id`` GUC. The pool that runs it is built from
-    ``OMNINODE_INTERNAL_DB_URL``, whose principal ``omninode_runtime`` is
+    It was written for the case that made it necessary: the anti-join then
+    read ``savings_estimates``, a FORCE-RLS relation whose policy is
+    predicated on the ``app.tenant_id`` GUC, over a pool built from
+    ``OMNINODE_INTERNAL_DB_URL`` whose principal ``omninode_runtime`` is
     pinned NOSUPERUSER / NOBYPASSRLS / non-owner (OMN-16843,
-    ``docker/docker-compose.infra.yml``).
+    ``docker/docker-compose.infra.yml``). That read is gone — the anti-join
+    now reads :data:`FINALIZATION_RELATION`, which this node owns and writes —
+    so the guard passes by construction rather than by grant. It is kept, and
+    kept in the same place, because what it actually asserts is a property of
+    the CONNECTION and not of one relation name: if the relation the anti-join
+    reads ever acquires a policy this node has no scope to satisfy, the
+    inversion below is available again, and this refusal is what stops it.
 
     Postgres row-level security fails OPEN from the caller's point of view.
     With the GUC unset, ``tenant_id = current_setting('app.tenant_id', true)``
@@ -170,19 +198,19 @@ class SavingsCorrelationUnscopedReadError(RuntimeHostError):
 
     That is why the obvious remediation for the live
     ``InsufficientPrivilegeError`` — ``GRANT SELECT ON savings_estimates TO
-    omninode_runtime`` — is the WRONG fix. It does not make the read correct;
+    omninode_runtime`` — was the WRONG fix. It does not make the read correct;
     it makes the read silently, unboundedly wrong, and converts a visible
-    error into no error at all. This class is what a grant would run into
-    instead.
+    error into no error at all.
 
-    Refusing is the honest outcome, not a degradation: this handler carries no
-    tenant attribution of its own (its ``savings_injection_signals`` /
-    ``savings_validator_catch_signals`` tables have no ``tenant_id`` column),
-    so there is no scope for it to bind that would not be invented — and
-    inventing one is exactly what the OMN-16831 ruling forbids. The durable
-    close is to stop reading a TENANT relation for INTERNAL idempotency at
-    all; until that lands, this refusal is what keeps the anti-join from
-    inverting.
+    Refusing was the honest outcome, not a degradation — but it was also not a
+    resting state. This handler carries no tenant attribution of its own (its
+    ``savings_injection_signals`` / ``savings_validator_catch_signals`` tables
+    have no ``tenant_id`` column), so there was no scope it could bind that
+    would not be invented, which the OMN-16831 ruling forbids. That left the
+    batch refusing on every tick forever. The durable close, landed, is the
+    one this class's own text named: stop reading a TENANT relation for
+    INTERNAL idempotency, and track finalization in this node's own
+    ``omninode_internal`` domain.
     """
 
 
@@ -236,9 +264,13 @@ async def _assert_idempotency_read_is_scoped(conn: asyncpg.Connection) -> None:
         f"`NOT EXISTS ({IDEMPOTENCY_RELATION})` anti-join would report every "
         f"session as un-finalized — re-publishing an estimate for every "
         f"session on every tick. Granting SELECT does not fix this; it is "
-        f"what produces it. Either read as a role row-level security does not "
-        f"apply to, or bind {TENANT_GUC} for the scope being read "
-        f"(OMN-16770)."
+        f"what produces it. {IDEMPOTENCY_RELATION} is this node's OWN "
+        f"internal relation and carries no row-level security by design "
+        f"(0002_create_savings_correlation_finalizations.sql), so reaching "
+        f"this branch means a policy was added to it — remove that policy "
+        f"rather than binding {TENANT_GUC} here, because this node has no "
+        f"tenant attribution to bind and inventing one is what the OMN-16831 "
+        f"ruling forbids (OMN-16770)."
     )
 
 
@@ -601,18 +633,22 @@ class HandlerSavingsCorrelation:
                 )
             )
             AND NOT EXISTS (
-                SELECT 1 FROM savings_estimates se WHERE se.session_id = cs.session_id
+                SELECT 1 FROM omninode_internal.savings_correlation_finalizations se
+                WHERE se.session_id = cs.session_id
             )
             ORDER BY cs.session_id
             LIMIT $4
         """
         async with self._pool.acquire() as conn:
             await set_statement_timeout(conn, self._query_timeout * 1000)
-            # OMN-16770: the anti-join above reads savings_estimates, a
-            # FORCE-RLS tenant relation this node neither owns nor writes. The
-            # probe runs FIRST, on this same connection: a refusal raised
-            # after the query would already have executed the inverted
-            # anti-join, and its all-sessions answer is the whole harm.
+            # OMN-16770: the anti-join above reads this node's OWN internal
+            # relation, so the probe passes by construction — it is kept, and
+            # kept HERE, because what it asserts is a property of the
+            # connection: a refusal raised after the query would already have
+            # executed an inverted anti-join, and its all-sessions answer is
+            # the whole harm. The probe stays in front of the statement it
+            # protects so that adding a policy to the relation surfaces as a
+            # refusal rather than as silent duplicate publishing.
             await _assert_idempotency_read_is_scoped(conn)
             rows = await conn.fetch(
                 sql,
@@ -622,6 +658,41 @@ class HandlerSavingsCorrelation:
                 self._batch_size,
             )
         return [str(row["session_id"]) for row in rows]
+
+    async def _record_finalization(
+        self, conn: asyncpg.Connection, session_id: str, correlation_id: UUID
+    ) -> None:
+        """Record that this node published an estimate for ``session_id``.
+
+        This row is what the ``_find_ready_sessions`` anti-join reads, so
+        without it the session is re-published on every tick — the exact
+        unbounded behaviour OMN-16770's seam exists to prevent, arrived at from
+        the other direction.
+
+        ``ON CONFLICT DO NOTHING`` because the first publication is the one
+        that counts: a retried tick, or two ticks racing on the same session,
+        must not raise here and undo a publish that already happened. The
+        relation is append-only (the migration grants no UPDATE and no DELETE),
+        so there is nothing to merge.
+        """
+        # The relation is spelled literally, not interpolated from
+        # FINALIZATION_RELATION: interpolating a name into SQL is the shape a
+        # static analyser cannot tell from an injection, and every other
+        # statement in this handler spells its relations out. The two are
+        # pinned to each other by
+        # test_savings_correlation_internal_idempotency_omn16770.py, which
+        # reads this method's source and asserts the name it writes is the one
+        # the constant declares — so they cannot drift silently.
+        await conn.execute(
+            """
+            INSERT INTO omninode_internal.savings_correlation_finalizations
+                (session_id, correlation_id, finalized_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (session_id) DO NOTHING
+            """,
+            session_id,
+            correlation_id,
+        )
 
     async def _finalize_session(self, session_id: str, correlation_id: UUID) -> bool:
         async with self._pool.acquire() as conn:
@@ -755,6 +826,16 @@ class HandlerSavingsCorrelation:
             topic=SUFFIX_SAVINGS_ESTIMATED,
             correlation_id=correlation_id,
         )
+        # OMN-16770: record the publication AFTER it succeeds, never before.
+        # Marking first and publishing second loses the estimate outright when
+        # the publish raises — the session would read as finalized having
+        # emitted nothing. Marking second re-publishes at most one duplicate on
+        # the next tick, which node_projection_savings upserts on session_id.
+        # At-least-once is the correct bias for a publisher; at-most-once is
+        # not.
+        async with self._pool.acquire() as conn:
+            await set_statement_timeout(conn, self._query_timeout * 1000)
+            await self._record_finalization(conn, session_id, correlation_id)
         logger.info(
             "Savings correlation: published estimate for session=%s "
             "savings=$%.6f (cid=%s)",
