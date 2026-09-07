@@ -112,7 +112,29 @@ def build_aiokafka_auth_kwargs(config: ModelKafkaEventBusConfig) -> dict[str, ob
     if config.sasl_mechanism is not None:
         kwargs["sasl_mechanism"] = config.sasl_mechanism
 
-    if config.sasl_mechanism == "OAUTHBEARER":
+    if config.sasl_mechanism in ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"):
+        # OMN-18012: the sasl_mechanism field pattern has always accepted PLAIN
+        # and SCRAM-SHA-*, but this builder never threaded the credentials, so
+        # a client configured for a username/password broker was constructed
+        # with a mechanism and no credentials -- aiokafka then dies inside its
+        # own SCRAM authenticator ("'NoneType' object has no attribute
+        # 'encode'"). Fail loudly on a missing credential instead.
+        if not config.sasl_plain_username or not config.sasl_plain_password:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="build_aiokafka_auth_kwargs",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                f"sasl_mechanism={config.sasl_mechanism!r} requires both "
+                "sasl_plain_username and sasl_plain_password",
+                context=context,
+                parameter="sasl_plain_username",
+                value=config.sasl_plain_username,
+            )
+        kwargs["sasl_plain_username"] = config.sasl_plain_username
+        kwargs["sasl_plain_password"] = config.sasl_plain_password
+    elif config.sasl_mechanism == "OAUTHBEARER":
         kwargs["sasl_oauth_token_provider"] = OAuthBearerTokenProvider(
             token_endpoint_url=str(config.sasl_oauthbearer_token_endpoint_url),
             client_id=str(config.sasl_oauthbearer_client_id),

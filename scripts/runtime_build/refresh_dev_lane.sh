@@ -157,6 +157,7 @@ readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projecti
 # it is the half that is provable here.
 readonly REFRESH_BUILD_SERVICES=(
     "${CORE_SERVICES[@]}"
+    redpanda-scram-user
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
