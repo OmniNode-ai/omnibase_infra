@@ -66,6 +66,7 @@ import pytest
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append import (
     HandlerLedgerAppend,
 )
@@ -166,7 +167,7 @@ async def test_ledger_append_dispatches_through_real_engine_to_handle() -> None:
     envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
         payload=payload,
         correlation_id=correlation_id,
-        event_type=_LEDGER_APPEND_TOPIC,
+        event_type=derive_event_type_alias_for_topic(_LEDGER_APPEND_TOPIC),
     )
 
     with patch.object(

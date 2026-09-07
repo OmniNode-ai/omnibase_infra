@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.service_dispatch_result_applier import (
@@ -606,7 +607,7 @@ class TestDelegationIntentTopicRouting:
         result = _make_result(
             output_events=[
                 ModelEventEnvelope(
-                    event_type=completed_topic,
+                    event_type=derive_event_type_alias_for_topic(completed_topic),
                     payload=terminal_payload,
                 )
             ],

@@ -37,6 +37,25 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
+  # OMN-18013: this subscription is TRUE and is deliberately kept, even though
+  # this contract declares no handler_routing. ContextAuditConsumer
+  # (services/observability) is a real, live consumer of this topic, and this
+  # contract is where the topic is OWNED for provisioning — TopicProvisioner
+  # creates it from this declaration (OMN-7114). Deleting it de-provisioned a
+  # topic a live consumer reads, which is a strictly worse failure than the one
+  # the deletion was meant to fix.
+  #
+  # Nothing was wrong in handler_wiring and nothing was changed there for this
+  # contract. Because `handler_routing` is ABSENT, _prepare_contract_wiring
+  # short-circuits `contract.handler_routing is None` to a SKIPPED result with
+  # subscription_topics=[] BEFORE the subscribe decision, so auto-wiring never
+  # created a dispatcher-less subscription here — the consume/DLQ/commit loop
+  # this comment once described did not exist. The
+  # subscriber-dispatcher-resolution finding was a FALSE POSITIVE and the gate
+  # now mirrors the same skip. (`no_live_dispatcher` does NOT cover this shape —
+  # it is guarded by `bool(prepared_wirings)`, False at zero entries. The
+  # present-but-EMPTY routing shape is caught by the OMN-14141 phantom-wiring
+  # guard, fail-closed.)
   subscribe_topics:
     - "onex.evt.omniclaude.context-audit-dlq.v1"
   publish_topics: []

@@ -10,8 +10,10 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import _extract_projectio
 
 
 def test_projection_topic_uses_onex_event_type_when_envelope_topic_is_absent() -> None:
-    envelope = ModelEventEnvelope[dict[str, str]](
-        event_type="onex.evt.omniclaude.task-delegated.v1",
+    envelope = ModelEventEnvelope[
+        dict[str, str]
+    ](
+        event_type="onex.evt.omniclaude.task-delegated.v1",  # onex-topic-allow: exercises _extract_projection_topic's legacy topic-shaped event_type fallback, which handler-constructed envelopes still hit (OMN-18013 residual)
         payload={"correlation_id": "runtime-proof"},
     )
 

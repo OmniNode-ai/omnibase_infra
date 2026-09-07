@@ -43,6 +43,7 @@ from omnibase_core.enums import EnumMessageCategory
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.models.coding_agent import (
     EnumAgentSandbox,
     EnumAgentStatus,
@@ -79,8 +80,8 @@ from omnibase_infra.runtime.service_dispatch_result_applier import (
 pytestmark = pytest.mark.unit
 
 _NODES_ROOT = Path(__file__).resolve().parents[4] / "src" / "omnibase_infra" / "nodes"
+_INVOKE_TOPIC = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"  # onex-topic-allow: the chain entry topic this dispatch test drives
 
-_INVOKE_TOPIC = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"
 _VALIDATE_TOPIC = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
 _EFFECT_INVOKE_TOPIC = "onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1"
 _FSM_ADVANCE_TOPIC = "onex.evt.omnibase-infra.coding-agent-fsm-advance.v1"
@@ -106,8 +107,15 @@ def _publish_topics(raw: dict[str, object]) -> list[str]:
 def _orchestrator_entry() -> object:
     raw = _contract("node_coding_agent_orchestrator")
     routing = _parse_handler_routing(cast("dict[str, object]", raw["handler_routing"]))
-    assert len(routing.handlers) == 1
-    return routing.handlers[0]
+    # OMN-18013 split the single unscoped operation_match entry into one
+    # `topic:`-scoped entry per subscribe topic, so the orchestrator now has four.
+    # `event_model:` stays on the ENTRY-topic entry — the one whose payload the
+    # real dispatch path re-hydrates — and that is the entry this test drives.
+    entries = [
+        e for e in routing.handlers if getattr(e, "topic", None) == _INVOKE_TOPIC
+    ]
+    assert len(entries) == 1, f"expected one handler entry for {_INVOKE_TOPIC}"
+    return entries[0]
 
 
 def _discovered_contract(node_dir: str) -> object:
@@ -149,8 +157,11 @@ def _entry_event_model(node_dir: str) -> object:
     """Return the single handler entry's parsed ``event_model`` for ``node_dir``."""
     raw = _contract(node_dir)
     routing = _parse_handler_routing(cast("dict[str, object]", raw["handler_routing"]))
-    assert len(routing.handlers) == 1
-    return routing.handlers[0].event_model
+    entries = [e for e in routing.handlers if e.event_model is not None]
+    assert len(entries) == 1, (
+        f"{node_dir}: expected exactly one handler entry declaring event_model"
+    )
+    return entries[0].event_model
 
 
 def _make_engine(
@@ -225,7 +236,10 @@ class TestOrchestratorHop1RoutesToValidateNotTerminal:
             handler=HandlerCodingAgentOrchestrator(),
             dispatcher_id="coding-agent-orchestrator",
             category=EnumMessageCategory.COMMAND,
-            message_types={_INVOKE_TOPIC, "ModelCodingAgentInvokeCommand"},
+            message_types={
+                derive_event_type_alias_for_topic(_INVOKE_TOPIC),
+                "ModelCodingAgentInvokeCommand",
+            },
             route_id="route.coding-agent-orchestrator",
             topic_pattern="*.cmd.omnibase-infra.coding-agent-invoke.*",
             event_model=entry.event_model,  # type: ignore[attr-defined]
@@ -245,7 +259,7 @@ class TestOrchestratorHop1RoutesToValidateNotTerminal:
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=command,
             correlation_id=command.correlation_id,
-            event_type=_INVOKE_TOPIC,
+            event_type=derive_event_type_alias_for_topic(_INVOKE_TOPIC),
         )
 
         result = await engine.dispatch(topic=_INVOKE_TOPIC, envelope=envelope)
@@ -284,7 +298,10 @@ class TestComputeConsumesValidateAndEmitsValidated:
             handler=HandlerWorkspaceValidate(),
             dispatcher_id="coding-agent-workspace-compute",
             category=EnumMessageCategory.COMMAND,
-            message_types={_VALIDATE_TOPIC, "ModelWorkspaceValidateCommand"},
+            message_types={
+                derive_event_type_alias_for_topic(_VALIDATE_TOPIC),
+                "ModelWorkspaceValidateCommand",
+            },
             route_id="route.coding-agent-workspace-compute",
             topic_pattern="*.cmd.omnibase-infra.coding-agent-workspace-validate.*",
             event_model=_entry_event_model("node_coding_agent_workspace_compute"),
@@ -302,7 +319,7 @@ class TestComputeConsumesValidateAndEmitsValidated:
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=command,
             correlation_id=command.correlation_id,
-            event_type=_VALIDATE_TOPIC,
+            event_type=derive_event_type_alias_for_topic(_VALIDATE_TOPIC),
         )
         result = await engine.dispatch(topic=_VALIDATE_TOPIC, envelope=envelope)
         assert result.status == EnumDispatchStatus.SUCCESS, result.error_message
@@ -329,7 +346,9 @@ class TestOrchestratorHop3RoutesToEffectInvoke:
             dispatcher_id="coding-agent-orchestrator",
             category=EnumMessageCategory.EVENT,
             message_types={
-                "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1",
+                derive_event_type_alias_for_topic(
+                    "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"  # onex-topic-allow: alias derived on the next line
+                ),
             },
             route_id="route.coding-agent-orchestrator-validated",
             topic_pattern="*.evt.omnibase-infra.coding-agent-workspace-validated.*",
@@ -361,7 +380,7 @@ class TestOrchestratorHop3RoutesToEffectInvoke:
                 "command": command.model_dump(mode="json"),
             },
             correlation_id=corr,
-            event_type=validated_topic,
+            event_type=derive_event_type_alias_for_topic(validated_topic),
         )
         result = await engine.dispatch(topic=validated_topic, envelope=envelope)
         assert result.status == EnumDispatchStatus.SUCCESS, result.error_message
@@ -413,7 +432,10 @@ class TestEffectReachedAndTerminalCarriesResult:
             handler=handler,
             dispatcher_id="coding-agent-invoke-effect",
             category=EnumMessageCategory.COMMAND,
-            message_types={_EFFECT_INVOKE_TOPIC, "ModelCodingAgentInvokeCommand"},
+            message_types={
+                derive_event_type_alias_for_topic(_EFFECT_INVOKE_TOPIC),
+                "ModelCodingAgentInvokeCommand",
+            },
             route_id="route.coding-agent-invoke-effect",
             topic_pattern="*.cmd.omnibase-infra.coding-agent-effect-invoke.*",
             event_model=_entry_event_model("node_coding_agent_invoke_effect"),
@@ -432,7 +454,7 @@ class TestEffectReachedAndTerminalCarriesResult:
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=command,
             correlation_id=command.correlation_id,
-            event_type=_EFFECT_INVOKE_TOPIC,
+            event_type=derive_event_type_alias_for_topic(_EFFECT_INVOKE_TOPIC),
         )
         result = await engine.dispatch(topic=_EFFECT_INVOKE_TOPIC, envelope=envelope)
         assert result.status == EnumDispatchStatus.SUCCESS, result.error_message

@@ -25,9 +25,11 @@ known_entrypointless:
   - contract: handler_architecture_validation
     handler: HandlerArchitectureValidation
     module: omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation
-  - contract: node_artifact_change_detector_effect
-    handler: HandlerContractFileWatcher
-    module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher
+  # OMN-18013: HandlerContractFileWatcher was removed from node_artifact_change_detector_effect's
+  # handler_routing entirely — it is a filesystem watchdog driven from node.py, not a bus
+  # consumer, and it owned BOTH subscribe topics only because an operation_match entry
+  # with no `topic:` is assigned every subscribe topic. It is no longer in this gate's
+  # population, so its row is removed rather than left to go stale.
   - contract: node_artifact_change_detector_effect
     handler: HandlerManualTrigger
     module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_manual_trigger

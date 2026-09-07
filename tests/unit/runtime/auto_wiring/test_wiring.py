@@ -16,6 +16,7 @@ from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
     _derive_handler_entry_key,
@@ -136,16 +137,28 @@ class TestDeriveMessageCategory:
     def test_intent(self) -> None:
         assert _derive_message_category("onex.intent.platform.test.v1") == "intent"
 
-    def test_unknown_defaults_to_event(self) -> None:
-        assert _derive_message_category("onex.unknown.platform.test.v1") == "event"
+    def test_unknown_kind_derives_nothing_rather_than_defaulting(self) -> None:
+        """OMN-18013: an unrecognised kind segment yields None, never "event".
+
+        The pre-OMN-18013 code returned an unconditional ``"event"`` here, so
+        registration stamped EVENT on 32 live topics (``onex.dlq.*``,
+        ``onex.snapshot.*``) while ``EnumMessageCategory.from_topic`` — the
+        derivation ``MessageDispatchEngine`` applies to the arriving topic —
+        returned ``None`` and rejected every message as an invalid topic
+        category. The two derivations now agree by construction.
+        """
+        assert _derive_message_category("onex.unknown.platform.test.v1") is None
+        assert EnumMessageCategory.from_topic("onex.unknown.platform.test.v1") is None
 
 
 class TestExtractProjectionTopic:
     @pytest.mark.unit
     def test_model_event_envelope_uses_event_type_topic(self) -> None:
-        envelope = ModelEventEnvelope[dict[str, str]](
+        envelope = ModelEventEnvelope[
+            dict[str, str]
+        ](
             payload={"correlation_id": "release-proof"},
-            event_type="onex.evt.omniclaude.task-delegated.v1",
+            event_type="onex.evt.omniclaude.task-delegated.v1",  # onex-topic-allow: exercises _extract_projection_topic's legacy topic-shaped event_type fallback, which handler-constructed envelopes still hit (OMN-18013 residual)
         )
 
         assert (

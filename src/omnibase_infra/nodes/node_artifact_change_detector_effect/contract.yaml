@@ -55,6 +55,7 @@ handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: "artifact.ingest_pr_webhook"
+      topic: "onex.evt.github.pr-webhook.v1"
       handler:
         name: "HandlerPRWebhookIngestion"
         module: "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_pr_webhook_ingestion"
@@ -63,16 +64,16 @@ handler_routing:
         - trigger_id
         - trigger_type
         - changed_files
-    - operation: "artifact.watch_contracts"
-      handler:
-        name: "HandlerContractFileWatcher"
-        module: "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher"
-      description: "Watchdog-based contract.yaml file watcher with MD5 hash tracking"
-      output_fields:
-        - trigger_id
-        - trigger_type
-        - changed_files
+    # OMN-18013: the HandlerContractFileWatcher entry was REMOVED from
+    # handler_routing. It is a filesystem watchdog (MD5 hash tracking over
+    # contract.yaml on disk, driven from node.py), not a bus consumer — it has no
+    # dispatch entrypoint at all. Listed as an operation_match entry with no
+    # `topic:`, _topics_for_handler_entry assigned it EVERY subscribe topic, so a
+    # single entry spanned both the .cmd. and the .evt. topic. The class, its
+    # node.py call site and its tests are unchanged; only the false claim that the
+    # bus dispatches to it is gone.
     - operation: "artifact.manual_trigger"
+      topic: "onex.cmd.artifact.reconcile.v1"
       handler:
         name: "HandlerManualTrigger"
         module: "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_manual_trigger"

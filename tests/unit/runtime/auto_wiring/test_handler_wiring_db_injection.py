@@ -16,6 +16,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
     ModelDbTableDeclaration,
 )
 from omnibase_infra.errors import ProjectionNotMaterializedError
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _DB_URL_ENV_MAP,
     ProjectionDispatchSinks,
@@ -188,7 +189,7 @@ def test_projection_callback_preserves_typed_envelope_id() -> None:
     envelope = ModelEventEnvelope[object](
         payload={"service_name": "svc-a", "health_status": "healthy"},
         envelope_id=envelope_id,
-        event_type=topic,
+        event_type=derive_event_type_alias_for_topic(topic),
     )
     callback = _make_projection_dispatch_callback(
         EnvelopeAwareHandler(),

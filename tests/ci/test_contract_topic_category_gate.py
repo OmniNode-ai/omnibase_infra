@@ -37,9 +37,10 @@ from omnibase_infra.runtime.auto_wiring import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
-from omnibase_infra.validators.mixed_category_routing import (
+from omnibase_infra.validators.contract_topic_category import (
+    REASON_MIXED,
+    category_findings,
     main,
-    mixed_category_findings,
 )
 
 pytestmark = pytest.mark.unit
@@ -75,18 +76,19 @@ def _contract(
 
 def test_gate_flags_mixed_category_entry() -> None:
     """RED: an entry assigned command + event topics is flagged."""
-    findings = mixed_category_findings(
+    findings = category_findings(
         [_contract(name="node_x", subscribe_topics=(_CMD_TOPIC, _EVT_TOPIC))]
     )
     assert len(findings) == 1, findings
     f = findings[0]
     assert f.contract == "node_x"
-    assert f.categories == ("command", "event")
+    assert f.reason == REASON_MIXED
+    assert "command+event" in f.detail
 
 
 def test_gate_passes_single_category_entry() -> None:
     """GREEN: an entry assigned only event topics is NOT flagged."""
-    findings = mixed_category_findings(
+    findings = category_findings(
         [_contract(name="node_ok", subscribe_topics=(_EVT_TOPIC, _EVT_TOPIC_2))]
     )
     assert findings == []
@@ -130,7 +132,7 @@ def test_mixin_node_dispatch_rejects_exactly_the_flagged_shape() -> None:
     thing. If they diverge, one of these two assertions fails."""
     # Clean (single-category) — gate passes AND MixinNodeDispatch accepts.
     assert (
-        mixed_category_findings(
+        category_findings(
             [_contract(name="clean", subscribe_topics=(_EVT_TOPIC, _EVT_TOPIC_2))]
         )
         == []
@@ -140,7 +142,7 @@ def test_mixin_node_dispatch_rejects_exactly_the_flagged_shape() -> None:
     # Mixed — gate flags AND MixinNodeDispatch rejects the identical shape.
     assert (
         len(
-            mixed_category_findings(
+            category_findings(
                 [_contract(name="mixed", subscribe_topics=(_CMD_TOPIC, _EVT_TOPIC))]
             )
         )
@@ -150,15 +152,18 @@ def test_mixin_node_dispatch_rejects_exactly_the_flagged_shape() -> None:
         _register_entry_shape_in_mixin((_CMD_TOPIC, _EVT_TOPIC))
 
 
-def test_seeded_baseline_is_green_day_one() -> None:
-    """The live repo scan against the seeded baseline exits 0 (WARN-on-baseline).
+def test_live_repo_scan_is_green_at_zero_with_no_baseline() -> None:
+    """The live repo scan exits 0 with ZERO findings and no baseline anywhere.
 
-    A non-zero exit here means either a new offender slipped in (growth) or the
-    baseline went stale (a fixed entry still listed) — both are ratchet failures
-    this gate must surface, and both mean the seed drifted from reality."""
+    OMN-18013 replaced the OMN-14605 WARN-on-baseline ratchet: the baseline was
+    burned to zero and the file DELETED, so a non-zero exit here means a real
+    new offender and there is nothing to freeze it into. The gate also refuses
+    to run without an explicit --scope, because defaulting the scope is how a
+    gate silently scans nothing.
+    """
+    assert main(["--scope", "omnibase_infra"]) == 0
+    assert main([]) == 1, "the gate must refuse to run with no scope"
     repo_root = Path(__file__).resolve().parents[2]
-    scan_root = repo_root / "src" / "omnibase_infra"
-    baseline = (
+    assert not (
         repo_root / "config" / "validation" / "mixed_category_routing_baseline.yaml"
-    )
-    assert main([str(scan_root), "--baseline", str(baseline)]) == 0
+    ).exists()

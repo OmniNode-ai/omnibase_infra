@@ -47,6 +47,28 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
+  # OMN-18013: these subscriptions are TRUE and are deliberately kept, even
+  # though this contract declares no handler_routing. They are consumed by the
+  # runtime KERNEL, not by auto-wiring: service_kernel wires
+  # ContractRegistrationEventRouter and subscribes the first three topics with
+  # `on_message=contract_router.handle_message` and required_for_readiness=True.
+  # Deleting them would erase a live, readiness-critical consumption from the
+  # contract graph and drop the EnumPlatformTopic members that
+  # models/projection/projection_contract_registry.py imports for the
+  # contract_registry and topic_registry projections.
+  #
+  # Nothing was wrong in handler_wiring and nothing was changed there for this
+  # contract. Because `handler_routing` is ABSENT, _prepare_contract_wiring
+  # short-circuits `contract.handler_routing is None` to a SKIPPED result with
+  # subscription_topics=[] BEFORE the subscribe decision is reached, so
+  # auto-wiring never created a subscription here at all — the second,
+  # dispatcher-less consumer this comment once described did not exist. The
+  # subscriber-dispatcher-resolution finding against these topics was a FALSE
+  # POSITIVE, and the gate now mirrors the same skip. (The adjacent
+  # `no_live_dispatcher` branch does NOT cover this shape: it is guarded by
+  # `bool(prepared_wirings)`, which is False when there are zero entries. The
+  # present-but-EMPTY handler_routing shape, which does reach the subscribe
+  # decision, is caught fail-closed by the OMN-14141 phantom-wiring guard.)
   subscribe_topics:
     - "onex.evt.platform.contract-registered.v1"
     - "onex.evt.platform.contract-deregistered.v1"

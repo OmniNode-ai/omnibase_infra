@@ -34,6 +34,7 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_envelope_context import (
@@ -5096,7 +5097,7 @@ async def test_sync_dispatcher_receives_copied_typed_context() -> None:
     envelope = ModelEventEnvelope[dict[str, object]](
         payload={"value": "proof"},
         correlation_id=uuid4(),
-        event_type=topic,
+        event_type=derive_event_type_alias_for_topic(topic),
     )
     authority = signed_tenant_authority_fixture(
         uuid4(), event_envelope=envelope

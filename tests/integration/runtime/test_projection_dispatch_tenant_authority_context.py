@@ -16,6 +16,7 @@ from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRout
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory
 from omnibase_infra.errors import ProjectionNotMaterializedError
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
     _resolve_projection_database_target,
@@ -138,7 +139,7 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     envelope = ModelEventEnvelope[dict[str, object]](
         payload={"value": "dispatched", "tenant_id": str(uuid4())},
         correlation_id=correlation_id,
-        event_type=TOPIC,
+        event_type=derive_event_type_alias_for_topic(TOPIC),
     )
     authority = signed_tenant_authority_fixture(
         tenant_id,
@@ -202,7 +203,7 @@ async def test_dispatch_without_verified_capability_records_but_never_selects(
     claimed_tenant = uuid4()
     envelope = ModelEventEnvelope[dict[str, object]](
         payload={"tenant_id": str(claimed_tenant)},
-        event_type=TOPIC,
+        event_type=derive_event_type_alias_for_topic(TOPIC),
     )
     calls: list[tuple[str, object]] = []
     connection = _Connection(calls, principal="tenant_projection_writer")
@@ -244,7 +245,7 @@ async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
     claimed_tenant = uuid4()
     envelope = ModelEventEnvelope[dict[str, object]](
         payload={"tenant_id": str(claimed_tenant)},
-        event_type=TOPIC,
+        event_type=derive_event_type_alias_for_topic(TOPIC),
     )
 
     with patch("psycopg2.connect", return_value=connection) as connect:
@@ -292,7 +293,7 @@ async def test_mixed_target_internal_operation_does_not_resolve_tenant_authority
     envelope = ModelEventEnvelope[dict[str, object]](
         payload={"status": "complete"},
         correlation_id=uuid4(),
-        event_type=TOPIC,
+        event_type=derive_event_type_alias_for_topic(TOPIC),
     )
 
     with patch("psycopg2.connect", return_value=connection) as connect:

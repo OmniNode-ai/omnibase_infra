@@ -49,6 +49,7 @@ from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRout
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.models.coding_agent import (
     EnumAgentSandbox,
     EnumCodingAgent,
@@ -69,6 +70,7 @@ from omnibase_infra.runtime.auto_wiring.models.model_handler_routing_entry impor
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 _NODES_ROOT = Path(__file__).resolve().parents[4] / "src" / "omnibase_infra" / "nodes"
+_INVOKE_TOPIC = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"  # onex-topic-allow: the chain entry topic this dispatch test drives
 _ORCH_CONTRACT = _NODES_ROOT / "node_coding_agent_orchestrator" / "contract.yaml"
 
 # The orchestrator's contract-declared workflow entrypoint + hop-1 output topic.
@@ -85,8 +87,15 @@ def _orchestrator_entry() -> ModelHandlerRoutingEntry:
     """
     raw = yaml.safe_load(_ORCH_CONTRACT.read_text(encoding="utf-8"))
     routing = _parse_handler_routing(raw["handler_routing"])
-    assert len(routing.handlers) == 1, "orchestrator contract has one handler entry"
-    return routing.handlers[0]
+    # OMN-18013 split the single unscoped operation_match entry into one
+    # `topic:`-scoped entry per subscribe topic, so the orchestrator now has four.
+    # `event_model:` stays on the ENTRY-topic entry — the one whose payload the
+    # real dispatch path re-hydrates — and that is the entry this test drives.
+    entries = [
+        e for e in routing.handlers if getattr(e, "topic", None) == _INVOKE_TOPIC
+    ]
+    assert len(entries) == 1, f"expected one handler entry for {_INVOKE_TOPIC}"
+    return entries[0]
 
 
 def _invoke_command(workspace_path: str) -> ModelCodingAgentInvokeCommand:
@@ -176,7 +185,10 @@ class TestRealDispatchRehydratesTypedEnvelope:
             dispatcher_id="coding-agent-orchestrator",
             dispatcher=callback,
             category=EnumMessageCategory.COMMAND,
-            message_types={_INVOKE_TOPIC, "ModelCodingAgentInvokeCommand"},
+            message_types={
+                derive_event_type_alias_for_topic(_INVOKE_TOPIC),
+                "ModelCodingAgentInvokeCommand",
+            },
             payload_type_matcher=payload_type_matcher,
         )
         engine.register_route(
@@ -193,7 +205,7 @@ class TestRealDispatchRehydratesTypedEnvelope:
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=command,
             correlation_id=command.correlation_id,
-            event_type=_INVOKE_TOPIC,
+            event_type=derive_event_type_alias_for_topic(_INVOKE_TOPIC),
         )
 
         result = await engine.dispatch(topic=_INVOKE_TOPIC, envelope=envelope)
@@ -211,7 +223,9 @@ class TestRealDispatchRehydratesTypedEnvelope:
         )
         # ...carrying the re-hydrated typed payload and the workflow event_type.
         assert isinstance(received.payload, ModelCodingAgentInvokeCommand)
-        assert received.event_type == _INVOKE_TOPIC
+        # OMN-18013: the consume boundary stamps the DERIVED ALIAS for the topic
+        # (derive_event_type_alias_for_topic, OMN-17296), never the topic string.
+        assert received.event_type == derive_event_type_alias_for_topic(_INVOKE_TOPIC)
 
         # Hop 1: the workflow advanced and emitted the workspace-validate command.
         emitted_types = [

@@ -97,8 +97,14 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
-  subscribe_topics:
-    - "onex.cmd.platform.contract-resolve-requested.v1"
+  # OMN-18013: subscription DELETED. This contract declares no handler_routing,
+  # so _topics_for_handler_entry assigned these topics to no entry and ZERO
+  # dispatch routes ever existed for them: every message was consumed, found
+  # NO_DISPATCHER, and was DLQ'd or dropped while the container booted green.
+  # A subscribe declaration that can never dispatch is a lie in the contract
+  # graph, not a feature awaiting wiring. Re-add it together with the
+  # handler_routing entry that consumes it, in the same diff.
+  subscribe_topics: []
 # ---------------------------------------------------------------------------
 # Capabilities
 # ---------------------------------------------------------------------------

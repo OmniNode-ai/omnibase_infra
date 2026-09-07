@@ -136,15 +136,36 @@ def test_real_node_gateway_attach_effect_passes_unchanged() -> None:
     assert operation_match_fanout_findings(matches) == []
 
 
-def test_seeded_baseline_is_green_day_one() -> None:
-    """The live repo scan against the seeded baseline exits 0 (WARN-on-baseline).
+def test_live_repo_is_green_with_no_baseline_at_all() -> None:
+    """The live repo scan exits 0 with ZERO baseline (OMN-18013).
 
-    A non-zero exit here means either a new offender slipped in (growth) or the
-    baseline went stale (a fixed entry still listed) — both are ratchet failures
-    this gate must surface, and both mean the seed drifted from reality."""
+    This gate shipped as a shrink-only ratchet seeded with seven rows. OMN-18013
+    cleared the last five by applying the per-topic ``topic:`` split the baseline
+    text itself prescribed for each one, so the ratchet reached its declared end
+    state and ``config/validation/operation_match_fanout_baseline.yaml`` was
+    DELETED. A non-zero exit here now means a real fan-through entry exists, and
+    there is nowhere to record it: the fix is the split, not a row.
+    """
     repo_root = Path(__file__).resolve().parents[2]
     scan_root = repo_root / "src" / "omnibase_infra"
+    assert main([str(scan_root)]) == 0
+
+
+def test_the_baseline_file_and_its_flag_are_gone() -> None:
+    """The deleted baseline cannot come back through this gate's own CLI."""
+    repo_root = Path(__file__).resolve().parents[2]
     baseline = (
         repo_root / "config" / "validation" / "operation_match_fanout_baseline.yaml"
     )
-    assert main([str(scan_root), "--baseline", str(baseline)]) == 0
+    assert not baseline.exists(), (
+        "operation_match_fanout_baseline.yaml is back. A ratchet that can be "
+        "re-seeded is a ratchet that will be."
+    )
+    source = (
+        repo_root
+        / "src"
+        / "omnibase_infra"
+        / "validators"
+        / "operation_match_fanout.py"
+    ).read_text(encoding="utf-8")
+    assert "--baseline" not in source

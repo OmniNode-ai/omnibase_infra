@@ -311,16 +311,48 @@ jobs:
       - name: Check handler dispatch-entrypoint gate (OMN-14135)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
 
-      # OMN-14605: a handler_routing entry whose _topics_for_handler_entry-assigned
-      # topics span >1 real category (.cmd/.evt/.intent) gets ONE category stamped on
-      # every route by handler_wiring, so the off-category topics are permanent
-      # NO_DISPATCHER (silent DLQ/drop) while the node boots green — the OMN-14606
-      # (node_swarm_fanout_orchestrator) live defect. MixinNodeDispatch (OMN-12549)
-      # hard-rejects the same shape at registration; this gate flags it at CI time.
-      # Ratchet frozen in config/validation/mixed_category_routing_baseline.yaml
-      # (shrink-only). SYNC with pre-commit hook 'mixed-category-routing'.
-      - name: Check mixed-category routing gate (OMN-14605)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
+      # OMN-18013 (operator ruling item 1), superseding the OMN-14605 gate. Routing is
+      # now PER-TOPIC: derive_route_message_category stamps each ModelDispatchRoute
+      # with the category derived from THAT ROUTE'S OWN topic name, so the
+      # subscribe_topics[0] mechanism that made every off-category sibling topic a
+      # permanent NO_DISPATCHER is gone. This gate refuses the contract shapes that
+      # could still make a category wrong: an entry spanning >1 category, a
+      # message_category: contradicting its topic's own name, and a topic whose name
+      # derives no category at all (the old silent "event" default, which disagreed
+      # with EnumMessageCategory.from_topic at dispatch on 32 live topics).
+      # The OMN-14605 baseline is burned to zero and DELETED.
+      # SYNC with pre-commit hook 'contract-topic-category'.
+      - name: Check contract topic category gate (OMN-18013)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.contract_topic_category --scope omnibase_infra
+
+      # OMN-18013 (operator ruling item 2). The runtime stamps the DERIVED ALIAS for a
+      # topic as event_type (derive_event_type_alias_for_topic, the single source on
+      # both sides of the wire, OMN-17296) — never the topic string. Before OMN-18013
+      # the consume boundary ALSO honoured an `event_type` lifted out of the raw
+      # payload, an untyped field no contract declares, which let a publisher re-key a
+      # message onto any dispatcher and was the only path by which a hand-typed alias
+      # was ever reachable. That override is removed; this gate removes the shapes that
+      # depended on it. SYNC with pre-commit hook 'handler-event-type-source'.
+      - name: Check handler event_type source gate (OMN-18013)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_event_type_source --scope omnibase_infra
+
+      # OMN-18013 (operator ruling item 4). 108 test sites across the corpus passed a
+      # full ONEX TOPIC as an envelope event_type — a spelling the bus never carries.
+      # They were green only because derive_entry_message_types registers BOTH the
+      # topic and the alias as dispatcher index keys, so the wrong one still resolved
+      # inside the test while production used the other. SYNC with pre-commit hook
+      # 'no-literal-event-type-in-tests'.
+      - name: Check golden-chain contract input gate (OMN-18013)
+        run: uv run python -m omnibase_infra.validators.no_literal_event_type_in_tests tests
+
+      # OMN-18013 (operator ruling item 5). The subscriber-dispatcher-resolution and
+      # mixed-category baselines were burned to zero and DELETED. A shrink-only ratchet
+      # is better than an amnesty list but still takes a row from whoever cannot make
+      # the gate pass — every OMN-16939 live victim was a baselined row. A file that
+      # does not exist cannot take one. SYNC with pre-commit hook
+      # 'no-baseline-refreeze'.
+      - name: Check no baseline refreeze (OMN-18013)
+        run: uv run python -m omnibase_infra.validators.no_baseline_refreeze .
 
       # OMN-15468: an applier built outside its factory silently loses BOTH
       # re-route mechanisms — the published_events map (class-based routing to a
@@ -342,8 +374,8 @@ jobs:
       # shape: subscribe-wiring-health checks for a PUBLISHER, dispatcher-route-coverage
       # only looks at onex.cmd.* topics, and mixed-category-routing is scanned over
       # src/omnibase_infra only (its "Lane B" fan-out never landed, which is why the
-      # omnimarket victims went unseen). Ratchet frozen in
-      # config/validation/subscriber_dispatcher_resolution_baseline.yaml (shrink-only).
+      # omnimarket victims went unseen). OMN-18013 burned this repo's 22-row baseline
+      # to ZERO and DELETED the file; the validator has no --baseline flag left.
       # SYNC with pre-commit hook 'subscriber-dispatcher-resolution'.
       - name: Check subscriber dispatcher resolution gate (OMN-16939)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
@@ -354,9 +386,11 @@ jobs:
       # topic on the contract, so N operation-scoped handlers each register for all N
       # topics — a message on ANY topic reaches every handler, and the ones whose
       # `operation` does not match crash or misfire (the pre-fix
-      # node_gateway_attach_effect shape, OMN-15978). Ratchet frozen in
-      # config/validation/operation_match_fanout_baseline.yaml (shrink-only). SYNC with
-      # pre-commit hook 'operation-match-fanout'.
+      # node_gateway_attach_effect shape, OMN-15978). OMN-18013 burned this ratchet
+      # to ZERO — the per-topic `topic:` split it prescribed cleared its last five
+      # rows — and DELETED config/validation/operation_match_fanout_baseline.yaml;
+      # no --baseline flag remains and `no-baseline-refreeze` refuses its return.
+      # SYNC with pre-commit hook 'operation-match-fanout'.
       - name: Check operation_match fan-out gate (OMN-16088)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra
 

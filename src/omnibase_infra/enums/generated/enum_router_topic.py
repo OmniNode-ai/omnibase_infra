@@ -22,5 +22,4 @@ class EnumRouterTopic(str, Enum):
     EVT_HEALTH_SNAPSHOT_V1 = "onex.evt.router.health-snapshot.v1"  # onex.evt.router.health-snapshot.v1
     EVT_ROUTING_COMPLETE_V1 = "onex.evt.router.routing-complete.v1"  # onex.evt.router.routing-complete.v1
     EVT_ROUTING_FAILED_V1 = "onex.evt.router.routing-failed.v1"  # onex.evt.router.routing-failed.v1
-    EVT_ROUTING_OUTCOME_V1 = "onex.evt.router.routing-outcome.v1"  # onex.evt.router.routing-outcome.v1
     EVT_SCORING_DECISION_V1 = "onex.evt.router.scoring-decision.v1"  # onex.evt.router.scoring-decision.v1

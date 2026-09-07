@@ -50,6 +50,28 @@ def _load_contract(contract_path: Path) -> dict[str, object]:
     return raw
 
 
+def contract_subscribe_topics(contract_path: Path) -> tuple[str, ...]:
+    """Return the ``event_bus.subscribe_topics`` declared in the given contract.
+
+    OMN-18013 (operator ruling item 2): the event type a handler matches on is
+    read from the contract that declares the topic, never hand-typed. The
+    handler resolves a subscribe topic by suffix here and then derives its wire
+    alias with ``derive_event_type_alias_for_topic`` — the same single source
+    the publish side and the manifest builder use (OMN-17296).
+    """
+    raw = _load_contract(contract_path)
+    event_bus = raw.get("event_bus")
+    if not isinstance(event_bus, dict):
+        raise ValueError(f"contract {contract_path} must declare an event_bus mapping")
+    topics = event_bus.get("subscribe_topics")
+    if not isinstance(topics, list) or not all(isinstance(t, str) for t in topics):
+        raise ValueError(
+            f"contract {contract_path} must declare event_bus.subscribe_topics "
+            "as a list of strings"
+        )
+    return tuple(_expand_env_refs(t) for t in topics)
+
+
 def contract_publish_topics(contract_path: Path) -> tuple[str, ...]:
     """Return the ``event_bus.publish_topics`` declared in the given contract."""
     raw = _load_contract(contract_path)

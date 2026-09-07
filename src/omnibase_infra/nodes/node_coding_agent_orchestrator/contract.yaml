@@ -15,16 +15,46 @@ description: >
 
 handler_routing:
   routing_strategy: operation_match
+  # OMN-18013: split into per-topic `topic:`-scoped entries. Before the split a
+  # single operation_match entry with no topic scoping owned EVERY subscribe
+  # topic, so one entry spanned more than one real message category and the one
+  # category the wiring derived could not be true of all of them. Routing is
+  # per-topic since OMN-18013; the contract now says so too. Each entry also
+  # replaces the handler's hand-typed `event_type.endswith(...)` branch as the
+  # thing that decides which lifecycle step a message is (ruling item 2).
   handlers:
     - operation: "coding_agent.orchestrate"
+      topic: "onex.cmd.omnibase-infra.coding-agent-invoke.v1"
       handler:
         name: HandlerCodingAgentOrchestrator
         module: omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator
-      description: "Route a coding-agent lifecycle event to the next bus command."
+      description: "Workflow entrypoint: an invoke-requested command."
+      # The entry topic is the one whose payload must be re-hydrated into a typed
+      # model on the real dispatch path (OMN-13247), so `event_model:` stays on
+      # THIS entry after the OMN-18013 per-topic split. The three .evt. steps
+      # carry heterogeneous payloads and stay untyped, as before the split.
       event_model:
         name: ModelCodingAgentInvokeCommand
         module: omnibase_infra.models.coding_agent
         description: "The invoke-requested command (workflow entrypoint)."
+    - operation: "coding_agent.orchestrate"
+      topic: "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"
+      handler:
+        name: HandlerCodingAgentOrchestrator
+        module: omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator
+      description: "Workspace validated: emit the effect-invoke command."
+    - operation: "coding_agent.orchestrate"
+      topic: "onex.evt.omnibase-infra.coding-agent-invoke-completed.v1"
+      handler:
+        name: HandlerCodingAgentOrchestrator
+        module: omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator
+      description: "Effect completed: emit the terminal completed event."
+    - operation: "coding_agent.orchestrate"
+      topic: "onex.evt.omnibase-infra.coding-agent-invoke-failed.v1"
+      handler:
+        name: HandlerCodingAgentOrchestrator
+        module: omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator
+      description: "Effect failed: emit the terminal failed event."
 input_model:
   name: ModelCodingAgentInvokeCommand
   module: omnibase_infra.models.coding_agent
@@ -63,6 +93,19 @@ event_bus:
     - onex.evt.omnibase-infra.coding-agent-fsm-advance.v1
     - onex.evt.omnibase-infra.coding-agent-completed.v1
     - onex.evt.omnibase-infra.coding-agent-failed.v1
+# OMN-18013: the workflow's entry command topic is produced by an EXTERNAL
+# trigger (the `onex run-node` / skill CLI dispatch), not by another node's
+# publish_topics. `runtime_dispatch.external_trigger` + `command_topic` is the
+# contract-level declaration of that producer — the same shape
+# node_runner_fleet_maintain_orchestrator already uses. Without it the topic is
+# an orphan in the contract graph and a golden chain over it cannot build its
+# input from any publisher.
+runtime_dispatch:
+  external_trigger: true
+  command_topic: "onex.cmd.omnibase-infra.coding-agent-invoke.v1"
+  terminal_events:
+    - "onex.evt.omnibase-infra.coding-agent-completed.v1"
+    - "onex.evt.omnibase-infra.coding-agent-failed.v1"
 dependencies:
   - name: "omnibase_core"
     type: "library"

@@ -49,6 +49,18 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # fmt: off
 _LEGACY_ALLOWLIST: dict[str, str] = {
+    # --- OMN-18013: provisioned and PUBLISHED, but with no contract consumer ---
+    # Each of these had exactly one subscriber, and that subscriber declared no
+    # handler_routing entry that could ever be assigned the topic: the runtime
+    # created the subscription and then DLQ'd or dropped every message at LAG 0.
+    # OMN-18013 deleted the dead subscribe declarations, so the topics stay
+    # provisioned for their live publishers and are now uncontracted on the
+    # consume side. Recorded here rather than silently de-provisioned because a
+    # published topic must exist; the real close is a handler_routing entry that
+    # consumes it, or removal from ALL_PROVISIONED_SUFFIXES if nothing needs it.
+    "onex.evt.omniclaude.context-audit-dlq.v1": "OMN-18013 deleted the non-dispatching subscriber; publisher is omniclaude context audit, outside this repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.platform.contract-deregistered.v1": "OMN-18013 deleted the non-dispatching subscriber on node_contract_registry_reducer; in-repo publisher remains | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.platform.contract-registered.v1": "OMN-18013 deleted the non-dispatching subscriber on node_contract_registry_reducer; in-repo publisher remains | owner: jonah | expiry: 2026-12-01",
     # --- runtime/service emitted topics pending service contract ownership split (OMN-9877) ---
     # --- omniclaude skill cmd topics (migrating via topics.yaml, OMN-4592/OMN-4594) ---
     "onex.cmd.omniclaude.action-logging.v1": "pre-migration skill topic; topics.yaml covers this once OMN-4594 wired | owner: jonah | expiry: 2026-06-01",

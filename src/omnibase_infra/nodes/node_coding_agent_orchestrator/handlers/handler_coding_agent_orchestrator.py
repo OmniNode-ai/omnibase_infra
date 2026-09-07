@@ -33,6 +33,7 @@ from uuid import UUID, uuid4
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.models.coding_agent.model_coding_agent_invoke_command import (
     ModelCodingAgentInvokeCommand,
 )
@@ -45,12 +46,14 @@ from omnibase_infra.models.coding_agent.model_workspace_validate_result import (
 from omnibase_infra.nodes.node_coding_agent_orchestrator.contract_topics import (
     contract_allowed_workspace_roots,
     contract_publish_topics,
+    contract_subscribe_topics,
 )
 
 HANDLER_ID = "coding-agent-orchestrator"
 
 _CONTRACT = Path(__file__).resolve().parent.parent / "contract.yaml"
 _PUBLISH = contract_publish_topics(_CONTRACT)
+_SUBSCRIBE = contract_subscribe_topics(_CONTRACT)
 
 
 def _topic_with_suffix(suffix: str) -> str:
@@ -63,6 +66,31 @@ def _topic_with_suffix(suffix: str) -> str:
         )
     return matches[0]
 
+
+def _subscribe_topic_with_suffix(suffix: str) -> str:
+    """Resolve exactly one contract SUBSCRIBE topic ending with ``suffix``."""
+    matches = [t for t in _SUBSCRIBE if t.endswith(suffix)]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Contract {_CONTRACT} must declare exactly one event_bus.subscribe_topics "
+            f"topic ending in {suffix!r}; found {matches}"
+        )
+    return matches[0]
+
+
+# OMN-18013 (operator ruling item 2). This handler used to branch on
+# ``event_type.endswith("workspace-validated.v1")`` — a hand-typed suffix of a
+# TOPIC. The auto-wired consume boundary stamps the ALIAS
+# (``omnibase-infra.coding-agent-workspace-validated``), not the topic, so that
+# branch could only ever be taken when a publisher put the full topic string
+# into the payload's untyped ``event_type`` field and the boundary honoured it.
+# That override is gone. The alias below is derived from the subscribe topic the
+# contract declares, through the same single-source helper the publish side and
+# the manifest builder use (OMN-17296), so the handler cannot disagree with the
+# wire.
+EVENT_TYPE_WORKSPACE_VALIDATED = derive_event_type_alias_for_topic(
+    _subscribe_topic_with_suffix("coding-agent-workspace-validated.v1")
+)
 
 TOPIC_WORKSPACE_VALIDATE = _topic_with_suffix("coding-agent-workspace-validate.v1")
 TOPIC_INVOKE = _topic_with_suffix("coding-agent-effect-invoke.v1")
@@ -87,7 +115,7 @@ class HandlerCodingAgentOrchestrator:
         event_type = envelope.event_type or ""
         correlation_id = envelope.correlation_id or uuid4()
 
-        if event_type.endswith("workspace-validated.v1"):
+        if event_type == EVENT_TYPE_WORKSPACE_VALIDATED:
             events = self._on_workspace_validated(envelope, correlation_id)
         else:
             # Default entrypoint: the invoke-requested command.

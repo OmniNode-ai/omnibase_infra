@@ -763,26 +763,66 @@ repos:
         stages: [pre-commit]
       # OMN-14605: a handler_routing entry whose assigned topics span >1 real category
       # (.cmd/.evt/.intent) gets ONE category stamped on every route by handler_wiring,
-      # so the off-category topics are permanent NO_DISPATCHER (silent DLQ/drop) while
-      # the node boots green (the OMN-14606 node_swarm_fanout_orchestrator live defect).
-      # MixinNodeDispatch (OMN-12549) hard-rejects the same shape at registration.
-      # Triggers on contract.yaml too (a routing change needs no .py edit). Ratchet
-      # frozen in config/validation/mixed_category_routing_baseline.yaml (shrink-only).
-      # SYNC with the ci.yml step 'Check mixed-category routing gate (OMN-14605)'.
-      - id: mixed-category-routing
-        name: No handler_routing entry spans >1 real message category (OMN-14605)
-        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
+      # so the off-category topics were permanent NO_DISPATCHER (silent DLQ/drop) while
+      # the node booted green (the OMN-14606 node_swarm_fanout_orchestrator live
+      # defect). OMN-18013 made routing PER-TOPIC in handler_wiring, so the mechanism
+      # is gone; this gate now refuses the CONTRACT shapes that could still make a
+      # category wrong — a mixed-category entry, a message_category: that contradicts
+      # its topic's own name, and a topic whose name derives no category at all.
+      # The OMN-14605 baseline was burned to zero and DELETED; there is no --baseline.
+      # SYNC with the ci.yml step 'Check contract topic category gate (OMN-18013)'.
+      - id: contract-topic-category
+        name: Every route category comes from its own topic's name (OMN-18013)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.contract_topic_category --scope omnibase_infra
         language: system
         files: ^src/omnibase_infra/.*\.(py|yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-18013 (operator ruling item 2): the event type a handler matches is READ
+      # FROM the contract that declares the topic, never hand-typed. Refuses a
+      # handler_routing `event_type:` matching none of the entry's own topics (the
+      # dispatcher is then indexed under a key the consume boundary never produces),
+      # and a handler module comparing an event type against a literal onex.* topic or
+      # a `.v1` suffix. SYNC with the ci.yml step
+      # 'Check handler event_type source gate (OMN-18013)'.
+      - id: handler-event-type-source
+        name: Handler event types are read from a contract, never hand-typed (OMN-18013)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_event_type_source --scope omnibase_infra
+        language: system
+        files: ^src/omnibase_infra/.*\.(py|yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-18013 (operator ruling item 4): a golden chain builds its input from the
+      # publisher's contract. The bus carries the DERIVED ALIAS for a topic
+      # (OMN-17296), never the topic string, so a test feeding a topic as an envelope
+      # event_type is green on a shape production never produces. SYNC with the ci.yml
+      # step 'Check golden-chain contract input gate (OMN-18013)'.
+      - id: no-literal-event-type-in-tests
+        name: No test feeds a topic string as an envelope event_type (OMN-18013)
+        entry: uv run --frozen python -m omnibase_infra.validators.no_literal_event_type_in_tests tests
+        language: system
+        files: ^tests/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-18013 (operator ruling item 5): the burned baselines stay deleted. A file
+      # that does not exist cannot take a row; a shrink-only ratchet can, and every
+      # OMN-16939 live victim was a baselined row. SYNC with the ci.yml step
+      # 'Check no baseline refreeze (OMN-18013)'.
+      - id: no-baseline-refreeze
+        name: A burned gate baseline may not come back (OMN-18013)
+        entry: uv run --frozen python -m omnibase_infra.validators.no_baseline_refreeze .
+        language: system
+        files: ^(config/validation/|src/omnibase_infra/validators/).*$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-16939: a declared subscribe_topic that resolves to NO registered dispatcher
       # for its own (category, message type) is consumed, DLQ'd and COMMITTED on every
       # message — the consumer group reads Stable / LAG 0 forever while 100% of the
       # traffic is lost, because the offset advances after DLQ-routing so lag can never
-      # rise. Triggers on contract.yaml too (a routing change needs no .py edit). Ratchet
-      # frozen in config/validation/subscriber_dispatcher_resolution_baseline.yaml
-      # (shrink-only). SYNC with the ci.yml step
+      # rise. Triggers on contract.yaml too (a routing change needs no .py edit).
+      # OMN-18013 burned the 22-row baseline to ZERO and DELETED the file; there is no
+      # --baseline flag and `no-baseline-refreeze` refuses the file's recreation.
+      # SYNC with the ci.yml step
       # 'Check subscriber dispatcher resolution gate (OMN-16939)'.
       - id: subscriber-dispatcher-resolution
         name: Every subscribe_topic resolves to a registered dispatcher (OMN-16939)
@@ -799,9 +839,11 @@ repos:
       # register for all N topics — a message on ANY topic reaches every handler, and
       # the ones whose `operation` does not match crash or misfire (the pre-fix
       # node_gateway_attach_effect shape, OMN-15978). Triggers on contract.yaml too (a
-      # routing change needs no .py edit). Ratchet frozen in
-      # config/validation/operation_match_fanout_baseline.yaml (shrink-only). SYNC with
-      # the ci.yml step 'Check operation_match fan-out gate (OMN-16088)'.
+      # routing change needs no .py edit). OMN-18013 burned this ratchet
+      # to ZERO — the per-topic `topic:` split it prescribed cleared its last five
+      # rows — and DELETED config/validation/operation_match_fanout_baseline.yaml;
+      # no --baseline flag remains and `no-baseline-refreeze` refuses its return.
+      # SYNC with the ci.yml step 'Check operation_match fan-out gate (OMN-16088)'.
       - id: operation-match-fanout
         name: No operation_match handler_routing entry falls through to full fan-out (OMN-16088)
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra

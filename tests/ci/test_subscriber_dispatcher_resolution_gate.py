@@ -44,7 +44,6 @@ from omnibase_infra.runtime.auto_wiring import (
 from omnibase_infra.validators.subscriber_dispatcher_resolution import (
     REASON_CATEGORY_MISMATCH,
     REASON_NO_ROUTE,
-    load_baseline,
     scan,
     unresolved_subscriptions,
 )
@@ -84,11 +83,21 @@ def _contract(
     )
 
 
-def test_red_pr_lifecycle_state_reducer_shape() -> None:
-    """RED: the live 174-in / 174-DLQ shape — one operation_match entry, mixed topics.
+def test_the_live_174_dlq_shape_now_resolves_by_construction() -> None:
+    """The OMN-16939 shape, and it is GREEN since OMN-18013.
 
-    Every ``.evt.`` topic registers under ``command`` because the ``.cmd.`` sweep-start
-    topic is ``subscribe_topics[0]``, so none of them can ever match.
+    node_pr_lifecycle_state_reducer took 174 messages and DLQ'd 174 over six
+    hours on exactly this contract: one unscoped ``operation_match`` entry over a
+    ``.cmd.`` topic and two ``.evt.`` siblings. handler_wiring derived ONE
+    category for the entry from ``subscribe_topics[0]`` — the ``.cmd.`` topic —
+    and stamped ``command`` on all three routes, so both event topics were
+    permanent NO_DISPATCHER while the consumer group read Stable / LAG 0.
+
+    ``derive_route_message_category`` now takes each route's category from THAT
+    route's own topic name, so this shape cannot mis-register any more. The gate
+    finding is gone because the DEFECT is gone, not because it was baselined —
+    there is no baseline. ``test_red_subscribe_topic_no_entry_is_assigned`` below is
+    the live control proving the gate still fails on a real defect.
     """
     findings = unresolved_subscriptions(
         [
@@ -103,19 +112,21 @@ def test_red_pr_lifecycle_state_reducer_shape() -> None:
             )
         ]
     )
-    unresolved = {f.topic: f for f in findings}
-    assert _SWEEP_CMD not in unresolved, "the command topic resolves; only events break"
-    assert set(unresolved) == {_FIX_EVT, _MERGE_EVT}
-    assert unresolved[_FIX_EVT].reason == REASON_CATEGORY_MISMATCH
-    assert unresolved[_FIX_EVT].category == "event"
+    assert [f.topic for f in findings] == [], (
+        "the subscribe_topics[0] category mechanism is gone; every topic now "
+        "registers under its own category"
+    )
 
 
-def test_red_topic_match_without_explicit_category_is_still_broken() -> None:
-    """RED: the trap — a full per-topic split with event_models is NOT sufficient.
+def test_per_topic_split_without_an_explicit_category_now_resolves() -> None:
+    """The trap that a per-topic split alone used not to fix — now it does.
 
-    ``node_swarm_subtask_state_reducer`` had exactly this shape and was 100%
-    NO_DISPATCHER on all of its event topics. ``topic:`` picks WHICH topic an entry owns;
-    the category still falls back to ``subscribe_topics[0]``.
+    ``node_swarm_subtask_state_reducer`` had a full ``topic_match`` split with
+    per-entry event models and was still 100% NO_DISPATCHER on its event topic:
+    ``topic:`` chose WHICH topic an entry owned, but the category still came from
+    ``subscribe_topics[0]``. Since OMN-18013 the category comes from the topic,
+    so the split is sufficient on its own and no ``message_category:`` is needed
+    where the topic's name derives one.
     """
     findings = unresolved_subscriptions(
         [
@@ -138,8 +149,7 @@ def test_red_topic_match_without_explicit_category_is_still_broken() -> None:
             )
         ]
     )
-    assert [f.topic for f in findings] == [_ESCALATION_EVT]
-    assert findings[0].reason == REASON_CATEGORY_MISMATCH
+    assert [f.topic for f in findings] == []
 
 
 def test_green_explicit_message_category_resolves() -> None:
@@ -170,18 +180,68 @@ def test_green_explicit_message_category_resolves() -> None:
     assert findings == []
 
 
-def test_red_no_handler_routing_entry_at_all() -> None:
-    """RED: a subscribe topic no entry is assigned registers zero routes."""
+def test_red_subscribe_topic_no_entry_is_assigned() -> None:
+    """RED: a subscribe topic no entry owns registers zero routes.
+
+    This is the gate's live control — the proof it still fails on a real defect
+    rather than having been quietly neutered by the OMN-18013 burn-down. The
+    contract HAS a handler_routing entry, so the runtime does subscribe it; the
+    entry is ``topic_match``-scoped to one topic, so the sibling topic is
+    assigned to nothing and every message on it is consumed, matched against no
+    route, DLQ'd and committed.
+    """
     findings = unresolved_subscriptions(
         [
             _contract(
                 name="node_no_routes",
+                subscribe_topics=(_FIX_EVT, _MERGE_EVT),
+                routing_strategy="topic_match",
+                handlers=(
+                    ModelHandlerRoutingEntry(
+                        operation="reduce_pr_state",
+                        topic=_FIX_EVT,
+                        handler=_HANDLER,
+                    ),
+                ),
+            )
+        ]
+    )
+    assert [f.reason for f in findings] == [REASON_NO_ROUTE]
+    assert [f.topic for f in findings] == [_MERGE_EVT]
+
+
+def test_contract_with_no_handler_routing_entries_is_not_flagged() -> None:
+    """OMN-18013: the runtime never auto-subscribes this shape, so nothing to resolve.
+
+    A contract declaring subscribe topics and NO handler_routing entries is
+    short-circuited to SKIPPED in ``_prepare_contract_wiring``; one whose routing
+    block exists but parses to zero handlers is FAILED by the phantom-wiring
+    check. Either way no Kafka subscription is created, so this gate's failure
+    mode — consume, DLQ, commit, while the group reads Stable / LAG 0 — cannot
+    occur, exactly as for ``plugin_managed``.
+
+    This is not a convenience exemption; it removed two live FALSE POSITIVES.
+    ``node_contract_registry_reducer`` and ``node_context_audit_dlq_effect`` have
+    this shape, and the "fix" the finding invited — deleting the subscribe
+    declaration — would have de-provisioned topics that the kernel's
+    ``ContractRegistrationEventRouter`` and ``ContextAuditConsumer`` actually
+    consume, and dropped enum members that live projection source imports.
+    ``tests/unit/runtime/auto_wiring/test_omn17562_subscription_skip.py`` pins the
+    runtime half of this invariant.
+    """
+    findings = unresolved_subscriptions(
+        [
+            _contract(
+                name="node_kernel_consumed",
                 subscribe_topics=(_FIX_EVT,),
                 handlers=(),
             )
         ]
     )
-    assert [f.reason for f in findings] == [REASON_NO_ROUTE]
+    assert findings == [], (
+        "a contract the runtime never subscribes has no unresolved subscription; "
+        "flagging it invites deleting a declaration something else consumes"
+    )
 
 
 def test_gate_uses_the_runtime_derivation_not_a_reimplementation() -> None:
@@ -196,25 +256,41 @@ def test_gate_uses_the_runtime_derivation_not_a_reimplementation() -> None:
     assert "derive_entry_message_types(contract, entry)" in source
 
 
-def test_live_baseline_is_green_and_not_stale() -> None:
-    """The seeded omnibase_infra baseline exactly matches the live finding set.
+def test_live_scan_is_zero_with_no_baseline_at_all() -> None:
+    """Every declared subscribe topic in this repo resolves to a dispatcher.
 
-    Shrink-only in both directions: a new unresolved subscription fails as a violation,
-    and a fixed one still listed fails as stale.
+    This gate shipped with a 22-row shrink-only baseline. OMN-18013 burned it to
+    ZERO and DELETED ``config/validation/subscriber_dispatcher_resolution_baseline.yaml``;
+    ``load_baseline`` and the ``--baseline`` flag went with it, and
+    ``no-baseline-refreeze`` refuses the file's return. A finding here is a live
+    defect — a topic the runtime would subscribe to, consume, DLQ and COMMIT at
+    LAG 0 — and the fix is the contract, because there is nowhere to record it.
     """
     repo_root = Path(__file__).resolve().parents[2]
     findings, contract_count = scan(repo_root / "src" / "omnibase_infra")
     assert contract_count >= 60, (
         "contract scan collapsed; a green gate would be vacuous"
     )
-    baseline = load_baseline(
+    assert [f.key for f in findings] == [], (
+        "unresolved subscription(s) — fix the contract, there is no baseline"
+    )
+
+
+def test_the_baseline_file_and_its_loader_are_gone() -> None:
+    """The burned baseline cannot return through this gate's own module."""
+    repo_root = Path(__file__).resolve().parents[2]
+    assert not (
         repo_root
         / "config"
         / "validation"
         / "subscriber_dispatcher_resolution_baseline.yaml"
-    )
-    live = {f.key for f in findings}
-    assert live - baseline == set(), (
-        "new unresolved subscription(s) — fix, do not baseline"
-    )
-    assert baseline - live == set(), "stale baseline entr(ies) — remove them"
+    ).exists()
+    source = (
+        repo_root
+        / "src"
+        / "omnibase_infra"
+        / "validators"
+        / "subscriber_dispatcher_resolution.py"
+    ).read_text(encoding="utf-8")
+    assert "--baseline" not in source
+    assert "def load_baseline" not in source
