@@ -45,6 +45,15 @@ from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import 
 from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
     ModelEventBusWiring,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_handler_ref import (
+    ModelHandlerRef,
+)
+from omnibase_infra.runtime.auto_wiring.models.model_handler_routing import (
+    ModelHandlerRouting,
+)
+from omnibase_infra.runtime.auto_wiring.models.model_handler_routing_entry import (
+    ModelHandlerRoutingEntry,
+)
 from omnibase_infra.runtime.enums.enum_contract_attach_gate_phase import (
     EnumContractAttachGatePhase,
 )
@@ -78,6 +87,20 @@ DELEGATION_INFERENCE_REQUEST_TOPIC: str = (
 )
 
 
+#: A contract the interleave will actually attach declares handler routing.
+#: Without one it is SKIPPED upstream and can never report (OMN-17372).
+_DEFAULT_ROUTING: ModelHandlerRouting = ModelHandlerRouting(
+    routing_strategy="payload_type_match",
+    handlers=(
+        ModelHandlerRoutingEntry(
+            handler=ModelHandlerRef(name="StubHandler", module="tests.stub"),
+            event_model=ModelHandlerRef(name="ModelStub", module="tests.stub"),
+            operation=None,
+        ),
+    ),
+)
+
+
 class _StubEventBus:
     """Event bus that reports exactly the topics it was handed as required+ready."""
 
@@ -104,8 +127,20 @@ def _running_process(required_topics: tuple[str, ...]) -> RuntimeHostProcess:
 
 
 def _contract(
-    name: str, subscribe_topics: tuple[str, ...], **eb: Any
+    name: str,
+    subscribe_topics: tuple[str, ...],
+    *,
+    handler_routing: ModelHandlerRouting | None = _DEFAULT_ROUTING,
+    **eb: Any,
 ) -> ModelDiscoveredContract:
+    """A contract shaped like one the boot interleave will actually attach.
+
+    ``handler_routing`` defaults to a real routing block (OMN-17372): a
+    contract without one is SKIPPED by ``_prepare_contract_wiring`` and can
+    never report an attach result, so it is not a readiness requirement and a
+    fixture that omits it does not model a wired command contract at all. Pass
+    ``handler_routing=None`` to model that skipped shape deliberately.
+    """
     return ModelDiscoveredContract(
         name=name,
         node_type="EFFECT_GENERIC",
@@ -114,6 +149,7 @@ def _contract(
         entry_point_name=name,
         package_name="omnibase_infra",
         event_bus=ModelEventBusWiring(subscribe_topics=subscribe_topics, **eb),
+        handler_routing=handler_routing,
     )
 
 

@@ -27,6 +27,20 @@ command topics the gateway publishes into
 set by construction, not by enumeration, so a contract added later is covered
 without editing this module.
 
+A required contract must be one the boot interleave will ACTUALLY ATTEMPT.
+The first revision of this module derived the required set from
+``manifest.contracts`` while results were produced only for the ``eligible``
+subset inside ``subscribe_wired_contract_topics`` — six filters narrower — and
+this module hand-mirrored exactly one of those six. One contract caught by any
+of the other five was required, never recorded, and pending forever:
+``/ready`` answered 503 for the life of the process, on every lane, with no
+timeout to expire and no log line to read. The two filters decidable from the
+contract alone live in :func:`contract_subscribes_a_command_topic`; the rest are
+reported by the interleave itself through
+:meth:`ContractAttachReadinessGate.exclude`, so there is ONE authority on
+eligibility and a filter added to the interleave later cannot silently re-open
+the wedge.
+
 Direction of travel is one-way: this gate can only make ``/ready`` LESS
 permissive. It is ANDed into ``RuntimeHostProcess.readiness_check`` through the
 existing OMN-14758 supplemental-probe seam; it never marks anything ready that
@@ -49,6 +63,9 @@ from typing import TYPE_CHECKING
 
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
+)
+from omnibase_infra.event_bus.model_contract_attach_exclusion import (
+    ModelContractAttachExclusion,
 )
 from omnibase_infra.runtime.enums.enum_contract_attach_gate_phase import (
     EnumContractAttachGatePhase,
@@ -99,7 +116,16 @@ def is_command_topic(topic: str) -> bool:
 
 
 def contract_subscribes_a_command_topic(contract: ModelDiscoveredContract) -> bool:
-    """Return True when *contract* declares at least one command subscribe topic."""
+    """Return True when *contract* declares at least one command subscribe topic.
+
+    The two exclusions below are the ones decidable from the CONTRACT ALONE,
+    before any wiring runs. Both drop a contract the boot interleave provably
+    never attempts, so requiring it would wedge ``/ready`` at 503 forever. The
+    exclusions that are only decidable from the wiring REPORT (zero registered
+    dispatchers, a raw projection with no applier, an all-no-op dispatch) are
+    NOT guessed at here — the interleave reports those itself through
+    :meth:`ContractAttachReadinessGate.exclude`, which is the single authority.
+    """
     event_bus = contract.event_bus
     if event_bus is None:
         return False
@@ -107,6 +133,20 @@ def contract_subscribes_a_command_topic(contract: ModelDiscoveredContract) -> bo
         # OMN-10864: a plugin-managed contract owns its own subscription and is
         # never attached by the boot interleave, so it can never report a
         # result here. Requiring it would wedge /ready at 503 forever.
+        return False
+    if contract.handler_routing is None:
+        # OMN-17372: a contract with no handler_routing is SKIPPED by
+        # ``_prepare_contract_wiring`` ("No handler_routing declared in
+        # contract"), so ``subscribe_wired_contract_topics`` drops it at the
+        # outcome-is-not-WIRED filter and it can never report a result — the
+        # identical failure mode as plugin_managed above.
+        #
+        # This is not hypothetical: ``node_contract_resolver_bridge``
+        # subscribes ``onex.cmd.platform.contract-resolve-requested.v1`` and
+        # declares no handler_routing (it is a transitional HTTP bridge served
+        # by its own process, OMN-2756). It made every runtime from 0.38.21
+        # onward serve /ready 503 permanently — 154 of 155 required contracts
+        # ATTACHED, zero NOT_READY, zero FAILED, one contract pending forever.
         return False
     return any(is_command_topic(topic) for topic in event_bus.subscribe_topics)
 
@@ -148,16 +188,37 @@ class ContractAttachReadinessGate:
     contract that regresses flips it back.
     """
 
-    __slots__ = ("_required", "_status_by_contract")
+    __slots__ = ("_excluded", "_required", "_status_by_contract")
 
     def __init__(self, required_contract_names: Iterable[str]) -> None:
         self._required: frozenset[str] = frozenset(required_contract_names)
         self._status_by_contract: dict[str, EnumContractAttachStatus] = {}
+        self._excluded: dict[str, ModelContractAttachExclusion] = {}
 
     @property
     def required_contract_names(self) -> frozenset[str]:
         """The contract names this gate requires to be ATTACHED."""
         return self._required
+
+    def exclude(self, exclusions: Sequence[ModelContractAttachExclusion]) -> None:
+        """Fold in the contracts the boot interleave says it will NEVER attempt.
+
+        This is the fix for the class of defect OMN-17372 shipped: the required
+        set is derived statically from the contracts, but results are produced
+        only for the subset the interleave finds eligible, and that eligibility
+        depends on facts (registered dispatchers, live dispatch targets, applier
+        registration) that do not exist until wiring has run. Mirroring those
+        filters here — guessing a second time, in a second place — is what
+        broke; the interleave reporting its own exclusions is what fixes it.
+
+        This is NOT a default-open and NOT a timeout. Exclusion applies only to
+        a contract the interleave never TRIED: a contract with a recorded
+        NOT_READY or FAILED result keeps blocking readiness no matter what
+        arrives here, so nothing that actually failed to attach can be excluded
+        into readiness.
+        """
+        for exclusion in exclusions:
+            self._excluded[exclusion.contract_name] = exclusion
 
     def record(self, results: Sequence[ModelContractAttachResult]) -> None:
         """Fold attach results in. Results for non-required contracts are kept.
@@ -175,8 +236,21 @@ class ContractAttachReadinessGate:
         not_ready: list[str] = []
         failed: list[str] = []
         pending: list[str] = []
+        effective_required: list[str] = []
+        excluded: list[ModelContractAttachExclusion] = []
         for name in sorted(self._required):
             status = self._status_by_contract.get(name)
+            exclusion = self._excluded.get(name)
+            # Fail-closed: an exclusion never overrides a contract the
+            # interleave actually TRIED and could not attach. Only a contract
+            # with no result, or one already ATTACHED, can be excluded.
+            if exclusion is not None and status in (
+                None,
+                EnumContractAttachStatus.ATTACHED,
+            ):
+                excluded.append(exclusion)
+                continue
+            effective_required.append(name)
             if status is None:
                 pending.append(name)
             elif status is EnumContractAttachStatus.ATTACHED:
@@ -196,11 +270,14 @@ class ContractAttachReadinessGate:
         return ModelContractAttachGateStatus(
             phase=phase,
             ready=phase is EnumContractAttachGatePhase.ATTACHED,
-            required_contracts=tuple(sorted(self._required)),
+            required_contracts=tuple(effective_required),
             attached_contracts=tuple(attached),
             not_ready_contracts=tuple(not_ready),
             failed_contracts=tuple(failed),
             pending_contracts=tuple(pending),
+            excluded_contracts=tuple(
+                sorted(excluded, key=lambda item: item.contract_name)
+            ),
         )
 
     def probe(self) -> tuple[bool, dict[str, object]]:

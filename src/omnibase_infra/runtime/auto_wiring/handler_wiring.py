@@ -90,11 +90,17 @@ from omnibase_infra.errors import (
     ProjectionQueryRowBudgetError,
     TopicReplicationPolicyError,
 )
+from omnibase_infra.event_bus.enum_contract_attach_exclusion_reason import (
+    EnumContractAttachExclusionReason,
+)
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
 )
 from omnibase_infra.event_bus.enum_topic_readiness_status import (
     EnumTopicReadinessStatus,
+)
+from omnibase_infra.event_bus.model_contract_attach_exclusion import (
+    ModelContractAttachExclusion,
 )
 from omnibase_infra.event_bus.model_contract_attach_result import (
     ModelContractAttachResult,
@@ -8176,6 +8182,7 @@ async def subscribe_wired_contract_topics(
     provisioner: ProtocolTopicProvisioner | None = None,
     readiness_config: ModelTopicReadinessConfig | None = None,
     attach_results_out: list[ModelContractAttachResult] | None = None,
+    exclusions_out: list[ModelContractAttachExclusion] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
 ) -> dict[str, tuple[str, ...]]:
@@ -8195,6 +8202,19 @@ async def subscribe_wired_contract_topics(
     never aborts the kernel or recycles the process (§3.5, §3.8). Per-contract
     attach outcomes are appended to *attach_results_out* when provided so the
     caller can build the runtime readiness tri-state.
+
+    OMN-17372 — the eligibility filters below drop contracts this function will
+    NEVER attempt, so those contracts never produce a
+    ``ModelContractAttachResult``. Each such drop is appended to
+    *exclusions_out* when provided, naming the contract and the structural
+    reason. Together the two out-params account for EVERY contract in *report*:
+    a caller can tell "has not reported yet" apart from "will never report"
+    instead of waiting forever on the second in the belief it is the first.
+    That is the whole defect OMN-17372's readiness gate hit — it required
+    ``manifest.contracts`` and could only ever be satisfied by this eligible
+    subset, so one structurally-skipped command contract pinned ``/ready`` at
+    503 for the life of the process. The exclusion list is filled BEFORE the
+    first await, so it is complete even for a caller that reads it early.
 
     Returns the map of attached contract -> attached topics (the contracts that
     actually subscribed). Backward-compatible: with no *provisioner* the
@@ -8218,14 +8238,59 @@ async def subscribe_wired_contract_topics(
 
     # Collect eligible contracts in priority order (projection appliers first).
     eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
+
+    def _exclude(
+        contract_name: str,
+        reason: EnumContractAttachExclusionReason,
+        detail: str = "",
+    ) -> None:
+        """Report a contract this function will never attempt (OMN-17372)."""
+        if exclusions_out is None:
+            return
+        exclusions_out.append(
+            ModelContractAttachExclusion(
+                contract_name=contract_name,
+                reason=reason,
+                detail=detail,
+            )
+        )
+
     for result in _prioritize_subscription_results(
         report,
         result_appliers_by_contract,
     ):
         if result.outcome is not EnumWiringOutcome.WIRED:
+            # OMN-17372: this was the one filter of the six that logged
+            # NOTHING. A contract SKIPPED upstream (no handler_routing, no
+            # subscribe_topics) vanished here without a line, which is why a
+            # permanently-503 runtime gave no diagnostic at all. Log it at the
+            # same level as its five siblings.
+            logger.info(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "contract '%s' because its wiring outcome is %s, not WIRED "
+                "(OMN-17372). reason=%s",
+                result.contract_name,
+                result.outcome.value,
+                result.reason,
+            )
+            _exclude(
+                result.contract_name,
+                EnumContractAttachExclusionReason.NOT_WIRED,
+                f"outcome={result.outcome.value} reason={result.reason}",
+            )
             continue
         contract = contract_by_name.get(result.contract_name)
         if contract is None:
+            logger.info(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "contract '%s' because it is absent from the manifest being "
+                "subscribed (OMN-17372)",
+                result.contract_name,
+            )
+            _exclude(
+                result.contract_name,
+                EnumContractAttachExclusionReason.ABSENT_FROM_MANIFEST,
+            )
             continue
         if not result.dispatchers_registered:
             # Resolver-owned skips and quarantines intentionally register no
@@ -8238,11 +8303,19 @@ async def subscribe_wired_contract_topics(
                 "contract '%s' because it owns zero dispatchers (OMN-15474)",
                 contract.name,
             )
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.NO_DISPATCHERS_REGISTERED,
+            )
             continue
         if _is_raw_event_projection_contract(contract) and (
             result_appliers_by_contract is None
             or contract.name not in result_appliers_by_contract
         ):
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.RAW_EVENT_PROJECTION_WITHOUT_APPLIER,
+            )
             continue
         # plugin_managed: domain plugin owns Kafka subscription (OMN-10864).
         if contract.event_bus is not None and contract.event_bus.plugin_managed:
@@ -8250,6 +8323,10 @@ async def subscribe_wired_contract_topics(
                 "Auto-wiring (deferred): skipping Kafka subscription for "
                 "plugin-managed contract '%s' (OMN-10864)",
                 contract.name,
+            )
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.PLUGIN_MANAGED,
             )
             continue
         # OMN-17562. The same withholding as the immediate seam, applied here
@@ -8267,6 +8344,11 @@ async def subscribe_wired_contract_topics(
                 contract.name,
                 len(result.wirings),
                 list(result.nonwriting_handlers),
+            )
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.NO_LIVE_DISPATCHER,
+                f"nonwriting_handlers={list(result.nonwriting_handlers)}",
             )
             continue
         eligible.append((result, contract))
