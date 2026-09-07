@@ -2,7 +2,13 @@
 # SPDX-License-Identifier: MIT
 """Systemd unit must execute deploy-agent code from the canonical repo copy."""
 
+import os
+import shutil
+import socket
+import subprocess
 from pathlib import Path
+
+import pytest
 
 _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 
@@ -148,3 +154,216 @@ def test_dev_unit_does_not_touch_the_prod_bus() -> None:
     assert not any("49092" in ln for ln in dev_directives), dev_directives
     assert "192.168.86.201:49092" in prod_override
     assert "Environment=DEPLOY_AGENT_ALLOWED_LANES=prod" in prod_override
+
+
+def test_no_unit_kills_the_port_holder() -> None:
+    """OMN-16939: no unit may kill whatever already holds its port.
+
+    ``ExecStartPre=/bin/sh -c 'fuser -k <port>/tcp || true'`` shipped in #3262
+    (hostile-reviewer MAJOR fp=0c64d40e5e65, undisclosed at merge). It is a
+    blind ``kill -9`` of *whatever* is listening: the peer lane's agent, a
+    still-draining rebuild subprocess, or an unrelated process that happened to
+    bind the port. ``|| true`` then swallows the outcome, so the unit starts
+    reporting success either way and the kill leaves no trace.
+
+    A port collision is a fail-fast error, not a licence to kill. The
+    preflight names the holder and refuses; a human decides what to stop.
+    """
+    kill_verbs = (
+        "fuser -k",
+        "fuser --kill",
+        "pkill",
+        "killall",
+        "kill -9",
+        "kill -KILL",
+    )
+    for unit in sorted(_DEPLOY_DIR.glob("*.service")) + sorted(
+        _DEPLOY_DIR.glob("*.service.d/*.conf")
+    ):
+        text = unit.read_text()
+        for directive in (
+            "ExecStartPre=",
+            "ExecStart=",
+            "ExecStartPost=",
+            "ExecStop=",
+            "ExecStopPost=",
+            "ExecReload=",
+        ):
+            for line in text.splitlines():
+                if not line.startswith(directive):
+                    continue
+                for verb in kill_verbs:
+                    assert verb not in line, (
+                        f"{unit.name}: {directive} must not kill the port holder "
+                        f"(found {verb!r} in {line!r})"
+                    )
+
+
+def test_units_preflight_their_port_fail_closed() -> None:
+    """Each agent unit must fail-fast on a busy port via the shared preflight."""
+    expected = {
+        "deploy-agent.service": "8099",
+        "deploy-agent-dev.service": "8098",
+    }
+    for unit_name, port in expected.items():
+        text = (_DEPLOY_DIR / unit_name).read_text()
+        pre_lines = [ln for ln in text.splitlines() if ln.startswith("ExecStartPre=")]
+        assert pre_lines, f"{unit_name} must declare an ExecStartPre port preflight"
+        assert any(
+            "preflight_port_free.sh" in ln and ln.rstrip().endswith(f" {port}")
+            for ln in pre_lines
+        ), pre_lines
+        # No `|| true` anywhere on the preflight line: swallowing the exit
+        # status is what made the fuser form report success unconditionally.
+        assert all("|| true" not in ln for ln in pre_lines), pre_lines
+
+
+def test_preflight_script_is_executable_and_never_kills() -> None:
+    script = _DEPLOY_DIR / "preflight_port_free.sh"
+    assert script.is_file(), f"{script} must exist"
+    assert script.stat().st_mode & 0o111, f"{script} must be executable"
+    body = script.read_text()
+    for verb in ("fuser", "pkill", "killall", "kill "):
+        assert verb not in body, f"preflight must never kill: found {verb!r}"
+
+
+_PREFLIGHT = _DEPLOY_DIR / "preflight_port_free.sh"
+
+
+def _run_preflight(port: object) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(_PREFLIGHT), str(port)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("bad", ["", "0", "70000", "80a", "-1"])
+def test_preflight_rejects_bad_port_fail_closed(bad: str) -> None:
+    """An unusable argument is exit 2 (unprovable), never a silent pass."""
+    assert _run_preflight(bad).returncode == 2
+
+
+def test_preflight_passes_when_port_is_free() -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        free_port = probe.getsockname()[1]
+    # Socket closed: nothing is listening on free_port now.
+    result = _run_preflight(free_port)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(
+    shutil.which("ss") is None and shutil.which("lsof") is None,
+    reason="no socket-inspection tool on this host",
+)
+def test_preflight_refuses_and_names_the_holder_without_stopping_it() -> None:
+    """A held port is exit 1, the holder is named, and it is still alive after."""
+    with socket.socket() as holder:
+        holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        port = holder.getsockname()[1]
+
+        result = _run_preflight(port)
+
+        assert result.returncode == 1, (result.returncode, result.stderr)
+        assert f"port {port} is already in use" in result.stderr
+        assert "Refusing to start" in result.stderr
+        # "Names the holder" is the whole point of replacing the kill-first
+        # form, so assert the identity actually reaches stderr rather than
+        # only that *some* refusal was printed. The holder here is this very
+        # pytest process, so an unprivileged probe can always attribute it.
+        assert str(os.getpid()) in result.stderr, result.stderr
+        # The holder must still be listening: the preflight observes, never acts.
+        holder.setblocking(False)
+        with socket.socket() as client:
+            client.settimeout(2)
+            client.connect(("127.0.0.1", port))
+
+
+def _write_stub(directory: Path, name: str, body: str) -> None:
+    stub = directory / name
+    stub.write_text(body)
+    stub.chmod(0o755)
+
+
+def test_preflight_fails_closed_when_the_probe_tool_errors(tmp_path: Path) -> None:
+    """A probe that fails to RUN is exit 2, never a silent "port is free".
+
+    Both probes were previously invoked as ``$(... 2>/dev/null || true)``, which
+    maps *every* tool failure -- unsupported filter syntax on an older
+    iproute2, a netlink error, /proc/net unreadable in a restricted namespace
+    -- onto an empty holder list and therefore onto exit 0. That is fail-OPEN,
+    and it silently contradicted the docblock's fail-closed contract. Shim both
+    tools onto failing stubs and assert the refusal (hostile-reviewer MAJOR
+    fp=b71ceadd2319).
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _write_stub(bindir, "ss", '#!/bin/sh\necho "ss: netlink error" >&2\nexit 1\n')
+    # lsof exit 1 means "ran, matched nothing"; 2 is a genuine failure.
+    _write_stub(bindir, "lsof", '#!/bin/sh\necho "lsof: fatal" >&2\nexit 2\n')
+
+    result = subprocess.run(
+        [str(_PREFLIGHT), "8098"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PATH": str(bindir)},
+    )
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert "unproven" in result.stderr, result.stderr
+
+
+def test_preflight_fails_closed_when_no_probe_tool_exists(tmp_path: Path) -> None:
+    """No `ss` and no `lsof` is unprovable, so it refuses (exit 2)."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = subprocess.run(
+        [str(_PREFLIGHT), "8098"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PATH": str(empty)},
+    )
+    assert result.returncode == 2, (result.returncode, result.stderr)
+    assert "neither 'ss' nor 'lsof'" in result.stderr
+
+
+def test_lsof_no_match_exit_1_is_free_not_an_error(tmp_path: Path) -> None:
+    """Negative control for the test above: lsof's exit 1 must stay "free".
+
+    `lsof` exits 1 when the query ran and matched nothing. Treating every
+    non-zero probe status as a failure would turn the common "port is free"
+    case into a permanent refusal, so the lsof branch must special-case it.
+    Only `lsof` is on PATH here, which forces the fallback branch.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _write_stub(bindir, "lsof", "#!/bin/sh\nexit 1\n")
+
+    result = subprocess.run(
+        [str(_PREFLIGHT), "8098"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PATH": str(bindir)},
+    )
+    assert result.returncode == 0, (result.returncode, result.stderr)
+
+
+def test_units_bound_the_fail_fast_restart_loop() -> None:
+    """A refusal must stop, not re-refuse every RestartSec forever.
+
+    Restart=on-failure with RestartSec=5 spaces five restarts over ~25s, which
+    never trips systemd's default start limit of 5 starts in 10s -- so before
+    this the unit would re-run the refusing preflight every five seconds for as
+    long as the collision lasted (hostile-reviewer MINOR fp=b58479fbe9d6).
+    """
+    for unit_name in ("deploy-agent.service", "deploy-agent-dev.service"):
+        text = (_DEPLOY_DIR / unit_name).read_text()
+        directives = [ln.strip() for ln in text.splitlines()]
+        assert "StartLimitIntervalSec=300" in directives, unit_name
+        assert "StartLimitBurst=5" in directives, unit_name
