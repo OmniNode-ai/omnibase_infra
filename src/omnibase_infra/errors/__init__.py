@@ -44,7 +44,7 @@ Exports:
     EventRegistryFingerprintMissingError: Event registry artifact file not found
     ProjectionError: Raised by NodeProjectionEffect when a synchronous projection write fails
     ProjectionNotMaterializedError: Projection write-path failure — offset must not advance (OMN-17379)
-    ProjectionQueryRowBudgetError: Projection read matched more rows than the seam materialises (OMN-17888)
+    ProjectionQueryRowBudgetError: Projection read matched more rows than the seam materialises — a ProjectionNotMaterializedError subclass, so the offset is withheld (OMN-17888)
     ProjectionTenantContextError: Projection write refused — no tenant resolved under enforcement
 
 Correlation ID Assignment:

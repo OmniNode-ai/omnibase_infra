@@ -158,7 +158,7 @@ class ProjectionNotMaterializedError(ProjectionError):
     """
 
 
-class ProjectionQueryRowBudgetError(ProjectionError):
+class ProjectionQueryRowBudgetError(ProjectionNotMaterializedError):
     """A projection read matched more rows than the seam will materialise.
 
     OMN-17888. ``ProjectionDatabaseOperations._execute_query`` emitted
@@ -181,11 +181,30 @@ class ProjectionQueryRowBudgetError(ProjectionError):
     is identifiable from one log line.
 
     Classified as a write-path failure, not a content failure: the event is
-    well-formed and still owed a row, so the offset is withheld and the record
-    is redelivered once the caller is repaired. The remedy is never to raise
-    the bound -- it is to make the caller ask a bounded question (an indexed
-    single-row read, or a paged one), which is what the read it replaced
-    already needed.
+    well-formed and still owed a row, so the offset must be withheld and the
+    record redelivered once the caller is repaired. The remedy is never to
+    raise the bound -- it is to make the caller ask a bounded question (an
+    indexed single-row read, or a paged one), which is what the read it
+    replaced already needed.
+
+    IT IS A SUBCLASS OF :class:`ProjectionNotMaterializedError`, AND THAT IS
+    THE WHOLE MECHANISM. Until OMN-17888 second pass it was a direct sibling
+    under :class:`ProjectionError` and was caught NOWHERE. Every offset-unsafe
+    arm in the runtime matches ``ProjectionNotMaterializedError`` by EXACT type
+    (``event_bus_kafka._dispatch_to_subscriber``,
+    ``message_dispatch_engine._dispatch_one``, and both
+    ``handler_wiring`` boundary arms), so a sibling fell through to the generic
+    bounded-retry loop, then to ``_route_swallowed_exception`` -> DLQ -> and the
+    offset ADVANCED. The paragraph above claimed the opposite of what the code
+    did: the event was acknowledged into a dead-letter record and the row it was
+    owed was never written -- the exact OMN-17379 swallow this error was
+    supposed to be on the safe side of.
+
+    Subclassing rather than widening four ``except`` tuples is deliberate. The
+    two types state the SAME fact -- "this projection consumed an event, wrote
+    no row, and the cause is the runtime rather than the event" -- so the
+    relationship belongs in the hierarchy, where a fifth arm added later
+    inherits it, instead of in four call sites that a fifth arm can forget.
     """
 
 
