@@ -277,23 +277,33 @@ class TestReadbackSurvivesAConnectionThatLags:
         assert "was written" in outcome.reason.lower()
 
     async def test_an_unconfirmed_flip_still_leaves_the_audit_trail(self) -> None:
-        """A Done nobody can attribute is the worst of both outcomes.
+        """A state change nobody can attribute is the worst of both outcomes.
 
         The measured run left OMN-17658 in Done with no comment at all: no
-        counters, no companion, and no `class=flipped` marker — which is the
-        anchor the OMN-17934 prior-revert fence is meant to grow into. The
-        comment is posted either way; what changes is that it states the
-        readback did not confirm rather than quoting an entry id it does not
-        have.
+        counters, no companion, no marker. The comment is posted either way.
+
+        OMN-16106 changed WHICH marker. This assertion used to require
+        ``class=flipped``; the write is now rolled back when the readback does
+        not confirm, so claiming a flip in the marker would be false — and
+        actively harmful, because ``class=flipped`` is what the prior-revert
+        fence anchors on to recognise a closer-written Done. Stamping it on a
+        write that was taken back would fence out a later, legitimate flip on
+        the same ticket.
         """
         linear = LaggingLinear(lag_reads=99, ever_consistent=False)
         await _handler(linear).handle(_request(readback_max_attempts=2))
 
         assert len(linear.comments) == 1
         body = linear.comments[0][1]
-        assert "class=flipped" in body
+        assert "class=flipped" not in body
+        assert "class=readback_unconfirmed" in body
         assert "UNCONFIRMED" in body
         assert "8270" in body
+        # The board ends the run where it began: Done written, then restored.
+        assert linear.state_updates == [
+            ("issue-1", "state-done"),
+            ("issue-1", "s1"),
+        ]
 
     async def test_the_retry_is_bounded_by_the_contract(self) -> None:
         linear = LaggingLinear(lag_reads=99, ever_consistent=False)

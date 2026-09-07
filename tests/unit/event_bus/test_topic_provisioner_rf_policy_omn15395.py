@@ -382,6 +382,15 @@ def _use_scram_multi_broker(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
     monkeypatch.setenv("KAFKA_SASL_MECHANISM", "SCRAM-SHA-512")
+    # OMN-18012: a SCRAM mechanism with no credentials is not a config any
+    # broker would accept -- it is the shape of escape 1 (a client handed a
+    # mechanism and nothing to authenticate with), and ModelKafkaEventBusConfig
+    # now refuses it rather than building a half-formed client. This fixture
+    # asserts a REPLICATION-FACTOR policy, so its transport only has to be
+    # well-formed; supplying synthetic credentials makes it a config that could
+    # really exist. Synthetic values, never a real credential.
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", "omn15395-fixture")
+    monkeypatch.setenv("KAFKA_SASL_PASSWORD", "omn15395-fixture-secret")
 
 
 def _provisioner(contracts_root: Path) -> TopicProvisioner:

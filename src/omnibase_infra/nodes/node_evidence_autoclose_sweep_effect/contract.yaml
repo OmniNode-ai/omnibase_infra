@@ -237,7 +237,7 @@ contract_version:
   major: 1
   minor: 7
   patch: 0
-node_version: "1.8.0"
+node_version: "1.9.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -382,7 +382,13 @@ error_handling:
       retry_strategy: "none"
     - name: "FLIP_READBACK_UNCONFIRMED"
       description: >
-        issueUpdate(stateId) reported success but no completed state-history segment newer than the pre-write head appeared within readback_max_attempts reads (OMN-17658). Recorded as ERROR_READBACK_UNCONFIRMED and counted under tickets_errored, never as a flip: the API agreeing to a request is not evidence the board moved. The outcome still carries applied=true and still posts the audit comment with the class=flipped marker and an explicit UNCONFIRMED line, because the state change WAS written -- measured on run 33958237006, where recording applied=false on a ticket the run had just moved to Done left a receipt that disagreed with the board in the direction nobody checks.
+        issueUpdate(stateId) reported success but no completed state-history segment newer than the pre-write head appeared within readback_max_attempts reads (OMN-17658). Recorded as ERROR_READBACK_UNCONFIRMED and counted under tickets_errored, never as a flip: the API agreeing to a request is not evidence the board moved. The outcome still carries applied=true, because the state change WAS written -- measured on run 33958237006, where recording applied=false on a ticket the run had just moved to Done left a receipt that disagreed with the board in the direction nobody checks. OMN-16106, node_version 1.9.0: an unconfirmed readback is now a REFUSAL and the write is ROLLED BACK to the pre-write state, reported as flip_rolled_back. The label and the flip cannot coexist -- run 34061364537 left OMN-16025 reading Done on the board under a comment saying the readback did not confirm, and every downstream sweep and rollup reads the board while almost nobody opens the comment. A rollback target (the pre-write state id) is therefore a PRECONDITION of the write: a Done this run could not take back is a Done it may not write. The audit comment is still posted, now under the class=readback_unconfirmed marker rather than class=flipped -- stamping the flip marker on a write that was taken back would teach the prior-revert fence that this mechanism had closed a ticket it did not close, and the fence would then refuse a later, legitimate flip. If the rollback write ALSO fails, flip_rolled_back is false and both the reason and the comment say the ticket may be sitting in Done unverified.
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "GATE_PROBE_NOT_GREEN"
+      description: >
+        The ticket's own description carries a `Gate: <owner>/<repo> <workflow-file.yml>` line naming the workflow that proves it, and the newest completed run of that workflow did not conclude `success` (OMN-16106, node_version 1.9.0). The sweep records SKIPPED_GATE_PROBE_RED, writes nothing, posts no comment, and re-offers the candidate on the next tick, so the ticket flips with no human launch once its own probe goes green. Every ambiguous branch fails CLOSED and holds: a `Gate:` line that does not resolve to a repo plus a workflow filename (a bare filename is ambiguous across repos, and reading the wrong workflow's colour as this ticket's proof is worse than declining to answer), a workflow with no completed run at all (unattempted is not proven), and a `gh` read that errors. Measured: OMN-16025, "[Gate] Delegation canary green", was flipped Done at 2026-09-06T21:42:17.523Z by run 34061364537 on 6/12 verified with 0 failed, while its gate probe chain-canary.yml was conclusion=failure on EVERY run of that day -- including run 34061981317, fired 21:44:42Z, two minutes after the flip, at 3 of 5 links proven. dod_verify's counters describe the OCC contract's checks; a gate ticket's acceptance is a live surface, and the workflow probing that surface is the only thing that can answer it.
 
       recoverable: true
       retry_strategy: "none"

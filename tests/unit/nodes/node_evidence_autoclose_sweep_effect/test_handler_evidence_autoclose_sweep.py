@@ -892,8 +892,27 @@ class TestAcceptanceCriteriaExtraction:
         description = "### AC\nAC1: alpha\nAC2 beta\n"
         assert _acceptance_criteria_items(description) == ["AC1: alpha", "AC2 beta"]
 
-    def test_no_acceptance_criteria_section_yields_nothing(self):
-        assert _acceptance_criteria_items("Just a paragraph.\n- a bullet\n") == []
+    def test_no_heading_means_the_whole_body_is_the_section(self):
+        """OMN-16106 — REVERSED, deliberately. This used to assert ``== []``.
+
+        Requiring one of nine heading spellings made the coverage guard depend
+        on markdown. OMN-16025 lists five numbered criteria under a prose
+        opener and no heading; the parser returned zero items, both counting
+        bounds in ``_ac_coverage_gap`` sit behind an ``if not items`` early
+        exit, and run 34061364537 flipped it Done on 6/12 verified with 6
+        non-probative and ``uncovered_acceptance_criteria: []``.
+
+        Reading the whole body over-counts on a description whose bullets are
+        not all criteria. That is the direction that HOLDS a flip, which is the
+        trade ``_acceptance_criteria_items`` already declares.
+        """
+        assert _acceptance_criteria_items("Just a paragraph.\n- a bullet\n") == [
+            "a bullet"
+        ]
+
+    def test_a_body_with_no_list_at_all_still_yields_nothing(self):
+        """The fallback widens the SECTION, it does not invent items."""
+        assert _acceptance_criteria_items("Just a paragraph, no list.\n") == []
 
     def test_task_markers_are_stripped_from_item_text(self):
         description = "## Acceptance Criteria\n- [x] done thing\n"
