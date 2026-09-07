@@ -34,6 +34,15 @@ DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
 # OMN-18031: the per-run routing consumer shape. A job whose runs-on resolves
 # from a route job's output rather than from the seam expression directly.
 ROUTE_CONSUMER_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.labels")
+# OMN-18031: the selector-generation markers. V1 is the inline seam expression
+# that 94 job definitions in this repo carry; V2 is a job whose placement comes
+# from a route job's output. The marker is a COMMENT, so YAML parsing drops it
+# and these two passes are necessarily textual.
+SELECTOR_V1_MARKER = "OMNI_RUNNER_SELECTOR_V1"
+SELECTOR_V2_MARKER = "OMNI_RUNNER_SELECTOR_V2"
+# A marker sits directly above the `runs-on:` it describes. The bound exists so
+# an unrelated marker elsewhere in the same job cannot satisfy the requirement.
+SELECTOR_MARKER_WINDOW = 24
 
 
 @dataclass(frozen=True)
@@ -385,6 +394,133 @@ def audit_route_wiring(policy: dict[str, Any], repo_root: Path) -> list[Finding]
     return findings
 
 
+def _runs_on_blocks(text: str) -> list[tuple[int, str]]:
+    """Yield ``(line_index, full_value)`` for every ``runs-on:`` key in ``text``.
+
+    Textual on purpose. The marker these blocks are matched against is a YAML
+    COMMENT, and ``yaml.safe_load`` discards comments -- so a pass built on the
+    parsed document literally cannot see the thing it must check. Continuation
+    lines of a folded scalar are joined in, because the V1 expression spans six
+    lines and a line-at-a-time match would miss it.
+    """
+    lines = text.splitlines()
+    blocks: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        match = re.match(r"^(\s*)runs-on:\s*(.*)$", line)
+        if match is None:
+            continue
+        indent = len(match.group(1))
+        value = [match.group(2)]
+        for follow in lines[idx + 1 :]:
+            if not follow.strip():
+                continue
+            if len(follow) - len(follow.lstrip()) <= indent:
+                break
+            value.append(follow.strip())
+        blocks.append((idx, " ".join(value)))
+    return blocks
+
+
+def _marker_comments_above(lines: list[str], runs_on_index: int) -> list[str]:
+    """Comment lines between the job key and ``runs-on:``.
+
+    Walking stops at the first NON-comment line indented less than the
+    ``runs-on:`` key -- that is the job key itself. Comment lines are collected
+    at any indentation, so the scan is not defeated by a marker written flush
+    left, and the window never reaches into the job above.
+    """
+    runs_on_indent = len(lines[runs_on_index]) - len(lines[runs_on_index].lstrip())
+    collected: list[str] = []
+    lower = max(0, runs_on_index - SELECTOR_MARKER_WINDOW)
+    for idx in range(runs_on_index - 1, lower - 1, -1):
+        line = lines[idx]
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            collected.append(stripped)
+            continue
+        if not stripped:
+            continue
+        if len(line) - len(line.lstrip()) < runs_on_indent:
+            break
+    return collected
+
+
+def audit_selector_markers(repo_root: Path) -> list[Finding]:
+    """Audit the OMN-18031 V2 selector marker (additive).
+
+    ADDITIVE AND TEXTUAL. ``audit_route_wiring`` above already enforces the
+    STRUCTURE of a route consumer -- the ``needs:`` edge, the producer's
+    existence, the fork-isolation prohibition. It cannot enforce the marker,
+    because the marker is a comment and the structural pass reads parsed YAML.
+
+    Why a comment is worth a gate at all, when it changes no behaviour: the V1
+    marker is how 94 job definitions in this repo are FOUND. Every survey,
+    migration and drift audit of runner placement to date -- including the one
+    that established this design had zero prior art in the org -- was a grep for
+    that string. A V2 consumer that carries no marker is invisible to the same
+    grep, so the next survey silently under-counts the very jobs that moved, and
+    the first person to notice is whoever is debugging a placement incident.
+
+    Both directions are enforced, because each alone is a half-measure:
+
+    1. A route-consuming ``runs-on:`` must carry the V2 marker above it.
+    2. A V2 marker must be followed by a route-consuming ``runs-on:``. Without
+       this, a job reverted from V2 back to the seam expression keeps a marker
+       that now lies, which is worse than no marker.
+    3. A route-consuming ``runs-on:`` must NOT still carry the V1 marker. That
+       pairing is a half-finished migration whose comment contradicts its code.
+    """
+    findings: list[Finding] = []
+    for path in _workflow_paths(repo_root):
+        rel = path.relative_to(repo_root).as_posix()
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+
+        consumer_indices: set[int] = set()
+        for idx, value in _runs_on_blocks(text):
+            if ROUTE_CONSUMER_RE.search(_normalized_expression(value)) is None:
+                continue
+            consumer_indices.add(idx)
+            comments = "\n".join(_marker_comments_above(lines, idx))
+            if SELECTOR_V2_MARKER not in comments:
+                findings.append(
+                    Finding(
+                        f"{rel}:{idx + 1}",
+                        "runs-on resolves from a route output but carries no "
+                        f"{SELECTOR_V2_MARKER} marker comment; every survey of runner "
+                        f"placement in this org is a grep for {SELECTOR_V1_MARKER}, so an "
+                        "unmarked consumer is invisible to the next one",
+                    )
+                )
+            if SELECTOR_V1_MARKER in comments:
+                findings.append(
+                    Finding(
+                        f"{rel}:{idx + 1}",
+                        f"runs-on resolves from a route output but still carries the "
+                        f"{SELECTOR_V1_MARKER} marker; the comment contradicts the "
+                        "expression it describes",
+                    )
+                )
+
+        for idx, line in enumerate(lines):
+            if SELECTOR_V2_MARKER not in line:
+                continue
+            if any(
+                idx < consumer <= idx + SELECTOR_MARKER_WINDOW
+                for consumer in consumer_indices
+            ):
+                continue
+            findings.append(
+                Finding(
+                    f"{rel}:{idx + 1}",
+                    f"{SELECTOR_V2_MARKER} is declared but no runs-on below it resolves "
+                    "from a route output; a marker left behind by a revert states a "
+                    "placement the workflow does not have",
+                )
+            )
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
@@ -405,6 +541,10 @@ def main() -> int:
         # same findings list, so its results print alongside the existing pass
         # rather than replacing or short-circuiting it.
         findings.extend(audit_route_wiring(policy, args.repo_root))
+        # OMN-18031, additive: the V2 selector marker. Textual rather than
+        # structural, because the marker is a YAML comment the parsed
+        # document above does not retain.
+        findings.extend(audit_selector_markers(args.repo_root))
     if args.github_vars:
         findings.extend(audit_github_variables(policy))
 

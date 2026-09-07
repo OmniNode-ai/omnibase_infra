@@ -102,6 +102,7 @@ jobs:
     # THE ASSERTION UNDER TEST (shape a). If `needs` did not resolve here this
     # job would fail to schedule, not merely fail -- which is exactly the
     # signal P1 is looking for.
+    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job's decision.
     runs-on: ${{ fromJSON(needs.route-inline.outputs.labels) }}
     timeout-minutes: 5
     steps:
@@ -130,6 +131,7 @@ jobs:
     needs: route-reusable
     # THE ASSERTION UNDER TEST (shape b) — the one the four-repo fan-out rests
     # on. Documented as supported; never before exercised in this org.
+    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job's decision.
     runs-on: ${{ fromJSON(needs.route-reusable.outputs.labels) }}
     timeout-minutes: 5
     steps:

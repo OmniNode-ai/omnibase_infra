@@ -129,12 +129,17 @@ jobs:
   # decision artifact per run; changing placement is a separate single-owner
   # claim on the seam, which is OMN-16682 and not this ticket.
   #
-  # CONSUMERS ARE NOT WIRED IN THIS PR. Every job below still reads the
-  # OMNI_RUNNER_SELECTOR_V1 expression directly. They move to
-  # `runs-on: ${{ fromJSON(needs.route.outputs.labels) }}` only after gate P1 --
-  # the live proof in runner-route-probe.yml that `needs.<job>.outputs` resolves
-  # inside `runs-on` for a reusable-workflow job -- has passed on real runs. A
-  # survey of all five routing repos found zero prior uses of that wiring.
+  # ONE CONSUMER IS WIRED: `lint`. Gate P1 -- the live proof in
+  # runner-route-probe.yml that `needs.<job>.outputs` resolves inside `runs-on`
+  # for a reusable-workflow job -- passed on real runs (34131478724, 34138114205:
+  # `consume-reusable` scheduled and succeeded), so the wiring is no longer an
+  # assumption. `lint` was chosen because it is the cheapest heavy job and runs
+  # on every event, which maximises how often the consumer is exercised and
+  # minimises what a routing defect costs. EVERY OTHER JOB BELOW STILL READS THE
+  # OMNI_RUNNER_SELECTOR_V1 EXPRESSION DIRECTLY and moves only on separate
+  # evidence -- a survey of all five routing repos found zero prior uses of this
+  # wiring, so widening it in one step would put the whole fan-out on one
+  # unproven shape.
   #
   # Registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS as
   # "Runner Route (OMN-18031) / route". THAT REGISTRATION IS HALF THE
@@ -234,17 +239,38 @@ jobs:
   # Phase 3 - Aggregation
   # =============================================================================
 
+  # OMN-18031 gate G6: `lint` is the FIRST and, for now, the ONLY job in this
+  # repo whose placement resolves from the per-run route decision instead of the
+  # seam expression read at the call site. Chosen because it is the cheapest
+  # heavy job and runs on every event, so the consumer is exercised constantly
+  # and a routing defect costs one job rather than the whole fan-out. Every
+  # other heavy job below is untouched and still reads the seam directly.
+  #
+  # FORK ISOLATION IS NOT RESTATED HERE, AND THAT IS THE POINT. The seam
+  # expression encodes it inline at each of the 46 selector call sites in this
+  # repo, any one of which can be edited wrong with nothing noticing. Routing
+  # holds it in ONE place -- scripts/ci/runner_route_decision.py step S1, ahead
+  # of every capacity signal: a fork PR gets OMNI_PUBLIC_PR_RUNS_ON_JSON's
+  # labels, and a public variable that names a self-hosted label is overridden
+  # back to hosted, so a fork can never widen onto the fleet at any idle level.
+  # scripts/audit-runner-routing.py REFUSES a route consumer whose own runs-on
+  # mentions that variable, precisely so the single place stays single.
+  #
+  # PLACEMENT IS UNCHANGED TODAY. With the trusted seam at '["ubuntu-latest"]'
+  # the decision is `seam_ceiling_hosted` and the seam is returned verbatim, so
+  # this job lands exactly where it landed before. The proof this change carries
+  # is that runs-on RESOLVED FROM THE ROUTE OUTPUT -- the run's decision
+  # artifact plus the jobs API -- never that anything moved onto the lab.
+  #
+  # `needs: route` is load-bearing twice: without the edge the expression
+  # resolves to nothing and the job fails to SCHEDULE, which does not surface as
+  # a failure; and the route job is fail-closed, so a probe fault yields hosted
+  # labels rather than a red gate.
   lint:
-    needs: occ-preflight
+    needs: [occ-preflight, route]
     name: Lint
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job's decision.
+    runs-on: ${{ fromJSON(needs.route.outputs.labels) }}
     timeout-minutes: 30
 
     steps:
