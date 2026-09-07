@@ -51,6 +51,13 @@ from pathlib import Path
 ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
     {
         # Version control
+        # Public-repo hygiene gate (OMN-18016). Layer (a) of the gate is a
+        # TOP-LEVEL path allowlist, so its declaration has to sit at the root:
+        # the gate refuses to run without it and treats an absent config as a
+        # refusal, never as an empty allowlist. Two root-hygiene rules that
+        # disagree would leave this repo unable to adopt the gate at all.
+        ".public-repo-hygiene.yaml",
+        ".public-repo-hygiene-suppressions.yaml",
         ".gitignore",
         # NOTE: `.env.*` variants (e.g. .env.local, .env.staging) are intentionally
         # NOT in this allowlist. The Infisical provisioning plan requires all non-example
