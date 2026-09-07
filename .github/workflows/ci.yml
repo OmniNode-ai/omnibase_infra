@@ -3832,12 +3832,39 @@ jobs:
           cache-enabled: "false"
 
       - name: Pre-pull the harness broker image
-        run: docker pull redpandadata/redpanda:v24.2.7
+        # Digest-pinned, and identical to REDPANDA_IMAGE in
+        # tests/integration/customer_path/redpanda_sasl_harness.py -- a
+        # floating tag lets two runners resolve two different images.
+        # test_omn18012_harness_runner_topology.py asserts the two agree.
+        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
 
       - name: Run customer-path boundary tests
         env:
           # A missing docker daemon must be RED here, never a green skip.
           OMN18012_REQUIRE_HARNESS: "1"
+          # WHICH BROKER (operator ruling, 2026-09-07). The harness does not
+          # start a Redpanda container on a host that already runs one. When
+          # these are set the harness ADOPTS that broker and starts nothing;
+          # when they are empty -- which is the case on GitHub-hosted runners,
+          # where no broker exists on the runner -- it starts one throwaway
+          # container advertising an address the test process can actually
+          # reach. A declaration that is incomplete, unreachable, or not
+          # enforcing SASL is a hard failure, never a fall-through, so setting
+          # these wrong cannot make this gate quietly pass on a private broker.
+          #
+          # A GitHub Actions `services:` container is deliberately NOT the
+          # hosted path: `services:` cannot override a container's command, and
+          # this image's default CMD is `redpanda start --overprovisioned` with
+          # `enable_sasl` off (`--set redpanda.enable_sasl=true` is
+          # command-line only -- verified by reading /entrypoint.sh out of
+          # redpandadata/redpanda:v24.2.7). A service container would be a
+          # NO-AUTH broker, which is the exact hole this job exists to close.
+          OMN18012_BROKER_BOOTSTRAP: ${{ vars.OMN18012_BROKER_BOOTSTRAP }}
+          OMN18012_BROKER_CONTAINER: ${{ vars.OMN18012_BROKER_CONTAINER }}
+          OMN18012_BROKER_INTERNAL_BOOTSTRAP: ${{ vars.OMN18012_BROKER_INTERNAL_BOOTSTRAP }}
+          OMN18012_BROKER_SASL_USERNAME: ${{ vars.OMN18012_BROKER_SASL_USERNAME }}
+          OMN18012_BROKER_SASL_PASSWORD: ${{ secrets.OMN18012_BROKER_SASL_PASSWORD }}
+          OMN18012_BROKER_SASL_MECHANISM: ${{ vars.OMN18012_BROKER_SASL_MECHANISM }}
         run: |
           echo "================================================================"
           echo "Customer Path Boundary (OMN-18012)"

@@ -30,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from collections.abc import Iterator
 
 import pytest
 
@@ -61,18 +60,18 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(scope="module")
-def broker() -> Iterator[harness.RedpandaSasl]:
-    if not harness.docker_available():
-        pytest.fail(
-            "docker is not reachable. This boundary test does not skip: a "
-            "silently-absent auth test is how escape 1 stayed invisible."
-        )
-    running = harness.start_redpanda_sasl()
-    try:
-        yield running
-    finally:
-        harness.stop_redpanda(running)
+@pytest.fixture
+def broker(redpanda_sasl: harness.RedpandaSasl) -> harness.RedpandaSasl:
+    """The session broker from ``conftest.py`` -- never a second one.
+
+    This module used to start its OWN container, so a single CI job created
+    two brokers where one was needed. Per the operator ruling of 2026-09-07
+    the harness does not start a broker on a host that already has one, and
+    that applies to the harness's own broker first. Skip-vs-fail is decided in
+    one place (the session fixture): a declared broker never skips, and with
+    ``OMN18012_REQUIRE_HARNESS=1`` neither does a missing docker daemon.
+    """
+    return redpanda_sasl
 
 
 def test_harness_listener_actually_enforces_auth(
