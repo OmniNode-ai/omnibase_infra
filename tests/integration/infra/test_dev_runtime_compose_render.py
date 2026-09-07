@@ -93,6 +93,13 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN": _PG_DSN,
     "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",  # kafka-fallback-ok — test fixture
     "ARCH_GRAPH_BOLT_URI": "bolt://omnibase-infra-memgraph:7687",
+    # OMN-18012: the dev-lane overlay's redpanda-scram-user service takes both
+    # of these in the fail-closed ${VAR:?} form, so the LAYERED render aborts
+    # without them -- which is how CI caught their absence here. Render-only
+    # synthetic values; the real synthetic principal lives in the operator env
+    # file on the lane host and never appears in this repo.
+    "DEV_KAFKA_SASL_USERNAME": "render-only",
+    "DEV_KAFKA_SASL_PASSWORD": "render-only",
     "ONEX_REGISTRATION_AUTO_ACK": "true",
     "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
     # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with

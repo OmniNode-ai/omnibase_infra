@@ -175,6 +175,115 @@ x-dev-lane-analytics-env: &dev_lane_analytics_env
 x-dev-lane-strict-wiring-env: &dev_lane_strict_wiring_env
   ONEX_WIRING_STRICT_MODE: "1"
 services:
+  # ===========================================================================
+  # (7) DEV-LANE BROKER PRINCIPAL -- phase A of OMN-18012
+  # ===========================================================================
+  # WHAT THIS IS FOR
+  # ----------------
+  # Every local proof lane in this org runs a NO-AUTH broker: this lane's
+  # Redpanda, docker/docker-compose.e2e.yml, and every unit test's mock. Broker
+  # authentication therefore exists only in staging and prod, so a client that
+  # silently opens PLAINTEXT against an auth-required listener passes every
+  # local check and fails in front of a customer. That is escape 1 of the
+  # 2026-09-06 set: omnimarket's credential_publisher / generation_publisher
+  # built their event bus without apply_environment_overrides(), produced a
+  # PLAINTEXT client against the IAM-only MSK listener, and every BYOK
+  # registration 503'd (fixed omnimarket#2350, 15afc64f). Nothing local could
+  # have caught it, because there is no local listener that refuses.
+  #
+  # This one-shot creates the lane's SCRAM-SHA-256 principal. It is PHASE A and
+  # by itself changes NO client and NO listener: the broker still accepts
+  # PLAINTEXT after this lands. Phase B flips redpanda.enable_sasl on this lane
+  # and binds the clients' KAFKA_SASL_* env.
+  #
+  # WHY THE ORDER IS LOAD-BEARING AND NOT A PREFERENCE
+  # --------------------------------------------------
+  # `rpk security user` talks to the ADMIN API (:9644). `redpanda.enable_sasl`
+  # gates the KAFKA listener (:9092); the admin API is gated separately by
+  # `admin_api_require_auth`, false on this lane. That split is the ONLY reason
+  # a safe flip is possible at all -- the principal can be created while the
+  # Kafka listener is still open, so phase B never lands on a broker that has
+  # SASL required and no user, which is a lane locked out of its own broker
+  # with no un-authenticated path back in.
+  #
+  # `RP_BOOTSTRAP_USER` is NOT usable here: Redpanda honours it only on FIRST
+  # cluster formation, and this lane's `redpanda_data` volume already exists.
+  # An operator who reads the upstream docs and reaches for it will get a
+  # broker with SASL on and zero users.
+  #
+  # Idempotent by LIST-then-CREATE, deliberately not by `|| true`. A swallowed
+  # exit code here means phase B flips SASL against a broker whose user
+  # creation silently failed, which is the same class of invisible failure this
+  # whole ticket is about. The trailing list is the readback.
+  #
+  # WHY THIS FILE AND NOT docker-compose.infra.yml
+  # ----------------------------------------------
+  # Same fail-closed inversion as every other block in this file, and here it
+  # is the difference between a dev-lane change and a fleet change. The base
+  # file is the BASE that stability-test, prod and judge each merge. A service
+  # written there -- and in particular one carrying a `:?` required variable --
+  # would be inherited by all three, and their next deploy would fail at
+  # compose render on a variable that has nothing to do with them. Only the
+  # bare `omnibase-infra` project loads this overlay
+  # (`resolve_compose_file_args()` falls through to it), so this reaches the
+  # dev lane and provably no other lane.
+  #
+  # CREDENTIAL HANDLING
+  # -------------------
+  # SYNTHETIC dev credential, referenced and never inlined. Both variables are
+  # resolved by scripts/deploy-runtime.sh from the operator env file
+  # (OMNIBASE_OPERATOR_ENV_FILE, default ${HOME}/.omnibase/.env, sourced under
+  # `set -a`) exactly like POSTGRES_PASSWORD and ROLE_OMNIDASH_PASSWORD above.
+  # The `$$` forms in the command are compose escapes: the shell inside the
+  # container expands them from the container environment, so no value is
+  # rendered into `docker compose config` output or into the container command
+  # line.
+  #
+  # `:?` and not `:-`: an unset variable must fail at compose render. A `:-`
+  # fallback would create a principal with an empty or guessable password on a
+  # lane whose whole purpose here is to prove that a rejection exists.
+  #
+  # NOT A CREDENTIAL ROTATION (Operating Rule 22). This provisions a NEW
+  # synthetic principal on a fully-mutable test lane. Nothing is rotated,
+  # re-issued or revoked, and no existing credential is read or written.
+  #
+  # Ticket: OMN-18012. Gate this enables:
+  #   tests/integration/customer_path/test_omn18012_plaintext_client_is_refused.py
+  # RESIDUAL: this proves PLAINTEXT-vs-authenticated, not IAM. Staging and prod
+  # are AWS_MSK_IAM over SASL_SSL; this lane is SCRAM-SHA-256 over
+  # SASL_PLAINTEXT. The mechanism differs; the failure mode pinned -- a client
+  # built with no credentials at all -- does not. The IAM leg stays a staging
+  # concern.
+  redpanda-scram-user:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-redpanda-scram-user
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane provisions a synthetic SCRAM principal (OMN-18012); it is resolved from the operator env file, never inlined here}
+      DEV_KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane provisions a synthetic SCRAM principal (OMN-18012); it is resolved from the operator env file, never inlined here}
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        if /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$DEV_KAFKA_SASL_USERNAME"; then
+          echo "OMN-18012: SCRAM principal already present"
+        else
+          /usr/bin/rpk security user create "$$DEV_KAFKA_SASL_USERNAME" -p "$$DEV_KAFKA_SASL_PASSWORD" --mechanism SCRAM-SHA-256 $$ADMIN
+          echo "OMN-18012: SCRAM principal created"
+        fi
+        /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$DEV_KAFKA_SASL_USERNAME"
+        echo "OMN-18012: readback confirms the principal exists"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    logging: *dev_lane_logging
+    labels:
+      - "com.omninode.service=redpanda-scram-user"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-18012"
   forward-migration:
     environment:
       # Consumed by scripts/run-forward-migrations.sh. `dev` is the only value

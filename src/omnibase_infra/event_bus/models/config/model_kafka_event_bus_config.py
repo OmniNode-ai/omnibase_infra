@@ -118,6 +118,14 @@ Environment Variables:
             Options: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER", "AWS_MSK_IAM"
             Requires: security_protocol must be SASL_PLAINTEXT or SASL_SSL
 
+        KAFKA_SASL_USERNAME: SASL username (optional)
+            Default: None
+            Required when: KAFKA_SASL_MECHANISM is PLAIN or SCRAM-SHA-*
+
+        KAFKA_SASL_PASSWORD: SASL password (optional)
+            Default: None
+            Required when: KAFKA_SASL_MECHANISM is PLAIN or SCRAM-SHA-*
+
         KAFKA_MSK_REGION: AWS region for MSK IAM token generation
             Default: "us-east-1"
             Required when: KAFKA_SASL_MECHANISM=AWS_MSK_IAM
@@ -406,6 +414,22 @@ class ModelKafkaEventBusConfig(BaseModel):
         ),
         pattern=r"^(PLAIN|SCRAM-SHA-256|SCRAM-SHA-512|OAUTHBEARER|AWS_MSK_IAM)$",
     )
+    sasl_plain_username: str | None = Field(
+        default=None,
+        description=(
+            "SASL username for the PLAIN and SCRAM-SHA-* mechanisms. "
+            "Required when sasl_mechanism is PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512. "
+            "Override via KAFKA_SASL_USERNAME."
+        ),
+    )
+    sasl_plain_password: str | None = Field(
+        default=None,
+        description=(
+            "SASL password for the PLAIN and SCRAM-SHA-* mechanisms. "
+            "Required when sasl_mechanism is PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512. "
+            "Override via KAFKA_SASL_PASSWORD."
+        ),
+    )
     sasl_oauthbearer_token_endpoint_url: str | None = Field(
         default=None,
         description=(
@@ -625,6 +649,27 @@ class ModelKafkaEventBusConfig(BaseModel):
                     raise ProtocolConfigurationError(
                         "sasl_mechanism='OAUTHBEARER' requires non-empty OAuth fields: "
                         + ", ".join(missing),
+                        context=context,
+                        parameter="sasl_mechanism",
+                        value=self.sasl_mechanism,
+                    )
+            elif self.sasl_mechanism in (
+                "PLAIN",
+                "SCRAM-SHA-256",
+                "SCRAM-SHA-512",
+            ):
+                missing_creds = [
+                    field
+                    for field, val in (
+                        ("sasl_plain_username", self.sasl_plain_username),
+                        ("sasl_plain_password", self.sasl_plain_password),
+                    )
+                    if val is None or (isinstance(val, str) and not val.strip())
+                ]
+                if missing_creds:
+                    raise ProtocolConfigurationError(
+                        f"sasl_mechanism={self.sasl_mechanism!r} requires non-empty "
+                        "credential fields: " + ", ".join(missing_creds),
                         context=context,
                         parameter="sasl_mechanism",
                         value=self.sasl_mechanism,
@@ -933,6 +978,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             - KAFKA_CIRCUIT_BREAKER_THRESHOLD -> circuit_breaker_threshold
             - KAFKA_SECURITY_PROTOCOL -> security_protocol
             - KAFKA_SASL_MECHANISM -> sasl_mechanism
+            - KAFKA_SASL_USERNAME -> sasl_plain_username
+            - KAFKA_SASL_PASSWORD -> sasl_plain_password
             - KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL -> sasl_oauthbearer_token_endpoint_url
             - KAFKA_SASL_OAUTHBEARER_CLIENT_ID -> sasl_oauthbearer_client_id
             - KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET -> sasl_oauthbearer_client_secret
@@ -968,6 +1015,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_INSTANCE_ID": "instance_id",
             "KAFKA_SECURITY_PROTOCOL": "security_protocol",
             "KAFKA_SASL_MECHANISM": "sasl_mechanism",
+            "KAFKA_SASL_USERNAME": "sasl_plain_username",
+            "KAFKA_SASL_PASSWORD": "sasl_plain_password",
             "KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL": "sasl_oauthbearer_token_endpoint_url",
             "KAFKA_SASL_OAUTHBEARER_CLIENT_ID": "sasl_oauthbearer_client_id",
             "KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET": "sasl_oauthbearer_client_secret",
