@@ -174,6 +174,64 @@ x-dev-lane-analytics-env: &dev_lane_analytics_env
 # run the auto-wiring kernel, so the flag would be inert there.
 x-dev-lane-strict-wiring-env: &dev_lane_strict_wiring_env
   ONEX_WIRING_STRICT_MODE: "1"
+# =============================================================================
+# DEV-LANE BROKER AUTHENTICATION -- phase B of OMN-18012
+# =============================================================================
+# Phase A (this file, `redpanda-scram-user`) created the lane's SCRAM principal
+# and changed nothing else: the listener still accepted PLAINTEXT, so nothing
+# was proven yet. Phase B is the half that makes the REFUSAL EXIST -- the
+# `redpanda-sasl-enable` one-shot below flips the broker, and this anchor binds
+# the credentials on every client that speaks to it.
+#
+# WHY THESE FOUR VARIABLE NAMES AND NO OTHERS
+# -------------------------------------------
+# Every Kafka client in this lane -- all 15 of them -- resolves transport auth
+# through exactly one function, and it reads exactly these names:
+#
+#   ModelKafkaEventBusConfig.apply_environment_overrides()
+#     KAFKA_SECURITY_PROTOCOL -> security_protocol
+#     KAFKA_SASL_MECHANISM    -> sasl_mechanism
+#     KAFKA_SASL_USERNAME     -> sasl_plain_username   (added by OMN-18012)
+#     KAFKA_SASL_PASSWORD     -> sasl_plain_password   (added by OMN-18012)
+#
+# The runtime, effects, worker, projection-api, contract-resolver and the six
+# projection writers construct that config directly. The four observability
+# consumers look like an exception and are not: they resolve their BOOTSTRAP
+# address from a service-prefixed variable
+# (`OMNIBASE_INFRA_<SERVICE>_KAFKA_BOOTSTRAP_SERVERS`, their own pydantic
+# settings class) but their AUTH through
+# `build_aiokafka_auth_kwargs_from_env()` -> `ModelKafkaEventBusConfig.default()`
+# -> the same `apply_environment_overrides()`. Verified by reading each
+# consumer, not assumed from the prefix: the prefixed name governs WHERE, the
+# unprefixed names govern HOW. That asymmetry is why phase B is not a
+# search-and-replace on one variable.
+#
+# This mirrors onex-dev, which binds KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM
+# on the same code path through `k8s/onex-dev-overlay-dev` (omninode_infra).
+# The MECHANISM differs -- staging is AWS_MSK_IAM over SASL_SSL, this lane is
+# SCRAM-SHA-256 over SASL_PLAINTEXT -- but the CONFIG PATH is identical, which
+# is the property that makes a dev-lane failure predictive of a staging one.
+#
+# WHY THE LANE OVERLAY AND NOT THE BASE (`x-common-env`, infra.yml:145)
+# --------------------------------------------------------------------
+# Same reason as `redpanda-scram-user` above, and the stakes are the same.
+# `x-common-env` is merged by stability-test, prod, judge and lakshman. Binding
+# KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT there would point four other lanes'
+# clients at a SASL handshake their brokers do not offer, and the two `:?`
+# variables would fail their compose render outright. Guarded in both
+# directions by tests/integration/infra/test_omn18012_dev_lane_broker_auth_scope.py.
+#
+# CREDENTIAL HANDLING: reference, never a literal -- identical to phase A. Both
+# values are resolved by scripts/deploy-runtime.sh from the operator env file
+# (OMNIBASE_OPERATOR_ENV_FILE, default ${HOME}/.omnibase/.env). `:?` and not
+# `:-`: a lane that silently falls back to an empty password is a lane whose
+# refusal proves nothing. NOT A ROTATION (Operating Rule 22) -- this binds the
+# principal phase A provisioned; nothing is rotated, re-issued or revoked.
+x-dev-lane-broker-auth-env: &dev_lane_broker_auth_env
+  KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
+  KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
+  KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane authenticates to its own broker as the synthetic SCRAM principal provisioned by redpanda-scram-user (OMN-18012); resolved from the operator env file, never inlined here}
+  KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane authenticates to its own broker as the synthetic SCRAM principal provisioned by redpanda-scram-user (OMN-18012); resolved from the operator env file, never inlined here}
 services:
   # ===========================================================================
   # (7) DEV-LANE BROKER PRINCIPAL -- phase A of OMN-18012
@@ -282,6 +340,118 @@ services:
     logging: *dev_lane_logging
     labels:
       - "com.omninode.service=redpanda-scram-user"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-18012"
+  # ===========================================================================
+  # (8) DEV-LANE SASL FLIP -- phase B of OMN-18012
+  # ===========================================================================
+  # THIS IS THE SERVICE THAT MAKES THE REJECTION EXIST.
+  #
+  # Everything else in this ticket is preparation. Until `enable_sasl` is true
+  # on this cluster, the dev lane's broker accepts a client built with no
+  # credentials at all -- which is escape 1's exact shape, and the reason it
+  # passed every local check before reaching a customer.
+  #
+  # WHY A CLUSTER-CONFIG ONE-SHOT AND NOT `--set` ON THE BROKER COMMAND
+  # ------------------------------------------------------------------
+  # `--set` is a NODE-STARTUP flag. Redpanda seeds cluster properties from
+  # redpanda.yaml / .bootstrap.yaml only on FIRST cluster formation; after that
+  # the controller log is the source of truth and a startup flag is ignored.
+  # This lane's `redpanda_data` volume already exists (cluster config version 2
+  # as of 2026-09-07), so a `--set` here would render, deploy, log nothing, and
+  # leave the listener open -- a change that reads as landed and is not. The
+  # base file already records the same lesson for topic_partitions_per_shard
+  # (OMN-13469), and `redpanda-partition-cap` is the existing one-shot this
+  # service is modelled on.
+  #
+  # It is ALSO the only form available: the `redpanda` service is declared in
+  # docker-compose.infra.yml, the BASE that stability-test, prod, judge and
+  # lakshman all merge. A `command:` override there would flip four other
+  # lanes' brokers. A separate one-shot declared HERE reaches this lane and
+  # provably no other.
+  #
+  # BOTH PROPERTIES ARE DYNAMIC -- measured, not assumed. Read live from this
+  # lane's own broker on 2026-09-07 via the admin API cluster_config/schema:
+  # `enable_sasl` needs_restart=False, `superusers` needs_restart=False. That
+  # is the fact that makes a flip on a running lane safe; if either had needed
+  # a restart this would have had to be a broker recreate.
+  #
+  # ORDER INSIDE THE SCRIPT IS LOAD-BEARING, AND IT IS SUPERUSER FIRST
+  # ------------------------------------------------------------------
+  # `kafka_enable_authorization` is null on this cluster, which in Redpanda
+  # means "follow enable_sasl". So the instant SASL comes on, ACLs come on too,
+  # and a principal that is not a superuser and holds no ACLs can authenticate
+  # and then do nothing -- every client fails on authorization instead of
+  # authentication, which looks identical in a client log and is a lane locked
+  # out of its own broker. Granting the superuser BEFORE the flip closes that
+  # window; the reverse order opens it.
+  #
+  # `service_completed_successfully` on the principal one-shot, not
+  # `service_healthy` on the broker: flipping SASL on a cluster whose user
+  # creation silently failed is the same invisible-failure class this whole
+  # ticket exists to remove.
+  #
+  # The readback is the point of the service, not decoration. Three assertions,
+  # in this order:
+  #   1. the principal is in `superusers`      (the grant landed)
+  #   2. `enable_sasl` reads true              (the flip landed)
+  #   3. an UNAUTHENTICATED rpk against the Kafka listener FAILS, and an
+  #      authenticated one SUCCEEDS               (the refusal is real)
+  # (3) is the positive-control pair. Without the second half, a broker that is
+  # simply down also refuses the anonymous client and this service would go
+  # green on a dead lane.
+  #
+  # THE ADMIN API STAYS OPEN, DELIBERATELY. `admin_api_require_auth` is false
+  # and this ticket does not change it. Two things depend on that and both were
+  # checked before the flip: the `redpanda` healthcheck (`rpk cluster health`)
+  # and scripts/deploy-runtime.sh's broker-reachability probe (line ~2791, the
+  # same command) are ADMIN-API calls. Had SASL gated them, this change would
+  # have made the lane undeployable by the only sanctioned path to it.
+  #
+  # Idempotent: re-running on an already-flipped cluster re-sets the same two
+  # values and re-runs the readback. `set -eu` and no `|| true` anywhere -- a
+  # swallowed exit code here is the failure this service is supposed to catch.
+  #
+  # Ticket: OMN-18012. Gate this enables:
+  #   tests/integration/customer_path/test_omn18012_plaintext_client_is_refused.py
+  # RESIDUAL: this proves PLAINTEXT-vs-authenticated, not IAM. Staging and prod
+  # are AWS_MSK_IAM over SASL_SSL. The mechanism differs; the failure mode
+  # pinned -- a client built with no credentials at all -- does not.
+  redpanda-sasl-enable:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-redpanda-sasl-enable
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane flips its broker to SASL and grants the synthetic principal (OMN-18012); it is resolved from the operator env file, never inlined here}
+      DEV_KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane flips its broker to SASL and grants the synthetic principal (OMN-18012); it is resolved from the operator env file, never inlined here}
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        BROKER="-X brokers=redpanda:9092"
+        AUTH="-X sasl.mechanism=SCRAM-SHA-256 -X user=$$DEV_KAFKA_SASL_USERNAME -X pass=$$DEV_KAFKA_SASL_PASSWORD"
+        /usr/bin/rpk cluster config set superusers "['$$DEV_KAFKA_SASL_USERNAME']" $$ADMIN
+        /usr/bin/rpk cluster config set enable_sasl true $$ADMIN
+        /usr/bin/rpk cluster config get superusers $$ADMIN | grep -q "$$DEV_KAFKA_SASL_USERNAME"
+        echo "OMN-18012: superuser grant confirmed"
+        /usr/bin/rpk cluster config get enable_sasl $$ADMIN | grep -qx true
+        echo "OMN-18012: enable_sasl confirmed true"
+        if /usr/bin/rpk topic list $$BROKER >/dev/null 2>&1; then
+          echo "OMN-18012 FAIL: an UNAUTHENTICATED client reached the Kafka listener" >&2
+          exit 1
+        fi
+        echo "OMN-18012: unauthenticated client refused"
+        /usr/bin/rpk topic list $$BROKER $$AUTH >/dev/null
+        echo "OMN-18012: authenticated client accepted - positive control"
+    depends_on:
+      redpanda-scram-user:
+        condition: service_completed_successfully
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    logging: *dev_lane_logging
+    labels:
+      - "com.omninode.service=redpanda-sasl-enable"
       - "com.omninode.layer=infrastructure"
       - "com.omninode.ticket=OMN-18012"
   forward-migration:
@@ -393,7 +563,7 @@ services:
   #   docker/docker-compose.stability-test.yml (OMN-15217).
   omninode-runtime:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
     healthcheck:
       test:
         - CMD
@@ -411,7 +581,7 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   runtime-effects:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
     healthcheck:
       test:
         - CMD
@@ -429,10 +599,10 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   projection-api:
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   runtime-worker:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
     # Base runtime-worker inherits interval 30s / timeout 10s / retries 5 but
     # start_period 1200s, NOT 1800s. Restated rather than copied from the two
     # services above so the shorter window is a visible decision.
@@ -453,7 +623,48 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   omninode-contract-resolver:
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
+  # ===========================================================================
+  # THE THREE OBSERVABILITY CONSUMERS THE PREFIX HID (OMN-18012, phase B)
+  # ===========================================================================
+  # These three are declared in docker-compose.infra.yml, not here, and they
+  # were the near-miss of this change. Each carries exactly ONE Kafka variable
+  # in the base -- `OMNIBASE_INFRA_<SERVICE>_KAFKA_BOOTSTRAP_SERVERS` -- so an
+  # inventory taken by grepping the compose files for `KAFKA_BOOTSTRAP_SERVERS`
+  # finds them under a different name, and an inventory taken by binding
+  # `x-common-env` misses them entirely.
+  #
+  # They resolve their bootstrap ADDRESS from that prefixed variable (their own
+  # pydantic-settings class, e.g. ConfigContextAuditConsumer with
+  # env_prefix=OMNIBASE_INFRA_CONTEXT_AUDIT_) and their AUTH from the
+  # UNPREFIXED names, through
+  # `build_aiokafka_auth_kwargs_from_env()` -> `ModelKafkaEventBusConfig.default()`
+  # -> `apply_environment_overrides()`. Read in each consumer module before
+  # writing this block, not inferred from the prefix.
+  #
+  # Left unbound, all three would have kept running as PLAINTEXT clients
+  # against a listener that now refuses them -- which is escape 1's failure
+  # mode reproduced by the very change meant to prevent it.
+  #
+  # A stanza here and not a base edit: the base is merged by four other lanes
+  # whose brokers offer no SASL handshake.
+  agent-actions-consumer:
+    environment:
+      !!merge <<: *dev_lane_broker_auth_env
+  skill-lifecycle-consumer:
+    environment:
+      !!merge <<: *dev_lane_broker_auth_env
+  # context-audit-consumer is additionally the one dev-lane Kafka client that NO
+  # deploy path restarted: it is in neither RUNTIME_SERVICES nor
+  # DEV_LANE_ONLY_RUNTIME_SERVICES in scripts/deploy-runtime.sh, so it had been
+  # up 2 weeks across every intervening deploy. Binding the credential here is
+  # inert on its own -- a container that is never recreated never reads a new
+  # environment -- so the deploy script gains DEV_LANE_EXTRA_BROKER_CLIENTS in
+  # the same change. Guarded by
+  # tests/unit/scripts/test_omn18012_dev_lane_broker_client_restart_coverage.py.
+  context-audit-consumer:
+    environment:
+      !!merge <<: *dev_lane_broker_auth_env
   # ===========================================================================
   # STANDALONE PROJECTION WRITERS (OMN-17448)
   # ===========================================================================
@@ -576,7 +787,7 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_registry.handlers.handler_tenant_registry_projection
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
       # KAFKA_BROKERS is the env `BaseProjectionRunner.kafka_bootstrap_servers`
       # reads first (runner.py KAFKA_BROKERS_ENV). Docker-internal hostname, as
       # every other runtime service on this lane uses.
@@ -646,7 +857,7 @@ services:
       - -m
       - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.delegation-writer.consume.v1"
@@ -735,7 +946,7 @@ services:
       - -m
       - omnimarket.nodes.node_projection_registration.handlers.handler_registration
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.registration-writer.consume.v1"
@@ -789,7 +1000,7 @@ services:
       - -m
       - omnimarket.nodes.node_projection_savings.handlers.handler_savings
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.savings-writer.consume.v1"
@@ -843,7 +1054,7 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.tenant-credentials-writer.consume.v1"
@@ -897,7 +1108,7 @@ services:
       - -m
       - omnimarket.nodes.node_projection_live_events.handlers.handler_live_events
     environment:
-      !!merge <<: *dev_lane_analytics_env
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.live-events-writer.consume.v1"
@@ -984,6 +1195,7 @@ services:
       - -m
       - omnibase_infra.services.observability.infra_routing_decisions.consumer
     environment:
+      !!merge <<: *dev_lane_broker_auth_env
       OMNIBASE_INFRA_ROUTING_DECISIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       OMNIBASE_INFRA_ROUTING_DECISIONS_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_ROUTING_DECISIONS_HEALTH_CHECK_PORT: "8097"
