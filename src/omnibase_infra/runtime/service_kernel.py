@@ -3798,6 +3798,9 @@ async def bootstrap() -> int:
             from omnibase_infra.event_bus.enum_contract_attach_status import (
                 EnumContractAttachStatus,
             )
+            from omnibase_infra.event_bus.model_contract_attach_exclusion import (
+                ModelContractAttachExclusion,
+            )
             from omnibase_infra.event_bus.model_contract_attach_result import (
                 ModelContractAttachResult,
             )
@@ -3861,6 +3864,11 @@ async def bootstrap() -> int:
             )
 
             _attach_results: list[ModelContractAttachResult] = []
+            # OMN-17372: the interleave reports the contracts it will NEVER
+            # attempt, so the gate requires only what can actually report.
+            # Without this the gate waits forever on a contract the interleave
+            # filtered out, and /ready is 503 for the life of the process.
+            _attach_exclusions: list[ModelContractAttachExclusion] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=auto_wiring_manifest_for_subscriptions,
                 report=auto_wiring_report,
@@ -3871,10 +3879,26 @@ async def bootstrap() -> int:
                 provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
                 readiness_config=resolve_topic_readiness_config(),
                 attach_results_out=_attach_results,
+                exclusions_out=_attach_exclusions,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
             )
+            _contract_attach_gate.exclude(tuple(_attach_exclusions))
             _contract_attach_gate.record(tuple(_attach_results))
+            _gate_status = _contract_attach_gate.status()
+            logger.info(
+                "Contract-attach readiness gate: required=%d attached=%d "
+                "not_ready=%d failed=%d pending=%d excluded=%d ready=%s "
+                "(OMN-17372, correlation_id=%s)",
+                len(_gate_status.required_contracts),
+                len(_gate_status.attached_contracts),
+                len(_gate_status.not_ready_contracts),
+                len(_gate_status.failed_contracts),
+                len(_gate_status.pending_contracts),
+                len(_gate_status.excluded_contracts),
+                _gate_status.ready,
+                correlation_id,
+            )
             _attach_readiness = ModelRuntimeAttachReadiness.from_results(
                 tuple(_attach_results)
             )

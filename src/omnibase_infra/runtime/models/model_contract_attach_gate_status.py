@@ -16,6 +16,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.event_bus.model_contract_attach_exclusion import (
+    ModelContractAttachExclusion,
+)
 from omnibase_infra.runtime.enums.enum_contract_attach_gate_phase import (
     EnumContractAttachGatePhase,
 )
@@ -34,6 +37,14 @@ class ModelContractAttachGateStatus(BaseModel):
         pending_contracts: Required contracts with no result yet, sorted. Any
             entry here means the boot interleave has not finished for that
             contract; the gate is NOT ready while this is non-empty.
+        excluded_contracts: Contracts that subscribe a command topic but that
+            the boot interleave reported it will NEVER attempt, each with the
+            structural reason (OMN-17372). These are dropped from
+            ``required_contracts`` — requiring a contract that can never report
+            wedges ``/ready`` at 503 for the life of the process. A contract is
+            only excluded while it has no NOT_READY / FAILED result of its own:
+            a contract the interleave actually tried and could not attach stays
+            blocking, whatever any later exclusion claims.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -45,6 +56,9 @@ class ModelContractAttachGateStatus(BaseModel):
     not_ready_contracts: tuple[str, ...] = Field(default_factory=tuple)
     failed_contracts: tuple[str, ...] = Field(default_factory=tuple)
     pending_contracts: tuple[str, ...] = Field(default_factory=tuple)
+    excluded_contracts: tuple[ModelContractAttachExclusion, ...] = Field(
+        default_factory=tuple
+    )
 
 
 __all__: list[str] = ["ModelContractAttachGateStatus"]

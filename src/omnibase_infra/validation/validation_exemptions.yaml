@@ -3873,6 +3873,21 @@ pattern_exemptions:
       - CLAUDE.md (Node Identity Model)
     ticket: OMN-13237
   # ==========================================================================
+  # ModelContractAttachExclusion contract_name Exemption (OMN-17372)
+  # ==========================================================================
+  # The direct sibling of ModelContractAttachResult above, carrying the SAME
+  # field for the SAME reason: that model says what happened when the boot
+  # interleave tried a contract, this one says it will never try it. Same
+  # auto-wiring path, same node-name identifier, same precedent.
+  - file_pattern: 'model_contract_attach_exclusion\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name is the wired contract's node name (the onex.nodes entry-point identifier), identical in kind and origin to ModelContractAttachResult.contract_name and ModelContractWiringResult.contract_name in the same auto-wiring boot path. It is a routing identifier the interleave echoes back so a readiness consumer can tell "has not reported yet" from "will never report", not a foreign key to a contract entity with ID + display_name.
+
+    documentation:
+      - CLAUDE.md (Node Identity Model)
+    ticket: OMN-17372
+  # ==========================================================================
   # Runner-Fleet-Maintain Exemptions (OMN-13942)
   # ==========================================================================
   # ModelZombieRunCandidate.workflow_name is the GitHub Actions workflow's
