@@ -369,3 +369,87 @@ def test_command_classification_agrees_with_the_wiring_categoriser() -> None:
 
 
 __all__: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# The KERNEL WIRING itself (hostile-reviewer MAJOR, thread r3949048723)
+#
+# Everything above builds the gate by hand. That leaves the one property this
+# whole change rests on untested: that `service_kernel` registers the probe
+# BEFORE it starts subscribing. If the registration were moved below the
+# interleave, every test above would still pass and the entire ~18-minute
+# wiring window would go back to answering /ready 200 -- which is the exact
+# bug class this diff exists to remove (a wiring site that forgot to mark).
+#
+# `bootstrap()` cannot be called in a unit test (it needs a broker, a database
+# and a container), so the ordering is asserted on the module's own AST. That
+# is a real guard against the regression: it fails if the three statements are
+# reordered, renamed, or deleted.
+# ---------------------------------------------------------------------------
+
+
+def _kernel_source() -> str:
+    import omnibase_infra.runtime.service_kernel as kernel_module
+
+    return Path(kernel_module.__file__).read_text(encoding="utf-8")
+
+
+def test_kernel_registers_the_gate_before_it_subscribes_anything() -> None:
+    """The probe must be armed BEFORE the boot interleave, not after it."""
+    source = _kernel_source()
+
+    construct = source.index("ContractAttachReadinessGate(")
+    # The kernel passes the CONSTANT, not the literal, so the shared name
+    # can never drift between the gate module and the registration site.
+    register = source.index("CONTRACT_ATTACH_PROBE_NAME,", construct)
+    subscribe = source.index("await subscribe_wired_contract_topics(")
+
+    assert construct < subscribe, (
+        "the gate is constructed after the boot interleave starts; the whole "
+        "wiring window would answer /ready 200"
+    )
+    assert register < subscribe, (
+        "register_readiness_probe runs after subscribe_wired_contract_topics; "
+        "/ready is unguarded for the entire wiring window"
+    )
+
+
+def test_kernel_feeds_the_gate_from_the_real_manifest_not_a_literal() -> None:
+    """The required set comes from the manifest the kernel is about to wire."""
+    source = _kernel_source()
+
+    assert (
+        "ContractAttachReadinessGate(\n"
+        "                derive_required_contract_names("
+        "auto_wiring_manifest_for_subscriptions)\n"
+        "            )" in source
+    ), (
+        "the kernel must derive the required set from "
+        "auto_wiring_manifest_for_subscriptions -- the same manifest object "
+        "passed to subscribe_wired_contract_topics -- and never from a literal"
+    )
+
+
+def test_kernel_records_boot_results_and_every_reconciliation_attempt() -> None:
+    """Boot results AND retry results must both reach the gate."""
+    source = _kernel_source()
+
+    subscribe = source.index("await subscribe_wired_contract_topics(")
+    boot_record = source.index("_contract_attach_gate.record(tuple(_attach_results))")
+    assert boot_record > subscribe, "boot attach results are never recorded"
+
+    assert "on_attempt=lambda _subscribed, results: (" in source, (
+        "the bounded NOT_READY reconciliation loop must hand every attempt to "
+        "the gate, or a contract that converges late never flips /ready to 200"
+    )
+    reconcile_record = source.index(
+        "on_attempt=lambda _subscribed, results: (\n"
+        "                                _contract_attach_gate.record(results)"
+    )
+    assert reconcile_record > boot_record
+
+
+def test_control_the_kernel_ast_probes_are_not_vacuous() -> None:
+    """POSITIVE CONTROL: the searches above fail on a source that lacks them."""
+    with pytest.raises(ValueError):
+        "".index("ContractAttachReadinessGate(")
