@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
+import inspect
 import sys
 from pathlib import Path
 from typing import Any
@@ -70,10 +70,10 @@ def test_pep503_identity_recognizes_accepted_arch004_entries(
 
 
 @pytest.mark.unit
-def test_arch004_identity_uses_git_root_from_nested_worktree_directory(
+def test_arch004_identity_uses_script_owned_root_from_nested_directory(
     validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """ARCH-004 runs from a nested directory against the worktree baseline."""
+    """ARCH-004 accepts a nested directory in the script-owned worktree."""
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "untrusted-git-dir"))
     monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "untrusted-work-tree"))
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
@@ -90,141 +90,169 @@ def test_arch004_identity_uses_git_root_from_nested_worktree_directory(
 
 
 @pytest.mark.unit
-def test_arch004_identity_uses_trusted_git_with_sanitized_environment(
+def test_arch004_identity_accepts_a_normal_nested_directory(
     validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Portable trusted Git binaries keep the selector isolated from state."""
-    resolved_git = tmp_path / "homebrew" / "bin" / "git"
-    captured: dict[str, object] = {}
+    """A normal nested directory resolves to the script-owned root."""
+    expected_root = tmp_path / "expected-root"
+    (expected_root / ".git").mkdir(parents=True)
+    (expected_root / ".git" / "HEAD").write_text("ref: refs/heads/dev\n")
+    nested = expected_root / "nested" / "directory"
+    nested.mkdir(parents=True)
+    script_path = expected_root / "scripts" / "validate.py"
+    script_path.parent.mkdir()
+    script_path.touch()
+    monkeypatch.setattr(validate_module, "__file__", str(script_path))
 
-    def run_git(
-        command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        captured["command"] = command
-        captured["env"] = kwargs["env"]
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout=f"{_REPO_ROOT.resolve()}\n",
-        )
+    assert validate_module._repository_root(nested) == expected_root
 
-    monkeypatch.setenv("GIT_DIR", str(tmp_path / "untrusted-git-dir"))
-    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "untrusted-work-tree"))
+
+@pytest.mark.unit
+def test_arch004_identity_accepts_a_linked_worktree_with_matching_backlink(
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A linked-worktree gitfile must be confirmed by its admin backlink."""
+    expected_root = tmp_path / "linked-worktree"
+    expected_root.mkdir()
+    admin_git_dir = tmp_path / "admin" / "worktrees" / "linked-worktree"
+    admin_git_dir.mkdir(parents=True)
+    (admin_git_dir / "HEAD").write_text("ref: refs/heads/dev\n")
+    root_marker = expected_root / ".git"
+    root_marker.write_text(f"gitdir: {admin_git_dir}\n")
+    (admin_git_dir / "gitdir").write_text(f"{root_marker}\n")
+    nested = expected_root / "nested"
+    nested.mkdir()
+    script_path = expected_root / "scripts" / "validate.py"
+    script_path.parent.mkdir()
+    script_path.touch()
+    monkeypatch.setattr(validate_module, "__file__", str(script_path))
+
+    assert validate_module._repository_root(nested) == expected_root
+
+
+@pytest.mark.unit
+def test_arch004_identity_rejects_an_unrelated_linked_worktree_administration(
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An admin directory with HEAD cannot attest a different worktree root."""
+    expected_root = tmp_path / "linked-worktree"
+    expected_root.mkdir()
+    admin_git_dir = tmp_path / "admin" / "worktrees" / "unrelated"
+    admin_git_dir.mkdir(parents=True)
+    (admin_git_dir / "HEAD").write_text("ref: refs/heads/dev\n")
+    (expected_root / ".git").write_text(f"gitdir: {admin_git_dir}\n")
+    unrelated_marker = tmp_path / "unrelated-worktree" / ".git"
+    unrelated_marker.parent.mkdir()
+    unrelated_marker.write_text("gitdir: elsewhere\n")
+    (admin_git_dir / "gitdir").write_text(f"{unrelated_marker}\n")
+    nested = expected_root / "nested"
+    nested.mkdir()
+    script_path = expected_root / "scripts" / "validate.py"
+    script_path.parent.mkdir()
+    script_path.touch()
+    monkeypatch.setattr(validate_module, "__file__", str(script_path))
+
+    assert validate_module._repository_root(nested) is None
+
+
+@pytest.mark.unit
+def test_arch004_identity_fails_closed_without_a_root_marker(
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A script root without a Git marker cannot establish a worktree."""
+    expected_root = tmp_path / "expected-root"
+    nested = expected_root / "nested"
+    nested.mkdir(parents=True)
+    script_path = expected_root / "scripts" / "validate.py"
+    script_path.parent.mkdir()
+    script_path.touch()
+    monkeypatch.setattr(validate_module, "__file__", str(script_path))
+
+    assert validate_module._repository_root(nested) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("marker_contents", ["", "not-a-gitdir", "gitdir: "])
+def test_arch004_identity_fails_closed_for_a_malformed_root_marker(
+    validate_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    marker_contents: str,
+) -> None:
+    """Malformed gitfile markers cannot establish repository identity."""
+    expected_root = tmp_path / "expected-root"
+    expected_root.mkdir()
+    (expected_root / ".git").write_text(marker_contents)
+    nested = expected_root / "nested"
+    nested.mkdir()
+    script_path = expected_root / "scripts" / "validate.py"
+    script_path.parent.mkdir()
+    script_path.touch()
+    monkeypatch.setattr(validate_module, "__file__", str(script_path))
+
+    assert validate_module._repository_root(nested) is None
+
+
+@pytest.mark.unit
+def test_arch004_identity_fails_closed_for_an_outside_cwd(
+    validate_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A caller outside the script-owned checkout cannot select its baseline."""
+    expected_root = tmp_path / "expected-root"
+    (expected_root / ".git").mkdir(parents=True)
+    (expected_root / ".git" / "HEAD").write_text("ref: refs/heads/dev\n")
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    script_path = expected_root / "scripts" / "validate.py"
+    script_path.parent.mkdir()
+    script_path.touch()
+    monkeypatch.setattr(validate_module, "__file__", str(script_path))
+
+    assert validate_module._repository_root(outside_cwd) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("marker_kind", ["file", "directory"])
+def test_arch004_identity_fails_closed_for_a_nested_git_marker(
+    validate_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    marker_kind: str,
+) -> None:
+    """A nested Git file or directory cannot replace the script-owned root."""
+    expected_root = tmp_path / "expected-root"
+    (expected_root / ".git").mkdir(parents=True)
+    (expected_root / ".git" / "HEAD").write_text("ref: refs/heads/dev\n")
+    nested = expected_root / "nested"
+    nested.mkdir()
+    marker = nested / ".git"
+    if marker_kind == "file":
+        marker.write_text("gitdir: /foreign/worktree\n")
+    else:
+        marker.mkdir()
+    script_path = expected_root / "scripts" / "validate.py"
+    script_path.parent.mkdir()
+    script_path.touch()
+    monkeypatch.setattr(validate_module, "__file__", str(script_path))
+
+    assert validate_module._repository_root(nested) is None
+
+
+@pytest.mark.unit
+def test_arch004_identity_never_uses_a_git_process_or_fhs_git_path(
+    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Repository containment is independent of executables and PATH."""
     monkeypatch.setenv("PATH", str(tmp_path / "attacker-bin"))
-    monkeypatch.setattr(
-        validate_module,
-        "_TRUSTED_GIT_EXECUTABLES",
-        (tmp_path / "attacker-bin" / "git", resolved_git),
-    )
-    monkeypatch.setattr(validate_module.os, "access", lambda path, mode: True)
-    monkeypatch.setattr(
-        validate_module.Path, "is_file", lambda path: path == resolved_git
-    )
-    monkeypatch.setattr(validate_module.subprocess, "run", run_git)
 
-    assert (
-        validate_module._repository_root(_REPO_ROOT / "scripts") == _REPO_ROOT.resolve()
-    )
-    assert captured["command"] == [
-        str(resolved_git),
-        "-C",
-        str((_REPO_ROOT / "scripts").resolve()),
-        "rev-parse",
-        "--show-toplevel",
-    ]
-    assert captured["env"] == {
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_TERMINAL_PROMPT": "0",
-        "PATH": "/usr/bin:/bin",
-    }
+    source = inspect.getsource(validate_module._repository_root)
 
-
-@pytest.mark.unit
-def test_arch004_identity_fails_closed_without_a_trusted_git_executable(
-    validate_module: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """A missing portable Git binary remains a generic fail-closed error."""
-    monkeypatch.setattr(
-        validate_module,
-        "_TRUSTED_GIT_EXECUTABLES",
-        (tmp_path / "missing-git",),
-    )
-
-    assert validate_module._repository_root(tmp_path) is None
-    assert capsys.readouterr().out == (
-        "Imperative Orchestrators: ERROR (git-worktree-root-unresolved)\n"
-    )
-
-
-@pytest.mark.unit
-def test_arch004_identity_fails_closed_for_a_fake_nested_git_marker(
-    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A nested filesystem marker cannot replace the validator's Git root."""
-    fake_checkout = tmp_path / "fake-checkout"
-    (fake_checkout / ".git").mkdir(parents=True)
-    (fake_checkout / "pyproject.toml").write_text(
-        "[project]\nname = 'omnibase_infra'\n", encoding="utf-8"
-    )
-    monkeypatch.chdir(fake_checkout)
-
-    assert validate_module._repository_root(Path.cwd()) is None
-
-
-@pytest.mark.unit
-def test_arch004_identity_fails_closed_for_a_genuine_foreign_git_root(
-    validate_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A real nested foreign repository cannot become this validator's root."""
-    foreign_repo = tmp_path / "outer" / "nested-foreign-repository"
-    foreign_repo.parent.mkdir(parents=True)
-    subprocess.run(
-        [
-            "/usr/bin/env",
-            "-i",
-            "PATH=/usr/bin:/bin",
-            "GIT_CONFIG_NOSYSTEM=1",
-            "/usr/bin/git",
-            "init",
-            str(foreign_repo),
-        ],
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-    monkeypatch.chdir(foreign_repo)
-
-    assert validate_module._repository_root(Path.cwd()) is None
-
-
-@pytest.mark.unit
-def test_arch004_identity_does_not_expose_subprocess_failure_details(
-    validate_module: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Git failures report a stable code rather than subprocess command details."""
-    sensitive_detail = "do-not-expose-this-subprocess-command"
-
-    def raise_git_failure(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise subprocess.CalledProcessError(
-            returncode=128,
-            cmd=["git", sensitive_detail],
-            stderr="do-not-expose-this-subprocess-stderr",
-        )
-
-    monkeypatch.setattr(validate_module.subprocess, "run", raise_git_failure)
-
-    assert validate_module._repository_root(tmp_path) is None
-
-    output = capsys.readouterr().out
-    assert output == "Imperative Orchestrators: ERROR (git-worktree-root-unresolved)\n"
-    assert sensitive_detail not in output
+    assert "subprocess" not in source
+    assert "os." not in source
+    assert "/usr/" not in source
+    assert "/opt/" not in source
 
 
 @pytest.mark.unit
