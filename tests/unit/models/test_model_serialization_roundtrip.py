@@ -39,6 +39,10 @@ from omnibase_infra.enums import (
     EnumConfirmationState,
     EnumDispatchStatus,
     EnumInfraTransportType,
+    EnumKafkaFetchBudgetSource,
+)
+from omnibase_infra.event_bus.models.config.model_kafka_consumer_fetch_budget import (
+    ModelKafkaConsumerFetchBudget,
 )
 from omnibase_infra.event_bus.models.model_dlq_event import ModelDlqEvent
 from omnibase_infra.event_bus.models.model_dlq_metrics import ModelDlqMetrics
@@ -391,6 +395,31 @@ def _make_batch_publisher_metrics() -> ModelBatchPublisherMetrics:
     )
 
 
+def _make_kafka_consumer_fetch_budget() -> ModelKafkaConsumerFetchBudget:
+    """OMN-17888: the aggregate consumer fetch budget.
+
+    Covered by a factory rather than dispositioned as uncovered because the
+    JSON round trip IS this model's deployment path: the budget is rendered
+    from ``contracts/services/runtime_policy.contract.yaml`` into
+    ``docker/runtime-policy.env`` as one JSON variable, passed by compose
+    fail-closed, and parsed back by ``from_declaration()`` at runtime boot. A
+    round trip that silently dropped or renamed a field would leave the runtime
+    holding a fetch bound it never declared.
+
+    ``DECLARED_BYTES`` with an explicit limit, never the container-cgroup
+    source: a unit test must not derive anything from the host it happens to
+    run on. The value is the .201 dev lane's real 1536 MiB limit, injected.
+    """
+    return ModelKafkaConsumerFetchBudget(
+        source=EnumKafkaFetchBudgetSource.DECLARED_BYTES,
+        memory_limit_bytes=1_610_612_736,
+        memory_fraction=0.15,
+        max_concurrent_consumers=512,
+        brokers_per_consumer=1,
+        in_flight_fetches_per_broker=2,
+    )
+
+
 def _make_retry_policy() -> ModelRetryPolicy:
     return ModelRetryPolicy(
         max_retries=5,
@@ -546,6 +575,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelEventBusReadiness: _make_event_bus_readiness,
     ModelEventMessage: _make_event_message,
     ModelPublishReceipt: _make_publish_receipt,
+    ModelKafkaConsumerFetchBudget: _make_kafka_consumer_fetch_budget,
     ModelDurabilityConfirmation: _make_durability_confirmation,
     # Runtime models (13/59 covered)
     ModelBatchPublisherConfig: _make_batch_publisher_config,
