@@ -54,6 +54,9 @@ from omnibase_infra.event_bus.models.model_publish_receipt import (
     ModelPublishReceipt,
 )
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.runtime.enums.enum_contract_attach_gate_phase import (
+    EnumContractAttachGatePhase,
+)
 
 # -- Runtime models --
 from omnibase_infra.runtime.models.model_batch_publisher_config import (
@@ -67,6 +70,9 @@ from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
     ModelBifrostLaneBackendBinding,
 )
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
+from omnibase_infra.runtime.models.model_contract_attach_gate_status import (
+    ModelContractAttachGateStatus,
+)
 from omnibase_infra.runtime.models.model_detailed_health_response import (
     ModelDetailedHealthResponse,
 )
@@ -538,6 +544,19 @@ def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
 # ============================================================================
 # Factory registry: maps model class -> factory callable
 # ============================================================================
+def _make_contract_attach_gate_status() -> ModelContractAttachGateStatus:
+    """OMN-17372: the /ready 503 body naming the contracts that block readiness."""
+    return ModelContractAttachGateStatus(
+        phase=EnumContractAttachGatePhase.BLOCKED,
+        ready=False,
+        required_contracts=("node_delegation_inference", "node_delegation_router"),
+        attached_contracts=("node_delegation_inference",),
+        not_ready_contracts=("node_delegation_router",),
+        failed_contracts=(),
+        pending_contracts=(),
+    )
+
+
 MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     # Event bus models (5/6 covered)
     ModelEventHeaders: _make_event_headers,
@@ -552,6 +571,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelBatchPublisherMetrics: _make_batch_publisher_metrics,
     ModelBifrostLaneBackendBinding: _make_bifrost_lane_backend_binding,
     ModelComponentHealth: _make_component_health,
+    ModelContractAttachGateStatus: _make_contract_attach_gate_status,
     ModelDetailedHealthResponse: _make_detailed_health_response,
     ModelDuplicateResponse: _make_duplicate_response,
     ModelFailedComponent: _make_failed_component,
