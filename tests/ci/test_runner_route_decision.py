@@ -425,3 +425,64 @@ def test_the_decision_record_carries_its_inputs_and_is_json_serialisable() -> No
     assert "decided_at" in payload
     assert payload["inputs"]["event_name"] == "push"
     assert payload["inputs"]["fleet"]["online"] == 88
+
+
+# --- 12. the runtime never-widen guard checks the ANSWER, not the ceiling -----
+
+
+def test_runtime_guard_degrades_a_widened_answer_to_hosted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A widening return from the elimination is caught on the way out.
+
+    WHY THIS TEST EXISTS. The first build called
+    ``assert_never_widens(ceiling, ceiling, hosted)`` from inside the S7 branch
+    and both the module docstring and the PR body advertised that as the
+    mechanical runtime guard. It compares the ceiling with itself, so it can
+    never fail. Proven by injecting a widening bug into S7 and re-running: the
+    runtime check passed and the widened label set was emitted unchanged; only
+    the cross-product sweep above caught it. A guard that cannot fail is
+    documentation, not enforcement (CLAUDE.md rule 5).
+
+    ``decide`` now validates the labels ``_decide_unchecked`` actually returned
+    against that run's own ceiling. This monkeypatch stands in for the future
+    edit to one of the eight return points that the sweep would catch in CI but
+    that nothing would catch at RUNTIME, which is where an untrusted or
+    unbudgeted job would actually reach the fleet.
+    """
+    widened = route.RouteDecision(
+        labels=["self-hosted", "omnibase-ci", "invented"],
+        decision="self_hosted",
+        reason="capacity_available",
+        policy_version=1,
+    )
+    monkeypatch.setattr(route, "_decide_unchecked", lambda **_: widened)
+
+    result = _decide(seam_json=HOSTED_SEAM)
+
+    assert result.labels == HOSTED_LABELS
+    assert result.decision == "hosted"
+    assert result.reason == "never_widen_violation"
+    assert "violation" in result.inputs
+
+
+def test_runtime_guard_passes_a_legitimate_lab_answer_through() -> None:
+    """Positive control for the guard: it must not reject a valid decision.
+
+    A guard that rejected everything would satisfy the test above while making
+    the mechanism permanently hosted -- indistinguishable, from a green run,
+    from a guard that works.
+    """
+    result = _decide(fleet=_fleet(online=88, busy=10), lab=_lab(ratio=0.19))
+    assert result.labels == LAB_LABELS
+    assert result.reason == "capacity_available"
+
+
+def test_decide_and_the_elimination_are_separate_callables() -> None:
+    """Pins the structure the guard depends on.
+
+    Re-collapsing ``decide`` back into the elimination would silently restore
+    the tautology: there would be no 'on the way out' left to check from.
+    """
+    assert route.decide is not route._decide_unchecked
+    assert callable(route._decide_unchecked)

@@ -40,8 +40,9 @@ route job hands the run a usable ``runs-on`` rather than an empty one. An
 unreadable probe is never "assume ample" -- that assumption is the failure class
 the pre-push picker's own fail-closed rules already exist to prevent.
 
-NEVER-WIDEN IS MECHANICAL, NOT A CONVENTION. ``assert_never_widens`` re-checks
-the returned label set against the ceiling as the last act before emitting, and
+NEVER-WIDEN IS MECHANICAL, NOT A CONVENTION. ``decide`` re-checks the label set
+``_decide_unchecked`` actually returned against that run's ceiling as the last
+act before emitting, and a violation degrades to hosted rather than raising, and
 ``tests/ci/test_runner_route_decision.py::test_never_widens_beyond_ceiling``
 sweeps the cross-product of every input dimension asserting a self-hosted label
 can appear only when the seam already contained one.
@@ -191,7 +192,7 @@ def assert_never_widens(
         raise AssertionError(f"routing invented a self-hosted label: ceiling={ceiling}")
 
 
-def decide(
+def _decide_unchecked(
     *,
     event_name: str,
     head_repo: str | None,
@@ -204,7 +205,9 @@ def decide(
     policy: dict[str, Any],
     allowlist: list[str] | None = None,
 ) -> RouteDecision:
-    """Choose a runs-on label set. Never raises; every fault degrades to hosted."""
+    """The ordered elimination itself. Callers use ``decide``, which re-checks
+    this function's ANSWER against the ceiling before anyone can act on it.
+    """
     hosted = [str(item) for item in policy.get("hosted_labels", ["ubuntu-latest"])]
     version = int(policy.get("policy_version", 0))
     decided_at = datetime.now(UTC).isoformat()
@@ -357,8 +360,10 @@ def decide(
                     extra={**fleet_inputs, "lab_host": host.get("label")},
                 )
 
-        # --- S7: capacity is available and the seam permits it.
-        assert_never_widens(ceiling, ceiling, hosted)
+        # --- S7: capacity is available and the seam permits it. The
+        # never-widen check is NOT made here -- checking `ceiling` against
+        # itself is a tautology that would pass a widened answer. It is made in
+        # `decide` below, against the labels this function actually returned.
         return RouteDecision(
             labels=ceiling,
             decision="self_hosted",
@@ -387,6 +392,42 @@ def decide(
             decided_at=decided_at,
             inputs={"event_name": event_name, "workflow_path": workflow_path},
         )
+
+
+def decide(**kwargs: Any) -> RouteDecision:
+    """Choose a runs-on label set. Never raises; every fault degrades to hosted.
+
+    THE NEVER-WIDEN CHECK LIVES HERE, ON THE WAY OUT, and it is the only place
+    it can be honest. An earlier build called ``assert_never_widens(ceiling,
+    ceiling, hosted)`` from inside the S7 branch and the module docstring
+    claimed that as the mechanical guard. It is a TAUTOLOGY -- it compares the
+    ceiling with itself and never looks at what was returned. Proven by
+    injecting a widening bug into S7: the runtime check passed and the widened
+    label set was emitted; only the cross-product sweep in
+    ``tests/ci/test_runner_route_decision.py`` caught it. A guard that cannot
+    fail is documentation, not enforcement (CLAUDE.md rule 5).
+
+    Checking the ANSWER, on every path, is what makes it enforcement: a future
+    edit to any of the eight return points is re-validated here against the
+    seam that run actually carried, and a violation degrades to hosted rather
+    than raising -- an unroutable run is worse than a hosted one.
+    """
+    decision = _decide_unchecked(**kwargs)
+    policy = kwargs["policy"]
+    hosted = [str(item) for item in policy.get("hosted_labels", ["ubuntu-latest"])]
+    ceiling = _parse_labels(kwargs.get("seam_json")) or []
+    try:
+        assert_never_widens(decision.labels, ceiling, hosted)
+    except AssertionError as exc:
+        return RouteDecision(
+            labels=hosted,
+            decision="hosted",
+            reason="never_widen_violation",
+            policy_version=int(policy.get("policy_version", 0)),
+            decided_at=decision.decided_at,
+            inputs={**decision.inputs, "violation": str(exc)},
+        )
+    return decision
 
 
 # --------------------------------------------------------------------------
