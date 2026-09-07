@@ -17,11 +17,13 @@ path went through a re-publish, so `main` simply stayed stale.
 this repo's release-workflow tests already are:
 
 * **Shape** assertions parse the real workflow YAML -- the job graph, the job
-  conditions, and the fact that the sync-only job builds and publishes nothing.
+  conditions, and the fact that the sync-only job builds, publishes, and pushes
+  nothing through git.
 * **Behaviour** assertions extract the real `Validate sync tag` script out of
   the committed workflow and EXECUTE it under `bash -e` against a real
-  throwaway git repository with a real `origin`. Nothing is re-implemented
-  here: a regression in the committed shell is a regression in these tests.
+  throwaway git repository with a real `origin` under `bash -euo pipefail`.
+  Nothing is re-implemented here: a regression in the committed shell is a
+  regression in these tests.
   That is also why the script must stay free of inline `${{ }}` expressions
   (values arrive through `env:`) -- an expression would make the committed
   shell unrunnable here and quietly turn these tests into string matching.
@@ -164,19 +166,27 @@ def test_the_sync_job_keeps_the_release_jobs_step_names() -> None:
     assert names.index(_MINT_STEP) < names.index(_SYNC_STEP), names
 
 
-def test_the_sync_push_uses_the_minted_app_token_not_the_workflow_token() -> None:
+def test_the_sync_step_updates_main_over_rest_with_the_minted_app_token() -> None:
     """The main ruleset's only bypass actor is the onexbot-occ-writer App."""
     script = str(_step(_SYNC_JOB, _SYNC_STEP)["run"])
-    assert "x-access-token:${APP_TOKEN}@github.com" in script, script
-    assert (
-        'git config --local --unset-all "http.https://github.com/.extraheader"'
-        in script
-    ), (
-        "actions/checkout's persisted GITHUB_TOKEN header overrides the app token "
-        "in the push URL, so the push would authenticate as github-actions[bot] "
-        "and the ruleset would decline it (OMN-17272)"
+    assert "Authorization: Bearer ${APP_TOKEN}" in script, script
+    assert "/git/refs/heads/main" in script, script
+    assert '\\"force\\":false' in script, script
+    assert "git push" not in script, script
+    assert "x-access-token:${APP_TOKEN}@github.com" not in script, script
+    assert "git rev-list" not in script, (
+        "the sync step must reuse the already validated TAG_SHA, not re-resolve "
+        "a mutable tag name after validation"
     )
-    assert "--force" not in script, script
+
+
+def test_the_release_job_main_sync_also_uses_rest_not_git_push() -> None:
+    script = str(_step(_RELEASE_JOB, _SYNC_STEP)["run"])
+    assert "Authorization: Bearer ${APP_TOKEN}" in script, script
+    assert "/git/refs/heads/main" in script, script
+    assert '\\"force\\":false' in script, script
+    assert "git push" not in script, script
+    assert "x-access-token:${APP_TOKEN}@github.com" not in script, script
 
 
 def test_the_sync_app_token_can_write_refs_and_tagged_workflows() -> None:
@@ -325,7 +335,7 @@ def _run_validate(tmp_path: Path, work: Path, sync_tag: str) -> _ValidateRun:
         }
     )
     result = subprocess.run(
-        ["bash", "-e", str(script)],
+        ["bash", "-euo", "pipefail", str(script)],
         cwd=work,
         env=env,
         capture_output=True,
@@ -389,14 +399,34 @@ def test_validate_refuses_a_prerelease_tag(tmp_path: Path) -> None:
     work, _ = _build_fixture_repo(tmp_path)
     run = _run_validate(tmp_path, work, "v9.9.9-rc1")
     assert run.returncode != 0, run.stdout
-    assert "prerelease" in run.stdout + run.stderr
+    assert "final vX.Y.Z release tag" in run.stdout + run.stderr
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "v1.0.0-beta",
+        "v1.0.0-alpha.1",
+        "v1.0.0b2",
+        "v1.0.0.dev0",
+        "v1.0.0+build",
+        "v1.0.0.1",
+    ],
+)
+def test_validate_refuses_non_final_release_tag_shapes(
+    tmp_path: Path, tag: str
+) -> None:
+    work, _ = _build_fixture_repo(tmp_path)
+    run = _run_validate(tmp_path, work, tag)
+    assert run.returncode != 0, run.stdout
+    assert "final vX.Y.Z release tag" in run.stdout + run.stderr
 
 
 def test_validate_refuses_a_non_release_tag_shape(tmp_path: Path) -> None:
     work, _ = _build_fixture_repo(tmp_path)
     run = _run_validate(tmp_path, work, "dev")
     assert run.returncode != 0, run.stdout
-    assert "not a vX.Y.Z release tag" in run.stdout + run.stderr
+    assert "not a final vX.Y.Z release tag" in run.stdout + run.stderr
 
 
 def test_validate_refuses_an_empty_input(tmp_path: Path) -> None:

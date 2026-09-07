@@ -430,8 +430,15 @@ def test_escalation_is_a_superset_of_the_runnable_selection() -> None:
         "expected the fail-closed escalation to run ${FULL_SUITE_TARGET}"
     )
     assert (
-        'run_prepush_allowlisted_integration_tests "${RUNNABLE_INTEGRATION_PATHS[@]}"'
+        'if [ "$rc" -eq 0 ] && [ "${#RUNNABLE_INTEGRATION_PATHS[@]}" -gt 0 ]; then'
     ) in script_text, (
+        "expected successful escalations to continue into the runnable "
+        "(service-free) integration partition"
+    )
+    assert (
+        'run_prepush_allowlisted_integration_tests "${RUNNABLE_INTEGRATION_PATHS[@]}"'
+        in script_text
+    ), (
         "expected the fail-closed escalation to append the runnable "
         "(service-free) integration paths to ${FULL_SUITE_TARGET}, so it "
         "remains a strict superset of the impacted-subset selection"
