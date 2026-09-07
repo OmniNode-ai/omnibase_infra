@@ -394,7 +394,12 @@ def test_full_suite_target_is_single_sourced() -> None:
         f"expected FULL_SUITE_TARGET to be set to {_FULL_SUITE_TARGET!r} in "
         f"{HOOK_SCRIPT}"
     )
-    assert 'uv run pytest "${FULL_SUITE_TARGET}"' in script_text, (
+    # OMN-17793 moved the invocation behind `run_prepush_ordinary_tests`, which
+    # is the single place `uv run pytest` is spelled for the ordinary lane. The
+    # assertion follows it rather than pinning the old inline literal: what this
+    # test protects is that the escalation runs THE SAME target the predicate is
+    # evaluated against, not the spelling of the command that runs it.
+    assert 'run_prepush_ordinary_tests "$FULL_SUITE_TARGET"' in script_text, (
         "expected the fail-closed escalation to run ${FULL_SUITE_TARGET} "
         "itself, so the guard predicate cannot drift from the run it guards"
     )
@@ -415,9 +420,17 @@ def test_escalation_is_a_superset_of_the_runnable_selection() -> None:
     alongside the single-sourced target, not instead of it.
     """
     script_text = HOOK_SCRIPT.read_text(encoding="utf-8")
+    # OMN-17793: the two runs are now separate invocations inside
+    # `run_prepush_partitioned_tests` rather than one argv. The superset
+    # property is unchanged and is asserted as the two facts that constitute
+    # it -- the full target is run, AND the runnable integration paths are run
+    # alongside it under the same function, guarded only by the ordinary run
+    # having passed.
+    assert 'run_prepush_ordinary_tests "$FULL_SUITE_TARGET"' in script_text, (
+        "expected the fail-closed escalation to run ${FULL_SUITE_TARGET}"
+    )
     assert (
-        'uv run pytest "${FULL_SUITE_TARGET}" '
-        '${RUNNABLE_INTEGRATION_PATHS[@]+"${RUNNABLE_INTEGRATION_PATHS[@]}"}'
+        'run_prepush_allowlisted_integration_tests "${RUNNABLE_INTEGRATION_PATHS[@]}"'
     ) in script_text, (
         "expected the fail-closed escalation to append the runnable "
         "(service-free) integration paths to ${FULL_SUITE_TARGET}, so it "
