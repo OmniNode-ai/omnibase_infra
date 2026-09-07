@@ -16,6 +16,7 @@ _REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.ci.check_pin_reachability import Resolution, Verdict, _Resolver
 from scripts.ci.pr_trailers import parse_trailer
 
 DEFAULT_REF = "dev"
@@ -69,9 +70,38 @@ def _validate(candidate: str) -> str:
     return candidate
 
 
+def _resolve_ref_from_dev(ref: str) -> Resolution:
+    """Resolve ``ref`` against the protected omnimarket ``dev`` history.
+
+    A source-ref trailer is an input to the grants derivation gate, not a
+    permission to checkout an arbitrary feature branch. Reuse the existing
+    OMN-15538 GitHub-compare oracle so ``behind`` and ``identical`` are the
+    only passing outcomes; unmerged, missing, and unavailable refs stay
+    fail-closed.
+    """
+    return _Resolver(("dev",)).resolve("omnimarket", ref)
+
+
+def _require_ref_reachable_from_dev(ref: str) -> str:
+    """Return a durably reachable ref or raise a fail-closed error."""
+    resolution = _resolve_ref_from_dev(ref)
+    if resolution.verdict is Verdict.REACHABLE:
+        return ref
+    if resolution.verdict is Verdict.UNREACHABLE:
+        raise ValueError(
+            "declared omnimarket source ref is not reachable from "
+            f"omnimarket/dev: {ref!r}; {resolution.detail}"
+        )
+    raise ValueError(
+        "could not prove declared omnimarket source ref reachable from "
+        f"omnimarket/dev (fail-closed): {ref!r}; {resolution.detail}"
+    )
+
+
 def main() -> int:
     try:
         ref = _parse_ref(_body_from_event(os.environ.get("GITHUB_EVENT_PATH")))
+        ref = _require_ref_reachable_from_dev(ref)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1
