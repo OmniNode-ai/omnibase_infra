@@ -83,15 +83,14 @@ class TestProfileDerivation:
             bootstrap_servers="broker-1.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism=mechanism,
-            # OMN-18012 made credentials MANDATORY for every username/password
-            # mechanism -- previously the model accepted a mechanism with no
-            # credentials and dropped them silently into a half-built client.
-            # These are synthetic values on a synthetic broker: what this test
-            # derives is the provisioning PROFILE from the mechanism, and the
-            # credentials are only what the model now requires to be
-            # constructible at all.
-            sasl_plain_username="synthetic-provisioning-policy-principal",
-            sasl_plain_password="synthetic-provisioning-policy-secret",
+            # OMN-18012 made a credential-less PLAIN/SCRAM config a
+            # ProtocolConfigurationError at construction. These fixtures assert
+            # what the PROVISIONING POLICY derives from a mechanism, not what
+            # the client authenticates with, so they now name the credentials
+            # the model requires rather than asserting policy on a config that
+            # could never connect.
+            sasl_plain_username="fixture-principal",
+            sasl_plain_password="fixture-secret",  # pragma: allowlist secret
         )
         policy = ModelTopicProvisioningPolicy.from_kafka_config(config)
         assert policy.capacity_replication_factor is None
@@ -116,10 +115,10 @@ class TestSaslClusterIsNotAssumedSingleNode:
             bootstrap_servers="b-1.example:9096,b-2.example:9096,b-3.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism="SCRAM-SHA-512",
-            # Required since OMN-18012; synthetic, and orthogonal to what this
-            # class asserts (that a SCRAM cluster is not assumed single-node).
-            sasl_plain_username="synthetic-provisioning-policy-principal",
-            sasl_plain_password="synthetic-provisioning-policy-secret",
+            # OMN-18012, same reason as above: SCRAM without credentials no
+            # longer constructs.
+            sasl_plain_username="fixture-principal",
+            sasl_plain_password="fixture-secret",  # pragma: allowlist secret
         )
         return ModelTopicProvisioningPolicy.from_kafka_config(config)
 
