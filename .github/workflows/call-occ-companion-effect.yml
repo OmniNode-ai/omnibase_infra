@@ -69,10 +69,12 @@
 # main, re-pin this `uses:` to `@main` or a main SHA so the caller no longer
 # tracks a moving dev branch.
 #
-# SECRET-FREE: no `secrets: inherit` — the dev-lane broker comes from
-# omnimarket's committed config/ci_bus_lanes.yaml overlay (OMN-14813), and the
-# dev-lane listener is plaintext. This repo needs no Kafka secrets for this
-# workflow.
+# BROKER-SECRET-FREE, SASL-CREDENTIALLED (OMN-14813 + OMN-18012): the
+# dev-lane broker still comes from omnimarket's committed
+# config/ci_bus_lanes.yaml overlay. Only the SASL credentials come from
+# inherited secrets because the dev listener now declares
+# SASL_PLAINTEXT/SCRAM-SHA-256. Do not add KAFKA_BOOTSTRAP_SERVERS here; the
+# broker remains config, not an opaque secret.
 #
 # MANUAL REPLAY ENTRYPOINT (OMN-14993): `workflow_dispatch` lets an operator
 # manually re-request a mint for a PR whose original `pull_request` event was
@@ -128,6 +130,7 @@ jobs:
       (contains(github.event.pull_request.title, 'OMN-') ||
        contains(github.event.pull_request.head.ref, 'OMN-'))
     uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-companion-effect-reusable.yml@dev
+    secrets: inherit
     with:
       lane: dev
 
@@ -202,6 +205,8 @@ jobs:
 
       - name: Publish onex.cmd.omnimarket.occ-companion-effect-requested.v1 (manual replay)
         env:
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           RUNNER_IS_TRUSTED: "true"
           PR_REPO: ${{ github.repository }}
           LANE: dev
