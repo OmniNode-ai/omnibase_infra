@@ -47,3 +47,17 @@ def _stub_promotion_guard(
     monkeypatch.setattr(
         executor_mod, "_load_promotion_guard", lambda: _NoopPromotionGuard()
     )
+
+
+@pytest.fixture(autouse=True)
+def _declare_lane_fence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-16939: DEPLOY_AGENT_ALLOWED_LANES is required and has no default.
+
+    Tests that construct a ``DeployAgent`` are not testing the fence, so they
+    get an explicit permissive one here rather than each re-declaring it. This
+    is visible, not a bypass: the fence's own behaviour — including that an
+    unset variable aborts startup — is asserted in
+    ``test_lane_policy.py``, which deletes the variable via monkeypatch and so
+    is unaffected by this fixture.
+    """
+    monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev,stability-test,prod")
