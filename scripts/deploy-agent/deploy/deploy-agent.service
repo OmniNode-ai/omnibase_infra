@@ -31,6 +31,16 @@
 #   commands for more than one lane, so "which broker am I on" does not bound
 #   which lane this process may mutate; this variable does.
 
+#
+# PORT PREFLIGHT (fail-fast, never destructive)
+#
+# ExecStartPre runs deploy/preflight_port_free.sh, which refuses to start
+# when the port is already held and names the holder (command + pid) on
+# stderr. It never terminates the holder: that process may be a peer lane's
+# agent or a draining rebuild, and a unit file cannot judge the blast
+# radius. Exit 2 (no socket-inspection tool, bad argument) also refuses --
+# an unprovable precondition is not a satisfied one.
+
 [Unit]
 Description=ONEX Deploy Agent — Kafka-driven rebuild orchestrator
 After=network-online.target docker.service
@@ -43,7 +53,7 @@ EnvironmentFile=/home/jonah/.omnibase/.env
 Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs
 Environment=DEPLOY_AGENT_PORT=8099
-ExecStartPre=/bin/sh -c 'fuser -k 8099/tcp || true'
+ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8099
 ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/.venv/bin/python -m deploy_agent
 Restart=on-failure
 RestartSec=5
