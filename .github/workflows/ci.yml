@@ -3738,6 +3738,78 @@ jobs:
           uv run pytest tests/integration/chains/ -v --tb=short
 
   # ===========================================================================
+  # Customer Path Boundary (OMN-18012)
+  # ---------------------------------------------------------------------------
+  # The 2026-09-06 escape set had one common cause: the boundaries where the
+  # defects lived -- broker AUTH, partition RETENTION, DB constraints, error
+  # bodies, host toolchain -- are mocked in unit tests and absent from every
+  # local proof lane (Redpanda no-auth, offsets from zero, the .201 dev lane),
+  # and the integration suite that could hold them never ran before push.
+  #
+  # This job runs the omnibase_infra half against a HERMETIC broker that
+  # actually requires SASL and a partition whose log start has actually been
+  # advanced above 0:
+  #   - the chain-canary terminal readback must find a terminal on a
+  #     retention-truncated partition (OMN-16931 / #3254, parent 10017ee52 --
+  #     the pre-fix `max(0, end - N)` seek reads 0 records and reports a
+  #     NOT_FOUND indistinguishable from a chain that never emitted)
+  #   - the bus client must be able to authenticate to a username/password
+  #     listener at all (OMN-18012 gate 0)
+  #
+  # RESIDUAL, stated because this job is NOT the production topology: staging
+  # and prod are MSK with AWS_MSK_IAM + SASL_SSL; this harness is SCRAM. What
+  # it proves is "this client did not silently open PLAINTEXT against an
+  # auth-required listener", NOT "this client speaks IAM".
+  #
+  # The sharded test matrix runs `-m "not kafka ..."`, so these tests run
+  # NOWHERE ELSE in this repo. Registered in STRICT_GATE_JOBS in
+  # scripts/ci/ci_summary_gate.py -- that registration is half the mechanism:
+  # an unregistered job that is skipped or deleted yields SUCCESS, and a
+  # silently-absent boundary test is the exact failure mode this job exists to
+  # end. OMN18012_REQUIRE_HARNESS=1 turns an unreachable docker daemon into a
+  # hard failure rather than a skip.
+  customer-path-boundary:
+    name: Customer Path Boundary (OMN-18012)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Pre-pull the harness broker image
+        run: docker pull redpandadata/redpanda:v24.2.7
+
+      - name: Run customer-path boundary tests
+        env:
+          # A missing docker daemon must be RED here, never a green skip.
+          OMN18012_REQUIRE_HARNESS: "1"
+        run: |
+          echo "================================================================"
+          echo "Customer Path Boundary (OMN-18012)"
+          echo "Auth-required Redpanda + a partition trimmed above offset 0."
+          echo "RESIDUAL: this harness is SCRAM; staging/prod are AWS_MSK_IAM."
+          echo "================================================================"
+          uv run pytest tests/integration/customer_path/ \
+            tests/unit/event_bus/test_omn18012_sasl_scram_credentials.py \
+            -v --tb=short -p no:randomly
+
+  # ===========================================================================
   # Subscribe Wiring Health (OMN-16795)
   # ---------------------------------------------------------------------------
   # scripts/check_subscribe_wiring_health.py has existed since OMN-7385 and was
