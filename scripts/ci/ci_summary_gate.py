@@ -223,6 +223,17 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # always completes success/failure and a skip/absence here is anomalous
     # -- correctly fails closed.
     "Lockfile Registry Allowlist (OMN-16516)",
+    # OMN-18012: the customer-path boundary chain (tests/integration/
+    # customer_path/). THIS LINE IS HALF THE MECHANISM, same as the two
+    # entries above -- the default-deny sweep fails CI Summary when the job
+    # FAILS, but an unregistered job that is `skipped` or absent yields
+    # SUCCESS, and a silently-absent boundary test is exactly the shape of
+    # the 2026-09-06 escapes it exists to catch. The job runs the ONLY
+    # per-PR proof in this repo that the terminal readback survives a
+    # retention-truncated partition and that the bus client can actually
+    # authenticate to an auth-required listener; the sharded test matrix
+    # excludes it by marker (`-m "not kafka"`).
+    "Customer Path Boundary (OMN-18012)",  # customer-path-boundary
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
