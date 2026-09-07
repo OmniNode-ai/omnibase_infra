@@ -33,24 +33,25 @@ trusted_runner_variable:
   # different, so the hourly audit can tell an authorized per-repo divergence
   # from the silent drift it exists to catch. An override is not a hole: the
   # audit holds the repo to the override value, still judges the org value on
-  # expected_json above, and refuses an override with no revert_when.
-  repository_overrides:
-    omnimarket:
-      expected_json: '["self-hosted","omnibase-ci"]'
-      # Interim load-balancing relief, 2026-09-07T12:04:30Z. At the moment of the
-      # flip these two repos held 78 queued hosted runs between them (omnimarket
-      # 23 queued / 0 in progress, omnibase_infra 55 queued / 4 in progress) while
-      # all 30 runners in the self-hosted omnibase-ci group were online and zero
-      # were busy. The label set is the one in force before the 2026-08-27 re-flip
-      # (OMN-16682, commit 8ce11d51 removed `expected_json: '["self-hosted",
-      # "omnibase-ci"]'` from this file).
-      revert_when: >-
-        Operator, verbatim, 2026-09-07 in-session: "we can toggle them back off when the queue clears and the lab runners are operational again" -- "for load balaning that is". So: revert when (a) the hosted queue has drained AND (b) the OMN-18031 per-run router is live and enforced in this repo, at which point DELETE the repo shadow entirely so the router's seam ceiling governs rather than leaving a pinned value behind. Authorization is the OPERATOR-CONSENT row in the omni_home rolling work ledger, lane=trusted-seam-flip-market-infra.
-    omnibase_infra:
-      expected_json: '["self-hosted","omnibase-ci"]'
-      # Same flip, same timestamp, same rationale -- see the omnimarket entry.
-      revert_when: >-
-        Operator, verbatim, 2026-09-07 in-session: "we can toggle them back off when the queue clears and the lab runners are operational again" -- "for load balaning that is". So: revert when (a) the hosted queue has drained AND (b) the OMN-18031 per-run router is live and enforced in this repo, at which point DELETE the repo shadow entirely so the router's seam ceiling governs rather than leaving a pinned value behind. Authorization is the OPERATOR-CONSENT row in the omni_home rolling work ledger, lane=trusted-seam-flip-market-infra.
+  # expected_json above, refuses an override with no revert_when, and reports a
+  # repo that declares an override but carries no shadow at all (it would
+  # silently inherit the org value -- the "the flip looked successful because the
+  # org readback was correct" trap in rule 14).
+  #
+  # It is EMPTY today, deliberately. On 2026-09-07T12:04:30-31Z the omnimarket
+  # and omnibase_infra shadows were flipped to '["self-hosted","omnibase-ci"]' as
+  # authorized interim load-balancing relief (78 hosted runs queued across the two
+  # repos while all 30 runners in the omnibase-ci group were online and zero were
+  # busy). It was REVERTED 53 minutes later at 12:57:48Z on measured harm: the
+  # required gate "Customer Path Boundary (OMN-18012)" cannot bootstrap its Kafka
+  # testcontainer on the fleet -- the runners are themselves containers on a
+  # shared Docker daemon, so a mapped container port is not reachable on the
+  # runner's own localhost. Clean A/B on omnibase_infra ci.yml, same job: 5 of 5
+  # pre-flip runs SUCCESS on ubuntu-latest, 5 of 5 post-flip runs FAILURE on
+  # self-hosted, the first of them 71 seconds after the flip; reproduced on
+  # omnimarket run 34122888401. Before any future flip of this seam, that gate
+  # (and every other testcontainer-backed gate) needs a hosted class of its own.
+  repository_overrides: {}
 public_pr_runner_variable:
   name: OMNI_PUBLIC_PR_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'

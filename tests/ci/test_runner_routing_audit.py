@@ -403,21 +403,10 @@ def test_every_repository_override_carries_a_revert_condition() -> None:
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
     overrides = policy["trusted_runner_variable"].get("repository_overrides", {})
 
-    assert overrides, "OMN-18031: the interim relief overrides must be declared"
+    # Empty is the correct steady state; the assertion is about SHAPE, so it
+    # holds whether or not an override happens to be live right now.
     for repo, entry in overrides.items():
         assert repo in policy["repositories"], f"{repo} is not an audited repository"
         assert entry["expected_json"], f"{repo} override has no expected_json"
         module._canonical_json(entry["expected_json"])
         assert entry.get("revert_when"), f"{repo} override has no revert_when"
-
-
-def test_policy_declares_the_interim_self_hosted_relief_overrides() -> None:
-    """OMN-18031: the two repos flipped to the lab fleet on 2026-09-07."""
-    import yaml
-
-    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
-    overrides = policy["trusted_runner_variable"]["repository_overrides"]
-
-    assert set(overrides) == {"omnimarket", "omnibase_infra"}
-    for repo in ("omnimarket", "omnibase_infra"):
-        assert overrides[repo]["expected_json"] == '["self-hosted","omnibase-ci"]'
