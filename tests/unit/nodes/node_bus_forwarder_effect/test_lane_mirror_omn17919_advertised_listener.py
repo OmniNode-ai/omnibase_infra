@@ -213,11 +213,28 @@ def test_mirror_target_leg_is_not_the_source_lane() -> None:
         "advertised endpoints; the mirror would republish stability's records "
         "onto stability"
     )
-    # The dev target keeps its unique container name: the forwarder is joined to
-    # the dev network, so `omnibase-infra-redpanda` bootstraps unambiguously.
-    # Its re-resolution of dev's advertised bare `redpanda` lands on dev because
-    # dev is the network Docker answers that alias from -- correct today, and
-    # recorded as a residual on OMN-17919 rather than left implicit.
+    # The dev target keeps its unique container name. THE RESIDUAL THIS COMMENT
+    # RECORDED HAS SINCE FIRED (OMN-17201, 2026-09-06T20:44:38Z): the dev broker
+    # container was recreated, and while it was gone the only container
+    # answering the `redpanda` alias was the STABILITY broker, so the dev
+    # producer's reconnect re-resolved onto the source lane and stayed there for
+    # three hours -- acknowledging every record against the broker it was
+    # reading from.
+    #
+    # This assertion is deliberately NOT changed to an external-listener
+    # endpoint the way the source leg's was, because the fix is not available
+    # here: the dev lane renders its external advertised host from
+    # `DEV_REDPANDA_ADVERTISE_HOST` at deploy time (asserted directly by
+    # `test_both_lane_brokers_advertise_the_same_bare_internal_name` above), so
+    # this repo cannot know the literal to pin. An ADDRESS-level fix cannot
+    # close an ADVERTISED-address defect on a lane whose advertised address is
+    # a deploy-time interpolation.
+    #
+    # What closes it is a RUNTIME check that needs no address at all: the mirror
+    # remembers the destination coordinate each publish returns, and a source
+    # record arriving at a coordinate this process WROTE to a destination is
+    # proof the destination broker is the source broker. See
+    # `test_lane_mirror_omn17201_destination_verification.py`.
     assert dev_target.startswith("omnibase-infra-redpanda:")
 
 
