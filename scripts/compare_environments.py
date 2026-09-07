@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -919,7 +920,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--checks", default=",".join(DEFAULT_CHECKS))
     p.add_argument("--all-checks", action="store_true")
     p.add_argument("--namespace", default="onex-dev")
-    p.add_argument("--instance-id", default="i-0e596e8b557e27785")
+    # OMN-18024: required, no default. This repository is public, so the k3s
+    # node's instance id is not written here -- a literal default is exactly
+    # what published it. Callers pass --instance-id or set SSM_INSTANCE_ID;
+    # argparse fails fast when neither is present.
+    p.add_argument(
+        "--instance-id",
+        default=os.environ.get("SSM_INSTANCE_ID"),
+        required="SSM_INSTANCE_ID" not in os.environ,
+        help=(
+            "EC2 instance id of the k3s node to probe over SSM. Defaults to "
+            "$SSM_INSTANCE_ID; no value is published in this public repo."
+        ),
+    )
     p.add_argument("--region", default="us-east-1")
     p.add_argument("--json", dest="json_output", action="store_true")
     p.add_argument("--dry-run", action="store_true")

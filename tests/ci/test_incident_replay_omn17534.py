@@ -43,10 +43,23 @@ WHAT WAS MODIFIED, because R1 is about honesty and not about ceremony:
   is not committed because this repository is PUBLIC and the remainder carries a
   live RDS endpoint, MSK broker DNS and 32 occurrences of an EC2 instance id --
   a disclosure the repo's own guards exist to prevent.
-* FOUR LENGTH-PRESERVING REDACTIONS inside the excerpt: one EC2 instance id and
-  three UUIDs. Every byte offset up to that point is therefore unchanged, and
+* FOUR LENGTH-PRESERVING REDACTIONS inside the excerpt at capture time: one EC2
+  instance id and three UUIDs. Every byte offset is therefore unchanged, and
   none of them appears in any line this test reads. Same precedent and same
   reasoning as the omn17320 case in this registry.
+* TWENTY-TWO FURTHER LENGTH-PRESERVING REDACTIONS added by OMN-18024: every
+  occurrence of the AWS account id inside the ECR image references this log
+  echoes (``ECR_REGISTRY``, ``Image:``, ``Image ID:`` and the kubelet pull
+  lines). The 12-digit id became the 12-byte marker ``redacted-acc``, so the
+  file is still 83,228 bytes and every offset is still unchanged. The capture
+  is dated 2026-09-02, the redaction 2026-09-07; the pre-redaction file was
+  sha256 199d6cbc891c15838e37f2482868bd6c87d011a688a795116759f73c4b8dd9ea, which
+  is what a re-fetch of the same excerpt reproduces. This was forced, not
+  cosmetic: OMN-18024 mints a digest denylist entry for that account id, and an
+  entry cannot be minted while any occurrence of the literal survives in the
+  tree. The registry name, the repository path, the digest tag, the deployment
+  names and the auto-wiring traceback are untouched, so every assertion in this
+  module reads the same bytes it read before.
 * ANSI SGR SEQUENCES STRIPPED. 42 of them -- 21 ``ESC[36;1m`` and 21 ``ESC[0m``,
   GitHub's own colouring of the echoed step script. Post-redaction the file was
   sha256 4dd041f6654137e47a6d65b3775b05ee57536a765fb4a89e6c2748654ddf881c and
@@ -85,7 +98,7 @@ FIXTURE = (
     / "omn17534"
     / "deploy-onex-staging-33609666720.rollout-diagnostics.log.captured"
 )
-FIXTURE_SHA256 = "199d6cbc891c15838e37f2482868bd6c87d011a688a795116759f73c4b8dd9ea"
+FIXTURE_SHA256 = "5a12699412e568b56b472bbe723574f124d8821235a6343a445d672456c6c6fa"
 
 _FAILED_RE = re.compile(r'deployment "([a-z0-9-]+)" exceeded its progress deadline')
 _WAITED_RE = re.compile(r"Checking rollout state for: ([a-z0-9-]+)")

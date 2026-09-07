@@ -423,8 +423,19 @@ PINNED_SCANNER_SHA256 = (
     "3bcae6e1d4c884ec9cc21d76ad75ef2a394ae5376b0f3fa8263f3ba607ce6826"
 )
 PINNED_DENYLIST_SHA256 = (
-    "0ca020357e5745885bd120c9e96ba95e069c34ea7fb1eb745b7f9895f635e8b6"
+    "7a8b65958ddbff276de9ac1089ad15f823f8391633f98d51d1f1e4bfdcb98d4a"
 )
+
+# OMN-18024 moved this pin, and DELIBERATELY moved it in this repo only. The six
+# entries added here denylist cloud identifiers that omnimarket still carries in
+# its own tree (its leaked-literals header enumerates the account id in
+# plaintext, and its test fixtures hold both k3s instance ids), so copying them
+# across today would red every omnimarket PR rather than protect anything. The
+# pair is therefore drifted on purpose: omnimarket's copy of this test pins its
+# own unchanged file and stays green, and its denylist takes these entries once
+# its own occurrences are scrubbed. Recorded here rather than left for a reader
+# to discover, because a silent drift is the failure mode the parity pin exists
+# to make visible.
 
 
 def test_cross_repo_fingerprint_pin() -> None:

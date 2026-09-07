@@ -73,7 +73,7 @@ LANE_INSPECT = FIXTURES / "docker-inspect-omninode-runtime.docker.json.captured"
 # edit to a captured artifact fails the replay rather than quietly changing what
 # the incident was.
 SHA256 = {
-    STALE_COMPARE: "b641c243a79490d4766b21b5fcf4404dff40d950404ca982d3dccfaf5210d82d",
+    STALE_COMPARE: "57fc91f6f0256cea60118147952fb38389bc701ca7e44e5005cc8aa4f57a9f51",
     FRESH_COMPARE: "787b08cec82ceb68fcd2a9c1e9fd4448771aeb1bfff65f9433123bfea77e9edb",
 }
 
