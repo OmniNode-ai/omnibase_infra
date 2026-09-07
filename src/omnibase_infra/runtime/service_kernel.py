@@ -1301,8 +1301,10 @@ async def bootstrap() -> int:
         )
 
         # 1c. Load runtime profile to determine subsystem policies (OMN-10587).
-        # Reads RUNTIME_PROFILE env var; unknown values fall back to "default"
-        # (prefetch_policy="disabled") with a structured warning.
+        # Reads RUNTIME_PROFILE env var. Unset or blank resolves to "default";
+        # an UNREGISTERED name is REFUSED (OMN-17985) -- it used to fall back to
+        # "default" with a warning, which discarded the role identity while the
+        # process went on to wire zero contracts and pass readiness.
         # Named kernel_profile to avoid collision with the auto-wiring
         # runtime_profile string variable used later in the bootstrap loop.
         kernel_profile = load_runtime_profile()
