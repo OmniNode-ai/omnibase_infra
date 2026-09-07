@@ -31,6 +31,9 @@ FORK_PR_PREDICATE = (
     "github.event.pull_request.head.repo.full_name!=github.repository"
 )
 DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
+# OMN-18031: the per-run routing consumer shape. A job whose runs-on resolves
+# from a route job's output rather than from the seam expression directly.
+ROUTE_CONSUMER_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.labels")
 
 
 @dataclass(frozen=True)
@@ -219,6 +222,135 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
     return findings
 
 
+def audit_route_wiring(policy: dict[str, Any], repo_root: Path) -> list[Finding]:
+    """Audit the OMN-18031 per-run routing consumer shape.
+
+    ADDITIVE ON PURPOSE. This is a new pass inside ``--local-workflows``; it
+    changes nothing about the two existing passes. That placement is deliberate
+    and was checked against the live workflow rather than assumed: the
+    OMN-16727 masking everyone cites is at the WORKFLOW-STEP level --
+    ``.github/workflows/runner-routing-audit.yml`` runs ``--local-workflows``
+    and ``--github-vars`` as two separate ``run:`` steps, so a failure in the
+    first means the second never executes. ``main()`` itself already extends
+    one findings list and prints them all, so adding a pass HERE inherits no
+    masking. Do not "fix" ``main()`` on the strength of that ticket's title.
+
+    What it enforces, and why each rule is mechanical rather than a review
+    convention:
+
+    1. A route consumer must NOT also reference ``OMNI_PUBLIC_PR_RUNS_ON_JSON``.
+       Fork isolation lives INSIDE ``runner_route_decision.py`` (step S1),
+       deliberately once, rather than being restated at each of the 46
+       selector-carrying call sites in this repo where one of them can be
+       edited wrong and nothing notices. A call site that re-implements the
+       fork branch is re-opening exactly that hole.
+    2. A route consumer must actually declare ``needs:`` on the job it reads.
+       Without it the expression resolves to nothing, the job fails to
+       SCHEDULE, and that does not look like a test failure.
+    3. A workflow that consumes a route output must contain a job that
+       produces one -- otherwise the consumer is reading a job that was
+       deleted or renamed, which is the silent-retirement shape again.
+    """
+    allowlist = {
+        str(item["path"])
+        for item in policy.get("hosted_runner_allowlist", [])
+        if isinstance(item, dict) and "path" in item
+    }
+    findings: list[Finding] = []
+    for path in _workflow_paths(repo_root):
+        rel = path.relative_to(repo_root).as_posix()
+        try:
+            workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            findings.append(Finding(rel, f"workflow is not parseable YAML: {exc}"))
+            continue
+        jobs = workflow.get("jobs", {}) if isinstance(workflow, dict) else {}
+        if not isinstance(jobs, dict):
+            continue
+
+        producers = {
+            name
+            for name, job in jobs.items()
+            if isinstance(job, dict)
+            and (
+                "runner-route-reusable" in str(job.get("uses", ""))
+                or "labels" in (job.get("outputs") or {})
+            )
+        }
+
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            runs_on = job.get("runs-on")
+            if not isinstance(runs_on, str):
+                continue
+            match = ROUTE_CONSUMER_RE.search(_normalized_expression(runs_on))
+            if match is None:
+                continue
+            producer = match.group(1)
+            scope = f"{rel}:{job_name}"
+
+            if PUBLIC_PR_RUNNER_VARIABLE in _normalized_expression(runs_on):
+                findings.append(
+                    Finding(
+                        scope,
+                        "a per-run route consumer must not also reference "
+                        f"{PUBLIC_PR_RUNNER_VARIABLE}; fork isolation is enforced inside "
+                        "scripts/ci/runner_route_decision.py (step S1), not restated at "
+                        "call sites where it can be edited wrong",
+                    )
+                )
+
+            needs = job.get("needs")
+            declared = (
+                [needs]
+                if isinstance(needs, str)
+                else list(needs)
+                if isinstance(needs, list)
+                else []
+            )
+            if producer not in declared:
+                findings.append(
+                    Finding(
+                        scope,
+                        f"runs-on reads needs.{producer}.outputs.labels but the job does not "
+                        f"declare needs: {producer} -- the expression would resolve to nothing "
+                        "and the job would fail to schedule, which does not surface as a failure",
+                    )
+                )
+
+            if producer not in jobs:
+                findings.append(
+                    Finding(
+                        scope,
+                        f"runs-on reads needs.{producer}.outputs.labels but no job named "
+                        f"{producer!r} exists in this workflow",
+                    )
+                )
+            elif producers and producer not in producers:
+                findings.append(
+                    Finding(
+                        scope,
+                        f"job {producer!r} is consumed as a route producer but declares no "
+                        "'labels' output and does not call the route reusable workflow",
+                    )
+                )
+
+        # A workflow carrying the routing decision must be pinned hosted: a
+        # router that queues behind the fleet it routes onto cannot report on
+        # saturation.
+        if producers and "runner-route" in rel and rel not in allowlist:
+            findings.append(
+                Finding(
+                    rel,
+                    "a workflow that produces a routing decision must be listed in "
+                    "hosted_runner_allowlist with a reason -- it must not share fate with "
+                    "the fleet it routes onto",
+                )
+            )
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
@@ -235,6 +367,10 @@ def main() -> int:
     findings: list[Finding] = []
     if args.local_workflows:
         findings.extend(audit_local_workflows(policy, args.repo_root))
+        # OMN-18031, additive: the per-run routing consumer shape. Extends the
+        # same findings list, so its results print alongside the existing pass
+        # rather than replacing or short-circuiting it.
+        findings.extend(audit_route_wiring(policy, args.repo_root))
     if args.github_vars:
         findings.extend(audit_github_variables(policy))
 

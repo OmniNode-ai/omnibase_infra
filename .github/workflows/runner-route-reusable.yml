@@ -1,0 +1,150 @@
+# runner-route-reusable.yml — per-run runner routing decision (OMN-18031)
+#
+# Called as a `uses:` job at the top of a consuming workflow. It probes live
+# org-runner capacity plus the most recent lab-load record and emits a
+# `runs-on` label set that the heavy jobs consume:
+#
+#   jobs:
+#     route:
+#       uses: ./.github/workflows/runner-route-reusable.yml
+#       secrets: inherit
+#     lint:
+#       needs: route
+#       runs-on: ${{ fromJSON(needs.route.outputs.labels) }}
+#
+# HARD REQUIREMENT: this job runs on GitHub-hosted compute, NEVER self-hosted.
+# A router that queues behind the fleet it is routing away from cannot report on
+# saturation -- the same isolation rationale runner-fleet-canary.yml carries.
+# It is allowlisted in config/runner_routing_policy.yaml for exactly that reason.
+#
+# THE SEAM IS A CEILING, READ AND NEVER WRITTEN (CLAUDE.md rule 14). Routing can
+# only ever DOWNGRADE from what OMNI_TRUSTED_CI_RUNS_ON_JSON already allows.
+# With that variable at its current live value of '["ubuntu-latest"]' this job
+# decides `seam_ceiling_hosted` on every run and placement is byte-identical to
+# today -- the mechanism is deliberately inert until a separate single-owner
+# claim flips the seam (OMN-16682).
+#
+# FAIL-CLOSED: any probe error, missing token, malformed payload or internal
+# fault yields GitHub-hosted. The step cannot fail the calling run.
+#
+# WHERE THIS LIVES. During the omnibase_infra pilot the decision module and this
+# workflow are co-located here, beside the policy file, the routing audit and
+# the CI Summary umbrella that already live in this repo. At fan-out both MOVE
+# to omniclaude alongside the other cross-repo reusable gates
+# (deploy-gate-reusable.yml) and this copy is DELETED -- no re-export, no shim.
+name: runner-route-reusable
+
+on:
+  workflow_call:
+    inputs:
+      workflow_path:
+        description: "Path of the CALLING workflow, checked against the hosted allowlist."
+        required: true
+        type: string
+      dry_run:
+        description: "Compute and report the decision but gate nothing; always succeeds."
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      labels:
+        description: "runs-on label set, as a JSON array for fromJSON()."
+        value: ${{ jobs.route.outputs.labels }}
+      decision:
+        description: "hosted | self_hosted"
+        value: ${{ jobs.route.outputs.decision }}
+      reason:
+        description: "Why. e.g. seam_ceiling_hosted, capacity_available, fleet_saturated."
+        value: ${{ jobs.route.outputs.reason }}
+    secrets:
+      RUNNER_FLEET_STATUS_TOKEN:
+        required: false
+      CROSS_REPO_PAT:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  route:
+    name: route
+    # MUST NOT share fate with the fleet it routes onto. Allowlisted in
+    # config/runner_routing_policy.yaml (OMN-18031). Do not change runs-on.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      labels: ${{ steps.decide.outputs.labels }}
+      decision: ${{ steps.decide.outputs.decision }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      - name: Checkout (decision module + policy)
+        uses: actions/checkout@v4
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Download the most recent lab-load record
+        id: lab
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # Best-effort: the record is published by the saturation monitor's
+          # self-hosted lab-load probe. Its ABSENCE is not an error here -- the
+          # decision module treats a missing or stale record as `lab_unknown`
+          # and routes hosted, which is the fail-closed answer.
+          run_id="$(gh run list --workflow dev-lane-liveness.yml \
+            --repo "${GITHUB_REPOSITORY}" --status completed --limit 1 \
+            --json databaseId --jq '.[0].databaseId' || true)"
+          if [ -n "${run_id:-}" ]; then
+            gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" \
+              --name lab-load --dir ./.route-lab || true
+          fi
+          if [ -f ./.route-lab/lab-load.json ]; then
+            echo "path=./.route-lab/lab-load.json" >> "${GITHUB_OUTPUT}"
+          else
+            echo "path=" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Decide runs-on
+        id: decide
+        env:
+          # Preferred: dedicated secret with org self-hosted-runner read scope.
+          # Fallback: CROSS_REPO_PAT. Absent BOTH is not a crash -- the probe
+          # returns `missing_token` and the decision is hosted.
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          RUNNER_ROUTE_ARTIFACT: runner-route-decision.json
+        run: |
+          set -uo pipefail
+          python3 scripts/ci/runner_route_decision.py \
+            --event-name "${{ github.event_name }}" \
+            --head-repo "${{ github.event.pull_request.head.repo.full_name }}" \
+            --repository "${{ github.repository }}" \
+            --workflow-path "${{ inputs.workflow_path }}" \
+            --seam-json "${{ vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}" \
+            --public-json "${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}" \
+            --policy config/runner_routing_policy.yaml \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            ${{ steps.lab.outputs.path && format('--lab-record {0}', steps.lab.outputs.path) || '' }} \
+            || rc=$?
+          # FAIL-CLOSED FLOOR. The module already catches everything internally,
+          # but if the interpreter itself could not run, the calling workflow
+          # must still receive a usable runs-on rather than an empty string that
+          # would make every consuming job fail to schedule.
+          if [ ! -s "${GITHUB_OUTPUT}" ] || ! grep -q '^labels=' "${GITHUB_OUTPUT}"; then
+            echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
+            echo 'decision=hosted' >> "${GITHUB_OUTPUT}"
+            echo 'reason=probe_error:module_unavailable' >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Upload the decision record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-route-decision-${{ github.run_id }}-${{ github.job }}
+          path: runner-route-decision.json
+          if-no-files-found: ignore
+          retention-days: 7

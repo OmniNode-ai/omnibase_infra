@@ -159,6 +159,39 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn18031-route-pinned-ci-yml-hosted-off-the-wrong-allowlist
+    guard: scripts/ci/runner_route_decision.py
+    incident: OMN-18031
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18031/runner_routing_policy.dev.yaml.captured
+      sha256: 015a35744de18e86d7abd5cdc3eef5acc530e562509d38e030b8b1ec23ffcbd7
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@f6f4fee1e24609d93236e9d6459a27ed37e955c6:config/runner_routing_policy.yaml
+      captured_at: '2026-09-07T11:05:00Z'
+      captured_by: lane replay (OMN-18031)
+    test: tests/ci/test_incident_replay_omn18031.py::test_the_real_guard_pins_ci_yml_hosted_when_fed_the_audit_allowlist
+    why: >-
+      This guard is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the guard answering "hosted, policy_allowlist" for the one workflow it most needs to route -- and answering it on a fully idle fleet, with every unit test green. The artifact is config/runner_routing_policy.yaml exactly as committed on dev at f6f4fee1, and the defect is a conflation of two lists that look interchangeable and are not. hosted_runner_allowlist means "this FILE contains a job that is deliberately bare runs-on: ubuntu-latest"; .github/workflows/ci.yml is on it for ONE lightweight CI Summary aggregator job, which is the whole reason that entry exists (OMN-14127). The first build of the decision module read the workflow path against that list, so all 54 jobs of ci.yml -- the largest consumer in the repo -- would have been pinned to GitHub-hosted compute permanently and the entire mechanism would have been a silent no-op on it. NOT A RECONSTRUCTION: this was observed, not reasoned about. A dry run of the real module against the live org runners API on 2026-09-07T10:48:57Z returned reason "policy_allowlist" for ci.yml, and that reading is what caused the two lists to be separated into hosted_runner_allowlist (audit scope) and route.hosted_workflows (routing scope). The replay drives the real decide() over the captured file's own allowlist and requires the wrong verdict to reproduce; the accept control in the same module (test_the_shipped_configuration_does_not_pin_ci_yml_hosted) drives the same function over the shipped route.hosted_workflows and requires capacity_available, so a module that simply routes everything hosted -- which is exactly what the inert seam makes it look like from the outside -- cannot satisfy this case.
+  - id: omn18031-saturation-alerter-would-fire-on-the-inert-seam-state
+    guard: scripts/ci/runner_saturation_record.py
+    incident: OMN-16030
+    regression_class: false_red
+    guard_verdict_on_artifact: accept
+    discriminator: tests/ci/test_incident_replay_omn18031.py::test_the_same_monitor_does_fire_on_a_genuine_sustained_fallback
+    artifact:
+      fixture: tests/fixtures/omn18031/org-runners-omnibase-ci.json.captured
+      sha256: 9805b0a087535b29dcfd925a9fe3379d95cd98b99d1a93eaf44367be1eea37c7
+    capture:
+      method: gh-api
+      source: gh-api:orgs/OmniNode-ai/actions/runners/12
+      captured_at: '2026-09-07T11:00:00Z'
+      captured_by: lane replay (OMN-18031)
+    test: tests/ci/test_incident_replay_omn18031.py::test_the_real_monitor_stays_silent_on_the_inert_seam_state
+    why: >-
+      A false_red case, because the hazard this monitor inherits is an alerter that is RIGHT about its numbers and WRONG about what they mean. OMN-16030 is the incident, on the very workflow this monitor rides: the fleet canary failed on the org REST status field until measurement on 2026-08-14 showed offline-labelled runners serving ~80% of nominal throughput -- so it was persistently red on a signal that was not liveness, which trains operators to ignore it and halted two landing sweeps on a false alarm. The saturation monitor reaches the identical failure from the other direction. While OMNI_TRUSTED_CI_RUNS_ON_JSON reads ["ubuntu-latest"] -- its live value, the deliberate OMN-16682 re-flip -- every run decides seam_ceiling_hosted, so an alerter that counted a hosted decision as a saturation fallback would fire on EVERY sample from the day it landed and be muted long before the seam ever flips. That is why condition 3 counts an ALLOWLIST, SATURATION_FALLBACK_REASONS = {fleet_saturated, fleet_degraded, lab_saturated}, and not a denylist of the inert reasons. The denylist form shipped first and was measured wrong on 2026-09-07T12:22Z: against a fully healthy fleet (88 online, 4 busy) and a healthy lab host (0.669x load, 66013 MiB free) it raised route_fallback_sustained on lab_unknown -- the reason that holds on EVERY run until the monitor has produced its first lab record, i.e. from the day it lands. A denylist fails open, so every reason nobody thought of silently becomes a saturation alert; an allowlist fails closed. The artifact is the live omnibase-ci runner registry at capture time (88 registered, 88 online, 9 busy), and the replay builds a twelve-sample window from those real counts and requires silence. R2 NOTE, recorded rather than glossed: the locator pins one runner of the group because the collection endpoint GET /orgs/OmniNode-ai/actions/runners takes no per-resource id and the grammar refuses a bare collection path -- a re-fetch of the whole group is `gh api "/orgs/OmniNode-ai/actions/runners?per_page=100" --paginate`, and the fixture is that response filtered to the omnibase-ci label and reduced to name/status/busy, which are the only three fields the replay reads. The discriminator is mandatory here and is not a formality: an accept-only proof cannot distinguish a correct monitor from one stuck silent, so the same function is driven over the SAME captured fleet bytes with only the route reason changed to fleet_saturated, and is required to fire.
   - id: omn17534-candidate-announced-with-nothing-booting-it
     guard: scripts/ci/boot_gate.py
     incident: OMN-17519
