@@ -577,6 +577,64 @@ prepush_probe_uv() {
   prepush_uv_version_ok "$2" "$3" "$4"
 }
 
+# =============================================================================
+# Container-runtime capability probe (OMN-18012)
+# =============================================================================
+# A REQUIREMENT, not a ranking input, and it is off unless a caller turns it on.
+# `PREPUSH_REQUIRE_DOCKER` is set only by
+# prepush_smart_tests.sh::place_integration_selection_offbox, around the
+# placement of a service-dependent integration selection; every other placement
+# in this file probes exactly the rows it probed before.
+#
+# WHY it has to exist. The picker admits a row on load, memory, an exclusive
+# slot and a uv floor -- none of which says anything about whether a container
+# runtime is reachable there. `hcloud`'s own committed note says "NO docker",
+# and the lab Macs do not expose a daemon to a non-interactive ssh. Placing a
+# suite that starts a Redpanda container on such a row produces a red that is
+# a statement about the HOST, not about the tree, and a guaranteed false red
+# hard-blocks a push -- the identical failure class OMN-17549 closed for PATH
+# (six false reds from a missing ~/.local/bin on .201).
+#
+# Deliberately a LIVE probe rather than a new host-table column: a declared
+# capability goes stale silently the first time a daemon stops, and the picker
+# would then keep sending integration work to a row that cannot take it. The
+# override map exists for the same reason the load/uv/mem maps do -- so the
+# tests can drive every branch without a network.
+#
+# Fail-CLOSED: an empty or unreadable answer is NOT fit. `docker info` is used
+# rather than `docker --version` on purpose -- a client binary with no
+# reachable daemon answers the version and fails the run.
+PREPUSH_REQUIRE_DOCKER=0
+_PREPUSH_DOCKER_PROBE_SH='docker info --format "{{.ServerVersion}}" 2>/dev/null | head -1'
+
+# prepush_probe_docker LABEL TARGET -- 0 a docker daemon answered / 1 it did not.
+prepush_probe_docker() {
+  local out tcmd
+  PREPUSH_DOCKER_VERSION_SEEN=""
+  if [ -n "${PREPUSH_DOCKER_OVERRIDE_MAP:-}" ]; then
+    out="$(prepush_map_lookup "$PREPUSH_DOCKER_OVERRIDE_MAP" "$1")"
+  elif [ -z "$2" ]; then
+    out="$(eval "$_PREPUSH_DOCKER_PROBE_SH" 2> /dev/null || true)"
+  else
+    tcmd="$(_prepush_timeout_cmd)"
+    if [ -n "$tcmd" ]; then
+      out="$("$tcmd" 30 ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$2" "$_PREPUSH_DOCKER_PROBE_SH" 2> /dev/null || true)"
+    else
+      out="$(ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$2" "$_PREPUSH_DOCKER_PROBE_SH" 2> /dev/null || true)"
+    fi
+  fi
+  out="$(printf '%s' "$out" | tr -d '[:space:]')"
+  # Recorded BEFORE the verdict, so the refusal can name what it actually read
+  # rather than only that it said no (OMN-17271 item 4: evidence-carrying
+  # routing). An empty read stays empty and the caller prints `unreadable`.
+  PREPUSH_DOCKER_VERSION_SEEN="$out"
+  [ -n "$out" ] || return 1
+  case "$out" in none | unreachable) return 1 ;; esac
+  return 0
+}
+
 # -----------------------------------------------------------------------------
 # Placement
 # -----------------------------------------------------------------------------
@@ -793,6 +851,17 @@ pick_capacity_host() {
         PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=uv-unfit(${PREPUSH_UV_VERSION_SEEN:-unreadable}<${floor}) "
         k=$((k + 1))
         continue
+      fi
+
+      # OMN-18012: last, and only when the caller asked for it -- it is the
+      # most expensive probe in the ladder and the rarest requirement, so a row
+      # already refused on slot/load/memory/uv is never charged for it.
+      if [ "${PREPUSH_REQUIRE_DOCKER:-0}" = "1" ]; then
+        if ! prepush_probe_docker "$slot_label" "$ssh_t"; then
+          PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=no-docker(${PREPUSH_DOCKER_VERSION_SEEN:-unreadable}) "
+          k=$((k + 1))
+          continue
+        fi
       fi
 
       # The fit record carries the MEASUREMENT, not just the verdict, so the
@@ -1462,6 +1531,18 @@ prepush_remote_pytest_flags() {
 # site runs ${PATHS[@]}. Shipping only tests/unit/ would silently drop
 # tests/integration/chains/, a required Event Chain Gate surface, with no test
 # firing.
+#
+# OMN-18012 adds a THIRD component, appended to BOTH branches:
+# ${OFFBOX_INTEGRATION_PATHS[@]}, the selected integration paths that may not
+# run on the launching host. Appending them here is what makes "placed
+# off-box" mean something -- until this change those paths were dropped from
+# the local argv and never added to the remote one, so the remote leg
+# faithfully reproduced the local blind spot. Because they are appended to
+# BOTH branches, a single dispatch always ships a SUPERSET of whatever the
+# local call site would have executed, which is how the caller is entitled to
+# treat the run as covered instead of dispatching twice. It also keeps
+# OMN-16825's invariant intact in its stronger form: an escalation is never a
+# coverage DOWNGRADE, and now neither is a placement.
 prepush_remote_argv() {
   if [ "${IS_FULL:-}" = "True" ] || [ "${IS_FULL:-}" = "true" ]; then
     printf '%s\n' "$FULL_SUITE_TARGET"
@@ -1473,6 +1554,18 @@ prepush_remote_argv() {
       printf '%s\n' "${PATHS[@]}"
     fi
   fi
+  # `${A[@]+"${A[@]}"}` and not a length test: this function is VENDORED into
+  # omnibase_core and omnimarket, and those copies advance in separate PRs. A
+  # bare `${#OFFBOX_INTEGRATION_PATHS[@]}` is an unbound-variable abort under
+  # `set -u` in any consumer whose prepush_smart_tests.sh has not yet been
+  # re-vendored -- i.e. this file would brick every heavy push in two repos for
+  # the length of a review. An absent array here is the ONLY case this tolerates,
+  # and it is not a silent coverage loss: a repo with no array also has no
+  # partition emitting one, and the repo that DOES have one refuses the push
+  # from its own backstop if the placement was skipped.
+  for _prepush_offbox_path in ${OFFBOX_INTEGRATION_PATHS[@]+"${OFFBOX_INTEGRATION_PATHS[@]}"}; do
+    printf '%s\n' "$_prepush_offbox_path"
+  done
 }
 
 # -----------------------------------------------------------------------------

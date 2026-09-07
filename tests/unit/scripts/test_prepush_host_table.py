@@ -718,10 +718,21 @@ def _hook_func(name: str) -> str:
 
 
 def _impacted_selection_branch() -> str:
-    """The shipped impacted-selection branch, without the surrounding script exit."""
+    """The shipped impacted-selection branch, without the surrounding script exit.
+
+    OMN-18012 wrapped the two whole-suite guard calls in an outer
+    ``if [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]`` (an off-box integration
+    placement has already dispatched a superset, so re-entering the guard would
+    dispatch twice). The slice anchors on that outer ``if`` rather than on the
+    inner one: anchoring on the inner line still MATCHED as a substring and
+    silently produced a fragment with an unbalanced ``fi``, which surfaces as a
+    bash syntax error in the driver rather than as a readable assertion.
+    """
     text = HOOK.read_text(encoding="utf-8")
-    start = text.index('  if selection_is_whole_suite "$FULL_SUITE_TARGET"')
-    end = text.index('\nelse\n  log "no impacted unit tests', start)
+    start = text.index(
+        '  if [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]; then\n    if selection_is_whole_suite'
+    )
+    end = text.index('\nelif [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then', start)
     return text[start:end] + "\n"
 
 
@@ -753,6 +764,8 @@ def _pick(
     slot: str,
     uv: str,
     mem: str = "",
+    docker: str = "",
+    require_docker: bool = False,
     repo_name: str = "omnibase_core",
 ) -> str:
     body = (
@@ -760,6 +773,8 @@ def _pick(
         f'export PREPUSH_SLOT_OVERRIDE_MAP="{slot}"\n'
         f'export PREPUSH_MEM_OVERRIDE_MAP="{mem}"\n'
         f'export PREPUSH_UV_OVERRIDE_MAP="{uv}"\n'
+        f'export PREPUSH_DOCKER_OVERRIDE_MAP="{docker}"\n'
+        f"PREPUSH_REQUIRE_DOCKER={int(require_docker)}\n"
         f"if pick_capacity_host stickybeatz-studio {repo_name}; then\n"
         '  echo "PICK=$PREPUSH_PICK_LABEL"\n'
         "else\n"
@@ -771,6 +786,93 @@ def _pick(
 
 
 _GOOD_UV = "h200=0.11.32,h201=0.11.5,h101=0.8.3,h105=0.11.8"
+
+
+# =============================================================================
+# OMN-18012 -- the container-runtime requirement
+# =============================================================================
+# A REQUIREMENT the caller opts into, not a new ranking input. It exists so a
+# service-dependent integration selection is never placed on a row with no
+# docker daemon: that red is a statement about the HOST, not the tree, and a
+# guaranteed false red hard-blocks a push (the class OMN-17549 closed for PATH).
+
+
+def test_the_docker_requirement_is_off_unless_a_caller_turns_it_on(
+    table_repo: Path,
+) -> None:
+    """Every pre-OMN-18012 placement probes exactly the rows it probed before.
+
+    The negative control for the two tests below: with no docker anywhere and
+    the requirement off, the picker's answer is unchanged.
+    """
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        docker="",
+    )
+    assert "PICK=h105" in out, out
+    assert "no-docker" not in out, out
+
+
+def test_a_row_without_a_reachable_docker_daemon_is_refused_when_required(
+    table_repo: Path,
+) -> None:
+    """The fittest row loses to the only row that can actually run the suite."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        docker="h201=24.0.7",
+        require_docker=True,
+    )
+    assert "PICK=h201" in out, out
+    assert "h105=no-docker(unreadable)" in out, out
+
+
+def test_an_unreadable_docker_probe_is_not_fit(table_repo: Path) -> None:
+    """Fail-CLOSED. Unreadable is never "assume ample" -- the same posture the
+    load, memory, slot and uv probes already carry."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        docker="h201=unreachable,h105=",
+        require_docker=True,
+    )
+    assert "PICK=none" in out, out
+    assert "h201=no-docker(unreachable)" in out, out
+
+
+def test_the_docker_probe_asks_for_a_daemon_not_a_client_binary() -> None:
+    """``docker info`` and not ``docker --version``: a client binary with no
+    reachable daemon answers the version and then fails the run."""
+    lib = LIB.read_text(encoding="utf-8")
+    assert "_PREPUSH_DOCKER_PROBE_SH='docker info" in lib, (
+        "the container-runtime probe must interrogate the DAEMON"
+    )
+    # Comment lines are stripped: the rationale ABOVE the probe names the
+    # rejected form on purpose, and asserting against the raw file would make
+    # the explanation of the rule violate the rule.
+    code = "\n".join(
+        line for line in lib.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "docker --version" not in code
+
+
+def test_the_docker_requirement_is_the_last_probe_in_the_ladder() -> None:
+    """It is the most expensive probe and the rarest requirement, so a row
+    already refused on slot/load/memory/uv is never charged for it."""
+    lib = LIB.read_text(encoding="utf-8")
+    picker = lib[lib.index("pick_capacity_host() {") :]
+    picker = picker[: picker.index("\n}\n")]
+    assert picker.index("prepush_probe_slot") < picker.index("prepush_probe_ratio")
+    assert picker.index("prepush_probe_ratio") < picker.index("prepush_probe_mem_ok")
+    assert picker.index("prepush_probe_mem_ok") < picker.index("prepush_probe_uv")
+    assert picker.index("prepush_probe_uv") < picker.index("prepush_probe_docker")
 
 
 def test_picker_chooses_the_least_loaded_fit_host(table_repo: Path) -> None:

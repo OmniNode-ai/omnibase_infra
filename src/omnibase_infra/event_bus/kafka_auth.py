@@ -5,6 +5,17 @@
 Keep direct aiokafka admin/producer/consumer call sites aligned with
 ``EventBusKafka`` so managed MSK IAM cutover does not leave health checks,
 topic provisioning, or lag checks on plaintext-only client construction.
+
+This module is a declared TEST-SELECTION BOUNDARY (OMN-18012). Every unit test
+around it mocks the broker, so the one failure it cannot observe is the only
+one that matters here: a client that silently opens PLAINTEXT against an
+auth-required listener. ``scripts/ci/test_selection_adjacency.yaml``
+(``boundary_integration_tests``) therefore maps this file to
+``tests/integration/customer_path/``, which starts a real auth-required
+Redpanda -- so a change here selects that suite and the governed pre-push
+places it on a lab host instead of deferring it. The edge is invisible from
+this file otherwise, which is why it is named here: if this module moves or is
+split, move the mapping with it.
 """
 
 from __future__ import annotations

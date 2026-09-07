@@ -29,6 +29,26 @@ class ModelAdjacencyMap(BaseModel):
     test_infrastructure_paths: list[str]
     adjacency: dict[str, ModelAdjacencyEntry]
 
+    # OMN-18012 -- BOUNDARY source -> the integration suite that proves it.
+    #
+    # `adjacency` can only ever emit `tests/unit/<module>/`, so a change to a
+    # boundary module selected its MOCKS and nothing else. That is the second
+    # half of escape 6 of 2026-09-06 and it is independent of the pre-push
+    # hook: even with the hook's integration drop removed, an edit to
+    # `event_bus/kafka_auth.py` still selected no integration test, because the
+    # selector never emitted one. Measured on dev before this change:
+    # `--changed-files src/omnibase_infra/event_bus/kafka_auth.py` emitted
+    # seven `tests/unit/*` directories and zero integration paths, while the
+    # only suite in the repo that exercises that module against a real
+    # auth-required broker is tests/integration/customer_path/.
+    #
+    # Keys are exact source paths or path PREFIXES (a trailing "/" makes it a
+    # prefix); values are the integration directories that change implicates.
+    # Deliberately narrow and hand-curated: this is a fail-CLOSED gate whose
+    # cost is a lab slot, so entries are added per proven boundary, never by a
+    # wildcard over `src/`.
+    boundary_integration_tests: dict[str, list[str]] = Field(default_factory=dict)
+
     @model_validator(mode="after")
     def validate_shared_modules_in_adjacency(self) -> ModelAdjacencyMap:
         for shared in self.shared_modules:
@@ -39,6 +59,20 @@ class ModelAdjacencyMap(BaseModel):
                 if dep not in self.adjacency:
                     raise ValueError(
                         f"adjacency['{module}'].reverse_deps references unknown module '{dep}'"
+                    )
+        for source, targets in self.boundary_integration_tests.items():
+            if not targets:
+                raise ValueError(
+                    f"boundary_integration_tests['{source}'] selects nothing; "
+                    "an empty mapping is a silent no-op, not a narrowing"
+                )
+            for target in targets:
+                if not target.startswith("tests/integration/") or not target.endswith(
+                    "/"
+                ):
+                    raise ValueError(
+                        f"boundary_integration_tests['{source}'] -> '{target}' must be "
+                        "a directory under tests/integration/ (trailing slash required)"
                     )
         return self
 
