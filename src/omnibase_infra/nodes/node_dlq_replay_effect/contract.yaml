@@ -53,13 +53,51 @@ output_model:
 # Handler routing
 handler_routing:
   routing_strategy: "operation_match"
+  # OMN-18013: split into per-topic `topic:`-scoped entries. Before the split
+  # every entry here owned EVERY subscribe topic (operation_match with no topic
+  # scoping), so one entry spanned more than one real message category and the
+  # single category the wiring derived could not be true of all its topics.
+  # Routing is per-topic since OMN-18013; the contract now says so too.
   handlers:
     - operation: "replay_dlq"
+      topic: "onex.dlq.omnibase-infra.commands.v1"
       handler:
         name: "HandlerDlqReplay"
         module: "omnibase_infra.nodes.node_dlq_replay_effect.handlers.handler_dlq_replay"
       description: >
-        Replay eligible DLQ messages to their original topic; quarantine non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1.
+        Replay eligible DLQ messages from onex.dlq.omnibase-infra.commands.v1 to their original topic; quarantine non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1.
+
+      output_fields:
+        - dlq_topic
+        - total_processed
+        - completed
+        - quarantined
+        - failed
+        - pending
+        - dry_run
+    - operation: "replay_dlq"
+      topic: "onex.dlq.omnibase-infra.events.v1"
+      handler:
+        name: "HandlerDlqReplay"
+        module: "omnibase_infra.nodes.node_dlq_replay_effect.handlers.handler_dlq_replay"
+      description: >
+        Replay eligible DLQ messages from onex.dlq.omnibase-infra.events.v1 to their original topic; quarantine non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1.
+
+      output_fields:
+        - dlq_topic
+        - total_processed
+        - completed
+        - quarantined
+        - failed
+        - pending
+        - dry_run
+    - operation: "replay_dlq"
+      topic: "onex.dlq.omnibase-infra.intents.v1"
+      handler:
+        name: "HandlerDlqReplay"
+        module: "omnibase_infra.nodes.node_dlq_replay_effect.handlers.handler_dlq_replay"
+      description: >
+        Replay eligible DLQ messages from onex.dlq.omnibase-infra.intents.v1 to their original topic; quarantine non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1.
 
       output_fields:
         - dlq_topic

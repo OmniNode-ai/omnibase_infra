@@ -23,4 +23,3 @@ class EnumRsdTopic(str, Enum):
     EVT_SCORE_COMPLETE_V1 = "onex.evt.rsd.score-complete.v1"  # onex.evt.rsd.score-complete.v1
     EVT_SCORE_FAILED_V1 = "onex.evt.rsd.score-failed.v1"  # onex.evt.rsd.score-failed.v1
     EVT_SCORES_CALCULATED_V1 = "onex.evt.rsd.scores-calculated.v1"  # onex.evt.rsd.scores-calculated.v1
-    EVT_SCORES_STORED_V1 = "onex.evt.rsd.scores-stored.v1"  # onex.evt.rsd.scores-stored.v1

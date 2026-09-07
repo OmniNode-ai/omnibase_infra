@@ -6264,19 +6264,21 @@ def _make_event_bus_callback(
                         event_type=derived or topic,
                         source_tool="auto-wiring",
                     )
-                explicit_event_type = (
-                    data.get("event_type") if isinstance(data, dict) else None
-                )
-                if explicit_event_type:
+                # OMN-18013 (operator ruling item 2): the event type a handler
+                # matches on is read from the TOPIC — the publisher's contract
+                # declares the topic, and ``derive_event_type_alias_for_topic``
+                # is the single source for the alias on both sides of the wire
+                # (OMN-17296). The payload's own ``event_type`` field is an
+                # untyped, uncontracted string that no contract declares and no
+                # gate checks; honouring it let a publisher re-key a message to
+                # any dispatcher at will, and is the only path by which the 12
+                # alias-mismatch handler entries are reachable at all. It is no
+                # longer consulted.
+                derived_event_type = _derive_event_type_from_topic(topic)
+                if derived_event_type is not None:
                     envelope = envelope.model_copy(
-                        update={"event_type": explicit_event_type}
+                        update={"event_type": derived_event_type}
                     )
-                else:
-                    derived_event_type = _derive_event_type_from_topic(topic)
-                    if derived_event_type is not None:
-                        envelope = envelope.model_copy(
-                            update={"event_type": derived_event_type}
-                        )
                 if tenant_scoped:
                     envelope = _stamp_tenant_id_from_topic_prefix(topic, envelope)
             else:
@@ -7074,24 +7076,80 @@ def _derive_topic_pattern_from_topic(topic: str) -> str:
     return topic
 
 
-def _derive_message_category(topic: str) -> str:
-    """Derive message category string from ONEX topic naming convention.
+def _derive_message_category(topic: str) -> str | None:
+    """Derive a message category from THIS topic's own name, or ``None`` (OMN-18013).
 
-    Convention: ``onex.<kind>.<producer>.<event-name>.v<n>``
-    where ``<kind>`` is one of: evt, cmd, intent.
+    Delegates to :meth:`EnumMessageCategory.from_topic` — the SAME derivation
+    ``MessageDispatchEngine._dispatch`` applies to the topic a message actually
+    arrived on. Registration and dispatch therefore cannot disagree: previously
+    this function carried its own segment parser plus an unconditional
+    ``return "event"`` fallback, so 32 live topics whose kind segment is neither
+    ``evt``/``cmd``/``intent`` (``onex.dlq.*``, ``onex.snapshot.*``) were
+    REGISTERED as ``event`` while ``from_topic`` returned ``None`` at dispatch
+    and the message was rejected as "invalid topic category". A silent default
+    is exactly the shape CLAUDE.md rule 8 forbids.
 
-    Returns lowercase values matching EnumMessageCategory enum values.
+    Returns ``None`` — never a guess — when the topic name carries no category.
+    Callers must fail closed on ``None``; :func:`derive_route_message_category`
+    is the fail-closed wrapper the wiring path uses.
     """
-    parts = topic.split(".")
-    if len(parts) >= 2:
-        kind = parts[1]
-        if kind == "evt":
-            return "event"
-        if kind == "cmd":
-            return "command"
-        if kind == "intent":
-            return "intent"
-    return "event"
+    from omnibase_infra.enums import EnumMessageCategory
+
+    category = EnumMessageCategory.from_topic(topic)
+    return None if category is None else str(category.value)
+
+
+def derive_route_message_category(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+    topic: str,
+) -> EnumMessageCategory:
+    """Return the category a route for *topic* registers under (OMN-18013).
+
+    THE CATEGORY IS THE TOPIC'S OWN, ALWAYS. It is never taken from
+    ``subscribe_topics[0]``, never from the entry's position in a list, and
+    never defaulted. That is the whole of the operator ruling's item (1):
+    a topic/category mismatch must be impossible by construction, not merely
+    detectable after a projection has silently DLQ'd for six hours
+    (OMN-16939, OMN-14605).
+
+    An explicit ``entry.message_category`` is honoured ONLY for a topic whose
+    name carries no derivable category (the ``onex.dlq.*`` family). Where the
+    name IS derivable, an explicit declaration that disagrees with it is a
+    contract lie and is refused here rather than being stamped on a route that
+    the dispatch path will then never match. ``contract-topic-category``
+    refuses the same shape at authoring time, so this raise is a backstop, not
+    the primary surface.
+    """
+    from omnibase_infra.enums import EnumMessageCategory
+
+    derived = _derive_message_category(topic)
+    declared_raw = (entry.message_category or "").strip().lower()
+    declared = declared_raw or None
+
+    if derived is not None:
+        if declared is not None and declared != derived:
+            raise ModelOnexError(
+                f"handler_wiring: contract {contract.name!r} handler entry "
+                f"{getattr(getattr(entry, 'handler', None), 'name', '?')!r} declares "
+                f"message_category={declared!r} for topic {topic!r}, whose own name "
+                f"derives {derived!r}. The dispatch engine matches on the topic's own "
+                "category, so the declared value would register a route no message can "
+                "ever reach. Remove the declaration or fix the topic."
+            )
+        return EnumMessageCategory(derived)
+
+    if declared is None:
+        raise ModelOnexError(
+            f"handler_wiring: contract {contract.name!r} subscribes to topic {topic!r}, "
+            "whose name carries no message category (EnumMessageCategory.from_topic "
+            "returns None), and the owning handler entry declares no explicit "
+            "message_category. Refusing to guess: the previous 'event' default "
+            "registered a route the dispatch path rejects as an invalid topic "
+            "category, losing 100% of the traffic while the container booted green. "
+            "Declare message_category on a topic-scoped handler entry for this topic."
+        )
+    return EnumMessageCategory(declared)
 
 
 def _node_kind_from_node_type(node_type: str | None) -> EnumNodeKind | None:
@@ -7264,11 +7322,25 @@ def derive_entry_message_category(
     through this exact function rather than re-deriving it (a re-implementation is free to
     drift from the runtime, which is how the class survived three prior gates).
     """
-    if entry.message_category:
-        return entry.message_category.strip().lower()
-    if contract.event_bus and contract.event_bus.subscribe_topics:
-        return _derive_message_category(contract.event_bus.subscribe_topics[0])
-    return "event"
+    topics = _topics_for_handler_entry(contract, entry)
+    categories = sorted(
+        {derived for topic in topics if (derived := _derive_message_category(topic))}
+    )
+    if len(categories) == 1:
+        return categories[0]
+    declared = (entry.message_category or "").strip().lower()
+    if declared:
+        return declared
+    if categories:
+        # A mixed-category entry has no single answer. Since OMN-18013 this
+        # value no longer decides ROUTING — every route carries its own topic's
+        # category via ``derive_route_message_category`` — so returning the
+        # first is a reporting choice, not a dispatch decision. The
+        # ``contract-topic-category`` gate refuses the shape outright.
+        return categories[0]
+    from omnibase_infra.enums import EnumMessageCategory
+
+    return str(EnumMessageCategory.EVENT.value)
 
 
 def derive_entry_message_types(
@@ -9913,10 +9985,13 @@ def _prepare_handler_wiring(
             route_id = _derive_route_id(contract.name, handler_key, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
+            # OMN-18013: the route's category is THIS topic's own, derived from
+            # its name. Stamping the entry-level ``category`` here is what made
+            # every off-category sibling topic a permanent NO_DISPATCHER.
             route = ModelDispatchRoute(
                 route_id=route_id,
                 topic_pattern=topic_pattern,
-                message_category=category,
+                message_category=derive_route_message_category(contract, entry, topic),
                 handler_id=dispatcher_id,
             )
             route_ids.append(route_id)

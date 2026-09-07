@@ -748,15 +748,26 @@ class TestContractValidation:
         with open(CONTRACT_PATH) as f:
             return yaml.safe_load(f)
 
-    def test_contract_has_all_26_topics(self, contract_data: dict) -> None:
-        """Verify contract subscribes to the 7 platform topic suffixes plus
-        the 18 business command/completion/DLQ topics added by OMN-15006
-        (build_loop + OCC governance + DLQ) plus the 1 external
-        steel_onslaught terminal-event topic added by OMN-15168 — 26 total."""
+    def test_contract_has_all_20_dispatchable_topics(self, contract_data: dict) -> None:
+        """Verify contract subscribes to every topic the runtime can deliver.
+
+        7 platform topic suffixes + 12 of the business command/completion/DLQ
+        topics from OMN-15006 + 1 external steel_onslaught terminal-event topic
+        from OMN-15168 = 20.
+
+        Was 26. OMN-18013 deleted the six `onex.dlq.omnibase-infra.*`
+        subscriptions whose names derive no message category
+        (omnibase-infra, platform, quarantine, router, rsd, skill):
+        `EnumMessageCategory.from_topic` returns None for them, so the dispatch
+        engine rejected every message on those topics as an invalid category.
+        They were dead subscriptions, not delivered ones — the runtime consumed,
+        matched nothing, and committed the offset. Asserted absent in
+        tests/unit/runtime/test_ledger_projection_business_topics_omn15006.py.
+        """
         event_bus = contract_data.get("event_bus", {})
         topics = event_bus.get("subscribe_topics", [])
 
-        assert len(topics) == 26, f"Expected 26 topics, got {len(topics)}: {topics}"
+        assert len(topics) == 20, f"Expected 20 topics, got {len(topics)}: {topics}"
 
         # Verify expected topic suffixes/categories are covered
         expected_suffixes = [

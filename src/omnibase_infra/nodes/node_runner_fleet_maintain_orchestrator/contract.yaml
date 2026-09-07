@@ -65,7 +65,13 @@ output_model:
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
-    - event_model:
+    # OMN-18013: three handler entries competed for three subscribe topics with
+    # no per-entry topic scoping, so the ambiguity guard in
+    # _topics_for_handler_entry assigned NONE of them any topic and the node
+    # registered zero routes. `topic:` names the one topic this entry owns; its
+    # category is now derived from that topic's own name (OMN-18013).
+    - topic: "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"
+      event_model:
         name: "ModelRunnerFleetMaintainStartCommand"
         module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.models.model_runner_fleet_maintain_start_command"
       handler:
@@ -73,7 +79,13 @@ handler_routing:
         module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_maintain_start"
       output_events:
         - "ModelRunnerFleetSnapshotGatherCommand"
-    - event_model:
+    # OMN-18013: three handler entries competed for three subscribe topics with
+    # no per-entry topic scoping, so the ambiguity guard in
+    # _topics_for_handler_entry assigned NONE of them any topic and the node
+    # registered zero routes. `topic:` names the one topic this entry owns; its
+    # category is now derived from that topic's own name (OMN-18013).
+    - topic: "onex.evt.omnibase-infra.runner-health-snapshot.v1"
+      event_model:
         name: "ModelRunnerFleetSnapshot"
         module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot"
       handler:
@@ -81,7 +93,13 @@ handler_routing:
         module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_snapshot_complete"
       output_events:
         - "ModelRunnerFleetHealthEvaluateCommand"
-    - event_model:
+    # OMN-18013: three handler entries competed for three subscribe topics with
+    # no per-entry topic scoping, so the ambiguity guard in
+    # _topics_for_handler_entry assigned NONE of them any topic and the node
+    # registered zero routes. `topic:` names the one topic this entry owns; its
+    # category is now derived from that topic's own name (OMN-18013).
+    - topic: "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"
+      event_model:
         name: "ModelRunnerFleetHealthVerdict"
         module: "omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict"
       handler:

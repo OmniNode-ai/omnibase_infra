@@ -246,8 +246,8 @@ class TestPerContractInterleaveOrder:
     async def test_provision_precedes_ready_precedes_attach_per_contract(
         self,
     ) -> None:
-        a_topic = "topic.alpha.v1"
-        b_topic = "topic.beta.v1"
+        a_topic = "onex.evt.platform.interleave-alpha.v1"
+        b_topic = "onex.evt.platform.interleave-beta.v1"
         calls, _provisioner, _subscriptions, _attach = await _wire_two_contracts(
             a_topic=a_topic, b_topic=b_topic
         )
@@ -271,8 +271,8 @@ class TestPerContractInterleaveOrder:
         must NOT appear. We prove the test guards by asserting the recorded
         order matches the interleave AND would fail under big-bang ordering.
         """
-        a_topic = "topic.alpha.v1"
-        b_topic = "topic.beta.v1"
+        a_topic = "onex.evt.platform.interleave-alpha.v1"
+        b_topic = "onex.evt.platform.interleave-beta.v1"
         calls, _provisioner, _subscriptions, _attach = await _wire_two_contracts(
             a_topic=a_topic, b_topic=b_topic
         )
@@ -305,8 +305,8 @@ class TestPerContractInterleaveOrder:
         fail. Here we simulate the regressed (big-bang) recording and confirm
         our per-contract-order check rejects it.
         """
-        a_topic = "topic.alpha.v1"
-        b_topic = "topic.beta.v1"
+        a_topic = "onex.evt.platform.interleave-alpha.v1"
+        b_topic = "onex.evt.platform.interleave-beta.v1"
         regressed_big_bang = [
             ("provision", a_topic),
             ("provision", b_topic),
@@ -328,8 +328,8 @@ class TestPerContractInterleaveOrder:
 class TestNotReadyContractIsDegradedNotFatal:
     @pytest.mark.asyncio
     async def test_not_ready_contract_skipped_others_attach(self) -> None:
-        a_topic = "topic.alpha.v1"
-        b_topic = "topic.beta.v1"
+        a_topic = "onex.evt.platform.interleave-alpha.v1"
+        b_topic = "onex.evt.platform.interleave-beta.v1"
         (
             calls,
             _provisioner,
@@ -353,8 +353,8 @@ class TestNotReadyContractIsDegradedNotFatal:
 
     @pytest.mark.asyncio
     async def test_runtime_readiness_is_degraded_not_failed(self) -> None:
-        a_topic = "topic.alpha.v1"
-        b_topic = "topic.beta.v1"
+        a_topic = "onex.evt.platform.interleave-alpha.v1"
+        b_topic = "onex.evt.platform.interleave-beta.v1"
         _calls, _p, _subs, attach_out = await _wire_two_contracts(
             a_topic=a_topic,
             b_topic=b_topic,
@@ -385,8 +385,8 @@ class TestNotReadyContractIsDegradedNotFatal:
 
     @pytest.mark.asyncio
     async def test_all_attached_is_ready(self) -> None:
-        a_topic = "topic.alpha.v1"
-        b_topic = "topic.beta.v1"
+        a_topic = "onex.evt.platform.interleave-alpha.v1"
+        b_topic = "onex.evt.platform.interleave-beta.v1"
         _calls, _p, _subs, attach_out = await _wire_two_contracts(
             a_topic=a_topic, b_topic=b_topic
         )
@@ -405,7 +405,7 @@ class TestBackwardCompatNoProvisioner:
     async def test_no_provisioner_attaches_without_readiness_gate(self) -> None:
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        topic = "topic.alpha.v1"
+        topic = "onex.evt.platform.interleave-alpha.v1"
         contract = _contract("node_a", (topic,))
         manifest = ModelAutoWiringManifest(contracts=(contract,))
         engine = MessageDispatchEngine()

@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-18013 (operator ruling item 3): contract-graph closure — every subscribe
+# topic has >=1 declared publisher, every publish topic has >=1 subscriber or an
+# explicit sink declaration.
+#
+# WHY THIS IS NOT YET A PR-BLOCKING CHECK, STATED PLAINLY
+# -------------------------------------------------------
+# The validator is re-homed here from omnimarket, carries a per-repo `--scope`,
+# and has NO `--baseline` and no `--write-baseline`: the external producer/
+# consumer maps that used to live in the baseline file are now read from the
+# CONTRACTS themselves (`runtime_dispatch.external_trigger` + `command_topic`
+# for a CLI-dispatched command; `externally_consumed_topics` /
+# `runtime_dispatch.terminal_events` for a declared sink), so a closure claim is
+# reviewed as part of the contract that makes it. `no-baseline-refreeze` refuses
+# the recreation of the deleted files.
+#
+# `--scope omnibase_infra` reports 117 defects as of 2026-09-07 against
+# origin/dev 31e3a979a (66 ORPHANED_CONSUMER, 45 ORPHANED_PRODUCER,
+# 4 DISCONNECTED_SUBGRAPH, 2 DECLARED_BUT_UNWIRED), measured by the scheduled
+# census below rather than remembered. Each one is a product decision
+# — name the producer, declare the sink, or delete the declaration — not
+# mechanical work, and inventing 112 declarations to make a gate green would be
+# a baseline written in contract YAML. The burn-down is tracked on OMN-18013;
+# the flip to a required check lands with it, and NOT before. Reporting this
+# rather than fabricating closure is the whole point of the gate.
+name: contract-topic-graph
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily census so the number is visible and its trend is a fact, not a memory.
+    - cron: "17 6 * * *"
+  pull_request:
+    paths:
+      - "src/omnibase_infra/validators/contract_topic_graph.py"
+      - ".github/workflows/contract-topic-graph.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract-topic-graph:
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: omnibase_infra
+
+      # The graph is built over the WHOLE corpus — closure is a cross-repo
+      # property, and a partial graph reports every cross-package producer as a
+      # phantom orphan (build_graph fails closed on a missing package). These
+      # repos sit ABOVE omnibase_infra in the layering (compat -> core -> spi ->
+      # infra -> omnimarket), so they are resolved from a checkout, never as
+      # installed dependencies: parse_contract only ever reads YAML text.
+      - uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omnimarket
+          path: omnimarket
+          ref: dev
+          token: ${{ secrets.CROSS_REPO_PAT }}
+      - uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omnimemory
+          path: omnimemory
+          ref: dev
+          token: ${{ secrets.CROSS_REPO_PAT }}
+      - uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omniclaude
+          path: omniclaude
+          ref: dev
+          token: ${{ secrets.CROSS_REPO_PAT }}
+      - uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omniintelligence
+          path: omniintelligence
+          ref: dev
+          token: ${{ secrets.CROSS_REPO_PAT }}
+      - uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/onex_change_control
+          path: onex_change_control
+          ref: dev
+          token: ${{ secrets.CROSS_REPO_PAT }}
+
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        working-directory: omnibase_infra
+        run: uv sync --frozen
+
+      # `env -u PYTHONPATH`: discover_contract_roots FAILS CLOSED when a pinned
+      # dependency resolves from outside the interpreter's environment, which is
+      # what an ambient PYTHONPATH causes. The corpus root is passed on the
+      # command line, not through the environment, so the verdict names its own
+      # inputs.
+      - name: Contract graph census (omnibase_infra scope)
+        working-directory: omnibase_infra
+        run: |
+          env -u PYTHONPATH uv run python -m omnibase_infra.validators.contract_topic_graph \
+            --scope omnibase_infra --checkout-root "${{ github.workspace }}" --report || true
+          echo "::notice::contract-topic-graph is a census until the OMN-18013 burn-down lands."

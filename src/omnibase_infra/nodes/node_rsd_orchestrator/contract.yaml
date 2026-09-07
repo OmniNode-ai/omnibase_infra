@@ -23,7 +23,10 @@ event_bus:
     - "onex.cmd.rsd.score.v1"
     - "onex.evt.rsd.data-fetched.v1"
     - "onex.evt.rsd.scores-calculated.v1"
-    - "onex.evt.rsd.scores-stored.v1"
+    # OMN-18013: `onex.evt.rsd.scores-stored.v1` DELETED from subscribe_topics. No handler_routing entry owned it
+    # (_topics_for_handler_entry returned no match, so ZERO dispatch routes existed) AND
+    # no contract anywhere in the corpus publishes it, so nothing could ever arrive on it
+    # either. Re-add it with its publisher and its handler entry, in one diff.
   publish_topics:
     - "onex.evt.rsd.score-complete.v1"
     - "onex.evt.rsd.score-failed.v1"

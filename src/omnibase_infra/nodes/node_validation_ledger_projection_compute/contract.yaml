@@ -84,8 +84,34 @@ output_model:
 # entry is sufficient once event_model is declared.
 handler_routing:
   routing_strategy: "operation_match"
+  # OMN-18013: split into per-topic `topic:`-scoped entries — see
+  # node_event_forward_effect for the rationale. Clears the last rows of the
+  # OMN-16088 fan-out ratchet, deleted in the same commit.
   handlers:
     - operation: validation_ledger.project
+      topic: "onex.evt.validation.cross-repo-run-started.v1"
+      handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerValidationLedgerProjection"
+        module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
+      supported_operations:
+        - "validation_ledger.project"
+    - operation: validation_ledger.project
+      topic: "onex.evt.validation.cross-repo-violations-batch.v1"
+      handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerValidationLedgerProjection"
+        module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
+      supported_operations:
+        - "validation_ledger.project"
+    - operation: validation_ledger.project
+      topic: "onex.evt.validation.cross-repo-run-completed.v1"
       handler_type: "validation_ledger_projection"
       event_model:
         name: "ModelEventMessage"

@@ -37,7 +37,24 @@ class TestParseRegistrationOrchestratorContract:
     def test_subscribe_topics_count(
         self, contract: ModelParsedContractForVerification
     ) -> None:
-        assert len(contract.subscribe_topics) == 7
+        # OMN-18013: was 7. `onex.evt.platform.registry-request-introspection.v1`
+        # was deleted — no handler_routing entry owned it and no contract in the
+        # corpus published it, so it was a subscription with neither a producer
+        # nor a consumer. Asserting the exact set rather than only the count, so
+        # a future deletion names what it removed instead of decrementing a
+        # number.
+        assert set(contract.subscribe_topics) == {
+            "onex.evt.platform.node-introspection.v1",
+            "onex.intent.platform.runtime-tick.v1",
+            "onex.cmd.platform.node-registration-acked.v1",
+            "onex.evt.platform.node-heartbeat.v1",
+            "onex.cmd.platform.topic-catalog-query.v1",
+            "onex.cmd.platform.request-introspection.v1",
+        }
+        assert (
+            "onex.evt.platform.registry-request-introspection.v1"
+            not in contract.subscribe_topics
+        )
 
     def test_subscribe_topics_contains_introspection(
         self, contract: ModelParsedContractForVerification

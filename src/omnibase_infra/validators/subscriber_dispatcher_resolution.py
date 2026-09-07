@@ -69,7 +69,8 @@ The baseline can only shrink. It is a burn-down list, NOT an amnesty list.
 Usage (pre-commit / CI):
     PYTHONPATH=src uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
     uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution \\
-        src/omnimarket --baseline config/validation/subscriber_dispatcher_resolution_baseline.yaml
+    uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution \
+        src/omnibase_infra
 """
 
 from __future__ import annotations
@@ -80,26 +81,23 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
+from omnibase_core.models.errors import ModelOnexError
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_message_category,
     _topics_for_handler_entry,
-    derive_entry_message_category,
     derive_entry_message_types,
+    derive_route_message_category,
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
 
 DEFAULT_SCAN_ROOT = Path("src/omnibase_infra")
-DEFAULT_BASELINE = Path(
-    "config/validation/subscriber_dispatcher_resolution_baseline.yaml"
-)
 
 REASON_NO_ROUTE = "no_route"
 REASON_CATEGORY_MISMATCH = "category_mismatch"
 REASON_MESSAGE_TYPE_UNINDEXED = "message_type_unindexed"
+REASON_UNDERIVABLE_CATEGORY = "underivable_category"
 
 # A scan that discovers far fewer contracts than the tree actually has is a broken scan,
 # not a clean tree. A gate over a collapsed set is vacuously green, so the validator fails
@@ -130,6 +128,24 @@ def _resolve_topic(
     real_category = _derive_message_category(topic)
     alias = derive_event_type_alias_for_topic(topic)
 
+    if real_category is None:
+        # OMN-18013: the topic's own name carries no category, so
+        # ``EnumMessageCategory.from_topic`` returns None at dispatch and the
+        # message is rejected as an invalid topic category BEFORE any route is
+        # consulted. Before OMN-18013 the wiring stamped a silent "event"
+        # default here and this was invisible.
+        return UnresolvedSubscription(
+            contract=contract.name,
+            topic=topic,
+            category="",
+            reason=REASON_UNDERIVABLE_CATEGORY,
+            detail=(
+                "EnumMessageCategory.from_topic returns None for this topic, so "
+                "MessageDispatchEngine rejects every message on it as an invalid "
+                "topic category regardless of routing"
+            ),
+        )
+
     routing = contract.handler_routing
     entries = list(getattr(routing, "handlers", None) or []) if routing else []
 
@@ -141,11 +157,16 @@ def _resolve_topic(
     for entry in entries:
         if topic not in _topics_for_handler_entry(contract, entry):
             continue
-        entry_category = derive_entry_message_category(contract, entry)
-        if entry_category != real_category:
+        try:
+            route_category = derive_route_message_category(contract, entry, topic).value
+        except ModelOnexError as exc:
+            reason = REASON_CATEGORY_MISMATCH
+            detail = f"route category is unresolvable for this topic: {exc}"
+            continue
+        if route_category != real_category:
             reason = REASON_CATEGORY_MISMATCH
             detail = (
-                f"route registered under category={entry_category!r} but messages arrive "
+                f"route registered under category={route_category!r} but messages arrive "
                 f"as {real_category!r}"
             )
             continue
@@ -180,6 +201,44 @@ def unresolved_subscriptions(
     for contract in contracts:
         if contract.event_bus is None or not contract.event_bus.subscribe_topics:
             continue
+        # plugin_managed: the DOMAIN PLUGIN owns the Kafka subscription, and the
+        # runtime host explicitly skips creating one (OMN-10864,
+        # handler_wiring.py "Auto-wiring (deferred): skipping Kafka subscription
+        # for plugin-managed contract"). There is therefore no auto-wired
+        # dispatcher to resolve to, and no traffic being consumed-and-DLQ'd:
+        # this gate's whole failure mode cannot occur here. Scanning these
+        # contracts anyway reported node_emit_daemon_runtime's three topics as
+        # unresolved, and the burn-down nearly "fixed" that by deleting a live
+        # plugin's declared consumption from the contract graph. This gate
+        # observes exactly what the runtime observes — including what it skips.
+        if contract.event_bus.plugin_managed:
+            continue
+        # OMN-18013, same principle one case wider. A contract declaring NO
+        # handler_routing never reaches the subscribe decision at all:
+        # _prepare_contract_wiring short-circuits `contract.handler_routing is
+        # None` to a SKIPPED result with subscription_topics=[]. So, as with
+        # plugin_managed, the runtime creates no auto-wired consumer and this
+        # gate's failure mode (consume, DLQ, commit) cannot occur.
+        #
+        # Note the mechanism precisely, because the adjacent one does NOT apply:
+        # handler_wiring's `no_live_dispatcher` branch is guarded by
+        # `bool(prepared_wirings)`, which is False at zero entries, so it does
+        # not cover this shape and no change was made there for it. The
+        # present-but-EMPTY handler_routing shape DOES reach the subscribe
+        # decision, and is caught fail-closed by the OMN-14141 phantom-wiring
+        # guard (zero dispatchers registered with subscribe topics declared =>
+        # FAILED, topic not subscribed). That guard is why skipping on an empty
+        # entry list here is safe rather than a blind spot. Flagging these anyway is what produced the near-miss this
+        # gate was written to avoid: node_contract_registry_reducer's three
+        # contract-lifecycle topics ARE consumed, by the kernel's
+        # ContractRegistrationEventRouter, and "fixing" the finding by deleting
+        # the subscribe declaration would have erased a live, readiness-critical
+        # consumption from the contract graph AND dropped the enum members that
+        # models/projection/projection_contract_registry.py imports. The gate
+        # observes exactly what the runtime observes, including what it skips.
+        _routing = contract.handler_routing
+        if not (list(getattr(_routing, "handlers", None) or []) if _routing else []):
+            continue
         for topic in contract.event_bus.subscribe_topics:
             finding = _resolve_topic(contract, topic)
             if finding is not None:
@@ -199,17 +258,6 @@ def scan(scan_root: Path) -> tuple[list[UnresolvedSubscription], int]:
     return unresolved_subscriptions(contracts), len(contracts)
 
 
-def load_baseline(baseline_path: Path) -> set[tuple[str, str]]:
-    """Load the frozen shrink-only burn-down baseline of unresolved subscriptions."""
-    if not baseline_path.is_file():
-        return set()
-    data = yaml.safe_load(baseline_path.read_text()) or {}
-    return {
-        (str(row["contract"]), str(row["topic"]))
-        for row in (data.get("known_unresolved_subscriptions") or [])
-    }
-
-
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -225,11 +273,6 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Root to scan for contract.yaml files.",
     )
     parser.add_argument(
-        "--baseline",
-        default=str(DEFAULT_BASELINE),
-        help="Frozen shrink-only burn-down baseline.",
-    )
-    parser.add_argument(
         "--min-contracts",
         type=int,
         default=DEFAULT_MIN_EXPECTED_CONTRACTS,
@@ -240,7 +283,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
-    scan_root, baseline_path = Path(args.scan_root), Path(args.baseline)
+    scan_root = Path(args.scan_root)
 
     findings, contract_count = scan(scan_root)
     if contract_count < args.min_contracts:
@@ -252,11 +295,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    baseline = load_baseline(baseline_path)
     live: dict[tuple[str, str], UnresolvedSubscription] = {f.key: f for f in findings}
-
-    violations = sorted(set(live) - baseline)
-    stale = sorted(baseline - set(live))
+    violations = sorted(live)
     exit_code = 0
 
     if violations:
@@ -276,27 +316,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write(
             "\n  Fix: give the topic a handler_routing entry that registers under its own "
             "real category — a per-topic `topic_match` entry carrying an explicit "
-            "`message_category:` (and an `event_model:` where several topics share a "
-            "handler). Setting `topic:` alone is NOT sufficient: the category still falls "
-            "back to subscribe_topics[0]. Do NOT add the topic to "
-            f"{baseline_path} — that baseline is frozen and shrink-only.\n"
+            "`message_category:` where the topic name derives no category, or DELETE "
+            "the subscribe declaration if nothing consumes the topic. There is no "
+            "baseline to add it to: OMN-18013 burned this ratchet to zero and deleted "
+            "the file, and `no-baseline-refreeze` refuses its recreation.\n"
         )
-
-    if stale:
-        exit_code = 1
-        sys.stderr.write(
-            f"[subscriber-dispatcher-resolution] FAIL: subscription(s) now resolve to a "
-            f"dispatcher but are still listed in {baseline_path}. Remove them; the "
-            f"baseline is shrink-only and must never go stale:\n"
-        )
-        for contract, topic in stale:
-            sys.stderr.write(f"  - {contract} :: {topic}\n")
 
     if exit_code == 0:
         sys.stderr.write(
             f"[subscriber-dispatcher-resolution] OK: {contract_count} contracts scanned, "
-            f"{len(live)} unresolved subscription(s) (all in the frozen baseline), "
-            f"0 new violations.\n"
+            f"0 unresolved subscription(s).\n"
         )
     return exit_code
 

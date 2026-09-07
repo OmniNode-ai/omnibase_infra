@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for HandlerContractFileWatcher and HandlerManualTrigger."""
+"""Unit tests for ContractFileWatcher and HandlerManualTrigger."""
 
 from __future__ import annotations
 
@@ -147,13 +147,13 @@ class TestModelManualReconcileCommand:
 
 
 # ---------------------------------------------------------------------------
-# HandlerContractFileWatcher tests (filesystem I/O — use tmpdir)
+# ContractFileWatcher tests (filesystem I/O — use tmpdir)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-class TestHandlerContractFileWatcher:
-    """Tests for HandlerContractFileWatcher.
+class TestContractFileWatcher:
+    """Tests for ContractFileWatcher.
 
     Skipped if watchdog is not installed (optional dependency for this handler).
     """
@@ -176,34 +176,48 @@ class TestHandlerContractFileWatcher:
             pytest.skip("watchdog not installed")
 
     def test_import_error_without_watchdog(self, tmp_path: Path) -> None:
-        """HandlerContractFileWatcher raises ImportError if watchdog is absent."""
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers import (
-            handler_contract_file_watcher as mod,
+        """ContractFileWatcher raises ImportError if watchdog is absent."""
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services import (
+            contract_file_watcher as mod,
         )
 
         original = mod._WATCHDOG_AVAILABLE
         try:
             mod._WATCHDOG_AVAILABLE = False
             with pytest.raises(ImportError, match="watchdog"):
-                from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-                    HandlerContractFileWatcher,
+                from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+                    ContractFileWatcher,
                 )
 
-                HandlerContractFileWatcher(
+                ContractFileWatcher(
                     watch_root=tmp_path,
                     source_repo="omnibase_infra",
                 )
         finally:
             mod._WATCHDOG_AVAILABLE = original
 
+    def test_constructs_with_no_arguments(self) -> None:
+        """OMN-18013: moved here from tests/integration/handlers/test_handler_autowiring_compliance.py.
+
+        The watcher is no longer an auto-wired bus handler, so the auto-wiring
+        compliance file is the wrong home for this. The property is still worth
+        pinning where the class lives: it constructs with no arguments.
+        """
+        self._skip_if_no_watchdog()
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
+        )
+
+        assert ContractFileWatcher() is not None
+
     def test_watch_root_not_found_raises(self, tmp_path: Path) -> None:
         """start() raises FileNotFoundError if watch_root does not exist."""
         self._skip_if_no_watchdog()
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
         )
 
-        handler = HandlerContractFileWatcher(
+        handler = ContractFileWatcher(
             watch_root=tmp_path / "nonexistent",
             source_repo="omnibase_infra",
         )
@@ -217,11 +231,11 @@ class TestHandlerContractFileWatcher:
     def test_md5_hash_seeding(self, tmp_nodes_dir: Path) -> None:
         """Handler seeds MD5 hashes for all existing contract files on start."""
         self._skip_if_no_watchdog()
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
         )
 
-        handler = HandlerContractFileWatcher(
+        handler = ContractFileWatcher(
             watch_root=tmp_nodes_dir,
             source_repo="omnibase_infra",
         )
@@ -239,14 +253,14 @@ class TestHandlerContractFileWatcher:
     def test_no_trigger_on_unchanged_file(self, tmp_nodes_dir: Path) -> None:
         """Writing identical content to a contract file does not emit a trigger."""
         self._skip_if_no_watchdog()
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
         )
 
         contract_file = tmp_nodes_dir / "node_foo" / "contract.yaml"
         original_content = contract_file.read_text()
 
-        handler = HandlerContractFileWatcher(
+        handler = ContractFileWatcher(
             watch_root=tmp_nodes_dir,
             source_repo="omnibase_infra",
             debounce_seconds=0.1,
@@ -273,13 +287,13 @@ class TestHandlerContractFileWatcher:
     def test_trigger_emitted_on_content_change(self, tmp_nodes_dir: Path) -> None:
         """Modifying a contract file's content emits a trigger."""
         self._skip_if_no_watchdog()
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
         )
 
         contract_file = tmp_nodes_dir / "node_foo" / "contract.yaml"
 
-        handler = HandlerContractFileWatcher(
+        handler = ContractFileWatcher(
             watch_root=tmp_nodes_dir,
             source_repo="omnibase_infra",
             debounce_seconds=0.1,
@@ -312,13 +326,13 @@ class TestHandlerContractFileWatcher:
     ) -> None:
         """Changed file paths in triggers are relative to watch_root."""
         self._skip_if_no_watchdog()
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
         )
 
         contract_file = tmp_nodes_dir / "node_foo" / "contract.yaml"
 
-        handler = HandlerContractFileWatcher(
+        handler = ContractFileWatcher(
             watch_root=tmp_nodes_dir,
             source_repo="omnibase_infra",
             debounce_seconds=0.1,
@@ -345,11 +359,11 @@ class TestHandlerContractFileWatcher:
     def test_handler_type_and_category(self, tmp_nodes_dir: Path) -> None:
         self._skip_if_no_watchdog()
         from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
         )
 
-        handler = HandlerContractFileWatcher(
+        handler = ContractFileWatcher(
             watch_root=tmp_nodes_dir,
             source_repo="omnibase_infra",
         )
@@ -359,11 +373,11 @@ class TestHandlerContractFileWatcher:
     def test_get_pending_triggers_empty_initially(self, tmp_nodes_dir: Path) -> None:
         """No triggers queued until a change is detected."""
         self._skip_if_no_watchdog()
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
+        from omnibase_infra.nodes.node_artifact_change_detector_effect.services.contract_file_watcher import (
+            ContractFileWatcher,
         )
 
-        handler = HandlerContractFileWatcher(
+        handler = ContractFileWatcher(
             watch_root=tmp_nodes_dir,
             source_repo="omnibase_infra",
         )

@@ -213,6 +213,9 @@ class TestFsmReducerCrossBoundary:
         dispatch adapter instead of being silently dropped (OMN-14598).
         """
         from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.event_bus.topic_constants import (
+            derive_event_type_alias_for_topic,
+        )
         from omnibase_infra.models.coding_agent.enum_agent_sandbox import (
             EnumAgentSandbox,
         )
@@ -250,7 +253,12 @@ class TestFsmReducerCrossBoundary:
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=payload,
             correlation_id=corr,
-            event_type="onex.evt.omnibase-infra.coding-agent-fsm-advance.v1",
+            # OMN-18013: the consume boundary stamps the derived alias, never the
+            # topic. Deriving it here means this test cannot pass on a spelling
+            # the bus does not carry.
+            event_type=derive_event_type_alias_for_topic(
+                "onex.evt.omnibase-infra.coding-agent-fsm-advance.v1"  # onex-topic-allow: the topic whose alias is derived on this line
+            ),
         )
 
         output = await handler.handle(envelope)
