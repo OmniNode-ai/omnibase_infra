@@ -126,6 +126,14 @@ x-runtime-base: &runtime-base
         cpus: "0.25"
         memory: 256M
 x-lakshman-runtime-env: &lakshman-runtime-env
+  # OMN-17888: this lane defines its own runtime env block rather than merging
+  # docker-compose.infra.yml's x-runtime-env anchor, so it inherits NOTHING and
+  # must carry this key itself -- same reasoning and same fail-closed form as
+  # the base file's block, where the long rationale lives. `:?` and not `:-`:
+  # an undeclared aggregate Kafka consumer fetch budget is the unbounded fetch
+  # that OOM-killed omninode-runtime, so a container without one must not
+  # start.
+  ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON: ${ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON:?runtime policy contract must set ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_HOST: postgres

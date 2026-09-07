@@ -177,6 +177,9 @@ from omnibase_infra.enums import (
     EnumKafkaAcks,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.event_bus.models.config.model_kafka_consumer_fetch_budget import (
+    ModelKafkaConsumerFetchBudget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +343,27 @@ class ModelKafkaEventBusConfig(BaseModel):
         ),
         ge=1024,  # 1 KB minimum
         le=52428800,  # 50 MB maximum
+    )
+
+    # Aggregate consumer fetch-memory bound (OMN-17888). Deliberately NOT an
+    # env-overridable scalar: the bound is *derived* from a real memory limit
+    # and a contract-declared policy by ModelKafkaConsumerFetchBudget, never
+    # typed in as a number. None means no budget was declared, which is legal
+    # only for library/CLI callers that construct a handful of consumers; the
+    # runtime construction path (backends.auto_configure.select_event_bus)
+    # resolves it from the contract-rendered environment and refuses to build a
+    # bus without one. See the model's docstring for why this bounds
+    # fetch_max_bytes and not max_partition_fetch_bytes.
+    consumer_fetch_budget: ModelKafkaConsumerFetchBudget | None = Field(
+        default=None,
+        description=(
+            "Declared inputs to the aggregate consumer fetch bound. When set, "
+            "every AIOKafkaConsumer is constructed with fetch_max_bytes = "
+            "floor(memory_fraction * limit / (in_flight_fetches_per_broker * "
+            "brokers_per_consumer * max_concurrent_consumers)) and "
+            "max_concurrent_consumers is enforced as a hard subscription cap. "
+            "max_partition_fetch_bytes is unaffected (OMN-16267)."
+        ),
     )
 
     # Kafka consumer settings

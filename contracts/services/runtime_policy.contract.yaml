@@ -21,6 +21,42 @@ omnimemory_memgraph_port: 7687
 # host address (bolt://100.109.203.94:7687) is the cross-lane fallback.
 arch_graph_bolt_uri: "bolt://omnibase-infra-memgraph:7687"
 auxiliary_services_omnimemory_enabled: false
+# OMN-17888: aggregate Kafka consumer fetch-memory bound.
+#
+# EventBusKafka creates one AIOKafkaConsumer per subscribed topic (group ids
+# are scoped per topic on purpose, to avoid rebalance storms), so a runtime
+# subscribing to ~355 topics holds ~355 consumers. Each passed
+# max_partition_fetch_bytes=1_048_588 (OMN-16267, aligned to the producer's
+# max_request_size) and nothing for fetch_max_bytes, inheriting aiokafka's
+# 52_428_800 default -- so nothing bounded the SUM. Measured on the .201 dev
+# lane: 694 -> 1512 MB in six seconds at subscription start, then SIGKILL by
+# the cgroup OOM killer at anon-rss ~1.55 GB against memory.max 1_610_612_736
+# (docker reported ExitCode=0 OOMKilled=false because the cgroup is recreated
+# per start -- the kernel log is the evidence, not docker).
+#
+# The bound is DERIVED, never typed in:
+#   fetch_max_bytes = floor(memory_fraction * L
+#                           / (in_flight_fetches_per_broker
+#                              * brokers_per_consumer
+#                              * max_concurrent_consumers))
+# with L read live from /sys/fs/cgroup/memory.max, so it tracks the compose
+# limit rather than restating it. Raising the compose memory limit is NOT the
+# fix and is deliberately not done here.
+#
+# At the dev lane's 1536 MiB limit these values give fetch_max_bytes=235_929
+# (~230 KiB); at the measured 355 consumers the fetch term is 2 x 355 x 235_929
+# = 160 MiB against a 694 MB non-fetch baseline, and at the enforced cap of 512
+# consumers the fetch term is the full 230 MiB budget.
+#
+# max_concurrent_consumers is ENFORCED as a hard subscription cap, which is
+# what makes the divisor a bound rather than an estimate: consumer 513 raises a
+# named configuration error instead of quietly invalidating the arithmetic.
+kafka_consumer_fetch_budget:
+  source: container_cgroup_limit
+  memory_fraction: 0.15
+  max_concurrent_consumers: 512
+  brokers_per_consumer: 1
+  in_flight_fetches_per_broker: 2
 profiles:
   dev:
     compose_project: omnibase-infra

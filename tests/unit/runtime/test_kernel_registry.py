@@ -18,8 +18,20 @@ from omnibase_infra.backends.auto_configure import (
 )
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.event_bus.models.config import ModelKafkaConsumerFetchBudget
 
 pytestmark = pytest.mark.unit
+
+# OMN-17888: select_event_bus refuses to construct an EventBusKafka without a
+# declared aggregate consumer fetch budget. Every Kafka-resolving call below
+# therefore passes one. DECLARED_BYTES with the .201 dev lane's real 1536 MiB
+# limit, injected -- a unit test must never read the host's own cgroup.
+DECLARED_FETCH_BUDGET = ModelKafkaConsumerFetchBudget.from_declaration(
+    '{"source":"declared_bytes","memory_limit_bytes":1610612736,'
+    '"memory_fraction":0.15,"max_concurrent_consumers":512,'
+    '"brokers_per_consumer":1,"in_flight_fetches_per_broker":2}'
+)
 
 
 class TestKernelRegistryResolution:
@@ -66,6 +78,7 @@ class TestKernelRegistryResolution:
                 kafka_bootstrap_servers="localhost:9092",
                 environment="test",
                 consumer_group="test-group",
+                consumer_fetch_budget=DECLARED_FETCH_BUDGET,
             )
             assert type(bus).__name__ == "EventBusKafka"
 
@@ -93,6 +106,7 @@ class TestKernelRegistryResolution:
                 kafka_bootstrap_servers="localhost:9092",
                 environment="test",
                 consumer_group="test-group",
+                consumer_fetch_budget=DECLARED_FETCH_BUDGET,
             )
             assert type(bus).__name__ == "EventBusKafka"
             assert bus.config.instance_id == "runtime-effects"
@@ -120,6 +134,7 @@ class TestKernelRegistryResolution:
                 kafka_bootstrap_servers="localhost:9092",
                 environment="test",
                 consumer_group="test-group",
+                consumer_fetch_budget=DECLARED_FETCH_BUDGET,
             )
             assert type(bus).__name__ == "EventBusKafka"
 
@@ -184,6 +199,7 @@ class TestKernelRegistryResolution:
                 kafka_bootstrap_servers="localhost:9092",
                 environment="test",
                 consumer_group="test-group",
+                consumer_fetch_budget=DECLARED_FETCH_BUDGET,
             )
             assert type(bus).__name__ == "EventBusKafka"
 
@@ -208,3 +224,83 @@ class TestKernelRegistryResolution:
                 consumer_group="test-group",
             )
             assert type(bus).__name__ == "EventBusInmemory"
+
+
+@pytest.mark.unit
+class TestKafkaConsumerFetchBudgetIsRequiredAtTheConstructionSeam:
+    """OMN-17888: the Kafka construction seam refuses an undeclared budget."""
+
+    def test_select_event_bus_refuses_without_a_declared_budget(self) -> None:
+        """No budget, no Kafka bus -- and the error names what to declare.
+
+        This is the seam the OOM happened behind: the process that subscribes
+        to hundreds of topics at once. Refusing here is what makes the bound a
+        requirement rather than a suggestion.
+        """
+        kafka_probe_result = ModelProbeResult(
+            state=EnumProbeState.AUTHORITATIVE,
+            reason="Kafka healthy with 5 topics, brokers match config",
+            backend_label="event_bus_kafka",
+        )
+        with (
+            patch(
+                "omnibase_infra.backends.auto_configure.probe_kafka",
+                return_value=kafka_probe_result,
+            ),
+            pytest.raises(ProtocolConfigurationError) as excinfo,
+        ):
+            select_event_bus(
+                bus_type="kafka",
+                kafka_bootstrap_servers="localhost:9092",
+                environment="test",
+                consumer_group="test-group",
+            )
+        message = str(excinfo.value)
+        assert "consumer_fetch_budget" in message
+        assert "ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON" in message
+
+    def test_inmemory_bus_needs_no_budget(self) -> None:
+        """The in-memory bus holds no fetch buffers, so it is not gated.
+
+        Requiring a container memory limit for local, brokerless development
+        would gate the cheap path on a fact only the deployed path has.
+        """
+        kafka_probe_result = ModelProbeResult(
+            state=EnumProbeState.DISCOVERED,
+            reason="TCP connect failed",
+            backend_label="event_bus_kafka",
+        )
+        with patch(
+            "omnibase_infra.backends.auto_configure.probe_kafka",
+            return_value=kafka_probe_result,
+        ):
+            bus = select_event_bus(
+                bus_type="inmemory",
+                kafka_bootstrap_servers=None,
+                environment="test",
+                consumer_group="test-group",
+            )
+        assert type(bus).__name__ == "EventBusInmemory"
+
+    def test_declared_budget_reaches_the_constructed_bus(self) -> None:
+        """The declared budget is carried onto the bus config, not dropped."""
+        kafka_probe_result = ModelProbeResult(
+            state=EnumProbeState.AUTHORITATIVE,
+            reason="Kafka healthy with 5 topics, brokers match config",
+            backend_label="event_bus_kafka",
+        )
+        with patch(
+            "omnibase_infra.backends.auto_configure.probe_kafka",
+            return_value=kafka_probe_result,
+        ):
+            bus = select_event_bus(
+                bus_type="kafka",
+                kafka_bootstrap_servers="localhost:9092",
+                environment="test",
+                consumer_group="test-group",
+                consumer_fetch_budget=DECLARED_FETCH_BUDGET,
+            )
+        budget = bus.config.consumer_fetch_budget
+        assert budget is not None
+        assert budget.max_concurrent_consumers == 512
+        assert budget.resolve_fetch_max_bytes() == 235_929

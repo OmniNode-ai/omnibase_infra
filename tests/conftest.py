@@ -141,6 +141,33 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _declare_kafka_consumer_fetch_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Declare the aggregate Kafka consumer fetch budget for the suite (OMN-17888).
+
+    ``service_kernel`` resolves this variable whenever the resolved transport
+        is Kafka, and ``select_event_bus`` REFUSES to construct an ``EventBusKafka``
+        without the budget it produces -- an unbounded aggregate fetch is what the
+        cgroup OOM killer SIGKILLed omninode-runtime over. In deployment the value
+        is rendered from ``contracts/services/runtime_policy.contract.yaml`` and
+        passed by compose fail-closed; under pytest there is no compose, so the
+        suite declares it here, once, explicitly.
+
+        ``DECLARED_BYTES`` and not the container-cgroup source on purpose: a unit
+        run must never derive its bound from the host it happens to execute on.
+        The limit below is the .201 dev lane's real 1536 MiB, injected.
+
+        A test that wants the refusal path (or a different budget) deletes or
+        overrides it with its own ``monkeypatch`` -- last writer wins.
+    """
+    monkeypatch.setenv(
+        "ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON",
+        '{"source":"declared_bytes","memory_limit_bytes":1610612736,'
+        '"memory_fraction":0.15,"max_concurrent_consumers":512,'
+        '"brokers_per_consumer":1,"in_flight_fetches_per_broker":2}',
+    )
+
+
+@pytest.fixture(autouse=True)
 def _strip_test_local_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent one test's Git process state from leaking into the next test.
 

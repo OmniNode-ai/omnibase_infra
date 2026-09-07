@@ -1483,6 +1483,33 @@ async def bootstrap() -> int:
         # bus_type keeps select_event_bus from resolving a second time
         # (OMN-16693) — one decision per boot, never two.
         from omnibase_infra.backends.auto_configure import select_event_bus
+        from omnibase_infra.event_bus.models.config import (
+            FETCH_BUDGET_ENV_VAR,
+            ModelKafkaConsumerFetchBudget,
+        )
+
+        # OMN-17888: resolve the declared aggregate consumer fetch-memory
+        # budget. This is deployment config, so the kernel owns reading it and
+        # the config model owns validating it -- the model never touches the
+        # environment. Resolved BEFORE construction and only for Kafka: the
+        # in-memory bus holds no fetch buffers, so requiring a budget there
+        # would gate local development on a container limit that does not
+        # exist. from_declaration() refuses on absence rather than choosing a
+        # number; compose passes the value fail-closed, so a runtime container
+        # that has not declared one never boots this far.
+        consumer_fetch_budget: ModelKafkaConsumerFetchBudget | None = None
+        if use_kafka:
+            consumer_fetch_budget = ModelKafkaConsumerFetchBudget.from_declaration(
+                os.getenv(FETCH_BUDGET_ENV_VAR)
+            )
+            logger.info(
+                "Kafka consumer fetch budget declared: "
+                "max_concurrent_consumers=%d, memory_fraction=%s "
+                "(correlation_id=%s)",
+                consumer_fetch_budget.max_concurrent_consumers,
+                consumer_fetch_budget.memory_fraction,
+                correlation_id,
+            )
 
         # Why: Cast documents the narrowed runtime protocol for downstream readers.
         event_bus = cast(  # type: ignore[redundant-cast]
@@ -1493,6 +1520,7 @@ async def bootstrap() -> int:
                 environment=environment,
                 consumer_group=config.consumer_group,
                 circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
+                consumer_fetch_budget=consumer_fetch_budget,
             ),
         )
         event_bus_type = "kafka" if isinstance(event_bus, EventBusKafka) else "inmemory"

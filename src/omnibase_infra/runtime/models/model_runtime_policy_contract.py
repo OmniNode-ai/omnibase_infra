@@ -8,6 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_infra.event_bus.models.config.model_kafka_consumer_fetch_budget import (
+    ModelKafkaConsumerFetchBudget,
+)
 from omnibase_infra.runtime.models.model_runtime_profile_policy import (
     ModelRuntimeProfilePolicy,
 )
@@ -41,6 +44,14 @@ class ModelRuntimePolicyContract(BaseModel):
     # rather than the per-profile omnimemory_memgraph_host pattern.
     arch_graph_bolt_uri: str = Field(min_length=1)
     auxiliary_services_omnimemory_enabled: bool
+    # OMN-17888: the aggregate Kafka consumer fetch-memory bound. Lane-invariant
+    # today because every runtime lane runs under the same 1536M container
+    # limit, and the bound divides that limit rather than restating it -- the
+    # limit itself is read live from the cgroup, so a lane whose compose limit
+    # changes gets a correspondingly smaller/larger bound with no edit here.
+    # Rendered as ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON and resolved fail-closed
+    # by backends.auto_configure.select_event_bus.
+    kafka_consumer_fetch_budget: ModelKafkaConsumerFetchBudget
     profiles: dict[RuntimeProfileName, ModelRuntimeProfilePolicy]
 
     @field_validator("active_runtime_packages")

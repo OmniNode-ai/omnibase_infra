@@ -80,6 +80,12 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         "GOOGLE_CLOUD_LOCATION": contract.google_cloud_location,
         "OMNIMEMORY_MEMGRAPH_PORT": str(contract.omnimemory_memgraph_port),
         "ARCH_GRAPH_BOLT_URI": contract.arch_graph_bolt_uri,
+        # OMN-17888: one typed JSON var rather than five scalars -- a partially
+        # declared fetch budget is then impossible to express, and compose
+        # resolves a single fail-closed ${VAR:?...}.
+        "ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON": contract.kafka_consumer_fetch_budget.model_dump_json(
+            exclude_none=True
+        ),
     }
 
     dev_main = contract.profiles["dev"].processes["main"]

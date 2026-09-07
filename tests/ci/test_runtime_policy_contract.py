@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 import sys
@@ -432,3 +433,62 @@ def test_secret_resolver_mappings_satisfy_gateway_boot_check(tmp_path: Path) -> 
     assert exercised_profiles, (
         "expected at least one runtime profile to set secret_resolver_config_path"
     )
+
+
+def test_kafka_consumer_fetch_budget_is_contract_declared_and_rendered() -> None:
+    """OMN-17888: the aggregate consumer fetch bound is contract-owned.
+
+    The bound itself is never written down -- it is derived from the container
+    memory limit read live from the cgroup. What the contract owns is the
+    POLICY that divides it, and this test pins the policy's rendered form so a
+    contract edit that changes what the runtime receives fails here rather than
+    at container start on a lane.
+    """
+    contract = _load_contract()
+    budget = contract.kafka_consumer_fetch_budget
+
+    # The cgroup source is what keeps the bound tracking the compose limit
+    # instead of restating it; a declared limit here would be a second,
+    # driftable copy and the model rejects it outright.
+    assert budget.source.value == "container_cgroup_limit"
+    assert budget.memory_limit_bytes is None
+    assert budget.max_concurrent_consumers >= 1
+    assert 0.0 < budget.memory_fraction <= 1.0
+
+    env = _load_dotenv(POLICY_ENV_PATH)
+    # The renderer shell-quotes any value that is not dotenv-safe, and a JSON
+    # object never is; unquote it the way a shell sourcing the file would.
+    rendered = shlex.split(env["ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON"])[0]
+    assert json.loads(rendered) == {
+        "source": budget.source.value,
+        "memory_fraction": budget.memory_fraction,
+        "max_concurrent_consumers": budget.max_concurrent_consumers,
+        "brokers_per_consumer": budget.brokers_per_consumer,
+        "in_flight_fetches_per_broker": budget.in_flight_fetches_per_broker,
+    }
+
+
+def test_kafka_consumer_fetch_budget_wired_fail_closed_on_every_runtime_lane() -> None:
+    """OMN-17888: no lane may start a runtime without a declared budget.
+
+    ``:?`` and not ``:-``: an undeclared budget IS the unbounded aggregate
+    fetch that SIGKILLed omninode-runtime, so a silent default here would
+    reintroduce exactly the defect. The judge and lakshman lanes redefine their
+    own runtime env block rather than merging the base anchor (OMN-16843), so
+    each must carry the key itself -- a lane that inherits nothing and is not
+    listed here would boot unbounded with no signal.
+    """
+    var = "ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON"
+    lane_composes = (
+        COMPOSE_PATH,
+        ROOT / "docker" / "docker-compose.judge.yml",
+        ROOT / "docker" / "docker-compose.lakshman.yml",
+    )
+    for path in lane_composes:
+        text = path.read_text(encoding="utf-8")
+        assert f"{var}: ${{{var}:?" in text, (
+            f"{path.name} must resolve {var} fail-closed"
+        )
+        assert f"${{{var}:-" not in text, (
+            f"{path.name} must not carry a silent default for {var}"
+        )

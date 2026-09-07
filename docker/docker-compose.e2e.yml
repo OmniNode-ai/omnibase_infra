@@ -308,6 +308,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       # Kafka (internal address)
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # OMN-17888: aggregate Kafka consumer fetch bound. This service declares
+      # its own environment block and merges no anchor, so it carries the key
+      # itself. Fail-closed for the same reason as every other lane.
+      ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON: ${ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON:?runtime policy contract must set ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON}
       # Infisical (internal address)
       INFISICAL_ADDR: http://infisical:8080
       # Valkey (internal address)

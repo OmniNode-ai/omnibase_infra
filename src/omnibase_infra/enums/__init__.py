@@ -117,6 +117,9 @@ from omnibase_infra.enums.enum_infra_resource_type import EnumInfraResourceType
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
+from omnibase_infra.enums.enum_kafka_fetch_budget_source import (
+    EnumKafkaFetchBudgetSource,
+)
 from omnibase_infra.enums.enum_ledger_sink_drop_policy import EnumLedgerSinkDropPolicy
 from omnibase_infra.enums.enum_lifecycle_tier import EnumLifecycleTier
 from omnibase_infra.enums.enum_llm_finish_reason import EnumLlmFinishReason
@@ -194,6 +197,7 @@ __all__: list[str] = [
     "EnumInfraTransportType",
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
+    "EnumKafkaFetchBudgetSource",
     "EnumLedgerSinkDropPolicy",
     "EnumLifecycleTier",
     "EnumLlmFinishReason",

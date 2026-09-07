@@ -23,6 +23,14 @@ from omnibase_infra.backends.backend_probe import (
 )
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
+from omnibase_infra.event_bus.models.config.model_kafka_consumer_fetch_budget import (
+    ModelKafkaConsumerFetchBudget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +307,7 @@ def select_event_bus(
     environment: str = "local",
     consumer_group: str = "onex-runtime",
     circuit_breaker_threshold: int = 5,
+    consumer_fetch_budget: ModelKafkaConsumerFetchBudget | None = None,
 ) -> object:
     """Construct the event bus for the transport :func:`resolve_bus_type` selects.
 
@@ -324,6 +333,13 @@ def select_event_bus(
         environment: Runtime environment identifier.
         consumer_group: Consumer group for the bus.
         circuit_breaker_threshold: Circuit breaker threshold.
+        consumer_fetch_budget: Declared aggregate consumer fetch-memory
+            budget (OMN-17888). REQUIRED whenever the resolved transport is
+            Kafka: it bounds the sum of the per-consumer fetch buffers
+            across one consumer per subscribed topic, which is the term
+            that OOM-killed omninode-runtime. There is no default; the
+            runtime kernel resolves it from the contract-rendered
+            deployment environment and passes it here.
 
     Returns:
         An event bus instance (EventBusKafka or EventBusInmemory).
@@ -331,6 +347,8 @@ def select_event_bus(
     Raises:
         EventBusResolutionAmbiguousError: the probe result is indeterminate and
             neither ``bus_type`` nor ``ONEX_EVENT_BUS_TYPE`` disambiguates it.
+        ProtocolConfigurationError: the resolved transport is Kafka and no
+            ``consumer_fetch_budget`` was declared.
     """
     # Resolve bootstrap servers (match probe_kafka fallback logic)
     resolved_bootstrap = kafka_bootstrap_servers or os.getenv(
@@ -345,12 +363,42 @@ def select_event_bus(
     if resolved_bus == BUS_KAFKA:
         logger.info("Event bus resolved to kafka (%s) — using EventBusKafka", reason)
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+        from omnibase_infra.event_bus.models.config import (
+            ModelKafkaEventBusConfig,
+        )
+
+        # OMN-17888: the aggregate consumer fetch bound is REQUIRED on this
+        # path and has no default. This is the runtime's Kafka construction
+        # seam -- the process that subscribes to hundreds of topics at once and
+        # was SIGKILLed by the cgroup OOM killer with an unbounded aggregate
+        # fetch. The caller resolves the declared budget (the runtime kernel
+        # reads it from the contract-rendered deployment environment); this
+        # refuses rather than choosing a number, so a caller that forgot it
+        # gets a named error instead of an unbounded bus.
+        if consumer_fetch_budget is None:
+            raise ProtocolConfigurationError(
+                "refusing to construct EventBusKafka without a declared "
+                "consumer fetch budget. Pass consumer_fetch_budget=..., "
+                "resolved from ONEX_KAFKA_CONSUMER_FETCH_BUDGET_JSON "
+                "(rendered from contracts/services/runtime_policy.contract."
+                "yaml into docker/runtime-policy.env and passed by compose "
+                "fail-closed). An unbounded aggregate fetch across one "
+                "consumer per subscribed topic is what OOM-killed "
+                "omninode-runtime (OMN-17888).",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="select_event_bus",
+                    target_name="event_bus_kafka",
+                ),
+                parameter="consumer_fetch_budget",
+                value=None,
+            )
 
         kafka_config = ModelKafkaEventBusConfig(
             bootstrap_servers=resolved_bootstrap,
             environment=environment,
             circuit_breaker_threshold=circuit_breaker_threshold,
+            consumer_fetch_budget=consumer_fetch_budget,
         ).apply_environment_overrides()
         return EventBusKafka(config=kafka_config)
 

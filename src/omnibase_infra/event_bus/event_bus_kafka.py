@@ -437,6 +437,31 @@ class EventBusKafka(
             transport_type=EnumInfraTransportType.KAFKA,
         )
 
+        # OMN-17888: aggregate consumer fetch bound, resolved ONCE here so an
+        # unresolvable memory limit fails at boot rather than at the 300th
+        # subscription. Both values stay None when no budget is declared --
+        # the library path (CLI relays, tests) constructs a handful of
+        # consumers and is not what OOM-killed the runtime. The runtime
+        # construction path resolves a budget from the contract and refuses
+        # without one; see backends.auto_configure.select_event_bus.
+        self._consumer_fetch_max_bytes: int | None = None
+        self._max_concurrent_consumers: int | None = None
+        if config.consumer_fetch_budget is not None:
+            self._consumer_fetch_max_bytes = (
+                config.consumer_fetch_budget.resolve_fetch_max_bytes()
+            )
+            self._max_concurrent_consumers = (
+                config.consumer_fetch_budget.max_concurrent_consumers
+            )
+            logger.info(
+                "Kafka consumer aggregate fetch bound resolved: "
+                "fetch_max_bytes=%d, max_concurrent_consumers=%d "
+                "(max_partition_fetch_bytes stays %d -- OMN-16267 untouched)",
+                self._consumer_fetch_max_bytes,
+                self._max_concurrent_consumers,
+                config.max_request_size,
+            )
+
         # Kafka producer and consumer
         self._producer: AIOKafkaProducer | None = None
         self._consumers: dict[str, AIOKafkaConsumer] = {}
@@ -1902,6 +1927,70 @@ class EventBusKafka(
         prefix_budget = KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(host_hash) - 1
         return f"{effective_group_id[:prefix_budget]}-{host_hash}"
 
+    def _build_consumer_fetch_bound_kwargs(self) -> dict[str, int]:
+        """Aggregate fetch bound passed to every AIOKafkaConsumer (OMN-17888).
+
+        Returns ``{"fetch_max_bytes": N}`` when a budget is declared, and an
+        empty mapping otherwise. This is the AGGREGATE, response-level cap. It
+        is independent of ``max_partition_fetch_bytes``, which stays pinned to
+        the producer's ``max_request_size`` at both construction sites and
+        carries the OMN-16267 guarantee on its own.
+
+        ``fetch_max_bytes`` may legally be smaller than
+        ``max_partition_fetch_bytes``: aiokafka couples neither knob to the
+        other, and KIP-74's ``minOneMessage`` means a record larger than this
+        value is still returned so the consumer can make progress. Lowering
+        this can therefore never make a record unfetchable -- which is exactly
+        why the memory bound lives here and not on the per-partition knob.
+        """
+        if self._consumer_fetch_max_bytes is None:
+            return {}
+        return {"fetch_max_bytes": self._consumer_fetch_max_bytes}
+
+    def _enforce_consumer_cap(
+        self, consumer_key: tuple[str, str], correlation_id: UUID
+    ) -> None:
+        """Refuse to exceed the declared consumer count the bound divides by.
+
+        ``max_concurrent_consumers`` is the divisor in the aggregate fetch
+        budget. If consumers may exceed it, the divisor is an estimate and the
+        "bound" is decoration. Enforcing it converts the failure mode from a
+        silent SIGKILL by the cgroup OOM killer into a loud, attributable
+        configuration error naming the cap, the observed count and the field.
+
+        Raises:
+            ProtocolConfigurationError: starting this consumer would exceed
+                ``consumer_fetch_budget.max_concurrent_consumers``.
+        """
+        if self._max_concurrent_consumers is None:
+            return
+        # The caller has already reserved this key in _pending_consumer_keys,
+        # so the observed count includes the consumer about to be created.
+        observed = len(self._group_consumers) + len(self._pending_consumer_keys)
+        if observed <= self._max_concurrent_consumers:
+            return
+        self._pending_consumer_keys.discard(consumer_key)
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="start_consumer",
+            target_name=f"kafka.{consumer_key[0]}",
+            correlation_id=correlation_id,
+        )
+        raise ProtocolConfigurationError(
+            f"refusing to start consumer for topic {consumer_key[0]}: "
+            f"{observed} live/pending consumers would exceed the declared cap "
+            f"consumer_fetch_budget.max_concurrent_consumers="
+            f"{self._max_concurrent_consumers}. That cap is the divisor of the "
+            f"aggregate Kafka consumer fetch budget, so exceeding it silently "
+            f"invalidates the memory bound (OMN-17888). Raise the cap in "
+            f"contracts/services/runtime_policy.contract.yaml -- and re-derive "
+            f"the per-consumer baseline against the container memory limit "
+            f"before doing so -- or subscribe to fewer topics in this process.",
+            context=context,
+            parameter="consumer_fetch_budget.max_concurrent_consumers",
+            value=self._max_concurrent_consumers,
+        )
+
     async def _start_consumer_for_topic_unlocked(
         self,
         topic: str,
@@ -1948,6 +2037,7 @@ class EventBusKafka(
         consumer_key = (topic, group_id)
 
         correlation_id = uuid4()
+        self._enforce_consumer_cap(consumer_key, correlation_id)
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
         effective_group_id = self._resolve_effective_group_id(
@@ -1980,6 +2070,9 @@ class EventBusKafka(
             # producer reads (self._config.max_request_size) rather than a
             # second independently-tunable value.
             max_partition_fetch_bytes=self._config.max_request_size,
+            # OMN-17888: aggregate, response-level cap. Independent of the
+            # per-partition knob above; see _build_consumer_fetch_bound_kwargs.
+            **self._build_consumer_fetch_bound_kwargs(),
             **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
@@ -2109,6 +2202,8 @@ class EventBusKafka(
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
                     # OMN-16267: see rationale on the initial construction above.
                     max_partition_fetch_bytes=self._config.max_request_size,
+                    # OMN-17888: see rationale on the initial construction above.
+                    **self._build_consumer_fetch_bound_kwargs(),
                     **self._build_client_version_kwargs(AIOKafkaConsumer),
                     **self._build_auth_kwargs(),
                 )
