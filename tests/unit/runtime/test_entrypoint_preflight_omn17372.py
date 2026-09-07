@@ -55,10 +55,12 @@ _RESOLVER_CONFIG: dict[str, object] = {
 
 def _render_out_of_process(target: Path, config_json: str) -> int:
     """Render the way the entrypoint used to: a fresh cold interpreter."""
+    repo_src = Path(__file__).resolve().parents[3] / "src"
     result = subprocess.run(
         [sys.executable, "-m", "omnibase_infra.runtime.render_secret_resolver_config"],
         env={
             "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(repo_src),
             "ONEX_SECRET_RESOLVER_CONFIG_PATH": str(target),
             "ONEX_SECRET_RESOLVER_CONFIG_JSON": config_json,
         },

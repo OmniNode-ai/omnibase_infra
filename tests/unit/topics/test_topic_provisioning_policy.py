@@ -83,6 +83,8 @@ class TestProfileDerivation:
             bootstrap_servers="broker-1.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism=mechanism,
+            sasl_plain_username="fixture-user",
+            sasl_plain_password="fixture-password",
         )
         policy = ModelTopicProvisioningPolicy.from_kafka_config(config)
         assert policy.capacity_replication_factor is None
@@ -107,6 +109,8 @@ class TestSaslClusterIsNotAssumedSingleNode:
             bootstrap_servers="b-1.example:9096,b-2.example:9096,b-3.example:9096",
             security_protocol="SASL_SSL",
             sasl_mechanism="SCRAM-SHA-512",
+            sasl_plain_username="fixture-user",
+            sasl_plain_password="fixture-password",
         )
         return ModelTopicProvisioningPolicy.from_kafka_config(config)
 
