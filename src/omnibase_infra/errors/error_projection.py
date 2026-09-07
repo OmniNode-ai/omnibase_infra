@@ -158,8 +158,40 @@ class ProjectionNotMaterializedError(ProjectionError):
     """
 
 
+class ProjectionQueryRowBudgetError(ProjectionError):
+    """A projection read matched more rows than the seam will materialise.
+
+    OMN-17888. ``ProjectionDatabaseOperations._execute_query`` emitted
+    ``SELECT *`` with no row bound for any caller and then materialised the
+    result set twice, both copies alive at once
+    (``[dict(record) for record in cursor.fetchall()]``). Measured in the
+    deployed container against the live ``omnidash_analytics`` database, one
+    call over the ``session_id`` holding 91,633 of
+    ``public.session_replay_snapshots``' 94,571 rows cost 225.4 MiB: 200.7 MiB
+    of driver rows plus 24.8 MiB of plain dicts. ``asyncio.to_thread`` ran the
+    blocking handler on the loop's default 32-worker executor, so four to five
+    concurrent calls produced the ~1,062 MB RSS step that memcg-OOM-killed
+    ``onex-runtime`` on the ``.201`` DEV lane about every three minutes.
+
+    Raising is the deliberate choice over appending a ``LIMIT``. A truncated
+    answer is indistinguishable from a complete one at the call site, so a
+    ``LIMIT`` would convert an OOM into silently wrong projections -- the
+    silent-fallback shape this codebase refuses everywhere else. The refusal
+    names the relation, the bound, and the filter keys so the offending caller
+    is identifiable from one log line.
+
+    Classified as a write-path failure, not a content failure: the event is
+    well-formed and still owed a row, so the offset is withheld and the record
+    is redelivered once the caller is repaired. The remedy is never to raise
+    the bound -- it is to make the caller ask a bounded question (an indexed
+    single-row read, or a paged one), which is what the read it replaced
+    already needed.
+    """
+
+
 __all__ = [
     "ProjectionError",
     "ProjectionNotMaterializedError",
+    "ProjectionQueryRowBudgetError",
     "ProjectionTenantContextError",
 ]

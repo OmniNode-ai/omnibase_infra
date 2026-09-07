@@ -43,6 +43,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Final,
     Protocol,
     cast,
     get_args,
@@ -50,6 +51,7 @@ from typing import (
     runtime_checkable,
 )
 from uuid import UUID, uuid4
+from weakref import WeakKeyDictionary
 
 from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
@@ -85,6 +87,7 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ProjectionNotMaterializedError,
+    ProjectionQueryRowBudgetError,
     TopicReplicationPolicyError,
 )
 from omnibase_infra.event_bus.enum_contract_attach_status import (
@@ -2108,6 +2111,67 @@ class ProjectionDatabaseBindingTarget:
         return f"{self.dsn_env}"
 
 
+# ---------------------------------------------------------------------------
+# OMN-17888: the projection read seam's memory budget.
+#
+# Both numbers are POLICY, derived from measurements taken in the deployed
+# container on the .201 DEV lane (image sha256:21dd9d6a7401, revision
+# 743881e38f4c) and stated here so they can be re-derived rather than guessed:
+#
+#   container memory limit                              1,536 MiB
+#   post-subscription baseline RSS, measured              ~462 MiB
+#   headroom                                            ~1,051 MiB
+#   share allotted to projection reads                     256 MiB
+#   retained cost per row, measured (24.8 MiB / 91,571)      284 B
+#
+# The seam's worst case is MAX_INFLIGHT * MAX_ROWS * 284 B = 271 MiB, which is
+# the whole point of pairing the two: bounding rows alone leaves the loop's
+# default executor free to multiply it by 32, and bounding concurrency alone
+# leaves each call unbounded. `tests/unit/runtime/auto_wiring/
+# test_projection_query_row_budget_omn17888.py` pins this arithmetic, so
+# raising either constant without redoing it fails.
+#
+# MAX_ROWS also deliberately clears the live hot session (91,633 rows in
+# `session_replay_snapshots` as of 2026-09-07, growing ~800/hour): a bound that
+# refused today's legitimate traffic would be an availability regression
+# dressed up as a memory fix. It leaves roughly six weeks of runway, and it
+# fires as a named refusal rather than as an OOM kill when it is crossed. The
+# repair when that happens is the caller, not this number.
+PROJECTION_QUERY_MAX_ROWS: Final[int] = 125_000
+
+# `asyncio.to_thread` dispatches onto the running loop's DEFAULT executor,
+# whose worker count is `min(32, os.cpu_count() + 4)` -- 32 in this container.
+# That made the per-call allocation's multiplier a property of the host's core
+# count rather than a declared number, and py-spy caught 32 live `asyncio_N`
+# threads with 86% of sampled stacks inside one projection query.
+PROJECTION_HANDLER_MAX_INFLIGHT: Final[int] = 8
+
+# Keyed by the running loop rather than constructed once at import: an
+# asyncio.Semaphore binds itself to the first loop that awaits it, and the test
+# suite runs many loops in one process. `WeakKeyDictionary` lets a finished
+# loop's gate go with it instead of accumulating.
+_PROJECTION_INFLIGHT_GATES: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, asyncio.Semaphore
+] = WeakKeyDictionary()
+
+
+def _projection_inflight_gate() -> asyncio.Semaphore:
+    """Return this loop's gate over concurrent blocking projection invocations.
+
+    Runtime-wide rather than per handler: the budget above is a single share of
+    one container's memory, so the ceiling it buys has to be a single number.
+    A per-handler gate would multiply by however many projection contracts the
+    lane happens to wire, which is exactly the "bound is a property of the
+    deployment" shape this replaces.
+    """
+    loop = asyncio.get_running_loop()
+    gate = _PROJECTION_INFLIGHT_GATES.get(loop)
+    if gate is None:
+        gate = asyncio.Semaphore(PROJECTION_HANDLER_MAX_INFLIGHT)
+        _PROJECTION_INFLIGHT_GATES[loop] = gate
+    return gate
+
+
 @dataclass(frozen=True)
 class ProjectionCatalogBindingPolicy:
     """Composition-root choice of existing topology catalog identities."""
@@ -3150,7 +3214,42 @@ class ProjectionDatabaseOperations:
             cursor_factory = self._extras.RealDictCursor  # type: ignore[attr-defined]
             with conn.cursor(cursor_factory=cursor_factory) as cursor:  # type: ignore[attr-defined]
                 cursor.execute(select_sql, params or None)
-                return [dict(record) for record in cursor.fetchall()]
+                # OMN-17888. Two separate defects lived on this one line, which
+                # read `[dict(record) for record in cursor.fetchall()]`:
+                #
+                # (1) It materialised the result set TWICE with both copies
+                #     alive -- `fetchall()`'s full list of driver rows, plus the
+                #     comprehension's full list of plain dicts. Measured in the
+                #     deployed container against live `omnidash_analytics`, one
+                #     call over the session holding 91,633 of
+                #     `session_replay_snapshots`' 94,571 rows cost 225.4 MiB:
+                #     200.7 MiB of driver rows and 24.8 MiB of dicts. Streaming
+                #     the cursor drops each driver row as soon as it is copied,
+                #     leaving one copy: ~284 B/row, a ~9x reduction on the
+                #     measured shape.
+                #
+                # (2) It was unbounded by construction, for every caller. The
+                #     bound below is checked PER ROW, before the row is kept, so
+                #     the refusal never first allocates the thing it refuses.
+                #
+                # The refusal is deliberate over a `LIMIT`: a truncated result
+                # is indistinguishable from a complete one at the call site, so
+                # a limit would trade an OOM for silently wrong projections.
+                rows: list[dict[str, object]] = []
+                for record in cursor:
+                    if len(rows) >= PROJECTION_QUERY_MAX_ROWS:
+                        raise ProjectionQueryRowBudgetError(
+                            f"projection read of "
+                            f'"{target.physical_schema}"."{target.table.name}" '
+                            f"matched more than the {PROJECTION_QUERY_MAX_ROWS} "
+                            f"rows this seam will materialise "
+                            f"(filters={sorted(filters) if filters else []}); "
+                            "the read is refused rather than silently truncated "
+                            "(OMN-17888)",
+                            projection_type=target.table.name,
+                        )
+                    rows.append(dict(record))
+                return rows
 
         scope = _statement_tenant_scope(tenant_context, recorded_scope)
         if scope is None:
@@ -3810,7 +3909,12 @@ def _make_projection_dispatch_callback(
                 # Why: Control flow narrows this union at runtime before the attribute access.
                 return handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
 
-            result = await asyncio.to_thread(_invoke_projection_handler)
+            # OMN-17888: the gate is the declared multiplier on the read
+            # budget above. Held only across the blocking call, so it caps
+            # concurrent materialisation without serialising the async work
+            # on either side of it.
+            async with _projection_inflight_gate():
+                result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
             # OMN-13360 (deterministic-truth gate): the terminal
