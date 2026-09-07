@@ -126,6 +126,15 @@ jobs:
         # All potentially attacker-controlled inputs (labels, base_ref, sha) are
         # passed through environment variables to prevent shell injection.
         env:
+          # OMN-18012 — the dev control-bus lane declares
+          # `security_protocol: SASL_PLAINTEXT` / `sasl_mechanism: SCRAM-SHA-256`
+          # in omnimarket's config/ci_bus_lanes.yaml, which this job sparse-checks
+          # out above. The publisher READS that declaration and refuses to
+          # downgrade it, so a SASL lane with no credentials in the job env is a
+          # hard failure rather than a silent plaintext publish. These are org
+          # secrets with ALL visibility; they are the dev-lane SCRAM principal.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           PR_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
