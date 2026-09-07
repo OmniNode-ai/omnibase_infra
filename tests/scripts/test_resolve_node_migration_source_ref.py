@@ -8,6 +8,11 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from scripts import resolve_node_migration_source_ref as resolver
+from scripts.ci.check_pin_reachability import Resolution, Verdict
+
 SCRIPT = (
     Path(__file__).resolve().parents[2]
     / "scripts"
@@ -43,14 +48,79 @@ def test_defaults_to_dev_without_metadata(tmp_path: Path) -> None:
     assert (tmp_path / "github_output.txt").read_text(encoding="utf-8") == "ref=dev\n"
 
 
-def test_reads_explicit_omnimarket_source_ref(tmp_path: Path) -> None:
-    result = _run(
-        tmp_path,
-        "Refs OMN-15038\nOmnimarket-Source-Ref: jonah/omn-15038-drop-unwired-routing-columns",
+def test_reads_explicit_omnimarket_source_ref_after_dev_reachability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {"pull_request": {"body": "Omnimarket-Source-Ref: jonah/landed-source-ref"}}
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "github_output.txt"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+
+    seen: list[str] = []
+
+    def resolve_from_dev(ref: str) -> Resolution:
+        seen.append(ref)
+        return Resolution(Verdict.REACHABLE, "compare dev...landed = behind")
+
+    monkeypatch.setattr(resolver, "_resolve_ref_from_dev", resolve_from_dev)
+
+    assert resolver.main() == 0
+    assert capsys.readouterr().out.strip() == "jonah/landed-source-ref"
+    assert seen == ["jonah/landed-source-ref"]
+    assert output_path.read_text(encoding="utf-8") == "ref=jonah/landed-source-ref\n"
+
+
+def test_rejects_explicit_ref_not_reachable_from_dev(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps({"pull_request": {"body": "Omnimarket-Source-Ref: jonah/unmerged"}}),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "github_output.txt"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setattr(
+        resolver,
+        "_resolve_ref_from_dev",
+        lambda ref: Resolution(
+            Verdict.UNREACHABLE,
+            f"compare dev...{ref} = ahead",
+        ),
     )
 
-    assert result.returncode == 0
-    assert result.stdout.strip() == "jonah/omn-15038-drop-unwired-routing-columns"
+    assert resolver.main() == 1
+    assert "not reachable from omnimarket/dev" in capsys.readouterr().err
+    assert not output_path.exists()
+
+
+def test_rejects_explicit_ref_when_dev_reachability_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps({"pull_request": {"body": "Omnimarket-Source-Ref: jonah/unknown"}}),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "github_output.txt"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setattr(
+        resolver,
+        "_resolve_ref_from_dev",
+        lambda ref: Resolution(Verdict.UNDETERMINED, "HTTP 429: rate limit"),
+    )
+
+    assert resolver.main() == 1
+    assert "could not prove" in capsys.readouterr().err
+    assert not output_path.exists()
 
 
 def test_rejects_unsafe_ref(tmp_path: Path) -> None:
@@ -114,11 +184,11 @@ def test_fenced_decoy_does_not_outrank_the_real_trailer(tmp_path: Path) -> None:
         "Omnimarket-Source-Ref: attacker/branch\n"
         "```\n"
         "\n"
-        "Omnimarket-Source-Ref: jonah/omn-17294-real-branch\n",
+        "Omnimarket-Source-Ref: dev\n",
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "jonah/omn-17294-real-branch"
+    assert result.stdout.strip() == "dev"
 
 
 def test_indented_code_block_trailer_is_ignored(tmp_path: Path) -> None:
@@ -172,11 +242,11 @@ def test_repeated_identical_trailer_is_not_a_conflict(tmp_path: Path) -> None:
     """Idempotent re-stamping of the same value stays legal."""
     result = _run(
         tmp_path,
-        "Omnimarket-Source-Ref: jonah/same\nOmnimarket-Source-Ref: jonah/same\n",
+        "Omnimarket-Source-Ref: dev\nOmnimarket-Source-Ref: dev\n",
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "jonah/same"
+    assert result.stdout.strip() == "dev"
 
 
 def test_unterminated_fence_swallows_the_rest_of_the_body(tmp_path: Path) -> None:
