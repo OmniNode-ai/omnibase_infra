@@ -95,7 +95,7 @@ jobs:
           # self-hosted lab-load probe. Its ABSENCE is not an error here -- the
           # decision module treats a missing or stale record as `lab_unknown`
           # and routes hosted, which is the fail-closed answer.
-          run_id="$(gh run list --workflow runner-fleet-canary.yml \
+          run_id="$(gh run list --workflow dev-lane-liveness.yml \
             --repo "${GITHUB_REPOSITORY}" --status completed --limit 1 \
             --json databaseId --jq '.[0].databaseId' || true)"
           if [ -n "${run_id:-}" ]; then

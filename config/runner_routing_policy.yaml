@@ -47,7 +47,7 @@ hosted_runner_allowlist:
   - path: .github/workflows/omnigate.yml
     reason: "Fork-only untrusted PR verification must not execute on self-hosted runners."
   - path: .github/workflows/runner-fleet-canary.yml
-    reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors. OMN-18031 EXTENDS THIS ENTRY: the same file now also carries the saturation monitor's `saturation-record` job, hosted on the identical rationale -- a monitor that queues behind the saturation it reports on cannot report on it. The third job in this file, `lab-load-probe`, is deliberately NOT covered here: it is self-hosted on purpose (a hosted runner has no route to the lab's tailnet/RFC1918 addresses) and routes through the standard OMNI_RUNNER_SELECTOR_V1 block, so this entry does not silently widen to cover it."
+    reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors."
   - path: .github/workflows/model-review-capability-canary.yml
     reason: "OMN-17876: capability contract evidence must stay on hosted compute until separately authorized live runner selection."
   - path: .github/workflows/runner-broker-dispatch-wedge-rerun.yml
@@ -62,6 +62,8 @@ hosted_runner_allowlist:
     reason: "OMN-18031: the per-run routing decision job. It must not share fate with the fleet it routes onto -- a router queued behind a saturated fleet would decide, minutes late, that the fleet is saturated. Same isolation rationale as runner-fleet-canary.yml above. It is also the surface that enforces fork isolation (OMN-16683/16684) before any capacity signal is read, so it must be reachable on an untrusted PR, where self-hosted is prohibited outright."
   - path: .github/workflows/runner-route-probe.yml
     reason: "OMN-18031 gate P1: the live proof that `needs.<job>.outputs` resolves inside `runs-on`, for both a normal job and a reusable-workflow job. A survey of all five routing repos on 2026-09-07 found zero prior uses of that wiring (196 files carrying the seam selector were the positive control), so the assumption the whole design rests on is proven here rather than assumed. Its two `route-*` jobs and the proof gate are hosted; its two `consume-*` jobs resolve their runs-on FROM the route output and are hosted today only because the seam ceiling is hosted."
+  - path: .github/workflows/dev-lane-liveness.yml
+    reason: "OMN-18031: the saturation-record job is a bare ubuntu-latest by design -- the monitor must survive the saturation it reports on, the same fate-isolation rationale as runner-fleet-canary.yml above. Its sibling lab-load-probe job is deliberately self-hosted on a literal [self-hosted, omnibase-ci] and the pre-existing dev-lane-liveness job on [self-hosted, omnibase-deploy]; neither is a bare hosted runner, so this entry covers the ONE hosted job. These probes live here rather than in runner-fleet-canary.yml because tests/ci/test_dev_lane_liveness.py asserts the canary stays single-job and GitHub-hosted, and names this workflow as the home for lane/host-scoped probes."
   - path: .github/workflows/shared-env-runner-parity.yml
     reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
@@ -170,7 +172,21 @@ route:
     lab_load_ratio_threshold: 1.5
     min_lab_free_mem_mib: 4096
     sustained_samples: 4
-    # THE SAMPLE COUNT ALONE DOES NOT MEAN "20 MINUTES", and saying so would be
+    # CADENCE, STATED HONESTLY. The monitor rides dev-lane-liveness.yml
+    # ("7,22,37,52 * * * *" -- every 15 minutes), not a */5 of its own. The
+    # first build put it in runner-fleet-canary.yml and moved that cron */15 ->
+    # */5 to make "4 samples" mean 20 minutes; that broke the codified
+    # single-job/GitHub-hosted invariant on the canary
+    # (tests/ci/test_dev_lane_liveness.py), whose own message names
+    # dev-lane-liveness.yml as the home for lane/host-scoped probes. Riding the
+    # correct existing scheduler costs resolution: four samples there is roughly
+    # a 45-60 minute sustain, not 20. That is slower to notice a pile-up, and it
+    # is the price of not adding a third scheduler (out of scope) and not
+    # narrowing a fate-isolation guard. Re-derive the count against real
+    # placement once the seam permits self-hosted; tuning it now would be tuning
+    # against a mechanism with no consumers wired.
+    #
+    # THE SAMPLE COUNT ALONE DOES NOT MEAN A DURATION, and saying so would be
     # a soft claim. Measured 2026-09-07T11:0xZ: four consecutive canary runs
     # (queued 10:25, 10:34, 10:46, 11:02Z) were all still QUEUED behind the
     # GitHub-hosted backlog, so samples arrive at whatever rate that queue

@@ -109,3 +109,158 @@ jobs:
             echo "by operator ruling — recovery path:"
             echo "\`knowledge-base:runbooks/cold-lane-full-bringup.md\`."
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  # --- OMN-18031 G7: the lab half of the saturation record -----------------
+  #
+  # WHY THIS LIVES HERE AND NOT IN runner-fleet-canary.yml. The first build put
+  # it there, on the reasoning that the canary is an EXISTING scheduler and the
+  # consent row forbids adding a third one. That broke a codified invariant:
+  # `tests/ci/test_dev_lane_liveness.py::test_fleet_canary_is_not_borrowed_for_the_lane_probe`
+  # asserts `list(canary["jobs"]) == ["fleet-status"]` and its own message says
+  # where host-scoped probes belong — "put lane/host-scoped probes in
+  # dev-lane-liveness.yml instead". The canary asserts every one of its jobs is
+  # GitHub-hosted because a canary that shares fate with the fleet it watches
+  # proves nothing, and folding a self-hosted job in would have required
+  # narrowing that guard. This workflow is the sanctioned home for exactly this
+  # shape, and it is also an existing scheduler, so no third one is added.
+  #
+  # DELIBERATELY SELF-HOSTED, and therefore deliberately fate-shared with the
+  # fleet. A hosted runner cannot read lab load at all: the pre-push picker
+  # reaches lab hosts over ssh to tailnet/RFC1918 addresses that GitHub-hosted
+  # compute has no route to. The only way to measure the lab is to run on it.
+  #
+  # The cost is named rather than hidden: the lab half of the record is missing
+  # exactly when the lab is busiest. That is why its ABSENCE is itself one of
+  # the four alert conditions (`lab_probe_unavailable_sustained`) — the one
+  # reason a 3-minute self-hosted job cannot start is that no runner is free.
+  lab-load-probe:
+    name: lab-load-probe
+    # Literal, not OMNI_RUNNER_SELECTOR_V1: this job's whole purpose is to
+    # execute ON a lab host, so a seam flip must never be able to relocate it
+    # onto GitHub-hosted compute, where it would measure the wrong machine and
+    # report it as the lab. Same reasoning the dev-lane-liveness job above
+    # already applies to its own runs-on.
+    runs-on: [self-hosted, omnibase-ci]
+    # Never blocks the lane probe: this job failing IS a data point, not an outage.
+    continue-on-error: true
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Probe this host's load and free memory
+        run: |
+          set -uo pipefail
+          python3 - <<'PYEOF' > lab-load.json
+          import json, sys, datetime
+          sys.path.insert(0, "scripts/ci")
+          from runner_route_decision import probe_local_lab_load
+          record = probe_local_lab_load()
+          record["sampled_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+          print(json.dumps(record))
+          PYEOF
+          cat lab-load.json
+      - name: Upload lab load record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-load
+          path: lab-load.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  # --- OMN-18031 G7: merge, evaluate, alert --------------------------------
+  #
+  # Hosted for the same reason the fleet canary is: the monitor must survive
+  # the saturation it reports on. It probes the org runner registry itself
+  # rather than consuming an artifact from the canary, which keeps the canary
+  # byte-for-byte unchanged and removes a cross-workflow artifact dependency.
+  saturation-record:
+    name: saturation-record
+    needs: [lab-load-probe]
+    # `always()` is load-bearing: an absent lab probe is the state this monitor
+    # most needs to record, and it is alert condition 4.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Probe the org runner registry
+        env:
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          set -uo pipefail
+          python3 - <<'PYEOF' > fleet-status.json
+          import json, os, sys, pathlib
+          sys.path.insert(0, "scripts/ci")
+          from runner_route_decision import probe_fleet, load_route_policy
+          policy = load_route_policy(pathlib.Path("config/runner_routing_policy.yaml"))
+          token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get("CROSS_REPO_PAT")
+          print(json.dumps(probe_fleet(token, str(policy["runner_group"]), "https://api.github.com")))
+          PYEOF
+          cat fleet-status.json
+
+      - name: Download this run's lab half
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: lab-load
+          path: ./.sat-current
+
+      - name: Download prior records for the sustain window
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p ./.sat-history
+          # The sustain window is read from this workflow's own previous record
+          # artifacts — no new datastore, and nothing to keep in sync.
+          gh run list --workflow dev-lane-liveness.yml --repo "${GITHUB_REPOSITORY}" \
+            --status completed --limit 8 --json databaseId --jq '.[].databaseId' \
+            > ./.sat-runs.txt || true
+          # Read the ids with an explicit loop: an unquoted variable does not
+          # word-split under every shell (CLAUDE.md rule 16).
+          while IFS= read -r run_id; do
+            [ -n "${run_id}" ] || continue
+            gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" \
+              --name saturation-record --dir "./.sat-history/${run_id}" || true
+          done < ./.sat-runs.txt
+          find ./.sat-history -name '*.json' | head -20 || true
+
+      - name: Build the record and evaluate sustained saturation
+        id: evaluate
+        env:
+          # Until a route job publishes its reason into this workflow, the
+          # monitor records `unknown`, which is NOT on the condition-3
+          # allowlist and therefore raises nothing. Silence here is honest:
+          # condition 3 has no input yet, rather than a fabricated one.
+          ROUTE_REASON: unknown
+          # Same channel the fleet canary already alerts to — inherited, not
+          # chosen here. Absent tokens degrade to annotation + artifact only.
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: |
+          set -uo pipefail
+          python3 scripts/ci/runner_saturation_record.py \
+            --policy config/runner_routing_policy.yaml \
+            --fleet-json fleet-status.json \
+            --lab-json ./.sat-current/lab-load.json \
+            --route-reason "${ROUTE_REASON}" \
+            --history ./.sat-history \
+            --out runner-saturation-record.json
+
+      - name: Upload the saturation record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saturation-record
+          path: |
+            runner-saturation-record.json
+            runner-saturation-alerts.json
+          if-no-files-found: warn
+          retention-days: 7

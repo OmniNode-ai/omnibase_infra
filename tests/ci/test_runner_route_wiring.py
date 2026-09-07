@@ -129,10 +129,15 @@ def test_the_route_workflows_are_pinned_hosted_in_the_policy_allowlist() -> None
     assert ".github/workflows/runner-route-probe.yml" in paths
 
 
-def test_the_canary_allowlist_reason_was_widened_with_its_new_jobs() -> None:
-    """Adding jobs to an allowlisted file silently widens what the entry covers.
-    The reason text must have grown to match, or the allowlist has outgrown its
-    own justification.
+def test_the_canary_allowlist_reason_was_not_widened_at_all() -> None:
+    """The canary entry must still cover exactly what it always covered.
+
+    The first build added the two monitor jobs INTO runner-fleet-canary.yml and
+    extended this reason text to match. That broke a codified invariant --
+    tests/ci/test_dev_lane_liveness.py asserts the canary stays single-job -- so
+    the jobs moved to dev-lane-liveness.yml and this entry went back to its
+    original OMN-13915 justification. An entry that still mentioned jobs it no
+    longer covers is an allowlist describing a file that does not exist.
     """
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
     entry = next(
@@ -140,9 +145,24 @@ def test_the_canary_allowlist_reason_was_widened_with_its_new_jobs() -> None:
         for item in policy["hosted_runner_allowlist"]
         if item["path"] == ".github/workflows/runner-fleet-canary.yml"
     )
+    assert "OMN-18031" not in entry["reason"]
+    assert "saturation-record" not in entry["reason"]
+    assert "lab-load-probe" not in entry["reason"]
+
+
+def test_the_new_hosted_monitor_job_carries_its_own_allowlist_reason() -> None:
+    """dev-lane-liveness.yml gained one bare-hosted job, so it needs an entry
+    naming that job and why it is hosted -- otherwise the audit's bare
+    ubuntu-latest rule would fire, or an unexplained entry would suppress it.
+    """
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    entry = next(
+        item
+        for item in policy["hosted_runner_allowlist"]
+        if item["path"] == ".github/workflows/dev-lane-liveness.yml"
+    )
     assert "OMN-18031" in entry["reason"]
     assert "saturation-record" in entry["reason"]
-    assert "lab-load-probe" in entry["reason"]
 
 
 def test_the_audit_route_wiring_pass_is_wired_into_local_workflows() -> None:
@@ -216,15 +236,29 @@ def test_the_probe_gate_treats_a_skipped_consumer_as_a_failure() -> None:
 # --- the saturation monitor rides the EXISTING scheduler -------------------
 
 
-def test_the_saturation_monitor_extends_the_existing_canary_not_a_third_scheduler() -> (
-    None
-):
-    canary = _workflow("runner-fleet-canary.yml")
-    schedule = _triggers(canary)["schedule"]
-    assert schedule == [{"cron": "*/5 * * * *"}]
-    assert {"fleet-status", "lab-load-probe", "saturation-record"} <= set(
-        canary["jobs"]
+def test_the_saturation_monitor_rides_an_existing_scheduler_not_a_third_one() -> None:
+    """It extends dev-lane-liveness.yml, which already runs on a schedule.
+
+    NOT runner-fleet-canary.yml, which is where it first went:
+    tests/ci/test_dev_lane_liveness.py::test_fleet_canary_is_not_borrowed_for_the_lane_probe
+    asserts the canary stays single-job and GitHub-hosted, and its own failure
+    message names this workflow as the home for lane/host-scoped probes. That
+    invariant exists because a canary sharing fate with the fleet it watches
+    proves nothing.
+    """
+    lane = _workflow("dev-lane-liveness.yml")
+    assert _triggers(lane)["schedule"], "dev-lane-liveness must already be scheduled"
+    assert {"dev-lane-liveness", "lab-load-probe", "saturation-record"} <= set(
+        lane["jobs"]
     )
+
+
+def test_the_canary_is_left_exactly_as_it_was() -> None:
+    """Single-job, GitHub-hosted, unchanged cadence -- the OMN-13915 boundary."""
+    canary = _workflow("runner-fleet-canary.yml")
+    assert list(canary["jobs"]) == ["fleet-status"]
+    assert canary["jobs"]["fleet-status"]["runs-on"] == "ubuntu-latest"
+    assert _triggers(canary)["schedule"] == [{"cron": "*/15 * * * *"}]
 
 
 def test_no_third_scheduled_routing_workflow_was_added() -> None:
@@ -243,32 +277,31 @@ def test_no_third_scheduled_routing_workflow_was_added() -> None:
     assert "runner-route-reusable.yml" not in scheduled
 
 
-def test_the_fleet_status_job_stays_hosted_byte_for_byte() -> None:
-    """The canary's isolation from the fleet it monitors is unchanged."""
-    assert (
-        _workflow("runner-fleet-canary.yml")["jobs"]["fleet-status"]["runs-on"]
-        == "ubuntu-latest"
-    )
-
-
-def test_the_lab_probe_is_self_hosted_and_cannot_block_the_canary() -> None:
+def test_the_lab_probe_is_pinned_self_hosted_by_a_literal_not_the_seam() -> None:
     """It must run ON the lab (a hosted runner has no route to the lab's
     tailnet/RFC1918 addresses) and its failure is a data point, not an outage.
+
+    The runs-on is a LITERAL and not OMNI_RUNNER_SELECTOR_V1 on purpose: routed
+    through the seam, a flip could relocate this probe onto GitHub-hosted
+    compute, where it would measure the wrong machine and publish the reading as
+    the lab's. The pre-existing dev-lane-liveness job pins its own runner for
+    the same reason.
     """
-    job = _workflow("runner-fleet-canary.yml")["jobs"]["lab-load-probe"]
+    job = _workflow("dev-lane-liveness.yml")["jobs"]["lab-load-probe"]
     assert job["continue-on-error"] is True
     assert job["timeout-minutes"] <= 3
-    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in job["runs-on"]
+    assert job["runs-on"] == ["self-hosted", "omnibase-ci"]
+    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" not in str(job["runs-on"])
 
 
-def test_the_saturation_record_runs_even_when_its_inputs_failed() -> None:
-    """A red fleet-status and an absent lab probe are the two states the
-    monitor most needs to record.
+def test_the_saturation_record_runs_even_when_its_input_failed() -> None:
+    """An absent lab probe is the state the monitor most needs to record -- it
+    is alert condition 4, not a reason to skip the sample.
     """
-    job = _workflow("runner-fleet-canary.yml")["jobs"]["saturation-record"]
+    job = _workflow("dev-lane-liveness.yml")["jobs"]["saturation-record"]
     assert job["if"] == "always()"
     assert job["runs-on"] == "ubuntu-latest"
-    assert set(job["needs"]) == {"fleet-status", "lab-load-probe"}
+    assert set(job["needs"]) == {"lab-load-probe"}
 
 
 # --- the seam is read, never written --------------------------------------
