@@ -117,19 +117,44 @@ jobs:
           RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
           RUNNER_ROUTE_ARTIFACT: runner-route-decision.json
+          # EVERY VALUE THE COMMAND READS ARRIVES HERE, NOT INLINE IN THE BODY.
+          # Actions substitutes an expression into the run script as RAW TEXT
+          # before the shell parses it, so `["self-hosted","omnibase-ci"]`
+          # interpolated inside double quotes renders as
+          # `--seam-json "["self-hosted","omnibase-ci"]"`; the shell strips the
+          # inner quotes and the module receives `[self-hosted,omnibase-ci]`,
+          # which is not JSON. Measured on run 34131479134, the merged pilot's
+          # own first live decision: `reason: probe_error:seam_unparseable`.
+          # Env values are passed as data and never re-parsed by the shell,
+          # which also closes the Actions template-injection class on
+          # head.repo.full_name in the same stroke.
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_PATH: ${{ inputs.workflow_path }}
+          # The seam the CALLER's event would have resolved under
+          # OMNI_RUNNER_SELECTOR_V1, including the merge_group carve-out, so the
+          # ceiling this reads is the same one the V1 expression would apply.
+          SEAM_JSON: >-
+            ${{ (github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON)
+                || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}
+          PUBLIC_JSON: ${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          LAB_RECORD: ${{ steps.lab.outputs.path }}
         run: |
           set -uo pipefail
-          python3 scripts/ci/runner_route_decision.py \
-            --event-name "${{ github.event_name }}" \
-            --head-repo "${{ github.event.pull_request.head.repo.full_name }}" \
-            --repository "${{ github.repository }}" \
-            --workflow-path "${{ inputs.workflow_path }}" \
-            --seam-json "${{ vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}" \
-            --public-json "${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}" \
-            --policy config/runner_routing_policy.yaml \
-            ${{ inputs.dry_run && '--dry-run' || '' }} \
-            ${{ steps.lab.outputs.path && format('--lab-record {0}', steps.lab.outputs.path) || '' }} \
-            || rc=$?
+          args=(
+            --event-name "${EVENT_NAME}"
+            --head-repo "${HEAD_REPO}"
+            --repository "${REPOSITORY}"
+            --workflow-path "${WORKFLOW_PATH}"
+            --seam-json "${SEAM_JSON}"
+            --public-json "${PUBLIC_JSON}"
+            --policy config/runner_routing_policy.yaml
+          )
+          [ "${DRY_RUN}" = "true" ] && args+=(--dry-run)
+          [ -n "${LAB_RECORD}" ] && args+=(--lab-record "${LAB_RECORD}")
+          python3 scripts/ci/runner_route_decision.py "${args[@]}" || rc=$?
           # FAIL-CLOSED FLOOR. The module already catches everything internally,
           # but if the interpreter itself could not run, the calling workflow
           # must still receive a usable runs-on rather than an empty string that

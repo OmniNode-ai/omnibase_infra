@@ -330,3 +330,75 @@ def test_nothing_added_here_writes_an_actions_variable() -> None:
             assert needle not in text, (
                 f"{path.name} contains a variable-mutation path: {needle}"
             )
+
+
+# --- the seam reaches the module as JSON, not as shell-mangled argv --------
+
+
+def _decide_step(workflow_name: str, job: str) -> dict[str, Any]:
+    wf = _workflow(workflow_name)
+    for step in wf["jobs"][job]["steps"]:
+        if isinstance(step, dict) and step.get("id") == "decide":
+            return step
+    raise AssertionError(f"{workflow_name}:{job} has no step with id 'decide'")
+
+
+def test_the_decide_step_body_contains_no_actions_interpolation() -> None:
+    """MEASURED LIVE, on the merged pilot's own CI run.
+
+    Run 34131479134, artifact `runner-route-decision-34131479134-route`, the
+    first real decision this mechanism ever published:
+
+        {"decision": "hosted", "reason": "probe_error:seam_unparseable", ...}
+
+    The step interpolated the runner variable straight into the shell command:
+
+        --seam-json "${{ vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}"
+
+    Actions substitutes the RAW value before the shell parses the line, so
+    `["self-hosted","omnibase-ci"]` renders as
+    `--seam-json "["self-hosted","omnibase-ci"]"`. The shell strips the inner
+    quotes and the module receives `[self-hosted,omnibase-ci]`, which is not
+    JSON. Reproduced exactly in a local bash one-liner.
+
+    The failure is fail-CLOSED, and that is precisely why it survived review:
+    every decision was `hosted`, which is what an inert mechanism looks like.
+    It was invisible under the old hosted seam too -- `["ubuntu-latest"]`
+    renders as `[ubuntu-latest]`, equally unparseable, equally hosted. The
+    reason string was the only thing that ever differed, and nothing read it.
+    A green route job is not evidence the module saw its inputs.
+
+    Pinning "no interpolation anywhere in the run body" rather than "quote the
+    seam properly" is deliberate: it is one rule a reader can check by looking,
+    it cannot be satisfied by a cleverer quoting, and it closes the Actions
+    template-injection class in the same stroke.
+    """
+    for workflow_name, job in (
+        ("runner-route-reusable.yml", "route"),
+        ("runner-route-probe.yml", "route-inline"),
+    ):
+        body = _decide_step(workflow_name, job)["run"]
+        assert "${{" not in body, (
+            f"{workflow_name}:{job} interpolates an Actions expression into the "
+            f"shell body; pass it through env: instead -- a JSON array renders "
+            f"as unquoted argv and reaches the module as non-JSON"
+        )
+
+
+def test_the_runner_variables_are_supplied_through_env() -> None:
+    """The counterpart: removing the interpolation must not remove the input.
+
+    A step with an interpolation-free body that no longer receives the seam at
+    all would satisfy the test above and route hosted forever -- the same
+    outcome, one layer down.
+    """
+    for workflow_name, job in (
+        ("runner-route-reusable.yml", "route"),
+        ("runner-route-probe.yml", "route-inline"),
+    ):
+        env = _decide_step(workflow_name, job).get("env") or {}
+        joined = " ".join(str(v) for v in env.values())
+        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in joined, workflow_name
+        assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in joined, workflow_name
+        body = _decide_step(workflow_name, job)["run"]
+        assert "--seam-json" in body and "--public-json" in body, workflow_name
