@@ -701,6 +701,28 @@ jobs:
           path: /tmp/boot-gate-diagnostics
           retention-days: 14
 
+      # OMN-17530 follow-up. `lab_pass_receipt.py` imports pydantic at module
+      # scope, and nothing in this job installs a Python dependency -- no
+      # setup-uv, no setup-python, no pip. So the gate's FIRST run (34235502322,
+      # the gate commit's own push) and every run after it died on
+      # `ModuleNotFoundError: No module named 'pydantic'` AFTER all four checks
+      # had already been interpolated to `ok`, and the delivery this gate exists
+      # to govern was skipped by `needs:` with nothing red saying why. A gate
+      # that has never emitted a passing receipt is not fail-closed, it is
+      # fail-always.
+      #
+      # Convention, not invention: `astral-sh/setup-uv` + `uv run --no-project
+      # --with <dep>` is how every other dependency-carrying CI script in this
+      # repo runs (precommit-parity-gate.yml, hostile-reviewer.yml).
+      #
+      # `if: always()` to match the emit step below. A FAILED lab pass must
+      # still be able to write its receipt -- "it failed" and "nobody ran it"
+      # are the two states the receipt exists to tell apart -- and it cannot do
+      # that if the interpreter it needs was skipped along with the failure.
+      - name: Install uv (the receipt emitter's runtime)
+        if: always()
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
       # OMN-17530 rule 24(a). This job IS the onex-lab lab pass; until now it
       # left nothing behind that outlived the run. The receipt is a durable,
       # sha-keyed record of what was exercised, which the lab-pass-gate job
@@ -717,7 +739,8 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          python3 omnibase_infra/scripts/ci/lab_pass_receipt.py emit \
+          uv run --no-project --with pydantic \
+            python3 omnibase_infra/scripts/ci/lab_pass_receipt.py emit \
             --sha "${GITHUB_SHA}" \
             --lane onex-lab \
             --started-at "${LAB_PASS_STARTED_AT}" \
@@ -804,12 +827,21 @@ jobs:
         with:
           persist-credentials: false
 
+      # Same missing dependency as the emit half above, and latent rather than
+      # observed: this job has been skipped on every run so far because the
+      # emit half failed first, so its own `ModuleNotFoundError` would have
+      # surfaced only once the emitter was repaired alone. Fixed in the same
+      # change so the repair cannot land half-done.
+      - name: Install uv (the receipt reader's runtime)
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
       - name: Read the lab-pass receipt for the delivered sha
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/lab_pass_receipt.py gate \
+          uv run --no-project --with pydantic \
+            python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${GITHUB_SHA}" \
             --repo "${GITHUB_REPOSITORY}" \
             | tee /tmp/lab-pass-gate.txt
