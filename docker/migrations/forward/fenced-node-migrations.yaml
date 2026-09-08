@@ -92,11 +92,18 @@
 # the 2026-08-29 "Hold + fix mechanism" ruling that replaced 0031's remedy.
 # The ordinals are historical and are NOT renumbered when an id is released —
 # they name the ruling that added the entry, not its index in the list):
-#   delegation 0023-0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
-#     live, actively-written delegation tables; un-gate only in a change that
-#     also proves the writer sets app.tenant_id per connection. No lane may
-#     release these (see the "delegation ids are not releasable" checks in
-#     both runners).
+#   delegation 0023, 0026 — OMN-14974 / OMN-15313. Tenant-isolation RLS on
+#     live, actively-written delegation tables.
+#
+#     THIS ENTRY WAS THE QUARTET 0023-0026 until 2026-09-08. 0024 and 0025
+#     left the baseline entirely under OMN-15683. 0023 and 0026 stay: 0023 as
+#     a SUPERSEDED id rather than a pending ruling — its CREATE POLICY compares
+#     TEXT to TEXT by construction and now aborts against the uuid column,
+#     leaving the table FORCE-RLS with zero policies — and 0026 because
+#     releasing it was MEASURED, on the .201 dev lane, to refuse every write
+#     the lane's own async judge-verdict writer issues. Both arguments, with
+#     the verbatim errors, are in the "2026-09-08" block at the end of this
+#     header.
 #   registration 0002 — OMN-15343 (introduced-by) / OMN-14894 (tranche 1).
 #     FORCE ROW LEVEL SECURITY plus a tenant_id column on
 #     node_service_registry. THIS is the id the hold was ever really about,
@@ -446,13 +453,251 @@
 #     node_projection_tenant_registry — on a first-ever bootstrap 0032 runs
 #     first, which 0032 handles explicitly (empty table: convert; rows present:
 #     abort naming the violation).
+#
+# ===========================================================================
+# 2026-09-08 — THE DELEGATION-PATH RELEASE (OMN-15683, lane
+# delegation-fence-lift)
+# ===========================================================================
+# Operator ruling of 2026-09-08, recorded as the orchestrator RULING row in
+# omni_home docs/tracking/ROLLING_WORK_LEDGER.md at 2026-09-08T12:32:13Z: a
+# fence on a migration is a defect to close, not a state to maintain —
+# migrations and deployment are one process. That ruling releases the
+# delegation-path hold and supersedes the 2026-08-28 "Fence 0031, HOLD the
+# repin" ruling for the ids below. Related: OMN-15583, OMN-15349, OMN-14974,
+# OMN-16493, OMN-16930, OMN-17288, OMN-17316.
+#
+# The release lands in TWO PIECES, because this file is a baseline and the
+# guard that sits next to it makes the two halves mechanically different:
+#
+#   BASELINE RELEASE (removed from the list below, every lane):
+#     delegation 0024, 0025
+#
+#   LANE RELEASE (kept in the list below, un-gated on the compose dev/lab lane
+#   by run-forward-migrations.sh's ONEX_MIGRATION_LANE=dev arm):
+#     delegation 0034
+#
+#   STILL FULLY FENCED:
+#     delegation 0023, 0026, 0031, 0032, 0033
+#
+# 0026 WAS RELEASED IN THIS CHANGE'S FIRST REVISION AND WAS TAKEN BACK OUT ON
+# MEASUREMENT — see its own section below. The lab-first step is what caught
+# it, which is the point of the lab-first step.
+#
+# ---------------------------------------------------------------------------
+# WHY 0034 GETS A LANE RELEASE AND NOT A BASELINE REMOVAL
+# ---------------------------------------------------------------------------
+# This is mechanical, not a preference, and it is the SAME constraint the
+# "registration 0002" rationale above already records. 0034 enables FORCE ROW
+# LEVEL SECURITY (its conversion path toggles it off and back on) and is not in
+# grandfathered-force-rls-migrations.yaml, so removing it from this list hands
+# it to the OMN-15336 item-4 guard
+# (migration_declares_unclassified_force_rls), which is FATAL for a
+# FORCE-enabling id that is neither fenced nor grandfathered and has never
+# applied on that database.
+#
+# MEASURED, not argued. A baseline removal of 0026 — the sibling that carries
+# the identical shape — was executed against a virgin Postgres through the real
+# runner in tests/scripts/test_node_migration_fence_parity.py and produced:
+#
+#   [forward-migration] FATAL:
+#   node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_
+#   tenant_isolation.sql enables FORCE ROW LEVEL SECURITY but is not in the
+#   operator fence manifest (...). This migration has never applied on this
+#   database. Classify it before it may run ... NOTHING was applied by this
+#   migration.
+#
+# The guard's own message names the remedy — "add a fence entry citing the
+# owning ticket ... (with a lane release only if an operator ruling authorizes
+# one)" — and that is exactly the shape taken here. 0024 and 0025 declare no
+# FORCE at all, so they take the baseline removal cleanly; the guard predicate
+# was run against all five candidate files individually to establish which is
+# which (0023, 0026 and 0034 fire it; 0024 and 0025 do not).
+# The grandfather snapshot is NOT the alternative: its own header states it
+# does not grow, and a 2026-authored migration was never in the pre-guard tree
+# it snapshots.
+#
+# THE LANE RELEASE IS ALSO THE SAFER OUTCOME, independently of the guard, and
+# this is the second reason it is not a workaround. Read-only probes of the
+# .201 lanes on 2026-09-08:
+#   * dev (omnibase-infra-postgres): delegation_events.tenant_id is ALREADY
+#     uuid (0031 recorded 2026-08-27) and delegation_judge_verdict_events holds
+#     ZERO rows. 0034 takes its already-uuid branch — no conversion, no mirror
+#     lookup — and restates the policy and the app_dashboard GRANT; 0026 locks
+#     nothing out of an existing dataset.
+#   * stability-test: tenant_id is still TEXT with 165 rows, and
+#     tenant_registry_mirror EXISTS BUT HOLDS 0 ROWS — 0034's own pre-guard
+#     query returns 11 unresolvable slugs there. A baseline release would make
+#     0034 abort on that lane, correctly and uselessly, and by lexical sort
+#     order would take every node directory after node_projection_delegation
+#     down with it. That is the "WHO WAS PAYING FOR IT" hazard above, and step
+#     1 of the un-gate ordering (the mirror is CAUGHT UP) is simply not
+#     satisfied there yet.
+#   * prod and judge: delegation_events exists but carries NO tenant_id column
+#     at all and NO platform_catalog ledger — neither lane has ever run this
+#     node corpus through this runner.
+# The lane release un-gates exactly the lane where the preconditions hold and
+# leaves every other lane at the full baseline, which is the property the
+# ONEX_MIGRATION_LANE mechanism exists to provide (fail-closed by default; the
+# release set is committed, never supplied).
+#
+# ONEX-DEV IS NOT COVERED BY THIS CHANGE, stated plainly rather than implied.
+# The k8s Job (omninode_infra k8s/migrations/omnibase-infra-migrate.yaml) reads
+# this same baseline and layers its OWN release, which today names only the
+# registration trio. 0026 and 0034 therefore stay fenced on onex-dev until that
+# Job's release block is extended in its own repo — a separate PR, tracked as a
+# blocker on OMN-15683. Landing it there requires the same precondition: the
+# tenant-registry projection caught up on that database.
+#
+# ---------------------------------------------------------------------------
+# WHY 0026 IS NOT RELEASED — MEASURED ON THE LAB LANE, NOT INHERITED
+# ---------------------------------------------------------------------------
+# 0026 puts ENABLE + FORCE ROW LEVEL SECURITY and a TEXT-comparing
+# tenant_isolation policy on delegation_judge_verdict_events. This file's own
+# un-gate bar for the delegation quartet has always been "un-gate only in a
+# change that also proves the writer sets app.tenant_id per connection". That
+# bar is NOT met, and the reasoning that it was — "the table holds zero rows,
+# so there is nothing to lock out" — was about READS. The hazard is on the
+# WRITE path.
+#
+# It was released here in this change's first revision, applied on the .201 dev
+# lane through the sanctioned one-shot, and then MEASURED. Two refusals, both
+# quoted verbatim:
+#
+#   (1) NEGATIVE CONTROL, an unset GUC. As the lane's own non-superuser,
+#       non-BYPASSRLS writer role, inside a rolled-back transaction:
+#         ERROR:  new row violates row-level security policy for table
+#         "delegation_judge_verdict_events"
+#       Nothing was written; the transaction was rolled back.
+#
+#   (2) THE REAL WRITE PATH. The lane's async judge-verdict writer
+#       (omnimarket node_projection_delegation handler_delegation
+#       _project_judge_verdict) resolves tenant_id by correlation join against
+#       delegation_events — which on this lane is now the canonical UUID — and
+#       then issues its INSERT through AsyncpgAdapter.execute WITHOUT a
+#       `tenant=` argument. The adapter therefore falls back to
+#       resolve_read_tenant(None), whose table-less form is the house SLUG. So
+#       the row carries a UUID and the GUC carries a slug, the WITH CHECK
+#       predicate is false for EVERY row, and every judge-verdict write is
+#       refused. That is precisely the two-divergent-resolvers shape OMN-15919
+#       already documented for the delegation write path, reproduced here by
+#       the fence release rather than by a code change. The sync twin
+#       (PostgresSyncProjectionAdapter.upsert) is unaffected: it derives the GUC
+#       from the row it is writing.
+#
+# The change was reverted on the lane in one transaction (policy dropped, NO
+# FORCE, RLS disabled, the 0026 ledger row removed so the lane matches this
+# file again) and 0026 was taken back out of the dev arm. RELEASE CONDITION,
+# written so the next attempt does not re-derive it: the async judge-verdict
+# writer must pass the row's own resolved tenant to the adapter (the
+# `tenant=` argument the OMN-15919 seam exists for), so the GUC and the column
+# agree by construction. That is an omnimarket change, not a fence edit.
+#
+# ---------------------------------------------------------------------------
+# WHY 0025 IS RELEASED
+# ---------------------------------------------------------------------------
+# It was held for the OMN-15301 hazard the delegation quartet shares: a tenant
+# posture applied to a live, actively-written table whose writer may not set
+# app.tenant_id. delegation_judge_verdict_events holds ZERO rows on the .201
+# dev lane, so its ADD COLUMN + correlation_id backfill lock nothing out of an
+# existing dataset, and the file is internally idempotent (ADD COLUMN IF NOT
+# EXISTS, CREATE INDEX IF NOT EXISTS). It declares no FORCE ROW LEVEL SECURITY,
+# so the baseline removal is clean.
+#
+# ONE HONEST RESIDUAL, stated rather than discovered later: 0025's backfill
+# joins delegation_events, which carries a tenant_isolation policy. Where the
+# migrate identity is a non-superuser without BYPASSRLS and app.tenant_id is
+# unset, that join sees zero rows and the backfill is a silent no-op — every
+# unmatched row keeps the 'omninode' text default. That is a weaker outcome,
+# not an abort, and it is the same RLS blindness OMN-16493 documented for 0031.
+# The compose lanes connect as the postgres superuser and are unaffected.
+#
+# ---------------------------------------------------------------------------
+# WHY 0024 IS RELEASED
+# ---------------------------------------------------------------------------
+# It drops routing_rule / routing_confidence / routing_candidates, which no
+# live code reads. Re-verified 2026-09-08 across omnimarket, omnibase_infra and
+# the omnidash server: the only occurrences anywhere are hardcoded NULL
+# literals in jsonb_build_object inside the dashboard views
+# (node_projection_delegation 0010 / 0021 / 0028) — those never SELECT the
+# columns, so no view depends on them and no CASCADE is required. No writer,
+# model or handler sets any of the three. `routing_rules` (plural, the Bifrost
+# delegation config) is an unrelated identifier and is not this column. On the
+# .201 dev lane the three columns do not exist at all (live catalog probe), so
+# the release is a no-op there and a real drift cleanup where the columns were
+# added out-of-band.
+#
+# ---------------------------------------------------------------------------
+# WHY 0023 STAYS — SUPERSEDED IN PLACE BY THE CONVERSION CHAIN, WITH THE EXACT
+# CONFLICTING STATEMENT
+# ---------------------------------------------------------------------------
+# 0023 is NOT idempotent against the state the conversion leaves. Its
+# delegation_events half is:
+#
+#     ALTER TABLE delegation_events ENABLE ROW LEVEL SECURITY;
+#     ALTER TABLE delegation_events FORCE ROW LEVEL SECURITY;
+#     DROP POLICY IF EXISTS tenant_isolation ON delegation_events;
+#     CREATE POLICY tenant_isolation ON delegation_events
+#       FOR ALL
+#       USING (tenant_id = current_setting('app.tenant_id', true))
+#       WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+#
+# THE CONFLICTING STATEMENT is that CREATE POLICY. Its comparison is TEXT on
+# both sides by construction — 0023's own "SEAM DECISION" says so explicitly,
+# no ::uuid. Once tenant_id is uuid, which it IS on the .201 dev lane (live
+# catalog readback 2026-09-08: `tenant_id | uuid | DEFAULT
+# '820272f9-4aaf-5add-a2df-0af942852ab2'::uuid`), that predicate has no
+# operator and PostgreSQL raises `operator does not exist: uuid = text`.
+# Reproduced on that same server (PostgreSQL 16.15) this session by binding a
+# text-OID parameter against that column, which returns the identical string.
+#
+# The failure is worse than an abort. The runner is `psql -v ON_ERROR_STOP=1
+# -f <file>` with NO --single-transaction, so the two ALTERs and the DROP
+# POLICY each COMMIT and only the CREATE POLICY fails — leaving
+# delegation_events with ENABLE + FORCE ROW LEVEL SECURITY and ZERO POLICIES,
+# denying every row to every non-owner, non-BYPASSRLS principal. That is the
+# same defect class OMN-17288 and OMN-17298 already superseded two migrations
+# for, and it would then take every later node's migrations down with it by
+# lexical sort order.
+#
+# Nothing is lost by holding it: 0034 restates tenant_isolation WITH the
+# ::uuid cast and restates the app_dashboard GRANT, inside one guarded DO
+# block, on both its conversion and its already-uuid path. 0023 is therefore
+# superseded in place exactly like 0031/0032/0033 and stays fenced for the
+# same reason — leaving a retired id fenced is what keeps it retired. Its
+# delegation_budget_state half is genuinely unapplied and is a separate
+# follow-up (that column is still text); it is NOT a reason to release the
+# file that carries the aborting statement above.
+#
+# ---------------------------------------------------------------------------
+# WHY 0031, 0032 AND 0033 STAY — AND WHY THAT IS NOT A NARROWING OF THE RULING
+# ---------------------------------------------------------------------------
+# All three are RETIRED, recorded in _ledger/migration-supersessions.tsv, and
+# every one of those rows already states the un-gate shape this change
+# implements: un-gate 0034 and only 0034. The mechanical reason the
+# predecessors cannot come with it is that NEITHER runner has any supersession
+# awareness — grep scripts/run-forward-migrations.sh for "supersed" and it
+# returns nothing. The fenced-id skip runs AHEAD of the ledger probe, so
+# releasing an id is exactly "apply it on every lane that has not already
+# recorded it". Applied to live state: 0031 is recorded only on the dev lane,
+# so releasing it would run its closed three-value literal CASE with no ELSE
+# against the stability-test lane's 165 TEXT rows and reproduce the
+# `contains null values` abort this entry was created for. 0032 and 0033 carry
+# defects proven by execution (omnimarket
+# tests/test_omn17288_migration_policy_atomicity.py and
+# tests/integration/migrations/test_omn17316_role_set_membership_guard.py
+# here). Releasing the operative conversion is what the ruling asks for;
+# releasing its three retired predecessors would apply three superseded
+# conversions in sequence and re-open two closed defect classes.
+#
 fenced_node_migrations:
+  # 0024_drop_unwired_routing_columns.sql and
+  # 0025_delegation_judge_verdict_events_tenant_id.sql were RELEASED from this
+  # BASELINE on 2026-09-08 (OMN-15683). 0023 and 0026 stay fully fenced -- 0023
+  # because it is superseded in place and now aborts, 0026 because releasing it
+  # was MEASURED on the .201 dev lane to lock the lane's own judge-verdict
+  # writer out of the table. See the "2026-09-08" block in the header.
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
-  - id: "node:node_projection_delegation:0024_drop_unwired_routing_columns.sql"
-    ticket: "OMN-14974"
-  - id: "node:node_projection_delegation:0025_delegation_judge_verdict_events_tenant_id.sql"
-    ticket: "OMN-15313"
   - id: "node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql"
     ticket: "OMN-15313"
   # 0000_create_node_service_registry.sql and 0001_add_heartbeat_columns.sql
@@ -474,5 +719,11 @@ fenced_node_migrations:
     ticket: "OMN-16930"
   - id: "node:node_projection_delegation:0033_delegation_events_uuid_via_registry_single_transaction.sql"
     ticket: "OMN-17288"
+  # 0034 stays in this BASELINE and is LANE-RELEASED on the compose dev/lab
+  # lane (OMN-15683, 2026-09-08) — it is the OPERATIVE conversion, and
+  # releasing exactly it is step 3 of the un-gate ordering recorded above. It
+  # could not be removed from the baseline: it enables FORCE ROW LEVEL SECURITY
+  # and is not grandfathered, so the OMN-15336 item-4 guard would FATAL on it.
+  # 0031, 0032 and 0033 above stay fully fenced — they are RETIRED, not held.
   - id: "node:node_projection_delegation:0034_delegation_events_uuid_via_registry_role_set_guard.sql"
     ticket: "OMN-17316"
