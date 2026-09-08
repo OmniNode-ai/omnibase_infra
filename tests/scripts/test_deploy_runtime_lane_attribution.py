@@ -33,6 +33,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
 REFRESH_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "refresh_stability_lane.sh"
+# OMN-16729: resolve_lane_name() moved into the shared compose-file resolver lib
+# that deploy-runtime.sh and both refresh wrappers source, so the wrappers' own
+# compose calls derive the lane the same way this guard does.
+COMPOSE_FILES_SH = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "runtime_build"
+    / "compose_files.sh"
+)
 PREFLIGHT = REPO_ROOT / "scripts" / "preflight_lane_deploy_attribution.py"
 
 
@@ -116,7 +125,17 @@ def test_refresh_stability_lane_runs_the_preflight_before_it_mutates_anything() 
 @pytest.mark.unit
 def test_lane_derivation_is_shared_not_duplicated() -> None:
     text = _script_text()
-    assert re.search(r"^resolve_lane_name\s*\(\)", text, re.MULTILINE)
+    assert "runtime_build/compose_files.sh" in text, (
+        "deploy-runtime.sh must source the shared lane derivation"
+    )
+    assert re.search(
+        r"^resolve_lane_name\s*\(\)",
+        COMPOSE_FILES_SH.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert not re.search(r"^resolve_lane_name\s*\(\)", text, re.MULTILINE), (
+        "deploy-runtime.sh must not re-declare the shared lane derivation"
+    )
     hotpatch = _extract_function(text, "guard_hotpatch_ledger")
     assert "resolve_lane_name" in hotpatch, (
         "hot-patch guard must reuse the shared lane derivation"
@@ -170,7 +189,7 @@ def _harness(
     script = "\n".join(
         [
             HARNESS_PRELUDE,
-            _extract_function(text, "resolve_lane_name"),
+            f'source "{COMPOSE_FILES_SH}"',
             _extract_function(text, "guard_lane_deploy_attribution"),
             'guard_lane_deploy_attribution "$1" "$2"',
             'printf "RECORD:%s\\n" "${LANE_ATTRIBUTION_RECORD_JSON}"',

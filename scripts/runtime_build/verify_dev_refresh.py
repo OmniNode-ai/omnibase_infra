@@ -95,6 +95,14 @@ class ServiceDigestCheck:
     revision_label: str | None
     expected_revision: str
     revision_match: bool
+    # OMN-16753: the container's live `.State.Status`, and whether that status is
+    # ``running``. A service whose container sits in ``created`` behind an unmet
+    # ``depends_on`` produces ZERO log lines, so it is invisible to every
+    # log-grep triage; on 2026-09-08 two of the four core services sat there for
+    # 53 minutes while the only signal was an anonymous revision-readback
+    # mismatch. ``None`` means compose has no container for the service at all.
+    container_state: str | None = None
+    running: bool = False
     error: str | None = None
 
 
@@ -128,6 +136,28 @@ class HealthGateReport:
         return bool(self.services) and all(s.revision_match for s in self.services)
 
     @property
+    def core_services_running(self) -> bool:
+        """Every core service has a container and that container is running.
+
+        A lane-HEALTH dimension, not a provenance one: the caller uses it to
+        decide whether a destructive rollback is warranted (OMN-16729).
+        """
+        return bool(self.services) and all(s.running for s in self.services)
+
+    @property
+    def core_services_not_running(self) -> list[str]:
+        """Name every core service that is not running, with the state it is in.
+
+        Named rather than merely counted so the failure reads as
+        ``runtime-effects=created`` instead of a bare False.
+        """
+        return [
+            f"{s.service}={s.container_state or 'absent'}"
+            for s in self.services
+            if not s.running
+        ]
+
+    @property
     def overall(self) -> str:
         if self.errors:
             return "INFRA_ERROR"
@@ -137,6 +167,7 @@ class HealthGateReport:
             and self.manifest_ok
             and self.health_ok
             and self.cluster_healthy
+            and self.core_services_running
             and self.revisions_match
         ):
             return "PASS"
@@ -158,6 +189,8 @@ class HealthGateReport:
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "revision_readback_ok": self.revisions_match,
+            "core_services_running": self.core_services_running,
+            "core_services_not_running": self.core_services_not_running,
             "services": [asdict(s) for s in self.services],
             "errors": self.errors,
             "overall": self.overall,
@@ -222,6 +255,38 @@ def get_revision_label(
     return revision, None
 
 
+def get_container_state(
+    container: str, *, runner: object | None = None
+) -> tuple[str | None, str | None]:
+    """Return ``(state, error)`` for a container's live ``.State.Status``.
+
+    OMN-16753: ``docker compose ps -q`` returns nothing for a container that is
+    not running, so a service stranded in ``created`` behind an unmet
+    ``depends_on`` looked identical to a service compose had never created. The
+    caller now resolves ids with ``ps -aq`` and this reads the real state, so
+    the gate can say ``runtime-effects=created`` instead of "no container".
+    """
+    try:
+        result = _run(
+            ["docker", "inspect", container, "--format", "{{.State.Status}}"],
+            runner=runner,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"timed out inspecting state of {container}"
+    except FileNotFoundError:
+        return None, "docker command not found"
+    if result.returncode != 0:
+        return (
+            None,
+            f"docker inspect (state) failed (exit {result.returncode}): "
+            f"{(result.stderr or '').strip()}",
+        )
+    state = (result.stdout or "").strip()
+    if not state:
+        return None, f"empty container state for {container}"
+    return state, None
+
+
 def _revisions_match(actual: str, expected: str) -> bool:
     a, b = actual.strip().lower(), expected.strip().lower()
     if not a or not b:
@@ -247,11 +312,18 @@ def check_service_digest(
             revision_label=None,
             expected_revision=expected_revision,
             revision_match=False,
-            error="no running container resolved for this service",
+            container_state=None,
+            running=False,
+            error="no container resolved for this service (compose has none)",
         )
     post_image_id, image_err = get_image_id(container, runner=runner)
     revision, rev_err = get_revision_label(container, runner=runner)
-    error = image_err or rev_err
+    state, state_err = get_container_state(container, runner=runner)
+    running = state == "running"
+    error = image_err or rev_err or state_err
+    if error is None and not running:
+        # Named, so the receipt carries the state rather than a bare False.
+        error = f"container is {state!r}, not running"
     digest_changed = bool(
         pre_image_id and post_image_id and pre_image_id != post_image_id
     )
@@ -267,6 +339,8 @@ def check_service_digest(
         revision_label=revision,
         expected_revision=expected_revision,
         revision_match=revision_match,
+        container_state=state,
+        running=running,
         error=error,
     )
 
@@ -492,7 +566,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--container-ids",
         required=True,
-        help="JSON dict of {service: container_id}, resolved by the caller via `docker compose ps -q`.",
+        help=(
+            "JSON dict of {service: container_id}, resolved by the caller via "
+            "`docker compose ps -aq` -- ALL states, so a service stranded in "
+            "State=created behind an unmet depends_on is a named not-running "
+            "finding rather than an anonymous missing container (OMN-16753)."
+        ),
     )
     # fallback-ok: fixed dev lane ops-tooling defaults (port 8085); the
     # automated caller (refresh_dev_lane.sh) always passes these explicitly.
@@ -548,10 +627,19 @@ def main(argv: list[str] | None = None) -> int:
             f"  manifest_count={report.manifest_count} (floor={report.manifest_floor}) ok={report.manifest_ok}"
         )
         print(f"  health_ok={report.health_ok} ({report.health_detail})")
+        print(
+            f"  core_services_running={report.core_services_running}"
+            + (
+                f" not_running={report.core_services_not_running}"
+                if not report.core_services_running
+                else ""
+            )
+        )
         print(f"  cluster_healthy={report.cluster_healthy} ({report.cluster_detail})")
         for s in report.services:
             print(
-                f"  service {s.service}: digest_changed={s.digest_changed} "
+                f"  service {s.service}: state={s.container_state or 'absent'} "
+                f"digest_changed={s.digest_changed} "
                 f"revision_match={s.revision_match} (label={s.revision_label})"
                 + (f" error={s.error}" if s.error else "")
             )

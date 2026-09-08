@@ -41,6 +41,14 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+# OMN-16729: the lane -> compose-file resolvers live in a shared lib now, so the
+# refresh wrappers' rollback recreate derives the same file list.
+COMPOSE_FILES_SH = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "runtime_build"
+    / "compose_files.sh"
+)
 
 GIT_SHA = "abc123def456"
 STALE_SHA = "111111111111"
@@ -182,8 +190,7 @@ def _run_readback(
             "log_warn() { printf 'WARN: %s\\n' \"$*\" >&2; }",
             "log_error() { printf 'ERR: %s\\n' \"$*\" >&2; }",
             "log_cmd() { printf 'CMD: %s\\n' \"$*\" >&2; }",
-            _extract_function("resolve_lane_overlay_filename"),
-            _extract_function("resolve_compose_file_args"),
+            f'source "{COMPOSE_FILES_SH}"',
             _extract_function("resolve_lane_runtime_container_name"),
             _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),
