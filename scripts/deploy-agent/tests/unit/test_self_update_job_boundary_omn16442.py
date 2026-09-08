@@ -282,6 +282,10 @@ def test_up_to_date_at_poll_does_not_reexec_and_accepts_normally(tmp_path) -> No
 async def test_behind_during_deploy_completes_the_deploy_then_updates(
     tmp_path, monkeypatch
 ) -> None:
+    # The broker address is required and has no fallback (there is no
+    # localhost default in this package); constructing a DeployAgent needs it
+    # declared even though nothing here talks to a broker.
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
     monkeypatch.setenv("DEPLOY_AGENT_LOCK_PATH", str(tmp_path / "deploy.lock"))
     monkeypatch.setattr("deploy_agent.lock._LOCK_PATH", tmp_path / "deploy.lock")
     monkeypatch.setattr("deploy_agent.agent.STATE_DIR", tmp_path / "jobs")
