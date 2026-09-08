@@ -363,3 +363,107 @@ def test_cli_exit_nonzero_on_dev_only_head(tmp_path: Path) -> None:
     _git(clone, "commit", "-q", "-m", "dev-only work")
     rc = _mod.main(["--repo", str(clone)])
     assert rc != 0
+
+
+# ---------------------------------------------------------------------------
+# (a2) the DIRTY_TREE refusal names what is pending (OMN-16442)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_pending_entries_is_empty_on_a_clean_clone(tmp_path: Path) -> None:
+    """Positive control for every assertion below: clean means zero rows."""
+    clone = _make_promoted_clone(tmp_path)
+    assert _mod.pending_worktree_entries(clone) == []
+
+
+@pytest.mark.unit
+def test_dirty_tree_refusal_names_an_untracked_directory(tmp_path: Path) -> None:
+    """The .201 case: one porcelain row standing for a whole nested tree.
+
+    ``?? origin/`` refused every release-mode build on the deploy-source clone
+    for eight days while the refusal said only "uncommitted or untracked
+    changes". The message must name the directory.
+    """
+    clone = _make_promoted_clone(tmp_path)
+    stray = clone / "origin" / "jonah" / "omn-17287-runtime-service-name"
+    stray.mkdir(parents=True)
+    (stray / "CLAUDE.md").write_text("nested checkout\n", encoding="utf-8")
+
+    with pytest.raises(_mod.ProdLineageError) as excinfo:
+        _mod.assert_prod_build_promoted(clone)
+
+    message = str(excinfo.value)
+    assert excinfo.value.reason is _mod.EnumProdLineageFailure.DIRTY_TREE
+    assert "untracked DIRECTORIES" in message
+    assert "origin/" in message
+    assert "nested checkout" in message
+
+
+@pytest.mark.unit
+def test_dirty_tree_refusal_separates_files_from_directories(
+    tmp_path: Path,
+) -> None:
+    clone = _make_promoted_clone(tmp_path)
+    (clone / "stray.txt").write_text("loose\n", encoding="utf-8")
+    (clone / "file.txt").write_text("modified\n", encoding="utf-8")
+    (clone / "nested").mkdir()
+    (clone / "nested" / "inner.txt").write_text("inner\n", encoding="utf-8")
+
+    with pytest.raises(_mod.ProdLineageError) as excinfo:
+        _mod.assert_prod_build_promoted(clone)
+
+    message = str(excinfo.value)
+    assert "untracked DIRECTORIES" in message
+    assert "nested/" in message
+    assert "untracked files: stray.txt" in message
+    assert "tracked/staged changes" in message
+    assert "file.txt" in message
+
+
+@pytest.mark.unit
+def test_describe_pending_entries_renders_each_class() -> None:
+    rendered = _mod.describe_pending_entries(
+        ["?? origin/", "?? loose.txt", " M src/thing.py"]
+    )
+    assert rendered.index("untracked DIRECTORIES") < rendered.index("untracked files")
+    assert rendered.index("untracked files") < rendered.index("tracked/staged")
+
+
+@pytest.mark.unit
+def test_describe_pending_entries_on_no_rows() -> None:
+    assert _mod.describe_pending_entries([]) == "no pending entries"
+
+
+@pytest.mark.unit
+def test_dirty_tree_refusal_names_a_nested_repository_directory(
+    tmp_path: Path,
+) -> None:
+    """The exact .201 shape: a nested repo, which git never descends into.
+
+    This is the one untracked directory that survives even the strict
+    ``--untracked-files=all`` view as a single ``?? path/`` row, and it is what
+    a worktree command given a relative path leaves behind inside the clone.
+    """
+    clone = _make_promoted_clone(tmp_path)
+    nested = clone / "origin" / "jonah" / "omn-17287-runtime-service-name"
+    nested.mkdir(parents=True)
+    _init_repo(nested)
+
+    # The strict view stops AT the nested repository rather than descending
+    # into it, so the whole 83 MB tree is one row. The collapsed view the
+    # refusal message renders from stops earlier still, at "?? origin/" — the
+    # literal row read back from the .201 deploy-source clone.
+    assert _mod.pending_worktree_entries(clone) == [
+        "?? origin/jonah/omn-17287-runtime-service-name/"
+    ]
+    assert _mod.pending_worktree_entries(clone, untracked="normal") == ["?? origin/"]
+
+    with pytest.raises(_mod.ProdLineageError) as excinfo:
+        _mod.assert_prod_build_promoted(clone)
+
+    message = str(excinfo.value)
+    assert excinfo.value.reason is _mod.EnumProdLineageFailure.DIRTY_TREE
+    assert "untracked DIRECTORIES" in message
+    assert "origin/" in message
+    assert "registered worktrees" in message

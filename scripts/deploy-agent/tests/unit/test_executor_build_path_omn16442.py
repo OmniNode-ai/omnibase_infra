@@ -273,8 +273,10 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
 
     monkeypatch.setattr(DeployExecutor, "_compose_build", fake_compose_build)
     monkeypatch.setattr(DeployExecutor, "_compose_up", lambda *a, **k: None)
-    monkeypatch.setattr(DeployExecutor, "self_update", lambda self, skip=False: None)
 
+    # No self_update stub: OMN-16442 (#3331) removed self-update from this
+    # path entirely, so reaching it would be a defect rather than a call to
+    # neutralise. test_self_update_job_boundary_omn16442.py owns that.
     DeployExecutor().rebuild_scope(
         Scope.RUNTIME,
         [],
@@ -282,7 +284,6 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
         git_sha="abc1234",
         git_ref="origin/dev",
         build_source=BuildSource.WORKSPACE,
-        skip_self_update=True,
         lane=EnumRuntimeLane.DEV,
     )
 
