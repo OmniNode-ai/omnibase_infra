@@ -738,3 +738,23 @@ fenced_node_migrations:
   # id it names is now 0036.
   - id: "node:node_projection_delegation:0036_delegation_events_uuid_mixed_representation.sql"
     ticket: "OMN-15683"
+  # 0036 is RETIRED, superseded by 0037 (OMN-15683, 2026-09-08, later the same
+  # day). It stays in this baseline and it LOST its lane release: it reads
+  # tenant_registry_mirror AFTER set_config('role', <delegation_events' owner>,
+  # true), and on onex-dev that owner holds no SELECT on the mirror -- measured
+  # on staging deploy run 34281092205, which aborted with `permission denied for
+  # table tenant_registry_mirror` after the debris DELETE and rolled the whole
+  # transaction back. A retired id stays fenced, and leaving it fenced is what
+  # keeps it retired.
+  #
+  # 0037 is the OPERATIVE conversion and takes 0036's place in the compose
+  # dev/lab lane release. It stays in this BASELINE for the same mechanical
+  # reason 0034 and 0036 did: it enables FORCE ROW LEVEL SECURITY and is not
+  # grandfathered, so a baseline REMOVAL hands it to the OMN-15336 item-4
+  # guard, which is FATAL for exactly that shape ("NOTHING was applied by this
+  # migration"). The guard's own message names this remedy -- keep the fence
+  # entry, add a lane release authorized by an operator ruling. Releasing
+  # exactly one id is still step 3 of the un-gate ordering recorded above; the
+  # id it names is now 0037.
+  - id: "node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
+    ticket: "OMN-15683"

@@ -379,6 +379,18 @@ migration_declares_unclassified_force_rls() {
 # uuid conversion, under the operator ruling of that date recorded in the
 # omni_home rolling work ledger.
 #
+# THE RELEASED ID IS NOW 0037, NOT 0036 (OMN-15683, later the same day again).
+# 0036 reads tenant_registry_mirror AFTER set_config('role', ...), as
+# delegation_events' owner, and on onex-dev that owner is absent from the
+# mirror's ACL -- measured on staging deploy run 34281092205, which aborted with
+# `permission denied for table tenant_registry_mirror` at inline_code_block line
+# 262 and rolled its whole transaction back. 0037 copies the mirror into a
+# session-local TEMP table as the MIGRATE IDENTITY, before the role switch, and
+# joins that snapshot everywhere below; it also refuses by name if the migrate
+# identity itself cannot read the mirror. 0036 is retired in place and keeps its
+# baseline entry for the same FORCE-RLS reason 0034 does; it simply no longer
+# appears here.
+#
 # THE RELEASED ID IS NOW 0036, NOT 0034 (OMN-15683, later the same day). 0034
 # resolves identity on m.tenant_slug alone and has no branch for a tenant_id
 # that is ALREADY the canonical UUID. Write-time UUID stamping (OMN-16804) is
@@ -423,7 +435,7 @@ case "${ONEX_MIGRATION_LANE}" in
     # longer covers would be inert but would misdescribe the policy.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
-node:node_projection_delegation:0036_delegation_events_uuid_mixed_representation.sql"
+node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
     ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""

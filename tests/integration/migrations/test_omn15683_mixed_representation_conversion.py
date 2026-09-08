@@ -81,7 +81,16 @@ _MIGRATIONS = (
 _PREDECESSOR = (
     _MIGRATIONS / "0034_delegation_events_uuid_via_registry_role_set_guard.sql"
 )
-_SUCCESSOR = _MIGRATIONS / "0036_delegation_events_uuid_mixed_representation.sql"
+# 0036: the FIRST successor. It converts correctly and cannot RUN on onex-dev,
+# because it reads tenant_registry_mirror after switching role. It is a RED
+# control here, on the privilege axis, exactly as 0034 is on the data axis.
+_SUPERSEDED_BY_PRIVILEGE = (
+    _MIGRATIONS / "0036_delegation_events_uuid_mixed_representation.sql"
+)
+_SUCCESSOR = (
+    _MIGRATIONS
+    / "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
+)
 _READINESS = (
     REPO_ROOT / "scripts" / "ci" / "check_delegation_tenant_conversion_readiness.py"
 )
@@ -112,7 +121,7 @@ _EXPECTED_SURVIVING = _EXPECTED_TOTAL - 6  # 223
 
 # 0034's misdirecting sentence, pinned verbatim. Its ARRIVAL is the defect.
 _MISDIRECTION = "HAS NOT CAUGHT UP"
-# 0036's distinctive wording. Matched on the phrase, not the ticket id: psql
+# The successors' distinctive wording. Matched on the phrase, not the ticket id: psql
 # echoes the migration's absolute PATH on every diagnostic line, and a worktree
 # named after the ticket would make an id match pass vacuously.
 _SUCCESSOR_MARKER = "resolves under NEITHER form"
@@ -360,15 +369,40 @@ class Lane:
     database: str
     owner: str
     migrator: str
+    mirror_owner: str
+    mirror_reader_role: str
 
 
 @pytest.fixture
 def lane(server: Server) -> Iterator[Lane]:
-    """The onex-dev shape: mixed text column, FORCE RLS, owner != migrator."""
+    """The onex-dev shape: mixed text column, FORCE RLS, owner != migrator.
+
+    AND THE GRANT TOPOLOGY, which the first revision of this fixture did not
+    carry (OMN-15683, FRICTION 2026-09-08T22:25:10Z). It owned BOTH tables with
+    one role, so the cross-owner mirror read that fails in production was free
+    here and 0036 went green on every leg before aborting on onex-dev with
+    ``permission denied for table tenant_registry_mirror``.
+
+    Reproduced from the live onex-dev catalog readback:
+
+        delegation_events        owner  role_omninode_owner
+        tenant_registry_mirror   owner  role_omnidash
+        tenant_registry_mirror   ACL    {role_omnidash=arwdDxt/role_omnidash,
+                                         app_dashboard=r,
+                                         omninode_runtime=arw,
+                                         jake_ro=r}
+
+    The migrate identity reaches the mirror the way it does there -- not by an
+    ACL entry of its own (the live ACL has none) but by membership in a role
+    that holds one. A reconstruction reproduces DATA for free; it reproduces
+    OWNERSHIP, GRANTS and ROLE MEMBERSHIP only when it is told to.
+    """
     tag = uuid.uuid4().hex[:12]
     database = f"omn15683_{tag}"
     owner = f"omn15683_owner_{tag}"
     migrator = f"omn15683_migrator_{tag}"
+    mirror_owner = f"omn15683_mirror_owner_{tag}"
+    mirror_reader = f"omn15683_mirror_reader_{tag}"
 
     assert (
         _psql(server, "postgres", "-c", f"CREATE DATABASE {database}").returncode == 0
@@ -381,10 +415,17 @@ def lane(server: Server) -> Iterator[Lane]:
     ):
         _psql(server, "postgres", "-c", "CREATE ROLE app_dashboard")
     _psql(server, "postgres", "-c", f"CREATE ROLE {owner}")
+    _psql(server, "postgres", "-c", f"CREATE ROLE {mirror_owner}")
+    _psql(server, "postgres", "-c", f"CREATE ROLE {mirror_reader}")
     _psql(server, "postgres", "-c", f"CREATE ROLE {migrator} LOGIN")
     # PostgreSQL 16 default membership confers both INHERIT and SET, which is
     # what the carried-over OMN-17316 guard requires.
     _psql(server, "postgres", "-c", f"GRANT {owner} TO {migrator}")
+    # The migrate identity's ONLY route to the mirror: membership in a role that
+    # holds SELECT. Revoking this one grant is what the privilege RED control
+    # below does, and it is the only difference between a lane 0037 can convert
+    # and a lane it refuses by name.
+    _psql(server, "postgres", "-c", f"GRANT {mirror_reader} TO {migrator}")
 
     rows: list[str] = []
     mirror: list[str] = []
@@ -428,7 +469,13 @@ def lane(server: Server) -> Iterator[Lane]:
     {" UNION ALL ".join(rows)};
 
     ALTER TABLE delegation_events OWNER TO {owner};
-    ALTER TABLE tenant_registry_mirror OWNER TO {owner};
+    -- THE TOPOLOGY. A DIFFERENT owner, and an ACL that does NOT name
+    -- delegation_events' owner -- byte-for-byte the shape read back from
+    -- onex-dev. `{owner}` therefore cannot read the mirror, which is the whole
+    -- defect 0037 exists to route around.
+    ALTER TABLE tenant_registry_mirror OWNER TO {mirror_owner};
+    GRANT SELECT ON tenant_registry_mirror TO {mirror_reader};
+    GRANT SELECT ON tenant_registry_mirror TO app_dashboard;
     GRANT SELECT ON delegation_events TO app_dashboard;
 
     -- Migration 0023's policy: TEXT compared to TEXT.
@@ -444,10 +491,18 @@ def lane(server: Server) -> Iterator[Lane]:
     assert prepared.returncode == 0, prepared.stderr
 
     try:
-        yield Lane(database=database, owner=owner, migrator=migrator)
+        yield Lane(
+            database=database,
+            owner=owner,
+            migrator=migrator,
+            mirror_owner=mirror_owner,
+            mirror_reader_role=mirror_reader,
+        )
     finally:
         _psql(server, "postgres", "-c", f"DROP DATABASE IF EXISTS {database}")
         _psql(server, "postgres", "-c", f"DROP ROLE IF EXISTS {migrator}")
+        _psql(server, "postgres", "-c", f"DROP ROLE IF EXISTS {mirror_reader}")
+        _psql(server, "postgres", "-c", f"DROP ROLE IF EXISTS {mirror_owner}")
         _psql(server, "postgres", "-c", f"DROP ROLE IF EXISTS {owner}")
 
 
@@ -485,10 +540,193 @@ def test_fixture_reproduces_the_onex_dev_census(server: Server, lane: Lane) -> N
     )
 
 
+def test_fixture_reproduces_the_onex_dev_grant_topology(
+    server: Server, lane: Lane
+) -> None:
+    """The positive control ON THE PRIVILEGE AXIS.
+
+    Without this the two privilege tests below could both pass for the
+    uninteresting reason that the fixture never split the ownership -- which is
+    exactly what the FIRST revision of this fixture did, and exactly why 0036
+    reached onex-dev. A reconstruction that reproduces the row census and not
+    the grant topology is silent on the axis that broke.
+    """
+    assert (
+        _scalar(
+            server,
+            lane.database,
+            "SELECT pg_get_userbyid(relowner) FROM pg_class "
+            "WHERE oid = 'delegation_events'::regclass",
+        )
+        == lane.owner
+    )
+    assert (
+        _scalar(
+            server,
+            lane.database,
+            "SELECT pg_get_userbyid(relowner) FROM pg_class "
+            "WHERE oid = 'tenant_registry_mirror'::regclass",
+        )
+        == lane.mirror_owner
+    ), "the two relations share an owner; the cross-owner read is not reproduced"
+    assert (
+        _scalar(
+            server,
+            lane.database,
+            f"SELECT has_table_privilege('{lane.owner}', "
+            "'tenant_registry_mirror', 'SELECT')",
+        )
+        == "f"
+    ), (
+        "delegation_events' owner CAN read the mirror in this fixture, so the "
+        "0036 failure cannot be reproduced here"
+    )
+    assert (
+        _scalar(
+            server,
+            lane.database,
+            f"SELECT has_table_privilege('{lane.migrator}', "
+            "'tenant_registry_mirror', 'SELECT')",
+        )
+        == "t"
+    ), "the migrate identity cannot read the mirror, so 0037 has nothing to use"
+
+
+def test_red_control_0036_aborts_on_the_cross_owner_mirror_read(
+    server: Server, lane: Lane
+) -> None:
+    """0036 reproduces the onex-dev abort, verbatim, and applies nothing.
+
+    This is the leg the 0036 lab proof did not have. Its failure message is
+    pinned on the SERVER's own wording rather than on anything this repo
+    writes, because the point is that PostgreSQL refuses the read -- not that a
+    guard noticed.
+    """
+    result = _apply_as(server, lane.database, _SUPERSEDED_BY_PRIVILEGE, lane.migrator)
+    assert result.returncode != 0, (
+        "0036 CONVERTED against a split-ownership topology. Either the fixture "
+        "stopped reproducing the ACL split or the privilege axis was closed "
+        "elsewhere -- either way this RED control measures nothing."
+    )
+    assert "permission denied for table tenant_registry_mirror" in result.stderr, (
+        "0036 aborted for some OTHER reason; this control is no longer pinned "
+        f"to the measured onex-dev failure. stderr={result.stderr!r}"
+    )
+    # It gets as far as the determinism guard -- past the blindness
+    # reconciliation and the debris DELETE, exactly as on onex-dev. That
+    # ordering is why the run looked healthy right up to the abort.
+    assert "visibility reconciled" in result.stderr
+    assert "debris row(s)" in result.stderr
+    # And the whole transaction went with it.
+    assert _column_type(server, lane) == "text"
+    assert _scalar(
+        server, lane.database, "SELECT count(*) FROM delegation_events"
+    ) == str(_EXPECTED_TOTAL), (
+        "0036's debris DELETE was not rolled back with its aborting block"
+    )
+
+
+def test_successor_refuses_by_name_when_the_migrate_identity_cannot_read_the_mirror(
+    server: Server, lane: Lane
+) -> None:
+    """0037 does not grant itself the privilege; it refuses, early, by name.
+
+    The alternative repair was a GRANT to delegation_events' owner as the
+    migration's first statement. It is rejected in the file's header on
+    evidence, and this test is what keeps the rejection honest: the refusal
+    happens BEFORE the role switch and before any mutation, and it names the
+    remedy as an operator act rather than performing it.
+    """
+    assert (
+        _psql(
+            server,
+            "postgres",
+            "-c",
+            f"REVOKE {lane.mirror_reader_role} FROM {lane.migrator}",
+        ).returncode
+        == 0
+    )
+    result = _apply_as(server, lane.database, _SUCCESSOR, lane.migrator)
+    assert result.returncode != 0, "0037 converted without being able to resolve"
+    assert "holds no SELECT on tenant_registry_mirror" in result.stderr, (
+        f"0037 aborted opaquely instead of refusing by name: {result.stderr!r}"
+    )
+    assert lane.migrator in result.stderr, "the refusal does not name the role"
+    assert "GRANT SELECT ON tenant_registry_mirror TO" in result.stderr, (
+        "the refusal does not state the remedy"
+    )
+    # Nothing was mutated: the refusal precedes even the NO FORCE.
+    assert "visibility reconciled" not in result.stderr, (
+        "0037 got past Phase A before refusing; the guard is in the wrong place"
+    )
+    assert _column_type(server, lane) == "text"
+    assert _scalar(
+        server, lane.database, "SELECT count(*) FROM delegation_events"
+    ) == str(_EXPECTED_TOTAL)
+
+
+def test_successor_leaves_no_temp_snapshot_behind(server: Server, lane: Lane) -> None:
+    """The mirror snapshot is ON COMMIT DROP; it cannot outlive the migration.
+
+    That transience is the reason the repair is a snapshot and not a GRANT: a
+    GRANT would be a persistent, cross-owner widening of a role's reach, made
+    to get one transaction through.
+    """
+    assert _apply_as(server, lane.database, _SUCCESSOR, lane.migrator).returncode == 0
+    assert (
+        _scalar(
+            server,
+            lane.database,
+            "SELECT count(*) FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE c.relname = 'omn15683_mirror_snapshot'",
+        )
+        == "0"
+    )
+    # And the mirror's ACL is untouched -- no privilege survives the file.
+    assert (
+        _scalar(
+            server,
+            lane.database,
+            f"SELECT has_table_privilege('{lane.owner}', "
+            "'tenant_registry_mirror', 'SELECT')",
+        )
+        == "f"
+    ), "0037 left delegation_events' owner holding SELECT on the mirror"
+
+
 def test_red_control_predecessor_aborts_on_the_mixed_column(
     server: Server, lane: Lane
 ) -> None:
-    """0034 refuses -- and blames the projection for data the projection has."""
+    """0034 refuses -- and blames the projection for data the projection has.
+
+    TWO axes, and the ORDER matters. On the true onex-dev topology 0034 does
+    not reach its data-axis guard at all: it reads tenant_registry_mirror after
+    switching role, so it dies on `permission denied` first, exactly as 0036
+    did. That is asserted first, and then the mirror is granted to the owner to
+    restore the SINGLE-OWNER shape in which the data defect is observable --
+    which is precisely the shape the pre-0037 harness had, and the reason the
+    privilege defect survived it. Naming it here keeps it a deliberate control
+    rather than a fixture that quietly reverted.
+    """
+    privilege_first = _apply_as(server, lane.database, _PREDECESSOR, lane.migrator)
+    assert privilege_first.returncode != 0
+    assert (
+        "permission denied for table tenant_registry_mirror" in privilege_first.stderr
+    ), (
+        "0034 reached its data-axis guard on a split-ownership topology; the "
+        "fixture is no longer reproducing the onex-dev ACL split"
+    )
+
+    assert (
+        _psql(
+            server,
+            lane.database,
+            "-c",
+            f"GRANT SELECT ON tenant_registry_mirror TO {lane.owner}",
+        ).returncode
+        == 0
+    )
     result = _apply_as(server, lane.database, _PREDECESSOR, lane.migrator)
     assert result.returncode != 0, (
         "0034 CONVERTED a mixed-representation column. That would mean the "
@@ -516,7 +754,7 @@ def test_red_control_predecessor_aborts_on_the_mixed_column(
 def test_successor_converts_the_mixed_column(server: Server, lane: Lane) -> None:
     """GREEN. Both representations collapse onto one canonical identity."""
     result = _apply_as(server, lane.database, _SUCCESSOR, lane.migrator)
-    assert result.returncode == 0, f"0036 failed on the mixed column: {result.stderr!r}"
+    assert result.returncode == 0, f"0037 failed on the mixed column: {result.stderr!r}"
     assert _column_type(server, lane) == "uuid"
     assert _scalar(
         server, lane.database, "SELECT count(*) FROM delegation_events"
@@ -662,7 +900,7 @@ def test_a_value_in_neither_form_still_fails_closed(server: Server, lane: Lane) 
         == 0
     )
     result = _apply_as(server, lane.database, _SUCCESSOR, lane.migrator)
-    assert result.returncode != 0, "0036 converted a value it cannot resolve"
+    assert result.returncode != 0, "0037 converted a value it cannot resolve"
     assert foreign in result.stderr, "the refusal does not name the value"
     assert "2 row(s)" in result.stderr, "the refusal does not name the row count"
     assert _SUCCESSOR_MARKER in result.stderr
@@ -670,7 +908,7 @@ def test_a_value_in_neither_form_still_fails_closed(server: Server, lane: Lane) 
         result.stderr
     ), "the refusal does not say WHICH of the two lookups failed"
     assert _MISDIRECTION not in result.stderr, (
-        "0036 reproduced 0034's misdirection -- it asserts the projection is "
+        "0037 reproduced 0034's misdirection -- it asserts the projection is "
         "behind for a value it has not established anything about"
     )
     assert _column_type(server, lane) == "text", "0036 partially converted"

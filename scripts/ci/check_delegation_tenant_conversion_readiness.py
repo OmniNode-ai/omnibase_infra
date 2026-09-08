@@ -47,6 +47,34 @@ WHAT THIS DOES INSTEAD
 4. Classifies every surviving value against BOTH resolution forms the successor
    migration uses -- ``tenant_slug = <value>`` OR ``tenant_uuid::text = <value>``
    -- and names, per unresolvable value, which of the two failed.
+5. **Asserts the PRIVILEGE topology**, per (role, relation) pair, and names
+   every failing one. See THE PRIVILEGE LEG below.
+
+THE PRIVILEGE LEG (added 2026-09-08, after 0036 aborted on onex-dev)
+--------------------------------------------------------------------
+Everything above is about DATA. Migration 0036 satisfied all of it -- on this
+tool, on a hermetic PG16 suite, and on a scratch database seeded to onex-dev's
+exact row census -- and then aborted on the live database with ``permission
+denied for table tenant_registry_mirror``.
+
+The reason is that the migration changes ROLE mid-flight. It runs as the migrate
+identity, then ``set_config('role', <delegation_events' owner>, true)`` for the
+rest of the block, and the two relations it reads have two DIFFERENT owners: on
+onex-dev ``delegation_events`` belongs to ``role_omninode_owner`` and
+``tenant_registry_mirror`` to ``role_omnidash``, whose ACL does not name the
+former. A reconstruction reproduces DATA for free; it reproduces OWNERSHIP,
+GRANTS and ROLE MEMBERSHIP only when it is told to, and none of the proofs were
+told to.
+
+So the plan is DERIVED FROM THE MIGRATION'S OWN BYTES: the file is split at its
+role switch, relations read before it are attributed to the migrate identity and
+relations read after it to the owner role, and ``has_table_privilege`` is
+asserted for each pair. A denial is REFUSED, not INDETERMINATE -- the migration
+WILL abort on it -- and it is evaluated ahead of the visibility legs so a
+policy-blinded table cannot mask it.
+
+There is no way to turn this leg off. An unreadable migration file is a probe
+error, not a skip: a leg that can be silenced is the leg 0036 did not have.
 
 n_live_tup is an ESTIMATE. Stated plainly rather than implied: the reconciliation
 is a **blindness detector**, not a row-count audit. In DIRECT mode the count is
@@ -59,7 +87,8 @@ stale estimate makes that check stricter rather than laxer.
 EXIT STATUS
 -----------
 ``0``  PASS -- reconciled, and every surviving value resolves.
-``1``  REFUSED -- unresolvable values survive the debris delete.
+``1``  REFUSED -- unresolvable values survive the debris delete, or a
+       (role, relation) pair the migration reads is denied.
 ``2``  INDETERMINATE -- the enumeration could not be reconciled, or the relation
        is missing. Never reported as PASS; an unanswered question is not a
        negative answer.
@@ -90,9 +119,76 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 RELATION = "delegation_events"
 MIRROR = "tenant_registry_mirror"
+
+# ---------------------------------------------------------------------------
+# THE PRIVILEGE LEG (OMN-15683, added after 0036 aborted on onex-dev)
+#
+# 0036 passed every leg this script had -- and every leg its own hermetic and
+# lab proofs had -- and then aborted on the live database with
+# ``permission denied for table tenant_registry_mirror``. Nothing here was
+# wrong; the whole tool was silent on one axis.
+#
+# The migration changes ROLE mid-flight: it runs as the migrate identity, then
+# ``set_config('role', <delegation_events' owner>, true)`` for the rest of the
+# block. Those are two DIFFERENT privilege sets, and the two relations it reads
+# have two DIFFERENT owners. A reconstruction that seeds the row census but not
+# the ownership and ACL topology cannot see that, and neither could this script.
+#
+# So the plan is DERIVED FROM THE MIGRATION'S OWN BYTES rather than declared by
+# hand: the file is split at its role switch, every relation it reads before the
+# switch is attributed to the migrate identity, and every relation it reads after
+# the switch is attributed to the owner role. ``has_table_privilege`` is then
+# asserted for each (role, relation) pair, and every failing pair is named.
+#
+# Pointed at 0036's bytes against the onex-dev topology this reports
+# (role_omninode_owner, tenant_registry_mirror). That is the leg that would have
+# caught it.
+# ---------------------------------------------------------------------------
+
+PHASE_SESSION = "session"  # before the role switch: the migrate identity
+PHASE_OWNER = "owner"  # after the role switch: delegation_events' owner
+
+# The migration takes its SET ROLE target from this relation's owner
+# (``pg_get_userbyid(relowner) ... WHERE oid = '<RELATION>'::regclass``). The
+# probe reads the same catalog rather than being told a role name.
+OWNER_ROLE_SOURCE_RELATION = RELATION
+
+# The role switch. Both 0034/0036/0037 spell it this way deliberately -- as a
+# VALUE, so the OMN-15361 dynamic-SQL gate sees only static statements.
+ROLE_SWITCH_RE = re.compile(r"set_config\s*\(\s*'role'", re.IGNORECASE)
+
+# A relation READ. FROM/JOIN cover every select; UPDATE covers the target of the
+# resolving UPDATE, which must also be readable.
+RELATION_READ_RE = re.compile(
+    r"\b(?:FROM|JOIN|UPDATE)\s+(?:ONLY\s+)?"
+    r"((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+
+# Relations the file CREATES are excluded: they do not exist when this probe
+# runs, so has_table_privilege has nothing to answer about. A temp relation the
+# migration creates and then reads in another role carries its own in-file
+# GRANT, and the integration test proves that grant by execution.
+RELATION_CREATE_RE = re.compile(
+    r"\bCREATE\s+(?:TEMP|TEMPORARY|UNLOGGED|GLOBAL|LOCAL)?\s*TABLE\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+
+# System catalogs and information_schema are readable by every role by default
+# and are not part of any lane's grant topology.
+CATALOG_PREFIXES = ("pg_", "information_schema.")
+
+# Resolved relative to this file so the default works from any cwd.
+DEFAULT_MIGRATION = (
+    "docker/migrations/forward/nodes/node_projection_delegation/"
+    "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
+)
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 UUID_RE = re.compile(
@@ -237,6 +333,193 @@ class ValueCensus:
         )
 
 
+@dataclass(frozen=True)
+class RelationRead:
+    """One relation the migration reads, and the role it reads it in."""
+
+    relation: str
+    phase: str
+
+
+@dataclass(frozen=True)
+class PrivilegeFinding:
+    """A (role, relation) pair the target database refuses."""
+
+    role: str
+    relation: str
+    phase: str
+
+
+def strip_sql_comments(sql: str) -> str:
+    """Blank out ``--`` and ``/* */`` comments, PRESERVING every offset.
+
+    Offsets are preserved because the caller splits the file at the role
+    switch's position, and a comment-stripping pass that shortened the text
+    would move every statement relative to it.
+
+    Single-quoted strings are tracked, because these migrations put ``--``
+    INSIDE exception messages (``'tenant_uuid::text = <value> -- '``) and a
+    naive strip would truncate the file at the first one. Dollar-quoted bodies
+    (``$$ ... $$``) are deliberately NOT treated as opaque strings: the whole
+    migration lives inside one, and its statements are exactly what is being
+    read.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(sql)
+    in_string = False
+    while index < length:
+        char = sql[index]
+        if in_string:
+            if char == "'":
+                if index + 1 < length and sql[index + 1] == "'":
+                    out.append("''")
+                    index += 2
+                    continue
+                in_string = False
+            out.append(char)
+            index += 1
+            continue
+        if char == "'":
+            in_string = True
+            out.append(char)
+            index += 1
+            continue
+        if char == "-" and index + 1 < length and sql[index + 1] == "-":
+            end = sql.find("\n", index)
+            end = length if end == -1 else end
+            out.append(" " * (end - index))
+            index = end
+            continue
+        if char == "/" and index + 1 < length and sql[index + 1] == "*":
+            end = sql.find("*/", index + 2)
+            end = length if end == -1 else end + 2
+            out.append(" " * (end - index))
+            index = end
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def blank_sql_string_literals(sql: str) -> str:
+    """Blank the CONTENTS of single-quoted literals, PRESERVING every offset.
+
+    Required, and measured rather than assumed: without it the exception prose
+    in these migrations -- "a tenant that DOES exist in
+    omninode_cloud.public.tenants", "the value is genuinely absent FROM the
+    registry" -- is scanned as SQL, and the derived plan reports relations named
+    ``omninode_cloud.public`` and ``the``. A relation reference never lives
+    inside a string literal in a static migration; ``to_regclass('...')`` takes
+    its argument as a literal and is not a read of that relation either.
+
+    Run AFTER the role switch has been located, because the switch is spelled
+    ``set_config('role', ...)`` and its own marker is a string literal.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(sql)
+    while index < length:
+        char = sql[index]
+        if char != "'":
+            out.append(char)
+            index += 1
+            continue
+        out.append("'")
+        index += 1
+        while index < length:
+            if sql[index] == "'":
+                if index + 1 < length and sql[index + 1] == "'":
+                    out.append("  ")
+                    index += 2
+                    continue
+                out.append("'")
+                index += 1
+                break
+            out.append(" ")
+            index += 1
+    return "".join(out)
+
+
+def derive_role_read_plan(sql: str) -> tuple[RelationRead, ...]:
+    """Which relations the migration reads, in which role, from its own bytes.
+
+    Everything before the ``set_config('role', ...)`` switch is read as the
+    migrate identity; everything after it as ``delegation_events``' owner. A
+    file with NO role switch reads everything as the migrate identity.
+    """
+    body = strip_sql_comments(sql)
+    switch = ROLE_SWITCH_RE.search(body)
+    boundary = switch.start() if switch else len(body)
+    # Offsets are preserved by both passes, so ``boundary`` stays valid.
+    body = blank_sql_string_literals(body)
+
+    created = {match.group(1).lower() for match in RELATION_CREATE_RE.finditer(body)}
+
+    seen: dict[tuple[str, str], RelationRead] = {}
+    for match in RELATION_READ_RE.finditer(body):
+        relation = match.group(1)
+        lowered = relation.lower()
+        if lowered.startswith(CATALOG_PREFIXES) or lowered in created:
+            continue
+        phase = PHASE_SESSION if match.start() < boundary else PHASE_OWNER
+        seen.setdefault((lowered, phase), RelationRead(relation=lowered, phase=phase))
+    return tuple(sorted(seen.values(), key=lambda item: (item.phase, item.relation)))
+
+
+def read_owner_role(client: PsqlClient) -> str:
+    owner = client.scalar(
+        f"""
+        SELECT pg_get_userbyid(relowner)
+        FROM pg_catalog.pg_class
+        WHERE oid = '{OWNER_ROLE_SOURCE_RELATION}'::regclass;
+        """  # noqa: S608 - every interpolated value is a module constant or passes through _quote_literal; no caller input reaches the SQL text
+    )
+    if not owner:
+        raise ProbeError(
+            f"could not resolve the owner role of {OWNER_ROLE_SOURCE_RELATION}"
+        )
+    return owner
+
+
+def check_privileges(
+    client: PsqlClient, plan: Sequence[RelationRead]
+) -> list[PrivilegeFinding]:
+    """Assert SELECT for every (role, relation) pair the plan names.
+
+    A relation the target database does not have is NOT a privilege finding --
+    the migration's own ``to_regclass`` branches handle absence, and reporting
+    it here would confuse "not granted" with "not there". A relation that is
+    present and unreadable in the role that reads it is the finding.
+    """
+    if not plan:
+        return []
+    owner = read_owner_role(client)
+    session_role = client.scalar("SELECT current_user;") or ""
+    findings: list[PrivilegeFinding] = []
+    for item in plan:
+        role = session_role if item.phase == PHASE_SESSION else owner
+        answer = client.scalar(
+            f"""
+            SELECT CASE
+                     WHEN to_regclass({_quote_literal(item.relation)}) IS NULL
+                       THEN 'absent'
+                     WHEN has_table_privilege(
+                            {_quote_literal(role)},
+                            {_quote_literal(item.relation)},
+                            'SELECT')
+                       THEN 'granted'
+                     ELSE 'denied'
+                   END;
+            """
+        )
+        if answer == "denied":
+            findings.append(
+                PrivilegeFinding(role=role, relation=item.relation, phase=item.phase)
+            )
+    return findings
+
+
 def _quote_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -349,10 +632,34 @@ def evaluate(
     visibility: Visibility,
     mode: str,
     census: list[ValueCensus],
+    privileges: Sequence[PrivilegeFinding] = (),
 ) -> tuple[str, list[str]]:
     """The verdict, and the reasons for it. PASS is the hardest to reach."""
     reasons: list[str] = []
     enumerated = sum(item.rows for item in census)
+
+    # The privilege leg first, and REFUSED rather than INDETERMINATE: a denied
+    # (role, relation) pair is a definite negative answer -- the migration WILL
+    # abort on it, exactly as 0036 did on onex-dev. It is checked ahead of the
+    # visibility legs because a privilege denial is not a visibility question
+    # and would otherwise be masked by one.
+    if privileges:
+        for finding in privileges:
+            phase = (
+                "as the migrate identity, BEFORE the role switch"
+                if finding.phase == PHASE_SESSION
+                else "AFTER set_config('role', ...), as the owner role"
+            )
+            reasons.append(
+                f"PRIVILEGE: ({finding.role}, {finding.relation}) -- the "
+                f"migration reads {finding.relation} {phase}, and "
+                f"has_table_privilege('{finding.role}', "
+                f"'{finding.relation}', 'SELECT') is false. The migration "
+                "would abort with `permission denied for table "
+                f"{finding.relation}`. This is the leg that was absent when "
+                "0036 passed a full lab proof and then aborted on onex-dev."
+            )
+        return VERDICT_REFUSED, reasons
 
     if mode == MODE_RECONSTRUCTED:
         if visibility.n_live_tup <= 0:
@@ -419,6 +726,9 @@ def render(
     census: list[ValueCensus],
     verdict: str,
     reasons: list[str],
+    plan: Sequence[RelationRead] = (),
+    owner_role: str | None = None,
+    session_role: str | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append(f"relation                 {RELATION}")
@@ -433,6 +743,18 @@ def render(
     lines.append(f"  of which debris        {debris} (deleted by exact correlation_id)")
     lines.append(f"  surviving the delete   {enumerated - debris}")
     lines.append("")
+    if plan:
+        lines.append(
+            "role/relation read plan (derived from the migration's own bytes):"
+        )
+        for read in plan:
+            role = (
+                (session_role or "current_user")
+                if read.phase == PHASE_SESSION
+                else (owner_role or "owner")
+            )
+            lines.append(f"  {read.phase:<8} {role:<24} reads {read.relation}")
+        lines.append("")
     lines.append("tenant_id enumeration:")
     for item in census:
         lines.append(
@@ -498,12 +820,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--migration",
+        help=(
+            "path to the migration whose role/relation read plan is asserted. "
+            "Defaults to the operative successor. There is no way to turn the "
+            "PRIVILEGE leg off: an unreadable file is INDETERMINATE, not a "
+            "skip -- a leg that can be silenced is the leg 0036 did not have."
+        ),
+    )
+    parser.add_argument(
         "--json", action="store_true", help="emit machine-readable JSON"
     )
     args = parser.parse_args(argv)
 
+    migration_path = (
+        Path(args.migration)
+        if args.migration
+        else Path(__file__).resolve().parents[2] / DEFAULT_MIGRATION
+    )
+
+    try:
+        migration_sql = migration_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"PROBE ERROR: cannot read the migration at {migration_path}: {exc}. "
+            "The PRIVILEGE leg derives its role/relation plan from these bytes "
+            "and is not skippable; pass --migration.",
+            file=sys.stderr,
+        )
+        return EXIT_PROBE_ERROR
+    plan = derive_role_read_plan(migration_sql)
+
     try:
         client = build_client(args)
+        owner_role = read_owner_role(client)
+        session_role = client.scalar("SELECT current_user;")
+        privileges = check_privileges(client, plan)
         visibility = read_visibility(client)
         if visibility.row_security_active:
             mode = MODE_RECONSTRUCTED
@@ -532,7 +884,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for value, rows, debris in raw
     ]
-    verdict, reasons = evaluate(visibility, mode, census)
+    verdict, reasons = evaluate(visibility, mode, census, privileges)
 
     if args.json:
         print(
@@ -540,6 +892,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {
                     "relation": RELATION,
                     "mode": mode,
+                    "migration": str(migration_path),
+                    "owner_role": owner_role,
+                    "session_role": session_role,
+                    "role_read_plan": [
+                        {
+                            "phase": item.phase,
+                            "role": session_role
+                            if item.phase == PHASE_SESSION
+                            else owner_role,
+                            "relation": item.relation,
+                        }
+                        for item in plan
+                    ],
+                    "privilege_findings": [
+                        {
+                            "role": finding.role,
+                            "relation": finding.relation,
+                            "phase": finding.phase,
+                        }
+                        for finding in privileges
+                    ],
                     "verdict": verdict,
                     "reasons": reasons,
                     "n_live_tup": visibility.n_live_tup,
@@ -561,7 +934,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
     else:
-        print(render(visibility, mode, census, verdict, reasons))
+        print(
+            render(
+                visibility,
+                mode,
+                census,
+                verdict,
+                reasons,
+                plan,
+                owner_role,
+                session_role,
+            )
+        )
 
     if verdict == VERDICT_PASS:
         return EXIT_PASS
