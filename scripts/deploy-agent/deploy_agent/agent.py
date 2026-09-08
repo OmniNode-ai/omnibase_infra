@@ -267,6 +267,9 @@ class DeployAgent:
                 cmd.services,
                 on_phase_update=on_phase_update,
                 git_sha=self._current_git_sha,
+                # OMN-16442/OMN-17291: the command's own pin, carried through to
+                # stage_workspace.sh as DEPLOY_REF for workspace-mode builds.
+                git_ref=cmd.git_ref,
                 build_source=cmd.build_source,
                 lane=cmd.runtime_lane,
                 image_digest=cmd.image_digest,

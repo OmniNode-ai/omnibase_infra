@@ -121,7 +121,10 @@ def _load_promotion_guard() -> ModuleType:
 
 
 def assert_release_build_promoted(
-    build_source: BuildSource, *, repo_dir: str = REPO_DIR
+    build_source: BuildSource,
+    *,
+    repo_dir: str = REPO_DIR,
+    runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
 ) -> None:
     """Enforce clean + promoted source for prod-bound (release-mode) builds.
 
@@ -130,10 +133,35 @@ def assert_release_build_promoted(
     ancestor-of/equal-to origin/main. Workspace builds (local dev iteration) are
     exempt by design — they never reach prod.
 
+    OMN-16442: the assertion is also scoped to the lanes whose artifacts can
+    reach prod. It used to be applied lane-blind, which made it unsatisfiable
+    on the dev lane rather than merely strict: a dev head is by construction
+    NOT an ancestor of a release-synced ``origin/main``, so the ancestry half
+    refused every dev release-mode build on every day, and the clean-tree half
+    refused on any stray file in the deploy-source clone. Measured live
+    2026-09-08 on command c73cc38a: DIRTY_TREE first, then NOT_PROMOTED for
+    HEAD e42519c5b against origin/main 276d69383.
+
+    The exemption is the DEV lane and only the DEV lane, named rather than
+    derived from a negation, because the stability lane is where the
+    ``stability-proven`` digest of a prod promotion grant comes from
+    (CLAUDE.md rule 12, OMN-15243) and must keep the same lineage requirement
+    prod has. The default is ``PROD`` so an undeclared lane fails CLOSED —
+    the gate applies unless a caller says which exempt lane it is on.
+
     Raises the guard's ``ProdLineageError`` when the source is dirty or
     not promoted. Fails the build CLOSED before any docker build side effects.
     """
     if build_source != BuildSource.RELEASE:
+        return
+    if runtime_lane == EnumRuntimeLane.DEV:
+        logger.info(
+            "assert_release_build_promoted: lane %s is exempt from the prod "
+            "promotion-lineage assertion (a dev head is never an ancestor of "
+            "the release-synced origin/main); build source %s not checked",
+            runtime_lane.value,
+            repo_dir,
+        )
         return
     guard = _load_promotion_guard()
     sha = guard.assert_prod_build_promoted(Path(repo_dir))
@@ -1180,6 +1208,7 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         git_sha: str = "",
+        git_ref: str = "",
         build_source: BuildSource | str = BuildSource.RELEASE,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
@@ -1232,10 +1261,20 @@ class DeployExecutor:
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
             # the COPY src/ layer even when the file-system mtime is cached.
             self._compose_build(
-                Scope.CORE, git_sha, on_phase_update, build_source=build_source
+                Scope.CORE,
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                runtime_lane=lane,
+                git_ref=git_ref,
             )
             self._compose_build(
-                Scope.RUNTIME, git_sha, on_phase_update, build_source=build_source
+                Scope.RUNTIME,
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                runtime_lane=lane,
+                git_ref=git_ref,
             )
             self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
             self._compose_up(
@@ -1243,7 +1282,14 @@ class DeployExecutor:
             )
             return services_for_scope(Scope.FULL)
 
-        self._compose_build(scope, git_sha, on_phase_update, build_source=build_source)
+        self._compose_build(
+            scope,
+            git_sha,
+            on_phase_update,
+            build_source=build_source,
+            runtime_lane=lane,
+            git_ref=git_ref,
+        )
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
         return services if services else services_for_scope(scope)
 
@@ -1520,12 +1566,29 @@ class DeployExecutor:
         return fallback
 
     @staticmethod
-    def _stage_workspace(repo_dir: str, omni_home: str) -> None:
+    def _stage_workspace(repo_dir: str, omni_home: str, deploy_ref: str = "") -> None:
         """Stage sibling repos into the Docker build context for workspace mode.
 
         Runs docker/runtime_build/stage_workspace.sh from the repo root so that
         workspace/sibling-repos/ is populated before `docker compose build`.
         Raises RuntimeError on failure.
+
+        OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
+        is exported as ``DEPLOY_REF`` for the staging script. The script's
+        OMN-17291 guard refuses to stage the AMBIENT host tree when
+        ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
+        wrong. The command envelope carries the pin (``git_ref=origin/dev``,
+        resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
+        already used it one step earlier, but it was dropped between the
+        consumer and the staging step, so the sibling build was asserted
+        against nothing. Measured live 2026-09-08 on command a5635af0:
+        ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
+
+        The guard STAYS. This passes the pin the operator supplied; it does not
+        weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
+        deliberately NOT substituted with a fallback ref — nothing is exported
+        and the script refuses in its own words, which is the correct outcome
+        for a caller that has no pin to offer.
         """
         script = Path(repo_dir) / "scripts" / "runtime_build" / "stage_workspace.sh"
         if not script.exists():
@@ -1533,13 +1596,21 @@ class DeployExecutor:
                 f"workspace staging script not found: {script}. "
                 "Cannot proceed with BUILD_SOURCE=workspace."
             )
+        staging_env = {**os.environ, "OMNI_HOME": omni_home}
+        if deploy_ref:
+            staging_env["DEPLOY_REF"] = deploy_ref
+            logger.info(
+                "_stage_workspace: staging siblings against DEPLOY_REF=%s "
+                "(the accepted command's git_ref)",
+                deploy_ref,
+            )
         result = subprocess.run(
             ["bash", str(script)],
             capture_output=True,
             text=True,
             check=False,
             cwd=repo_dir,
-            env={**os.environ, "OMNI_HOME": omni_home},
+            env=staging_env,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -1556,6 +1627,8 @@ class DeployExecutor:
         *,
         build_source: BuildSource | str = BuildSource.RELEASE,
         expected_build_source: BuildSource | str | None = None,
+        runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
+        git_ref: str = "",
     ) -> None:
         """Build images with --build-arg GIT_SHA to bust the COPY src/ layer cache.
 
@@ -1589,14 +1662,18 @@ class DeployExecutor:
         # OMN-12626 (R1): release-mode builds produce the digest that is later
         # pinned/promoted to prod. Refuse to build one from a dirty or
         # non-promoted (dev-only) source tree before any docker side effects.
-        assert_release_build_promoted(selected_source)
+        # OMN-16442: scoped to the lanes whose artifacts can reach prod. The
+        # default is PROD, so an undeclared lane still runs the gate.
+        assert_release_build_promoted(selected_source, runtime_lane=runtime_lane)
 
         if selected_source == BuildSource.WORKSPACE:
             if not omni_home:
                 raise RuntimeError(
                     "BUILD_SOURCE=workspace requires OMNI_HOME before build"
                 )
-            self._stage_workspace(REPO_DIR, omni_home)
+            # OMN-16442/OMN-17291: the accepted command's git_ref is the pin the
+            # staging script asserts the sibling clones against.
+            self._stage_workspace(REPO_DIR, omni_home, git_ref)
 
         # OMN-16442: the sibling-repo fallback branch is the declared tracking
         # ref, not a literal. It used to be "dev" for omnimarket and "main" for
