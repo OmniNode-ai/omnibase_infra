@@ -987,6 +987,48 @@ class DeployExecutor:
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
 
+    def _preflight_required_compose_env(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        compose_files: list[str],
+        timeout: int,
+    ) -> None:
+        """Fail with EVERY unset required compose variable named, not just the first.
+
+        OMN-17530. ``docker compose config`` stops at the first unset
+        ``${VAR:?}``, so a host missing N of them produces N failed deploys that
+        each name one variable. This runs the repo's stdlib-only preflight over
+        the same compose files and the same environment the validation is about
+        to use, and raises once with the complete list.
+
+        There is no soft-fail branch and no "continue if the script is
+        missing": a preflight that can be skipped is the failure mode this
+        closes, so a missing or unrunnable script surfaces as a non-zero exit
+        and raises like any other refusal. The script is stdlib-only and runs
+        under the interpreter running this agent, so a missing project venv
+        cannot be the reason the list goes unseen.
+        """
+        script = f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+        cmd = [
+            sys.executable,
+            script,
+            "--lane",
+            lane.value,
+            "--runtime-policy-env",
+            f"{REPO_DIR}/docker/runtime-policy.env",
+        ]
+        for compose_file in compose_files:
+            cmd.extend(["--compose-file", compose_file])
+        result = _run(cmd, timeout=timeout, cwd=REPO_DIR, env=_compose_env())
+        if result.returncode != 0:
+            raise RuntimeError(
+                "REQUIRED_COMPOSE_ENV_MISSING for lane "
+                f"{lane.value} -- compose validation was not attempted. "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        logger.info("required-compose-env preflight: %s", result.stdout.strip())
+
     def compose_gen(
         self,
         bundles: list[str],
@@ -1112,6 +1154,26 @@ class DeployExecutor:
             # Validate the stack this deploy will actually bring up: the tracked
             # base plus the lane overlay (OMN-12865).
             config = lane_config_for(lane)
+
+            # OMN-17530 -- report the WHOLE missing-variable set first.
+            #
+            # The validation below is `docker compose config`, which reports the
+            # FIRST unset ${VAR:?} it reaches and stops. On 2026-09-08 two deploy
+            # commands died here ~14 minutes apart on two DIFFERENT variables
+            # added by the same PR (ONEX_API_IMAGE, then ONEX_CLOUD_MIGRATE_IMAGE);
+            # a mechanical enumeration afterwards put the real count at ten. Each
+            # one cost a whole command and a whole lane window to learn one name.
+            #
+            # This preflight parses every ${VAR:?} out of the same compose files
+            # this validation will load, checks them against the same env this
+            # validation will run under, and fails with all of them named at
+            # once. It reads names only, never values.
+            self._preflight_required_compose_env(
+                lane=lane,
+                compose_files=list(config.compose_files),
+                timeout=timeout,
+            )
+
             validate_cmd = [
                 "docker",
                 "compose",
