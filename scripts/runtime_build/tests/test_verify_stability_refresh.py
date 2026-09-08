@@ -34,7 +34,9 @@ _mod = importlib.util.module_from_spec(_spec)
 sys.modules["verify_stability_refresh"] = _mod
 _spec.loader.exec_module(_mod)
 
-check_manifest_count = _mod.check_manifest_count
+fetch_manifest_with_budget = _mod.fetch_manifest_with_budget
+count_manifest_contracts = _mod.count_manifest_contracts
+RetryBudget = _mod.RetryBudget
 check_health = _mod.check_health
 check_cluster_health = _mod.check_cluster_health
 check_partition_headroom = _mod.check_partition_headroom
@@ -152,20 +154,26 @@ def _opener(body: dict | list, status: int = 200):
 # ─── manifest count: PASS/FAIL boundary exactly at min_contracts ───────────
 
 
-def test_manifest_count_exactly_at_floor_passes():
-    opener = _opener(_manifest_payload(DEFAULT_MIN_CONTRACTS))
-    count, err = check_manifest_count(
-        "http://x/manifest", DEFAULT_MIN_CONTRACTS, opener=opener
+def _count(opener):
+    """Fetch and count, the way ``run_health_gate`` does (OMN-16753)."""
+    fetched = fetch_manifest_with_budget(
+        "http://x/manifest",
+        opener=opener,
+        budget=RetryBudget(sleep_fn=lambda _s: None),
     )
+    if fetched.error is not None or fetched.payload is None:
+        return None, fetched.error
+    return count_manifest_contracts(fetched.payload), None
+
+
+def test_manifest_count_exactly_at_floor_passes():
+    count, err = _count(_opener(_manifest_payload(DEFAULT_MIN_CONTRACTS)))
     assert err is None
     assert count == DEFAULT_MIN_CONTRACTS
 
 
 def test_manifest_count_one_below_floor_reported_as_not_ok():
-    opener = _opener({"contracts": list(range(DEFAULT_MIN_CONTRACTS - 1))})
-    count, err = check_manifest_count(
-        "http://x/manifest", DEFAULT_MIN_CONTRACTS, opener=opener
-    )
+    count, err = _count(_opener({"contracts": list(range(DEFAULT_MIN_CONTRACTS - 1))}))
     assert err is None
     assert count == DEFAULT_MIN_CONTRACTS - 1
     # run_health_gate is what actually flips manifest_ok -- assert the boundary there.
@@ -178,8 +186,7 @@ def test_manifest_count_one_below_floor_reported_as_not_ok():
 
 
 def test_manifest_count_list_shape_supported():
-    opener = _opener([{"name": "a"}, {"name": "b"}])
-    count, err = check_manifest_count("http://x/manifest", 1, opener=opener)
+    count, err = _count(_opener([{"name": "a"}, {"name": "b"}]))
     assert err is None
     assert count == 2
 

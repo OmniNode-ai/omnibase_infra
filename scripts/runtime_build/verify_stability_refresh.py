@@ -74,7 +74,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -100,12 +100,21 @@ from declared_consumer_groups import (
 from health_payload import (
     DEFAULT_MAX_VERDICT_AGE,
     HEALTH_POLICY_STATUS_ONLY_STRICT,
+    HealthDimension,
     HealthVerdict,
     default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
     unreachable_verdict,
     wait_for_verdict,
+)
+from manifest_fetch import (
+    MANIFEST_FETCH_HISTORY_LIMIT,
+    MANIFEST_FETCH_INTERVAL_SECONDS,
+    MANIFEST_FETCH_WINDOW_SECONDS,
+    RetryBudget,
+    count_manifest_contracts,
+    fetch_manifest_with_budget,
 )
 
 # OCI label stamped from VCS_REF/GIT_SHA at build time (Dockerfile.runtime).
@@ -131,6 +140,22 @@ DEFAULT_GROUP_AUDIT_INTERVAL_SECONDS = 3.0
 # visible (non-blocking) WARN. `rpk cluster health` never surfaces this on its
 # own -- see the module docstring's check #7.
 DEFAULT_PARTITION_WARN_THRESHOLD = 0.8
+
+# OMN-16753: boot tolerance for the introspection-manifest fetch, sized to the
+# SAME window ``check_health_with_retry`` waits for a first monitor verdict
+# (360 s). Anything shorter fails while the health leg beside it is still
+# legitimately waiting for the very runtime this fetch is talking to -- which
+# is exactly what happened on 2026-09-08 when both the refresh gate and the
+# post-rollback gate hit `[Errno 104] Connection reset by peer` on the effects
+# port and forced overall=INFRA_ERROR.
+#
+# The window is spent ONCE per gate run, not once per URL: ``run_health_gate``
+# fetches the main manifest and then the effects manifest serially, so a
+# per-URL window would have made the worst case ~720 s of manifest retrying
+# BEFORE the health leg started its own 360 s wait. The shared
+# ``RetryBudget`` means the effects fetch inherits whatever the main fetch
+# left, and the total is bounded by MANIFEST_FETCH_WINDOW_SECONDS. Fail-closed
+# on expiry, as before.
 
 
 # ─── Data structures ────────────────────────────────────────────────────────
@@ -209,6 +234,16 @@ class HealthGateReport:
     # OMN-17624 AC-3: the bound that was waited, with the arithmetic behind it.
     # A PASS after a 60s wait and a PASS after 360s are different claims.
     verdict_wait: str | None = None
+    # OMN-16753: every non-HEALTHY runtime_health dimension the probe saw, as
+    # {name, status, detail}. The gate decides on this block and the rollback
+    # destroys the container that held it, so it has to survive into the log
+    # and the receipt or the failing criterion is unrecoverable.
+    health_dimensions: list[dict[str, str]] = field(default_factory=list)
+    # OMN-16753: the last few manifest-fetch failures, oldest first. A retry
+    # loop that keeps only its final error cannot tell a persistent failure
+    # from an intermittent one, which is the distinction a reader of this
+    # receipt is actually trying to make.
+    manifest_fetch_attempts: list[str] = field(default_factory=list)
     cluster_healthy: bool = False
     cluster_detail: str | None = None
     group_audit: ConsumerGroupAudit | None = None
@@ -240,7 +275,7 @@ class HealthGateReport:
         A crossed-warn-threshold-but-below-cap state is still "ok" here by
         design (visibility only, see ``PartitionHeadroomCheck`` docstring); a
         probe failure (``error is not None``) is surfaced via ``errors`` ->
-        ``INFRA_ERROR`` instead, mirroring ``check_manifest_count``.
+        ``INFRA_ERROR`` instead, mirroring the manifest fetch.
         """
         return (
             self.partition_headroom is None
@@ -277,6 +312,8 @@ class HealthGateReport:
             "health_status": self.health_status,
             "health_policy": self.health_policy,
             "verdict_wait": self.verdict_wait,
+            "health_dimensions": self.health_dimensions,
+            "manifest_fetch_attempts": self.manifest_fetch_attempts,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "consumer_groups": (
@@ -400,49 +437,6 @@ def check_service_digest(
     )
 
 
-def fetch_manifest(
-    manifest_url: str, *, opener: object | None = None
-) -> tuple[dict[str, object] | None, str | None]:
-    """Fetch one ``/v1/introspection/manifest`` payload.
-
-    Split out of ``check_manifest_count`` by OMN-15837 so the SAME fetched
-    payload feeds both the contract-count floor and the consumer-group
-    derivation -- the declared set must describe the image that is actually
-    running, and a second fetch could observe a different one.
-    """
-    open_fn = opener or urllib.request.urlopen
-    try:
-        with open_fn(manifest_url, timeout=10) as resp:  # type: ignore[operator]
-            raw = resp.read()
-    except (urllib.error.URLError, OSError) as exc:
-        return None, f"manifest fetch failed ({manifest_url}): {exc}"
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        return None, f"manifest not valid JSON ({manifest_url}): {exc}"
-    if isinstance(payload, list):
-        return {"contracts": payload}, None
-    if isinstance(payload, dict):
-        return payload, None
-    return None, f"manifest payload has unexpected shape ({manifest_url})"
-
-
-def count_manifest_contracts(payload: dict[str, object]) -> int:
-    contracts = payload.get("contracts", [])
-    return len(contracts) if isinstance(contracts, list) else 0
-
-
-def check_manifest_count(
-    manifest_url: str, min_contracts: int, *, opener: object | None = None
-) -> tuple[int | None, str | None]:
-    """Fetch the introspection manifest and count contracts."""
-    _ = min_contracts
-    payload, err = fetch_manifest(manifest_url, opener=opener)
-    if err is not None or payload is None:
-        return None, err
-    return count_manifest_contracts(payload), None
-
-
 def check_health(
     health_url: str,
     *,
@@ -483,7 +477,7 @@ def check_health_with_retry(
     max_verdict_age_seconds: float | None | object = DEFAULT_MAX_VERDICT_AGE,
     check_interval_seconds: float = 300.0,
     boot_grace_seconds: float = 120.0,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> tuple[HealthVerdict, str]:
     """Probe until a monitor verdict exists, for a bounded window (OMN-17624).
 
@@ -816,7 +810,7 @@ def run_consumer_group_audit(
     runner: object | None = None,
     attempts: int = DEFAULT_GROUP_AUDIT_ATTEMPTS,
     interval_seconds: float = DEFAULT_GROUP_AUDIT_INTERVAL_SECONDS,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> ConsumerGroupAudit:
     """Reconcile the derived declared set against the live broker, with retry.
 
@@ -847,7 +841,7 @@ def run_consumer_group_audit(
         if audit.ok:
             return audit
         if attempt < attempts:
-            sleep(interval_seconds)  # type: ignore[operator]
+            sleep(interval_seconds)
     return audit
 
 
@@ -860,6 +854,15 @@ CORE_SERVICES: dict[str, str] = {
     "runtime-worker": "omninode-stability-test-runtime-worker",
     "projection-api": "omnimarket-stability-test-projection-api",
 }
+
+
+def _render_dimensions(
+    dimensions: tuple[HealthDimension, ...],
+) -> list[dict[str, str]]:
+    """Render the probe's non-HEALTHY dimensions for the log and the receipt."""
+    return [
+        {"name": d.name, "status": d.status, "detail": d.detail} for d in dimensions
+    ]
 
 
 def run_health_gate(
@@ -878,12 +881,14 @@ def run_health_gate(
     runner: object | None = None,
     opener: object | None = None,
     require_digest_change: bool = True,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
     partition_warn_threshold: float = DEFAULT_PARTITION_WARN_THRESHOLD,
     require_verdict: bool = True,
     max_verdict_age_seconds: float | None = None,
     health_check_interval_seconds: float = 300.0,
     health_boot_grace_seconds: float = 120.0,
+    manifest_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
+    manifest_clock_fn: Callable[[], float] = time.monotonic,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -903,9 +908,25 @@ def run_health_gate(
         )
 
     manifest_payloads: list[dict[str, object]] = []
-    main_manifest, err = fetch_manifest(manifest_url, opener=opener)
-    if err is not None or main_manifest is None:
-        report.errors.append(err or "manifest fetch returned no payload")
+    # OMN-16753: ONE budget for every manifest fetch in this run. The effects
+    # fetch below inherits whatever the main fetch leaves, so the combined
+    # worst case is MANIFEST_FETCH_WINDOW_SECONDS -- the health leg's own
+    # window -- rather than one window per URL.
+    manifest_budget = RetryBudget(
+        total_seconds=manifest_window_seconds,
+        interval_seconds=MANIFEST_FETCH_INTERVAL_SECONDS,
+        sleep_fn=sleep_fn or time.sleep,
+        monotonic_fn=manifest_clock_fn,
+    )
+    fetch_history: list[str] = []
+
+    main_fetch = fetch_manifest_with_budget(
+        manifest_url, opener=opener, budget=manifest_budget
+    )
+    fetch_history.extend(main_fetch.recent_history())
+    main_manifest = main_fetch.payload
+    if main_fetch.error is not None or main_manifest is None:
+        report.errors.append(main_fetch.error or "manifest fetch returned no payload")
     else:
         manifest_payloads.append(main_manifest)
         count = count_manifest_contracts(main_manifest)
@@ -918,15 +939,19 @@ def run_health_gate(
     # declared set from the main manifest alone would under-declare the effects
     # half of the lane. Not fetched -> fail closed, never silently narrowed.
     if effects_manifest_url:
-        effects_manifest, effects_err = fetch_manifest(
-            effects_manifest_url, opener=opener
+        effects_fetch = fetch_manifest_with_budget(
+            effects_manifest_url, opener=opener, budget=manifest_budget
         )
-        if effects_err is not None or effects_manifest is None:
+        fetch_history.extend(effects_fetch.recent_history())
+        effects_manifest = effects_fetch.payload
+        if effects_fetch.error is not None or effects_manifest is None:
             report.errors.append(
-                effects_err or "effects manifest fetch returned no payload"
+                effects_fetch.error or "effects manifest fetch returned no payload"
             )
         else:
             manifest_payloads.append(effects_manifest)
+
+    report.manifest_fetch_attempts = fetch_history[-MANIFEST_FETCH_HISTORY_LIMIT:]
 
     health_verdict, verdict_wait = check_health_with_retry(
         health_url,
@@ -942,6 +967,7 @@ def run_health_gate(
     report.health_status = health_verdict.status
     report.health_policy = health_verdict.policy
     report.verdict_wait = verdict_wait
+    report.health_dimensions = _render_dimensions(health_verdict.dimensions)
 
     cluster_healthy, cluster_detail = check_cluster_health(
         broker_container, runner=runner
@@ -1158,7 +1184,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"  manifest_count={report.manifest_count} (floor={report.manifest_floor}) ok={report.manifest_ok}"
         )
+        for attempt in report.manifest_fetch_attempts:
+            print(f"  manifest fetch attempt: {attempt}")
         print(f"  health_ok={report.health_ok} ({report.health_detail})")
+        for dimension in report.health_dimensions:
+            print(
+                f"  health dimension {dimension['name']}: {dimension['status']}"
+                f" — {dimension['detail']}"
+            )
         print(f"  cluster_healthy={report.cluster_healthy} ({report.cluster_detail})")
         if report.partition_headroom is not None:
             ph = report.partition_headroom
