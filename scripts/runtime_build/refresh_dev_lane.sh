@@ -185,6 +185,27 @@ readonly REFRESH_BUILD_SERVICES=(
     # for the same reason as the six above, and in the build scope for the same
     # reason: `restart: unless-stopped` keeps a stale image running and healthy.
     infra-routing-decisions-consumer
+    # OMN-17530 -- the tenant-scoped control plane. Here for redpanda-sasl-enable's
+    # reason and NOT the writers'. All three are TAG-REFERENCED -- onex-api from
+    # the omninode_infra clone, the migrate image from that repo's
+    # docker/Dockerfile.migrate, postgres:16 pinned upstream -- so `docker compose
+    # build` has nothing to build for them and they cannot go stale on a rebuild.
+    # What a governed refresh owes them is a RE-ASSERT: onex-api must be recreated
+    # to read a changed environment, and the two one-shots must re-run so a new
+    # migrate image tag actually reaches the database. That recreate is driven by
+    # DEV_LANE_ONLY_RUNTIME_SERVICES in scripts/deploy-runtime.sh; membership here
+    # keeps the two arrays reading the same and keeps the OMN-17448 drift check
+    # able to see the whole lane-only surface in one place.
+    #
+    # NOTE for a future editor: the OMN-17448 drift check reads this array with a
+    # regex whose body is a negated character class excluding the closing round
+    # bracket, so ANY round bracket in these comments truncates what the check can
+    # see and it silently stops covering the tail of the array. Keep the prose in
+    # this array free of round brackets. Measured here: a single parenthesised
+    # aside hid the last two entries and the check reported them as missing.
+    cloud-migration-files
+    cloud-migration
+    onex-api
 )
 readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
 

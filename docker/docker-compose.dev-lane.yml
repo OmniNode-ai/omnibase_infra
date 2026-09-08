@@ -1227,3 +1227,305 @@ services:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-16025"
       - "autoheal=true"
+  # ===========================================================================
+  # (8) THE TENANT-SCOPED CONTROL PLANE (OMN-17530, corpus OMN-17537)
+  # ===========================================================================
+  # WHAT THIS IS FOR
+  # ----------------
+  # Operator ruling, 2026-09-08: the compose dev lane is the lab of record. Rule
+  # 24 makes the lab the FIRST place a change runs and staging the promotion
+  # step that follows a lab proof. Until this block, the lane could prove that
+  # the runtime family boots and that the six projection writers are deployed,
+  # and NOTHING about whether a tenant-scoped request resolves -- there was no
+  # onex-api on it at all. That is exactly the seam the two most expensive
+  # defects of the 2026-09-08 window sat in (a tenant-form split between the
+  # reader and the projection writer, OMN-15583; a quality-gate NOT NULL
+  # timestamp), both found only on onex-dev after twelve failed staging runs.
+  #
+  # Rule 24(d) says a lane that cannot exercise the tenant-scoped path must SAY
+  # so rather than claim a lab proof. This block is the other way to close that
+  # gap: give the lane the surface instead of the disclaimer.
+  #
+  # THREE SERVICES, and the two one-shots are not optional scaffolding.
+  # `omninode_cloud` exists on this lane today with ZERO tables (created by
+  # docker/migrations/forward/000_create_multiple_databases.sh) because NOTHING
+  # migrates it: forward-migration names omnibase_infra and omnidash_analytics,
+  # and the corpus that fills omninode_cloud lives in omninode_infra
+  # db/migrations, a repo this lane does not stage. onex-api owns `tenants` and
+  # `tenant_api_keys` in that database, so without the corpus there is no tenant
+  # to mint and no key to mint it with.
+  #
+  # WHY THE LANE OVERLAY AND NOT docker-compose.infra.yml
+  # -----------------------------------------------------
+  # The same fail-closed inversion every block above uses. stability-test, prod
+  # and judge each merge the base and would INHERIT anything added there, and
+  # this plane carries eleven fail-closed secrets that only the dev lane
+  # provisions -- a lane that inherited the services without the secrets would
+  # fail at compose render, and one that inherited them WITH a `:-` default
+  # would start an API with an empty admin secret. Neither is acceptable, so the
+  # plane is declared only in the file only this project loads.
+  #
+  # WHY A TAG-REFERENCED IMAGE AND NOT A LANE BUILD
+  # -----------------------------------------------
+  # docker/onex-api in omninode_infra is a self-contained python:3.12-slim app
+  # with its own requirements.txt and no omnibase wheel, so BUILD_SOURCE=workspace
+  # staging is irrelevant to it and adding omninode_infra as a fourth sibling to
+  # scripts/runtime_build/stage_workspace.sh would buy this lane nothing today.
+  # (That is still the parity-correct follow-up, and it is ticketed; it is not
+  # the first move.) The precedent for a tag-referenced catalog image on this
+  # lane is docker/catalog/services/omnidash.yaml. `:?` and not `:-`: an
+  # unset image variable must fail at render rather than resolve to a `latest`
+  # tag that may be anything or nothing.
+  # ---------------------------------------------------------------------------
+  cloud-migration-files:
+    image: ${ONEX_CLOUD_MIGRATE_IMAGE:?ONEX_CLOUD_MIGRATE_IMAGE must name the omninode-cloud-migrate image tag present on this host - it carries the omninode_cloud SQL corpus, its MANIFEST and its manifest evaluator (omninode_infra docker/Dockerfile.migrate); resolved from the operator env file, never inlined here}
+    container_name: omnibase-infra-cloud-migration-files
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    volumes:
+      - cloud_migrations:/work
+    # The k8s Job's initContainer, verbatim in intent: the corpus ships in an
+    # alpine image with no psql, and psql ships in an image with no corpus.
+    # `rm -rf /work/*` first, so a re-run against a stale volume cannot leave a
+    # deleted migration behind and apply a corpus the MANIFEST no longer
+    # describes -- manifest_assert_complete would fail loudly on that, which is
+    # correct but is a worse failure than not creating it.
+    command:
+      - sh
+      - -c
+      # `.corpus-ready` is written LAST and is what cloud-migration waits on.
+      # A warm `docker compose up -d --no-deps` names both one-shots in one
+      # invocation and starts them concurrently -- `depends_on` is exactly what
+      # `--no-deps` switches off -- so the ordering has to be re-established
+      # inside the containers or the runner reads a half-copied /work.
+      - 'set -e; rm -rf /work/* /work/.[!.]* 2>/dev/null || true; cp -a /migrations/. /work/; echo "copied $$(ls /work/*.sql | wc -l) sql files + $$(ls /work/MANIFEST /work/manifest_lib.sh | wc -l) manifest artifacts"; touch /work/.corpus-ready'
+    logging: *dev_lane_logging
+    labels:
+      - "com.omninode.service=cloud-migration-files"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17530"
+  cloud-migration:
+    # Debian postgres, not -alpine, and matching the k8s runner's image family:
+    # run-cloud-migrations.sh sources omninode_infra's manifest_lib.sh, which is
+    # written for bash, and the alpine image ships only busybox ash.
+    image: postgres:16
+    container_name: omnibase-infra-cloud-migration
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    depends_on:
+      cloud-migration-files:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cloud_migrations:/work
+      - ../docker/migrations/cloud/run-cloud-migrations.sh:/run-cloud-migrations.sh:ro
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: omninode_cloud
+      # 000_create_multiple_databases.sh maps omninode_cloud -> role_omninode.
+      # The corpus is applied AS its owning login and never as the superuser:
+      # onex-api connects as this same non-superuser, NOBYPASSRLS role, so a
+      # corpus applied by `postgres` would leave every GRANT in it pointing at
+      # the wrong principal AND would exempt the applying session from the very
+      # row-level security this lane is the designated proving ground for
+      # (operator ruling 15, 2026-07-29; the OMN-15363 block above).
+      DB_USER: role_omninode
+      MIGRATION_DIR: /work
+      PGPASSWORD: ${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set - the omninode_cloud corpus is applied as role_omninode, the database's own owning login, never as the postgres superuser (OMN-17530); docker/migrations/forward/000_create_multiple_databases.sh creates that role only when this variable is non-empty, and defaults it to empty, so an unset value is why the role does not exist on a lane that has one}
+      PGCONNECT_TIMEOUT: "10"
+    command:
+      - bash
+      - /run-cloud-migrations.sh
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=cloud-migration"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17530"
+  onex-api:
+    image: ${ONEX_API_IMAGE:?ONEX_API_IMAGE must name the onex-api image tag present on this host - built from the omninode_infra clone, tag-referenced rather than lane-built because docker/onex-api is a self-contained python:3.12-slim app with no omnibase wheel; resolved from the operator env file, never inlined here}
+    container_name: onex-api
+    profiles: ["runtime", "full"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    depends_on:
+      cloud-migration:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    ports:
+      # 8090, not 8000: 8085/8086 are the runtime pair and 8000 is unclaimed on
+      # this host but reads like a default. A distinct port keeps a probe that
+      # hit the wrong process distinguishable from one that hit nothing.
+      - "8090:8000"
+    environment:
+      # One merge key, both anchors: a second `<<:` in the same mapping is a
+      # duplicate key and only one of the two would survive.
+      !!merge <<: [*dev_lane_broker_auth_env, *dev_lane_analytics_env]
+      # -- databases ---------------------------------------------------------
+      # The control plane. role_omninode is NOSUPERUSER and NOBYPASSRLS by
+      # construction (000_create_multiple_databases.sh SERVICE_DB_MAP), which is
+      # what makes any FORCE ROW LEVEL SECURITY on this lane's tenant tables
+      # actually enforced against the connection the database sees rather than
+      # inert -- the false-clean the OMN-15363 block above exists to remove.
+      OMNINODE_CLOUD_DB_URL: "postgresql://role_omninode:${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set - onex-api connects to omninode_cloud as the non-superuser NOBYPASSRLS role_omninode (OMN-17530), never as the postgres superuser}@postgres:5432/omninode_cloud"
+      # The analytics plane, as role_omnidash -- the SAME identity every other
+      # analytics consumer on this lane uses (the anchor above). onex-api is the
+      # C1 READER of delegation_events; a reader connecting as the owner would
+      # read past a policy the writer is enforced against, which is the exact
+      # asymmetry that makes an RLS proof meaningless. It is merged from
+      # *dev_lane_analytics_env at the top of this block, with the broker
+      # anchor.
+      # -- broker ------------------------------------------------------------
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      # -- rate limiter ------------------------------------------------------
+      # VALKEY_PASSWORD is spelled BEFORE the URL that interpolates it. On k8s
+      # this ordering is load-bearing (the kubelet expands $(VAR) only from
+      # entries earlier in the same list) and getting it wrong cost the k3s lane
+      # a 503 "rate limiter temporarily unavailable" whose only evidence was an
+      # AuthenticationError deep in a redis traceback. Compose interpolates from
+      # the host environment instead, so the ordering is not load-bearing here --
+      # it is kept identical so the two manifests read the same and a reader
+      # comparing them does not have to work out which difference matters.
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set - the lane's own Valkey password, resolved from the operator env file}
+      WORKFLOW_RATE_LIMIT_VALKEY_URL: "redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}@valkey:6379"
+      # -- Keycloak ----------------------------------------------------------
+      # The lane runs its own Keycloak (omnibase-infra-keycloak). It carries
+      # KEYCLOAK_ISSUER / KEYCLOAK_REALM / KEYCLOAK_ADMIN_URL and the admin
+      # client id + secret; the three onex-api-specific CLAIM names below are
+      # absent lane-wide, which is why they are pinned here rather than
+      # inherited from a variable that does not exist.
+      KEYCLOAK_ISSUER_URL: "http://keycloak:8080/realms/omninode"
+      KEYCLOAK_AUDIENCE: "onex-api"
+      KEYCLOAK_TENANT_ID_CLAIM: "tenant_id"
+      KEYCLOAK_TENANT_SLUG_CLAIM: "tenant_slug"
+      KEYCLOAK_ADMIN_BASE_URL: "http://keycloak:8080"
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-omninode}
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-onex-admin}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET must be set - the lane's own Keycloak admin client secret, resolved from the operator env file}
+      # -- public URLs -------------------------------------------------------
+      # main.py has NO default for ONEX_API_ALLOWED_ORIGINS and refuses to start
+      # when it is unset, and parse_allowed_origins rejects any entry that is
+      # not https:// unless it is localhost/127.0.0.1. The lane has no browser
+      # client, so any origin it names is a placeholder -- but a placeholder that
+      # PASSES the real validator is worth more than one that skips it, and
+      # spelling the http service URL here is precisely what cost the k3s lane
+      # fifteen minutes of CrashLoopBackOff on 2026-09-08. `.invalid` is the
+      # reserved never-resolvable TLD (RFC 6761), so the name cannot collide
+      # with a real host by accident.
+      ONEX_API_BASE_URL: "http://onex-api:8000"
+      ONEX_API_ALLOWED_ORIGINS: "https://onex-dev-lane-no-ingress.invalid"
+      STRIPE_CHECKOUT_SUCCESS_URL: "http://onex-dev-lane-no-ingress.invalid/billing/success"
+      STRIPE_CHECKOUT_CANCEL_URL: "http://onex-dev-lane-no-ingress.invalid/billing/cancel"
+      STRIPE_PORTAL_RETURN_URL: "http://onex-dev-lane-no-ingress.invalid/billing"
+      TRUST_PROXY_HEADERS: "false"
+      RATE_LIMIT_TRUSTED_PROXY_CIDRS: ""
+      # -- broker-side tenant provisioning -----------------------------------
+      # `redpanda` is a REAL registered provider (kafka_acl_manager
+      # get_acl_provisioner: redpanda|msk) and this lane's broker really is
+      # Redpanda, so this is the honest value and not a disable. `msk` would
+      # make every lane tenant-create attempt to reach AWS.
+      BROKER_ACL_PROVIDER: "redpanda"
+      BROKER_QUOTA_PROVIDER: "deferred"
+      GATEWAY_P0B_PER_TENANT_CREDENTIALS: ${GATEWAY_P0B_PER_TENANT_CREDENTIALS:-enabled}
+      GATEWAY_ATTACH_TOKEN_EXCHANGE: "enabled"
+      GATEWAY_SIGNUP_TOPIC_PROVISIONING: "disabled"
+      GATEWAY_USER_CLIENT_ID: "omniweb"
+      GATEWAY_TOKEN_MAX_TTL_SECONDS: "900"
+      # Emptied deliberately. The cloud value names a live bridge tenant;
+      # carrying it here would put this lane's publishes on that tenant's wire
+      # topics. Tenant identity is deployment-scoped (operator ruling
+      # 2026-09-08): the lane mints its own tenant ids and never carries a cloud
+      # one.
+      GATEWAY_BRIDGED_TENANT_SLUGS: ""
+      # -- admin gates -------------------------------------------------------
+      # Five constant-time-compared admin secrets. Unset is 503 and wrong is
+      # 401, so an unset value does not fail loudly at boot -- it fails at the
+      # first tenant bootstrap, hours later, as a service-unavailable that reads
+      # like an outage. `:?` moves that to compose render. These are LANE-LOCAL
+      # sentinels provisioned by scripts/runtime_build/render_dev_lane_tenant_path_env.sh,
+      # the same shape k8s/onex-lab/render_ci_secrets.py uses for the k3s lane;
+      # they authorise nothing outside this compose project and are not a
+      # rotation of anything (Operating Rule 22 untouched).
+      TENANT_BOOTSTRAP_ADMIN_SECRET: ${TENANT_BOOTSTRAP_ADMIN_SECRET:?TENANT_BOOTSTRAP_ADMIN_SECRET must be set - POST /v1/tenants/bootstrap returns 503 when it is unset and 401 when it is wrong, so an unset value surfaces as an outage at first use rather than at boot; generate the lane-local value with scripts/runtime_build/render_dev_lane_tenant_path_env.sh}
+      TENANT_TOPICS_ADMIN_SECRET: ${TENANT_TOPICS_ADMIN_SECRET:?TENANT_TOPICS_ADMIN_SECRET must be set - see render_dev_lane_tenant_path_env.sh}
+      TENANT_CLIENTS_ADMIN_SECRET: ${TENANT_CLIENTS_ADMIN_SECRET:?TENANT_CLIENTS_ADMIN_SECRET must be set - see render_dev_lane_tenant_path_env.sh}
+      TENANT_OFFBOARD_ADMIN_SECRET: ${TENANT_OFFBOARD_ADMIN_SECRET:?TENANT_OFFBOARD_ADMIN_SECRET must be set - see render_dev_lane_tenant_path_env.sh}
+      ALPHA_INVITE_ADMIN_SECRET: ${ALPHA_INVITE_ADMIN_SECRET:?ALPHA_INVITE_ADMIN_SECRET must be set - see render_dev_lane_tenant_path_env.sh}
+      # -- billing -----------------------------------------------------------
+      # main.py reads STRIPE_API_KEY through os.environ[...] at import, and the
+      # k8s lane's validate-secrets init container refuses to start without both
+      # of these. The lane needs the k8s/onex-lab answer -- a per-run generated
+      # SENTINEL, never a real key. The lane reaches no Stripe endpoint: the
+      # three redirect URLs above name a reserved never-resolvable host.
+      STRIPE_API_KEY: ${STRIPE_API_KEY:?STRIPE_API_KEY must be set - main.py reads it at import; the dev lane uses a generated sentinel from render_dev_lane_tenant_path_env.sh and reaches no Stripe endpoint, NEVER a real key}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET must be set - generated sentinel, see render_dev_lane_tenant_path_env.sh}
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # The lane's own tenant credential, written by the mint step of
+      # scripts/smoke/smoke_delegation.sh running INSIDE this container (the
+      # same in-process auth_api_keys.create_api_key call the k3s minting Job
+      # makes, for the same circularity reason: every /api-keys route resolves
+      # the caller's tenant from a credential the lane does not have yet).
+      #
+      # A host directory and not stdout: the plaintext is available exactly
+      # once, and routing it through a `docker exec` pipe would put it in this
+      # session's own transcript. It is written here with mode 0600 by the
+      # process that mints it and read by the smoke from the host.
+      # `:?` and not a `${HOME}`-derived default: a nested expansion resolves
+      # against whichever HOME the compose invocation happens to carry, which on
+      # this host differs between an interactive shell, the deploy agent's
+      # systemd unit and a CI runner -- three different directories for one
+      # lane's credential. tests/ci/test_compose_no_nested_expansion.py refuses
+      # the nested form outright, and rightly.
+      - ${ONEX_LAB_TENANT_STATE_DIR:?ONEX_LAB_TENANT_STATE_DIR must name a host directory this lane may write its own tenant credential into - scripts/runtime_build/render_dev_lane_tenant_path_env.sh sets it}:/var/lib/onex-lab-tenant
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    labels:
+      - "com.omninode.service=onex-api"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-17530"
+      - "autoheal=true"
+volumes:
+  # Declared here and not in the base: the two one-shots that use it exist only
+  # on this lane. `name:` is spelled so the volume is identifiable on a host
+  # that runs five compose projects side by side.
+  cloud_migrations:
+    name: omnibase-infra-cloud-migrations

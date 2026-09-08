@@ -189,6 +189,31 @@ readonly RUNTIME_SERVICES=(
 # infra_routing_decisions -- but it shares the property that makes membership
 # here mandatory and membership in RUNTIME_SERVICES fatal: the service name does
 # not exist in the prod, stability-test or judge merged compose.
+#
+# OMN-17530 adds onex-api for a third reason, stated separately because it is
+# not the writers' reason. It is TAG-REFERENCED, not lane-built, so it cannot go
+# stale on a rebuild -- what it needs from a governed refresh is a RECREATE. It
+# carries eleven fail-closed variables and the lane's broker SASL credentials,
+# and a container that is never recreated never reads a new environment. That is
+# context-audit-consumer's failure mode exactly, see the array below, and it
+# would be worse here: onex-api is the surface a lab proof is taken THROUGH, so
+# a stale one makes the proof itself stale.
+#
+# The two omninode_cloud one-shots are DELIBERATELY NOT in this array, and the
+# reason is a live defect rather than a judgement. This array feeds the RT-6
+# deploy readback, which resolves a RUNNING container for every service in
+# scope; a one-shot has already exited 0 by the time the readback runs, so
+# membership here fails the certification with "could not resolve a running
+# container". FRICTION docs/tracking/ROLLING_WORK_LEDGER.md:4778 recorded that
+# exact shape against migration-gate, and a partition of the readback by restart
+# policy is in flight in lane dev-lane-refresh-lock. Until it lands, the two
+# one-shots run through the full-project bring-up, where compose honours their
+# depends_on, and a WARM refresh does not re-run them.
+#
+# The consequence, named rather than left to be discovered: a warm refresh that
+# carries a new migrate image tag does not apply the migrations in it. Re-run
+# them explicitly, or take the full bring-up, until the readback partition
+# lands.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-tenant-registry-writer
     projection-delegation-writer
@@ -197,6 +222,7 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-tenant-credentials-writer
     projection-live-events-writer
     infra-routing-decisions-consumer
+    onex-api
 )
 
 # OMN-18012: dev-lane Kafka clients that are declared in the BASE compose file

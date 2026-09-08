@@ -1,0 +1,46 @@
+name: cloud-migration
+description: >-
+  One-shot runner for the omninode_cloud control-plane corpus on the dev/lab lane (OMN-17530). Applies the corpus from ZERO in the order omninode_infra's db/migrations/MANIFEST specifies, evaluated by that image's own manifest_lib.sh — the order is consumed, never re-derived here. Sits beside forward-migration, which owns omnibase_infra + omnidash_analytics and names neither this database nor this corpus.
+image: postgres:16
+layer: infrastructure
+container_name: omnibase-infra-cloud-migration
+required_env:
+  # The corpus is applied AS its owning login, never as the superuser: onex-api
+  # connects as this same non-superuser role, so a corpus applied by `postgres`
+  # would leave every GRANT in it pointing at the wrong principal and would
+  # exempt the owner from the row-level security the lane exists to prove.
+  - ROLE_OMNINODE_PASSWORD
+hardcoded_env:
+  DB_HOST: postgres
+  DB_PORT: '5432'
+  DB_NAME: omninode_cloud
+  # docker/migrations/forward/000_create_multiple_databases.sh maps
+  # omninode_cloud -> role_omninode. The k3s lane names the same principal
+  # role_omninode_cloud; the two names are reconciled in favour of the compose
+  # init script's, because that script is what creates the role on this lane.
+  DB_USER: role_omninode
+  MIGRATION_DIR: /work
+operational_defaults: {}
+ports: null
+healthcheck: null
+volumes:
+  - cloud_migrations:/work
+  - ../docker/migrations/cloud/run-cloud-migrations.sh:/run-cloud-migrations.sh:ro
+depends_on:
+  - service: cloud-migration-files
+    condition: service_completed_successfully
+  - service: postgres
+    condition: service_healthy
+restart: 'no'
+resources:
+  cpus: '0.5'
+  memory: 256M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+command:
+  - bash
+  - /run-cloud-migrations.sh
+labels:
+  com.omninode.service: cloud-migration
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-17530

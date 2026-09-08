@@ -22,6 +22,17 @@ consumers:
   omnimarket-projection-session-outcome:
     bindings:
       - tenant_projection
+  # OMN-17530: the tenant-scoped control plane on the dev/lab lane. TWO
+  # bindings, because onex-api is the only compose consumer that speaks to both
+  # halves of the tenant path: `onex_api` is the control plane it OWNS -- the
+  # tenants and tenant_api_keys rows a bootstrap creates -- and `app_dashboard`
+  # is the analytics side it READS as the C1 delegation reader. Neither is
+  # optional and neither implies the other; declaring one would leave the other
+  # as inventory drift the moment this manifest is read.
+  onex-api:
+    bindings:
+      - onex_api
+      - app_dashboard
   projection-api:
     bindings:
       - app_dashboard
