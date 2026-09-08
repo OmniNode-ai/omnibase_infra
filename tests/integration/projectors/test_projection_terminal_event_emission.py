@@ -13,12 +13,15 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import ProjectionNotMaterializedError
+from omnibase_infra.event_bus.models.model_publish_receipt import ModelPublishReceipt
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     ProjectionDispatchSinks,
     _make_projection_dispatch_callback,
@@ -60,8 +63,24 @@ def test_terminal_event_emitted_after_successful_projection() -> None:
             return {"rows_upserted": 1}
 
     class FakeEventBus:
-        async def publish(self, topic: str, key: object, value: bytes) -> None:
+        # [OMN-17862] Reports a coordinate, as BOTH shipped buses do
+        # (`EventBusKafka.publish` / `EventBusInmemory.publish` are annotated
+        # `-> ModelPublishReceipt`). Returning None -- which no real bus does --
+        # now reads as "the transport cannot support a durable claim", and the
+        # DLQ arm correctly withholds the offset rather than acking a quarantine
+        # that was never confirmed. Fixing the double, not the assertion.
+        async def publish(
+            self, topic: str, key: object, value: bytes
+        ) -> ModelPublishReceipt:
             published.append((topic, key, value))
+            return ModelPublishReceipt(
+                topic=topic,
+                partition=0,
+                offset=len(published) - 1,
+                cluster="test-cluster",
+                produced_at=datetime.now(UTC),
+                transport=EnumInfraTransportType.INMEMORY,
+            )
 
     callback = _make_projection_dispatch_callback(
         FakeDelegationHandler(),
@@ -135,8 +154,24 @@ def test_write_path_failure_emits_no_terminal_and_withholds_the_offset() -> None
             raise RuntimeError("DB write failed")
 
     class FakeEventBus:
-        async def publish(self, topic: str, key: object, value: bytes) -> None:
+        # [OMN-17862] Reports a coordinate, as BOTH shipped buses do
+        # (`EventBusKafka.publish` / `EventBusInmemory.publish` are annotated
+        # `-> ModelPublishReceipt`). Returning None -- which no real bus does --
+        # now reads as "the transport cannot support a durable claim", and the
+        # DLQ arm correctly withholds the offset rather than acking a quarantine
+        # that was never confirmed. Fixing the double, not the assertion.
+        async def publish(
+            self, topic: str, key: object, value: bytes
+        ) -> ModelPublishReceipt:
             published.append((topic, key, value))
+            return ModelPublishReceipt(
+                topic=topic,
+                partition=0,
+                offset=len(published) - 1,
+                cluster="test-cluster",
+                produced_at=datetime.now(UTC),
+                transport=EnumInfraTransportType.INMEMORY,
+            )
 
     callback = _make_projection_dispatch_callback(
         FailingHandler(),
@@ -196,8 +231,24 @@ def test_content_failure_still_quarantines_and_lets_the_offset_advance() -> None
             return {"rows_upserted": 1}
 
     class FakeEventBus:
-        async def publish(self, topic: str, key: object, value: bytes) -> None:
+        # [OMN-17862] Reports a coordinate, as BOTH shipped buses do
+        # (`EventBusKafka.publish` / `EventBusInmemory.publish` are annotated
+        # `-> ModelPublishReceipt`). Returning None -- which no real bus does --
+        # now reads as "the transport cannot support a durable claim", and the
+        # DLQ arm correctly withholds the offset rather than acking a quarantine
+        # that was never confirmed. Fixing the double, not the assertion.
+        async def publish(
+            self, topic: str, key: object, value: bytes
+        ) -> ModelPublishReceipt:
             published.append((topic, key, value))
+            return ModelPublishReceipt(
+                topic=topic,
+                partition=0,
+                offset=len(published) - 1,
+                cluster="test-cluster",
+                produced_at=datetime.now(UTC),
+                transport=EnumInfraTransportType.INMEMORY,
+            )
 
     callback = _make_projection_dispatch_callback(
         ValidatingHandler(),

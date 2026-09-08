@@ -158,6 +158,52 @@ class ProjectionNotMaterializedError(ProjectionError):
     """
 
 
+class QuarantinePublishUnconfirmedError(ProjectionError):
+    """A refused event's quarantine publication was never confirmed durable.
+
+    OMN-17862. ``handler_wiring._route_projection_error_to_dlq`` is declared
+    ``-> bool`` and returns ``False`` on three separate failures — no publishable
+    event bus bound, the bound bus's ``publish`` attribute not callable, and the
+    publish itself raising — each logged at ERROR, with its own docstring calling
+    the whole function "best-effort". **Its one call site discarded that
+    boolean**: the call was a bare ``await`` expression statement, so
+    ``write_path_failure`` stayed ``None``, the guard below it did not fire, and
+    the callback returned normally. A callback that returns normally IS an ACK.
+    On a broker refusal, a wedged connection, or a lane brought up with no bus,
+    a refused record was therefore **neither projected nor quarantined and its
+    offset advanced** — reached through the arm the design called the safe one.
+    ``record_active_error()`` fires at the top of that function regardless, so
+    the COUNTER moved while the RECORD was gone.
+
+    It is raised — and bound into ``write_path_failure`` — so the offset is
+    withheld until the quarantine actually lands. That deliberately answers the
+    "best-effort, so it cannot wedge the consumer" rationale rather than ignoring
+    it: withholding does stall the partition, and a stall is recoverable and
+    loud where a dropped record is neither. Redelivery re-refuses the record and
+    re-attempts the quarantine, so the stall clears as soon as the bus does.
+
+    **This type must be an EXCEPTION, never the boolean it replaces.**
+    ``write_path_failure = False`` satisfies the ``is not None`` guard and then
+    makes ``raise ProjectionNotMaterializedError(...) from False`` a ``TypeError``
+    (*exception causes must derive from BaseException*). A ``TypeError`` is not a
+    ``ProjectionNotMaterializedError``, so the offset-withholding arm does not
+    catch it; it falls to the bounded-retry loop's generic handler and then to the
+    boundary catch-all, which routes it to the swallowed-exception path and
+    returns normally — the same silent drop, one exception type further along.
+
+    Purpose-named rather than re-using the original refusal, because
+    ``ProjectionNotMaterializedError``'s message renders
+    ``type(write_path_failure).__name__``: binding the bare parse failure there
+    would name the PARSE while the QUARANTINE is what actually withheld the
+    offset, pointing an operator at the wrong seam. The parse failure stays
+    reachable through ``__cause__``.
+
+    Distinct from :class:`ProjectionNotMaterializedError` and deliberately NOT a
+    subclass of it: this is the *cause* bound into ``write_path_failure``, and
+    the withholding type is raised *from* it.
+    """
+
+
 class ProjectionQueryRowBudgetError(ProjectionNotMaterializedError):
     """A projection read matched more rows than the seam will materialise.
 
@@ -213,4 +259,5 @@ __all__ = [
     "ProjectionNotMaterializedError",
     "ProjectionQueryRowBudgetError",
     "ProjectionTenantContextError",
+    "QuarantinePublishUnconfirmedError",
 ]

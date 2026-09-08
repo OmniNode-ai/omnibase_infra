@@ -88,6 +88,7 @@ from omnibase_infra.errors import (
     EnvelopeValidationError,
     ProjectionNotMaterializedError,
     ProjectionQueryRowBudgetError,
+    QuarantinePublishUnconfirmedError,
     TopicReplicationPolicyError,
 )
 from omnibase_infra.event_bus.enum_contract_attach_exclusion_reason import (
@@ -3645,16 +3646,44 @@ async def _route_projection_error_to_dlq(
     every drop reaches a declared, durable topic even when the contract has no
     DLQ topic of its own.
 
-    Generic for ALL projection handlers, not delegation-only. Best-effort:
-    returns ``True`` when the DLQ/quarantine envelope was published, ``False``
-    when no publishable event bus is available or the publish itself fails
-    (each logged at ERROR). A DLQ publish failure never propagates, so it
-    cannot wedge the consumer.
+    Generic for ALL projection handlers, not delegation-only.
+
+    OMN-17862: returns ``True`` ONLY when the quarantine envelope's publication
+    was **confirmed**, and ``False`` on every other outcome — no publishable
+    event bus is available, the bound ``publish`` attribute is not callable, the
+    publish raises, or the publish reports no durability coordinate. Each is
+    logged at ERROR. This function no longer decides whether that failure
+    propagates: **its caller binds the return value**, and a falsy result
+    withholds the offset. The old docstring's "a DLQ publish failure never
+    propagates, so it cannot wedge the consumer" described a real property and
+    the wrong tradeoff — the single call site discarded the boolean, so a
+    quarantine that never happened acked the record anyway. Withholding does
+    stall the partition; a stall is recoverable and loud, a dropped record is
+    neither, and redelivery re-attempts the quarantine so the stall clears as
+    soon as the bus does.
+
+    Canonical invariant 7 — *a publish return is not durability* — is stated in
+    ``EventBus.publish``'s own docstring, so the returned ``ModelPublishReceipt``
+    is no longer discarded either: it is put through a
+    ``ProtocolConfirmationStrategy`` before this returns ``True``.
     """
     import json
     from datetime import UTC, datetime
 
     from omnibase_infra.enums import EnumDlqFailureClass
+    from omnibase_infra.enums.enum_confirmation_state import EnumConfirmationState
+
+    # Imported from its own MODULE, not the `confirmation` package __init__:
+    # that __init__ also re-exports `KafkaReadbackSource`, whose raw
+    # `AIOKafkaConsumer` the imperative-contract guard blocks once a live
+    # module reaches it. This seam needs only the strategy, so it takes only
+    # the strategy rather than making a dead Kafka client live (OMN-17862).
+    from omnibase_infra.event_bus.confirmation.strategy_publish_return_only import (
+        PublishReturnOnlyStrategy,
+    )
+    from omnibase_infra.event_bus.models.model_publish_receipt import (
+        ModelPublishReceipt,
+    )
     from omnibase_infra.event_bus.topic_constants import build_dlq_topic
     from omnibase_infra.runtime.observability import (
         record_active_dlq,
@@ -3723,8 +3752,8 @@ async def _route_projection_error_to_dlq(
         )
         return False
     try:
-        await publish(dlq_topic, None, raw)
-    except Exception as exc:  # noqa: BLE001 — DLQ publish is best-effort; never wedge the consumer
+        receipt = await publish(dlq_topic, None, raw)
+    except Exception as exc:  # noqa: BLE001 — reported to the caller as False, which withholds the offset
         logger.error(
             "Projection handler %s failed to route malformed/erroring event to DLQ %s "
             "(correlation_id=%s): %s",
@@ -3732,6 +3761,40 @@ async def _route_projection_error_to_dlq(
             dlq_topic,
             correlation_id,
             _sanitize_exc(exc),
+        )
+        return False
+
+    # OMN-17862, canonical invariant 7: a publish RETURN is not durability. The
+    # receipt was previously discarded here, so "the produce call did not raise"
+    # was being reported to the caller as a durable quarantine.
+    #
+    # PublishReturnOnlyStrategy is the deliberately weakest shipped strategy and
+    # is NAMED here rather than assumed, which is the reason that class exists.
+    # A broker readback is the stronger choice and is not available at this seam:
+    # the auto-wiring binds an arbitrary publishable object, not a readback
+    # source, and this path is already the failure path for a record that will be
+    # redelivered and re-quarantined if the claim turns out to be wrong. What the
+    # strategy buys unconditionally is the coordinate check — even it refuses a
+    # ``None`` receipt, because a transport that cannot report a coordinate has
+    # told us nothing at all. Both shipped buses (``EventBusKafka``,
+    # ``EventBusInmemory``) return a ``ModelPublishReceipt``.
+    #
+    # A return that is not a receipt at all is treated as no coordinate: the
+    # fail-closed direction, never a reason to assume durability.
+    confirmation = await PublishReturnOnlyStrategy().confirm(
+        receipt if isinstance(receipt, ModelPublishReceipt) else None
+    )
+    if confirmation.state is not EnumConfirmationState.CONFIRMED:
+        logger.error(
+            "Projection handler %s produced a malformed/erroring event to DLQ %s "
+            "but the publication was NOT confirmed durable (correlation_id=%s, "
+            "strategy=%s, state=%s): %s — the offset must not advance (OMN-17862)",
+            handler_name,
+            dlq_topic,
+            correlation_id,
+            confirmation.strategy,
+            confirmation.state.value,
+            confirmation.detail,
         )
         return False
     record_active_dlq()
@@ -4274,13 +4337,52 @@ def _make_projection_dispatch_callback(
                 # contract-declared DLQ topic (or the platform quarantine sink) and
                 # let the offset advance — otherwise one malformed record wedges
                 # the partition forever.
-                await _route_projection_error_to_dlq(
+                #
+                # OMN-17862: BIND the result. This call used to be a bare
+                # `await` expression statement — nothing assigned, nothing
+                # tested — while the function it calls returns False on three
+                # failures (no publishable bus, a non-callable `publish`, a
+                # publish that raises) and now a fourth (an unconfirmed
+                # publication). `write_path_failure` stayed None, the guard
+                # below did not fire, and the callback returned normally, which
+                # the consume boundary reads as success. A record this path
+                # refused was then NEITHER projected NOR quarantined while its
+                # offset advanced — the silent drop, reached through the arm
+                # this design calls the safe one, and reproduced end to end
+                # against this exact code.
+                quarantined = await _route_projection_error_to_dlq(
                     event_bus,
                     dlq_topics,
                     envelope,
                     handler_name,
                     f"{type(exc).__name__}: {_sanitize_exc(exc)}",
                 )
+                if not quarantined:
+                    # BIND AN EXCEPTION, NEVER THE BOOLEAN. `write_path_failure
+                    # = False` passes the `is not None` guard below and then
+                    # makes `raise ... from False` a TypeError (*exception
+                    # causes must derive from BaseException*), which is not a
+                    # ProjectionNotMaterializedError — so the offset-withholding
+                    # arm does not catch it, the bounded-retry loop's generic
+                    # handler re-raises it, and the boundary catch-all ACKs it.
+                    # That is the same silent drop this block closes, one
+                    # exception type further along.
+                    #
+                    # Purpose-named rather than re-using `exc`: the message
+                    # below renders `type(write_path_failure).__name__`, so
+                    # binding the parse failure would name the PARSE while the
+                    # QUARANTINE is what actually withheld the offset. The parse
+                    # failure stays reachable through __cause__.
+                    unconfirmed = QuarantinePublishUnconfirmedError(
+                        f"projection handler {handler_name} refused an event "
+                        f"from {_extract_projection_topic(envelope) or 'unknown'} "
+                        f"and its quarantine publication was not confirmed "
+                        f"durable, so the record is neither projected nor "
+                        f"captured (OMN-17862)",
+                        projection_type=handler_name,
+                    )
+                    unconfirmed.__cause__ = exc
+                    write_path_failure = unconfirmed
             else:
                 # OMN-17379: the WRITE PATH is the defect, not the event. Handing
                 # the record to a DLQ here and returning normally is an ACK, and
