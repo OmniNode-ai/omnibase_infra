@@ -120,12 +120,26 @@ def _load_boundary_pairs() -> list[Any]:
 def _changed_module_prefixes() -> set[str]:
     """Return a set of dotted module prefixes for files changed vs origin/main.
 
-    Uses ``git diff --name-only origin/main`` to detect touched Python files,
-    then converts them to dotted module paths (``src/foo/bar.py`` → ``foo.bar``).
+    Diffs from the MERGE BASE with ``origin/main`` (OMN-18058), then converts the
+    touched Python files to dotted module paths (``src/foo/bar.py`` → ``foo.bar``).
+
+    The merge base, not ``origin/main`` itself: the two-dot form ``git diff
+    origin/main`` describes the difference between two trees, so on a branch cut
+    from a stale base it additionally reports every file a PEER landed on the base
+    branch since the branch point, presented as this branch's own change. For a
+    ``--changed-only`` narrowing that silently widens the run to somebody else's
+    modules; for the gates that share this range shape it inverts the message
+    entirely (see ``tests/ci/test_changed_file_attribution_range_omn18058.py``).
     """
     try:
+        merge_base = subprocess.run(
+            ["git", "merge-base", "origin/main", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
         result = subprocess.run(
-            ["git", "diff", "--name-only", "origin/main"],
+            ["git", "diff", "--name-only", merge_base],
             capture_output=True,
             text=True,
             check=True,
