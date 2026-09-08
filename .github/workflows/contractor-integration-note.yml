@@ -55,11 +55,26 @@
 #   re-run, a backfill of an already-noted PR, and a replay all converge on
 #   `skip_reason=already_posted`. There is no side table to drift.
 #
+# WHERE THE RECIPIENT SET LIVES (OMN-18026)
+#   The roster names people outside the organisation and binds each to a
+#   tracker user id. It used to sit in omnimarket, which is PUBLIC, so it was a
+#   recipient list published to anyone who cloned. It now lives in a private
+#   repository, checked out by the `roster-source` step below with an
+#   installation token scoped to that one repository -- the same pattern this
+#   organisation's workflows already use, so moving it created no new
+#   credential.
+#
+#   The path is passed explicitly and there is no fallback. If the checkout is
+#   missing the node's load_roster raises and the CLI exits 2, which is the
+#   correct outcome: an unresolvable roster must fail loudly, because one that
+#   silently reads as empty delivers nothing and looks exactly like a quiet
+#   week -- the ambiguity this workflow exists to end.
+#
 # WHAT IT NEVER DOES
 #   It does not close, move, or re-assign a ticket, and it does not touch the
 #   PR. Its only write is one Linear comment.
 #
-# Ticket: OMN-17277 (epic OMN-17274)
+# Ticket: OMN-17277 (epic OMN-17274), OMN-18026 (epic OMN-17992)
 
 name: Contractor Integration Note
 
@@ -162,6 +177,33 @@ jobs:
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           persist-credentials: false
 
+      # OMN-18026: the recipient set is private. Mint a short-lived
+      # onexbot-occ-writer installation token scoped to the one repository that
+      # holds it -- the same pattern as env-parity.yml and
+      # deliver-dev-candidate-to-staging.yml, so no new credential exists.
+      - name: Mint onexbot-occ-writer app token (roster source)
+        id: roster-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: read
+
+      - name: Check out the roster source (the recipient set lives there)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omninode_infra
+          # Deliberately `dev`, for the same reason as the omnimarket checkout
+          # below: adding or removing a recipient must take effect on the next
+          # merge without a companion PR here.
+          ref: dev
+          fetch-depth: 1
+          path: roster-source
+          token: ${{ steps.roster-token.outputs.token || secrets.OMNI_GITHUB_TOKEN }}
+          persist-credentials: false
+
       - name: Check out omnimarket (the node lives there)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -261,7 +303,7 @@ jobs:
             --repo "$TARGET_REPO" \
             --pr-json "${GITHUB_WORKSPACE}/pr.json" \
             --repo-path "${GITHUB_WORKSPACE}/target-repo" \
-            --roster config/contractor_roster.yaml \
+            --roster "${GITHUB_WORKSPACE}/roster-source/config/contractor_roster.yaml" \
             $DRY_FLAG \
             | tee "${GITHUB_WORKSPACE}/note-result.txt"
 
@@ -276,6 +318,6 @@ jobs:
             cat "${GITHUB_WORKSPACE}/note-result.txt" 2>/dev/null || echo "(no result — see the step log)"
             echo '```'
             echo ""
-            echo "Recipient set: omnimarket \`config/contractor_roster.yaml\` @ dev."
+            echo "Recipient set: the private roster source, \`config/contractor_roster.yaml\` @ dev (OMN-18026)."
             echo "Most merges owe no note; a named skip reason is the expected outcome."
           } >> "$GITHUB_STEP_SUMMARY"
