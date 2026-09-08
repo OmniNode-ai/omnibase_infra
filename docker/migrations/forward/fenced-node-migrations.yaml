@@ -719,11 +719,22 @@ fenced_node_migrations:
     ticket: "OMN-16930"
   - id: "node:node_projection_delegation:0033_delegation_events_uuid_via_registry_single_transaction.sql"
     ticket: "OMN-17288"
-  # 0034 stays in this BASELINE and is LANE-RELEASED on the compose dev/lab
-  # lane (OMN-15683, 2026-09-08) — it is the OPERATIVE conversion, and
-  # releasing exactly it is step 3 of the un-gate ordering recorded above. It
-  # could not be removed from the baseline: it enables FORCE ROW LEVEL SECURITY
-  # and is not grandfathered, so the OMN-15336 item-4 guard would FATAL on it.
-  # 0031, 0032 and 0033 above stay fully fenced — they are RETIRED, not held.
+  # 0034 is RETIRED, superseded by 0036 (OMN-15683, 2026-09-08). It stays in
+  # this baseline and it LOST its lane release on the same date: it resolves
+  # identity on m.tenant_slug alone and cannot convert a mixed-representation
+  # column, which is what onex-dev now holds. A retired id stays fenced, and
+  # leaving it fenced is what keeps it retired. 0031, 0032 and 0033 above are
+  # retired on the same terms.
   - id: "node:node_projection_delegation:0034_delegation_events_uuid_via_registry_role_set_guard.sql"
     ticket: "OMN-17316"
+  # 0036 is the OPERATIVE conversion and takes 0034's place in the compose
+  # dev/lab lane release. It stays in this BASELINE for the same mechanical
+  # reason 0034 did: it enables FORCE ROW LEVEL SECURITY and is not
+  # grandfathered, so a baseline REMOVAL hands it to the OMN-15336 item-4
+  # guard, which is FATAL for exactly that shape ("NOTHING was applied by this
+  # migration"). The guard's own message names this remedy — keep the fence
+  # entry, add a lane release authorized by an operator ruling. Releasing
+  # exactly one id is still step 3 of the un-gate ordering recorded above; the
+  # id it names is now 0036.
+  - id: "node:node_projection_delegation:0036_delegation_events_uuid_mixed_representation.sql"
+    ticket: "OMN-15683"
