@@ -226,6 +226,9 @@ guard_hotpatch_ledger() { :; }
 check_compose_project_collision() { :; }
 show_preview() { :; }
 acquire_lock() { :; }
+resolve_lane_name() { printf 'dev\\n'; }
+lane_lock_acquire() { :; }
+lane_lock_release() { :; }
 sync_files() {
     local dst="$2"
     mkdir -p "${dst}"
@@ -336,7 +339,13 @@ def _build_harness(tmp_path: Path) -> tuple[str, dict[str, str]]:
         [
             "set -euo pipefail",
             f'DEPLOY_ROOT="{deploy_root}"',
+            # OMN-16729: the default only survives until main() repoints it at
+            # this lane's registry.<compose_project>.json.
             'REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"',
+            'REGISTRY_ALIAS_FILE="${DEPLOY_ROOT}/registry.json"',
+            'REGISTRY_ALIAS_COMPOSE_PROJECT="omnibase-infra"',
+            "LANE_LOCK_TIMEOUT_SECONDS=900",
+            'DEPLOY_STARTED_AT="2026-01-01T00:00:00Z"',
             'LOCK_DIR="${DEPLOY_ROOT}/.deploy.lock"',
             'SCRIPT_NAME="deploy-runtime.sh"',
             f"RUNTIME_BUILD_SERVICES=({services_literal})",
@@ -371,6 +380,7 @@ def _build_harness(tmp_path: Path) -> tuple[str, dict[str, str]]:
             _extract_function("restore_migration_tree_after_revert"),
             _extract_function("snapshot_latest_image_tags"),
             _extract_function("restore_latest_image_tags"),
+            _extract_function("lane_registry_file"),
             _extract_function("write_registry"),
             # OMN-17287: cleanup_on_exit() consults this before removing a
             # deploy dir, so it must be present in the harness too.
@@ -452,7 +462,7 @@ def test_fresh_deploy_failed_migration_preflight_never_writes_registry(
     )
     assert result.returncode != 0, result.stdout + result.stderr
 
-    registry_file = deploy_root / "registry.json"
+    registry_file = deploy_root / "registry.fake-project.json"
     assert not registry_file.exists(), (
         "registry.json must not exist after a failed fresh deploy -- "
         "write_registry() must run only after the migration preflight (and "
@@ -527,7 +537,9 @@ def test_force_redeploy_failed_migration_preflight_leaves_registry_byte_identica
         [
             "set -euo pipefail",
             f'DEPLOY_ROOT="{deploy_root}"',
-            'REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"',
+            'REGISTRY_FILE="${DEPLOY_ROOT}/registry.fake-project.json"',
+            'REGISTRY_ALIAS_FILE="${DEPLOY_ROOT}/registry.json"',
+            'REGISTRY_ALIAS_COMPOSE_PROJECT="omnibase-infra"',
             'LANE_ATTRIBUTION_RECORD_JSON=""',
             'COMPOSE_PROFILE="runtime"',
             _LOG_FUNCS,
@@ -548,7 +560,7 @@ def test_force_redeploy_failed_migration_preflight_leaves_registry_byte_identica
         timeout=30,
     )
     assert seed_result.returncode == 0, seed_result.stdout + seed_result.stderr
-    registry_file = deploy_root / "registry.json"
+    registry_file = deploy_root / "registry.fake-project.json"
     pre_run_registry_bytes = registry_file.read_bytes()
     assert b"111111111111" in pre_run_registry_bytes
 
@@ -623,7 +635,7 @@ def test_success_path_writes_registry_and_keeps_new_latest_tags(
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    registry_file = deploy_root / "registry.json"
+    registry_file = deploy_root / "registry.fake-project.json"
     assert registry_file.is_file(), "a successful deploy must write registry.json"
     registry = json.loads(registry_file.read_text(encoding="utf-8"))
     assert registry["git_sha"] == git_sha

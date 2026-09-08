@@ -37,6 +37,7 @@
 #
 # Usage:
 #   refresh_dev_lane.sh [--ref <ref>] [--min-contracts <n>] [--execute]
+#       [--lock-timeout <seconds>]
 #
 # Exit codes:
 #   0  plan printed (dry-run) or refresh SUCCEEDED (health-gate PASS)
@@ -52,6 +53,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
+
+# OMN-16729: per-compose-project host lane lock. This wrapper holds it across
+# its WHOLE critical section -- pre-state capture, build, health gate, readback,
+# receipt -- which is the window deploy-runtime.sh's own .deploy.lock never
+# covered and in which two sanctioned refreshes collided on 2026-09-08.
+# shellcheck source=./lane_lock.sh
+source "${SCRIPT_DIR}/lane_lock.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dev_refresh.py"
 
 log() { printf '[refresh-dev-lane] %s\n' "$*" >&2; }
@@ -195,10 +203,15 @@ MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${DEV_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
 HEALTH_URL="http://${LANE_PROBE_HOST}:${DEV_RUNTIME_MAIN_PORT}/health"
 MODE="plan"
+# OMN-16729: bounded wait for the per-lane host lock, in seconds. 15 minutes by
+# default -- long enough to queue behind a legitimate peer refresh of the same
+# lane, short enough that a wedged holder surfaces as a named refusal, never a
+# hang. The lock is never stolen at any timeout value.
+LANE_LOCK_TIMEOUT_SECONDS="${LANE_LOCK_TIMEOUT_SECONDS:-900}"
 TRIGGERING_TAG=""
 
 usage() {
-    sed -n '4,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '4,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -219,6 +232,10 @@ while [[ $# -gt 0 ]]; do
         --triggering-tag)
             [[ -n "${2:-}" ]] || { err "--triggering-tag requires a value"; exit 64; }
             TRIGGERING_TAG="$2"; shift 2 ;;
+        --lock-timeout)
+            [[ -n "${2:-}" ]] || { err "--lock-timeout requires a value"; exit 64; }
+            [[ "$2" =~ ^[0-9]+$ ]] || { err "--lock-timeout must be a non-negative integer number of seconds"; exit 64; }
+            LANE_LOCK_TIMEOUT_SECONDS="$2"; shift 2 ;;
         --execute)
             MODE="execute"; shift ;;
         --help|-h)
@@ -309,6 +326,22 @@ mkdir -p "${HISTORY_DIR}"
 UTC_NOW="$(date -u +%Y%m%dT%H%M%SZ)"
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/refresh-dev-lane.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
+
+# --- lane lock (OMN-16729) --------------------------------------------------
+# Taken before ANY live read of lane state, because the collision this closes
+# severed a post-deploy readback, not a build. Held until this script exits;
+# deploy-runtime.sh below inherits ONEX_LANE_LOCK_HELD and re-enters without
+# deadlocking. Plan mode takes nothing -- it mutates nothing, and a dry run must
+# not be blocked by a legitimately running refresh.
+if [[ "${MODE}" == "execute" ]]; then
+    if ! lane_lock_acquire "${COMPOSE_PROJECT}" "${LANE}" "${REF}" "${LANE_LOCK_TIMEOUT_SECONDS}" "refresh_dev_lane.sh" "--ref" "${REF}"; then
+        err "lane '${COMPOSE_PROJECT}' is held by another process; refusing to start a second refresh on it."
+        err "  Nothing was read, built, recreated or rolled back. See the holder named above."
+        exit 2
+    fi
+    trap 'lane_lock_release; rm -rf "${WORKDIR}"' EXIT
+fi
+
 
 log "lane            : ${LANE} (compose project ${COMPOSE_PROJECT})"
 log "ref             : ${REF}"

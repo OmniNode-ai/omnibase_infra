@@ -48,6 +48,13 @@ REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
 # shellcheck source=./runtime_build/compose_wait_timeout.sh
 source "${SCRIPT_DIR_FOR_ENV}/runtime_build/compose_wait_timeout.sh"
 
+# OMN-16729: per-compose-project host lane lock. Sourced here for the same
+# reason as the file above -- one helper-load block near the top. The lock is
+# taken in main() once the target lane is known, and is a re-entrant no-op when
+# an outer refresh wrapper already holds this lane.
+# shellcheck source=./runtime_build/lane_lock.sh
+source "${SCRIPT_DIR_FOR_ENV}/runtime_build/lane_lock.sh"
+
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
@@ -106,8 +113,40 @@ readonly SCRIPT_VERSION="1.0.0"
 
 # Deployment root -- all versioned deployments live under this tree
 readonly DEPLOY_ROOT="${HOME}/.omnibase/infra"
-readonly REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"
+
+# OMN-16729: the deploy record is PER LANE.
+#
+# registry.json used to be a single host-level file with `compose_project` as a
+# FIELD, written by every lane, last-writer-wins. It therefore could never
+# attest more than one lane at a time: on 2026-09-08 it read
+# active_version=0.38.22 / git_sha=7f6c2b8dbd89 with
+# compose_project=omnibase-infra-stability-test while the question being asked
+# of it was "what is on the DEV lane", and a reader who checked only the
+# version and the sha would have been wrong without any signal that they were.
+#
+# The lane identity moves from a field into the FILENAME. Every read and write
+# below goes through REGISTRY_FILE, which main() repoints to
+# registry.<compose_project>.json the moment the lane is resolved; the default
+# below only survives for the (test-only) paths that call a registry function
+# without going through main().
+REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"
+# Compatibility alias for readers that still open the old path by name. It is a
+# SYMLINK, refreshed only by a dev-lane deploy, so the old name now means
+# exactly one thing -- "the dev lane's deploy record" -- instead of "whichever
+# lane wrote last".
+readonly REGISTRY_ALIAS_FILE="${DEPLOY_ROOT}/registry.json"
+readonly REGISTRY_ALIAS_COMPOSE_PROJECT="omnibase-infra"
 readonly LOCK_DIR="${DEPLOY_ROOT}/.deploy.lock"
+
+# OMN-16729: bounded wait for the per-lane host lock, in seconds. 15 minutes by
+# default -- long enough to queue behind a legitimate peer refresh, short
+# enough that a wedged holder surfaces as a named failure rather than a hang.
+LANE_LOCK_TIMEOUT_SECONDS="${LANE_LOCK_TIMEOUT_SECONDS:-900}"
+
+lane_registry_file() {
+    # Path of one lane's deploy record. Lane identity is the filename.
+    printf '%s/registry.%s.json\n' "${DEPLOY_ROOT}" "$1"
+}
 
 # OMN-15218: env-var NAMES the lane-deploy attribution preflight reads. Held as
 # names (not values) so the guard's error text and the Python preflight can never
@@ -430,6 +469,10 @@ LATEST_TAG_SNAPSHOT_FILE=""
 # a parameter -- it reads this global to resolve the same image names
 # snapshot_latest_image_tags() recorded them under.
 DEPLOY_COMPOSE_PROJECT=""
+# OMN-16729: UTC timestamp taken at main() entry. The RT-6 readback compares a
+# one-shot's docker FinishedAt against it, so a one-shot that exited 0 during
+# some EARLIER deploy cannot be mistaken for one this run re-asserted.
+DEPLOY_STARTED_AT=""
 
 # =============================================================================
 # Logging
@@ -509,6 +552,12 @@ OPTIONS
     --prod              Enforce the prod promotion-lineage guard before build:
                         source tree must be clean AND HEAD an ancestor-of/equal-to
                         origin/main. Also honored via ONEX_DEPLOY_LANE=prod.
+    --lock-timeout N    Seconds to wait for the per-lane host lock before
+                        refusing (default 900). The lock is one exclusive fcntl
+                        lock per compose project under
+                        ~/.omnibase/state/lane-locks/; it is never stolen, and a
+                        contended acquisition names the holding pid, start time,
+                        lane and command (OMN-16729).
     --help              Show this help message and exit.
 
 ATTRIBUTION + GRANT INTERLOCK (OMN-15218)
@@ -530,7 +579,8 @@ ATTRIBUTION + GRANT INTERLOCK (OMN-15218)
 DEPLOYMENT ROOT
     ~/.omnibase/infra/
     +-- .deploy.lock/                       mkdir-based concurrency guard
-    +-- registry.json                       tracks active deployment
+    +-- registry.<compose_project>.json     that ONE lane's active deployment
+    +-- registry.json                       symlink alias -> the dev lane's file
     +-- deploy-log.jsonl                    append-only lane-deploy attribution log
     +-- deploy-attribution/                 per-run attribution records
     +-- deployed/
@@ -567,8 +617,12 @@ EXAMPLES
     # Print compose commands for manual use
     ${SCRIPT_NAME} --print-compose-cmd
 
-    # Check registry
-    cat ~/.omnibase/infra/registry.json | jq .
+    # Check a lane's registry (lane identity is the FILENAME, OMN-16729)
+    jq . ~/.omnibase/infra/registry.omnibase-infra.json                 # dev
+    jq . ~/.omnibase/infra/registry.omnibase-infra-stability-test.json  # stability
+
+    # Who holds a lane right now
+    python3 scripts/runtime_build/lane_lock.py describe --compose-project omnibase-infra
 
     # Verify image labels match deployed SHA
     docker inspect omninode-runtime \\
@@ -623,6 +677,15 @@ parse_args() {
             --prod)
                 PROD_LANE=true
                 shift
+                ;;
+            --lock-timeout)
+                # OMN-16729: bounded wait for the per-lane host lock, seconds.
+                if [[ -z "${2:-}" || ! "$2" =~ ^[0-9]+$ ]]; then
+                    log_error "--lock-timeout requires a non-negative integer number of seconds"
+                    exit 1
+                fi
+                LANE_LOCK_TIMEOUT_SECONDS="$2"
+                shift 2
                 ;;
             --help|-h)
                 usage
@@ -1791,6 +1854,12 @@ cleanup_on_exit() {
 
     # Release concurrency lock
     rm -rf "${LOCK_DIR}" 2>/dev/null || true
+
+    # OMN-16729: drop the holder sidecar and close the lane-lock fd. The lock
+    # itself is released by the kernel when this process exits regardless, so
+    # this is tidiness, not the mechanism -- there is no path on which a
+    # crashed deploy leaves a lane locked.
+    lane_lock_release
 }
 
 assert_deployed_migration_tree_synced() {
@@ -2558,6 +2627,24 @@ write_registry() {
     # Atomic rename
     mv "${tmp_file}" "${REGISTRY_FILE}"
 
+    # OMN-16729: keep the historical `registry.json` name resolvable for readers
+    # that still open it by name, but bind it to ONE lane -- the dev lane -- as
+    # a relative symlink, instead of letting every lane overwrite it in turn.
+    # A prod or stability deploy deliberately does NOT touch the alias: the
+    # whole defect being closed here is the old name silently changing which
+    # lane it describes.
+    if [[ "${compose_project}" == "${REGISTRY_ALIAS_COMPOSE_PROJECT}" ]]; then
+        local alias_target
+        alias_target="$(basename "${REGISTRY_FILE}")"
+        if ln -sfn "${alias_target}" "${REGISTRY_ALIAS_FILE}" 2>/dev/null; then
+            log_info "Registry alias: ${REGISTRY_ALIAS_FILE} -> ${alias_target}"
+        else
+            log_warn "Could not refresh the registry alias ${REGISTRY_ALIAS_FILE}; the per-lane record above is authoritative."
+        fi
+    else
+        log_info "Registry alias ${REGISTRY_ALIAS_FILE} left untouched -- it tracks the '${REGISTRY_ALIAS_COMPOSE_PROJECT}' lane only."
+    fi
+
     log_info "Registry written: ${REGISTRY_FILE}"
     log_info "  version:         ${version}"
     log_info "  git_sha:         ${git_sha}"
@@ -3264,6 +3351,72 @@ verify_deployment() {
 # Deploy readback -- RT-6 (OMN-14469): fail-closed Class-3 mechanism
 # =============================================================================
 
+service_is_one_shot() {
+    # OMN-16729: is this container a ONE-SHOT (a task that is supposed to exit)
+    # rather than a long-running service?
+    #
+    # The answer is read from the compose model as docker materialised it at
+    # create time -- HostConfig.RestartPolicy.Name -- not from a hardcoded list
+    # of service names here, which would silently go stale the next time a lane
+    # gains a one-shot. A one-shot declares `restart: "no"` (docker reports
+    # "no", or an empty string on some engine versions); every long-running
+    # service on every lane declares `unless-stopped`.
+    local container_id="$1"
+    local policy
+    policy="$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "${container_id}" 2>/dev/null || true)"
+    [[ -z "${policy}" || "${policy}" == "no" ]]
+}
+
+readback_one_shot_service() {
+    # OMN-16729: RT-6 assertion for a one-shot in the build scope.
+    #
+    # "Running" is the WRONG success condition for these: success is having
+    # exited 0, and having done so during THIS deploy. The finished-at check is
+    # the half that carries the meaning -- a one-shot whose whole purpose is to
+    # re-assert a broker-level flip on every governed refresh is not verified
+    # by a green exit code left over from a deploy three days ago.
+    #
+    # The image-revision readback is deliberately NOT run here: these one-shots
+    # run pinned upstream images that carry none of our build labels.
+    local service="$1"
+    local container_id="$2"
+
+    local state exit_code finished_at
+    state="$(docker inspect -f '{{.State.Status}}' "${container_id}" 2>/dev/null || true)"
+    exit_code="$(docker inspect -f '{{.State.ExitCode}}' "${container_id}" 2>/dev/null || true)"
+    finished_at="$(docker inspect -f '{{.State.FinishedAt}}' "${container_id}" 2>/dev/null || true)"
+
+    if [[ "${state}" != "exited" ]]; then
+        log_error "Deploy readback FAILED (RT-6): one-shot service '${service}' (container ${container_id:0:12}) is in state '${state}', expected 'exited'."
+        log_error "  A one-shot that never reached a terminal state has not proven it did its job."
+        log_error "Refusing to certify this deploy."
+        exit 1
+    fi
+
+    if [[ "${exit_code}" != "0" ]]; then
+        log_error "Deploy readback FAILED (RT-6): one-shot service '${service}' (container ${container_id:0:12}) exited ${exit_code}, expected 0."
+        log_error "  Inspect it with: docker logs ${container_id}"
+        log_error "Refusing to certify this deploy."
+        exit 1
+    fi
+
+    # Both timestamps are UTC ISO-8601, so a lexicographic compare of the
+    # second-resolution prefix IS a chronological compare -- and it needs no
+    # `date -d`, which macOS does not accept.
+    local finished_prefix="${finished_at:0:19}"
+    local started_prefix="${DEPLOY_STARTED_AT:0:19}"
+    if [[ -n "${started_prefix}" ]]; then
+        if [[ -z "${finished_prefix}" || "${finished_prefix}" < "${started_prefix}" ]]; then
+            log_error "Deploy readback FAILED (RT-6): one-shot service '${service}' (container ${container_id:0:12}) exited 0 at ${finished_at}, BEFORE this deploy started at ${DEPLOY_STARTED_AT}."
+            log_error "  It is a leftover from an earlier deploy; this run never re-asserted what it asserts."
+            log_error "Refusing to certify this deploy. Recreate the lane's one-shots and re-run."
+            exit 1
+        fi
+    fi
+
+    log_info "Deploy readback passed: ${service} (${container_id:0:12}) one-shot exited 0 at ${finished_at} (RT-6)."
+}
+
 readback_deployed_ref() {
     # TERMINAL deploy readback: read a fact only the freshly-built image could
     # carry off the RUNNING container and assert it equals the intended ref
@@ -3368,9 +3521,35 @@ readback_deployed_ref() {
             # (projection-api -> omnimarket-*, intelligence-api ->
             # omnibase-*). Resolve live via the compose service key instead
             # of hardcoding a second name map (OMN-13826-class lesson).
-            container_name="$(docker compose -p "${compose_project}" "${compose_args[@]}" ps -q "${service}" 2>/dev/null || true)"
+            #
+            # OMN-16729: resolve with `ps -aq` first, because a service in the
+            # build scope is not necessarily a LONG-RUNNING one. The dev lane's
+            # redpanda-scram-user / redpanda-sasl-enable are `restart: "no"`
+            # one-shots, deliberately in the refresh build scope (OMN-18012
+            # phase B) so a governed refresh re-asserts the SASL flip. Demanding
+            # a *running* container for them failed RT-6 on every governed dev
+            # refresh for services that had done their job perfectly -- and the
+            # ensuing rollback restored :latest TAGS while the recreated
+            # containers kept running the new image, which no tag rollback can
+            # recall.
+            local any_container_id
+            any_container_id="$(docker compose -p "${compose_project}" "${compose_args[@]}" ps -aq "${service}" 2>/dev/null | tail -n 1 || true)"
+            if [[ -z "${any_container_id}" ]]; then
+                log_error "Deploy readback FAILED (RT-6): in-scope service '${service}' has NO container at all (neither running nor exited)."
+                log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
+                exit 1
+            fi
+
+            if service_is_one_shot "${any_container_id}"; then
+                readback_one_shot_service "${service}" "${any_container_id}"
+                continue
+            fi
+
+            container_name="$(docker compose -p "${compose_project}" "${compose_args[@]}" ps -q "${service}" 2>/dev/null | tail -n 1 || true)"
             if [[ -z "${container_name}" ]]; then
                 log_error "Deploy readback FAILED (RT-6): could not resolve a running container for in-scope service '${service}'."
+                log_error "  Its container ${any_container_id:0:12} exists but is not running, and its restart policy"
+                log_error "  ('$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "${any_container_id}" 2>/dev/null || echo unknown)') marks it a long-running service, not a one-shot."
                 log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
                 exit 1
             fi
@@ -3550,6 +3729,7 @@ main() {
     # OMN-15218: capture raw argv before parse_args consumes it so the attribution
     # record carries the literal command that touched the lane.
     DEPLOY_INVOCATION_ARGS=("$@")
+    DEPLOY_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     parse_args "$@"
 
     # Phase 1: Validate prerequisites
@@ -3609,6 +3789,13 @@ main() {
     # trap handler) reads to resolve :latest image names on a failed deploy.
     DEPLOY_COMPOSE_PROJECT="${compose_project}"
 
+    # OMN-16729: the deploy record is per lane, and every read below (the
+    # active-deployment guard, the prune's "never remove the active path", the
+    # restore path) must read THIS lane's record rather than whichever lane
+    # wrote the shared file last.
+    REGISTRY_FILE="$(lane_registry_file "${compose_project}")"
+    log_info "Registry file: ${REGISTRY_FILE}"
+
     # --cold lane-scope guard (OMN-16803). Runs here, not in parse_args, because
     # the target lane is only known once the compose project is resolved — the
     # parse_args PROD_LANE check cannot see a prod lane selected purely via
@@ -3656,6 +3843,25 @@ main() {
     # =========================================================================
     # Execute mode from here
     # =========================================================================
+
+    # Phase 4a: Lane lock (OMN-16729)
+    #
+    # Taken BEFORE the host-wide .deploy.lock and before anything is synced,
+    # built, recreated or read back, and held until this process exits. It is
+    # per compose project, so two different lanes never block each other; it is
+    # a re-entrant no-op when refresh_dev_lane.sh / refresh_stability_lane.sh
+    # already holds this lane (they hold it across their pre-state capture,
+    # health gate and readback, which is the window .deploy.lock never covered).
+    if ! lane_lock_acquire \
+        "${compose_project}" \
+        "$(resolve_lane_name "${compose_project}")" \
+        "${git_sha}" \
+        "${LANE_LOCK_TIMEOUT_SECONDS}" \
+        "${SCRIPT_NAME}" "${DEPLOY_INVOCATION_ARGS[@]+"${DEPLOY_INVOCATION_ARGS[@]}"}"; then
+        log_error "Refusing to deploy: lane '${compose_project}' is held by another process (see above)."
+        log_error "Nothing was built, synced, recreated or rolled back."
+        exit 2
+    fi
 
     # Phase 4: Lock
     acquire_lock
