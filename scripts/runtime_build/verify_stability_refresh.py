@@ -112,8 +112,6 @@ from manifest_fetch import (
     MANIFEST_FETCH_HISTORY_LIMIT,
     MANIFEST_FETCH_INTERVAL_SECONDS,
     MANIFEST_FETCH_WINDOW_SECONDS,
-    ManifestFetchReport,
-    ManifestOpener,
     RetryBudget,
     count_manifest_contracts,
     fetch_manifest_with_budget,
@@ -437,34 +435,6 @@ def check_service_digest(
         revision_match=revision_match,
         error=error,
     )
-
-
-def fetch_manifest_within_budget(
-    manifest_url: str,
-    *,
-    opener: ManifestOpener | None = None,
-    budget: RetryBudget,
-) -> ManifestFetchReport:
-    """Fetch a manifest, tolerating a booting runtime within a SHARED budget.
-
-    OMN-16753. ``check_health_with_retry`` waits a derived window for the
-    runtime to publish its first verdict; this fetch, against the SAME runtime,
-    was single-shot. On 2026-09-08 both the refresh gate and the post-rollback
-    gate lost the effects manifest to `[Errno 104] Connection reset by peer`
-    immediately after the deploy: `overall=INFRA_ERROR` twice, and the
-    contract-derived identity base the OMN-15837 declared-groups check scores
-    against silently shrank to the main runtime's half.
-
-    Two properties the retry mechanics own rather than this call site:
-
-    * only a ``TRANSPORT`` failure is retried, decided on
-      :class:`EnumManifestFetchFailure` and never on the wording of the error
-      message -- a rephrased message must keep retrying;
-    * the ``budget`` is per gate RUN, so passing the same object to the main
-      and effects fetches bounds their combined wall clock instead of giving
-      each its own full window.
-    """
-    return fetch_manifest_with_budget(manifest_url, opener=opener, budget=budget)
 
 
 def check_health(
@@ -950,7 +920,7 @@ def run_health_gate(
     )
     fetch_history: list[str] = []
 
-    main_fetch = fetch_manifest_within_budget(
+    main_fetch = fetch_manifest_with_budget(
         manifest_url, opener=opener, budget=manifest_budget
     )
     fetch_history.extend(main_fetch.recent_history())
@@ -969,7 +939,7 @@ def run_health_gate(
     # declared set from the main manifest alone would under-declare the effects
     # half of the lane. Not fetched -> fail closed, never silently narrowed.
     if effects_manifest_url:
-        effects_fetch = fetch_manifest_within_budget(
+        effects_fetch = fetch_manifest_with_budget(
             effects_manifest_url, opener=opener, budget=manifest_budget
         )
         fetch_history.extend(effects_fetch.recent_history())

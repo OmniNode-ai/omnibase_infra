@@ -374,20 +374,6 @@ def _describe_discovery_errors(
     return f"{base}: {listed}"
 
 
-def _as_health_status(status: str) -> _HealthStatus:
-    """Narrow a status string to the dimension vocabulary, failing closed.
-
-    A value outside HEALTHY/DEGRADED/CRITICAL is not silently coerced to
-    HEALTHY -- an unrecognised status is unknown health, and unknown is not
-    healthy.
-    """
-    if status == "HEALTHY":
-        return "HEALTHY"
-    if status == "CRITICAL":
-        return "CRITICAL"
-    return "DEGRADED"
-
-
 def _worst(statuses: list[_HealthStatus]) -> _HealthStatus:
     """Return the worst status from a list."""
     if "CRITICAL" in statuses:
@@ -792,6 +778,8 @@ class ServiceRuntimeHealthMonitor:
         )
         # OMN-16753. The status comes from ``dlq_saturation_status`` rather than
         # being recomputed here, so it cannot disagree with the prose beside it.
+        # It is produced in this dimension's own vocabulary, so there is no
+        # narrowing step between the two that could regrade a value silently.
         # It is DEGRADED on an unattributable topic as well as on a measured
         # saturation: flow this process cannot attribute is excluded from every
         # ratio, and publishing HEALTHY over that exclusion is a false all-clear
@@ -799,7 +787,7 @@ class ServiceRuntimeHealthMonitor:
         dimensions.append(
             ModelRuntimeHealthDimension(
                 name="projection_dlq_saturation",
-                status=_as_health_status(dlq_saturation_status(liveness)),
+                status=dlq_saturation_status(liveness),
                 detail=describe_dlq_saturation(liveness),
             )
         )

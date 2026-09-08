@@ -34,7 +34,7 @@ _mod = importlib.util.module_from_spec(_spec)
 sys.modules["verify_stability_refresh"] = _mod
 _spec.loader.exec_module(_mod)
 
-fetch_manifest_within_budget = _mod.fetch_manifest_within_budget
+fetch_manifest_with_budget = _mod.fetch_manifest_with_budget
 count_manifest_contracts = _mod.count_manifest_contracts
 RetryBudget = _mod.RetryBudget
 check_health = _mod.check_health
@@ -156,7 +156,7 @@ def _opener(body: dict | list, status: int = 200):
 
 def _count(opener):
     """Fetch and count, the way ``run_health_gate`` does (OMN-16753)."""
-    fetched = fetch_manifest_within_budget(
+    fetched = fetch_manifest_with_budget(
         "http://x/manifest",
         opener=opener,
         budget=RetryBudget(sleep_fn=lambda _s: None),

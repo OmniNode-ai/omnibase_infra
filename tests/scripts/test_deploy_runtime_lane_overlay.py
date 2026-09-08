@@ -37,6 +37,17 @@ from pathlib import Path
 import pytest
 
 DEPLOY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy-runtime.sh"
+# OMN-16729: the three resolver functions moved into a shared lib that
+# deploy-runtime.sh, refresh_dev_lane.sh and refresh_stability_lane.sh all
+# source. They moved because the refresh wrappers' OWN compose calls -- notably
+# the failure rollback recreate -- needed the identical derivation, and their
+# hand-spelled copy of the file list had lost the dev-lane overlay.
+COMPOSE_FILES_SH = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "runtime_build"
+    / "compose_files.sh"
+)
 
 
 def _script_text() -> str:
@@ -72,8 +83,7 @@ def _run_overlay_resolver(compose_project: str) -> subprocess.CompletedProcess[s
         [
             "set -euo pipefail",
             "log_error() { printf 'ERR: %s\\n' \"$*\" >&2; }",
-            _extract_function("resolve_lane_overlay_filename"),
-            _extract_function("resolve_compose_file_args"),
+            f'source "{COMPOSE_FILES_SH}"',
             "declare -a out",
             f'resolve_compose_file_args out "/DEPLOY" "{compose_project}"',
             'printf "%s\\n" "${out[*]}"',
@@ -89,13 +99,33 @@ def _run_overlay_resolver(compose_project: str) -> subprocess.CompletedProcess[s
 
 @pytest.mark.unit
 def test_defines_lane_overlay_resolver_functions() -> None:
+    """The resolvers exist in the shared lib, and deploy-runtime.sh sources it.
+
+    Both halves matter: a lib nobody sources resolves nothing, and a
+    deploy-runtime.sh that re-declares its own copy is the duplication OMN-16729
+    removed.
+    """
+    lib = COMPOSE_FILES_SH.read_text(encoding="utf-8")
+    for fn in (
+        "resolve_lane_name",
+        "resolve_lane_overlay_filename",
+        "resolve_compose_file_args",
+    ):
+        assert re.search(rf"^{fn}\s*\(\)", lib, re.MULTILINE), (
+            f"compose_files.sh must define {fn}()"
+        )
     text = _script_text()
-    assert re.search(r"^resolve_lane_overlay_filename\s*\(\)", text, re.MULTILINE), (
-        "deploy-runtime.sh must define resolve_lane_overlay_filename()"
+    assert "runtime_build/compose_files.sh" in text, (
+        "deploy-runtime.sh must source the shared compose-file resolver"
     )
-    assert re.search(r"^resolve_compose_file_args\s*\(\)", text, re.MULTILINE), (
-        "deploy-runtime.sh must define resolve_compose_file_args()"
-    )
+    for fn in (
+        "resolve_lane_name",
+        "resolve_lane_overlay_filename",
+        "resolve_compose_file_args",
+    ):
+        assert not re.search(rf"^{fn}\s*\(\)", text, re.MULTILINE), (
+            f"deploy-runtime.sh must NOT re-declare {fn}() -- one derivation only"
+        )
 
 
 @pytest.mark.unit

@@ -261,11 +261,27 @@ def extract_non_healthy_dimensions(document: object) -> tuple[HealthDimension, .
 
 
 def _clip_detail(detail: str) -> str:
-    """Bound one remote detail string, marking the cut so it is not silent."""
-    if len(detail) <= MAX_DIMENSION_DETAIL_CHARS:
-        return detail
+    """Bound and neutralise one remote detail string before it is persisted.
+
+    Length alone is not enough. This string comes off a ``/health`` body served
+    by the very runtime the gate is failing on, and it lands in a committed
+    receipt artifact and in the refresh log. Newlines would let it forge extra
+    log lines; ANSI escapes and other control characters would rewrite the
+    surrounding terminal output. Every C0/C1 control character (tab included,
+    since a receipt reader has no use for it) is replaced with a visible
+    escape, so what is stored is exactly what was received and nothing acts.
+
+    Truncation is marked rather than silent, so a clipped detail is
+    distinguishable from a short one. The measurement is on the ORIGINAL, which
+    is the number a reader needs.
+    """
+    cleaned = "".join(
+        ch if ch.isprintable() or ch == " " else f"\\x{ord(ch):02x}" for ch in detail
+    )
+    if len(cleaned) <= MAX_DIMENSION_DETAIL_CHARS:
+        return cleaned
     return (
-        detail[:MAX_DIMENSION_DETAIL_CHARS]
+        cleaned[:MAX_DIMENSION_DETAIL_CHARS]
         + f" [truncated, {len(detail)} chars in the probed body]"
     )
 

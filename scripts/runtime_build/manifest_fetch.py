@@ -112,6 +112,13 @@ class EnumManifestFetchFailure(str, Enum):
     #: served error page into a contract list.
     UNREADABLE = "unreadable"
 
+    #: The runtime answered with an HTTP status that will not become a manifest
+    #: by waiting -- a 404/410/401 says this URL is wrong or forbidden, not that
+    #: the process is still booting. Split out of TRANSPORT because
+    #: ``HTTPError`` is a ``URLError`` subclass: a broad catch would spend the
+    #: entire window re-asking a question already answered.
+    HTTP_TERMINAL = "http_terminal"
+
     #: The shared window was already spent by an earlier fetch in this run, so
     #: this URL was never attempted. Reported as its own class rather than
     #: dressed up as a transport error, because "we did not ask" and "it did
@@ -223,6 +230,22 @@ def fetch_manifest_once(
     try:
         with open_fn(manifest_url, timeout=timeout_seconds) as resp:
             raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        # An HTTP status IS an answer, and only some answers are worth waiting
+        # on. 5xx and 429 are what a booting or overloaded runtime returns, so
+        # they stay retriable; every other status is terminal, because
+        # re-asking a 404 for six minutes delays the verdict without changing
+        # it. ``HTTPError`` must be caught BEFORE ``URLError`` -- it is a
+        # subclass, and the broad catch alone put every status in TRANSPORT.
+        retriable = exc.code >= 500 or exc.code == 429
+        return ManifestFetchOutcome(
+            failure=(
+                EnumManifestFetchFailure.TRANSPORT
+                if retriable
+                else EnumManifestFetchFailure.HTTP_TERMINAL
+            ),
+            error=f"manifest fetch failed ({manifest_url}): HTTP {exc.code} {exc.reason}",
+        )
     except (urllib.error.URLError, OSError) as exc:
         return ManifestFetchOutcome(
             failure=EnumManifestFetchFailure.TRANSPORT,
@@ -316,3 +339,34 @@ def count_manifest_contracts(payload: dict[str, object]) -> int:
     """Count the contracts a manifest payload declares."""
     contracts = payload.get("contracts", [])
     return len(contracts) if isinstance(contracts, list) else 0
+
+
+def fetch_manifest_contract_count(
+    manifest_url: str,
+    *,
+    opener: ManifestOpener | None = None,
+    budget: RetryBudget,
+) -> tuple[int | None, str | None, tuple[str, ...]]:
+    """Fetch a manifest and count its contracts, within the shared budget.
+
+    Lives here rather than in either verifier so the two gates cannot drift
+    apart again -- the same reason this module exists. Renamed from
+    ``check_manifest_count``, which never checked anything: it discarded its
+    ``min_contracts`` argument and returned the raw count while the caller did
+    the floor comparison, a signature promising a check its body did not
+    perform. The floor stays with the caller that owns the report field.
+
+    Returns:
+        ``(count, error, failure_history)`` -- the history is every failed
+        attempt's message, so a persistent failure is distinguishable from an
+        intermittent one in the receipt.
+    """
+    fetched = fetch_manifest_with_budget(manifest_url, opener=opener, budget=budget)
+    history = fetched.recent_history()
+    if fetched.error is not None or fetched.payload is None:
+        return (
+            None,
+            fetched.error or f"manifest fetch returned no payload ({manifest_url})",
+            history,
+        )
+    return count_manifest_contracts(fetched.payload), None, history

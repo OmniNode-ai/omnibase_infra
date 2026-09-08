@@ -103,6 +103,22 @@ fi
 unset OPERATOR_OMNI_HOME
 unset OPERATOR_HEALTH_CHECK_URL
 
+# OMN-16729: the ONE derivation of a lane's `docker compose -f ...` token
+# sequence, shared with refresh_dev_lane.sh / refresh_stability_lane.sh. Those
+# wrappers issue their own compose calls -- service-id resolution and the
+# failure rollback recreate -- and a second hand-spelled copy of the file list
+# there is how the 2026-09-08 rollback recreated the dev runtime family without
+# its overlay.
+#
+# Loaded HERE rather than in the helper block above the env sourcing: nothing in
+# this file is called before lane resolution, and
+# tests/scripts/test_deploy_runtime_no_env_file.py asserts that
+# `source "${OMNIBASE_OPERATOR_ENV_FILE}"` stays within the first 100 lines --
+# a real property (the env must be read before any deploy logic), not a line
+# budget to spend on helper loads.
+# shellcheck source=./runtime_build/compose_files.sh
+source "${SCRIPT_DIR_FOR_ENV}/runtime_build/compose_files.sh"
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -189,6 +205,31 @@ readonly RUNTIME_SERVICES=(
 # infra_routing_decisions -- but it shares the property that makes membership
 # here mandatory and membership in RUNTIME_SERVICES fatal: the service name does
 # not exist in the prod, stability-test or judge merged compose.
+#
+# OMN-17530 adds onex-api for a third reason, stated separately because it is
+# not the writers' reason. It is TAG-REFERENCED, not lane-built, so it cannot go
+# stale on a rebuild -- what it needs from a governed refresh is a RECREATE. It
+# carries eleven fail-closed variables and the lane's broker SASL credentials,
+# and a container that is never recreated never reads a new environment. That is
+# context-audit-consumer's failure mode exactly, see the array below, and it
+# would be worse here: onex-api is the surface a lab proof is taken THROUGH, so
+# a stale one makes the proof itself stale.
+#
+# The two omninode_cloud one-shots are DELIBERATELY NOT in this array, and the
+# reason is a live defect rather than a judgement. This array feeds the RT-6
+# deploy readback, which resolves a RUNNING container for every service in
+# scope; a one-shot has already exited 0 by the time the readback runs, so
+# membership here fails the certification with "could not resolve a running
+# container". FRICTION docs/tracking/ROLLING_WORK_LEDGER.md:4778 recorded that
+# exact shape against migration-gate, and a partition of the readback by restart
+# policy is in flight in lane dev-lane-refresh-lock. Until it lands, the two
+# one-shots run through the full-project bring-up, where compose honours their
+# depends_on, and a WARM refresh does not re-run them.
+#
+# The consequence, named rather than left to be discovered: a warm refresh that
+# carries a new migrate image tag does not apply the migrations in it. Re-run
+# them explicitly, or take the full bring-up, until the readback partition
+# lands.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-tenant-registry-writer
     projection-delegation-writer
@@ -197,6 +238,7 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-tenant-credentials-writer
     projection-live-events-writer
     infra-routing-decisions-consumer
+    onex-api
 )
 
 # OMN-18012: dev-lane Kafka clients that are declared in the BASE compose file
@@ -741,114 +783,15 @@ resolve_compose_project() {
     echo "${compose_project}"
 }
 
-# Compose project -> lane (overlay) mapping. The dev lane (bare omnibase-infra
-# project) runs from docker-compose.infra.yml alone; every non-dev lane LAYERS
-# its overlay so the overlay's container_name + project name + lane network win.
-#
-# OMN-13581: deploy-runtime.sh historically passed ONLY `-f infra.yml` on every
-# `docker compose` call, including warm_broker_topic_provisioning's `up redpanda`
-# step. The base infra compose hardcodes `container_name: omnibase-infra-redpanda`
-# (the DEV name) and the dev network, so running the warmup against a non-dev
-# project (e.g. omnibase-infra-stability-test) makes compose try to (re)create
-# redpanda as the DEV-named container, which collides with the live dev broker,
-# gets a Docker hash prefix, and lands in 'created' -- DESTROYING the lane's own
-# correctly-named broker. That left the stability lane broker-less for ~3 days.
-# Layering the matching overlay gives redpanda the lane-prefixed container_name +
-# lane network, so the lane's broker is targeted and never displaced.
-#
-# This mirrors the authoritative, tested lane->compose-file mapping in
-# scripts/deploy-agent/deploy_agent/executor.py (_LANE_CONFIGS): stability-test
-# layers docker-compose.stability-test.yml, prod layers docker-compose.prod.yml,
-# judge layers docker-compose.judge.yml. The dev project gets no overlay.
-resolve_lane_name() {
-    # Echo the LANE name derived from a compose project (OMN-15218).
-    #   omnibase-infra                -> dev
-    #   omnibase-infra-stability-test -> stability-test
-    #   omnibase-infra-prod           -> prod
-    #   omnibase-infra-judge          -> judge
-    # Single derivation shared by the hot-patch preflight and the lane-deploy
-    # attribution guard, so one deploy can never be recorded under two different
-    # lane names. Unknown suffixes echo through unchanged; the callers that must
-    # fail closed on an unknown lane (resolve_lane_overlay_filename) do their own
-    # allowlist check.
-    local compose_project="$1"
-    local lane="${compose_project#omnibase-infra}"
-    lane="${lane#-}"
-    if [[ -z "${lane}" ]]; then
-        lane="dev"
-    fi
-    echo "${lane}"
-}
-
-resolve_lane_overlay_filename() {
-    # Echo the overlay compose FILENAME (relative to docker/) for a compose
-    # project, or nothing for the bare dev project. Fails closed: an unknown
-    # non-dev project aborts rather than silently running on the dev config (the
-    # exact failure mode that displaced the lane broker).
-    local compose_project="$1"
-
-    # Lane = compose project suffix after the canonical "omnibase-infra" prefix.
-    # omnibase-infra                -> "" (dev, no overlay)
-    # omnibase-infra-stability-test -> "stability-test"
-    # omnibase-infra-prod           -> "prod"
-    # omnibase-infra-judge          -> "judge"
-    local lane="${compose_project#omnibase-infra}"
-    lane="${lane#-}"
-
-    case "${lane}" in
-        "")
-            # Dev lane: infra.yml alone (fixed dev container names are correct here).
-            return 0
-            ;;
-        stability-test|prod|judge)
-            echo "docker-compose.${lane}.yml"
-            return 0
-            ;;
-        *)
-            log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
-            log_error "  deploy-runtime.sh only knows the dev / stability-test / prod / judge lanes."
-            log_error "  Refusing to deploy: running a non-dev lane on the bare infra.yml config"
-            log_error "  would recreate the DEV-named redpanda and displace this lane's broker"
-            log_error "  (OMN-13581). Add the lane's overlay mapping before deploying it."
-            exit 1
-            ;;
-    esac
-}
-
-resolve_compose_file_args() {
-    # Populate a caller-provided array (passed by name) with the full
-    # `-f <file>` token sequence for a deployment: always
-    # docker-compose.infra.yml, plus the lane overlay (docker-compose.<lane>.yml)
-    # for any non-dev compose project (OMN-13581).
-    #
-    # Usage:
-    #   local -a compose_args
-    #   resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
-    #   docker compose -p "${compose_project}" "${compose_args[@]}" ...
-    local _out_args_name="$1"
-    local deploy_target="$2"
-    local compose_project="$3"
-
-    local docker_dir="${deploy_target}/docker"
-    eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.infra.yml"))"
-
-    local overlay_filename
-    overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
-    if [[ -n "${overlay_filename}" ]]; then
-        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/${overlay_filename}") )"
-    else
-        # Dev/lab lane (bare omnibase-infra project). OMN-15379: layer the
-        # dev-lane overlay, whose ONLY content is ONEX_MIGRATION_LANE=dev for
-        # forward-migration — the lane indicator that releases the
-        # node_projection_registration trio (operator ruling 15, lab lane is the
-        # FORCE proving ground). It is a separate file precisely so no non-dev
-        # lane can inherit it from the base: see the header of
-        # docker/docker-compose.dev-lane.yml. Unset indicator = FULL fence, so
-        # omitting this file degrades safely (the lane comes up without
-        # node_service_registry) rather than dangerously.
-        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-lane.yml") )"
-    fi
-}
+# Compose project -> lane (overlay) mapping lives in
+# scripts/runtime_build/compose_files.sh, sourced at the top of this file:
+# resolve_lane_name(), resolve_lane_overlay_filename() and
+# resolve_compose_file_args(). It is a shared lib rather than three functions
+# here because refresh_dev_lane.sh and refresh_stability_lane.sh issue compose
+# calls of their own -- notably the failure ROLLBACK recreate -- and a
+# second hand-spelled `-f` list there is exactly how the dev lane's overlay was
+# dropped on 2026-09-08 (OMN-16729). Read that file for the OMN-13581 /
+# OMN-15379 rationale behind the mapping itself.
 
 resolve_lane_runtime_container_name() {
     # Echo the lane-scoped `container_name` of the omninode-runtime main container

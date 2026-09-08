@@ -43,6 +43,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+# OMN-16729: the lane -> compose-file mapping moved out of deploy-runtime.sh into
+# a shared lib, because refresh_dev_lane.sh's rollback recreate needed the
+# identical derivation and its hand-spelled copy had lost the dev-lane overlay.
+# The harness sources the lib rather than extracting those functions by regex.
+COMPOSE_FILES_SH = REPO_ROOT / "scripts" / "runtime_build" / "compose_files.sh"
 
 GIT_SHA = "abc123def456"
 VERSION = "9.9.9"
@@ -194,8 +199,7 @@ def _run_readback(
             "log_error() { printf 'ERR: %s\\n' \"$*\" >&2; }",
             "log_cmd() { printf 'CMD: %s\\n' \"$*\" >&2; }",
             f'DEPLOY_STARTED_AT="{deploy_started_at}"',
-            _extract_function("resolve_lane_overlay_filename"),
-            _extract_function("resolve_compose_file_args"),
+            f'source "{COMPOSE_FILES_SH}"',
             _extract_function("resolve_lane_runtime_container_name"),
             _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),

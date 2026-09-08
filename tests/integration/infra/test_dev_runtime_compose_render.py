@@ -71,6 +71,13 @@ _SECRET_RESOLVER_CONFIG_JSON = (
 )
 _SECRET_RESOLVER_CONFIG_PATH = "/app/data/delegation/secret_resolver.yaml"
 
+# One shared synthetic value for every `${VAR:?}` name the tenant-path block
+# adds (OMN-17530). A named constant rather than eleven string literals: the
+# render only needs each name to be NON-EMPTY, and eleven distinct
+# credential-shaped literals in a test file are eleven things a future reader
+# has to confirm are not real.
+_RENDER_ONLY = "render-only"
+
 # Every :?-required var in docker-compose.infra.yml EXCEPT
 # DEV_REDPANDA_ADVERTISE_HOST, which each test sets (or omits) explicitly.
 BASE_REQUIRED_ENV: dict[str, str] = {
@@ -158,6 +165,30 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     # file. Supplied here so the overlay-layered renders below can run; harmless
     # to the base-only renders, which never read it.
     "ROLE_OMNIDASH_PASSWORD": "test",
+    # OMN-17530: the tenant-scoped control plane in the same overlay. Every one
+    # of these takes the fail-closed `${VAR:?}` form there, so the LAYERED
+    # render aborts without them -- which is the point of that form and is how
+    # this fixture learns about a new one. Render-only synthetic values; the
+    # lane's real lane-local sentinels are generated on the lane host by
+    # scripts/runtime_build/render_dev_lane_tenant_path_env.sh and never appear
+    # in this repo.
+    "ONEX_API_IMAGE": "onex-api:render-only",
+    # A path under the repo, not under the system temp directory: `docker
+    # compose config` only has to INTERPOLATE this, never open it, and a
+    # temp-directory literal here is a real lint finding rather than a false
+    # positive -- a world-writable path is the wrong shape for a variable whose
+    # production value holds a lane credential.
+    "ONEX_LAB_TENANT_STATE_DIR": str(REPO_ROOT / ".render-only-tenant-state"),
+    "ONEX_CLOUD_MIGRATE_IMAGE": "omninode-cloud-migrate:render-only",
+    "ROLE_OMNINODE_PASSWORD": _RENDER_ONLY,
+    "KEYCLOAK_ADMIN_CLIENT_SECRET": _RENDER_ONLY,
+    "TENANT_BOOTSTRAP_ADMIN_SECRET": _RENDER_ONLY,
+    "TENANT_TOPICS_ADMIN_SECRET": _RENDER_ONLY,
+    "TENANT_CLIENTS_ADMIN_SECRET": _RENDER_ONLY,
+    "TENANT_OFFBOARD_ADMIN_SECRET": _RENDER_ONLY,
+    "ALPHA_INVITE_ADMIN_SECRET": _RENDER_ONLY,
+    "STRIPE_API_KEY": _RENDER_ONLY,
+    "STRIPE_WEBHOOK_SECRET": _RENDER_ONLY,
 }
 
 # RFC 5737 TEST-NET-2 documentation address — never a real host, avoids

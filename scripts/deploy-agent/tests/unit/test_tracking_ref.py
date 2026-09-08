@@ -32,6 +32,7 @@ from uuid import uuid4
 import pytest
 from deploy_agent.events import (
     EnumRuntimeLane,
+    EnumSelfUpdateBoundary,
     ModelRebuildRequested,
     Scope,
 )
@@ -45,6 +46,14 @@ from deploy_agent.tracking_ref import (
 )
 
 _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
+
+# OMN-16442: ``self_update`` takes a required ``boundary`` so every call site
+# names the job boundary it fired at. These tests exercise the method's own
+# git mechanics, which are identical at either boundary, so they declare one
+# and keep it constant. Which boundary each caller actually uses -- and that
+# the deploy path uses none -- is asserted in
+# ``test_self_update_job_boundary_omn16442.py``.
+_BOUNDARY = EnumSelfUpdateBoundary.POST_TERMINAL
 
 SHA_LOCAL = "aaaaaaaabbbbbbbb"
 SHA_REMOTE = "ccccccccdddddddd"
@@ -122,7 +131,7 @@ class TestSelfUpdateUsesTrackingRef:
             patch("deploy_agent.executor._run", side_effect=self._record(calls)),
             patch("os.execv") as mock_execv,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
 
         fetches = [c for c in calls if "fetch" in c]
         rev_parses = [c for c in calls if "rev-parse" in c]
@@ -146,7 +155,7 @@ class TestSelfUpdateUsesTrackingRef:
             patch("deploy_agent.executor._run", side_effect=self._record(calls)),
             patch("os.execv"),
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         assert any(c[-2:] == ["origin", "staging"] for c in calls), calls
 
     def test_already_at_the_tracking_ref_does_not_reexec(
@@ -162,7 +171,7 @@ class TestSelfUpdateUsesTrackingRef:
             ),
             patch("os.execv") as mock_execv,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_not_called()
         assert not any("pull" in c for c in calls), calls
 
@@ -172,7 +181,7 @@ class TestSelfUpdateUsesTrackingRef:
             patch("deploy_agent.executor._run") as mock_run,
             pytest.raises(RuntimeError) as exc,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         assert ENV_TRACKING_REF in str(exc.value)
         mock_run.assert_not_called()
 
@@ -183,13 +192,13 @@ class TestSelfUpdateUsesTrackingRef:
         monkeypatch.setenv("DEPLOY_AGENT_NO_SELF_UPDATE", "1")
         executor = DeployExecutor()
         with patch("deploy_agent.executor._run") as mock_run:
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_run.assert_not_called()
 
     def test_skip_flag_short_circuits_before_the_ref_is_needed(self) -> None:
         executor = DeployExecutor()
         with patch("deploy_agent.executor._run") as mock_run:
-            executor.self_update(skip=True)
+            executor.self_update(boundary=_BOUNDARY, skip=True)
         mock_run.assert_not_called()
 
 

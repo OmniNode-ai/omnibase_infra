@@ -322,7 +322,7 @@ class TestManifestFetchRetry:
                 raise OSError(104, "Connection reset by peer")
             return _FakeResponse(json.dumps({"contracts": [1, 2]}).encode())
 
-        fetched = _verify.fetch_manifest_within_budget(
+        fetched = _verify.fetch_manifest_with_budget(
             "http://x/manifest", opener=opener, budget=_budget()
         )
         assert fetched.error is None
@@ -337,7 +337,7 @@ class TestManifestFetchRetry:
             raise OSError(104, "Connection reset by peer")
 
         clock = _FakeClock()
-        fetched = _verify.fetch_manifest_within_budget(
+        fetched = _verify.fetch_manifest_with_budget(
             "http://x/manifest",
             opener=opener,
             budget=_manifest_fetch.RetryBudget(
@@ -368,7 +368,7 @@ class TestManifestFetchRetry:
             attempts.append(url)
             return _FakeResponse(b"<html>nope</html>")
 
-        fetched = _verify.fetch_manifest_within_budget(
+        fetched = _verify.fetch_manifest_with_budget(
             "http://x/manifest", opener=opener, budget=_budget()
         )
         assert fetched.payload is None
@@ -415,7 +415,7 @@ class TestManifestFetchRetry:
                 raise OSError(104, "Connection reset by peer")
             return _FakeResponse(json.dumps({"contracts": [1]}).encode())
 
-        count, err, history = _verify_dev.fetch_manifest_contract_count(
+        count, err, history = _manifest_fetch.fetch_manifest_contract_count(
             "http://x/manifest", opener=opener, budget=_budget()
         )
         assert err is None
@@ -465,7 +465,7 @@ class TestRetryEligibilityIsTyped:
                 raise OSError("the runtime is not answering yet")
             return _FakeResponse(json.dumps({"contracts": [1]}).encode())
 
-        fetched = _verify.fetch_manifest_within_budget(
+        fetched = _verify.fetch_manifest_with_budget(
             "http://x/manifest", opener=opener, budget=_budget()
         )
         assert fetched.error is None
@@ -518,10 +518,10 @@ class TestManifestRetryWindowIsBoundedOverall:
             clock.advance(timeout)
             raise OSError(104, "Connection reset by peer")
 
-        main = _verify.fetch_manifest_within_budget(
+        main = _verify.fetch_manifest_with_budget(
             "http://x/main/manifest", opener=dead, budget=budget
         )
-        effects = _verify.fetch_manifest_within_budget(
+        effects = _verify.fetch_manifest_with_budget(
             "http://x/effects/manifest", opener=dead, budget=budget
         )
 
@@ -568,7 +568,7 @@ class TestFailureHistoryIsKept:
 
         clock = _FakeClock()
         # 45 s / 15 s leaves room for exactly two sleeps -> three attempts.
-        fetched = _verify.fetch_manifest_within_budget(
+        fetched = _verify.fetch_manifest_with_budget(
             "http://x/manifest",
             opener=opener,
             budget=_manifest_fetch.RetryBudget(
@@ -711,3 +711,142 @@ class TestTypedSeamsAndBoundedEvidence:
             _health_payload.RUNTIME_HEALTH_DETAIL_KEY
             == container_healthcheck.RUNTIME_HEALTH_DETAIL_KEY
         )
+
+
+# =============================================================================
+# 7. Second adversarial round (omnibase_infra#3334, 2026-09-08T23:00Z)
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestHttpStatusClassification:
+    """An HTTP status is an ANSWER, and only some answers are worth waiting on.
+
+    ``urllib.error.HTTPError`` is a ``URLError`` subclass, so the broad catch
+    alone put every status in TRANSPORT: a 404 was re-asked for the whole
+    window while a 503 and a 500 were handled correctly by accident.
+    """
+
+    @staticmethod
+    def _raiser(code: str | int):
+        import urllib.error
+
+        def opener(url, timeout=10):
+            raise urllib.error.HTTPError(url, int(code), "boom", {}, None)  # type: ignore[arg-type]
+
+        return opener
+
+    @pytest.mark.parametrize("code", [500, 502, 503, 429])
+    def test_a_booting_or_overloaded_runtime_is_retriable(self, code) -> None:
+        outcome = _manifest_fetch.fetch_manifest_once(
+            "http://x/m", opener=self._raiser(code)
+        )
+        assert outcome.failure is _manifest_fetch.EnumManifestFetchFailure.TRANSPORT
+        assert outcome.retriable is True
+
+    @pytest.mark.parametrize("code", [400, 401, 403, 404, 410])
+    def test_a_wrong_or_forbidden_url_is_terminal(self, code) -> None:
+        outcome = _manifest_fetch.fetch_manifest_once(
+            "http://x/m", opener=self._raiser(code)
+        )
+        assert outcome.failure is _manifest_fetch.EnumManifestFetchFailure.HTTP_TERMINAL
+        assert outcome.retriable is False
+
+    def test_a_404_is_not_re_asked_for_the_whole_window(self) -> None:
+        attempts: list[str] = []
+        opener_404 = self._raiser(404)
+
+        def counting(url, timeout=10):
+            attempts.append(url)
+            return opener_404(url, timeout=timeout)
+
+        fetched = _verify.fetch_manifest_with_budget(
+            "http://x/manifest", opener=counting, budget=_budget()
+        )
+        assert fetched.error is not None
+        assert len(attempts) == 1
+
+    def test_a_503_is_retried_and_then_succeeds(self) -> None:
+        import urllib.error
+
+        attempts: list[str] = []
+
+        def opener(url, timeout=10):
+            attempts.append(url)
+            if len(attempts) < 3:
+                raise urllib.error.HTTPError(url, 503, "booting", {}, None)  # type: ignore[arg-type]
+            return _FakeResponse(json.dumps({"contracts": [1]}).encode())
+
+        fetched = _verify.fetch_manifest_with_budget(
+            "http://x/manifest", opener=opener, budget=_budget()
+        )
+        assert fetched.error is None
+        assert len(attempts) == 3
+
+
+@pytest.mark.unit
+class TestOneSharedFetchSurface:
+    """Both gates call the same count helper; neither owns a private wrapper."""
+
+    def test_the_count_helper_lives_in_the_shared_module(self) -> None:
+        # Neither verifier defines its own: each name resolves to the shared
+        # module's function object, so a change to the retry contract cannot
+        # land in one gate and miss the other.
+        assert not hasattr(_verify, "fetch_manifest_within_budget")
+        assert (
+            _verify.fetch_manifest_with_budget
+            is _manifest_fetch.fetch_manifest_with_budget
+        )
+        assert (
+            _verify_dev.fetch_manifest_contract_count
+            is _manifest_fetch.fetch_manifest_contract_count
+        )
+
+    def test_a_top_level_list_manifest_is_still_supported(self) -> None:
+        """The list shape predates this change and must survive it.
+
+        Raised in review against ``decode_health_body``, which is the /health
+        parser and never sees a manifest; the manifest path is here, and it
+        wraps a top-level list into ``{"contracts": [...]}`` exactly as before.
+        """
+
+        def opener(url, timeout=10):
+            return _FakeResponse(json.dumps([{"name": "a"}, {"name": "b"}]).encode())
+
+        count, err, _history = _manifest_fetch.fetch_manifest_contract_count(
+            "http://x/manifest", opener=opener, budget=_budget()
+        )
+        assert err is None
+        assert count == 2
+
+
+@pytest.mark.unit
+class TestRemoteDetailIsNeutralised:
+    """The detail is written into a receipt and a CI log by the failing runtime."""
+
+    def test_control_characters_cannot_forge_log_lines_or_move_the_cursor(
+        self,
+    ) -> None:
+        body = {
+            "status": "degraded",
+            "details": {
+                "healthy": True,
+                "runtime_health": {
+                    "status": "DEGRADED",
+                    "age_seconds": 1.0,
+                    "dimensions": [
+                        {
+                            "name": "projection_dlq_saturation",
+                            "status": "DEGRADED",
+                            "detail": "line one\nhealth_ok=True \x1b[31mred\x07",
+                        }
+                    ],
+                },
+            },
+        }
+        detail = _health_payload.extract_non_healthy_dimensions(body)[0].detail
+        assert "\n" not in detail
+        assert "\x1b" not in detail
+        assert "\x07" not in detail
+        assert "\\x0a" in detail and "\\x1b" in detail
+        assert "line one" in detail

@@ -347,9 +347,20 @@ class TestComposeGen:
                 lane=EnumRuntimeLane.STABILITY_TEST,
             )
 
-        # captured_cmds[1] is the render validation (OMN-17291); the lane
-        # validation is the second `config --quiet` call.
-        validate_cmd = captured_cmds[2]
+        # captured_cmds[1] is the render validation (OMN-17291) and
+        # captured_cmds[2] is the required-env preflight (OMN-17530); the lane
+        # validation is the SECOND `config --quiet` call. Selected by content
+        # rather than by index so that adding a step ahead of it -- which
+        # OMN-17530 just did -- does not silently retarget this assertion at a
+        # different command.
+        config_cmds = [
+            cmd for cmd in captured_cmds if cmd[-2:] == ["config", "--quiet"]
+        ]
+        assert len(config_cmds) == 1, (
+            "expected exactly one interpolating `config --quiet` (the lane "
+            f"validation); got {config_cmds}"
+        )
+        validate_cmd = config_cmds[0]
         assert validate_cmd[:2] == ["docker", "compose"]
         assert "docker-compose.stability-test.yml" in " ".join(validate_cmd)
         assert "--profile" in validate_cmd
@@ -389,6 +400,85 @@ class TestComposeGen:
             Phase.COMPOSE_GEN,
             PhaseStatus.SUCCESS,
         ) not in phase_updates
+
+    def test_required_env_preflight_runs_before_lane_validation(self) -> None:
+        """OMN-17530: the whole missing-variable SET is reported before validation.
+
+        ``docker compose config`` reports the FIRST unset ``${VAR:?}`` and
+        stops, so two dev-lane deploy commands died ~14 minutes apart on two
+        different variables added by the same PR, and eight more were queued
+        behind them. The preflight must run AHEAD of the lane validation and be
+        handed the same compose files, or it reports nothing the validation
+        would not already have hit first.
+        """
+        executor = DeployExecutor()
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            return _make_result()
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            executor.compose_gen(["core", "runtime"], _noop_phase_update)
+
+        preflight_index = next(
+            i
+            for i, cmd in enumerate(captured_cmds)
+            if any("preflight_required_compose_env.py" in tok for tok in cmd)
+        )
+        validate_index = next(
+            i
+            for i, cmd in enumerate(captured_cmds)
+            if cmd[-2:] == ["config", "--quiet"]
+        )
+        assert preflight_index < validate_index, (
+            "the required-env preflight must run BEFORE the interpolating lane "
+            "validation; after it, it reports nothing new"
+        )
+        preflight_cmd = captured_cmds[preflight_index]
+        joined = " ".join(preflight_cmd)
+        assert "docker-compose.infra.yml" in joined
+        assert "docker-compose.dev-lane.yml" in joined, (
+            "the preflight must be handed the dev-lane OVERLAY too -- both "
+            "variables that killed a deploy are declared only there"
+        )
+
+    def test_compose_gen_fails_when_required_env_preflight_fails(self) -> None:
+        """A failing preflight stops the deploy, and carries its whole list."""
+        executor = DeployExecutor()
+        phase_updates: list[tuple[Phase, PhaseStatus]] = []
+
+        def track_updates(phase: Phase, status: PhaseStatus) -> None:
+            phase_updates.append((phase, status))
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            if any("preflight_required_compose_env.py" in tok for tok in cmd):
+                return _make_result(
+                    returncode=1,
+                    stderr=(
+                        "ERROR: REQUIRED_COMPOSE_ENV_MISSING - 2 of 66 ...\n"
+                        "    ONEX_API_IMAGE\n    ONEX_CLOUD_MIGRATE_IMAGE\n"
+                    ),
+                )
+            return _make_result(stdout="generated")
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            with pytest.raises(
+                RuntimeError, match="REQUIRED_COMPOSE_ENV_MISSING"
+            ) as exc:
+                executor.compose_gen(["core", "runtime"], track_updates)
+
+        message = str(exc.value)
+        assert "ONEX_API_IMAGE" in message
+        assert "ONEX_CLOUD_MIGRATE_IMAGE" in message, (
+            "the raised error must carry EVERY name the preflight reported, not "
+            "just the first -- reporting one at a time is the defect"
+        )
+        assert (Phase.COMPOSE_GEN, PhaseStatus.SUCCESS) not in phase_updates
 
     def test_scope_bundles_covers_all_scopes(self) -> None:
         """SCOPE_BUNDLES must have an entry for every Scope value."""

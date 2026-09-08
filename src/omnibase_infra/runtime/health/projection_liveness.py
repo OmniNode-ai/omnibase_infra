@@ -46,7 +46,7 @@ Related Tickets:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from omnibase_infra.enums.enum_consumer_group_purpose import (
     EnumConsumerGroupPurpose,
@@ -377,9 +377,23 @@ def _attribute_delta(
     declarers = topic_declarers.get(topic)
     if not declarers:
         return None
-    for infix, name in group_suffixes.items():
-        if infix in consumer_group and name in declarers:
-            return name
+    # EVERY match, not the first. Iterating a dict and returning on the first
+    # containment made the answer depend on manifest insertion order: the
+    # guards in ``select_projection_group_suffixes`` remove infixes that are
+    # ambiguous or nested WITHIN the map, but they cannot prove a real group id
+    # contains no two of them -- a service name that embeds another
+    # projection's normalised name would do it. Two matches is exactly the
+    # "cannot tell" case, so it drops to unattributable, which now degrades the
+    # dimension rather than vanishing.
+    matched = {
+        name
+        for infix, name in group_suffixes.items()
+        if infix in consumer_group and name in declarers
+    }
+    if len(matched) == 1:
+        return next(iter(matched))
+    if matched:
+        return None
     if len(declarers) == 1:
         return next(iter(declarers))
     return None
@@ -570,7 +584,17 @@ def describe_projection_attachment(verdict: ModelProjectionLivenessVerdict) -> s
     )
 
 
-def dlq_saturation_status(verdict: ModelProjectionLivenessVerdict) -> str:
+#: The runtime health-dimension vocabulary, declared here so the saturation
+#: status is produced IN it rather than as a free string a call site has to
+#: narrow. The narrowing step it replaces mapped every unrecognised value to
+#: DEGRADED, which is fail-closed but silently regrades a typo; a Literal makes
+#: the same mistake a type error at the point it is written.
+EnumDlqSaturationStatus = Literal["HEALTHY", "DEGRADED", "CRITICAL"]
+
+
+def dlq_saturation_status(
+    verdict: ModelProjectionLivenessVerdict,
+) -> EnumDlqSaturationStatus:
     """The ``projection_dlq_saturation`` dimension status for a verdict.
 
     OMN-16753. Lives beside :func:`describe_dlq_saturation` and is the sole

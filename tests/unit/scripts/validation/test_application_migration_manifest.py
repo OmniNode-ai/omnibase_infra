@@ -505,7 +505,20 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # non-owner) could never read truthfully, so the OMN-16770 seam refused
     # the batch on every 60s tick. Net-new file, no parent edited, ownership
     # declared first in omnimarket's application-relation-ownership.yaml.
-    assert len(result.declarations) == 172
+    #
+    # 172 -> 173 for OMN-15683's
+    # nodes/node_projection_delegation/
+    # 0036_delegation_events_uuid_mixed_representation.sql, the successor that
+    # supersedes 0034. 0034 resolves tenant identity on m.tenant_slug alone and
+    # has no branch for a tenant_id that is already the canonical UUID, so it
+    # cannot convert the mixed-representation column that live write-time UUID
+    # stamping (OMN-16804) produces -- measured read-only on onex-dev, 26 of 229
+    # rows across 3 values, every one of them present in tenant_registry_mirror
+    # under tenant_uuid. 0036 resolves on both forms and is fail-closed on
+    # neither. Net-new file; 0034's bytes are NOT edited, it is retired in place
+    # by a row in _ledger/migration-supersessions.tsv, exactly as 0034 retired
+    # 0033.
+    assert len(result.declarations) == 173
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

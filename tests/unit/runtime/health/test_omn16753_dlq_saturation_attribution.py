@@ -448,15 +448,12 @@ class TestUnattributableFlowDegradesTheVerdict:
         from omnibase_infra.models.health.model_runtime_health_dimension import (
             ModelRuntimeHealthDimension,
         )
-        from omnibase_infra.services.service_runtime_health_monitor import (
-            _as_health_status,
-            _worst,
-        )
+        from omnibase_infra.services.service_runtime_health_monitor import _worst
 
         verdict = self._unattributable_verdict()
         dimension = ModelRuntimeHealthDimension(
             name="projection_dlq_saturation",
-            status=_as_health_status(dlq_saturation_status(verdict)),
+            status=dlq_saturation_status(verdict),
             detail=describe_dlq_saturation(verdict),
         )
         assert dimension.status == "DEGRADED"
@@ -465,15 +462,111 @@ class TestUnattributableFlowDegradesTheVerdict:
         assert _worst(["HEALTHY", "HEALTHY", dimension.status]) == "DEGRADED"
         assert TOOL_EXECUTED in dimension.detail
 
-    def test_an_unrecognised_status_string_fails_closed(self) -> None:
-        from omnibase_infra.services.service_runtime_health_monitor import (
-            _as_health_status,
+    def test_the_status_is_produced_in_the_dimension_vocabulary(self) -> None:
+        """No narrowing step sits between the function and the dimension.
+
+        The first revision passed the status through a string-narrowing helper
+        that mapped anything unrecognised to DEGRADED. That is fail-closed, but
+        it also silently regrades a typo. The function now returns the
+        dimension's own Literal, so a wrong value is a type error where it is
+        written instead of a quiet downgrade at the call site.
+        """
+        import omnibase_infra.services.service_runtime_health_monitor as monitor
+
+        assert not hasattr(monitor, "_as_health_status")
+        for verdict in (
+            self._unattributable_verdict(),
+            evaluate_projection_liveness(
+                projections=(), attached_topics=frozenset(), flow_windows=[]
+            ),
+        ):
+            assert dlq_saturation_status(verdict) in {
+                "HEALTHY",
+                "DEGRADED",
+                "CRITICAL",
+            }
+
+
+@pytest.mark.unit
+class TestAmbiguousGroupMatchDropsRatherThanGuesses:
+    """MINOR (adversarial round 2): first-match iteration was order-dependent.
+
+    ``_attribute_delta`` returned on the FIRST suffix contained in the consumer
+    group. The guards in ``select_projection_group_suffixes`` remove infixes
+    that are ambiguous or nested within the map, but they cannot prove a real
+    group id contains no two of them. Where two match, the answer depended on
+    manifest insertion order -- a guess wearing the costume of a fact, which is
+    the defect this whole ticket removes.
+    """
+
+    def test_two_matching_infixes_yield_no_attribution(self) -> None:
+        from omnibase_infra.runtime.health.projection_liveness import _attribute_delta
+
+        declarers = {TOOL_EXECUTED: frozenset({HOOK_LEDGER, SESSION_REPLAY})}
+        # A group id that genuinely contains both infixes.
+        group = f".pkg.{HOOK_LEDGER}.consume..pkg.{SESSION_REPLAY}.consume."
+        suffixes = {
+            f".pkg.{HOOK_LEDGER}.consume.": HOOK_LEDGER,
+            f".pkg.{SESSION_REPLAY}.consume.": SESSION_REPLAY,
+        }
+        assert (
+            _attribute_delta(
+                group,
+                TOOL_EXECUTED,
+                group_suffixes=suffixes,
+                topic_declarers=declarers,
+            )
+            is None
+        )
+        # Reversing the map's insertion order gives the same answer, which is
+        # the property the first-match form could not hold.
+        assert (
+            _attribute_delta(
+                group,
+                TOOL_EXECUTED,
+                group_suffixes=dict(reversed(list(suffixes.items()))),
+                topic_declarers=declarers,
+            )
+            is None
         )
 
-        assert _as_health_status("HEALTHY") == "HEALTHY"
-        assert _as_health_status("CRITICAL") == "CRITICAL"
-        assert _as_health_status("UNKNOWN") == "DEGRADED"
-        assert _as_health_status("") == "DEGRADED"
+    def test_exactly_one_matching_infix_still_attributes(self) -> None:
+        from omnibase_infra.runtime.health.projection_liveness import _attribute_delta
+
+        declarers = {TOOL_EXECUTED: frozenset({HOOK_LEDGER, SESSION_REPLAY})}
+        suffixes = {
+            f".pkg.{HOOK_LEDGER}.consume.": HOOK_LEDGER,
+            f".pkg.{SESSION_REPLAY}.consume.": SESSION_REPLAY,
+        }
+        assert (
+            _attribute_delta(
+                f"env.pkg.{HOOK_LEDGER}.consume.1.0.0",
+                TOOL_EXECUTED,
+                group_suffixes=suffixes,
+                topic_declarers=declarers,
+            )
+            == HOOK_LEDGER
+        )
+
+    def test_an_ambiguous_match_reaches_the_verdict_as_unattributable(self) -> None:
+        """And therefore degrades the dimension, rather than vanishing."""
+        manifest = _manifest(
+            _projection(HOOK_LEDGER),
+            _projection(SESSION_REPLAY),
+            _projection(WORK_EVENTS),
+        )
+        projections = select_projection_contracts(manifest)
+        suffixes = select_projection_group_suffixes(manifest, projections)
+        ambiguous = "".join(suffixes)
+        verdict = evaluate_projection_liveness(
+            projections=projections,
+            attached_topics=frozenset({TOOL_EXECUTED, PROMPT_SUBMITTED}),
+            flow_windows=[_window(((ambiguous, TOOL_EXECUTED, 900, 900),))],
+            projection_group_suffixes=suffixes,
+        )
+        assert verdict.dlq_saturated_projections == ()
+        assert verdict.unattributable_flow_topics == (TOOL_EXECUTED,)
+        assert dlq_saturation_status(verdict) == "DEGRADED"
 
 
 @pytest.mark.unit

@@ -367,9 +367,48 @@ migration_declares_unclassified_force_rls() {
 # to corroborate against (compose does not inject the project name, and the
 # service's own container_name is not readable from inside it).
 #
-# Delegation 0023-0026 are NOT releasable on ANY lane. Ruling 15 is scoped to
-# node_service_registry; the delegation tenant-RLS hold is a separate ruling
-# still pending, and no case arm below names those ids.
+# Delegation 0023 is NOT releasable on ANY lane. Ruling 15 is scoped to
+# node_service_registry, and 0023 is a SUPERSEDED id (its CREATE POLICY
+# compares TEXT to TEXT and aborts against the converted uuid column), so no
+# case arm below names it. 0031, 0032, 0033 and 0034 are likewise not
+# releasable: they are retired conversions and neither runner has any
+# supersession awareness, so releasing one would apply a superseded conversion
+# on every lane that has not already recorded it.
+#
+# WIDENED 2026-09-08 (OMN-15683). The dev arm below ALSO releases the operative
+# uuid conversion, under the operator ruling of that date recorded in the
+# omni_home rolling work ledger.
+#
+# THE RELEASED ID IS NOW 0036, NOT 0034 (OMN-15683, later the same day). 0034
+# resolves identity on m.tenant_slug alone and has no branch for a tenant_id
+# that is ALREADY the canonical UUID. Write-time UUID stamping (OMN-16804) is
+# live, so the column is now MIXED: measured read-only on onex-dev, 26 of 229
+# rows across 3 values already hold canonical UUIDs that ARE in
+# tenant_registry_mirror under tenant_uuid, and 0034 aborts on all of them with
+# a message blaming the projection for data that is present. 0036 resolves on
+# BOTH forms and is fail-closed on neither. 0034 is retired in place and keeps
+# its baseline entry; it simply no longer appears here. It stays in the
+# baseline manifest rather than leaving it, because it enables FORCE ROW LEVEL
+# SECURITY and is not grandfathered: a baseline removal hands it to the
+# OMN-15336 item-4 guard below, which is FATAL for exactly that shape (measured
+# on a virgin Postgres through this runner: "FATAL: ... enables FORCE ROW LEVEL
+# SECURITY but is not in the operator fence manifest ... NOTHING was applied by
+# this migration"). The guard's own message names this remedy: keep the fence
+# entry, add a lane release authorized by an operator ruling. It is also the
+# safer outcome — the .201 stability-test lane still holds
+# delegation_events.tenant_id as TEXT with an EMPTY tenant_registry_mirror, so
+# a baseline release would make 0034 abort there and, by lexical sort order,
+# take every later node directory with it. Delegation 0024 and 0025 left the
+# baseline entirely in the same change; they declare no FORCE, so nothing here
+# names them.
+#
+# 0026 IS NOT RELEASED, and that is a measurement, not a hold-over. It was
+# released here in the first revision of this change and applied on the .201
+# dev lane; the resulting ENABLE + FORCE RLS on delegation_judge_verdict_events
+# is a WRITE LOCKOUT for the lane's own writer, so it was reverted on the lane
+# and dropped from this arm. See fenced-node-migrations.yaml's 2026-09-08 block
+# for the two measured refusals and the writer-side condition that has to land
+# before it can be released.
 ONEX_MIGRATION_LANE="${ONEX_MIGRATION_LANE:-}"
 case "${ONEX_MIGRATION_LANE}" in
   dev)
@@ -383,7 +422,8 @@ case "${ONEX_MIGRATION_LANE}" in
     # is_lane_released_node_migration meaningful; naming an id the fence no
     # longer covers would be inert but would misdescribe the policy.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
-node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
+node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
+node:node_projection_delegation:0036_delegation_events_uuid_mixed_representation.sql"
     ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""

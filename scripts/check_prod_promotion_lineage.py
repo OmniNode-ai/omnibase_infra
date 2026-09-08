@@ -116,14 +116,74 @@ def working_tree_clean(repo_dir: Path) -> bool:
     Raises :class:`ProdLineageError` (``GIT_ERROR``) when git cannot read the
     repository; never returns a silent default.
     """
-    result = _git(repo_dir, "status", "--porcelain", "--untracked-files=all")
+    return pending_worktree_entries(repo_dir) == []
+
+
+def pending_worktree_entries(repo_dir: Path, *, untracked: str = "all") -> list[str]:
+    """Return the porcelain rows that make the working tree unclean.
+
+    OMN-16442: this exists so the DIRTY_TREE refusal can NAME what is pending.
+    The refusal used to say only "has uncommitted or untracked changes", which
+    is true and undiagnosable: on the .201 deploy-source clone the entire
+    dirtiness was a single row, ``?? origin/``, and it refused every
+    release-mode build for eight days before anyone ran ``git status`` there by
+    hand. An untracked DIRECTORY is the worst case of this, because porcelain
+    collapses it to one row with a trailing slash no matter how much sits
+    underneath — that one row was standing for a full 83 MB nested repository
+    checkout, created by a worktree command given a relative path from inside
+    the clone (memory ``feedback_worktree_add_relative_path_nests_in_clone``).
+
+    ``untracked`` selects git's own two views and BOTH are used. The verdict
+    is taken at ``all``, which is the strictest and is what the clean-tree
+    check has always used — semantics unchanged. The refusal MESSAGE is
+    rendered from ``normal``, git's collapsed view, because that is the one
+    that emits a single ``?? path/`` row naming a directory. At ``all`` a plain
+    untracked directory becomes one row per file and the directory itself is
+    never named; the only directory rows that survive ``all`` are nested
+    repositories, which git refuses to descend into.
+
+    Raises :class:`ProdLineageError` (``GIT_ERROR``) when git cannot read the
+    repository; never returns a silent empty list.
+    """
+    result = _git(repo_dir, "status", "--porcelain", f"--untracked-files={untracked}")
     if result.returncode != 0:
         raise ProdLineageError(
             EnumProdLineageFailure.GIT_ERROR,
             f"git status failed in {repo_dir}: "
             f"{result.stderr.strip() or result.stdout.strip()}",
         )
-    return result.stdout.strip() == ""
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def describe_pending_entries(entries: list[str]) -> str:
+    """Render porcelain rows as a refusal preflight line, directories first.
+
+    Untracked directories are called out by name and separately from files: a
+    ``?? path/`` row is one line of output standing for an arbitrary amount of
+    content, and it is the row a reader is most likely to skim past.
+    """
+    untracked_dirs = [
+        entry[3:]
+        for entry in entries
+        if entry.startswith("?? ") and entry.endswith("/")
+    ]
+    untracked_files = [
+        entry[3:]
+        for entry in entries
+        if entry.startswith("?? ") and not entry.endswith("/")
+    ]
+    tracked = [entry for entry in entries if not entry.startswith("?? ")]
+    parts: list[str] = []
+    if untracked_dirs:
+        parts.append(
+            "untracked DIRECTORIES (each stands for its whole contents): "
+            + ", ".join(sorted(untracked_dirs))
+        )
+    if untracked_files:
+        parts.append("untracked files: " + ", ".join(sorted(untracked_files)))
+    if tracked:
+        parts.append("tracked/staged changes: " + ", ".join(sorted(tracked)))
+    return "; ".join(parts) if parts else "no pending entries"
 
 
 def head_is_promoted(repo_dir: Path) -> bool:
@@ -190,12 +250,21 @@ def assert_prod_build_promoted(repo_dir: Path) -> str:
     :func:`promoted_build_args` and later verify the deployed image with
     :func:`assert_image_revision_matches`.
     """
-    if not working_tree_clean(repo_dir):
+    pending = pending_worktree_entries(repo_dir)
+    if pending:
+        # The verdict came from the strict `all` view above; the preflight line
+        # is rendered from git's collapsed view so a directory is named as a
+        # directory instead of as every file inside it.
+        collapsed = pending_worktree_entries(repo_dir, untracked="normal")
         raise ProdLineageError(
             EnumProdLineageFailure.DIRTY_TREE,
             f"prod build rejected: working tree in {repo_dir} has uncommitted or "
             "untracked changes; the baked revision would not match the image "
-            "contents. Commit or stash, then rebuild from a clean clone.",
+            "contents. Commit or stash, then rebuild from a clean clone.\n"
+            f"       pending ({len(pending)} path(s)): "
+            f"{describe_pending_entries(collapsed)}\n"
+            "       An untracked directory may be a nested checkout — list the "
+            "repository's registered worktrees before deleting it.",
         )
     if not head_is_promoted(repo_dir):
         head = resolve_head_sha(repo_dir)

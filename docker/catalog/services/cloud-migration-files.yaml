@@ -1,0 +1,28 @@
+name: cloud-migration-files
+description: >-
+  One-shot that copies the omninode_cloud corpus, its MANIFEST and its manifest evaluator out of the migrate image into the lane's shared migration volume. The k8s Job's initContainer, in compose form (OMN-17530) — the SQL ships in an alpine image with no psql and psql ships in an image with no SQL, so the copy is a separate step in both shapes.
+image: ${ONEX_CLOUD_MIGRATE_IMAGE:-omninode-cloud-migrate:dev-lane}
+layer: infrastructure
+container_name: omnibase-infra-cloud-migration-files
+required_env: []
+hardcoded_env: {}
+operational_defaults: {}
+ports: null
+healthcheck: null
+volumes:
+  - cloud_migrations:/work
+depends_on: []
+restart: 'no'
+resources:
+  cpus: '0.25'
+  memory: 128M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+command:
+  - sh
+  - -c
+  - 'set -e; rm -rf /work/* /work/.[!.]* 2>/dev/null || true; cp -a /migrations/. /work/; ls /work/*.sql | wc -l; touch /work/.corpus-ready'
+labels:
+  com.omninode.service: cloud-migration-files
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-17530

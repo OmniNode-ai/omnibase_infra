@@ -11,6 +11,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
+from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+    host_aliases_in,
+)
 
 # Read off the generated topic enum, which is itself generated from the
 # contract.yaml files — never typed as raw literals here (CLAUDE.md
@@ -263,6 +266,45 @@ class ModelChainCanaryRequest(BaseModel):
                 "terminal_success_topics must name at least one topic — a "
                 "readback with no topics would report NOT_FOUND for every "
                 "run and teach people to ignore this canary"
+            )
+        return value
+
+    @field_validator("quarantine_bootstrap_servers", "terminal_bootstrap_servers")
+    @classmethod
+    def _refuse_a_host_alias_broker(cls, value: str) -> str:
+        """A broker address may not be a Docker-Desktop host alias (OMN-17926).
+
+        ``host.docker.internal:19092`` was this canary's hardcoded default for
+        both broker legs, and it took every run from 2026-09-07T17:44Z onward
+        red with ``quarantine_probe_failed`` -- 25 consecutive runs, each of
+        which had already fired its delegation successfully. The alias resolves
+        only because ``docker-compose.runners.yml`` hands the deploy runner an
+        ``extra_hosts: host-gateway`` mapping, and, being an address literal,
+        it carries no transport at all -- so the client opened plaintext
+        against the SASL/SCRAM listener OMN-18012 Phase B had enabled hours
+        earlier and reported the whole bus unreadable.
+
+        The refusal is deliberately at the model boundary rather than in the
+        workflow: a workflow default is one edit away from coming back, and
+        the next reader of a green canary cannot tell which address it used.
+        Pass the lane's declared broker (omnimarket
+        ``config/ci_bus_lanes.yaml``, resolved by
+        ``lane_transport.load_lane_transport``) instead.
+
+        The ingress ``probe_url`` is deliberately NOT covered: it speaks HTTP
+        to a host-published port, that leg has worked on every one of those 25
+        runs, and widening the refusal to it would break a working probe to
+        make a point.
+        """
+        aliases = host_aliases_in(value)
+        if aliases:
+            raise ValueError(
+                f"broker address {value!r} uses the Docker-Desktop host alias "
+                f"{aliases[0]!r}. That alias resolves on one runner's compose "
+                "block and nowhere else, and it declares no transport, so a "
+                "client cannot know whether the listener speaks SASL. Resolve "
+                "the broker from the lane declaration (omnimarket "
+                "config/ci_bus_lanes.yaml) instead of naming a host literal."
             )
         return value
 
