@@ -43,10 +43,25 @@
 #     connection immediately before the anti-join and REFUSES with
 #     SavingsCorrelationUnscopedReadError unless the read is either
 #     tenant-scoped or executed by a role row-level security does not apply
-#     to. The durable close — tracking finalization in this node's own
-#     omninode_internal domain instead of reading a TENANT relation — needs a
-#     cross-repo ownership declaration in omnimarket and stays on OMN-16770;
-#     the class-wide static gate is OMN-17453.
+#     to.
+#   - OMN-16770 (durable close, landed): the refusal above was correct and
+#     permanent — this node carries no tenant attribution of its own to bind
+#     (neither signal table has a tenant_id column, and inventing one is what
+#     the OMN-16831 ruling forbids), so the batch refused on every 60s tick
+#     and produced no estimate on any lane (480 refusals in four hours,
+#     measured on the .201 dev lane). The close is to stop reading a TENANT
+#     relation for INTERNAL idempotency at all: 0002_create_savings_
+#     correlation_finalizations.sql adds omninode_internal.
+#     savings_correlation_finalizations, this node writes one row there per
+#     estimate it publishes, and the readiness anti-join reads THAT — a
+#     relation it owns, writes, and can read truthfully under its own binding.
+#     Ownership was declared first in omnimarket's
+#     scripts/application-relation-ownership.yaml, as the OMN-15361 ownership
+#     gate requires. The seam is NOT deleted: it still runs on the same
+#     connection immediately before the candidate query and still refuses if
+#     the relation the anti-join reads ever acquires a policy this node cannot
+#     satisfy. It now passes by construction rather than by grant. The
+#     class-wide static gate is still OMN-17453.
 name: "node_savings_estimation_compute"
 contract_name: "node_savings_estimation_compute"
 node_name: "node_savings_estimation_compute"
@@ -57,7 +72,7 @@ contract_version:
 node_version:
   major: 0
   minor: 4
-  patch: 2
+  patch: 3
 node_type: "EFFECT_GENERIC"
 description: >
   EFFECT node for token savings estimation. HandlerSavingsCorrelation ingests raw injection-effectiveness / validator-catch signals into Postgres (no in-memory buffering), periodically correlates them per session by joining against llm_call_metrics and session_outcomes (owned by omnimarket's projection nodes), and calls the pure HandlerSavingsEstimation (tiered model pricing: Opus $15/M input, Sonnet $3/M input) to produce a ModelSavingsEstimate for Kafka emission to onex.evt.omnibase-infra.savings-estimated.v1.
@@ -92,7 +107,7 @@ handler_routing:
         name: "HandlerSavingsCorrelation"
         module: "omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation"
       description: >
-        Periodic batch step: finds sessions with unfinalized savings signals that are ready (session-outcome past grace window, or timed out), correlates them, and publishes savings-estimated.v1. Triggered directly by a periodic asyncio task in service_kernel.py (mirrors node_baselines_batch_compute), not by real bus traffic on this self-only command topic. Readiness is decided by an anti-join against savings_estimates, a TENANT relation this node neither owns nor writes; the batch refuses (SavingsCorrelationUnscopedReadError) rather than run that anti-join on a connection where row-level security applies and no app.tenant_id is bound, because a filtered read would report every session as un-finalized (OMN-16770).
+        Periodic batch step: finds sessions with unfinalized savings signals that are ready (session-outcome past grace window, or timed out), correlates them, publishes savings-estimated.v1, and records each publication in omninode_internal.savings_correlation_finalizations. Triggered directly by a periodic asyncio task in service_kernel.py (mirrors node_baselines_batch_compute), not by real bus traffic on this self-only command topic. Readiness is decided by an anti-join against that same finalization relation — INTERNAL-domain, owned and written by this node, so the read is answerable under its own binding. It formerly anti-joined savings_estimates, a TENANT relation this node neither owns nor writes, which the batch refused to read on a connection with no app.tenant_id bound because a filtered read would report every session as un-finalized; that refusal (SavingsCorrelationUnscopedReadError) still guards the connection and now passes by construction (OMN-16770). The marker is written AFTER a successful publish, never before: at-least-once with an upserting downstream projection, not at-most-once.
 
       input_model:
         name: "ModelSavingsCorrelationBatchCommand"
@@ -154,7 +169,7 @@ error_handling:
       recoverable: false
     - name: "SavingsCorrelationUnscopedReadError"
       description: >
-        The savings_estimates idempotency read cannot answer truthfully on this connection — row-level security applies and no app.tenant_id is bound, or the premise could not be read at all. Not recoverable by retry: the next tick reaches the identical connection state. Remediation is to read as a role row-level security does not apply to, or to bind the tenant scope — never a bare GRANT, which is what produces the silent all-sessions answer this refusal exists to prevent (OMN-16770).
+        The readiness anti-join's idempotency read cannot answer truthfully on this connection — row-level security applies and no app.tenant_id is bound, or the premise could not be read at all. Not recoverable by retry: the next tick reaches the identical connection state. Since the OMN-16770 durable close the relation read is omninode_internal.savings_correlation_finalizations, which this node owns and which carries no row-level security by design, so this refusal is no longer reachable in a correctly migrated lane. Reaching it means a policy was added to that relation: remove the policy. Do NOT bind a tenant scope here (this node has no tenant attribution and inventing one is forbidden by OMN-16831) and never issue a bare GRANT, which is what produces the silent all-sessions answer this refusal exists to prevent (OMN-16770).
 
       recoverable: false
 health_check:

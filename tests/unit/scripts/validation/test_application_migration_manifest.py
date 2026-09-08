@@ -493,7 +493,19 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # are what make that infra-ahead-by-one state legal rather than drift --
     # sync-node-migrations.sh --check reads them as preserved history via the
     # OMN-15717 legacy-declared exemption.
-    assert len(result.declarations) == 171
+    #
+    # 171 -> 172 for OMN-16770's
+    # nodes/node_savings_estimation_compute/
+    # 0002_create_savings_correlation_finalizations.sql, which creates
+    # omninode_internal.savings_correlation_finalizations -- the node's own
+    # record of which sessions it has published an estimate for. It replaces
+    # the readiness anti-join's cross-domain read of `savings_estimates`, a
+    # TENANT relation under FORCE ROW LEVEL SECURITY that the correlation
+    # pool's principal (`omninode_runtime`, NOSUPERUSER / NOBYPASSRLS /
+    # non-owner) could never read truthfully, so the OMN-16770 seam refused
+    # the batch on every 60s tick. Net-new file, no parent edited, ownership
+    # declared first in omnimarket's application-relation-ownership.yaml.
+    assert len(result.declarations) == 172
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

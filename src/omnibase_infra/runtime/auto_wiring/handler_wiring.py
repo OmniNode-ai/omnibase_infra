@@ -357,6 +357,7 @@ if TYPE_CHECKING:
         ModelProjectionIntent,
     )
     from omnibase_infra.enums import EnumMessageCategory
+    from omnibase_infra.handlers.handler_infisical import HandlerInfisical
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
@@ -3935,6 +3936,119 @@ def _resolve_binding_dsn(
     return os.environ.get(binding.dsn_env, "")
 
 
+INFISICAL_BOOTSTRAP_VARS: Final[tuple[str, ...]] = (
+    "INFISICAL_ADDR",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_ID",
+    "INFISICAL_ENVIRONMENT_SLUG",
+)
+"""The lane bootstrap identity a store-carried binding is resolved through.
+
+OMN-17557. Names only. No value from this tuple is ever logged or interpolated
+into an error message -- a refusal names the VARIABLES that are missing, never
+what any of them held.
+
+Every name here is a member of ``scripts/check-env-reads.sh``'s own
+``BOOTSTRAP_ALLOWLIST`` (or is not secret-ish), for the circularity that
+allowlist exists to describe: this is the identity the store resolver
+authenticates WITH, so it cannot itself be resolved from the store.
+
+``INFISICAL_ENVIRONMENT_SLUG`` and not ``INFISICAL_ENVIRONMENT`` because that
+is the name the onex-dev ``onex-runtime-config`` ConfigMap actually sets --
+verified by read-only readback of the live ConfigMap, 2026-09-08 -- and the
+name ``omnimarket.inference.secret_store_resolver`` already reads for the same
+identity.
+"""
+
+
+async def build_lane_infisical_handler(
+    container: object | None = None,
+) -> HandlerInfisical:
+    """Build the Infisical handler this lane's own bootstrap identity affords.
+
+    OMN-17557. ``SecretResolver.from_container`` used to treat an absent
+    ``HandlerInfisical`` as graceful degradation, so a lane whose rendered
+    config declared ``source_type: infisical`` still got a resolver that could
+    not read Infisical: every such logical name resolved to ``None`` behind a
+    single "Infisical handler not configured" WARNING. Nothing registers
+    ``HandlerInfisical`` in the container's service registry -- it is not
+    contract-declared, and the only other construction site
+    (``RuntimeHostProcess._prefetch_config_from_infisical``) builds an INLINE
+    handler and shuts it down again -- so on every runtime process that
+    condition was permanent, not incidental. That is what left the onex-dev
+    ``tenant_projection`` binding unresolvable and all eight tenant-domain
+    projection contracts refusing to wire with "Projection handler requires
+    topology bindings with configured DSNs: tenant_projection".
+
+    This function lives HERE rather than beside ``SecretResolver`` because this
+    module is the declared env-resolution boundary
+    (``scripts/check-env-reads.sh`` approves ``/runtime/auto_wiring/handler_wiring.py``
+    for exactly the sibling case: resolving a binding's DSN carrier at wiring
+    time). Moving the read into ``secret_resolver.py`` would have moved a
+    boundary, which that gate correctly refuses.
+
+    It is the single CONSTRUCTION seam for the handler: tests replace it to
+    prove the wiring without reaching a real Infisical server.
+
+    The handler is created WITHOUT a ``secret_path``. That is deliberate: a
+    folder-qualified mapping carries its own folder through per read (see
+    ``secret_resolver._split_infisical_path``), so configuring a default folder
+    here would silently re-root every read whose mapping declares none.
+
+    The returned handler is NOT shut down: it backs a resolver held for the
+    process lifetime, and the binding boundary may be reached again on a
+    re-wire. This differs deliberately from the config-prefetch path, whose
+    inline handler is used once and released.
+
+    Raises:
+        ProtocolConfigurationError: naming every missing or blank bootstrap
+            variable at once. A lane that declares a store-carried source and
+            holds no identity to read it with is misconfigured, and saying so
+            by name is the only honest outcome -- returning a resolver that
+            answers ``None`` to every store read is what made this invisible.
+    """
+    from omnibase_core.container import ModelONEXContainer as _Container
+    from omnibase_infra.errors import ProtocolConfigurationError
+    from omnibase_infra.handlers.handler_infisical import (
+        HandlerInfisical as _HandlerInfisical,
+    )
+
+    values = {
+        "INFISICAL_ADDR": os.environ.get("INFISICAL_ADDR", "").strip(),
+        "INFISICAL_CLIENT_ID": os.environ.get("INFISICAL_CLIENT_ID", "").strip(),
+        "INFISICAL_CLIENT_SECRET": os.environ.get(
+            "INFISICAL_CLIENT_SECRET", ""
+        ).strip(),
+        "INFISICAL_PROJECT_ID": os.environ.get("INFISICAL_PROJECT_ID", "").strip(),
+        "INFISICAL_ENVIRONMENT_SLUG": os.environ.get(
+            "INFISICAL_ENVIRONMENT_SLUG", ""
+        ).strip(),
+    }
+    missing = sorted(name for name, value in values.items() if not value)
+    if missing:
+        raise ProtocolConfigurationError(
+            "Lane declares an Infisical-backed secret source but the Infisical "
+            "machine identity is not fully configured. Missing or blank: "
+            f"{missing}. Declared bootstrap variables: "
+            f"{list(INFISICAL_BOOTSTRAP_VARS)}."
+        )
+
+    handler = _HandlerInfisical(
+        cast("ModelONEXContainer", container) if container is not None else _Container()
+    )
+    await handler.initialize(
+        {
+            "host": values["INFISICAL_ADDR"],
+            "client_id": values["INFISICAL_CLIENT_ID"],
+            "client_secret": values["INFISICAL_CLIENT_SECRET"],
+            "project_id": values["INFISICAL_PROJECT_ID"],
+            "environment_slug": values["INFISICAL_ENVIRONMENT_SLUG"],
+        }
+    )
+    return handler
+
+
 async def build_topology_secret_resolver(
     container: object | None,
 ) -> SecretResolver | None:
@@ -3949,9 +4063,14 @@ async def build_topology_secret_resolver(
     load-bearing.
 
     The Infisical handler is resolved from the container when present, which is
-    what makes ``source_type: infisical`` mappings live; without it the
-    resolver still serves ``env``/``file`` mappings and reports the Infisical
-    miss rather than guessing.
+    what makes ``source_type: infisical`` mappings live. OMN-17557: nothing ever
+    registers one there, so "when present" was never true on a runtime process
+    and every store-carried binding resolved to nothing behind a single
+    "Infisical handler not configured" warning. When the rendered config
+    declares an Infisical source the handler is now built from the lane's own
+    bootstrap identity (see ``build_lane_infisical_handler``), and an
+    incomplete identity is a refusal naming the missing variables. A config
+    with no Infisical source is unchanged and still needs no identity.
     """
     import yaml
 
@@ -3962,7 +4081,10 @@ async def build_topology_secret_resolver(
     from omnibase_infra.runtime.runtime_profile import (
         resolve_secret_resolver_config_path,
     )
-    from omnibase_infra.runtime.secret_resolver import SecretResolver
+    from omnibase_infra.runtime.secret_resolver import (
+        SecretResolver,
+        config_declares_infisical_source,
+    )
 
     config_path_raw = resolve_secret_resolver_config_path()
     if not config_path_raw:
@@ -3977,9 +4099,20 @@ async def build_topology_secret_resolver(
             f"secret-resolver config at {config_path}"
         ) from exc
     if container is None:
+        # No container is the standalone/test path. It still may not hand back
+        # a resolver that cannot serve a source the config declares
+        # (OMN-17557), so the same factory supplies the handler here on exactly
+        # the terms ``from_container`` applies it below.
+        if config_declares_infisical_source(config):
+            return SecretResolver(
+                config=config,
+                infisical_handler=await build_lane_infisical_handler(None),
+            )
         return SecretResolver(config=config)
     return await SecretResolver.from_container(
-        cast("ModelONEXContainer", container), config
+        cast("ModelONEXContainer", container),
+        config,
+        infisical_handler_factory=lambda: build_lane_infisical_handler(container),
     )
 
 

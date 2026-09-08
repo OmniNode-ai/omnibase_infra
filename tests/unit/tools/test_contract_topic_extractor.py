@@ -18,6 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from omnibase_infra.tools.contract_topic_extractor import (
+    _VALID_KINDS,
     ContractTopicExtractor,
     ModelContractTopicEntry,
 )
@@ -1030,7 +1031,12 @@ def test_extract_from_real_nodes_directory() -> None:
 
     # All results must be valid ModelContractTopicEntry objects
     for entry in results:
-        assert entry.kind in {"evt", "cmd", "intent", "dlq"}
+        # OMN-17557: read the extractor's OWN kind set rather than restating a
+        # copy of it. This literal had been {"evt","cmd","intent","dlq"} since
+        # before OMN-15832 added "snapshot", and it only kept passing because
+        # every snapshot topic in this repo's node contracts also carried a
+        # dotted event name and was being skipped for an unrelated arity bug.
+        assert entry.kind in _VALID_KINDS
         assert entry.topic.startswith("onex.")
         assert len(entry.source_contracts) >= 1
         assert entry.version.startswith("v")
