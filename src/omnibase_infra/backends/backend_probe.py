@@ -169,11 +169,20 @@ def probe_kafka(
     try:
         from confluent_kafka.admin import AdminClient
 
+        from omnibase_infra.event_bus.kafka_auth import (
+            build_confluent_auth_config_from_env,
+        )
+
+        # OMN-18012: honour the lane transport. A PLAINTEXT lane resolves to
+        # {} and keeps the previous construction; a SASL lane gets the
+        # credentials instead of a handshake failure reported as "auth
+        # failure -> REACHABLE".
         admin = AdminClient(
             {
                 "bootstrap.servers": bootstrap_servers,
                 "socket.timeout.ms": int(timeout * 1000),
                 "request.timeout.ms": int(timeout * 1000),
+                **build_confluent_auth_config_from_env(),
             }
         )
         cluster_metadata = admin.list_topics(timeout=timeout)
