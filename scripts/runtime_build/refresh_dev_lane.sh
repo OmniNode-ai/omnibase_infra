@@ -61,6 +61,10 @@ DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
 # shellcheck source=./lane_lock.sh
 source "${SCRIPT_DIR}/lane_lock.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dev_refresh.py"
+# OMN-17530: the required-compose-env preflight. Reports EVERY unset ${VAR:?}
+# across the compose files this lane loads in ONE message, before compose
+# validation reports only the first one and stops.
+PREFLIGHT_REQUIRED_ENV_SCRIPT="${REPO_ROOT}/scripts/preflight_required_compose_env.py"
 
 log() { printf '[refresh-dev-lane] %s\n' "$*" >&2; }
 err() { printf '[refresh-dev-lane] ERROR: %s\n' "$*" >&2; }
@@ -307,6 +311,21 @@ run_verify() {
     fi
 }
 
+# OMN-17530: stdlib-only, so it deliberately does NOT go through `uv run` --
+# a missing project venv must not be the reason an operator never sees the
+# missing-variable list.
+run_preflight_required_env() {
+    local py="${PYTHON_BIN}"
+    if [[ "${py}" == "uv-run" ]]; then
+        py="python3"
+    fi
+    "${py}" "${PREFLIGHT_REQUIRED_ENV_SCRIPT}" \
+        --lane "${LANE}" \
+        --runtime-policy-env "${REPO_ROOT}/docker/runtime-policy.env" \
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.infra.yml" \
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-lane.yml"
+}
+
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
 
 # --- ambient-clone git wrapper ----------------------------------------------
@@ -347,6 +366,34 @@ mkdir -p "${HISTORY_DIR}"
 UTC_NOW="$(date -u +%Y%m%dT%H%M%SZ)"
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/refresh-dev-lane.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
+
+# --- required compose env preflight (OMN-17530) -----------------------------
+# The dev lane brings up TWO compose files -- docker-compose.infra.yml plus
+# docker-compose.dev-lane.yml (deploy-runtime.sh resolve_compose_file_args()) --
+# and a ${VAR:?} in either is a hard requirement. `docker compose config`
+# reports the FIRST unset one and stops, so a host missing N of them fails N
+# deploys in a row, each naming one name. Two dev-lane deploy commands died that
+# way ~14 minutes apart on 2026-09-08, on two variables added by the same PR;
+# the real count turned out to be ten.
+#
+# This runs in BOTH dry-run and execute mode, and BEFORE the lane lock is
+# acquired: a refresh that cannot possibly validate must not take the lane
+# window away from one that can. It reads names only -- never values.
+if [[ -f "${PREFLIGHT_REQUIRED_ENV_SCRIPT}" ]]; then
+    log "=== Required compose env preflight ==="
+    if ! run_preflight_required_env; then
+        err "REQUIRED_COMPOSE_ENV_MISSING -- see the full list above."
+        err "  Nothing was probed, locked, built or recreated. Set every name listed"
+        err "  in the store file named beside it, then re-run. Supplying only the"
+        err "  first will not get further (OMN-17530)."
+        exit 64
+    fi
+else
+    err "preflight script not found: ${PREFLIGHT_REQUIRED_ENV_SCRIPT}"
+    err "  Refusing to continue: skipping it silently is exactly the failure mode"
+    err "  OMN-17530 closed."
+    exit 64
+fi
 
 # --- lane lock (OMN-16729) --------------------------------------------------
 # Taken before ANY live read of lane state, because the collision this closes

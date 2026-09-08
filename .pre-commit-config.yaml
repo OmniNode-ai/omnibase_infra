@@ -1085,6 +1085,19 @@ repos:
         language: python
         files: docker/(docker-compose\.infra\.yml|required-env-vars\.manifest\.txt)
         pass_filenames: false
+      # OMN-17530: the dev lane loads TWO compose files -- the base above plus
+      # docker-compose.dev-lane.yml -- and every ${VAR:?} in the overlay is just
+      # as hard a requirement. The overlay had no declaration at all, so two
+      # deploys died on two different undeclared variables added by one PR. Same
+      # script, same exactness property, its own manifest (merging them would
+      # make the base manifest inexact, which is what it exists to guarantee).
+      - id: check-dev-lane-required-env-vars
+        name: Check dev-lane required env vars are declared in the manifest
+        entry: >-
+          python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-lane.yml --manifest-file docker/dev-lane-required-env.manifest.txt
+        language: python
+        files: docker/(docker-compose\.dev-lane\.yml|dev-lane-required-env\.manifest\.txt)
+        pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references
