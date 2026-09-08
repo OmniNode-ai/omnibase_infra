@@ -52,6 +52,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -64,6 +65,7 @@ from dataclasses import asdict, dataclass, field
 from health_payload import (
     DEFAULT_MAX_VERDICT_AGE,
     HEALTH_POLICY_STATUS_ONLY_STRICT,
+    HealthDimension,
     HealthVerdict,
     default_max_verdict_age,
     derive_verdict_wait_bound,
@@ -98,6 +100,14 @@ class ServiceDigestCheck:
     error: str | None = None
 
 
+# OMN-16753: boot tolerance for the introspection-manifest fetch, mirroring
+# ``verify_stability_refresh``. The health probe beside it already waits a
+# derived window for the same runtime; a single-shot manifest fetch turns a
+# still-booting lane into INFRA_ERROR. Bounded, and still fail-closed.
+MANIFEST_FETCH_ATTEMPTS = 24
+MANIFEST_FETCH_INTERVAL_SECONDS = 15.0
+
+
 @dataclass
 class HealthGateReport:
     lane: str
@@ -114,6 +124,10 @@ class HealthGateReport:
     health_policy: str = HEALTH_POLICY_STATUS_ONLY_STRICT
     # OMN-17624 AC-3: the bound that was waited, with its arithmetic.
     verdict_wait: str | None = None
+    # OMN-16753: every non-HEALTHY runtime_health dimension the probe saw, so
+    # the failing criterion survives into the log and the receipt instead of
+    # being reduced to one opaque `(verdict gate: runtime_degraded)` string.
+    health_dimensions: list[dict[str, str]] = field(default_factory=list)
     cluster_healthy: bool = False
     cluster_detail: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -155,6 +169,7 @@ class HealthGateReport:
             "health_status": self.health_status,
             "health_policy": self.health_policy,
             "verdict_wait": self.verdict_wait,
+            "health_dimensions": self.health_dimensions,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "revision_readback_ok": self.revisions_match,
@@ -271,8 +286,8 @@ def check_service_digest(
     )
 
 
-def check_manifest_count(
-    manifest_url: str, min_contracts: int, *, opener: object | None = None
+def _fetch_manifest_once(
+    manifest_url: str, *, opener: object | None = None
 ) -> tuple[int | None, str | None]:
     open_fn = opener or urllib.request.urlopen
     try:
@@ -291,6 +306,37 @@ def check_manifest_count(
     else:
         return None, "manifest payload has unexpected shape"
     return len(contracts), None
+
+
+def check_manifest_count(
+    manifest_url: str,
+    min_contracts: int,
+    *,
+    opener: object | None = None,
+    attempts: int = MANIFEST_FETCH_ATTEMPTS,
+    interval_seconds: float = MANIFEST_FETCH_INTERVAL_SECONDS,
+    sleep_fn: object | None = None,
+) -> tuple[int | None, str | None]:
+    """Count the manifest's contracts, tolerating a booting runtime (OMN-16753).
+
+    Only a TRANSPORT failure is retried; a 200 carrying a non-manifest body is
+    terminal, because waiting cannot turn it into one. Bounded attempts at a
+    fixed interval, LAST result returned -- the same shape as the health
+    probe's wait, and fail-closed on expiry.
+    """
+    _ = min_contracts
+    sleep = sleep_fn or time.sleep
+    count: int | None = None
+    err: str | None = f"manifest never fetched ({manifest_url})"
+    for attempt in range(1, attempts + 1):
+        count, err = _fetch_manifest_once(manifest_url, opener=opener)
+        if err is None:
+            return count, None
+        if not err.startswith("manifest fetch failed"):
+            return count, err
+        if attempt < attempts:
+            sleep(interval_seconds)  # type: ignore[operator]
+    return count, err
 
 
 def check_health(
@@ -449,7 +495,9 @@ def run_health_gate(
             )
         )
 
-    count, err = check_manifest_count(manifest_url, min_contracts, opener=opener)
+    count, err = check_manifest_count(
+        manifest_url, min_contracts, opener=opener, sleep_fn=sleep_fn
+    )
     report.manifest_count = count
     if err is not None:
         report.errors.append(err)
@@ -470,6 +518,10 @@ def run_health_gate(
     report.health_status = health_verdict.status
     report.health_policy = health_verdict.policy
     report.verdict_wait = verdict_wait
+    report.health_dimensions = [
+        {"name": d.name, "status": d.status, "detail": d.detail}
+        for d in health_verdict.dimensions
+    ]
 
     cluster_healthy, cluster_detail = check_cluster_health(
         broker_container, runner=runner
@@ -548,6 +600,11 @@ def main(argv: list[str] | None = None) -> int:
             f"  manifest_count={report.manifest_count} (floor={report.manifest_floor}) ok={report.manifest_ok}"
         )
         print(f"  health_ok={report.health_ok} ({report.health_detail})")
+        for dimension in report.health_dimensions:
+            print(
+                f"  health dimension {dimension['name']}: {dimension['status']}"
+                f" — {dimension['detail']}"
+            )
         print(f"  cluster_healthy={report.cluster_healthy} ({report.cluster_detail})")
         for s in report.services:
             print(

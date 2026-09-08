@@ -123,6 +123,15 @@ REASON_STATUS_UNREADABLE = "status_unreadable"
 #: The only ``status`` value that means healthy.
 HEALTH_STATUS_HEALTHY = "healthy"
 
+#: Key of the monitor verdict block inside ``details``. Mirrors
+#: ``container_healthcheck.RUNTIME_HEALTH_DETAIL_KEY``; duplicated as a plain
+#: constant for the same reason that module duplicates it -- these scripts run
+#: under a bare ``python3`` when the repo venv is absent.
+RUNTIME_HEALTH_DETAIL_KEY = "runtime_health"
+
+#: The only dimension ``status`` that needs no record.
+HEALTH_DIMENSION_STATUS_HEALTHY = "HEALTHY"
+
 DEFAULT_MAX_VERDICT_AGE = object()
 
 _WAITABLE_REASONS = frozenset(
@@ -180,6 +189,68 @@ class HealthPayload:
 
 
 @dataclass(frozen=True)
+class HealthDimension:
+    """One ``details.runtime_health.dimensions`` entry, kept for the receipt.
+
+    OMN-16753. The gate reads this block to reach its verdict and used to throw
+    it away, leaving ``health_detail="... (verdict gate: runtime_degraded)"`` as
+    the whole diagnosis. ``refresh_stability_lane.sh`` then rolls back with
+    ``--force-recreate``, so the container that could answer "which dimension?"
+    is destroyed seconds later. Recovering the answer took ~25 minutes off a
+    retention-bounded bus topic, which for an older run would not have worked
+    at all.
+    """
+
+    name: str
+    status: str
+    detail: str
+
+
+def extract_non_healthy_dimensions(raw: bytes | str) -> tuple[HealthDimension, ...]:
+    """Every non-HEALTHY ``runtime_health`` dimension in a ``/health`` body.
+
+    Pure and total: a body that is not JSON, not an object, carries no verdict
+    block, or carries a ``dimensions`` value of the wrong shape yields an empty
+    tuple rather than raising. This runs on the failure path of a gate that is
+    already reporting a problem -- it must never become a second failure.
+
+    HEALTHY entries are dropped. The receipt records what was WRONG; carrying
+    the passing six as well would bury the one that matters, which is the same
+    unreadability in a longer form.
+    """
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return ()
+    if not isinstance(decoded, dict):
+        return ()
+    details = decoded.get("details")
+    if not isinstance(details, dict):
+        return ()
+    block = details.get(RUNTIME_HEALTH_DETAIL_KEY)
+    if not isinstance(block, dict):
+        return ()
+    dimensions = block.get("dimensions")
+    if not isinstance(dimensions, list):
+        return ()
+    found: list[HealthDimension] = []
+    for entry in dimensions:
+        if not isinstance(entry, dict):
+            continue
+        status = str(entry.get("status", "")).strip().upper()
+        if status == HEALTH_DIMENSION_STATUS_HEALTHY:
+            continue
+        found.append(
+            HealthDimension(
+                name=str(entry.get("name", "")).strip() or "unnamed",
+                status=status or "UNKNOWN",
+                detail=str(entry.get("detail", "")).strip(),
+            )
+        )
+    return tuple(found)
+
+
+@dataclass(frozen=True)
 class HealthVerdict:
     """The health-gate's verdict on one ``/health`` probe.
 
@@ -203,6 +274,10 @@ class HealthVerdict:
     #: (``verdict_absent`` / ``verdict_stale`` / ``status_unreadable``).
     #: ``detail`` is prose for humans; retry logic must never parse prose.
     reason: str | None = None
+    #: OMN-16753. Every non-HEALTHY ``runtime_health`` dimension the probed
+    #: body carried, kept so the log and the receipt name WHICH one failed.
+    #: Empty on a healthy lane and on any body with no readable verdict block.
+    dimensions: tuple[HealthDimension, ...] = ()
 
 
 def parse_health_payload(raw: bytes | str) -> HealthPayload:
@@ -442,6 +517,11 @@ def evaluate_health_body(
             reason=REASON_STATUS_UNREADABLE if require_verdict else None,
         )
 
+    # OMN-16753. Extracted on BOTH policies and on the healthy path too: a
+    # receipt that only records dimensions when it already failed cannot tell
+    # "the lane was clean" from "nothing was looked at".
+    dimensions = extract_non_healthy_dimensions(raw)
+
     if not require_verdict:
         return HealthVerdict(
             ok=payload.healthy,
@@ -449,6 +529,7 @@ def evaluate_health_body(
             status=payload.status,
             details_healthy=payload.details_healthy,
             detail=payload.describe(),
+            dimensions=dimensions,
         )
 
     from omnibase_infra.runtime.health.container_healthcheck import (
@@ -467,6 +548,10 @@ def evaluate_health_body(
         max_verdict_age_seconds=max_verdict_age_seconds,
     )
     ok = container_verdict.verdict == "PASS"
+    # OMN-16753: ``reason`` alone is ``runtime_degraded`` -- a category, not a
+    # finding. ``container_verdict.detail`` already names the dimensions and
+    # their details; carrying it is what makes the one line the refresh log
+    # prints actionable without a second forensic step.
     return HealthVerdict(
         ok=ok,
         policy=HEALTH_POLICY_VERDICT_REQUIRED,
@@ -475,9 +560,13 @@ def evaluate_health_body(
         detail=(
             payload.describe()
             if ok
-            else f"{payload.describe()} (verdict gate: {container_verdict.reason})"
+            else (
+                f"{payload.describe()} (verdict gate: {container_verdict.reason}"
+                f"{f' -- {container_verdict.detail}' if container_verdict.detail else ''})"
+            )
         ),
         reason=None if ok else container_verdict.reason,
+        dimensions=dimensions,
     )
 
 

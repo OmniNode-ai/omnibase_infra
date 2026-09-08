@@ -55,6 +55,7 @@ from omnibase_infra.runtime.health.projection_liveness import (
     evaluate_projection_liveness,
     select_kernel_nonwriting_projections,
     select_projection_contracts,
+    select_projection_group_suffixes,
 )
 from omnibase_infra.runtime.observability import get_consumer_flow_counters
 from omnibase_infra.runtime.projection_dispatch_ledger import (
@@ -532,6 +533,13 @@ class ServiceRuntimeHealthMonitor:
         # failure.
         nonwriting_projections: tuple[ModelProjectionContractRef, ...] = ()
         attached_topics: frozenset[str] = frozenset()
+        # OMN-16753. Group-suffix -> projection name, so a flow delta on a
+        # topic several projections declare is attributed to the subscription
+        # that produced it instead of to the alphabetically last declarer.
+        # Empty is the honest value when discovery raised: with no manifest
+        # nothing can be attributed, and the saturation half then reports only
+        # what a sole-declarer topic proves.
+        projection_group_suffixes: dict[str, str] = {}
         try:
             manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
             contract_count = manifest.total_discovered
@@ -555,6 +563,9 @@ class ServiceRuntimeHealthMonitor:
             )
             nonwriting_projections = select_kernel_nonwriting_projections(
                 manifest, kernel_nonwriting
+            )
+            projection_group_suffixes = select_projection_group_suffixes(
+                manifest, projections
             )
             live_expected_groups = _expected_consumer_groups_from_event_bus(
                 self._event_bus
@@ -755,6 +766,7 @@ class ServiceRuntimeHealthMonitor:
             attached_topics=attached_topics,
             flow_windows=get_consumer_flow_counters().retained_windows.snapshot(),
             kernel_nonwriting=nonwriting_projections,
+            projection_group_suffixes=projection_group_suffixes,
         )
         dimensions.append(
             ModelRuntimeHealthDimension(
