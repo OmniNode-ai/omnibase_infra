@@ -182,11 +182,7 @@ def test_the_same_guard_accepts_a_sha_that_does_carry_a_pass_receipt(
         agent_command_id=None,
     )
     surface = _SurfaceFromCapture(
-        {
-            artifact_name(EnumLabLane.COMPOSE_DEV, ANNOUNCED_SHA): (
-                receipt.model_dump_json()
-            )
-        }
+        {artifact_name(EnumLabLane.COMPOSE_DEV, ANNOUNCED_SHA): (receipt.to_json())}
     )
     code, output = _run(surface, monkeypatch)
     assert code == 0
