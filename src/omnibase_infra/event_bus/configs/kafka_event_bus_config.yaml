@@ -88,6 +88,16 @@ heartbeat_interval_ms: ${KAFKA_HEARTBEAT_INTERVAL_MS:-15000}
 # Max poll interval (ms) — max time between poll() calls before consumer is evicted.
 # Set high enough to accommodate slow batch processing (default 5 min).
 max_poll_interval_ms: ${KAFKA_MAX_POLL_INTERVAL_MS:-300000}
+# Maximum bytes the broker returns per partition per fetch request (passed to
+# AIOKafkaConsumer). OMN-15837: this is a PER-CONSUMER buffer ceiling and an
+# auto-wired runtime holds one consumer per wired topic, so the value is
+# multiplied by the wired consumer count against a fixed container memory
+# limit. At 1048588 (the producer's max_request_size, which this used to reuse)
+# a ~225-consumer lane reserves ~225 MiB of fetch buffer and the runtime
+# OOM-looped against its 1.5 GiB limit. 262144 (256 KiB) sits above the largest
+# payload measured on the live bus (240027 bytes) so ordinary traffic still
+# batches. Raise only with a measurement; the cost is linear in consumer count.
+max_partition_fetch_bytes: ${KAFKA_MAX_PARTITION_FETCH_BYTES:-262144}
 # =============================================================================
 # Producer Settings
 # =============================================================================

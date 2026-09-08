@@ -1972,14 +1972,14 @@ class EventBusKafka(
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             max_poll_interval_ms=self._config.max_poll_interval_ms,
             retry_backoff_ms=self._config.reconnect_backoff_ms,
-            # OMN-16267: must be >= producer max_request_size. aiokafka's own
-            # default (1_048_576) is smaller than this repo's producer default
-            # (1_048_588), so a record at the producer's ceiling would trip
-            # RecordTooLargeError / silent skip-and-advance on the consumer
-            # side otherwise. Keep aligned to the same config field the
-            # producer reads (self._config.max_request_size) rather than a
-            # second independently-tunable value.
-            max_partition_fetch_bytes=self._config.max_request_size,
+            # OMN-15837: a per-consumer buffer ceiling, deliberately decoupled
+            # from the producer's max_request_size. An auto-wired runtime holds
+            # one consumer per wired topic, so this value is multiplied by the
+            # consumer count against a fixed container memory limit -- see the
+            # field docstring on ModelKafkaEventBusConfig for the measurements
+            # and for why the OMN-16267 ">= max_request_size" coupling is not
+            # required against a KIP-74 broker.
+            max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
             **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
@@ -2107,8 +2107,8 @@ class EventBusKafka(
                     heartbeat_interval_ms=self._config.heartbeat_interval_ms,
                     max_poll_interval_ms=self._config.max_poll_interval_ms,
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
-                    # OMN-16267: see rationale on the initial construction above.
-                    max_partition_fetch_bytes=self._config.max_request_size,
+                    # OMN-15837: see rationale on the initial construction above.
+                    max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
                     **self._build_client_version_kwargs(AIOKafkaConsumer),
                     **self._build_auth_kwargs(),
                 )
