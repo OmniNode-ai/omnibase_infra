@@ -38,8 +38,65 @@ check_manifest_count = _mod.check_manifest_count
 check_health = _mod.check_health
 check_cluster_health = _mod.check_cluster_health
 check_partition_headroom = _mod.check_partition_headroom
-check_consumer_group = _mod.check_consumer_group
-check_consumer_group_with_retry = _mod.check_consumer_group_with_retry
+list_consumer_groups = _mod.list_consumer_groups
+describe_consumer_group = _mod.describe_consumer_group
+run_consumer_group_audit = _mod.run_consumer_group_audit
+build_declared_group_inputs = _mod.build_declared_group_inputs
+DEFAULT_MIN_DERIVED_COVERAGE = _mod.DEFAULT_MIN_DERIVED_COVERAGE
+
+# The SHIPPED declared-groups file. Used directly (not a fixture copy) so these
+# tests also pin that the file this repo actually installs still parses under
+# the OMN-15837 schema -- an unparseable one fails the gate closed.
+_DECLARED_GROUPS_FILE = _SCRIPT_DIR / "consumer_groups_stability.yaml"
+
+_DCG_SPEC = importlib.util.spec_from_file_location(
+    "declared_consumer_groups", _SCRIPT_DIR / "declared_consumer_groups.py"
+)
+assert _DCG_SPEC is not None and _DCG_SPEC.loader is not None
+_DCG = importlib.util.module_from_spec(_DCG_SPEC)
+sys.modules.setdefault("declared_consumer_groups", _DCG)
+_DCG_SPEC.loader.exec_module(_DCG)
+
+
+def _manifest_payload(count: int) -> dict:
+    """A manifest of ``count`` contracts, each subscribing to its own topic.
+
+    Before OMN-15837 these tests fed ``{"contracts": list(range(288))}`` -- bare
+    integers -- because the gate only ever counted the list. The gate now DERIVES
+    its declared consumer-group set from the same payload, so the fixture has to
+    carry real contract identities.
+    """
+    return {
+        "contracts": [
+            {
+                "name": f"node_{i:03d}",
+                "package_name": "omnibase_infra",
+                "contract_version": {"major": 1, "minor": 0, "patch": 0},
+                "event_bus": {
+                    "subscribe_topics": [f"onex.evt.fixture.topic-{i:03d}.v1"],
+                    "publish_topics": [],
+                    "plugin_managed": False,
+                },
+            }
+            for i in range(count)
+        ],
+        "errors": [],
+        "runtime_profile": "main",
+    }
+
+
+def _manifest_group_rows(count: int, state: str = "Stable") -> list[tuple[str, str]]:
+    """The live `rpk group list` rows `_manifest_payload(count)` should mint."""
+    return [
+        (
+            f"stability-test.omnibase_infra.node_{i:03d}.consume.1.0.0"
+            f".__i.stability-test-main.__t.onex.evt.fixture.topic-{i:03d}.v1",
+            state,
+        )
+        for i in range(count)
+    ]
+
+
 check_service_digest = _mod.check_service_digest
 run_health_gate = _mod.run_health_gate
 build_receipt = _mod.build_receipt
@@ -96,7 +153,7 @@ def _opener(body: dict | list, status: int = 200):
 
 
 def test_manifest_count_exactly_at_floor_passes():
-    opener = _opener({"contracts": list(range(DEFAULT_MIN_CONTRACTS))})
+    opener = _opener(_manifest_payload(DEFAULT_MIN_CONTRACTS))
     count, err = check_manifest_count(
         "http://x/manifest", DEFAULT_MIN_CONTRACTS, opener=opener
     )
@@ -334,82 +391,125 @@ def _group_describe_output(state: str) -> str:
     )
 
 
-def test_consumer_group_stable():
-    runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Stable")))
-    result = check_consumer_group("redpanda-container", "some.group", runner=runner)
-    assert result.stable is True
-    assert result.state == "Stable"
+def _group_list_output(rows: list[tuple[str, str]]) -> str:
+    """Fixed-width `rpk group list` output -- BROKER / GROUP / STATE."""
+    lines = ["BROKER  GROUP                                   STATE"]
+    lines.extend(f"0       {group}   {state}" for group, state in rows)
+    return "\n".join(lines) + "\n"
 
 
-def test_consumer_group_empty_is_healthy_demand_driven_idle():
-    """Empty = registered with the broker, zero current members -- the normal
-    idle state for a demand-driven consumer, not a wiring failure."""
-    runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Empty")))
-    result = check_consumer_group("redpanda-container", "some.group", runner=runner)
-    assert result.stable is True
-    assert result.state == "Empty"
+def test_group_list_is_the_existence_probe_not_describe():
+    """OMN-15837: `rpk group list` answers which groups EXIST, in one call.
+
+    `rpk group describe` cannot: it reports `Dead / 0 / 0` for a name that was
+    never a group, byte-identical to a real group that died. That ambiguity is
+    what made a stale hand-pinned name read as a hard failure twice.
+    """
+    runner = MagicMock(
+        return_value=_completed(
+            stdout=_group_list_output([("some.group.__t.t.one", "Stable")])
+        )
+    )
+    live, err = list_consumer_groups("redpanda-container", runner=runner)
+    assert err is None
+    assert live == {"some.group.__t.t.one": "Stable"}
 
 
-def test_consumer_group_dead_is_not_stable():
-    """Dead is the real 'silent wiring death' signal -- group coordinator does
-    not know this group at all."""
+def test_group_list_failure_is_not_a_silent_empty_broker():
+    runner = MagicMock(return_value=_completed(returncode=1, stderr="broker down"))
+    live, err = list_consumer_groups("redpanda-container", runner=runner)
+    assert live is None
+    assert err is not None and "broker down" in err
+
+
+def test_describe_reads_members_and_total_lag():
     runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Dead")))
-    result = check_consumer_group("redpanda-container", "some.group", runner=runner)
-    assert result.stable is False
-    assert result.state == "Dead"
+    described = describe_consumer_group(
+        "redpanda-container", "some.group", runner=runner
+    )
+    assert described.state == "Dead"
+    assert described.members == 1
+    assert described.total_lag == 0
 
 
-def test_consumer_group_describe_error_is_not_a_silent_stable():
+def test_describe_error_is_carried_not_swallowed():
     runner = MagicMock(return_value=_completed(returncode=1, stderr="no such group"))
-    result = check_consumer_group("redpanda-container", "some.group", runner=runner)
-    assert result.stable is False
-    assert result.error is not None
+    described = describe_consumer_group(
+        "redpanda-container", "some.group", runner=runner
+    )
+    assert described.error is not None
+    assert described.members is None
 
 
-def test_consumer_group_no_state_line_is_not_a_silent_stable():
-    runner = MagicMock(return_value=_completed(stdout="GROUP  some.group\n"))
-    result = check_consumer_group("redpanda-container", "some.group", runner=runner)
-    assert result.stable is False
-    assert result.error is not None
+def _derived_key(topic: str = "t.one"):
+    manifest = {
+        "contracts": [
+            {
+                "name": "node_a",
+                "package_name": "omnimarket",
+                "contract_version": {"major": 1, "minor": 0, "patch": 0},
+                "event_bus": {"subscribe_topics": [topic], "plugin_managed": False},
+            }
+        ]
+    }
+    keys, _ = build_declared_group_inputs(
+        lane="stability-test",
+        manifest_payloads=[manifest],
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        compose_file=None,
+    )
+    return keys
 
 
-def test_consumer_group_retry_recovers_after_transient_empty_then_dead():
-    """Right after a force-recreate the group can show a transient bad state
-    before the consumer rejoins; the bounded retry should recover on a later
-    attempt without sleeping in real time (sleep_fn stubbed)."""
+def test_group_audit_retry_recovers_after_a_transient_absence():
+    """Right after a force-recreate every consumer is mid-rejoin, so the whole
+    reconciliation is retried -- not one group at a time."""
+    keys = _derived_key()
+    group = f"{keys[0].base_group_id}.__i.stability-test-main.__t.t.one"
     runner = MagicMock(
         side_effect=[
-            _completed(stdout=_group_describe_output("Dead")),
-            _completed(stdout=_group_describe_output("Dead")),
-            _completed(stdout=_group_describe_output("Stable")),
+            _completed(
+                stdout=_group_list_output([("stability-test.other.__t.x", "Stable")])
+            ),
+            _completed(stdout=_group_list_output([(group, "Stable")])),
         ]
     )
     sleeps: list[float] = []
-    result = check_consumer_group_with_retry(
+    audit = run_consumer_group_audit(
         "redpanda-container",
-        "some.group",
-        runner=runner,
-        attempts=5,
-        interval_seconds=0.01,
-        sleep_fn=sleeps.append,
-    )
-    assert result.stable is True
-    assert result.state == "Stable"
-    assert len(sleeps) == 2  # slept between attempts 1->2 and 2->3, not after success
-
-
-def test_consumer_group_retry_exhausts_and_reports_last_state():
-    runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Dead")))
-    result = check_consumer_group_with_retry(
-        "redpanda-container",
-        "some.group",
+        lane="stability-test",
+        contract_keys=keys,
+        non_contract=(),
+        min_coverage=1.0,
         runner=runner,
         attempts=3,
         interval_seconds=0.01,
+        sleep_fn=sleeps.append,
+    )
+    assert audit.ok
+    assert len(sleeps) == 1
+
+
+def test_group_audit_exhausts_and_reports_the_last_observation():
+    keys = _derived_key()
+    runner = MagicMock(
+        return_value=_completed(
+            stdout=_group_list_output([("stability-test.other.__t.x", "Stable")])
+        )
+    )
+    audit = run_consumer_group_audit(
+        "redpanda-container",
+        lane="stability-test",
+        contract_keys=keys,
+        non_contract=(),
+        min_coverage=1.0,
+        runner=runner,
+        attempts=2,
+        interval_seconds=0.01,
         sleep_fn=lambda _s: None,
     )
-    assert result.stable is False
-    assert result.state == "Dead"
+    assert not audit.ok
+    assert audit.derived_live == 0
 
 
 # ─── full health-gate orchestration: PASS / FAIL end to end ────────────────
@@ -434,8 +534,10 @@ def _full_pass_runner():
             return _completed(stdout=_topic_list_output([1] * 1529))
         if cmd[:3] == ["docker", "exec", "redpanda-container"] and "cluster" in cmd:
             return _completed(stdout="Healthy:                          true\n")
-        if "group" in cmd and "describe" in cmd:
-            return _completed(stdout=_group_describe_output("Stable"))
+        if "group" in cmd and "list" in cmd:
+            return _completed(
+                stdout=_group_list_output(_manifest_group_rows(DEFAULT_MIN_CONTRACTS))
+            )
         raise AssertionError(f"unexpected command: {cmd}")
 
     return _run
@@ -443,7 +545,7 @@ def _full_pass_runner():
 
 def test_health_gate_overall_pass():
     pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
-    opener = _opener({"contracts": list(range(DEFAULT_MIN_CONTRACTS))})
+    opener = _opener(_manifest_payload(DEFAULT_MIN_CONTRACTS))
     # OMN-17624: the gate requires a monitor verdict, so a provably-healthy
     # lane must carry one. Without it the gate correctly refuses.
     health_opener = _opener(
@@ -468,7 +570,9 @@ def test_health_gate_overall_pass():
         health_url="http://x/health",
         broker_container="redpanda-container",
         min_contracts=DEFAULT_MIN_CONTRACTS,
-        consumer_groups=["group.a", "group.b"],
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        effects_manifest_url=None,
+        compose_file=None,
         runner=_full_pass_runner(),
         opener=combo_opener,
         sleep_fn=lambda _s: None,
@@ -491,16 +595,32 @@ def test_health_gate_overall_fail_when_a_group_is_dead():
             return _completed(stdout=_topic_list_output([1] * 1529))
         if "cluster" in cmd:
             return _completed(stdout="Healthy:                          true\n")
+        if "group" in cmd and "list" in cmd:
+            # Every derived identity Dead. OMN-15837 scores a Dead group by
+            # what it left behind, so the describe below is what decides.
+            return _completed(
+                stdout=_group_list_output(
+                    _manifest_group_rows(DEFAULT_MIN_CONTRACTS, state="Dead")
+                )
+            )
         if "group" in cmd and "describe" in cmd:
-            # Dead, not Empty -- Empty is now a healthy demand-driven-idle
-            # state; Dead is the genuine "group unknown to broker" failure.
-            return _completed(stdout=_group_describe_output("Dead"))
+            # Members lost, backlog retained -- a stall, not a retirement.
+            return _completed(
+                stdout=(
+                    "GROUP        g\n"
+                    "COORDINATOR  0\n"
+                    "STATE        Dead\n"
+                    "BALANCER     \n"
+                    "MEMBERS      0\n"
+                    "TOTAL-LAG    1508\n"
+                )
+            )
         raise AssertionError(f"unexpected command: {cmd}")
 
     def opener(url, timeout=10):
         if "manifest" in url:
             return _FakeHTTPResponse(
-                json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
+                json.dumps(_manifest_payload(DEFAULT_MIN_CONTRACTS)).encode()
             )
         # OMN-17624: an "otherwise-healthy refresh" must carry the monitor
         # verdict the gate now requires; the point of this test is partition
@@ -524,13 +644,122 @@ def test_health_gate_overall_fail_when_a_group_is_dead():
         health_url="http://x/health",
         broker_container="redpanda-container",
         min_contracts=DEFAULT_MIN_CONTRACTS,
-        consumer_groups=["group.a"],
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        effects_manifest_url=None,
+        compose_file=None,
         runner=runner,
         opener=opener,
         sleep_fn=lambda _s: None,
     )
     assert report.overall == "FAIL"
     assert report.groups_stable is False
+
+
+def test_health_gate_derivation_failure_fails_closed_naming_the_cause(tmp_path):
+    """OMN-15837: an underivable declared set is INFRA_ERROR, never a fallback.
+
+    Every other criterion here passes -- digests changed, revisions match,
+    /health healthy with a fresh verdict, cluster healthy, partitions well
+    under the cap. The ONLY defect is that the declared-groups file still
+    carries the retired hand-pinned ``consumer_groups:`` key. The gate must
+    refuse: no audit at all, ``groups_stable`` False, an error naming the
+    cause, and -- the point of the test -- it must NOT quietly fall back to
+    checking the names in that retired list.
+    """
+    stale_file = tmp_path / "consumer_groups_stability.yaml"
+    stale_file.write_text(
+        "consumer_groups:\n"
+        "  - name: stability-test.omnimarket.projection_delegation.consume.1.0.0\n"
+        "    description: the retired hand-pinned shape\n"
+    )
+
+    def opener(url, timeout=10):
+        if "manifest" in url:
+            return _FakeHTTPResponse(
+                json.dumps(_manifest_payload(DEFAULT_MIN_CONTRACTS)).encode()
+            )
+        return _FakeHTTPResponse(
+            json.dumps(
+                {
+                    "status": "healthy",
+                    "details": {
+                        "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}
+                    },
+                }
+            ).encode()
+        )
+
+    runner = _full_pass_runner()
+    report = run_health_gate(
+        lane="stability-test",
+        pre_image_ids=dict.fromkeys(CORE_SERVICES, "sha256:old-image"),
+        expected_revision="newrevision1234",
+        manifest_url="http://x/manifest",
+        health_url="http://x/health",
+        broker_container="redpanda-container",
+        min_contracts=DEFAULT_MIN_CONTRACTS,
+        declared_groups_file=stale_file,
+        effects_manifest_url=None,
+        compose_file=None,
+        runner=runner,
+        opener=opener,
+        sleep_fn=lambda _s: None,
+    )
+
+    assert report.group_audit is None
+    assert report.groups_stable is False
+    assert report.overall != "PASS"
+    assert any(
+        "declared consumer-group derivation failed" in err for err in report.errors
+    ), report.errors
+    assert any("consumer_groups" in err for err in report.errors), report.errors
+
+
+def test_health_gate_derivation_failure_when_no_manifest_can_be_fetched(tmp_path):
+    """OMN-15837: a manifest that cannot be fetched is fail-closed too.
+
+    Without a manifest there is nothing to derive the declared set FROM. The
+    old behaviour would still have checked the static list and could have
+    reported ``consumer_groups_stable`` true against an image whose contracts
+    were never read.
+    """
+    declared = tmp_path / "consumer_groups_stability.yaml"
+    declared.write_text("non_contract_groups: []\n")
+
+    def opener(url, timeout=10):
+        if "manifest" in url:
+            raise OSError("connection reset by peer")
+        return _FakeHTTPResponse(
+            json.dumps(
+                {
+                    "status": "healthy",
+                    "details": {
+                        "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}
+                    },
+                }
+            ).encode()
+        )
+
+    report = run_health_gate(
+        lane="stability-test",
+        pre_image_ids=dict.fromkeys(CORE_SERVICES, "sha256:old-image"),
+        expected_revision="newrevision1234",
+        manifest_url="http://x/manifest",
+        health_url="http://x/health",
+        broker_container="redpanda-container",
+        min_contracts=DEFAULT_MIN_CONTRACTS,
+        declared_groups_file=declared,
+        effects_manifest_url=None,
+        compose_file=None,
+        runner=_full_pass_runner(),
+        opener=opener,
+        sleep_fn=lambda _s: None,
+    )
+
+    assert report.group_audit is None
+    assert report.groups_stable is False
+    assert report.overall != "PASS"
+    assert any("manifest fetch failed" in err for err in report.errors), report.errors
 
 
 def test_health_gate_overall_fail_when_partition_cap_reached():
@@ -551,14 +780,16 @@ def test_health_gate_overall_fail_when_partition_cap_reached():
             return _completed(stdout=_topic_list_output([1] * 7046))
         if "cluster" in cmd:
             return _completed(stdout="Healthy:                          true\n")
-        if "group" in cmd and "describe" in cmd:
-            return _completed(stdout=_group_describe_output("Stable"))
+        if "group" in cmd and "list" in cmd:
+            return _completed(
+                stdout=_group_list_output(_manifest_group_rows(DEFAULT_MIN_CONTRACTS))
+            )
         raise AssertionError(f"unexpected command: {cmd}")
 
     def opener(url, timeout=10):
         if "manifest" in url:
             return _FakeHTTPResponse(
-                json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
+                json.dumps(_manifest_payload(DEFAULT_MIN_CONTRACTS)).encode()
             )
         # OMN-17624: an "otherwise-healthy refresh" must carry the monitor
         # verdict the gate now requires; the point of this test is partition
@@ -582,7 +813,9 @@ def test_health_gate_overall_fail_when_partition_cap_reached():
         health_url="http://x/health",
         broker_container="redpanda-container",
         min_contracts=DEFAULT_MIN_CONTRACTS,
-        consumer_groups=["group.a"],
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        effects_manifest_url=None,
+        compose_file=None,
         runner=runner,
         opener=opener,
         sleep_fn=lambda _s: None,
@@ -610,14 +843,16 @@ def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
             return _completed(stdout=_topic_list_output([1] * 7047))  # ~88%
         if "cluster" in cmd:
             return _completed(stdout="Healthy:                          true\n")
-        if "group" in cmd and "describe" in cmd:
-            return _completed(stdout=_group_describe_output("Stable"))
+        if "group" in cmd and "list" in cmd:
+            return _completed(
+                stdout=_group_list_output(_manifest_group_rows(DEFAULT_MIN_CONTRACTS))
+            )
         raise AssertionError(f"unexpected command: {cmd}")
 
     def opener(url, timeout=10):
         if "manifest" in url:
             return _FakeHTTPResponse(
-                json.dumps({"contracts": list(range(DEFAULT_MIN_CONTRACTS))}).encode()
+                json.dumps(_manifest_payload(DEFAULT_MIN_CONTRACTS)).encode()
             )
         # OMN-17624: an "otherwise-healthy refresh" must carry the monitor
         # verdict the gate now requires; the point of this test is partition
@@ -641,7 +876,9 @@ def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
         health_url="http://x/health",
         broker_container="redpanda-container",
         min_contracts=DEFAULT_MIN_CONTRACTS,
-        consumer_groups=["group.a"],
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        effects_manifest_url=None,
+        compose_file=None,
         runner=runner,
         opener=opener,
         sleep_fn=lambda _s: None,
@@ -650,6 +887,22 @@ def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
     assert report.partition_headroom is not None
     assert report.partition_headroom.crossed_warn_threshold is True
     assert report.partition_headroom.at_or_over_cap is False
+
+
+def _passing_audit():
+    """A reconciled audit: one derived identity, live and healthy."""
+    audit = _DCG.ConsumerGroupAudit(env="stability-test", min_coverage=1.0)
+    audit.derived_total = 1
+    audit.derived_live = 1
+    audit.findings = [
+        _DCG.GroupFinding(
+            group="stability-test.a.b.consume.1.0.0.__t.t.one",
+            origin="contract",
+            state="Stable",
+            classification="healthy",
+        )
+    ]
+    return audit
 
 
 # ─── receipt: ancestry true/false + rollback re-verification ───────────────
@@ -661,7 +914,7 @@ def test_receipt_success_when_gate_passes():
     gate.health_ok = True
     gate.cluster_healthy = True
     gate.services = []
-    gate.consumer_groups = []
+    gate.group_audit = None
     # Force overall PASS by monkeypatching the properties via a minimal report
     # that actually satisfies overall == PASS requires non-empty services/groups
     # with all-true; build one directly for this assertion instead.
@@ -682,9 +935,7 @@ def test_receipt_success_when_gate_passes():
             revision_match=True,
         )
     ]
-    passing.consumer_groups = [
-        _mod.ConsumerGroupCheck(group="g", state="Stable", stable=True)
-    ]
+    passing.group_audit = _passing_audit()
     assert passing.overall == "PASS"
 
     receipt = build_receipt(
@@ -739,9 +990,7 @@ def test_receipt_rollback_reverified_success():
             revision_match=True,
         )
     ]
-    passing_rollback_gate.consumer_groups = [
-        _mod.ConsumerGroupCheck(group="g", state="Stable", stable=True)
-    ]
+    passing_rollback_gate.group_audit = _passing_audit()
     assert passing_rollback_gate.overall == "PASS"
 
     receipt = build_receipt(

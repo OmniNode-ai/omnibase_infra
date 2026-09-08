@@ -239,10 +239,18 @@ readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_ch
 # URLs. Read it from the sourced runtime-policy.env instead; fail fast BY NAME
 # if absent. --manifest-url/--health-url still fully override these defaults.
 require_contract_var STABILITY_TEST_RUNTIME_MAIN_PORT
+# OMN-15837: the health gate now derives its declared consumer-group set from
+# the introspection manifests the refreshed image serves. The EFFECTS runtime
+# serves its own profile-filtered manifest, and its contracts mint consumer
+# groups the main runtime's manifest never describes (273 live on this lane), so
+# the gate needs both. Read the port from the same contract-rendered source as
+# the main port -- never a second hardcoded literal.
+require_contract_var STABILITY_TEST_RUNTIME_EFFECTS_PORT
 LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF="origin/dev"
 MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
+EFFECTS_MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_EFFECTS_PORT}/v1/introspection/manifest"
 HEALTH_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/health"
 MODE="plan"
 
@@ -500,6 +508,12 @@ done
 # =============================================================================
 log "=== Refresh omnibase_infra ambient clone to ${REF} ==="
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
+# OMN-15837: the health gate reads this file's literal KAFKA_CONSUMER_GROUP
+# values as a derivation source for the standalone projection writers'
+# consumer groups. It must be the AMBIENT clone's copy -- the same tree
+# `docker compose` is driven from below -- not this script's own checkout,
+# which may be a different revision.
+LANE_COMPOSE_FILE="${INFRA_CLONE}/docker/docker-compose.stability-test.yml"
 git_clone "${INFRA_CLONE}" fetch origin --prune
 RESOLVED_REF_SHA="$(git_clone "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
 git_clone "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"
@@ -595,6 +609,8 @@ run_verify \
     --broker-container "${REDPANDA_CONTAINER}" \
     --min-contracts "${MIN_CONTRACTS}" \
     --consumer-groups-file "${CONSUMER_GROUPS_FILE}" \
+    --effects-manifest-url "${EFFECTS_MANIFEST_URL}" \
+    --lane-compose-file "${LANE_COMPOSE_FILE}" \
     --json > "${GATE1_JSON}" || GATE_EXIT=$?
 
 # Defensive: if the health-gate crashed before printing valid JSON (should not
@@ -726,6 +742,8 @@ else
         --broker-container "${REDPANDA_CONTAINER}" \
         --min-contracts "${MIN_CONTRACTS}" \
         --consumer-groups-file "${CONSUMER_GROUPS_FILE}" \
+        --effects-manifest-url "${EFFECTS_MANIFEST_URL}" \
+        --lane-compose-file "${LANE_COMPOSE_FILE}" \
         --no-require-digest-change \
         --json > "${GATE2_JSON}" || GATE2_EXIT=$?
 
