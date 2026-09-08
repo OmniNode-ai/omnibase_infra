@@ -33,10 +33,21 @@
 #
 # Optional environment variables:
 #   KAFKA_BOOTSTRAP_SERVERS   -- drift guard / from-secret broker only
-#   KAFKA_SASL_USERNAME       -- SASL username / API key (cloud broker only)
-#   KAFKA_SASL_PASSWORD       -- SASL password / API secret (cloud broker only)
+#   KAFKA_SASL_USERNAME       -- SASL principal; REQUIRED when the lane the
+#                                overlay declares uses a SASL_* security
+#                                protocol, unused otherwise (OMN-18012)
+#   KAFKA_SASL_PASSWORD       -- that principal's secret, same condition
 #   RUNNER_ENVIRONMENT        -- GitHub Actions runner class, forwarded by the
 #                                workflow as --runner-environment (OMN-17888)
+#
+# TRANSPORT IS DECLARED, NEVER INFERRED (OMN-18012): the lane overlay carries
+# `security_protocol` (and `sasl_mechanism` for a SASL protocol) beside each
+# lane's broker, and this publisher READS them. The previous body chose
+# SASL_SSL/PLAIN whenever both SASL credentials happened to be present in the
+# environment. Credential presence is not a statement about transport: when the
+# .201 dev-lane Redpanda external listener began requiring SASL/SCRAM-SHA-256
+# over PLAINTEXT on 2026-09-07 and the org KAFKA_SASL_* secrets were injected,
+# that inference picked TLS against a listener that speaks none.
 #
 # RUNNER REACHABILITY (OMN-17888): the dev control-bus lane declares a LAN /
 # tailnet broker. A GitHub-hosted runner is not on that network, so librdkafka
@@ -69,7 +80,13 @@ from uuid import UUID
 
 import click
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 # CI publishes the node_redeploy_orchestrator start command; the orchestrator's
 # deploy publish-monitor effect is the sole emitter of the deploy-agent rebuild
@@ -77,6 +94,18 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
 _RUNTIME_LABEL = "runtime_change"
+
+# Lane-declared transport vocabulary (OMN-18012). The overlay
+# (omnimarket config/ci_bus_lanes.yaml) declares `security_protocol` and, for a
+# SASL protocol, `sasl_mechanism` beside each lane's broker. This publisher READS
+# them; it never derives them from the shape of the environment. Credential
+# PRESENCE is not a statement about transport -- inferring SASL_SSL from injected
+# credentials is precisely what took every OCC companion mint down on 2026-09-07
+# against a listener that speaks SASL over PLAINTEXT with no TLS.
+_INMEMORY_BROKER = "inmemory"
+_SASL_PROTOCOLS = frozenset({"SASL_PLAINTEXT", "SASL_SSL"})
+_NON_SASL_PROTOCOLS = frozenset({"PLAINTEXT", "SSL"})
+_VALID_SECURITY_PROTOCOLS = _SASL_PROTOCOLS | _NON_SASL_PROTOCOLS
 
 RuntimePathClassifier = Callable[[list[str]], list[str]]
 
@@ -91,11 +120,33 @@ _BASE_BRANCH_LANES: dict[str, str] = {
 
 
 class ModelCiBusLane(BaseModel):
-    """One checked-in CI control-bus lane declaration."""
+    """One checked-in CI control-bus lane declaration.
+
+    Carries the lane's broker AND its transport. The transport half is the
+    OMN-18012 contract, documented in the overlay itself
+    (omnimarket ``config/ci_bus_lanes.yaml``) and enforced field-for-field here:
+
+    * ``security_protocol`` -- one of PLAINTEXT | SSL | SASL_PLAINTEXT |
+      SASL_SSL, spelled as librdkafka spells it. REQUIRED on any lane whose
+      broker is a concrete ``host:port`` or ``from-secret``; an ``inmemory``
+      lane publishes nothing cross-process, so it needs none.
+    * ``sasl_mechanism`` -- REQUIRED when ``security_protocol`` is SASL_*, and
+      contradictory (rejected) beside a non-SASL protocol or with no protocol
+      at all.
+
+    ``extra="forbid"`` stays: an unknown key in this overlay is a typo that
+    would otherwise route a publisher to a default it never declared. That
+    strictness is also why this model had to learn the two transport keys --
+    once the overlay declared them, a model that knew only ``broker`` rejected
+    the live overlay outright and took the dev-lane redeploy trigger red on
+    every runtime PR (omnibase_infra run 34160709151).
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     broker: str
+    security_protocol: str | None = None
+    sasl_mechanism: str | None = None
 
     @field_validator("broker")
     @classmethod
@@ -104,6 +155,53 @@ class ModelCiBusLane(BaseModel):
         if not value:
             raise ValueError("broker must not be empty")
         return value
+
+    @field_validator("security_protocol")
+    @classmethod
+    def validate_security_protocol(cls, value: str | None) -> str | None:
+        """Accept only a librdkafka security protocol, normalised to upper case."""
+        if value is None:
+            return None
+        protocol = value.upper()
+        if protocol not in _VALID_SECURITY_PROTOCOLS:
+            raise ValueError(
+                f"security_protocol {value!r} is not a librdkafka security "
+                f"protocol; valid values: {sorted(_VALID_SECURITY_PROTOCOLS)}"
+            )
+        return protocol
+
+    @field_validator("sasl_mechanism")
+    @classmethod
+    def validate_sasl_mechanism(cls, value: str | None) -> str | None:
+        """Reject an empty mechanism declaration outright rather than ignoring it."""
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("sasl_mechanism must not be empty when declared")
+        return value
+
+    @model_validator(mode="after")
+    def validate_transport_declaration(self) -> ModelCiBusLane:
+        """Enforce the overlay's own transport contract, never a guess."""
+        publishes_cross_process = self.broker != _INMEMORY_BROKER
+        if publishes_cross_process and self.security_protocol is None:
+            raise ValueError(
+                f"lane declares broker {self.broker!r} but no security_protocol; "
+                f"declare one of {sorted(_VALID_SECURITY_PROTOCOLS)} beside it. "
+                "Refusing to guess the transport (OMN-18012)"
+            )
+        if self.security_protocol in _SASL_PROTOCOLS and self.sasl_mechanism is None:
+            raise ValueError(
+                f"security_protocol {self.security_protocol} requires a "
+                "sasl_mechanism (e.g. SCRAM-SHA-256); none was declared"
+            )
+        if self.security_protocol not in _SASL_PROTOCOLS and self.sasl_mechanism:
+            raise ValueError(
+                f"sasl_mechanism {self.sasl_mechanism!r} is declared beside "
+                f"security_protocol {self.security_protocol!r}, which carries no "
+                "SASL; fix the overlay rather than let the publisher pick a half"
+            )
+        return self
 
 
 class ModelCiBusOverlay(BaseModel):
@@ -226,29 +324,112 @@ def resolve_ci_bus_broker(
     return broker
 
 
+def resolve_ci_bus_security(
+    *,
+    overlay: ModelCiBusOverlay,
+    lane: str,
+) -> tuple[str, str]:
+    """Resolve one lane's DECLARED ``(security_protocol, sasl_mechanism)``.
+
+    OMN-18012. The transport is config, declared in the overlay beside the
+    broker it belongs to -- the same "one reviewable source of truth" principle
+    OMN-14801 applied to the broker, applied to the other half of the
+    connection. This function reads the overlay and nothing else: it never
+    consults the environment and never infers.
+
+    Only meaningful on the lanes that actually publish; ``resolve_ci_bus_broker``
+    has already refused an ``inmemory`` lane by the time this is called, and the
+    model has already refused a publishing lane that declares no protocol.
+    """
+    lane_key = lane.strip()
+    declaration = overlay.lanes.get(lane_key)
+    if declaration is None:
+        raise ValueError(
+            f"CI bus lane {lane_key!r} is not declared; "
+            f"declared lanes: {sorted(overlay.lanes)}"
+        )
+    protocol = declaration.security_protocol
+    if protocol is None:
+        raise ValueError(
+            f"CI bus lane {lane_key!r} declares no security_protocol; a "
+            "publishing lane must declare its transport (OMN-18012)"
+        )
+    return protocol, declaration.sasl_mechanism or ""
+
+
 def build_kafka_producer_config(
     bootstrap_servers: str,
     username: str,
     password: str,
+    security_protocol: str,
+    sasl_mechanism: str,
 ) -> dict[str, str | int | float | bool]:
-    """Build plaintext local or SASL_SSL cloud transport deterministically."""
+    """Build the producer transport from the LANE-DECLARED protocol (OMN-18012).
+
+    ``security_protocol`` / ``sasl_mechanism`` are required arguments resolved
+    from the overlay by :func:`resolve_ci_bus_security`. A default here would be
+    the guess this function exists to delete: the body this replaced selected
+    ``SASL_SSL`` / ``PLAIN`` whenever both SASL credentials happened to be
+    present in the environment, and plaintext otherwise. On 2026-09-07 the .201
+    dev-lane Redpanda EXTERNAL listener began requiring SASL/SCRAM-SHA-256 over
+    PLAINTEXT -- no TLS at all -- while the KAFKA_SASL_* org secrets were
+    injected, and that inference picked TLS against a listener that speaks none.
+    """
+    protocol = security_protocol.strip().upper()
+    mechanism = sasl_mechanism.strip()
+    if protocol not in _VALID_SECURITY_PROTOCOLS:
+        raise ValueError(
+            f"security_protocol {security_protocol!r} is not a librdkafka "
+            f"security protocol; valid values: {sorted(_VALID_SECURITY_PROTOCOLS)}"
+        )
     if bool(username) != bool(password):
         raise ValueError(
             "KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD must both be set "
             "or both be empty"
         )
+
     config: dict[str, str | int | float | bool] = {
         "bootstrap.servers": bootstrap_servers,
+        "security.protocol": protocol,
     }
-    if username and password:
-        config.update(
-            {
-                "security.protocol": "SASL_SSL",
-                "sasl.mechanisms": "PLAIN",
-                "sasl.username": username,
-                "sasl.password": password,
-            }
+
+    if protocol not in _SASL_PROTOCOLS:
+        if username or password:
+            # Not an error -- the declared transport is authoritative, and
+            # dropping credentials it cannot carry is safe. It IS drift worth
+            # naming, so say so rather than let a silently-unauthenticated
+            # publish look identical to a correctly-configured one.
+            click.echo(
+                "WARNING: SASL credentials are present in this environment but "
+                f"the lane declares security_protocol={protocol}, which carries "
+                "none. Publishing unauthenticated per the lane declaration and "
+                "IGNORING the injected credentials. If the broker now requires "
+                "SASL, the overlay is stale -- fix the overlay, never the "
+                "inference (OMN-18012).",
+                err=True,
+            )
+        return config
+
+    if not mechanism:
+        raise ValueError(
+            f"security_protocol {protocol} requires a sasl_mechanism; none was "
+            "declared for this lane"
         )
+    if not username or not password:
+        raise ValueError(
+            f"the lane declares security_protocol={protocol} / "
+            f"sasl_mechanism={mechanism}, but KAFKA_SASL_USERNAME and/or "
+            "KAFKA_SASL_PASSWORD are not set in this job's environment. A SASL "
+            "lane cannot be published to without credentials: wire them through "
+            "the workflow rather than downgrading the declared transport"
+        )
+    config.update(
+        {
+            "sasl.mechanisms": mechanism,
+            "sasl.username": username,
+            "sasl.password": password,
+        }
+    )
     return config
 
 
@@ -449,6 +630,8 @@ def publish_redeploy_start_event(
     bootstrap_servers: str,
     username: str,
     password: str,
+    security_protocol: str,
+    sasl_mechanism: str,
     runtime_lane: str,
     build_source: str,
     source_sha: str,
@@ -477,7 +660,13 @@ def publish_redeploy_start_event(
     )
 
     producer = Producer(
-        build_kafka_producer_config(bootstrap_servers, username, password)
+        build_kafka_producer_config(
+            bootstrap_servers,
+            username,
+            password,
+            security_protocol,
+            sasl_mechanism,
+        )
     )
 
     delivery_error: BaseException | None = None
@@ -713,8 +902,19 @@ def main(
             lane=bus_lane,
             injected_broker=injected_broker,
         )
+        # The transport is DECLARED by the lane, never inferred here (OMN-18012).
+        security_protocol, sasl_mechanism = resolve_ci_bus_security(
+            overlay=overlay,
+            lane=bus_lane,
+        )
         # Validate the transport pair before the producer is constructed.
-        build_kafka_producer_config(bootstrap_servers, username, password)
+        build_kafka_producer_config(
+            bootstrap_servers,
+            username,
+            password,
+            security_protocol,
+            sasl_mechanism,
+        )
         candidate_payload = build_redeploy_start_payload(
             runtime_lane=runtime_lane,
             build_source=build_source,
@@ -760,6 +960,8 @@ def main(
             bootstrap_servers=bootstrap_servers,
             username=username,
             password=password,
+            security_protocol=security_protocol,
+            sasl_mechanism=sasl_mechanism,
             runtime_lane=runtime_lane,
             build_source=build_source,
             source_sha=source_sha,

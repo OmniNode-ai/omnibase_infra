@@ -31,7 +31,9 @@ REBUILD_REQUESTED_TOPIC = "onex.cmd.deploy.rebuild-requested.v1"
 def _write_bus_contracts(tmp_path: Path) -> tuple[Path, Path]:
     overlay = tmp_path / "ci_bus_lanes.yaml"
     overlay.write_text(
-        "default: inmemory\nlanes:\n  dev:\n    broker: declared:19092\n"
+        "default: inmemory\nlanes:\n  dev:\n"
+        "    broker: declared:19092\n"
+        "    security_protocol: PLAINTEXT\n"
     )
     consumer_model = tmp_path / "model_redeploy_start_command.py"
     consumer_model.write_text(
@@ -183,6 +185,8 @@ def test_publish_redeploy_start_carries_triggering_lane_and_ref(
         bootstrap_servers="broker:9092",
         username="user",
         password="secret",
+        security_protocol="PLAINTEXT",
+        sasl_mechanism="",
         runtime_lane="dev",
         build_source="workspace",
         source_sha="abc1234",
@@ -477,6 +481,8 @@ def test_publish_reports_broker_assigned_coordinates(
         bootstrap_servers="broker:9092",
         username="",
         password="",
+        security_protocol="PLAINTEXT",
+        sasl_mechanism="",
         runtime_lane="dev",
         build_source="workspace",
         source_sha="abc1234",
@@ -506,6 +512,8 @@ def test_publish_fails_closed_when_no_delivery_callback_fires(
             bootstrap_servers="broker:9092",
             username="",
             password="",
+            security_protocol="PLAINTEXT",
+            sasl_mechanism="",
             runtime_lane="dev",
             build_source="workspace",
             source_sha="abc1234",

@@ -84,7 +84,9 @@ def _clear_publish_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _write_bus_contracts(tmp_path: Path) -> tuple[Path, Path]:
     overlay = tmp_path / "ci_bus_lanes.yaml"
     overlay.write_text(
-        "default: inmemory\nlanes:\n  dev:\n    broker: declared:19092\n"
+        "default: inmemory\nlanes:\n  dev:\n"
+        "    broker: declared:19092\n"
+        "    security_protocol: PLAINTEXT\n"
     )
     consumer_model = tmp_path / "model_redeploy_start_command.py"
     consumer_model.write_text(
