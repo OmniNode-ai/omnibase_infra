@@ -3671,7 +3671,15 @@ async def _route_projection_error_to_dlq(
 
     from omnibase_infra.enums import EnumDlqFailureClass
     from omnibase_infra.enums.enum_confirmation_state import EnumConfirmationState
-    from omnibase_infra.event_bus.confirmation import PublishReturnOnlyStrategy
+
+    # Imported from its own MODULE, not the `confirmation` package __init__:
+    # that __init__ also re-exports `KafkaReadbackSource`, whose raw
+    # `AIOKafkaConsumer` the imperative-contract guard blocks once a live
+    # module reaches it. This seam needs only the strategy, so it takes only
+    # the strategy rather than making a dead Kafka client live (OMN-17862).
+    from omnibase_infra.event_bus.confirmation.strategy_publish_return_only import (
+        PublishReturnOnlyStrategy,
+    )
     from omnibase_infra.event_bus.models.model_publish_receipt import (
         ModelPublishReceipt,
     )
