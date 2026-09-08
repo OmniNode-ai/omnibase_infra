@@ -130,6 +130,25 @@ def test_the_plan_names_only_real_relations(readiness: ModuleType) -> None:
         assert relations == {EVENTS, MIRROR}
 
 
+def test_a_set_returning_function_is_not_a_relation(readiness: ModuleType) -> None:
+    """0037 resolves against ``jsonb_to_recordset(<variable>)``, not a table.
+
+    A function call carries no table privilege, so reporting one as a
+    (role, relation) pair would make the leg ask PostgreSQL a question it
+    cannot answer -- and, worse, would report a finding on a name that is not
+    a grantable object at all.
+    """
+    assert "jsonb_to_recordset" not in _plan(readiness, _0037)
+    # Positive control: the same name spelled WITHOUT a call IS a relation.
+    bare = {
+        item.relation: item.phase
+        for item in readiness.derive_role_read_plan(
+            "SELECT * FROM jsonb_to_recordset;\n"
+        )
+    }
+    assert bare == {"jsonb_to_recordset": readiness.PHASE_SESSION}
+
+
 def test_catalog_relations_are_not_privilege_questions(readiness: ModuleType) -> None:
     """pg_catalog is readable by every role and is not part of a grant topology."""
     for path in (_0034, _0036, _0037):
@@ -141,13 +160,29 @@ def test_catalog_relations_are_not_privilege_questions(readiness: ModuleType) ->
 
 
 def test_a_relation_the_file_creates_is_not_asserted(readiness: ModuleType) -> None:
-    """0037's temp snapshot does not exist when a read-only probe runs.
+    """A relation the migration CREATES is not a pre-existing privilege question.
 
-    It is read in the owner role and carries its own in-file GRANT; asserting
-    has_table_privilege about it against a live database would ask a question
-    with no answer. The integration suite proves the GRANT by execution instead.
+    None of the three vendored files creates one today -- 0037 carries its
+    mirror snapshot in a PL/pgSQL variable precisely so that no relation
+    exists -- so the exclusion is exercised on synthetic SQL rather than left
+    unproven. Asserting has_table_privilege about a relation that does not
+    exist when a read-only probe runs would ask a question with no answer.
     """
-    assert "omn15683_mirror_snapshot" not in _plan(readiness, _0037)
+    sql = (
+        "CREATE TEMP TABLE scratch_thing AS SELECT 1;\n"
+        "SELECT * FROM scratch_thing;\n"
+        "SELECT * FROM tenant_registry_mirror;\n"
+    )
+    plan = {item.relation: item.phase for item in readiness.derive_role_read_plan(sql)}
+    assert plan == {MIRROR: readiness.PHASE_SESSION}, (
+        "the created-relation exclusion no longer holds"
+    )
+    # Positive control: without the CREATE, the same read IS reported.
+    bare = {
+        item.relation: item.phase
+        for item in readiness.derive_role_read_plan("SELECT * FROM scratch_thing;\n")
+    }
+    assert bare == {"scratch_thing": readiness.PHASE_SESSION}
 
 
 def test_comment_stripping_preserves_offsets(readiness: ModuleType) -> None:

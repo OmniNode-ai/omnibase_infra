@@ -86,11 +86,12 @@
 -- So the JOIN cannot be issued in either role. It is SPLIT:
 --
 --   PHASE A, as the migrate identity, BEFORE any SET ROLE -- copy the mirror's
---   two resolution columns into a session-local TEMP table. This is the only
+--   two resolution columns into a PL/pgSQL variable. This is the only
 --   statement in the file that reads tenant_registry_mirror.
 --
 --   PHASE B, after SET ROLE, exactly as 0036 -- every guard and the resolving
---   UPDATE run unchanged, joining the TEMP SNAPSHOT instead of the mirror.
+--   UPDATE run unchanged, resolving against that snapshot instead of the
+--   mirror.
 --
 -- The snapshot is taken inside the same transaction as the reads that consume
 -- it, so it is the same MVCC snapshot 0036 would have joined against: this
@@ -111,8 +112,8 @@
 --     work around not having used the one already held.
 --   * A GRANT is PERSISTENT and CROSS-OWNER. It would permanently widen
 --     role_omninode_owner's reach into a relation owned by role_omnidash, to
---     make one transaction succeed. The temp snapshot is ON COMMIT DROP: it
---     cannot outlive this transaction, and no privilege survives the file.
+--     make one transaction succeed. The snapshot is a local variable: it
+--     creates nothing, grants nothing, and cannot outlive the block.
 --   * A migration cannot GRANT on a table it does not own anyway. The grantor
 --     would have to be role_omnidash or a superuser, and this file holds
 --     neither -- it would abort on a different permission error.
@@ -123,16 +124,18 @@
 -- the brief offered as an alternative: the GRANT is an OPERATOR act recorded on
 -- the ticket, not a statement this file issues on its own authority.
 --
--- WHY THE TEMP TABLE IS GRANTED TO PUBLIC. It is created by the migrate
--- identity and read, one statement later, as role_omninode_owner -- which is
--- not a member of the migrate identity and therefore holds nothing on it. The
--- grant is scoped to a relation in this session's pg_temp schema, which
--- PostgreSQL forbids any other session from accessing at all ("cannot access
--- temporary tables of other sessions"), and which ON COMMIT DROP destroys when
--- this transaction ends. PUBLIC here is one role for one statement inside one
--- transaction, and is written that way because GRANT does not accept a
--- PL/pgSQL variable for its grantee and composing the role name into SQL text
--- would introduce the dynamic SQL the OMN-15361 gate rejects.
+-- WHY THE SNAPSHOT IS A VARIABLE AND NOT A TEMP TABLE. The first revision of
+-- this file used CREATE TEMP TABLE ... ON COMMIT DROP and granted it to PUBLIC,
+-- because a temp table is owned by the migrate identity and is read one
+-- statement later as role_omninode_owner, and GRANT accepts no PL/pgSQL
+-- variable for its grantee. The OMN-15361 application-database domain gate
+-- REJECTED that relation, and it was right to: a temp relation cannot be
+-- schema-qualified into the topology and cannot be owned by any declared
+-- identity, so it is authority the gate has no way to account for. A PL/pgSQL
+-- variable creates nothing, grants nothing, and is visible to the block
+-- regardless of current_user -- a variable is not a privilege object. Recorded
+-- here rather than silently corrected, because the rejection is the reason the
+-- shape changed.
 --
 -- ===========================================================================
 -- WHY THIS FILE EXISTS INSTEAD OF AN EDIT TO 0036
@@ -215,6 +218,7 @@ DECLARE
     v_convert        BOOLEAN := TRUE;
     v_mirror         REGCLASS;
     v_mirror_rows    BIGINT;
+    v_mirror_rows_js JSONB;
     v_row_count      BIGINT;
     v_live_tup       BIGINT;
     v_debris_deleted BIGINT;
@@ -350,35 +354,51 @@ BEGIN
                 current_user, v_owner, current_user;
         END IF;
 
-        -- The snapshot. Two columns, because two columns are all the
-        -- resolution uses. ON COMMIT DROP: it cannot outlive this
-        -- transaction, so nothing this file creates survives it -- unlike a
-        -- GRANT, which would. Taken inside the same transaction as the reads
-        -- that consume it, so it is the same MVCC snapshot 0036's JOIN would
-        -- have seen.
-        CREATE TEMP TABLE omn15683_mirror_snapshot
-        ON COMMIT DROP
-        AS SELECT tenant_slug, tenant_uuid FROM tenant_registry_mirror;
-
-        v_mirror_rows := (
-            SELECT count(*)
-            FROM omn15683_mirror_snapshot);
-
-        -- Read one statement later as delegation_events' owner, which is not
-        -- a member of the migrate identity and so holds nothing on a table
-        -- the migrate identity just created. GRANT takes no PL/pgSQL variable
-        -- for its grantee, and composing the role name into SQL text would be
-        -- the dynamic SQL the OMN-15361 gate rejects -- so the grantee is
-        -- PUBLIC. The blast radius of PUBLIC on this relation is one session:
-        -- pg_temp is inaccessible to every other session by construction
-        -- ("cannot access temporary tables of other sessions"), and this
-        -- relation ceases to exist at COMMIT.
-        GRANT SELECT ON omn15683_mirror_snapshot TO PUBLIC;
+        -- THE SNAPSHOT, and it is a LOCAL VARIABLE rather than a relation.
+        -- Two fields, because two fields are all the resolution uses.
+        --
+        -- A temp table was the obvious carrier and is deliberately NOT used.
+        -- A PL/pgSQL variable is strictly better on three counts, and the
+        -- third is what settled it:
+        --
+        --   * NOTHING IS CREATED. There is no object to drop, no window in
+        --     which one exists, and no possibility of one outliving the
+        --     transaction -- whereas ON COMMIT DROP is a promise about
+        --     cleanup rather than an absence of the thing.
+        --   * NOTHING IS GRANTED. A temp table is owned by the migrate
+        --     identity and would have to be granted to the owner role one
+        --     statement later; GRANT takes no PL/pgSQL variable for its
+        --     grantee, so that grant would have had to name PUBLIC. A
+        --     variable is visible to the block regardless of current_user,
+        --     because a variable is not a privilege object at all.
+        --   * IT IS NOT APPLICATION-DATABASE AUTHORITY, and the OMN-15361
+        --     domain gate is right to say so. A temp relation is neither
+        --     schema-qualifiable into the topology nor ownable by any
+        --     declared identity; the gate rejected it, and the correct
+        --     reading of that rejection is that a migration should not be
+        --     creating relations to carry values between two of its own
+        --     statements.
+        --
+        -- Same transaction as the reads that consume it, so it is the same
+        -- MVCC snapshot 0036's JOIN would have seen. The registry is a tenant
+        -- list -- tens of rows -- so materialising it in memory is bounded by
+        -- the same thing that bounds the JOIN it replaces.
+        --
+        -- COALESCE because jsonb_agg returns NULL over zero rows, and
+        -- jsonb_to_recordset(NULL) is not an empty result set.
+        v_mirror_rows_js := (
+            SELECT COALESCE(
+                       jsonb_agg(jsonb_build_object(
+                           'tenant_slug', m.tenant_slug,
+                           'tenant_uuid', m.tenant_uuid)),
+                       '[]'::jsonb)
+            FROM tenant_registry_mirror m);
+        v_mirror_rows := jsonb_array_length(v_mirror_rows_js);
 
         RAISE NOTICE
             'OMN-15683: tenant_registry_mirror snapshotted as % -- % row(s) '
-            '-- BEFORE the role switch; every resolution below joins the '
-            'snapshot, never the mirror',
+            '-- BEFORE the role switch; every resolution below resolves '
+            'against the snapshot, never the mirror',
             current_user, v_mirror_rows;
     END IF;
 
@@ -530,8 +550,8 @@ BEGIN
         ELSE
             -- -------------------------------------------------------------
             -- DETERMINISM GUARD, carried over from 0036 and required BY the
-            -- OR. Reads omn15683_mirror_snapshot, which is Phase A's copy of
-            -- the mirror; the predicate and the message are 0036's.
+            -- OR. Resolves against Phase A's snapshot of the mirror rather
+            -- than the mirror itself; the predicate and the message are 0036's.
             --
             -- 0034's single-predicate JOIN could match at most one mirror row
             -- per value. A two-form JOIN can, in principle, match two -- and
@@ -558,7 +578,8 @@ BEGIN
                                quote_literal(d.tenant_id),
                                count(DISTINCT m.tenant_uuid)) AS line
                     FROM delegation_events d
-                    JOIN omn15683_mirror_snapshot m
+                    JOIN jsonb_to_recordset(v_mirror_rows_js)
+                         AS m(tenant_slug text, tenant_uuid uuid)
                       ON m.tenant_slug = d.tenant_id
                       OR m.tenant_uuid::text = d.tenant_id
                     GROUP BY d.tenant_id
@@ -605,7 +626,8 @@ BEGIN
                     FROM delegation_events d
                     WHERE NOT EXISTS (
                         SELECT 1
-                        FROM omn15683_mirror_snapshot m
+                        FROM jsonb_to_recordset(v_mirror_rows_js)
+                             AS m(tenant_slug text, tenant_uuid uuid)
                         WHERE m.tenant_slug = d.tenant_id
                            OR m.tenant_uuid::text = d.tenant_id)
                     GROUP BY d.tenant_id
@@ -656,7 +678,8 @@ BEGIN
                 ADD COLUMN IF NOT EXISTS omn16930_resolved_tenant_uuid UUID;
             UPDATE delegation_events d
             SET omn16930_resolved_tenant_uuid = m.tenant_uuid
-            FROM omn15683_mirror_snapshot m
+            FROM jsonb_to_recordset(v_mirror_rows_js)
+                 AS m(tenant_slug text, tenant_uuid uuid)
             WHERE m.tenant_slug = d.tenant_id
                OR m.tenant_uuid::text = d.tenant_id;
         END IF;

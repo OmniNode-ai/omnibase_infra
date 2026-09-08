@@ -665,24 +665,29 @@ def test_successor_refuses_by_name_when_the_migrate_identity_cannot_read_the_mir
     ) == str(_EXPECTED_TOTAL)
 
 
-def test_successor_leaves_no_temp_snapshot_behind(server: Server, lane: Lane) -> None:
-    """The mirror snapshot is ON COMMIT DROP; it cannot outlive the migration.
+def test_successor_creates_no_relation_and_leaves_no_privilege(
+    server: Server, lane: Lane
+) -> None:
+    """The snapshot is a PL/pgSQL variable: nothing created, nothing granted.
 
-    That transience is the reason the repair is a snapshot and not a GRANT: a
-    GRANT would be a persistent, cross-owner widening of a role's reach, made
-    to get one transaction through.
+    That is the reason the repair is a snapshot and not a GRANT. A GRANT would
+    be a persistent, cross-owner widening of a role's reach, made to get one
+    transaction through -- and the first revision of 0037 used a temp table,
+    which the OMN-15361 application-database domain gate rejected, because a
+    temp relation is authority the topology cannot account for. A variable is
+    neither a relation nor a privilege object, so there is nothing for either
+    concern to attach to; this test is what keeps that true.
     """
     assert _apply_as(server, lane.database, _SUCCESSOR, lane.migrator).returncode == 0
     assert (
         _scalar(
             server,
             lane.database,
-            "SELECT count(*) FROM pg_class c "
-            "JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE c.relname = 'omn15683_mirror_snapshot'",
+            "SELECT count(*) FROM pg_class "
+            "WHERE relname LIKE 'omn15683%' OR relname LIKE '%mirror_snapshot%'",
         )
         == "0"
-    )
+    ), "0037 left a relation behind"
     # And the mirror's ACL is untouched -- no privilege survives the file.
     assert (
         _scalar(

@@ -163,9 +163,17 @@ ROLE_SWITCH_RE = re.compile(r"set_config\s*\(\s*'role'", re.IGNORECASE)
 
 # A relation READ. FROM/JOIN cover every select; UPDATE covers the target of the
 # resolving UPDATE, which must also be readable.
+# The trailing group captures whatever immediately follows the name, so a
+# set-returning FUNCTION in a FROM/JOIN clause -- `FROM jsonb_to_recordset(...)
+# AS m(...)`, which 0037 uses to resolve against its in-memory mirror snapshot
+# -- is distinguishable from a relation. A function call is not a relation and
+# carries no table privilege; reporting one as a (role, relation) pair would
+# make the leg ask a question PostgreSQL cannot answer. Same discriminator the
+# OMN-15361 application-database domain linter uses for the same reason.
 RELATION_READ_RE = re.compile(
     r"\b(?:FROM|JOIN|UPDATE)\s+(?:ONLY\s+)?"
-    r"((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)",
+    r"((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)"
+    r"(\s*\(?)",
     re.IGNORECASE,
 )
 
@@ -460,6 +468,9 @@ def derive_role_read_plan(sql: str) -> tuple[RelationRead, ...]:
     for match in RELATION_READ_RE.finditer(body):
         relation = match.group(1)
         lowered = relation.lower()
+        if match.group(2).strip() == "(":
+            # A function call, not a relation. See RELATION_READ_RE.
+            continue
         if lowered.startswith(CATALOG_PREFIXES) or lowered in created:
             continue
         phase = PHASE_SESSION if match.start() < boundary else PHASE_OWNER
