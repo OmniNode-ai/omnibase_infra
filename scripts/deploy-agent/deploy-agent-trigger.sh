@@ -9,11 +9,31 @@
 #   DEPLOY_AGENT_HMAC_SECRET=<secret> \
 #   KAFKA_BOOTSTRAP_SERVERS=<host:port> \
 #     ./deploy-agent-trigger.sh \
+#       --runtime-lane dev \
 #       --git-ref origin/dev \
-#       --reason "manual trigger by operator" \
+#       [--build-source release|workspace] \
+#       [--image-digest sha256:...] \
+#       [--reason "manual trigger by operator"] \
 #       [--requested-by claude] \
 #       [--correlation-id <uuid>] \
 #       [--dry-run]
+#
+# REQUIRED ARGS:
+#   --runtime-lane   dev | stability-test | prod. There is NO default: the lane
+#                    selects the compose overlay, compose project and health
+#                    ports the agent will act on, so guessing it is the one
+#                    mistake this script must never make. Mirrors the required
+#                    `runtime_lane` field of ModelRebuildRequested.
+#
+# NOTE ON --reason (OMN-16442): `reason` is printed in this script's own audit
+# output and is deliberately NOT part of the signed envelope.
+# `ModelRebuildRequested` is declared `extra="forbid"`, so an envelope carrying
+# `reason` is rejected wholesale at `consumer.poll_and_accept` — before
+# `self_update`, before the env-contract validator, before anything runs. The
+# envelope this script signs must contain exactly the model's own fields and
+# nothing else; `tests/unit/test_trigger_payload_matches_model_omn16442.py`
+# validates this script's real `--dry-run` output against the real model so the
+# two cannot drift apart again unnoticed.
 #
 # REQUIRED ENV VARS:
 #   DEPLOY_AGENT_HMAC_SECRET   HMAC-SHA256 key — from ~/.omnibase/.env on .201
@@ -46,6 +66,11 @@ TOPIC="onex.cmd.deploy.rebuild-requested.v1"
 # No default here: resolved from DEPLOY_AGENT_TRACKING_REF after arg parsing,
 # and only when --git-ref was not supplied (OMN-16442).
 GIT_REF=""
+# No default lane, by design (rule 8): an undeclared lane must abort naming the
+# flag, never silently pick one.
+RUNTIME_LANE=""
+BUILD_SOURCE=""
+IMAGE_DIGEST=""
 REASON=""
 REQUESTED_BY="operator-manual"
 CORRELATION_ID=""
@@ -60,6 +85,9 @@ usage() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --git-ref)         GIT_REF="$2";         shift 2 ;;
+        --runtime-lane)    RUNTIME_LANE="$2";     shift 2 ;;
+        --build-source)    BUILD_SOURCE="$2";     shift 2 ;;
+        --image-digest)    IMAGE_DIGEST="$2";     shift 2 ;;
         --reason)          REASON="$2";           shift 2 ;;
         --requested-by)    REQUESTED_BY="$2";     shift 2 ;;
         --correlation-id)  CORRELATION_ID="$2";   shift 2 ;;
@@ -68,6 +96,45 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown arg: $1" >&2; usage ;;
     esac
 done
+
+# ── resolve the runtime lane ─────────────────────────────────────────────────
+# Fail-fast, no default. `runtime_lane` is a REQUIRED field of
+# ModelRebuildRequested (deploy_agent/events.py) and selects the lane the agent
+# will actually mutate; a wrong or guessed value is a deploy against the wrong
+# compose project. The accepted set is EnumRuntimeLane's own members.
+if [[ -z "$RUNTIME_LANE" ]]; then
+    echo "ERROR: --runtime-lane is required (dev | stability-test | prod)." >&2
+    echo "       It has no default: the lane selects the compose overlay," >&2
+    echo "       compose project and health ports the deploy acts on." >&2
+    exit 1
+fi
+
+case "$RUNTIME_LANE" in
+    dev|stability-test|prod) ;;
+    *)
+        echo "ERROR: unknown --runtime-lane '${RUNTIME_LANE}'." >&2
+        echo "       Accepted: dev, stability-test, prod (EnumRuntimeLane)." >&2
+        exit 1 ;;
+esac
+
+if [[ -n "$BUILD_SOURCE" ]]; then
+    case "$BUILD_SOURCE" in
+        workspace|release) ;;
+        *)
+            echo "ERROR: unknown --build-source '${BUILD_SOURCE}'." >&2
+            echo "       Accepted: workspace, release (BuildSource)." >&2
+            exit 1 ;;
+    esac
+fi
+
+# Prod deploys a pinned, stability-proven digest and never rebuilds from a ref;
+# the model enforces this too, but refusing here means the operator is told
+# before a command is signed and published rather than after it is rejected.
+if [[ "$RUNTIME_LANE" == "prod" && -z "$IMAGE_DIGEST" ]]; then
+    echo "ERROR: --runtime-lane prod requires --image-digest sha256:..." >&2
+    echo "       Production deploys the exact stability-proven digest." >&2
+    exit 1
+fi
 
 # ── resolve the deploy ref ───────────────────────────────────────────────────
 # Fail-fast rather than defaulting: an undeclared tracking ref is exactly the
@@ -123,7 +190,9 @@ fi
 # JSON structure or inject code.
 SIGNED_JSON="$(
     _TRIGGER_GIT_REF="$GIT_REF" \
-    _TRIGGER_REASON="$REASON" \
+    _TRIGGER_RUNTIME_LANE="$RUNTIME_LANE" \
+    _TRIGGER_BUILD_SOURCE="$BUILD_SOURCE" \
+    _TRIGGER_IMAGE_DIGEST="$IMAGE_DIGEST" \
     _TRIGGER_REQUESTED_BY="$REQUESTED_BY" \
     _TRIGGER_CORRELATION_ID="$CORRELATION_ID" \
     python3 - <<'PYEOF'
@@ -134,17 +203,27 @@ import os
 secret         = os.environ["DEPLOY_AGENT_HMAC_SECRET"]
 correlation_id = os.environ["_TRIGGER_CORRELATION_ID"]
 git_ref        = os.environ["_TRIGGER_GIT_REF"]
-reason         = os.environ["_TRIGGER_REASON"]
 requested_by   = os.environ["_TRIGGER_REQUESTED_BY"]
+runtime_lane   = os.environ["_TRIGGER_RUNTIME_LANE"]
+build_source   = os.environ["_TRIGGER_BUILD_SOURCE"]
+image_digest   = os.environ["_TRIGGER_IMAGE_DIGEST"]
 
+# Exactly the fields ModelRebuildRequested declares, and nothing else: the
+# model is extra="forbid", so one stray key rejects the whole command. The
+# optional fields are omitted rather than sent empty so the model's own
+# defaults apply.
 envelope = {
     "correlation_id": correlation_id,
     "git_ref":        git_ref,
-    "reason":         reason,
     "requested_by":   requested_by,
+    "runtime_lane":   runtime_lane,
     "scope":          "runtime",
     "services":       [],
 }
+if build_source:
+    envelope["build_source"] = build_source
+if image_digest:
+    envelope["image_digest"] = image_digest
 body = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
 sig  = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 signed = {**envelope, "_signature": sig}
@@ -166,9 +245,12 @@ PYEOF
 
 echo "=== deploy-agent-trigger ==="
 echo "topic:          ${TOPIC}"
+echo "runtime_lane:   ${RUNTIME_LANE}"
 echo "git_ref:        ${GIT_REF}"
 echo "correlation_id: ${CORRELATION_ID}"
 echo "requested_by:   ${REQUESTED_BY}"
+# Printed, not signed: see the NOTE ON --reason in the header.
+echo "reason:         ${REASON:-(none)}  [local audit only, not in envelope]"
 echo "payload (sig masked):"
 echo "${MASKED_JSON}"
 
