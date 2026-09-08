@@ -716,7 +716,17 @@ class DeployExecutor:
 
         Safety rails:
         - Skipped entirely when DEPLOY_AGENT_NO_SELF_UPDATE=1 is set.
-        - Skipped when the working tree is dirty (would discard uncommitted work).
+        - Skipped when the working tree carries TRACKED modifications (a pull
+          would discard uncommitted work). UNTRACKED files do not block
+          (OMN-16442): ``git status --porcelain`` reports the whole repository
+          regardless of the ``-C`` subdirectory, and the deploy path drops
+          untracked build byproducts (historically
+          ``workspace/deploy-source-refs.json``) into whatever repo root it runs
+          from. One such file made the unfiltered check read dirty forever, so
+          the agent skipped every self-update and could not pick up its own
+          fixes -- the exact failure this method exists to prevent. A pull can
+          only lose work that git is tracking; ``--untracked-files=no`` is the
+          narrowest gate that still protects it.
         - skip=True (--skip-self-update CLI flag) bypasses the check.
         - Container mode (DEPLOY_AGENT_MODE=container) exits with code 42
           instead of os.execv so the supervisor can respawn from the new binary.
@@ -735,9 +745,11 @@ class DeployExecutor:
         agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         timeout = 60
 
-        # Abort if working tree is dirty — never silently discard changes.
+        # Abort only on TRACKED modifications — a pull cannot lose an untracked
+        # file, and untracked deploy byproducts in the clone are exactly what
+        # made this gate never open (OMN-16442).
         status_result = _run(
-            ["git", "-C", agent_dir, "status", "--porcelain"],
+            ["git", "-C", agent_dir, "status", "--porcelain", "--untracked-files=no"],
             timeout=timeout,
         )
         if status_result.returncode != 0:
@@ -746,9 +758,12 @@ class DeployExecutor:
                 status_result.returncode,
             )
             return
-        if status_result.stdout.strip():
+        tracked_changes = status_result.stdout.strip()
+        if tracked_changes:
             logger.warning(
-                "self_update: working tree is dirty, skipping update to avoid data loss"
+                "self_update: working tree has tracked modifications, skipping "
+                "update to avoid data loss: %s",
+                tracked_changes.replace("\n", "; "),
             )
             return
 

@@ -194,6 +194,10 @@ def test_collision_without_force_blocks_before_rt1_checkout(tmp_path: Path) -> N
             "OMNI_HOME": str(omni_home),
             "DEPLOY_REF": "dev",
             "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
+            # OMN-16442: the expected-refs manifest now lands OUTSIDE the build
+            # context, so pin it at a tmp_path location -- otherwise the default
+            # would write into the test runner's real HOME.
+            "DEPLOY_SOURCE_REFS_OUT": str(tmp_path / "refs-state" / "collision.json"),
         },
     )
     assert result.returncode == 1, result.stdout + result.stderr
@@ -203,6 +207,7 @@ def test_collision_without_force_blocks_before_rt1_checkout(tmp_path: Path) -> N
     # RT-1 never ran: the sibling clone is still detached at the OLD (behind)
     # SHA, and no expected-refs manifest was written into the collision dir.
     assert _git(omni_home / "omnimarket", "rev-parse", "HEAD") == old_sha
+    assert not (tmp_path / "refs-state" / "collision.json").exists()
     assert not (deploy_target / "workspace" / "deploy-source-refs.json").exists()
     assert (deploy_target / "stale-marker.txt").exists()  # untouched
 
@@ -238,6 +243,9 @@ def test_cut_lab_ref_execute_overwrites_collision_and_runs_rt1_checkout(
             "OMNI_HOME": str(omni_home),
             "DEPLOY_RUNTIME": str(stub),
             "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
+            # OMN-16442: pin the expected-refs manifest outside both the build
+            # context and the runner's real HOME.
+            "DEPLOY_SOURCE_REFS_OUT": str(tmp_path / "refs-state" / "cut-lab-ref.json"),
         },
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -248,10 +256,13 @@ def test_cut_lab_ref_execute_overwrites_collision_and_runs_rt1_checkout(
     # a no-op checkout would have left it detached at old_sha.
     assert _git(omni_home / "omnimarket", "rev-parse", "HEAD") == new_sha
 
-    expected_refs = deploy_target / "workspace" / "deploy-source-refs.json"
+    expected_refs = tmp_path / "refs-state" / "cut-lab-ref.json"
     provenance = deploy_target / "workspace" / "sibling-vcs-provenance.json"
     assert expected_refs.exists(), "RT-1 expected-refs manifest was never written"
     assert provenance.exists(), "RT-1 vendored-SHA provenance was never written"
+    # OMN-16442: the manifest is an intra-run intermediate and must NOT be left
+    # behind in the build context, which on the deploy host is a git clone.
+    assert not (deploy_target / "workspace" / "deploy-source-refs.json").exists()
 
     exp = json.loads(expected_refs.read_text(encoding="utf-8"))
     assert exp["repos"]["omnimarket"]["expected_sha"] == new_sha
