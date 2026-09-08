@@ -262,6 +262,13 @@ jobs:
       # OMN-17534 AC-6: the gate READS the staging pin and never writes it. This
       # token is minted contents:READ for exactly that reason -- the capability
       # to write the pin is not withheld by convention, it is not granted.
+      # OMN-17530 rule 24(a): the receipt this job emits is keyed by sha and
+      # carries the window it measured. Recorded here rather than derived at
+      # the end, so the window covers the whole lab pass and not just its last
+      # step.
+      - name: Record the lab-pass window start
+        run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Mint a read-only omninode_infra token
         id: infra-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -406,6 +413,7 @@ jobs:
           kubectl get priorityclass -l omninode/managed=true
 
       - name: Render the onex-lab overlay with the candidate pinned
+        id: render
         env:
           IMAGE_REF: ${{ needs.build-runtime-candidate.outputs.image-ref }}
           IMAGE_DIGEST: ${{ needs.build-runtime-candidate.outputs.digest }}
@@ -436,6 +444,7 @@ jobs:
           wc -l /tmp/onex-lab-render.yaml
 
       - name: Apply
+        id: apply
         run: |
           set -euo pipefail
           kubectl apply -f /tmp/onex-lab-render.yaml
@@ -504,6 +513,7 @@ jobs:
       # the schema failure as a candidate defect fifteen minutes later, which is
       # the misreading this whole ticket is about.
       - name: Apply the candidate's migration bundle to the lane
+        id: migrate
         env:
           MIGRATE_IMAGE_REF: ${{ needs.build-migrate-bundle.outputs.image-ref }}
         run: |
@@ -691,6 +701,44 @@ jobs:
           path: /tmp/boot-gate-diagnostics
           retention-days: 14
 
+      # OMN-17530 rule 24(a). This job IS the onex-lab lab pass; until now it
+      # left nothing behind that outlived the run. The receipt is a durable,
+      # sha-keyed record of what was exercised, which the lab-pass-gate job
+      # below reads and which anybody can read afterwards to answer "was this
+      # commit ever booted on a lab lane".
+      #
+      # if: always() on BOTH steps deliberately. A FAILED lab pass is exactly as
+      # worth recording as a passing one -- a receipt that only exists when
+      # everything worked cannot distinguish "it failed" from "nobody ran it",
+      # and those are the two states the gate must tell apart. The emit step
+      # itself exits non-zero on a FAIL receipt, so the failure stays visible on
+      # this run; the artifact is uploaded either way.
+      - name: Emit the onex-lab lab-pass receipt
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 omnibase_infra/scripts/ci/lab_pass_receipt.py emit \
+            --sha "${GITHUB_SHA}" \
+            --lane onex-lab \
+            --started-at "${LAB_PASS_STARTED_AT}" \
+            --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --check "manifests_render:${{ steps.render.outcome == 'success' && 'ok' || 'fail' }}:kubectl kustomize ${LAB_OVERLAY} against omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
+            --check "strict_wiring_mode:${{ steps.apply.outcome == 'success' && 'ok' || 'fail' }}:ONEX_WIRING_STRICT_MODE read back off the applied omninode-runtime Deployment" \
+            --check "migrations_applied:${{ steps.migrate.outcome == 'success' && 'ok' || 'fail' }}:${MIGRATE_JOB_NAME} Job on the candidate migration bundle" \
+            --check "runtime_family_ready:${{ steps.boot-wait.outcome == 'success' && 'ok' || 'fail' }}:every runtime-family Deployment plus the projection snapshot topic, within ${BOOT_WAIT_SECONDS}s" \
+            --out /tmp/lab-pass-receipt/receipt.json
+
+      - name: Upload the onex-lab lab-pass receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # The artifact NAME is the key the gate queries by. It must match
+          # scripts/ci/lab_pass_receipt.py's artifact_name() exactly.
+          name: lab-pass-receipt-onex-lab-${{ github.sha }}
+          path: /tmp/lab-pass-receipt
+          retention-days: 90
+          if-no-files-found: error
+
       - name: Summarise
         if: always()
         run: |
@@ -713,6 +761,70 @@ jobs:
             echo "candidate-boot-gate-${{ github.run_id }} artifact."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # OMN-17530 -- the mechanical half of omni_home CLAUDE.md Operating Rule 24(b):
+  # "delivery to staging FAILS CLOSED unless a passing lab receipt exists for the
+  # delivered sha".
+  #
+  # WHY THIS JOB EXISTS WHEN dispatch-to-staging ALREADY `needs:` THE BOOT GATE.
+  # A `needs:` edge is a fact about one workflow run and nothing else. It cannot
+  # be read by the deploy that follows in omninode_infra, by a later run, or by
+  # anybody asking afterwards which shas were exercised on a lab lane -- and
+  # that last question is precisely what nobody could answer on 2026-09-08,
+  # after twelve failed staging runs on two defects (a tenant-form split between
+  # the onex-api reader and the projection writer, and a quality-gate NOT NULL
+  # timestamp) that no lab lane had ever exercised. This job turns the premise
+  # into a durable, sha-keyed artifact and then reads it back through the same
+  # public surface every other consumer will use, rather than through an
+  # in-run edge only this file can see.
+  #
+  # It is NOT redundant with the boot gate: it also catches the case where a
+  # receipt exists for a DIFFERENT sha than the one being delivered, which is
+  # exactly what the concurrency group above can produce when a second merge
+  # supersedes the first mid-build.
+  #
+  # FAIL-CLOSED, with no way round it: a missing, unreadable, malformed or FAIL
+  # receipt all fail here. There is no --force, no skip input, and no `if:`
+  # override -- tests/ci/test_lab_pass_receipt_gate_omn17530.py asserts each of
+  # those, so adding one is a red test rather than a review catch.
+  lab-pass-gate:
+    name: Require a passing lab-pass receipt for this sha
+    needs: [candidate-boot-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The only capability this job needs: read the artifact surface. It has
+      # no write anywhere, and deliberately no cluster or broker access -- the
+      # receipt was chosen as a GH artifact precisely so this gate can run with
+      # nothing but a repository read token.
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Read the lab-pass receipt for the delivered sha
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/lab_pass_receipt.py gate \
+            --sha "${GITHUB_SHA}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            | tee /tmp/lab-pass-gate.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Lab-pass gate (rule 24(b), OMN-17530)"
+            echo ""
+            echo '```'
+            cat /tmp/lab-pass-gate.txt 2>/dev/null || echo "(the gate produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   dispatch-to-staging:
     name: Announce the bundle to omninode_infra
     # OMN-17534: the boot gate is a HARD dependency, not an advisory signal. A
@@ -721,7 +833,13 @@ jobs:
     # in two days. GitHub's default success() is exactly the wanted semantics:
     # a gate that fails, is skipped, or is cancelled leaves the dispatch
     # unfired, so "skipped" can never read as "passed".
-    needs: [build-runtime-candidate, build-migrate-bundle, candidate-boot-gate]
+    needs:
+      [
+        build-runtime-candidate,
+        build-migrate-bundle,
+        candidate-boot-gate,
+        lab-pass-gate,
+      ]
     # No `if:` override. GitHub's default `success()` is exactly the wanted
     # semantics -- either build failing, or being cancelled by the concurrency
     # group above, must leave the dispatch unfired. An `always()` here would
