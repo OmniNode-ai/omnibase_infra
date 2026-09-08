@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from deploy_agent.events import (
     BuildSource,
     EnumRuntimeLane,
+    EnumSelfUpdateBoundary,
     ModelHealthCheck,
     ModelRebuildRequested,
     Phase,
@@ -700,12 +701,43 @@ class DeployExecutor:
                     f"{source}: {result.stderr.strip() or result.stdout.strip()}"
                 )
 
-    def self_update(self, *, skip: bool = False) -> None:
+    def self_update(
+        self,
+        *,
+        boundary: EnumSelfUpdateBoundary,
+        skip: bool = False,
+        on_before_reexec: Callable[[], None] | None = None,
+    ) -> None:
         """Pull and re-exec deploy-agent itself if behind its tracking ref.
 
-        Called as the first step of every rebuild_scope() invocation so that
-        a bug-fix merged to the lane's deploy branch is picked up before the
-        next deploy runs.
+        Called ONLY at a job boundary, never between the phases of a deploy
+        (OMN-16442). ``boundary`` is required and has no default: every call
+        site names where it fired, the journal line carries that name, and a
+        future mid-deploy caller cannot quietly omit it.
+
+        Why the boundary is the whole contract. This method replaces the
+        process image. Until 2026-09-08 it was invoked as the first statement
+        of ``rebuild_scope`` -- that is, after preflight, git, compose_gen and
+        seed had already run for an accepted command. Command
+        ``8d0c861a-f91e-4ca2-954e-a073759dd39d`` on the .201 dev lane is the
+        live proof of what that costs: those four phases succeeded, this method
+        logged ``behind origin/dev ... pulling and re-execing``, and the
+        replacement process logged ``Recovered 1 crashed job(s)`` and published
+        the command as ``status=failed``. A process that re-execs mid-deploy
+        cannot finish the deploy it is executing, so a deploy that starts on
+        version X must be allowed to complete on version X.
+
+        The two legal boundaries are declared in
+        ``EnumSelfUpdateBoundary``: ``PRE_ACCEPT`` (before a polled command is
+        marked started) and ``POST_TERMINAL`` (after a job's terminal status is
+        published and the single-flight lock is released).
+
+        ``on_before_reexec`` is invoked once the decision to update has been
+        made and immediately before the pull, and only then. The ``PRE_ACCEPT``
+        caller passes a callback that rewinds its committed consumer offset to
+        the un-accepted command, so the replacement process re-reads that
+        command instead of skipping it -- update-then-process, not
+        process-then-die. Callers with nothing to hand off pass nothing.
 
         The branch is DECLARED, never hardcoded: ``DEPLOY_AGENT_TRACKING_REF``
         is required and has no default (OMN-16442, see
@@ -737,7 +769,9 @@ class DeployExecutor:
                 deliberately disabled self-update never needs the variable.
         """
         if skip or os.environ.get("DEPLOY_AGENT_NO_SELF_UPDATE") == "1":
-            logger.info("self_update: skipped (kill-switch active)")
+            logger.info(
+                "self_update[boundary=%s]: skipped (kill-switch active)", boundary.value
+            )
             return
 
         branch = load_tracking_ref_from_env()
@@ -754,15 +788,17 @@ class DeployExecutor:
         )
         if status_result.returncode != 0:
             logger.warning(
-                "self_update: git status failed (exit=%d), skipping update",
+                "self_update[boundary=%s]: git status failed (exit=%d), skipping update",
+                boundary.value,
                 status_result.returncode,
             )
             return
         tracked_changes = status_result.stdout.strip()
         if tracked_changes:
             logger.warning(
-                "self_update: working tree has tracked modifications, skipping "
-                "update to avoid data loss: %s",
+                "self_update[boundary=%s]: working tree has tracked modifications, "
+                "skipping update to avoid data loss: %s",
+                boundary.value,
                 tracked_changes.replace("\n", "; "),
             )
             return
@@ -774,7 +810,8 @@ class DeployExecutor:
         )
         if fetch_result.returncode != 0:
             logger.warning(
-                "self_update: git fetch failed (exit=%d), skipping update: %s",
+                "self_update[boundary=%s]: git fetch failed (exit=%d), skipping update: %s",
+                boundary.value,
                 fetch_result.returncode,
                 fetch_result.stderr[:200],
             )
@@ -789,7 +826,10 @@ class DeployExecutor:
             timeout=timeout,
         )
         if head_result.returncode != 0 or remote_result.returncode != 0:
-            logger.warning("self_update: rev-parse failed, skipping update")
+            logger.warning(
+                "self_update[boundary=%s]: rev-parse failed, skipping update",
+                boundary.value,
+            )
             return
 
         local_sha = head_result.stdout.strip()
@@ -797,18 +837,28 @@ class DeployExecutor:
 
         if local_sha == remote_sha:
             logger.info(
-                "self_update: already at %s (%s), nothing to do",
+                "self_update[boundary=%s]: already at %s (%s), nothing to do",
+                boundary.value,
                 remote_ref,
                 local_sha[:12],
             )
             return
 
         logger.info(
-            "self_update: behind %s (local=%s remote=%s), pulling and re-execing",
+            "self_update[boundary=%s]: behind %s (local=%s remote=%s), pulling and "
+            "re-execing",
+            boundary.value,
             remote_ref,
             local_sha[:12],
             remote_sha[:12],
         )
+
+        # Hand off before the process image is replaced. The PRE_ACCEPT caller
+        # rewinds its committed consumer offset here so the replacement process
+        # re-reads the command that triggered this update rather than skipping
+        # past it.
+        if on_before_reexec is not None:
+            on_before_reexec()
 
         pull_result = _run(
             ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
@@ -816,7 +866,8 @@ class DeployExecutor:
         )
         if pull_result.returncode != 0:
             logger.warning(
-                "self_update: git pull failed (exit=%d), skipping re-exec: %s",
+                "self_update[boundary=%s]: git pull failed (exit=%d), skipping re-exec: %s",
+                boundary.value,
                 pull_result.returncode,
                 pull_result.stderr[:200],
             )
@@ -829,7 +880,9 @@ class DeployExecutor:
         )
         if uv_result.returncode != 0:
             logger.warning(
-                "self_update: uv sync failed (exit=%d), proceeding with re-exec anyway: %s",
+                "self_update[boundary=%s]: uv sync failed (exit=%d), proceeding with "
+                "re-exec anyway: %s",
+                boundary.value,
                 uv_result.returncode,
                 uv_result.stderr[:200],
             )
@@ -838,11 +891,16 @@ class DeployExecutor:
         if mode == "container":
             # Let systemd/compose restart us from the freshly-pulled source.
             logger.info(
-                "self_update: container mode — exiting with code 42 for supervisor respawn"
+                "self_update[boundary=%s]: container mode — exiting with code 42 for "
+                "supervisor respawn",
+                boundary.value,
             )
             sys.exit(42)
         else:
-            logger.info("self_update: host mode — re-execing process image")
+            logger.info(
+                "self_update[boundary=%s]: host mode — re-execing process image",
+                boundary.value,
+            )
             os.execv(sys.executable, [sys.executable] + sys.argv)  # noqa: S606
 
     def preflight(self, on_phase_update: PhaseCallback) -> None:
@@ -1123,11 +1181,17 @@ class DeployExecutor:
         *,
         git_sha: str = "",
         build_source: BuildSource | str = BuildSource.RELEASE,
-        skip_self_update: bool = False,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
     ) -> list[str]:
-        self.self_update(skip=skip_self_update)
+        # OMN-16442: no self-update here. This method runs inside an accepted
+        # job, after preflight/git/compose_gen/seed; a re-exec from this point
+        # aborts the deploy in flight and the replacement process publishes the
+        # command as failed after recovering it as a crashed job (live: command
+        # 8d0c861a-f91e-4ca2-954e-a073759dd39d, 2026-09-08T16:01Z). Self-update
+        # is a job-boundary concern and lives at the two boundaries declared in
+        # EnumSelfUpdateBoundary. The parameter is removed rather than defaulted
+        # off so this path cannot reach self_update at all.
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
 
         # prod deploys the stability-proven digest — it pulls the pinned image

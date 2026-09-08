@@ -41,6 +41,33 @@ class EnumRuntimeLane(StrEnum):
     PROD = "prod"
 
 
+class EnumSelfUpdateBoundary(StrEnum):
+    """The job boundary a self-update is allowed to fire at (OMN-16442).
+
+    Self-update pulls the agent's own clone and replaces the process image, so
+    it may only run where no job is in flight. Between deploy phases is not
+    such a place: on 2026-09-08 command
+    ``8d0c861a-f91e-4ca2-954e-a073759dd39d`` re-execed after the seed phase and
+    the replacement process published that same command as ``failed`` after
+    logging ``Recovered 1 crashed job(s)``.
+
+    ``PRE_ACCEPT``
+        In the consumer, after a command has passed the signature, payload,
+        lane-fence, busy and dedup checks and BEFORE ``job_store.accept``
+        marks it started. Nothing is in flight, and the command's offset is
+        rewound rather than committed, so the replacement process re-reads it
+        and processes it once.
+
+    ``POST_TERMINAL``
+        In the agent, after the single-flight lock is released and the job's
+        terminal status has been published. Deferring to here is what lets a
+        deploy that starts on version X complete on version X.
+    """
+
+    PRE_ACCEPT = "pre_accept"
+    POST_TERMINAL = "post_terminal"
+
+
 class BuildSource(StrEnum):
     WORKSPACE = "workspace"
     RELEASE = "release"

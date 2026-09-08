@@ -84,6 +84,11 @@ def _consumer_with_fence() -> object:
     consumer.job_store.has_active_job.return_value = False
     consumer.job_store.is_duplicate.return_value = False
     consumer.allowed_lanes = frozenset({EnumRuntimeLane.DEV})
+    # OMN-16442: the pre-accept self-update boundary. These tests are not
+    # testing self-update, so the hook is an explicit no-op rather than absent
+    # -- an absent attribute would be swallowed by the boundary's own
+    # error rail and read as a pass.
+    consumer.self_update_hook = lambda rewind: None
     return consumer
 
 

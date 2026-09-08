@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, TopicPartition
 
 from deploy_agent.auth import verify_command
 from deploy_agent.events import (
@@ -25,6 +26,13 @@ from deploy_agent.lane_policy import (
 
 logger = logging.getLogger(__name__)
 
+# OMN-16442. Invoked at the PRE_ACCEPT job boundary with a callback that rewinds
+# this consumer's committed offset to the command being examined. The hook is
+# expected not to return when it decides to update: it replaces the process
+# image, and the rewound offset is what makes the replacement process re-read
+# the command instead of skipping it.
+SelfUpdateHook = Callable[[Callable[[], None]], None]
+
 
 class DeployConsumer:
     def __init__(
@@ -32,6 +40,7 @@ class DeployConsumer:
         kafka_config: ModelDeployAgentKafkaConfig,
         job_store: JobStore,
         allowed_lanes: frozenset[EnumRuntimeLane],
+        self_update_hook: SelfUpdateHook,
     ) -> None:
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
@@ -43,6 +52,7 @@ class DeployConsumer:
         )
         self.job_store = job_store
         self.allowed_lanes = allowed_lanes
+        self.self_update_hook = self_update_hook
         logger.info(
             "Deploy agent lane fence: %s",
             ",".join(sorted(lane.value for lane in self.allowed_lanes)),
@@ -62,9 +72,10 @@ class DeployConsumer:
         4. Check the lane fence -> reject "lane_not_allowed"
         5. Check busy (has_active_job) -> reject "busy"
         6. Check dedup (is_duplicate) -> reject "duplicate"
-        7. Persist job state (accepted)
-        8. Commit Kafka offset
-        9. Return (command, None)
+        7. Self-update boundary (OMN-16442) -- may not return
+        8. Persist job state (accepted)
+        9. Commit Kafka offset
+        10. Return (command, None)
         """
         records = self.consumer.poll(timeout_ms=1000)
         if not records:
@@ -132,18 +143,65 @@ class DeployConsumer:
             self.consumer.commit()
             return None, "duplicate"
 
-        # Step 7: Persist job state
+        # Step 7: Self-update boundary (OMN-16442). This is the last point at
+        # which nothing is in flight: the command has passed every acceptance
+        # check but is not yet marked started and its offset is not yet
+        # committed. If the agent is behind its tracking ref, the hook replaces
+        # the process image here and does not return -- having first rewound
+        # the committed offset to this message, so the replacement process
+        # re-reads it. Update-then-process, rather than the process-then-die
+        # that killed command 8d0c861a-f91e-4ca2-954e-a073759dd39d when the
+        # same check ran mid-deploy.
+        #
+        # A self-update failure must not cost a valid command: it is logged and
+        # the command is processed on the current image, exactly as the
+        # method's own dirty-tree and fetch-failure rails already do.
+        try:
+            self.self_update_hook(lambda: self._rewind_committed_offset_to(msg))
+        except Exception as e:  # noqa: BLE001
+            logger.error(  # noqa: TRY400
+                "Self-update at the pre-accept boundary failed for %s, "
+                "proceeding on the current image: %s "
+                "friction_type=self_update_boundary_failed",
+                cmd.correlation_id,
+                e,
+            )
+
+        # Step 8: Persist job state
         self.job_store.accept(
             correlation_id=cmd.correlation_id,
             command=command_payload,
         )
 
-        # Step 8: Commit offset
+        # Step 9: Commit offset
         self.consumer.commit()
 
-        # Step 9: Return accepted command
+        # Step 10: Return accepted command
         logger.info("Accepted command %s (scope=%s)", cmd.correlation_id, cmd.scope)
         return cmd, None
+
+    def _rewind_committed_offset_to(self, msg: Any) -> None:
+        """Commit this message's own offset so it is re-read, not skipped.
+
+        Called immediately before the process image is replaced. Seeking to
+        ``msg.offset`` and committing the resulting position makes the
+        committed offset point AT this command rather than past it, so the
+        replacement process fetches the same command again.
+
+        Relying on the message simply being uncommitted is not enough: this
+        consumer is configured ``auto_offset_reset="latest"``, so a group with
+        no committed offset yet -- the first command a freshly created group
+        ever sees -- would resume past the message and lose it.
+        """
+        topic_partition = TopicPartition(msg.topic, msg.partition)
+        self.consumer.seek(topic_partition, msg.offset)
+        self.consumer.commit()
+        logger.info(
+            "Rewound committed offset to %s@%d:%d before self-update re-exec",
+            msg.topic,
+            msg.partition,
+            msg.offset,
+        )
 
     def close(self) -> None:
         self.consumer.close()

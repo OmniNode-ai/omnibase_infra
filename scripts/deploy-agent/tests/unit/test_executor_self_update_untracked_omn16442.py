@@ -23,6 +23,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from deploy_agent.events import EnumSelfUpdateBoundary
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.executor import _run as real_run
 
@@ -89,7 +90,7 @@ def test_untracked_byproduct_does_not_block_and_agent_reports_current(
 
     executor = DeployExecutor()
     with caplog.at_level("INFO"), patch("os.execv") as mock_execv:
-        executor.self_update()
+        executor.self_update(boundary=EnumSelfUpdateBoundary.POST_TERMINAL)
 
     assert f"already at origin/{TRACKING_BRANCH}" in caplog.text
     assert "dirty" not in caplog.text
@@ -124,7 +125,7 @@ def test_untracked_byproduct_does_not_block_the_pull(
         patch("deploy_agent.executor._run", side_effect=_run_git_for_real),
         patch("os.execv") as mock_execv,
     ):
-        executor.self_update()
+        executor.self_update(boundary=EnumSelfUpdateBoundary.POST_TERMINAL)
 
     assert f"behind origin/{TRACKING_BRANCH}" in caplog.text
     after = _git(clone, "rev-parse", "HEAD")
@@ -145,7 +146,7 @@ def test_tracked_modification_still_skips_the_update(
 
     executor = DeployExecutor()
     with caplog.at_level("INFO"), patch("os.execv") as mock_execv:
-        executor.self_update()
+        executor.self_update(boundary=EnumSelfUpdateBoundary.POST_TERMINAL)
 
     assert "tracked modifications" in caplog.text
     # The offending path is named, not just counted.
@@ -167,7 +168,7 @@ def test_staged_addition_still_skips_the_update(
 
     executor = DeployExecutor()
     with caplog.at_level("INFO"), patch("os.execv") as mock_execv:
-        executor.self_update()
+        executor.self_update(boundary=EnumSelfUpdateBoundary.POST_TERMINAL)
 
     assert "tracked modifications" in caplog.text
     assert _git(clone, "rev-parse", "HEAD") == before
