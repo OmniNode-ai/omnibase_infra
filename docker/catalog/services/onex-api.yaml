@@ -1,0 +1,110 @@
+name: onex-api
+description: >-
+  ONEX control-plane API on the dev/lab lane — the tenant-scoped path (POST /v1/tenants/bootstrap, POST /v1/workflows, GET /v1/tenants/me/delegations). OMN-17530 / OMN-17537: the compose dev lane is the lab of record, and without this service the lane can prove that the runtime family boots and the projection writers are deployed, and nothing at all about whether a tenant-scoped request resolves — the defect class OMN-15583 and OMN-17519 sit in.
+image: ${ONEX_API_IMAGE:-onex-api:dev-lane}
+layer: runtime
+container_name: onex-api
+# Every name here is fail-closed at compose render (`${VAR:?}`), never `:-`.
+# The lane is the proving ground: a silent default is the false-clean the
+# OMN-15363 block in docker-compose.dev-lane.yml exists to remove.
+required_env:
+  - OMNINODE_CLOUD_DB_URL
+  - OMNIDASH_ANALYTICS_DB_URL
+  - VALKEY_PASSWORD
+  - KEYCLOAK_ADMIN_CLIENT_SECRET
+  - TENANT_BOOTSTRAP_ADMIN_SECRET
+  - TENANT_TOPICS_ADMIN_SECRET
+  - TENANT_CLIENTS_ADMIN_SECRET
+  - TENANT_OFFBOARD_ADMIN_SECRET
+  - ALPHA_INVITE_ADMIN_SECRET
+  - STRIPE_API_KEY
+  - STRIPE_WEBHOOK_SECRET
+hardcoded_env:
+  # Broker. The lane speaks SCRAM to its own Redpanda (OMN-18012 phase B); the
+  # four transport names are bound in the compose block from the lane anchor,
+  # not here, because they carry credentials.
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  # Keycloak. The lane runs its own (omnibase-infra-keycloak, healthy); the
+  # three claim names below are onex-api-specific and are absent lane-wide,
+  # which is why they are pinned rather than inherited.
+  KEYCLOAK_ISSUER_URL: http://keycloak:8080/realms/omninode
+  KEYCLOAK_AUDIENCE: onex-api
+  KEYCLOAK_TENANT_ID_CLAIM: tenant_id
+  KEYCLOAK_TENANT_SLUG_CLAIM: tenant_slug
+  KEYCLOAK_ADMIN_BASE_URL: http://keycloak:8080
+  KEYCLOAK_REALM: omninode
+  KEYCLOAK_ADMIN_CLIENT_ID: onex-admin
+  # Public URLs. main.py has NO default for ONEX_API_ALLOWED_ORIGINS and
+  # refuses to start when it is unset, and parse_allowed_origins rejects any
+  # entry that is not https:// unless it is localhost/127.0.0.1 — spelling the
+  # http service URL here cost the k3s lane fifteen minutes of CrashLoopBackOff
+  # (omninode_infra k8s/onex-lab/kustomization.yaml, measured 2026-09-08).
+  # The lane has no browser client, so every origin it names is a placeholder;
+  # a placeholder that passes the real validator is worth more than one that
+  # skips it.
+  ONEX_API_BASE_URL: http://onex-api:8000
+  ONEX_API_ALLOWED_ORIGINS: https://onex-dev-lane-no-ingress.invalid
+  STRIPE_CHECKOUT_SUCCESS_URL: http://onex-dev-lane-no-ingress.invalid/billing/success
+  STRIPE_CHECKOUT_CANCEL_URL: http://onex-dev-lane-no-ingress.invalid/billing/cancel
+  STRIPE_PORTAL_RETURN_URL: http://onex-dev-lane-no-ingress.invalid/billing
+  # `redpanda` is a real registered provider (kafka_acl_manager
+  # get_acl_provisioner, supported values redpanda|msk) and the lane's broker
+  # really is Redpanda — the honest value, not a disable. `msk` would make every
+  # lane tenant-create attempt to talk to AWS.
+  BROKER_ACL_PROVIDER: redpanda
+  BROKER_QUOTA_PROVIDER: deferred
+  GATEWAY_ATTACH_TOKEN_EXCHANGE: enabled
+  GATEWAY_SIGNUP_TOPIC_PROVISIONING: disabled
+  GATEWAY_USER_CLIENT_ID: omniweb
+  GATEWAY_TOKEN_MAX_TTL_SECONDS: '900'
+  PYTHONUNBUFFERED: '1'
+# `catalog_env` and not `hardcoded_env`, because the value is DELIBERATELY
+# empty and hardcoded_env cannot express that: tests/unit/infra/
+# test_catalog_completeness.py rejects an empty hardcoded value outright, and
+# rightly so — an accidentally-blank hardcoded variable is a real defect class.
+# This is the same seam contract-resolver uses to clear BIFROST_CONTRACT_PATH.
+#
+# The cloud value names a live bridge tenant; carrying it here would put this
+# lane's publishes on that tenant's wire topics. Tenant identity is
+# deployment-scoped (operator ruling 2026-09-08) — the lane mints its own tenant
+# ids and never carries a cloud one.
+catalog_env:
+  GATEWAY_BRIDGED_TENANT_SLUGS: ''
+operational_defaults:
+  # `enabled` matches onex-dev (reference_onexdev_p0b_flag_enabled_is_deliberate).
+  GATEWAY_P0B_PER_TENANT_CREDENTIALS: enabled
+  TRUST_PROXY_HEADERS: 'false'
+  RATE_LIMIT_TRUSTED_PROXY_CIDRS: ''
+ports:
+  external: 8090
+  internal: 8000
+healthcheck:
+  test:
+    - curl
+    - -sf
+    - http://localhost:8000/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 5
+  start_period_s: 60
+volumes: []
+depends_on:
+  - service: cloud-migration
+    condition: service_completed_successfully
+  - service: postgres
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+  - service: valkey
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '1.0'
+  memory: 768M
+  cpus_reservation: '0.25'
+  memory_reservation: 128M
+stop_grace_period: 30s
+labels:
+  com.omninode.service: onex-api
+  com.omninode.layer: runtime
+  com.omninode.ticket: OMN-17530

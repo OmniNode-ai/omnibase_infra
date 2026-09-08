@@ -281,6 +281,13 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         # in-scope service has no running container, so a new member must appear
         # here or the readback fixture no longer describes the real lane.
         "infra-routing-decisions-consumer",
+        # OMN-17530: the eighth. onex-api is the surface a lab proof is taken
+        # THROUGH, so a stale one makes the proof itself stale -- it is in the
+        # recreate scope for that reason and therefore in the readback's scope
+        # too. Its two omninode_cloud one-shot siblings are deliberately NOT,
+        # because RT-6 resolves a RUNNING container and a one-shot has already
+        # exited 0 by the time the readback runs.
+        "onex-api",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -297,6 +304,7 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-tenant-credentials-writer": "projection-tenant-credentials-writer",
         "projection-live-events-writer": "projection-live-events-writer",
         "infra-routing-decisions-consumer": "omninode-infra-routing-decisions-consumer",
+        "onex-api": "onex-api",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not
