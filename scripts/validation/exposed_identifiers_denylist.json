@@ -3,7 +3,7 @@
   "ticket": "OMN-17320",
   "salt": "onex-exposed-identifier-v1:",
   "annotation_class": "exposed-identifier",
-  "plaintext_source": "OMN-17288 (Linear, private workspace) -- description + the 'Finding 2' comment carry every value below in full.",
+  "plaintext_source": "OMN-17288 and OMN-18024 (Linear, private workspace). OMN-18024's entries are also resolvable from the pre-fix parent of its merge commit at the path:line each entry's notes field names -- the values are public in this repository's history and the operator ruled document-and-accept on history.",
   "readme": [
     "Each entry is a salted SHA-256 of a forbidden literal. The plaintext is deliberately",
     "ABSENT: this file ships in PUBLIC repos, and writing the literal here would create the",
@@ -43,6 +43,14 @@
       "notes": "Registry UUID for the same tenant, scrubbed from omnimarket by OMN-17288. Never reached omnibase_infra."
     },
     {
+      "id": "omn17288-tenant-uuid-hex",
+      "kind": "tenant-uuid-hex",
+      "length": 32,
+      "sha256": "4381a13c2440ddb99abd8e9077147daee6b2d1e5c3990af8912a74d1aa2eb393",
+      "ticket": "OMN-17288",
+      "notes": "Same UUID with dashes stripped -- the shape uuid.UUID(...).hex and most JSON encoders emit."
+    },
+    {
       "id": "omn17288-tenant-uuid-prefix",
       "kind": "tenant-uuid-prefix",
       "length": 18,
@@ -51,12 +59,52 @@
       "notes": "Leading three groups of the same UUID -- the form OMN-17288's AC4 grep used, and the form a truncated log line leaves behind."
     },
     {
-      "id": "omn17288-tenant-uuid-hex",
-      "kind": "tenant-uuid-hex",
-      "length": 32,
-      "sha256": "4381a13c2440ddb99abd8e9077147daee6b2d1e5c3990af8912a74d1aa2eb393",
-      "ticket": "OMN-17288",
-      "notes": "Same UUID with dashes stripped -- the shape uuid.UUID(...).hex and most JSON encoders emit."
+      "id": "omn18024-account-id",
+      "kind": "aws-account-id",
+      "length": 12,
+      "sha256": "bc7a08bc8ffe5d4f141b74acd0ab7c1721e47c294c6d39bf5e6d83b8e48b07e0",
+      "ticket": "OMN-18024",
+      "notes": "AWS account id for the dev/staging cloud plane. Was written out in two workflow COMMENT lines and inside ECR image references in three committed evidence bundles and one incident-replay capture; the functional workflow path reads it from the repo-scoped Actions variable AWS_ACCOUNT_ID and always did."
+    },
+    {
+      "id": "omn18024-ec2-dev-system",
+      "kind": "ec2-instance-id",
+      "length": 19,
+      "sha256": "c851d44046be7b5d471e67695388fa5955cd8f8cde57358a83c637ef3871b1a7",
+      "ticket": "OMN-18024",
+      "notes": "EC2 instance id of the dev-system k3s node. Was in a migration-ledger reason column and one test docstring; both now name the cluster by role."
+    },
+    {
+      "id": "omn18024-ec2-prepush-host",
+      "kind": "ec2-instance-id",
+      "length": 19,
+      "sha256": "491f89a733709d97d459ec4f0d2bb6d86b358f92b79f172cc81b812e70945b7f",
+      "ticket": "OMN-18024",
+      "notes": "EC2 instance id of the cloud pre-push authorizing host. Removed from the public host table by OMN-17996; survived inside the diff text of an incident-replay capture until OMN-18024 redacted it length-preservingly."
+    },
+    {
+      "id": "omn18024-ec2-public-cluster",
+      "kind": "ec2-instance-id",
+      "length": 19,
+      "sha256": "e6e4640880f607e1e6c75cfd8fa1c6d2079dc5b22d019d589057ce95d65a81d4",
+      "ticket": "OMN-18024",
+      "notes": "EC2 instance id of the k3s node fronting production hostnames. Was a literal default in three scripts; all three now resolve SSM_INSTANCE_ID fail-fast with no default."
+    },
+    {
+      "id": "omn18024-kms-key-id",
+      "kind": "kms-key-id",
+      "length": 36,
+      "sha256": "f28f25ba0302f7ac1272b3ea0469d2caa9ecacc87279385611dec8b204afc227",
+      "ticket": "OMN-18024",
+      "notes": "KMS key id protecting the MSK data volumes. Was in the DataVolumeKMSKeyId ARN in docs/evidence/OMN-15124/probes-round4/msk_describe_cluster.json."
+    },
+    {
+      "id": "omn18024-rds-endpoint",
+      "kind": "rds-endpoint",
+      "length": 62,
+      "sha256": "db2a546c50c726498ab202c8d276cea2a611ff75ad440d33c21c062e93a77add",
+      "ticket": "OMN-18024",
+      "notes": "Private RDS endpoint of the onex-dev serving database. Was in docs/evidence/OMN-15124/probes-round4/nc_rds_5432.txt beside a recorded connect attempt."
     }
   ]
 }

@@ -8,8 +8,12 @@
 # Pushes SHA-tagged image; :latest is also pushed for pull convenience but
 # run-migrations.sh enforces pinned tags for production execution.
 #
-# ECR repository: 272493677981.dkr.ecr.us-east-1.amazonaws.com/omnibase-infra-migrate
-# IAM role: arn:aws:iam::272493677981:role/omninode-github-actions-role
+# ECR repository: omnibase-infra-migrate, in the registry for the account id
+# held in the repo-scoped Actions variable AWS_ACCOUNT_ID.
+# IAM role: omninode-github-actions-role in that same account. The functional
+# `role-to-assume:` below composes the ARN from vars.AWS_ACCOUNT_ID; the account
+# id is deliberately not written out here, because this repository is public
+# (OMN-18024).
 
 name: Build and push migration image to ECR
 

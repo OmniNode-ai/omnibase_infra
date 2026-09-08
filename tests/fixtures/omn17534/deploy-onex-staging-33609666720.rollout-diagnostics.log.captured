@@ -27,7 +27,7 @@
 2026-09-02T08:42:46.0922422Z   DEV_KUBECONFIG_SSM_PARAMETER: /omninode/k3s/dev/kubeconfig
 2026-09-02T08:42:46.0922788Z   LOCAL_KUBE_API_HOST: localhost
 2026-09-02T08:42:46.0923059Z   LOCAL_KUBE_API_PORT: 6443
-2026-09-02T08:42:46.0923375Z   ECR_REGISTRY: 272493677981.dkr.ecr.us-east-1.amazonaws.com
+2026-09-02T08:42:46.0923375Z   ECR_REGISTRY: redacted-acc.dkr.ecr.us-east-1.amazonaws.com
 2026-09-02T08:42:46.0923729Z   ECR_REPOSITORY: omnicloud/core
 2026-09-02T08:42:46.0923999Z   DEPLOY_TIMEOUT_SECONDS: 1500
 2026-09-02T08:42:46.0924255Z   RUNTIME_REPIN_RELEASED: true
@@ -37,7 +37,7 @@
 2026-09-02T08:42:46.0930048Z   AWS_SESSION_TOKEN: ***
 2026-09-02T08:42:46.0930351Z   SYSTEM_INSTANCE_ID: i-0REDACTEDOMN17534
 2026-09-02T08:42:46.0930657Z   SSM_PORT_FORWARD_PID: 2105
-2026-09-02T08:42:46.0931522Z   OMNIBASE_INFRA_MIGRATE_IMAGE: 272493677981.dkr.ecr.us-east-1.amazonaws.com/omnibase-infra-migrate:5e079d3b552ffc55e80926680822788c96147679@sha256:05e424d880d872b3872845cc6351df188e72bd0c2047e6af458145ac2dc6b9d8
+2026-09-02T08:42:46.0931522Z   OMNIBASE_INFRA_MIGRATE_IMAGE: redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omnibase-infra-migrate:5e079d3b552ffc55e80926680822788c96147679@sha256:05e424d880d872b3872845cc6351df188e72bd0c2047e6af458145ac2dc6b9d8
 2026-09-02T08:42:46.0932575Z   IMAGE_WAS_PINNED: true
 2026-09-02T08:42:46.0932817Z ##[endgroup]
 2026-09-02T08:42:46.0989041Z Checking rollout state for: omninode-runtime...
@@ -71,7 +71,7 @@
 2026-09-02T08:42:47.7143579Z   Annotations:  kubectl.kubernetes.io/restartedAt: 2026-08-30T09:31:45Z
 2026-09-02T08:42:47.7144193Z   Containers:
 2026-09-02T08:42:47.7144510Z    omninode-runtime:
-2026-09-02T08:42:47.7145544Z     Image:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:47.7145544Z     Image:      redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
 2026-09-02T08:42:47.7146689Z     Port:       8085/TCP
 2026-09-02T08:42:47.7147067Z     Host Port:  0/TCP
 2026-09-02T08:42:47.7147397Z     Limits:
@@ -169,8 +169,8 @@
 2026-09-02T08:42:48.1281109Z Containers:
 2026-09-02T08:42:48.1281656Z   omninode-runtime:
 2026-09-02T08:42:48.1282672Z     Container ID:   containerd://948eab08439f7c970a4adcc347d270e049aa08554e32a1e4185ab98fa056ccca
-2026-09-02T08:42:48.1284789Z     Image:          272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
-2026-09-02T08:42:48.1286913Z     Image ID:       272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:48.1284789Z     Image:          redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:48.1286913Z     Image ID:       redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
 2026-09-02T08:42:48.1288625Z     Port:           8085/TCP
 2026-09-02T08:42:48.1289251Z     Host Port:      0/TCP
 2026-09-02T08:42:48.1289864Z     State:          Running
@@ -256,10 +256,10 @@
 2026-09-02T08:42:48.1362314Z Events:
 2026-09-02T08:42:48.1362916Z   Type     Reason     Age                    From     Message
 2026-09-02T08:42:48.1363638Z   ----     ------     ----                   ----     -------
-2026-09-02T08:42:48.1365662Z   Normal   Pulled     42m (x2 over 113m)     kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 161ms (161ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:48.1365662Z   Normal   Pulled     42m (x2 over 113m)     kubelet  Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 161ms (161ms including waiting). Image size: 792562392 bytes.
 2026-09-02T08:42:48.1369114Z   Warning  BackOff    6m5s (x279 over 127m)  kubelet  Back-off restarting failed container omninode-runtime in pod omninode-runtime-6b95fbcbff-ks9sv_onex-dev(00000000-0000-4000-8000-000000000001)
-2026-09-02T08:42:48.1371814Z   Normal   Pulling    2m24s (x23 over 142m)  kubelet  Pulling image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
-2026-09-02T08:42:48.1375345Z   Normal   Pulled     2m23s (x11 over 84m)   kubelet  (combined from similar events): Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 211ms (211ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:48.1371814Z   Normal   Pulling    2m24s (x23 over 142m)  kubelet  Pulling image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
+2026-09-02T08:42:48.1375345Z   Normal   Pulled     2m23s (x11 over 84m)   kubelet  (combined from similar events): Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 211ms (211ms including waiting). Image size: 792562392 bytes.
 2026-09-02T08:42:48.1378509Z   Warning  Unhealthy  56s (x480 over 141m)   kubelet  Startup probe failed: dial tcp 10.42.0.104:8085: connect: connection refused
 2026-09-02T08:42:48.1380171Z   Normal   Killing    56s (x8 over 131m)     kubelet  Container omninode-runtime failed startup probe, will be restarted
 2026-09-02T08:42:48.4702571Z === OmniNode Runtime ===
@@ -337,7 +337,7 @@
 2026-09-02T08:42:50.4810140Z                 omninode.ai/restarted-for: OMN-15876-registration-writer-verify
 2026-09-02T08:42:50.4810970Z   Containers:
 2026-09-02T08:42:50.4811474Z    omnimarket-projection-api:
-2026-09-02T08:42:50.4812702Z     Image:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:50.4812702Z     Image:      redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
 2026-09-02T08:42:50.4813962Z     Port:       3002/TCP
 2026-09-02T08:42:50.4814479Z     Host Port:  0/TCP
 2026-09-02T08:42:50.4814941Z     Command:
@@ -415,8 +415,8 @@
 2026-09-02T08:42:50.8930647Z Containers:
 2026-09-02T08:42:50.8931280Z   omnimarket-projection-api:
 2026-09-02T08:42:50.8932589Z     Container ID:  containerd://b132ccb094c1da81c2c2e51122979f431394691dfb15aa6d55ef6ea9869df452
-2026-09-02T08:42:50.8934518Z     Image:         272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
-2026-09-02T08:42:50.8936651Z     Image ID:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:50.8934518Z     Image:         redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:50.8936651Z     Image ID:      redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
 2026-09-02T08:42:50.8938192Z     Port:          3002/TCP
 2026-09-02T08:42:50.8939287Z     Host Port:     0/TCP
 2026-09-02T08:42:50.8939945Z     Command:
@@ -481,10 +481,10 @@
 2026-09-02T08:42:50.9000261Z Events:
 2026-09-02T08:42:50.9000892Z   Type     Reason     Age                     From     Message
 2026-09-02T08:42:50.9001740Z   ----     ------     ----                    ----     -------
-2026-09-02T08:42:50.9004002Z   Normal   Pulled     30m (x3 over 109m)      kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 163ms (163ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:50.9004002Z   Normal   Pulled     30m (x3 over 109m)      kubelet  Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 163ms (163ms including waiting). Image size: 792562392 bytes.
 2026-09-02T08:42:50.9006752Z   Normal   Killing    22m (x9 over 136m)      kubelet  Container omnimarket-projection-api failed startup probe, will be restarted
-2026-09-02T08:42:50.9009272Z   Normal   Pulling    7m18s (x29 over 142m)   kubelet  Pulling image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
-2026-09-02T08:42:50.9012499Z   Normal   Pulled     7m18s (x15 over 102m)   kubelet  (combined from similar events): Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 161ms (161ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:50.9009272Z   Normal   Pulling    7m18s (x29 over 142m)   kubelet  Pulling image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
+2026-09-02T08:42:50.9012499Z   Normal   Pulled     7m18s (x15 over 102m)   kubelet  (combined from similar events): Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 161ms (161ms including waiting). Image size: 792562392 bytes.
 2026-09-02T08:42:50.9015215Z   Warning  Unhealthy  5m39s (x601 over 141m)  kubelet  Startup probe failed: Get "http://10.42.0.92:3002/health": dial tcp 10.42.0.92:3002: connect: connection refused
 2026-09-02T08:42:50.9021221Z   Warning  BackOff    62s (x419 over 133m)    kubelet  Back-off restarting failed container omnimarket-projection-api in pod omnimarket-projection-api-6b65b9b688-67rzj_onex-dev(00000000-0000-4000-8000-000000000002)
 2026-09-02T08:42:51.2007461Z Topic onex.snapshot.projection.consumer-flow.v1 not found in cluster metadata
@@ -609,7 +609,7 @@
 2026-09-02T08:42:59.3875393Z   Annotations:  kubectl.kubernetes.io/restartedAt: 2026-08-30T09:31:45Z
 2026-09-02T08:42:59.3876163Z   Containers:
 2026-09-02T08:42:59.3876657Z    omninode-runtime-effects:
-2026-09-02T08:42:59.3877878Z     Image:      272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:59.3877878Z     Image:      redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
 2026-09-02T08:42:59.3879552Z     Port:       8085/TCP
 2026-09-02T08:42:59.3880109Z     Host Port:  0/TCP
 2026-09-02T08:42:59.3880835Z     Limits:
@@ -710,8 +710,8 @@
 2026-09-02T08:42:59.8252888Z Containers:
 2026-09-02T08:42:59.8253378Z   omninode-runtime-effects:
 2026-09-02T08:42:59.8254315Z     Container ID:   containerd://1b63fab94ed51f926b350905fd5a46499737f57231eb5fd7c0a5f7ff6b328992
-2026-09-02T08:42:59.8255967Z     Image:          272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
-2026-09-02T08:42:59.8257929Z     Image ID:       272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:59.8255967Z     Image:          redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
+2026-09-02T08:42:59.8257929Z     Image ID:       redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6
 2026-09-02T08:42:59.8260738Z     Port:           8085/TCP
 2026-09-02T08:42:59.8261892Z     Host Port:      0/TCP
 2026-09-02T08:42:59.8262469Z     State:          Running
@@ -800,12 +800,12 @@
 2026-09-02T08:42:59.8334042Z Events:
 2026-09-02T08:42:59.8334480Z   Type     Reason     Age                     From     Message
 2026-09-02T08:42:59.8335390Z   ----     ------     ----                    ----     -------
-2026-09-02T08:42:59.8337783Z   Normal   Pulled     53m                     kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 159ms (159ms including waiting). Image size: 792562392 bytes.
-2026-09-02T08:42:59.8342036Z   Normal   Pulled     43m (x2 over 52m)       kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 157ms (157ms including waiting). Image size: 792562392 bytes.
-2026-09-02T08:42:59.8346329Z   Normal   Pulled     14m (x4 over 126m)      kubelet  Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 164ms (164ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8337783Z   Normal   Pulled     53m                     kubelet  Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 159ms (159ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8342036Z   Normal   Pulled     43m (x2 over 52m)       kubelet  Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 157ms (157ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8346329Z   Normal   Pulled     14m (x4 over 126m)      kubelet  Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 164ms (164ms including waiting). Image size: 792562392 bytes.
 2026-09-02T08:42:59.8350248Z   Warning  BackOff    6m11s (x255 over 127m)  kubelet  Back-off restarting failed container omninode-runtime-effects in pod omninode-runtime-effects-746db55788-98j7j_onex-dev(00000000-0000-4000-8000-000000000003)
-2026-09-02T08:42:59.8353553Z   Normal   Pulling    3m1s (x25 over 142m)    kubelet  Pulling image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
-2026-09-02T08:42:59.8357395Z   Normal   Pulled     3m1s (x4 over 33m)      kubelet  (combined from similar events): Successfully pulled image "272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 159ms (159ms including waiting). Image size: 792562392 bytes.
+2026-09-02T08:42:59.8353553Z   Normal   Pulling    3m1s (x25 over 142m)    kubelet  Pulling image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6"
+2026-09-02T08:42:59.8357395Z   Normal   Pulled     3m1s (x4 over 33m)      kubelet  (combined from similar events): Successfully pulled image "redacted-acc.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime@sha256:349225be05fee0e075115522c54f8911b03de32b578a61dc17fdc631125cc2a6" in 159ms (159ms including waiting). Image size: 792562392 bytes.
 2026-09-02T08:42:59.8360881Z   Warning  Unhealthy  69s (x517 over 141m)    kubelet  Startup probe failed: dial tcp 10.42.0.100:8085: connect: connection refused
 2026-09-02T08:43:00.1722431Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Skipping contract 'pattern_b_broker' from 'omnimarket' because it targets an inactive runtime package domain
 2026-09-02T08:43:00.1731159Z 2026-09-02 08:42:59 [INFO] omnibase_infra.runtime.auto_wiring.discovery: Skipping contract 'node_persona_builder_compute' from 'omnimarket' because it targets an inactive runtime package domain
