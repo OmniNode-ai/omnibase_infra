@@ -12,10 +12,10 @@ Python interpreters before the kernel ever started, each paying a full cold
 * ``exec onex-runtime`` (the kernel itself) -- 48.6 s
 * total before any wiring work at all: **292.0 s**
 
-Measured live on 2026-09-06 from the onex-dev ``omninode-runtime`` container
-(dev-system cluster ``i-06169517a92b45f86``), container start 21:34:27Z: 551 s
-of an 1124 s boot elapsed before the FIRST subscription was attempted, 292 s of
-it in those four interpreter starts. The same phase on the .201 dev lane is
+Measured live on 2026-09-06 from the onex-dev ``omninode-runtime`` container on
+the dev-system cluster, container start 21:34:27Z: 551 s of an 1124 s boot
+elapsed before the FIRST subscription was attempted, 292 s of it in those four
+interpreter starts. The same phase on the .201 dev lane is
 ~8x faster on the same code, because the onex-dev container runs at
 ``requests.cpu 100m`` on a node whose CPU limits are 547 % overcommitted — the
 signature of ~0.05 effective cores paying four cold imports.
