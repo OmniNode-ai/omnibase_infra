@@ -28,8 +28,14 @@
 # forward-migration runner apply the node_projection_registration trio
 # (0000 CREATE / 0001 heartbeat columns / 0002 ENABLE + FORCE ROW LEVEL
 # SECURITY) on the lab lane, which operator ruling 15 designates as the FORCE
-# proving ground. Every other fenced node migration stays fenced here too — the
-# delegation 0023-0026 tenant-RLS hold is a different, still-pending ruling.
+# proving ground. As of OMN-15683 (2026-09-08) the same indicator ALSO releases
+# delegation 0034 — the operative uuid conversion — under the operator ruling
+# that closed the delegation-path fence; delegation 0024 and 0025 left the
+# baseline entirely in that change, so nothing releases them anywhere. Every
+# OTHER fenced node migration stays fenced here too — delegation 0023 is a
+# superseded id, 0026 is a measured write lockout for this lane's own writer,
+# and 0031/0032/0033 are retired conversions; none of them is releasable on any
+# lane.
 #
 # WHY IT IS A SEPARATE FILE AND NOT A LINE IN docker-compose.infra.yml
 # --------------------------------------------------------------------
