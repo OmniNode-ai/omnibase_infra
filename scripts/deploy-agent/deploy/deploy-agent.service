@@ -32,6 +32,20 @@
 #   which lane this process may mutate; this variable does.
 
 #
+# KAFKA_SECURITY_PROTOCOL (OMN-18012) is REQUIRED and likewise has no default:
+#   deploy_agent.kafka_config refuses to start on an undeclared control-bus
+#   transport rather than inferring one from whether SASL credentials happen to
+#   be in the environment. That inference is what took the dev agent down on
+#   2026-09-07 against a listener speaking SASL over PLAINTEXT. Like the lane
+#   fence, the correct value is a property of the deployment, not of this
+#   template: the .201 prod instance declares it in its drop-in
+#   (deploy-agent.service.d/override.conf, PLAINTEXT — docker-compose.prod.yml
+#   configures no SASL on the prod broker) and the dev instance declares
+#   SASL_PLAINTEXT + SCRAM-SHA-256 in deploy-agent-dev.service. A SASL protocol
+#   additionally requires KAFKA_SASL_MECHANISM and a credential pair, and
+#   KAFKA_SASL_ENV_PREFIX names the operator-env prefix those credentials live
+#   under (systemd cannot expand one Environment= value into another).
+#
 # PORT PREFLIGHT (fail-fast, never destructive)
 #
 # ExecStartPre runs deploy/preflight_port_free.sh, which refuses to start
