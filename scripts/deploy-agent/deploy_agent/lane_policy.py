@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 
 from deploy_agent.events import EnumRuntimeLane
+from deploy_agent.tracking_ref import ENV_TRACKING_REF
 
 ENV_ALLOWED_LANES = "DEPLOY_AGENT_ALLOWED_LANES"
 
@@ -87,3 +88,51 @@ def assert_lane_allowed(
             f"this agent's {ENV_ALLOWED_LANES}="
             f"{','.join(sorted(item.value for item in allowed))}"
         )
+
+
+def resolve_default_runtime_lane_from_env() -> EnumRuntimeLane:
+    """Resolve the lane an operator command targets when ``--runtime-lane`` is omitted.
+
+    OMN-16442. ``ModelRebuildRequested.runtime_lane`` is REQUIRED and has no
+    default, which is correct: the field decides which lane a command mutates,
+    and a literal default in the model would hand every caller the same blast
+    radius. But the operator trigger runs *inside* a lane's own environment,
+    which already declares that lane twice over, so requiring the flag on every
+    invocation would be ceremony rather than safety.
+
+    Resolution order, both sources DECLARED and neither a literal:
+
+    1. ``DEPLOY_AGENT_ALLOWED_LANES`` when it names exactly ONE lane. This is
+       the strongest statement available -- it is the process's own fence
+       (OMN-16939), and a single-lane fence leaves no ambiguity about which
+       lane a command from this environment is for. A multi-lane fence is
+       ambiguous by construction and does NOT resolve.
+    2. ``DEPLOY_AGENT_TRACKING_REF`` when the branch it names is also a lane
+       name (the dev unit declares ``dev`` for both). A tracking ref is a
+       branch, not a lane, so this only resolves when the two coincide.
+
+    Anything else raises, naming both variables and the flag. There is no
+    fallback lane: guessing ``dev`` here is the same class of defect as the
+    ``origin/main`` literal OMN-16442 removed from the tracking ref.
+    """
+    raw_lanes = os.environ.get(ENV_ALLOWED_LANES, "").strip()
+    if raw_lanes:
+        lanes = parse_allowed_lanes(raw_lanes)
+        if len(lanes) == 1:
+            return next(iter(lanes))
+
+    raw_ref = os.environ.get(ENV_TRACKING_REF, "").strip()
+    if raw_ref:
+        try:
+            return EnumRuntimeLane(raw_ref)
+        except ValueError:
+            pass
+
+    raise RuntimeError(
+        "cannot resolve a default runtime_lane for this command: "
+        f"{ENV_ALLOWED_LANES}={raw_lanes!r} does not name exactly one lane and "
+        f"{ENV_TRACKING_REF}={raw_ref!r} does not name a lane "
+        f"(known lanes: {', '.join(lane.value for lane in EnumRuntimeLane)}). "
+        "Pass --runtime-lane explicitly rather than let the trigger guess which "
+        "lane it is about to rebuild."
+    )

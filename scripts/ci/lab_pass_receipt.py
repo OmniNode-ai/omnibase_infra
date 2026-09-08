@@ -103,6 +103,23 @@ Subcommands
     unreadable, malformed or ``FAIL`` receipt is a FAILURE naming the sha, never
     a skip.
 
+STDLIB ONLY, and that is a requirement rather than a preference
+------------------------------------------------------------
+Both call sites run on a bare runner with no project environment. The boot gate
+checks this repository out into a SUBDIRECTORY (``path: omnibase_infra``), so
+``$GITHUB_WORKSPACE/.github/actions/setup-python-uv`` does not exist there and a
+local composite action cannot be referenced at all -- which is why every script
+that job already calls (``boot_gate.py``, ``render_ci_secrets.py``) is stdlib
+plus PyYAML. This module joins them.
+
+Measured, not assumed: the first live run of the emitter (run 34235502322,
+2026-09-08T14:14:36Z) died with ``ModuleNotFoundError: No module named
+'pydantic'`` at import, after all four of its checks had already passed, and
+took the whole delivery with it. The validation below is therefore hand-written
+on frozen dataclasses. It is the SAME set of invariants a Pydantic model would
+carry -- they are load-bearing, so they are asserted in ``__post_init__`` rather
+than dropped -- and ``ValueError`` is the single failure type.
+
 Exit codes: ``0`` a PASS receipt for the exact sha exists; ``1`` it does not, or
 could not be proven to.
 """
@@ -119,12 +136,11 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 #: Bump when a field is added or a meaning changes. A receipt carrying an
 #: unknown version is REFUSED by the gate rather than best-effort parsed: a
@@ -173,32 +189,71 @@ class EnumLabPassResult(StrEnum):
     FAIL = "FAIL"
 
 
-class ModelLabPassCheck(BaseModel):
+@dataclass(frozen=True)
+class ModelLabPassCheck:
     """One named integration check and the evidence for its verdict."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    name: str = Field(min_length=1)
+    name: str
     ok: bool
     #: What was actually read. Required and non-empty on BOTH verdicts: an
     #: ``ok: true`` with no evidence is indistinguishable from a check that was
     #: never run, which is the shape rule 16 (never suppress stderr; prove a
     #: zero with a positive control) exists to refuse.
-    evidence: str = Field(min_length=1)
+    evidence: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            msg = "check name is required and must be a non-empty string"
+            raise ValueError(msg)
+        if not isinstance(self.ok, bool):
+            msg = (
+                f"check {self.name!r}: ok must be a bool, got {type(self.ok).__name__}"
+            )
+            raise ValueError(msg)
+        if not isinstance(self.evidence, str) or not self.evidence:
+            msg = (
+                f"check {self.name!r}: evidence is required and must be non-empty. "
+                "A check with no evidence is indistinguishable from one that "
+                "was never run."
+            )
+            raise ValueError(msg)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "ok": self.ok, "evidence": self.evidence}
+
+    @classmethod
+    def from_dict(cls, payload: Any) -> ModelLabPassCheck:
+        if not isinstance(payload, dict):
+            msg = f"a check must be an object, got {type(payload).__name__}"
+            raise ValueError(msg)
+        unknown = sorted(set(payload) - {"name", "ok", "evidence"})
+        if unknown:
+            # extra="forbid", by hand: an unrecognised field means the writer
+            # and the reader disagree about the contract.
+            msg = f"unknown check field(s) {unknown}"
+            raise ValueError(msg)
+        try:
+            return cls(
+                name=payload["name"], ok=payload["ok"], evidence=payload["evidence"]
+            )
+        except KeyError as exc:
+            msg = f"check is missing required field {exc.args[0]!r}"
+            raise ValueError(msg) from exc
 
 
-class ModelLabPassReceipt(BaseModel):
+@dataclass(frozen=True)
+class ModelLabPassReceipt:
     """A durable statement that one sha was exercised on one lab lane.
 
     Keyed by ``(sha, lane)``. Two lanes may each emit a receipt for the same
     sha; the gate is satisfied by any one of them passing (rule 24(b) asks for
     "a passing lab receipt", not for a specific lane's).
+
+    Every invariant below is asserted in ``__post_init__`` so a receipt cannot
+    exist in an inconsistent state -- construction is the only gate, and there
+    is no path that builds one and validates it later.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    receipt_version: str = RECEIPT_VERSION
-    #: The exact commit the lab lane exercised.
     sha: str
     lane: EnumLabLane
     started_at: datetime
@@ -210,21 +265,17 @@ class ModelLabPassReceipt(BaseModel):
     #: explicitly nullable, because an emitter that cannot resolve it must say
     #: so rather than invent one. The ``onex-lab`` apply has no agent command
     #: at all and always carries ``null``.
-    agent_command_id: str | None = Field(...)
+    agent_command_id: str | None
+    receipt_version: str = RECEIPT_VERSION
 
-    @model_validator(mode="after")
-    def validate_sha_is_exact(self) -> ModelLabPassReceipt:
-        if not _SHA_RE.match(self.sha):
-            msg = (
-                f"sha={self.sha!r} is not a 40-character lowercase commit sha. "
-                "Rule 24(b) gates on the exact delivered sha; an abbreviated or "
-                "uppercase value cannot be matched safely."
-            )
-            raise ValueError(msg)
-        return self
+    def __post_init__(self) -> None:
+        self._validate_version()
+        self._validate_sha_is_exact()
+        self._validate_checks_present()
+        self._validate_result_matches_checks()
+        self._validate_window()
 
-    @model_validator(mode="after")
-    def validate_version(self) -> ModelLabPassReceipt:
+    def _validate_version(self) -> None:
         if self.receipt_version != RECEIPT_VERSION:
             msg = (
                 f"receipt_version={self.receipt_version!r} is not "
@@ -232,10 +283,17 @@ class ModelLabPassReceipt(BaseModel):
                 "against a different contract."
             )
             raise ValueError(msg)
-        return self
 
-    @model_validator(mode="after")
-    def validate_checks_present(self) -> ModelLabPassReceipt:
+    def _validate_sha_is_exact(self) -> None:
+        if not isinstance(self.sha, str) or not _SHA_RE.match(self.sha):
+            msg = (
+                f"sha={self.sha!r} is not a 40-character lowercase commit sha. "
+                "Rule 24(b) gates on the exact delivered sha; an abbreviated or "
+                "uppercase value cannot be matched safely."
+            )
+            raise ValueError(msg)
+
+    def _validate_checks_present(self) -> None:
         if not self.checks:
             msg = (
                 "checks is empty. A receipt with no checks asserts that nothing "
@@ -250,14 +308,12 @@ class ModelLabPassReceipt(BaseModel):
                 "means one of them is unreadable, and a reader cannot tell which."
             )
             raise ValueError(msg)
-        return self
 
-    @model_validator(mode="after")
-    def validate_result_matches_checks(self) -> ModelLabPassReceipt:
+    def _validate_result_matches_checks(self) -> None:
         """``PASS`` iff every check passed.
 
         Without this, a ``PASS`` receipt carrying a failed check would satisfy
-        the gate — the exact "green while doing nothing" shape rule 15 records.
+        the gate -- the exact "green while doing nothing" shape rule 15 records.
         The verdict is therefore not an independent field the emitter may set
         freely; it is a claim the record itself has to support.
         """
@@ -276,17 +332,80 @@ class ModelLabPassReceipt(BaseModel):
                 "cannot be used to hide a check the emitter forgot to record."
             )
             raise ValueError(msg)
-        return self
 
-    @model_validator(mode="after")
-    def validate_window(self) -> ModelLabPassReceipt:
+    def _validate_window(self) -> None:
         if self.finished_at < self.started_at:
             msg = (
                 f"finished_at={self.finished_at.isoformat()} precedes "
                 f"started_at={self.started_at.isoformat()}."
             )
             raise ValueError(msg)
-        return self
+
+    # -- serialisation ------------------------------------------------------
+    def to_json(self, *, indent: int | None = None) -> str:
+        return json.dumps(
+            {
+                "receipt_version": self.receipt_version,
+                "sha": self.sha,
+                "lane": self.lane.value,
+                "started_at": self.started_at.isoformat(),
+                "finished_at": self.finished_at.isoformat(),
+                "result": self.result.value,
+                "checks": [c.to_dict() for c in self.checks],
+                "agent_command_id": self.agent_command_id,
+            },
+            indent=indent,
+        )
+
+    @classmethod
+    def from_json(cls, body: str) -> ModelLabPassReceipt:
+        """Parse a receipt, refusing anything it does not fully understand.
+
+        Unknown fields, missing fields, a lane or result outside its enum, and
+        an unparseable timestamp are all refusals -- a reader that guesses at an
+        unfamiliar receipt is how a gate goes green on a record it did not
+        understand.
+        """
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            msg = f"a receipt must be a JSON object, got {type(payload).__name__}"
+            raise ValueError(msg)
+        known = {
+            "receipt_version",
+            "sha",
+            "lane",
+            "started_at",
+            "finished_at",
+            "result",
+            "checks",
+            "agent_command_id",
+        }
+        unknown = sorted(set(payload) - known)
+        if unknown:
+            msg = f"unknown receipt field(s) {unknown}"
+            raise ValueError(msg)
+        missing = sorted(known - set(payload))
+        if missing:
+            msg = f"receipt is missing required field(s) {missing}"
+            raise ValueError(msg)
+        raw_checks = payload["checks"]
+        if not isinstance(raw_checks, list):
+            msg = "receipt 'checks' must be a list"
+            raise ValueError(msg)
+        agent_command_id = payload["agent_command_id"]
+        if agent_command_id is not None and not isinstance(agent_command_id, str):
+            msg = "agent_command_id must be a string or null"
+            raise ValueError(msg)
+        return cls(
+            receipt_version=str(payload["receipt_version"]),
+            sha=payload["sha"],
+            lane=EnumLabLane(payload["lane"]),
+            started_at=_parse_ts(str(payload["started_at"])),
+            finished_at=_parse_ts(str(payload["finished_at"])),
+            result=EnumLabPassResult(payload["result"]),
+            checks=tuple(ModelLabPassCheck.from_dict(c) for c in raw_checks),
+            agent_command_id=agent_command_id,
+        )
 
 
 def artifact_name(lane: EnumLabLane, sha: str) -> str:
@@ -460,7 +579,7 @@ def load_checks_json(path: Path | None) -> list[ModelLabPassCheck]:
             "Refusing to emit a receipt whose probe output is empty."
         )
         raise ValueError(msg)
-    return [ModelLabPassCheck.model_validate(entry) for entry in payload]
+    return [ModelLabPassCheck.from_dict(entry) for entry in payload]
 
 
 def build_receipt(
@@ -553,8 +672,8 @@ def download_receipt(repo: str, artifact_id: int) -> ModelLabPassReceipt:
 def parse_receipt(body: str) -> ModelLabPassReceipt:
     """Parse and VALIDATE. A malformed receipt raises rather than degrading."""
     try:
-        return ModelLabPassReceipt.model_validate_json(body)
-    except ValidationError as exc:
+        return ModelLabPassReceipt.from_json(body)
+    except (ValueError, TypeError, KeyError) as exc:
         msg = f"receipt is malformed and cannot be trusted: {exc}"
         raise ReceiptLookupError(msg) from exc
 
@@ -738,7 +857,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         checks = probe_compose_dev(
             args.main_url, args.effects_url, args.timeout_seconds
         )
-        print(json.dumps([c.model_dump() for c in checks], indent=2))
+        print(json.dumps([c.to_dict() for c in checks], indent=2))
         return 0
 
     if args.command == "emit":
@@ -760,13 +879,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 checks=checks,
                 agent_command_id=args.agent_command_id,
             )
-        except (ValueError, ValidationError) as exc:
+        except (ValueError, TypeError, KeyError, OSError) as exc:
             print(
                 f"::error::refusing to emit an invalid receipt: {exc}", file=sys.stderr
             )
             return 1
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(receipt.model_dump_json(indent=2), encoding="utf-8")
+        args.out.write_text(receipt.to_json(indent=2), encoding="utf-8")
         print(f"wrote {artifact_name(receipt.lane, receipt.sha)} -> {args.out}")
         print(render_receipt(receipt))
         # A FAIL receipt is still EMITTED — the record of a failed lab pass is

@@ -89,6 +89,7 @@ _STUB_FUNCS = """
 restore_latest_image_tags() { :; }
 reconcile_runtime_container_start_state() { :; }
 restore_migration_tree_after_revert() { :; }
+lane_lock_release() { :; }
 """
 
 

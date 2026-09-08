@@ -26,7 +26,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from scripts.ci.lab_pass_receipt import (
     RECEIPT_VERSION,
@@ -91,7 +90,7 @@ class TestReceiptModel:
 
     def test_pass_carrying_a_failed_check_is_refused(self) -> None:
         """The 'green while doing nothing' shape, refused at the model."""
-        with pytest.raises(ValidationError, match="must be supported by every check"):
+        with pytest.raises(ValueError, match="must be supported by every check"):
             ModelLabPassReceipt(
                 sha=SHA,
                 lane=EnumLabLane.COMPOSE_DEV,
@@ -104,7 +103,7 @@ class TestReceiptModel:
 
     def test_fail_with_every_check_passing_is_refused(self) -> None:
         """Refused in both directions: a FAIL cannot hide an unrecorded check."""
-        with pytest.raises(ValidationError, match="contradicts"):
+        with pytest.raises(ValueError, match="contradicts"):
             ModelLabPassReceipt(
                 sha=SHA,
                 lane=EnumLabLane.COMPOSE_DEV,
@@ -116,7 +115,7 @@ class TestReceiptModel:
             )
 
     def test_empty_checks_is_refused(self) -> None:
-        with pytest.raises(ValidationError, match="checks is empty"):
+        with pytest.raises(ValueError, match="checks is empty"):
             ModelLabPassReceipt(
                 sha=SHA,
                 lane=EnumLabLane.COMPOSE_DEV,
@@ -129,7 +128,7 @@ class TestReceiptModel:
 
     @pytest.mark.parametrize("bad", ["98b9fb7", SHA.upper(), "", "not-a-sha"])
     def test_abbreviated_or_malformed_sha_is_refused(self, bad: str) -> None:
-        with pytest.raises(ValidationError, match="40-character lowercase"):
+        with pytest.raises(ValueError, match="40-character lowercase"):
             build_receipt(
                 sha=bad,
                 lane=EnumLabLane.COMPOSE_DEV,
@@ -141,7 +140,7 @@ class TestReceiptModel:
 
     def test_agent_command_id_has_no_default(self) -> None:
         """Rule 8: an emitter states it or states null; it is never guessed."""
-        with pytest.raises(ValidationError):
+        with pytest.raises((ValueError, TypeError)):
             ModelLabPassReceipt(  # type: ignore[call-arg]
                 sha=SHA,
                 lane=EnumLabLane.COMPOSE_DEV,
@@ -152,7 +151,7 @@ class TestReceiptModel:
             )
 
     def test_duplicate_check_names_are_refused(self) -> None:
-        with pytest.raises(ValidationError, match="duplicate check names"):
+        with pytest.raises(ValueError, match="duplicate check names"):
             build_receipt(
                 sha=SHA,
                 lane=EnumLabLane.COMPOSE_DEV,
@@ -167,11 +166,11 @@ class TestReceiptModel:
 
     def test_check_evidence_is_required_on_a_passing_check(self) -> None:
         """An `ok: true` with no evidence is a check that was never run."""
-        with pytest.raises(ValidationError):
+        with pytest.raises((ValueError, TypeError)):
             ModelLabPassCheck(name="ready_main", ok=True, evidence="")
 
     def test_finished_before_started_is_refused(self) -> None:
-        with pytest.raises(ValidationError, match="precedes"):
+        with pytest.raises(ValueError, match="precedes"):
             build_receipt(
                 sha=SHA,
                 lane=EnumLabLane.COMPOSE_DEV,
@@ -196,9 +195,66 @@ class TestReceiptModel:
             with pytest.raises(ValueError, match="is not a valid EnumLabLane"):
                 EnumLabLane(governed)
 
+    def test_the_module_imports_nothing_outside_the_stdlib(self) -> None:
+        """The regression that took a real delivery down, pinned.
+
+        Run 34235502322 (2026-09-08T14:14:36Z) died at import with
+        ``ModuleNotFoundError: No module named 'pydantic'`` AFTER all four of
+        its checks had passed, and took the whole dev-candidate delivery with
+        it. Both call sites run on a bare runner with no project environment,
+        and the boot gate checks this repository out into a subdirectory so it
+        cannot even reference the shared setup action. A third-party import here
+        is therefore not a style question -- it breaks the delivery path.
+        """
+        import ast
+        import sys
+        from pathlib import Path as _Path
+
+        module = _Path("scripts/ci/lab_pass_receipt.py")
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        roots: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                roots.add(node.module.split(".")[0])
+        non_stdlib = sorted(roots - set(sys.stdlib_module_names))
+        assert not non_stdlib, (
+            f"scripts/ci/lab_pass_receipt.py imports {non_stdlib}, which the "
+            "bare runners that emit and read receipts do not have"
+        )
+
     def test_round_trips_through_json(self) -> None:
         original = _receipt()
-        assert parse_receipt(original.model_dump_json()) == original
+        assert parse_receipt(original.to_json()) == original
+
+
+class TestSerialisation:
+    """Hand-written parsing has to refuse everything a model would have."""
+
+    def test_an_unknown_receipt_field_is_refused(self) -> None:
+        payload = json.loads(_receipt().to_json())
+        payload["parity_exclusions"] = ["msk"]
+        with pytest.raises(ValueError, match="unknown receipt field"):
+            ModelLabPassReceipt.from_json(json.dumps(payload))
+
+    def test_a_missing_receipt_field_is_refused(self) -> None:
+        payload = json.loads(_receipt().to_json())
+        del payload["agent_command_id"]
+        with pytest.raises(ValueError, match="missing required field"):
+            ModelLabPassReceipt.from_json(json.dumps(payload))
+
+    def test_an_unknown_lane_is_refused(self) -> None:
+        payload = json.loads(_receipt().to_json())
+        payload["lane"] = "prod"
+        with pytest.raises(ValueError, match="is not a valid EnumLabLane"):
+            ModelLabPassReceipt.from_json(json.dumps(payload))
+
+    def test_an_unknown_check_field_is_refused(self) -> None:
+        payload = json.loads(_receipt().to_json())
+        payload["checks"][0]["severity"] = "high"
+        with pytest.raises(ValueError, match="unknown check field"):
+            ModelLabPassReceipt.from_json(json.dumps(payload))
 
 
 class TestCheckArgumentParsing:
@@ -322,9 +378,7 @@ def _run_gate(surface: _Surface, monkeypatch: Any, sha: str = SHA) -> tuple[int,
 class TestGate:
     def test_present_pass_continues(self, monkeypatch: Any) -> None:
         receipt = _receipt()
-        surface = _Surface(
-            {artifact_name(receipt.lane, SHA): receipt.model_dump_json()}
-        )
+        surface = _Surface({artifact_name(receipt.lane, SHA): receipt.to_json()})
         code, output = _run_gate(surface, monkeypatch)
         assert code == 0
         # AC: the gate PRINTS sha, lane, result and checks.
@@ -336,9 +390,7 @@ class TestGate:
 
     def test_fail_receipt_fails_and_names_the_sha(self, monkeypatch: Any) -> None:
         receipt = _receipt(ok=False)
-        surface = _Surface(
-            {artifact_name(receipt.lane, SHA): receipt.model_dump_json()}
-        )
+        surface = _Surface({artifact_name(receipt.lane, SHA): receipt.to_json()})
         code, output = _run_gate(surface, monkeypatch)
         assert code == 1
         assert f"lab-pass gate FAILED for {SHA}" in output
@@ -362,7 +414,7 @@ class TestGate:
         assert SHA in output
 
     def test_unknown_receipt_version_is_refused(self, monkeypatch: Any) -> None:
-        payload = json.loads(_receipt().model_dump_json())
+        payload = json.loads(_receipt().to_json())
         payload["receipt_version"] = "lab_pass_receipt.v2"
         surface = _Surface(
             {artifact_name(EnumLabLane.COMPOSE_DEV, SHA): json.dumps(payload)}
@@ -381,7 +433,7 @@ class TestGate:
         """
         wrong = _receipt(sha=OTHER_SHA)
         surface = _Surface(
-            {artifact_name(EnumLabLane.COMPOSE_DEV, SHA): wrong.model_dump_json()}
+            {artifact_name(EnumLabLane.COMPOSE_DEV, SHA): wrong.to_json()}
         )
         code, output = _run_gate(surface, monkeypatch)
         assert code == 1
@@ -397,7 +449,7 @@ class TestGate:
         """Rule 24(b) asks for 'a passing lab receipt', not a specific lane's."""
         receipt = _receipt(lane=EnumLabLane.ONEX_LAB)
         surface = _Surface(
-            {artifact_name(EnumLabLane.ONEX_LAB, SHA): receipt.model_dump_json()}
+            {artifact_name(EnumLabLane.ONEX_LAB, SHA): receipt.to_json()}
         )
         code, output = _run_gate(surface, monkeypatch)
         assert code == 0

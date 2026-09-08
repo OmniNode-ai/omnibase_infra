@@ -45,6 +45,13 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("DEPLOY_AGENT_TRACKING_REF", None)
+    # Also cleared so the refusal cases below test what they claim to. The lane
+    # is now resolvable from a single-lane DEPLOY_AGENT_ALLOWED_LANES as well as
+    # from the flag (see deploy_agent.trigger._resolve_runtime_lane), so an
+    # ambient value on the running host would make
+    # test_missing_runtime_lane_refuses_rather_than_guessing pass a command
+    # instead of a refusal -- a false green on the exact assertion that matters.
+    env.pop("DEPLOY_AGENT_ALLOWED_LANES", None)
     if secret is None:
         env.pop("DEPLOY_AGENT_HMAC_SECRET", None)
     else:
@@ -209,9 +216,13 @@ def test_tracking_ref_still_supplies_the_default_git_ref() -> None:
         capture_output=True,
         text=True,
         env={
-            **os.environ,
-            "DEPLOY_AGENT_HMAC_SECRET": _TEST_HMAC,
-            "DEPLOY_AGENT_TRACKING_REF": "dev",
+            k: v
+            for k, v in {
+                **os.environ,
+                "DEPLOY_AGENT_HMAC_SECRET": _TEST_HMAC,
+                "DEPLOY_AGENT_TRACKING_REF": "dev",
+            }.items()
+            if k != "DEPLOY_AGENT_ALLOWED_LANES"
         },
         check=False,
     )
