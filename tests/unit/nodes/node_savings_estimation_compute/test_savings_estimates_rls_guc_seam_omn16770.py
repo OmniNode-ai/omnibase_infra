@@ -1,7 +1,22 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-16770: the savings_estimates idempotency read must never run unscoped.
+"""OMN-16770: the idempotency read must never run unscoped.
+
+The relation moved; the seam did not
+------------------------------------
+The durable close (``test_savings_correlation_internal_idempotency_omn16770.py``)
+repointed ``_find_ready_sessions``' anti-join at
+``omninode_internal.savings_correlation_finalizations`` — INTERNAL-domain, owned
+and written by this node — so the seam these tests pin now passes BY
+CONSTRUCTION rather than by grant or by a bound scope.
+
+That is exactly why the seam is kept and why this file is kept: what it asserts
+is a property of the CONNECTION, not of one relation name. If the relation the
+anti-join reads ever acquires a policy this node has no scope to satisfy, the
+inversion described below is available again, and this refusal is the only
+thing that stops it. Every test here runs against ``IDEMPOTENCY_RELATION``,
+which tracks whatever the anti-join actually reads.
 
 The defect this pins
 --------------------
@@ -9,20 +24,22 @@ The defect this pins
 with an anti-join::
 
     AND NOT EXISTS (
-        SELECT 1 FROM savings_estimates se WHERE se.session_id = cs.session_id
+        SELECT 1 FROM <IDEMPOTENCY_RELATION> se WHERE se.session_id = cs.session_id
     )
 
-``savings_estimates`` is a TENANT relation. ``node_projection_savings/
+The relation that anti-join used to read was ``savings_estimates``, a TENANT
+relation. ``node_projection_savings/
 081_savings_estimates_rls_tenant_isolation.sql`` puts it under ``ENABLE`` **and**
 ``FORCE ROW LEVEL SECURITY`` with the policy
 ``tenant_id = current_setting('app.tenant_id', true)``. The pool that runs this
 query is built from ``OMNINODE_INTERNAL_DB_URL``, whose principal
 ``omninode_runtime`` is pinned NOSUPERUSER / NOBYPASSRLS / non-owner by
-``docker/docker-compose.infra.yml``.
+``docker/docker-compose.infra.yml``. That combination is what made the two
+states below reachable, and it is still the live binding.
 
 That leaves exactly two reachable states, and BOTH are wrong:
 
-* **No grant (today).** The read raises ``InsufficientPrivilegeError`` deep
+* **No grant.** The read raises ``InsufficientPrivilegeError`` deep
   inside the candidate query. Loud, but no estimate is ever produced.
 * **A bare ``GRANT SELECT`` (the obvious "fix").** The policy now evaluates
   ``tenant_id = NULL`` for every row, which is NULL, which is not TRUE — so the
@@ -312,8 +329,13 @@ async def test_an_rls_enforced_connection_with_a_tenant_scope_reads() -> None:
 
 
 def test_the_migration_still_declares_the_premise_the_seam_reads() -> None:
-    """If 081 stops forcing RLS or changes its predicate, this seam's
-    reasoning changed and the guard must be re-derived rather than trusted."""
+    """081 is why the old anti-join was moved, so it is derived, not recalled.
+
+    If 081 stops forcing RLS or changes its predicate, the reasoning that made
+    ``savings_estimates`` unreadable under this node's binding has changed, and
+    both this seam and the OMN-16770 durable close must be re-derived rather
+    than trusted.
+    """
     sql = RLS_MIGRATION.read_text()
 
     assert re.search(
