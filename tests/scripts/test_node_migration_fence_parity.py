@@ -439,8 +439,21 @@ FENCED_HOOK_EVENT_CAPTURE_IDS = (
 # predicates before the switch and carries 0033's body verbatim otherwise;
 # proven by execution in
 # tests/integration/migrations/test_omn17316_role_set_membership_guard.py.
-# 0031, 0032 and 0033 all stay in this tuple permanently: they are RETIRED, not
-# released, and when the operator un-gates it is 0034 and only 0034.
+# OMN-15683 superseded 0034 in turn, making 0036 the FIFTH id here. 0034
+# resolves identity with a SINGLE predicate, m.tenant_slug = d.tenant_id, and
+# has NO branch for a tenant_id that is ALREADY the canonical UUID. Write-time
+# UUID stamping (OMN-16804) is live and writes canonical UUIDs into the
+# still-text column, so the column is MIXED: measured read-only on onex-dev
+# 2026-09-08, 26 of 229 rows across 3 values already hold canonical UUIDs that
+# ARE in tenant_registry_mirror -- under tenant_uuid, which 0034 never reads.
+# 0034 aborts on all of them, and its message blames the tenant-registry
+# projection for data the projection has. 0036 resolves on BOTH forms and stays
+# fail-closed on neither; proven by execution against the seeded onex-dev shape
+# on the .201 dev-lane Postgres. There is no 0035 in this chain -- 0035 is an
+# unrelated GRANT and 0036 is simply the next free ordinal.
+# 0031, 0032, 0033 and 0034 all stay in this tuple permanently: they are
+# RETIRED, not released, and when the operator un-gates it is 0036 and only
+# 0036.
 FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql",
     "node:node_projection_delegation:"
@@ -449,6 +462,8 @@ FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "0033_delegation_events_uuid_via_registry_single_transaction.sql",
     "node:node_projection_delegation:"
     "0034_delegation_events_uuid_via_registry_role_set_guard.sql",
+    "node:node_projection_delegation:"
+    "0036_delegation_events_uuid_mixed_representation.sql",
 )
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
@@ -567,8 +582,13 @@ DEV_LANE_VALUE = "dev"
 # them now apply because nothing fences them, not because this release un-gates
 # them.
 #
-# WIDENED by OMN-15683 (2026-09-08): the dev/lab arm now also releases
-# delegation 0034, the operative uuid conversion. It stays in the BASELINE
+# WIDENED by OMN-15683 (2026-09-08): the dev/lab arm now also releases the
+# operative uuid conversion. THE RELEASED ID IS 0036, NOT 0034 -- 0034 was
+# released here earlier the same day and lost the release when the onex-dev
+# read-only enumeration showed it cannot convert a mixed-representation column
+# (it resolves on m.tenant_slug alone; 26 of 229 rows already hold canonical
+# UUIDs). 0034 keeps its baseline entry and is retired in place. 0036 stays in
+# the BASELINE
 # manifest rather than leaving it, because it enables FORCE ROW LEVEL SECURITY
 # and is not grandfathered -- a baseline removal is FATAL under the OMN-15336
 # item-4 guard, whose own message prescribes exactly this remedy ("add a fence
@@ -580,7 +600,7 @@ DEV_LANE_VALUE = "dev"
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
     "node:node_projection_delegation:"
-    "0034_delegation_events_uuid_via_registry_role_set_guard.sql",
+    "0036_delegation_events_uuid_mixed_representation.sql",
 )
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
@@ -1025,9 +1045,12 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
     Ruling 15 is scoped to node_service_registry; post-OMN-17150 that is 0002
     alone, because 0000/0001 are no longer fenced for any lane to release, and
     the dev lane still ends up with the whole trio applied. OMN-15683
-    (2026-09-08) added delegation 0034 on the same arm — it stays in the
-    baseline because a removal is FATAL under the item-4 FORCE-RLS guard, so
-    the lane release is the only mechanism that can un-gate it.
+    (2026-09-08) added the operative delegation conversion on the same arm — it
+    stays in the baseline because a removal is FATAL under the item-4 FORCE-RLS
+    guard, so the lane release is the only mechanism that can un-gate it. The
+    id it names is 0036: 0034 held this slot for part of the same day and lost
+    it once the onex-dev enumeration showed it cannot convert a
+    mixed-representation column.
     """
     policies = parse_lane_release_policies(extract_fence_block())
     assert policies[DEV_LANE_VALUE] == LANE_RELEASED_IDS, (
@@ -1044,7 +1067,7 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
     )
     assert set(LANE_RELEASED_IDS) - set(FENCED_REGISTRATION_IDS) == {
         "node:node_projection_delegation:"
-        "0034_delegation_events_uuid_via_registry_role_set_guard.sql",
+        "0036_delegation_events_uuid_mixed_representation.sql",
     }, "the dev-lane release carries ids no operator ruling names"
 
 
@@ -1074,14 +1097,17 @@ def test_unreleasable_delegation_ids_are_not_releasable_on_any_lane() -> None:
     awareness, so releasing one applies a superseded conversion on every lane
     that has not already recorded it. 0026 is here too: releasing it was
     measured on the .201 dev lane to refuse every write the lane's own async
-    judge-verdict writer issues. OMN-15683 released 0034 on the dev/lab lane;
-    that one id is deliberately outside this set.
+    judge-verdict writer issues. 0034 joined them on 2026-09-08, superseded by
+    0036 under OMN-15683 -- it resolves identity on m.tenant_slug alone and
+    aborts on the 26 already-canonical-UUID rows onex-dev holds. OMN-15683
+    released 0036 on the dev/lab lane; that one id is deliberately outside this
+    set.
     """
     forbidden = set(UNRELEASABLE_DELEGATION_IDS) | set(
         FENCED_DELEGATION_UUID_CONVERSION_IDS
     ) - {
         "node:node_projection_delegation:"
-        "0034_delegation_events_uuid_via_registry_role_set_guard.sql"
+        "0036_delegation_events_uuid_mixed_representation.sql"
     }
     for label, released in parse_lane_release_policies(extract_fence_block()).items():
         leaked = sorted(set(released or ()) & forbidden)

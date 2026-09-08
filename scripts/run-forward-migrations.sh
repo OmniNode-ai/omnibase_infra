@@ -370,14 +370,24 @@ migration_declares_unclassified_force_rls() {
 # Delegation 0023 is NOT releasable on ANY lane. Ruling 15 is scoped to
 # node_service_registry, and 0023 is a SUPERSEDED id (its CREATE POLICY
 # compares TEXT to TEXT and aborts against the converted uuid column), so no
-# case arm below names it. 0031, 0032 and 0033 are likewise not releasable:
-# they are retired conversions and neither runner has any supersession
-# awareness, so releasing one would apply a superseded conversion on every lane
-# that has not already recorded it.
+# case arm below names it. 0031, 0032, 0033 and 0034 are likewise not
+# releasable: they are retired conversions and neither runner has any
+# supersession awareness, so releasing one would apply a superseded conversion
+# on every lane that has not already recorded it.
 #
-# WIDENED 2026-09-08 (OMN-15683). The dev arm below now ALSO releases
-# delegation 0034 — the operative uuid conversion — under the operator ruling of
-# that date recorded in the omni_home rolling work ledger. It stays in the
+# WIDENED 2026-09-08 (OMN-15683). The dev arm below ALSO releases the operative
+# uuid conversion, under the operator ruling of that date recorded in the
+# omni_home rolling work ledger.
+#
+# THE RELEASED ID IS NOW 0036, NOT 0034 (OMN-15683, later the same day). 0034
+# resolves identity on m.tenant_slug alone and has no branch for a tenant_id
+# that is ALREADY the canonical UUID. Write-time UUID stamping (OMN-16804) is
+# live, so the column is now MIXED: measured read-only on onex-dev, 26 of 229
+# rows across 3 values already hold canonical UUIDs that ARE in
+# tenant_registry_mirror under tenant_uuid, and 0034 aborts on all of them with
+# a message blaming the projection for data that is present. 0036 resolves on
+# BOTH forms and is fail-closed on neither. 0034 is retired in place and keeps
+# its baseline entry; it simply no longer appears here. It stays in the
 # baseline manifest rather than leaving it, because it enables FORCE ROW LEVEL
 # SECURITY and is not grandfathered: a baseline removal hands it to the
 # OMN-15336 item-4 guard below, which is FATAL for exactly that shape (measured
@@ -413,7 +423,7 @@ case "${ONEX_MIGRATION_LANE}" in
     # longer covers would be inert but would misdescribe the policy.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
-node:node_projection_delegation:0034_delegation_events_uuid_via_registry_role_set_guard.sql"
+node:node_projection_delegation:0036_delegation_events_uuid_mixed_representation.sql"
     ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""
