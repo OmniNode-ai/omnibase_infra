@@ -113,12 +113,37 @@ def _tracked_files() -> list[str]:
     return result.stdout.splitlines()
 
 
+# The catalog names whose VALUE the render is allowed to read from the render
+# host, and which therefore have to be neutralised before this test measures the
+# ${VAR:?} NAME set. Today that is the source_env of every optional directory
+# bind mount declared under docker/catalog/services/. Set to a value the
+# generator accepts, so the test exercises the configured branch rather than the
+# unconfigured one -- the point of OMN-17291 is that both branches render the
+# same names, and the companion unit tests in
+# tests/unit/infra/test_catalog_generator.py assert exactly that.
+_HOST_SENSITIVE_RENDER_INPUTS = ("CODING_AGENT_CLAUDE_CREDS_HOST_DIR",)
+
+
 def _generate_catalog_compose(output: Path) -> None:
-    """Run the catalog CLI generator into *output*, in a subprocess."""
+    """Run the catalog CLI generator into *output*, in a subprocess.
+
+    The subprocess gets a CONTROLLED environment for every name the render is
+    allowed to read. Inheriting them unfiltered is what made this test's verdict
+    a property of the machine: a workstation carrying ambient coding-agent
+    credentials rendered one required-var name that a lab host without them did
+    not, so the test passed on one and failed on the other for the same commit
+    (OMN-17291; measured on lab host h105 at 2026-09-08). The generator no
+    longer branches on those values, and pinning them here keeps the test
+    measuring the DECLARATION even if a future optional input reintroduces a
+    host-sensitive branch.
+    """
     env = dict(os.environ)
+    for name in _HOST_SENSITIVE_RENDER_INPUTS:
+        env[name] = str(_REPO_ROOT)
     # The generator reads os.environ for image tags and similar render-time
-    # values, and the CLI also loads ~/.omnibase/.env and the repo .env. None of
-    # that changes the ${VAR:?} NAME set, which is what this test measures.
+    # values, and the CLI also loads ~/.omnibase/.env and the repo .env. Those
+    # supply VALUES; with the names above pinned, none of them changes the
+    # ${VAR:?} NAME set, which is what this test measures.
     result = subprocess.run(
         [
             sys.executable,

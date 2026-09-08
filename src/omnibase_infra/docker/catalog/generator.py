@@ -15,35 +15,59 @@ from omnibase_infra.docker.catalog.resolver import ResolvedStack
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
 
 
+# Compose default for an optional directory bind mount whose source variable is
+# unset. It must be a DIRECTORY: a file fallback such as ``/dev/null`` is
+# invalid for a directory target, which is the OMN-13248 defect that made the
+# mount conditional in the first place. Docker creates a missing bind source
+# directory, so this resolves to an empty, read-only directory on any host --
+# the same outcome the container saw when the mount was omitted, and the
+# coding-agent handler still fails closed on absent credentials.
+_ABSENT_OPTIONAL_BIND_SOURCE = "/var/lib/omninode/optional-bind-source-absent"
+
+
 def _render_optional_directory_bind_mount(
     *,
     source_env: str,
     container_path: str,
     read_only: bool,
     environment: Mapping[str, str],
-) -> str | None:
-    """Render an optional directory mount after validating its host source.
+) -> str:
+    """Render an optional directory mount from the catalog declaration alone.
 
-    A file fallback (such as ``/dev/null``) is invalid for a directory target:
-    Docker rejects it as a file-to-directory mount.  Keep an unset optional
-    credential source out of compose entirely, while making an explicitly
-    configured source fail closed unless it is an existing absolute directory.
+    The rendered entry is a function of the catalog declaration and nothing
+    else. It used to be a function of the RENDER HOST as well (OMN-17291): the
+    mount was emitted only when ``source_env`` was set in the render process's
+    environment AND pointed at an existing directory, and dropped otherwise. Two
+    hosts therefore rendered two different compose files from one commit -- and
+    because the emitted expression was a compose REQUIRED-var (``${VAR:?}``),
+    they rendered two different required-var NAME sets. The committed
+    declaration in ``docker/generated-compose-required-env.manifest.txt`` cannot
+    be exact for both, so the parity test asserting it passed on a workstation
+    carrying ambient coding-agent credentials and failed on a lab host carrying
+    none, for the same tree.
+
+    The source is now always emitted with a compose DEFAULT rather than a
+    required-var expression, so the mount introduces no required-var name at
+    all and every render interpolates on a host that supplies no value --
+    which ``docker compose config`` on the generated render does, on the
+    stability lane and in the deploy agent's own compose_gen path.
+
+    A configured source is still validated as an existing absolute directory at
+    render time, so an explicitly set but unusable value fails closed here
+    rather than at container start.
     """
     raw_source = environment.get(source_env)
-    if raw_source is None or not raw_source.strip():
-        return None
-    if raw_source != raw_source.strip():
-        raise ValueError(f"{source_env} must not contain surrounding whitespace")
-
-    source_path = Path(raw_source)
-    if not source_path.is_absolute() or not source_path.is_dir():
-        raise ValueError(f"{source_env} must point to an existing absolute directory")
+    if raw_source is not None and raw_source.strip():
+        if raw_source != raw_source.strip():
+            raise ValueError(f"{source_env} must not contain surrounding whitespace")
+        source_path = Path(raw_source)
+        if not source_path.is_absolute() or not source_path.is_dir():
+            raise ValueError(
+                f"{source_env} must point to an existing absolute directory"
+            )
 
     mode = ":ro" if read_only else ""
-    return (
-        f"${{{source_env}:?{source_env} must point to an existing absolute directory}}:"
-        f"{container_path}{mode}"
-    )
+    return f"${{{source_env}:-{_ABSENT_OPTIONAL_BIND_SOURCE}}}:{container_path}{mode}"
 
 
 def _runtime_image_build() -> dict[str, object]:
@@ -114,14 +138,14 @@ def generate_compose(
         # Volumes
         volumes = list(manifest.volumes)
         for mount in manifest.optional_directory_bind_mounts:
-            rendered = _render_optional_directory_bind_mount(
-                source_env=mount.source_env,
-                container_path=mount.container_path,
-                read_only=mount.read_only,
-                environment=configured_environment,
+            volumes.append(
+                _render_optional_directory_bind_mount(
+                    source_env=mount.source_env,
+                    container_path=mount.container_path,
+                    read_only=mount.read_only,
+                    environment=configured_environment,
+                )
             )
-            if rendered is not None:
-                volumes.append(rendered)
 
         if volumes:
             svc["volumes"] = volumes
