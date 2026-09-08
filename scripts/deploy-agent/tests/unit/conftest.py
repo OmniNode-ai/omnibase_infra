@@ -61,3 +61,21 @@ def _declare_lane_fence(monkeypatch: pytest.MonkeyPatch) -> None:
     is unaffected by this fixture.
     """
     monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev,stability-test,prod")
+
+
+@pytest.fixture(autouse=True)
+def _declare_control_bus_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-18012: KAFKA_SECURITY_PROTOCOL is required and has no default.
+
+    The agent refuses to start on an undeclared control-bus transport rather
+    than inferring one from whether SASL credentials happen to be in the
+    environment. Tests that construct a ``DeployAgent`` are not testing that
+    declaration, so they get an explicit plaintext one here rather than each
+    re-declaring it — the same visible arrangement as the lane fence above.
+
+    This is not a bypass: the declaration's own behaviour, including that an
+    unset variable refuses startup and that credential presence never selects a
+    protocol, is asserted in ``test_kafka_config.py``, which deletes the
+    variable in its own autouse fixture and so is unaffected by this one.
+    """
+    monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")

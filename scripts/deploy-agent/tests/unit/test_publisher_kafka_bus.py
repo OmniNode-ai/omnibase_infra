@@ -17,6 +17,7 @@ def test_publish_result_uses_configured_kafka_bus() -> None:
     config = ModelDeployAgentKafkaConfig(
         bootstrap_servers="pkc.example.confluent.cloud:9092",
         security_protocol="SASL_SSL",
+        sasl_mechanism="PLAIN",
         sasl_username="key",
         sasl_password=_TEST_PASSWORD,
     )

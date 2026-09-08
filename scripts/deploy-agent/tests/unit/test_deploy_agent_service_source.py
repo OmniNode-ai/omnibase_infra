@@ -367,3 +367,37 @@ def test_units_bound_the_fail_fast_restart_loop() -> None:
         directives = [ln.strip() for ln in text.splitlines()]
         assert "StartLimitIntervalSec=300" in directives, unit_name
         assert "StartLimitBurst=5" in directives, unit_name
+
+
+def test_dev_unit_declares_its_sasl_scram_control_bus_transport() -> None:
+    """OMN-18012: the dev unit is the dev agent's lane declaration surface.
+
+    The dev-lane Redpanda external listener requires SCRAM-SHA-256 over
+    PLAINTEXT. deploy_agent.kafka_config refuses to start on an undeclared
+    transport, so the three names below are what make this unit startable at
+    all -- and declaring them here, rather than letting the loader infer a
+    protocol from the presence of credentials, is the whole fix.
+    """
+    text = (_DEPLOY_DIR / "deploy-agent-dev.service").read_text()
+
+    assert "Environment=KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT" in text
+    assert "Environment=KAFKA_SASL_MECHANISM=SCRAM-SHA-256" in text
+    # The lane's SCRAM principal stays in the operator env file under its
+    # DEV_ prefix; a unit file must never carry the credential itself.
+    assert "Environment=KAFKA_SASL_ENV_PREFIX=DEV_" in text
+    assert "KAFKA_SASL_PASSWORD=" not in text
+    assert "KAFKA_SASL_USERNAME=" not in text
+
+
+def test_prod_drop_in_declares_its_plaintext_control_bus_transport() -> None:
+    """The prod broker configures no SASL; PLAINTEXT is declared, not defaulted."""
+    text = (_DEPLOY_DIR / "deploy-agent.service.d" / "override.conf").read_text()
+
+    assert "Environment=KAFKA_SECURITY_PROTOCOL=PLAINTEXT" in text
+    exec_start_lines = [
+        line for line in text.splitlines() if line.startswith("ExecStart=/usr/bin/env")
+    ]
+    assert exec_start_lines, "drop-in must re-declare ExecStart"
+    assert all(
+        "KAFKA_SECURITY_PROTOCOL=PLAINTEXT" in line for line in exec_start_lines
+    ), exec_start_lines
