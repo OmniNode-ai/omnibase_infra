@@ -9,13 +9,19 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class ModelOptionalDirectoryBindMount:
-    """A read-only host directory mounted only when its source env var is set.
+    """A host directory bind mount whose source comes from an env var.
 
-    The catalog generator validates a configured source as an existing absolute
-    directory before it renders the compose interpolation.  An unset source is
-    intentionally absent from the rendered service instead of being replaced by
-    a file sentinel, which prevents Docker from binding a file onto a directory
-    target.
+    The mount is OPTIONAL in that the repository commits no value for
+    ``source_env``; it is not conditional in the render. The generator always
+    emits it, with a directory-valued compose default for the unset case, so the
+    rendered compose -- and in particular its required-var name set -- is a
+    function of this declaration and not of the machine that ran the render
+    (OMN-17291).
+
+    The default is a DIRECTORY, never a file sentinel such as ``/dev/null``,
+    which is what stops Docker being asked to bind a file onto a directory
+    target. A configured source is validated as an existing absolute directory
+    at render time.
     """
 
     source_env: str
