@@ -172,12 +172,22 @@ def _list_consumer_group_snapshots(
     """
     from confluent_kafka.admin import AdminClient
 
+    from omnibase_infra.event_bus.kafka_auth import (
+        build_confluent_auth_config_from_env,
+    )
+
     timeout_seconds = max(request_timeout_ms / 1000.0, 1.0)
+    # OMN-18012: the aiokafka data plane in this same container authenticates
+    # from KAFKA_SECURITY_PROTOCOL/KAFKA_SASL_* while this admin client opened
+    # PLAINTEXT, so consumer_coverage failed every cycle on a SASL lane and the
+    # container was marked unhealthy. Same resolver, confluent projection: the
+    # spread is empty on a PLAINTEXT lane.
     admin = AdminClient(
         {
             "bootstrap.servers": bootstrap_servers,
             "socket.timeout.ms": request_timeout_ms,
             "request.timeout.ms": request_timeout_ms,
+            **build_confluent_auth_config_from_env(),
         }
     )
     result = admin.list_consumer_groups(request_timeout=timeout_seconds).result(
