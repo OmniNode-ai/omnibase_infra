@@ -74,6 +74,29 @@
 # watchdog cannot tell it apart from a hang), Type=simple, Restart=on-failure.
 
 #
+# TRACKING REF (declared, never inferred -- OMN-16442)
+#
+# DEPLOY_AGENT_TRACKING_REF names the branch this process tracks: the ref
+# self_update() fetches and re-execs onto, the default git_ref of a rebuild
+# command that omits one, and the sibling-repo fallback for the build-arg
+# cache-bust refs. It is REQUIRED and has no default -- deploy_agent.tracking_ref
+# raises rather than guessing.
+#
+# The value is `dev`, per the operator ruling of 2026-09-08 (firm): the deploy
+# agent tracks the lane deploy branch, never `main`. Until this landed, the
+# literal `origin/main` was compiled into self_update. This repo's `main` is
+# release-synced -- it is advanced only by an automated fast-forward to the last
+# released tag and is not a PR-merge target -- so a code clone checked out on
+# `dev` is hundreds of commits ahead of it. The dev agent therefore never
+# self-updated, could not pick up its own fixes (#3305, #3306, #3316), and the
+# manual path was the only dev deploy path for a full night.
+#
+# Setting this to `dev` on THIS unit does not open a prod promotion path. Prod
+# deploys a pinned, stability-proven image digest -- ModelRebuildRequested
+# refuses a prod command without image_digest, and prod never rebuilds from a
+# ref -- and prod image promotion is governed by the OMN-13418 grant path, not
+# by which branch this agent's own code tracks.
+#
 # PORT PREFLIGHT (fail-fast, never destructive)
 #
 # ExecStartPre runs deploy/preflight_port_free.sh, which refuses to start
@@ -106,6 +129,7 @@ EnvironmentFile=/home/jonah/.omnibase/.env
 Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev
 Environment=DEPLOY_AGENT_PORT=8098
+Environment=DEPLOY_AGENT_TRACKING_REF=dev
 Environment=DEPLOY_AGENT_ALLOWED_LANES=dev
 Environment=KAFKA_BOOTSTRAP_SERVERS=192.168.86.201:19092
 Environment=KAFKA_ENVIRONMENT=dev

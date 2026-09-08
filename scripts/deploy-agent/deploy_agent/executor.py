@@ -29,6 +29,7 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
+from deploy_agent.tracking_ref import load_tracking_ref_from_env
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
 # Scope.FULL regenerates both core and runtime bundles.
@@ -700,10 +701,18 @@ class DeployExecutor:
                 )
 
     def self_update(self, *, skip: bool = False) -> None:
-        """Pull and re-exec deploy-agent itself if behind origin/main.
+        """Pull and re-exec deploy-agent itself if behind its tracking ref.
 
         Called as the first step of every rebuild_scope() invocation so that
-        a bug-fix merged to main is picked up before the next deploy runs.
+        a bug-fix merged to the lane's deploy branch is picked up before the
+        next deploy runs.
+
+        The branch is DECLARED, never hardcoded: ``DEPLOY_AGENT_TRACKING_REF``
+        is required and has no default (OMN-16442, see
+        ``deploy_agent.tracking_ref``). This method previously compared against
+        a literal ``origin/main``; the .201 dev agent's clone is on ``dev``,
+        hundreds of commits ahead of a release-synced ``main``, so it never
+        self-updated and could not pick up its own fixes.
 
         Safety rails:
         - Skipped entirely when DEPLOY_AGENT_NO_SELF_UPDATE=1 is set.
@@ -711,11 +720,18 @@ class DeployExecutor:
         - skip=True (--skip-self-update CLI flag) bypasses the check.
         - Container mode (DEPLOY_AGENT_MODE=container) exits with code 42
           instead of os.execv so the supervisor can respawn from the new binary.
+
+        Raises:
+            RuntimeError: when ``DEPLOY_AGENT_TRACKING_REF`` is unset. The
+                kill-switch and ``skip=True`` are checked first, so a
+                deliberately disabled self-update never needs the variable.
         """
         if skip or os.environ.get("DEPLOY_AGENT_NO_SELF_UPDATE") == "1":
             logger.info("self_update: skipped (kill-switch active)")
             return
 
+        branch = load_tracking_ref_from_env()
+        remote_ref = f"origin/{branch}"
         agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         timeout = 60
 
@@ -736,9 +752,9 @@ class DeployExecutor:
             )
             return
 
-        # Fetch latest origin/main.
+        # Fetch the declared tracking ref.
         fetch_result = _run(
-            ["git", "-C", agent_dir, "fetch", "origin", "main"],
+            ["git", "-C", agent_dir, "fetch", "origin", branch],
             timeout=timeout,
         )
         if fetch_result.returncode != 0:
@@ -754,7 +770,7 @@ class DeployExecutor:
             timeout=timeout,
         )
         remote_result = _run(
-            ["git", "-C", agent_dir, "rev-parse", "origin/main"],
+            ["git", "-C", agent_dir, "rev-parse", remote_ref],
             timeout=timeout,
         )
         if head_result.returncode != 0 or remote_result.returncode != 0:
@@ -766,19 +782,21 @@ class DeployExecutor:
 
         if local_sha == remote_sha:
             logger.info(
-                "self_update: already at origin/main (%s), nothing to do",
+                "self_update: already at %s (%s), nothing to do",
+                remote_ref,
                 local_sha[:12],
             )
             return
 
         logger.info(
-            "self_update: behind origin/main (local=%s remote=%s), pulling and re-execing",
+            "self_update: behind %s (local=%s remote=%s), pulling and re-execing",
+            remote_ref,
             local_sha[:12],
             remote_sha[:12],
         )
 
         pull_result = _run(
-            ["git", "-C", agent_dir, "pull", "--ff-only", "origin", "main"],
+            ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
             timeout=timeout,
         )
         if pull_result.returncode != 0:
@@ -1389,14 +1407,21 @@ class DeployExecutor:
         return self.verify(on_phase_update=on_phase_update, lane=lane)
 
     @staticmethod
-    def _resolve_plugin_ref(repo_dir: str) -> str:
+    def _resolve_plugin_ref(repo_dir: str, *, fallback: str) -> str:
         """Return the HEAD SHA of a plugin repo for uv cache busting (OMN-10728).
 
         BuildKit's uv cache mount is keyed on the install URL, not the resolved
-        git HEAD. Passing @main always hits the stale cache entry. Passing the
-        full SHA forces a cache miss and a fresh fetch every time main advances.
+        git HEAD. Passing a bare branch always hits the stale cache entry.
+        Passing the full SHA forces a cache miss and a fresh fetch every time
+        the branch advances.
 
-        Falls back to "main" so manual docker builds without omni_home still work.
+        ``fallback`` is the branch name to use when the sibling clone is absent
+        or ``git rev-parse`` fails, so manual docker builds without omni_home
+        still work. It is supplied by the caller from the declared tracking ref
+        (OMN-16442) rather than hardcoded here: the old literal ``"main"``
+        resolved a release-synced branch on repos whose integration branch is
+        ``dev``, which is precisely the class of stale-ref defect the operator
+        ruling names.
         """
         result = subprocess.run(
             ["git", "-C", repo_dir, "rev-parse", "HEAD"],
@@ -1407,12 +1432,13 @@ class DeployExecutor:
         if result.returncode == 0:
             return result.stdout.strip()
         logger.warning(
-            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to branch default",
+            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to %s",
             repo_dir,
             result.returncode,
             result.stderr[:200],
+            fallback,
         )
-        return "main"
+        return fallback
 
     @staticmethod
     def _stage_workspace(repo_dir: str, omni_home: str) -> None:
@@ -1493,13 +1519,24 @@ class DeployExecutor:
                 )
             self._stage_workspace(REPO_DIR, omni_home)
 
+        # OMN-16442: the sibling-repo fallback branch is the declared tracking
+        # ref, not a literal. It used to be "dev" for omnimarket and "main" for
+        # omnibase_compat — an asymmetry with no stated reason, on two repos
+        # that both integrate on `dev`.
+        sibling_fallback = load_tracking_ref_from_env()
         omnimarket_ref = (
-            self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "dev"
+            self._resolve_plugin_ref(
+                f"{omni_home}/omnimarket", fallback=sibling_fallback
+            )
+            if omni_home
+            else sibling_fallback
         )
         compat_ref = (
-            self._resolve_plugin_ref(f"{omni_home}/omnibase_compat")
+            self._resolve_plugin_ref(
+                f"{omni_home}/omnibase_compat", fallback=sibling_fallback
+            )
             if omni_home
-            else "main"
+            else sibling_fallback
         )
         logger.info(
             "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s",
