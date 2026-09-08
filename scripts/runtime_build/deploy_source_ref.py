@@ -79,6 +79,13 @@ SYNC_NOT_CONVERGED = 5
 # script, two of which are TRACKED committed placeholders the build overwrites
 # by design. A reconciler that refuses on those refuses forever on the one clone
 # it most needs to cover. Everything OUTSIDE this prefix still blocks.
+#
+# OMN-16442: `deploy-source-refs.json` is no longer among them -- stage_workspace.sh
+# now writes the expected-refs manifest OUTSIDE the build context entirely, because
+# an untracked byproduct in a git clone is not only noise for this reconciler, it
+# also read as "dirty" to the deploy agent's own self-update gate and stopped the
+# agent from ever picking up its merged fixes. The two TRACKED placeholders above
+# still need this carve-out; the third file no longer exists here on a post-fix run.
 BUILD_SCRATCH_PREFIXES: tuple[str, ...] = ("workspace/",)
 
 
