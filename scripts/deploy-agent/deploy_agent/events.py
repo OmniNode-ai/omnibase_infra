@@ -16,6 +16,12 @@ from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 TOPIC_REBUILD_REQUESTED = "onex.cmd.deploy.rebuild-requested.v1"
 TOPIC_REBUILD_COMPLETED = "onex.evt.deploy.rebuild-completed.v1"
 TOPIC_REBUILD_REJECTED = "onex.evt.deploy.rebuild-rejected.v1"
+# Dead-letter target for a command record the agent cannot decode or validate
+# (OMN-16442). Shape follows the org convention onex.dlq.<producer>.<category>.<version>.
+# A record that lands here is one the agent has committed past: it can never be
+# decoded by redelivery, and withholding the offset stalls every command behind
+# it -- see deploy_agent.consumer for the full argument.
+TOPIC_DEPLOY_COMMAND_DLQ = "onex.dlq.omnibase-infra.deploy-command.v1"
 
 
 class DeployInProgressError(RuntimeError):
