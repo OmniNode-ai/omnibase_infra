@@ -1282,15 +1282,30 @@ def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
     """
     overlay_filename = Path(DEV_LANE_OVERLAY_RELPATH).name
 
+    # OMN-16729: resolve_compose_file_args() moved out of deploy-runtime.sh into
+    # scripts/runtime_build/compose_files.sh, which deploy-runtime.sh and both
+    # lane-refresh wrappers now source. Both halves are asserted: the resolver
+    # layers the overlay, AND deploy-runtime.sh actually loads the file that
+    # defines it -- a lib nobody sources brings the lane up with no indicator
+    # just as surely as a resolver that omits the overlay.
     deploy_runtime = (REPO_ROOT / "scripts" / "deploy-runtime.sh").read_text(
         encoding="utf-8"
     )
+    assert "runtime_build/compose_files.sh" in deploy_runtime, (
+        "deploy-runtime.sh does not source the shared compose-file resolver, so "
+        "it has no lane -> compose-file mapping at all"
+    )
+    compose_files = (
+        REPO_ROOT / "scripts" / "runtime_build" / "compose_files.sh"
+    ).read_text(encoding="utf-8")
     resolver = re.search(
         r"^resolve_compose_file_args\s*\(\)\s*\{.*?\n\}",
-        deploy_runtime,
+        compose_files,
         re.DOTALL | re.MULTILINE,
     )
-    assert resolver is not None, "resolve_compose_file_args() not found"
+    assert resolver is not None, (
+        "resolve_compose_file_args() not found in scripts/runtime_build/compose_files.sh"
+    )
     assert overlay_filename in resolver.group(0), (
         f"resolve_compose_file_args() does not layer {overlay_filename} for the "
         "dev lane, so `deploy-runtime.sh` brings the lab lane up with no lane "

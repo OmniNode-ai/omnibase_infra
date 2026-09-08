@@ -100,6 +100,14 @@ source "${SCRIPT_DIR}/lane_lock.sh"
 # compose_up_bounded, reconcile_container_running_state, container_status.
 # shellcheck source=./compose_wait_timeout.sh
 source "${SCRIPT_DIR}/compose_wait_timeout.sh"
+
+# OMN-16729: the ONE derivation of a lane's `docker compose -f ...` token
+# sequence, shared with deploy-runtime.sh and refresh_dev_lane.sh. This script
+# already spelled both files correctly by hand, but a hand-spelled copy is
+# exactly what silently lost the dev lane's overlay on the sibling script's
+# rollback path; there is now one copy and every caller reads it.
+# shellcheck source=./compose_files.sh
+source "${SCRIPT_DIR}/compose_files.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_stability_refresh.py"
 CONSUMER_GROUPS_FILE="${SCRIPT_DIR}/consumer_groups_stability.yaml"
 
@@ -547,6 +555,11 @@ INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
 # `docker compose` is driven from below -- not this script's own checkout,
 # which may be a different revision.
 LANE_COMPOSE_FILE="${INFRA_CLONE}/docker/docker-compose.stability-test.yml"
+# The lane's compose file list, resolved once from the shared resolver and used
+# by every compose invocation this script makes -- notably the rollback recreate
+# below. Never spell a `-f` path inline (OMN-16729).
+declare -a LANE_COMPOSE_FILE_ARGS
+resolve_compose_file_args LANE_COMPOSE_FILE_ARGS "${INFRA_CLONE}" "${COMPOSE_PROJECT}"
 git_clone "${INFRA_CLONE}" fetch origin --prune
 RESOLVED_REF_SHA="$(git_clone "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
 git_clone "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"
@@ -709,8 +722,7 @@ else
     ROLLBACK_RECREATE_TIMED_OUT=false
     compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" \
         docker compose -p "${COMPOSE_PROJECT}" \
-        -f "${INFRA_CLONE}/docker/docker-compose.infra.yml" \
-        -f "${INFRA_CLONE}/docker/docker-compose.stability-test.yml" \
+        "${LANE_COMPOSE_FILE_ARGS[@]}" \
         --profile runtime \
         up -d --no-deps --no-build --force-recreate \
         "${CORE_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?
