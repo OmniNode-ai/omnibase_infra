@@ -99,3 +99,43 @@ def _declare_tracking_ref(monkeypatch: pytest.MonkeyPatch) -> None:
     this one.
     """
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
+
+
+@pytest.fixture(autouse=True)
+def _derive_runtime_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-18057: derive the runtime compose-up ceiling from THIS checkout.
+
+    ``_compose_up`` now reads the lane's compose files to derive its ceiling
+    (``deploy_agent.compose_budget``) and refuses fail-closed when it cannot --
+    a ceiling that silently reverts to its floor because the model was
+    unreadable is the same undetectable wrongness as the bare ``300`` this
+    replaced. ``REPO_DIR`` is a deploy-HOST path that does not exist in the
+    unit-test sandbox, so the files are repointed at the repository under test.
+
+    This is a path repoint, not a stub: the real derivation runs, against the
+    real ``docker/docker-compose.infra.yml`` + dev-lane overlay, so a compose
+    change that moves ``start_period`` moves what these tests observe. The
+    derivation's own behaviour -- including the fail-closed read and the
+    ``service_healthy`` gating rule -- is asserted directly in
+    ``test_compose_budget_omn18057.py``.
+    """
+    from deploy_agent import compose_budget
+    from deploy_agent import executor as executor_mod
+
+    docker_dir = Path(__file__).resolve().parents[4] / "docker"
+    compose_files = (
+        str(docker_dir / "docker-compose.infra.yml"),
+        str(docker_dir / "docker-compose.dev-lane.yml"),
+    )
+
+    def _budget(
+        lane: object, expected_services: list[str]
+    ) -> compose_budget.ModelPhaseBudget:
+        return compose_budget.derive_runtime_phase_budget(
+            compose_files,
+            expected_services,
+            margin_seconds=executor_mod.RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
+            floor_seconds=executor_mod.RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+        )
+
+    monkeypatch.setattr(executor_mod, "runtime_compose_up_budget", _budget)

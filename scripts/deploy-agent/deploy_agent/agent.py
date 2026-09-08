@@ -208,6 +208,11 @@ class DeployAgent:
         self._state = "deploying"
         cid = cmd.correlation_id
         health_checks = []
+        # OMN-18057: what the deploy ACTUALLY did, for the terminal event.
+        # rebuild_scope has always returned the services it brought up and this
+        # method has always discarded the return, which is why every terminal
+        # event reported services_restarted=[] for a scope-default deploy.
+        services_restarted: list[str] = []
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
             self.job_store.update_phase(cid, phase, status)
@@ -262,7 +267,7 @@ class DeployAgent:
 
             # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
             # cache. prod pulls the pinned digest instead of rebuilding from a ref.
-            self.executor.rebuild_scope(
+            services_restarted = self.executor.rebuild_scope(
                 cmd.scope,
                 cmd.services,
                 on_phase_update=on_phase_update,
@@ -306,7 +311,11 @@ class DeployAgent:
             job.current_phase = Phase.PUBLISH
             self.job_store._save(job)
             payload = build_completion_payload(
-                job, self._current_git_sha, health_checks
+                job,
+                self._current_git_sha,
+                health_checks,
+                services_restarted=services_restarted,
+                container_residue=self.executor.container_residue,
             )
             if publish_result(payload, self._kafka_config):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS

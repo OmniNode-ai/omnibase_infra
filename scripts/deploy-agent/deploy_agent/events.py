@@ -98,6 +98,21 @@ class PhaseStatus(StrEnum):
     PENDING = "pending"
 
 
+# The phases a deploy actually executes, in pipeline order. PUBLISH is
+# deliberately absent: it is the act of emitting the terminal event, so an event
+# can never carry a settled verdict for it (OMN-18057). Used by the terminal
+# reconciliation to decide which phases a raised deploy never reached.
+DEPLOY_PHASE_ORDER: tuple[Phase, ...] = (
+    Phase.PREFLIGHT,
+    Phase.GIT,
+    Phase.COMPOSE_GEN,
+    Phase.SEED,
+    Phase.CORE,
+    Phase.RUNTIME,
+    Phase.VERIFICATION,
+)
+
+
 SCOPE_SERVICES: dict[Scope, list[str]] = {
     Scope.CORE: ["postgres", "redpanda", "valkey"],
     Scope.RUNTIME: [
@@ -128,6 +143,24 @@ class ModelHealthCheck(BaseModel):
     endpoint: str
     status: Literal["pass", "fail"]
     latency_ms: int = 0
+
+
+class ModelContainerResidue(BaseModel):
+    """One service left in a non-running state by a deploy phase (OMN-18057).
+
+    The 2026-09-08 runtime-phase kill left ``runtime-effects``,
+    ``runtime-worker`` and ``omninode-contract-resolver`` in ``Created`` with
+    :8086 down, and the terminal event said nothing about any of them. Residue
+    is recorded whether or not per-container recovery then succeeded, because
+    "recovered after the ceiling blew" and "came up first time" are different
+    facts about the lane.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    service: str
+    state: str
+    exit_code: int | None = None
+    recovered: bool = False
 
 
 class ModelRebuildRequested(BaseModel):
@@ -189,6 +222,41 @@ class ModelRebuildCompleted(BaseModel):
     phase_results: dict[Phase, PhaseStatus]
     errors: list[str] = Field(default_factory=list)
     health_checks: list[ModelHealthCheck] = Field(default_factory=list)
+    container_residue: list[ModelContainerResidue] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:
+        """A terminal event may only carry settled phase verdicts (OMN-18057).
+
+        Two shapes are refused here rather than merely discouraged upstream:
+
+        * ``PhaseStatus.IN_PROGRESS`` -- the live defect. Command 23edaf62's
+          terminal event carried ``runtime: in_progress`` alongside a
+          ``completed_at`` and a duration, so the event asserted the deploy was
+          over and simultaneously refused to say how it ended. An unreached
+          phase is SKIPPED and a phase that raised is FAILED.
+        * ``Phase.PUBLISH`` -- this event IS the publish. Its outcome is not
+          knowable at the moment the payload is built, and reporting it as
+          ``in_progress`` made ``status`` derive "failed" for every deploy the
+          agent ever completed, successful ones included.
+        """
+        if Phase.PUBLISH in self.phase_results:
+            raise ValueError(
+                "phase_results must not carry Phase.PUBLISH: the completion "
+                "event is the publish and cannot report its own outcome"
+            )
+        unsettled = sorted(
+            phase.value
+            for phase, status in self.phase_results.items()
+            if status in (PhaseStatus.IN_PROGRESS, PhaseStatus.PENDING)
+        )
+        if unsettled:
+            raise ValueError(
+                f"phase_results carries unsettled verdicts for {unsettled}: a "
+                "terminal event must report failed/skipped for a phase that "
+                "raised or was never reached"
+            )
+        return self
 
     @computed_field
     @property

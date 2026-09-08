@@ -87,7 +87,15 @@ def test_sasl_ssl_config_uses_kafka_python_cloud_kwargs(
         "sasl_plain_username": "key",
         "sasl_plain_password": _TEST_PASSWORD,
     }
-    assert config.producer_kwargs() == config.consumer_kwargs()
+    # OMN-18057: the producer adds one delivery guarantee the consumer has no
+    # notion of. It is asserted here rather than left as "producer == consumer",
+    # because that equality is exactly what allowed the duplicate terminal
+    # events measured on the dev bus on 2026-09-08 (offsets 96-101, 102-105).
+    assert config.producer_kwargs() == {
+        **config.consumer_kwargs(),
+        "enable_idempotence": True,
+    }
+    assert "enable_idempotence" not in config.consumer_kwargs()
 
 
 def test_dev_lane_sasl_plaintext_scram_is_accepted(

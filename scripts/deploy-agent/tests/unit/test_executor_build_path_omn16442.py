@@ -299,6 +299,9 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
 class _RefRecordingExecutor:
     def __init__(self) -> None:
         self.rebuild_kwargs: dict[str, object] = {}
+        # OMN-18057: the agent reads residue from the executor when it
+        # builds the terminal event.
+        self.container_residue: list[object] = []
 
     def preflight(self, **kwargs: object) -> None:
         pass
