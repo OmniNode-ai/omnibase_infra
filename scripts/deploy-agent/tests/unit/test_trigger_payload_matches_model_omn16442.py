@@ -224,3 +224,76 @@ def test_undeclared_tracking_ref_with_no_git_ref_still_refuses() -> None:
     proc = _run("--runtime-lane", "dev", "--dry-run")
     assert proc.returncode != 0
     assert "DEPLOY_AGENT_TRACKING_REF is not set" in proc.stderr
+
+
+@pytest.mark.unit
+def test_sasl_credentials_without_a_declared_transport_refuse() -> None:
+    """OMN-18012: the transport is declared, never inferred from credentials.
+
+    The publish branches previously hardcoded ``SASL_SSL`` + ``PLAIN`` and the
+    dockerised-rpk fallback passed no SASL at all, so on a SASL_PLAINTEXT /
+    SCRAM-SHA-256 broker the script had no working publish path. Refusing here
+    means a wrong transport is reported instead of hanging against a broker
+    that closes the connection.
+    """
+    env = dict(os.environ)
+    env["DEPLOY_AGENT_HMAC_SECRET"] = _TEST_HMAC
+    env["KAFKA_BOOTSTRAP_SERVERS"] = "broker.invalid:19092"
+    env["KAFKA_SASL_USERNAME"] = "some-principal"
+    env["KAFKA_SASL_PASSWORD"] = "not-a-real-value"
+    env.pop("KAFKA_SECURITY_PROTOCOL", None)
+    env.pop("KAFKA_SASL_MECHANISM", None)
+    proc = subprocess.run(
+        ["bash", str(TRIGGER), "--runtime-lane", "dev", "--git-ref", "origin/dev"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "transport is not declared" in proc.stderr
+
+
+@pytest.mark.unit
+def test_declared_transport_is_not_required_for_a_dry_run() -> None:
+    """Positive control: the refusal above is scoped to a real publish."""
+    env = dict(os.environ)
+    env["DEPLOY_AGENT_HMAC_SECRET"] = _TEST_HMAC
+    env["KAFKA_SASL_USERNAME"] = "some-principal"
+    env["KAFKA_SASL_PASSWORD"] = "not-a-real-value"
+    env.pop("KAFKA_SECURITY_PROTOCOL", None)
+    env.pop("KAFKA_SASL_MECHANISM", None)
+    proc = subprocess.run(
+        [
+            "bash",
+            str(TRIGGER),
+            "--runtime-lane",
+            "dev",
+            "--git-ref",
+            "origin/dev",
+            "--dry-run",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    ModelRebuildRequested.model_validate(
+        {k: v for k, v in _payload(proc.stdout).items() if k != "_signature"}
+    )
+
+
+@pytest.mark.unit
+def test_no_publish_branch_hardcodes_a_transport() -> None:
+    """The hardcoded values are what made every branch wrong on the dev broker."""
+    body = TRIGGER.read_text()
+    publish = body[body.index("# ── publish ──") :]
+    for literal in ("security.protocol=SASL_SSL", "sasl.mechanisms=PLAIN"):
+        assert literal not in publish, f"{literal} is hardcoded in the publish path"
+    assert "--sasl-mechanism PLAIN" not in publish
+    # The dockerised fallback must forward credentials, and via `-e` rather
+    # than argv, which `ps` exposes to every user on the host.
+    docker_branch = publish[publish.index("docker ") :]
+    assert "RPK_USER=" in docker_branch and "RPK_SASL_MECHANISM=" in docker_branch
+    assert "--sasl-password" not in docker_branch

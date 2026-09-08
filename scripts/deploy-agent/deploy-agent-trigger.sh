@@ -49,6 +49,11 @@
 # OPTIONAL ENV VARS:
 #   KAFKA_SASL_USERNAME        SASL username (omit for PLAINTEXT connections)
 #   KAFKA_SASL_PASSWORD        SASL password
+#   KAFKA_SECURITY_PROTOCOL    REQUIRED whenever SASL credentials are set, e.g.
+#                              SASL_PLAINTEXT. Declared, never inferred from
+#                              credential presence (OMN-18012).
+#   KAFKA_SASL_MECHANISM       REQUIRED whenever SASL credentials are set, e.g.
+#                              SCRAM-SHA-256.
 #
 # WARNING: Unsigned triggers are silently dropped by auth.py.
 # NEVER construct the command JSON manually — always use this script so the
@@ -167,6 +172,26 @@ if ! command -v python3 &>/dev/null; then
     exit 1
 fi
 
+# ── declare the control-bus transport ────────────────────────────────────────
+# OMN-18012 doctrine: the transport is DECLARED, never inferred from whether
+# credentials happen to be in the environment. The previous revision hardcoded
+# `SASL_SSL` + `PLAIN` in the kcat and rpk branches and passed no SASL at all
+# through the dockerised-rpk fallback. On the .201 dev broker — SASL_PLAINTEXT
+# with SCRAM-SHA-256 — all three were wrong, and the fallback's unauthenticated
+# connection is refused by the broker with "broker closed the connection
+# immediately after a request was issued, which happens when SASL is required
+# but not provided", so the script had no working publish path at all.
+if [[ $DRY_RUN -eq 0 && -n "${KAFKA_SASL_USERNAME:-}" ]]; then
+    if [[ -z "${KAFKA_SECURITY_PROTOCOL:-}" || -z "${KAFKA_SASL_MECHANISM:-}" ]]; then
+        echo "ERROR: SASL credentials are present but the transport is not declared." >&2
+        echo "       Set KAFKA_SECURITY_PROTOCOL (e.g. SASL_PLAINTEXT) and" >&2
+        echo "       KAFKA_SASL_MECHANISM (e.g. SCRAM-SHA-256) — the same" >&2
+        echo "       variables the deploy agent's own unit declares. They are" >&2
+        echo "       not guessed from credential presence (OMN-18012)." >&2
+        exit 1
+    fi
+fi
+
 # kcat is used for publish; rpk is accepted as fallback on .201
 _publish_tool=""
 if command -v kcat &>/dev/null; then
@@ -268,8 +293,8 @@ if [[ "$_publish_tool" == "kcat" ]]; then
     KCAT_ARGS=(-P -b "${KAFKA_BOOTSTRAP_SERVERS}" -t "${TOPIC}" -K /)
     if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
         KCAT_ARGS+=(
-            -X security.protocol=SASL_SSL
-            -X sasl.mechanisms=PLAIN
+            -X "security.protocol=${KAFKA_SECURITY_PROTOCOL}"
+            -X "sasl.mechanisms=${KAFKA_SASL_MECHANISM}"
             -X "sasl.username=${KAFKA_SASL_USERNAME}"
             -X "sasl.password=${KAFKA_SASL_PASSWORD}"
         )
@@ -279,16 +304,28 @@ if [[ "$_publish_tool" == "kcat" ]]; then
 elif [[ "$_publish_tool" == "rpk" ]]; then
     RPK_ARGS=(--brokers "${KAFKA_BOOTSTRAP_SERVERS}" --key "manual-${CORRELATION_ID}")
     if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
+        if [[ "$KAFKA_SECURITY_PROTOCOL" == *SSL* ]]; then
+            RPK_ARGS+=(--tls-enabled)
+        fi
         RPK_ARGS+=(
-            --tls-enabled
-            --sasl-mechanism PLAIN
+            --sasl-mechanism "${KAFKA_SASL_MECHANISM}"
             --sasl-username "${KAFKA_SASL_USERNAME}"
             --sasl-password "${KAFKA_SASL_PASSWORD}"
         )
     fi
     rpk topic produce "${TOPIC}" "${RPK_ARGS[@]}" <<< "${SIGNED_JSON}"
 else
-    docker exec -i omnibase-infra-redpanda \
+    # Credentials travel as `docker exec -e` environment, never as argv: an
+    # argument is visible in `ps` to every user on the host.
+    DOCKER_ARGS=(exec -i)
+    if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
+        DOCKER_ARGS+=(
+            -e "RPK_USER=${KAFKA_SASL_USERNAME}"
+            -e "RPK_PASS=${KAFKA_SASL_PASSWORD}"
+            -e "RPK_SASL_MECHANISM=${KAFKA_SASL_MECHANISM}"
+        )
+    fi
+    docker "${DOCKER_ARGS[@]}" omnibase-infra-redpanda \
         rpk topic produce "${TOPIC}" --brokers localhost:9092 \
         --key "manual-${CORRELATION_ID}" <<< "${SIGNED_JSON}"
 fi
