@@ -214,14 +214,38 @@ def _parse_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
                 source_contracts=(source,),
             )
 
-    if len(parts) != 5:
+    if len(parts) < 5:
         _warn(
-            f"Skipping malformed topic (expected 5 segments, got {len(parts)}): "
-            f"{raw!r} in {source}"
+            f"Skipping malformed topic (expected at least 5 segments, got "
+            f"{len(parts)}): {raw!r} in {source}"
         )
         return None
 
-    prefix, kind, producer, event_name, version = parts
+    # OMN-17557. The grammar is onex.<kind>.<producer>.<event_name>.<version>
+    # and ``_RE_EVENT_NAME`` has ALWAYS admitted a dot inside the event name --
+    # under a fixed 5-way unpack that branch was unreachable by construction,
+    # so every dotted event name was rejected as "malformed" instead. The four
+    # fixed positions are the first three segments and the last one; everything
+    # between them is the event name, joined back exactly as declared. A
+    # 5-segment topic is unaffected: ``parts[3:-1]`` is a single element and
+    # the join is the identity.
+    #
+    # Measured on the live onex-dev omnimarket-tenant-projection-writer pod
+    # (2026-09-08, RUNTIME_PROFILE=tenant-projection): EIGHTEEN distinct
+    # snapshot topics were being skipped here, including
+    # onex.snapshot.projection.delegation.quality-gate.v1 and
+    # onex.snapshot.projection.delegation.inference-response-text.v1. A skipped
+    # topic never reaches the contract-first provisioner's create-set, so on a
+    # managed broker with auto-create off it is never created -- the same
+    # failure mode OMN-15832 fixed for the `snapshot` KIND, recurring on ARITY.
+    #
+    # Renaming those topics instead was rejected: they are live wire names
+    # consumed by the projection API and omnidash widgets, and renaming would
+    # break every existing consumer to work around a parser that was already
+    # documented to accept them.
+    prefix, kind, producer = parts[0], parts[1], parts[2]
+    event_name = ".".join(parts[3:-1])
+    version = parts[-1]
 
     if prefix != "onex":
         _warn(
