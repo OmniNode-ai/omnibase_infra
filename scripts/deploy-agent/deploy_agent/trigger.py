@@ -243,8 +243,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--build-source",
-        default=BuildSource.RELEASE.value,
-        help="Build from a released artifact or from the workspace.",
+        default=None,
+        help=(
+            "Build from a released artifact or from the workspace. Defaults to "
+            "the build source the target lane can actually build: workspace on "
+            "dev, release on stability-test and prod (OMN-16442)."
+        ),
     )
     parser.add_argument(
         "--service",
@@ -326,6 +330,50 @@ def _resolve_runtime_lane(raw: str | None) -> EnumRuntimeLane:
         ) from exc
 
 
+#: OMN-16442: the build source each lane can actually build, named per lane
+#: rather than carried as one literal default. ``release`` cannot carry
+#: un-released merged-dev code (CLAUDE.md, "Cold vs warm lane bring-up"), which
+#: is why the sanctioned dev refresh — scripts/runtime_build/refresh_dev_lane.sh
+#: — has always run BUILD_SOURCE=workspace, and why a release-mode dev build is
+#: refused by the prod promotion-lineage gate on every day rather than on a bad
+#: day. The two sanctioned dev paths disagreed about the build source and the
+#: agent path had picked the one that cannot work.
+DEFAULT_BUILD_SOURCE_FOR_LANE: dict[EnumRuntimeLane, BuildSource] = {
+    EnumRuntimeLane.DEV: BuildSource.WORKSPACE,
+    EnumRuntimeLane.STABILITY_TEST: BuildSource.RELEASE,
+    EnumRuntimeLane.PROD: BuildSource.RELEASE,
+}
+
+
+def _resolve_build_source(
+    raw: str | None, runtime_lane: EnumRuntimeLane
+) -> BuildSource:
+    """Resolve the build source from the flag, else from the lane.
+
+    An explicit ``--build-source`` is still honoured everywhere it can be
+    satisfied. The one combination refused is ``release`` on the dev lane, and
+    it is refused HERE — before a command is signed and published — because the
+    executor would refuse it on the host anyway, with a message about prod
+    promotion lineage that names neither the lane nor the reason.
+    """
+    if raw is None:
+        return DEFAULT_BUILD_SOURCE_FOR_LANE[runtime_lane]
+    build_source = _resolve_enum(raw, BuildSource, "--build-source")
+    if build_source is BuildSource.RELEASE and runtime_lane is EnumRuntimeLane.DEV:
+        raise TriggerRefusedError(
+            "--build-source release is not buildable on --runtime-lane dev.\n"
+            "       A release build must come from a tree whose HEAD is an\n"
+            "       ancestor of the release-synced origin/main, and a dev head\n"
+            "       is by construction not one, so the deploy agent's prod\n"
+            "       promotion-lineage gate refuses it on every day, not on a\n"
+            "       bad day. release also cannot carry un-released merged-dev\n"
+            "       code, which is the whole point of a dev rebuild.\n"
+            "       Use --build-source workspace (the dev default), or target\n"
+            "       --runtime-lane stability-test."
+        )
+    return build_source
+
+
 def _resolve_git_ref(raw: str | None) -> str:
     if raw:
         return raw
@@ -363,9 +411,7 @@ def main(argv: list[str] | None = None) -> int:
             git_ref=_resolve_git_ref(args.git_ref),
             runtime_lane=runtime_lane,
             scope=_resolve_enum(args.scope, Scope, "--scope"),
-            build_source=_resolve_enum(
-                args.build_source, BuildSource, "--build-source"
-            ),
+            build_source=_resolve_build_source(args.build_source, runtime_lane),
             requested_by=args.requested_by,
             correlation_id=correlation_id,
             services=list(args.services),
@@ -384,6 +430,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"git_ref:        {command.git_ref}")
     print(f"runtime_lane:   {command.runtime_lane.value}")
     print(f"scope:          {command.scope.value}")
+    print(f"build_source:   {command.build_source.value}")
     print(f"correlation_id: {command.correlation_id}")
     print(f"requested_by:   {command.requested_by}")
     # Printed, not signed: see the NOTE ON --reason in the wrapper's header.
