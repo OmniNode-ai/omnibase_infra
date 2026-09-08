@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import signal
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -18,6 +19,7 @@ from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
     DeployInProgressError,
     EnumRuntimeLane,
+    EnumSelfUpdateBoundary,
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
@@ -120,6 +122,7 @@ class DeployAgent:
             kafka_config=self._kafka_config,
             job_store=self.job_store,
             allowed_lanes=self._allowed_lanes,
+            self_update_hook=self._self_update_pre_accept,
         )
 
         # Handle signals
@@ -148,6 +151,41 @@ class DeployAgent:
         logger.info("Shutdown signal received")
         self._shutdown = True
 
+    def _self_update_pre_accept(self, rewind_offset: Callable[[], None]) -> None:
+        """Self-update boundary before a polled command is marked started.
+
+        Passed to the consumer, which calls it once a command has cleared every
+        acceptance check and before ``job_store.accept``. ``rewind_offset``
+        re-points the committed offset at that command so the replacement
+        process re-reads it (OMN-16442).
+        """
+        self.executor.self_update(
+            boundary=EnumSelfUpdateBoundary.PRE_ACCEPT,
+            skip=self._skip_self_update,
+            on_before_reexec=rewind_offset,
+        )
+
+    def _self_update_post_terminal(self) -> None:
+        """Self-update boundary after a job reaches a terminal, published state.
+
+        This is the deferral half of OMN-16442: an agent that finds itself
+        behind while a deploy is in flight does NOT interrupt that deploy --
+        the deploy completes on the version it started on, and the update fires
+        here, at the next boundary.
+        """
+        try:
+            self.executor.self_update(
+                boundary=EnumSelfUpdateBoundary.POST_TERMINAL,
+                skip=self._skip_self_update,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(  # noqa: TRY400
+                "Self-update at the post-terminal boundary failed, "
+                "staying on the current image: %s "
+                "friction_type=self_update_boundary_failed",
+                e,
+            )
+
     async def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         try:
             with single_flight_lock():
@@ -158,6 +196,13 @@ class DeployAgent:
                 cmd.correlation_id,
             )
             self._publish_rejected(cmd, reason="in_progress")
+            return
+
+        # OMN-16442 job boundary: the job has a terminal status, its result has
+        # been published, and the single-flight lock is released. Deliberately
+        # outside the `with` block above — a re-exec must not happen while this
+        # process holds the deploy lock.
+        self._self_update_post_terminal()
 
     async def _run_deploy(self, cmd: ModelRebuildRequested) -> None:
         self._state = "deploying"
@@ -223,7 +268,6 @@ class DeployAgent:
                 on_phase_update=on_phase_update,
                 git_sha=self._current_git_sha,
                 build_source=cmd.build_source,
-                skip_self_update=self._skip_self_update,
                 lane=cmd.runtime_lane,
                 image_digest=cmd.image_digest,
             )

@@ -20,7 +20,16 @@ import sys
 from unittest.mock import call, patch
 
 import pytest
+from deploy_agent.events import EnumSelfUpdateBoundary
 from deploy_agent.executor import DEPLOY_AGENT_DIR, DeployExecutor
+
+# OMN-16442: ``self_update`` takes a required ``boundary`` so every call site
+# names the job boundary it fired at. These tests exercise the method's own
+# git mechanics, which are identical at either boundary, so they declare one
+# and keep it constant. Which boundary each caller actually uses -- and that
+# the deploy path uses none -- is asserted in
+# ``test_self_update_job_boundary_omn16442.py``.
+_BOUNDARY = EnumSelfUpdateBoundary.POST_TERMINAL
 
 SHA_LOCAL = "aaaaaaaabbbbbbbb"
 SHA_REMOTE = "ccccccccdddddddd"
@@ -66,14 +75,14 @@ class TestSelfUpdateSkip:
     def test_skip_flag_bypasses_all_git_calls(self) -> None:
         executor = DeployExecutor()
         with patch("deploy_agent.executor._run") as mock_run:
-            executor.self_update(skip=True)
+            executor.self_update(boundary=_BOUNDARY, skip=True)
         mock_run.assert_not_called()
 
     def test_env_kill_switch_bypasses_all_git_calls(self, monkeypatch) -> None:
         monkeypatch.setenv("DEPLOY_AGENT_NO_SELF_UPDATE", "1")
         executor = DeployExecutor()
         with patch("deploy_agent.executor._run") as mock_run:
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_run.assert_not_called()
 
 
@@ -87,7 +96,7 @@ class TestSelfUpdateDirtyTree:
             ),
             patch("os.execv") as mock_execv,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_not_called()
 
 
@@ -101,7 +110,7 @@ class TestSelfUpdateCurrent:
             ),
             patch("os.execv") as mock_execv,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_not_called()
 
 
@@ -112,7 +121,7 @@ class TestSelfUpdateBehind:
             patch("deploy_agent.executor._run", side_effect=_make_git_responses()),
             patch("os.execv") as mock_execv,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
 
     def test_behind_container_mode_exits_42(self, monkeypatch) -> None:
@@ -122,7 +131,7 @@ class TestSelfUpdateBehind:
             patch("deploy_agent.executor._run", side_effect=_make_git_responses()),
             patch("sys.exit") as mock_exit,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_exit.assert_called_once_with(42)
 
     def test_behind_fetch_failure_skips_execv(self) -> None:
@@ -141,7 +150,7 @@ class TestSelfUpdateBehind:
             patch("deploy_agent.executor._run", side_effect=side_effect),
             patch("os.execv") as mock_execv,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_not_called()
 
     def test_behind_pull_failure_skips_execv(self) -> None:
@@ -166,60 +175,46 @@ class TestSelfUpdateBehind:
             patch("deploy_agent.executor._run", side_effect=side_effect),
             patch("os.execv") as mock_execv,
         ):
-            executor.self_update()
+            executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_not_called()
 
 
-class TestSelfUpdateWiredIntoRebuildScope:
-    def test_self_update_called_first_in_rebuild_scope(self) -> None:
-        """self_update must be invoked before _compose_build inside rebuild_scope."""
-        from deploy_agent.events import Phase, PhaseStatus, Scope
+class TestSelfUpdateIsNotWiredIntoTheDeployPath:
+    """The mid-deploy call site is gone, not merely defaulted off (OMN-16442).
 
-        executor = DeployExecutor()
-        call_order: list[str] = []
+    ``rebuild_scope`` used to open with ``self.self_update(...)``. That is
+    inside an accepted job, after preflight/git/compose_gen/seed; re-execing
+    there aborts the deploy in flight, which is what published command
+    8d0c861a-f91e-4ca2-954e-a073759dd39d as failed on 2026-09-08 after the
+    replacement process recovered it as a crashed job.
 
-        def fake_self_update(*, skip: bool = False) -> None:
-            call_order.append("self_update")
+    The behavioural half of this -- which boundary each caller uses, that the
+    same command is processed once across a re-exec, and that a deploy running
+    while behind still completes -- lives in
+    ``test_self_update_job_boundary_omn16442.py``.
+    """
 
-        def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
-            call_order.append("build")
-
-        def fake_up(
-            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
-        ) -> None:
-            call_order.append("up")
-
-        executor.self_update = fake_self_update  # type: ignore[method-assign]
-        executor._compose_build = fake_build  # type: ignore[method-assign]
-        executor._compose_up = fake_up  # type: ignore[method-assign]
-
-        executor.rebuild_scope(Scope.RUNTIME, [], lambda p, s: None)
-
-        assert call_order[0] == "self_update", (
-            f"self_update must be first, got order: {call_order}"
-        )
-
-    def test_skip_self_update_flag_forwarded_from_rebuild_scope(self) -> None:
+    def test_rebuild_scope_does_not_call_self_update(self) -> None:
         from deploy_agent.events import Scope
 
         executor = DeployExecutor()
-        received_skip: list[bool] = []
+        calls: list[object] = []
 
-        def fake_self_update(*, skip: bool = False) -> None:
-            received_skip.append(skip)
-
-        def fake_build(scope, sha, cb, **kwargs) -> None:
-            pass
-
-        def fake_up(phase, scope, services, cb, **kwargs) -> None:
-            pass
+        def fake_self_update(**kwargs: object) -> None:
+            calls.append(kwargs)
 
         executor.self_update = fake_self_update  # type: ignore[method-assign]
-        executor._compose_build = fake_build  # type: ignore[method-assign]
-        executor._compose_up = fake_up  # type: ignore[method-assign]
+        executor._compose_build = lambda *a, **k: None  # type: ignore[method-assign]
+        executor._compose_up = lambda *a, **k: None  # type: ignore[method-assign]
 
-        executor.rebuild_scope(
-            Scope.RUNTIME, [], lambda p, s: None, skip_self_update=True
+        executor.rebuild_scope(Scope.RUNTIME, [], lambda p, s: None)
+
+        assert calls == [], f"rebuild_scope must not self-update, got {calls}"
+
+    def test_rebuild_scope_signature_carries_no_self_update_switch(self) -> None:
+        import inspect
+
+        assert (
+            "skip_self_update"
+            not in inspect.signature(DeployExecutor.rebuild_scope).parameters
         )
-
-        assert received_skip == [True]
