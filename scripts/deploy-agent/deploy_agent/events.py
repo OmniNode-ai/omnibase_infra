@@ -11,6 +11,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
+from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
+
 TOPIC_REBUILD_REQUESTED = "onex.cmd.deploy.rebuild-requested.v1"
 TOPIC_REBUILD_COMPLETED = "onex.evt.deploy.rebuild-completed.v1"
 TOPIC_REBUILD_REJECTED = "onex.evt.deploy.rebuild-rejected.v1"
@@ -103,7 +105,14 @@ class ModelRebuildRequested(BaseModel):
     runtime_lane: EnumRuntimeLane
     build_source: BuildSource = BuildSource.RELEASE
     services: list[str] = Field(default_factory=list)
-    git_ref: str = "origin/main"
+    # OMN-16442: a command that omits the ref deploys the branch this agent
+    # DECLARES it tracks (DEPLOY_AGENT_TRACKING_REF), not a literal. The old
+    # default was "origin/main"; on the .201 dev lane that asked the agent to
+    # `git reset --hard` its deploy-source clone onto a release-synced branch
+    # hundreds of commits behind the code the lane exists to run. There is no
+    # default for the variable itself — an undeclared tracking ref raises
+    # rather than guessing (rule 8).
+    git_ref: str = Field(default_factory=load_tracking_remote_ref_from_env)
     # Carry both ref and digest; the digest is the authority. dev/stability-test
     # may build from a ref and leave the digest unresolved up front; prod must
     # pin the stability-proven digest (enforced below).

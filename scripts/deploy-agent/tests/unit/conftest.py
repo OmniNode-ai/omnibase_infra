@@ -79,3 +79,23 @@ def _declare_control_bus_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     variable in its own autouse fixture and so is unaffected by this one.
     """
     monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
+
+
+@pytest.fixture(autouse=True)
+def _declare_tracking_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-16442: DEPLOY_AGENT_TRACKING_REF is required and has no default.
+
+    The branch this agent tracks — for its own self-update, for the default
+    git ref of a rebuild command that omits one, and for the sibling-repo
+    build-arg fallback — is a property of the deployment, so the package
+    refuses to guess it. Tests that exercise unrelated concerns are not
+    testing that declaration, so they get an explicit ``dev`` here rather than
+    each re-declaring it; this is the same visible arrangement the lane fence
+    and the control-bus transport already use above.
+
+    This is not a bypass: the declaration's own behaviour — including that an
+    unset variable raises — is asserted in ``test_tracking_ref.py``, which
+    deletes the variable in its own autouse fixture and so is unaffected by
+    this one.
+    """
+    monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")

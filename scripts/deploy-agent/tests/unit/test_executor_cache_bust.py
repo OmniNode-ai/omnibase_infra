@@ -298,17 +298,37 @@ class TestUvCacheBustPluginRefs:
             args=[], returncode=0, stdout=f"{expected_sha}\n", stderr=""
         )
         with patch("subprocess.run", return_value=mock_result):
-            sha = DeployExecutor._resolve_plugin_ref("/fake/repo")
+            sha = DeployExecutor._resolve_plugin_ref("/fake/repo", fallback="dev")
         assert sha == expected_sha
 
-    def test_resolve_plugin_ref_falls_back_to_main_on_git_failure(self) -> None:
-        """_resolve_plugin_ref must return 'main' when git rev-parse fails."""
+    def test_resolve_plugin_ref_falls_back_to_the_caller_supplied_branch(
+        self,
+    ) -> None:
+        """OMN-16442: the fallback branch is supplied, never hardcoded.
+
+        It used to be a literal ``"main"``. Both sibling repos integrate on
+        ``dev``, and this repo's ``main`` is release-synced, so that literal
+        pinned a stale branch on a git failure. ``_compose_build`` now passes
+        the declared tracking ref down.
+        """
         mock_result = subprocess.CompletedProcess(
             args=[], returncode=128, stdout="", stderr="fatal: not a git repo"
         )
         with patch("subprocess.run", return_value=mock_result):
-            sha = DeployExecutor._resolve_plugin_ref("/nonexistent/repo")
-        assert sha == "main"
+            sha = DeployExecutor._resolve_plugin_ref(
+                "/nonexistent/repo", fallback="dev"
+            )
+        assert sha == "dev"
+
+    def test_resolve_plugin_ref_does_not_invent_main_as_a_fallback(self) -> None:
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=128, stdout="", stderr="fatal: not a git repo"
+        )
+        with patch("subprocess.run", return_value=mock_result):
+            sha = DeployExecutor._resolve_plugin_ref(
+                "/nonexistent/repo", fallback="staging"
+            )
+        assert sha == "staging"
 
     def test_compose_build_uses_dev_fallback_for_omnimarket_when_omni_home_unset(
         self,
@@ -330,6 +350,9 @@ class TestUvCacheBustPluginRefs:
         env_without_omni_home = {
             k: v for k, v in os.environ.items() if k != "OMNI_HOME"
         }
+        # patch.dict(clear=True) wipes the declared tracking ref that the
+        # conftest fixture sets, and _compose_build requires it (OMN-16442).
+        env_without_omni_home["DEPLOY_AGENT_TRACKING_REF"] = "dev"
 
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
@@ -345,11 +368,15 @@ class TestUvCacheBustPluginRefs:
             for i, tok in enumerate(build_cmd)
             if tok == "--build-arg" and i + 1 < len(build_cmd)
         }
+        # OMN-16442: both sibling refs now fall back to the DECLARED tracking
+        # ref. omnimarket already used "dev" (OMN-12195: dev is its default
+        # branch); omnibase_compat used the literal "main" for no stated
+        # reason, on a repo whose default branch is likewise "dev".
         assert "OMNIMARKET_REF=dev" in build_args, (
-            f"Expected OMNIMARKET_REF=dev when OMNI_HOME unset (OMN-12195: dev is omnimarket default branch); got {build_args}"
+            f"Expected OMNIMARKET_REF=dev when OMNI_HOME unset; got {build_args}"
         )
-        assert "OMNIBASE_COMPAT_REF=main" in build_args, (
-            f"Expected OMNIBASE_COMPAT_REF=main when OMNI_HOME unset; got {build_args}"
+        assert "OMNIBASE_COMPAT_REF=dev" in build_args, (
+            f"Expected OMNIBASE_COMPAT_REF=dev when OMNI_HOME unset; got {build_args}"
         )
         occ_args = {a for a in build_args if a.startswith("ONEX_CHANGE_CONTROL_REF=")}
         assert not occ_args, (

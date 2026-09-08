@@ -9,7 +9,7 @@
 #   DEPLOY_AGENT_HMAC_SECRET=<secret> \
 #   KAFKA_BOOTSTRAP_SERVERS=<host:port> \
 #     ./deploy-agent-trigger.sh \
-#       --git-ref origin/main \
+#       --git-ref origin/dev \
 #       --reason "manual trigger by operator" \
 #       [--requested-by claude] \
 #       [--correlation-id <uuid>] \
@@ -18,6 +18,13 @@
 # REQUIRED ENV VARS:
 #   DEPLOY_AGENT_HMAC_SECRET   HMAC-SHA256 key — from ~/.omnibase/.env on .201
 #   KAFKA_BOOTSTRAP_SERVERS    e.g. 192.168.86.201:19092 (local) or localhost:29092 (tunnel)  # onex-allow-internal-ip # cloud-bus-ok OMN-9411
+#   DEPLOY_AGENT_TRACKING_REF  branch this lane deploys, e.g. `dev`. REQUIRED
+#                              only when --git-ref is omitted; it supplies the
+#                              default as origin/<branch>. There is no built-in
+#                              default (OMN-16442): the literal `origin/main`
+#                              that used to sit here published deploy commands
+#                              resetting the deploy-source clone onto a
+#                              release-synced branch the lane was never on.
 #
 # OPTIONAL ENV VARS:
 #   KAFKA_SASL_USERNAME        SASL username (omit for PLAINTEXT connections)
@@ -36,7 +43,9 @@ set -euo pipefail
 TOPIC="onex.cmd.deploy.rebuild-requested.v1"
 
 # ── defaults ─────────────────────────────────────────────────────────────────
-GIT_REF="origin/main"
+# No default here: resolved from DEPLOY_AGENT_TRACKING_REF after arg parsing,
+# and only when --git-ref was not supplied (OMN-16442).
+GIT_REF=""
 REASON=""
 REQUESTED_BY="operator-manual"
 CORRELATION_ID=""
@@ -59,6 +68,20 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown arg: $1" >&2; usage ;;
     esac
 done
+
+# ── resolve the deploy ref ───────────────────────────────────────────────────
+# Fail-fast rather than defaulting: an undeclared tracking ref is exactly the
+# defect this removes (operator ruling 2026-09-08 — track the lane deploy
+# branch, never `main`).
+if [[ -z "$GIT_REF" ]]; then
+    if [[ -z "${DEPLOY_AGENT_TRACKING_REF:-}" ]]; then
+        echo "ERROR: no --git-ref given and DEPLOY_AGENT_TRACKING_REF is not set." >&2
+        echo "       Pass --git-ref origin/<branch>, or export" >&2
+        echo "       DEPLOY_AGENT_TRACKING_REF=<branch> (e.g. dev) to supply the default." >&2
+        exit 1
+    fi
+    GIT_REF="origin/${DEPLOY_AGENT_TRACKING_REF}"
+fi
 
 # ── pre-flight ───────────────────────────────────────────────────────────────
 if [[ -z "${DEPLOY_AGENT_HMAC_SECRET:-}" ]]; then

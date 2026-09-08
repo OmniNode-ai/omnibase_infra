@@ -5,6 +5,12 @@
 Verifies: behind/ahead/current detection, os.execv call when behind,
 --skip-self-update / kill-switch bypass, dirty-tree safety rail,
 and container-mode exit(42) behavior.
+
+The ref self_update compares against is the DECLARED tracking ref
+(``DEPLOY_AGENT_TRACKING_REF``, supplied as ``dev`` by the conftest autouse
+fixture), not a hardcoded ``origin/main`` -- these tests therefore match any
+``origin/*`` rev-parse. That the ref is honoured, is required, and never
+resolves ``main`` is asserted in ``test_tracking_ref.py`` (OMN-16442).
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ def _fail(stderr: str = "") -> subprocess.CompletedProcess:
 def _make_git_responses(
     *, dirty: bool = False, local: str = SHA_LOCAL, remote: str = SHA_REMOTE
 ):
-    """Return a side_effect list for _run: status, fetch, rev-parse HEAD, rev-parse origin/main."""
+    """Return a side_effect list for _run: status, fetch, rev-parse HEAD, rev-parse origin/<tracking ref>."""
 
     def side_effect(
         cmd: list[str], timeout: int, **kwargs
@@ -41,7 +47,7 @@ def _make_git_responses(
         if "fetch" in cmd:
             return _ok()
         if "rev-parse" in cmd:
-            if "origin/main" in cmd:
+            if any(part.startswith("origin/") for part in cmd):
                 return _ok(remote)
             return _ok(local)
         if "pull" in cmd:
@@ -149,7 +155,7 @@ class TestSelfUpdateBehind:
             if "fetch" in cmd:
                 return _ok()
             if "rev-parse" in cmd:
-                if "origin/main" in cmd:
+                if any(part.startswith("origin/") for part in cmd):
                     return _ok(SHA_REMOTE)
                 return _ok(SHA_LOCAL)
             if "pull" in cmd:
