@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   verify:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@31e44e9db9f172059f03a7373d762536562a2f6f # OMN-13902/OMN-17292: pass PR commit text into final receipt identity binding
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@839e5d524960a4af954553168300971299c14a5f # OMN-13902/OMN-17292: pass PR commit text into final receipt identity binding
     with:
       branch-policy-mode: >-
         ${{
