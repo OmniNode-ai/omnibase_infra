@@ -97,6 +97,12 @@ class _NeverIdleConsumer:
     async def commit(self) -> None:
         self.commits += 1
 
+    async def commit_offsets(self, offsets: object) -> None:
+        """OMN-17896: the handler now commits an explicit offset map of the
+        records that COMPLETED, never the consumer's bare position."""
+        self.commits += 1
+        self.committed_offsets = dict(offsets)  # type: ignore[arg-type]
+
 
 class _SlowNeverIdleConsumer(_NeverIdleConsumer):
     """Same never-idle shape, but each yield is separated by a real sleep so

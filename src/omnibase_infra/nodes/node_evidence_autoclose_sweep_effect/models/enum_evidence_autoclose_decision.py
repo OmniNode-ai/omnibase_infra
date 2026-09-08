@@ -58,6 +58,22 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     SKIPPED_NO_BINDING = "skipped_no_binding"
     # More than one distinct ticket id bound to the same merged companion.
     SKIPPED_AMBIGUOUS_BINDING = "skipped_ambiguous_binding"
+    # OMN-16106 Item 1. THE OFFER PATH'S NAMED REFUSAL. A caller nominated this
+    # ticket in `offer_tickets` and the search for its newest merged OCC
+    # companion came back empty — the ticket has no merged evidence companion
+    # at all, or none this run's credential can see.
+    #
+    # It is a distinct value rather than a reuse of SKIPPED_NO_BINDING because
+    # the two say different things and only one of them is a hygiene finding.
+    # SKIPPED_NO_BINDING means a companion WAS read and carried no resolvable
+    # ticket id — a defect in that companion. This means no companion was found
+    # to read, which is a statement about the TICKET's evidence base and is the
+    # ordinary answer for a ticket whose work has not landed yet. Reporting
+    # nothing at all would be worse than either: an offered ticket absent from
+    # the outcomes is indistinguishable from one the run never considered, and
+    # a restrictive selector's whole value is that its receipt reconciles every
+    # nominated ticket to exactly one terminal outcome.
+    SKIPPED_NO_OFFER_COMPANION = "skipped_no_offer_companion"
     # The sweep reached the same gap verdict it has ALREADY posted on this
     # ticket, and did not repeat itself (OMN-16808). Enumeration is a bare
     # `now - lookback_hours` window with no cursor, so one merged companion sits
@@ -191,6 +207,24 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # they are looking at. Both are holds: nothing written, candidate
     # re-offered next tick.
     SKIPPED_LIVE_CHECK_NOT_EXECUTED = "skipped_live_check_not_executed"
+    # OMN-16106. THE GATE-PROBE HOLD. A ticket whose own description names the
+    # workflow that PROVES it -- a `Gate:` line -- is a ticket that has told
+    # this mechanism where its evidence lives. Reading dod_verify's counters
+    # while ignoring that workflow's live conclusion is reading the paperwork
+    # and not the thing.
+    #
+    # Measured: OMN-16025, "[Gate] Delegation canary green", flipped Done at
+    # 2026-09-06T21:42:17.523Z by run 34061364537. Its gate probe is
+    # `chain-canary.yml`, and EVERY run of that workflow on 2026-09-06 is
+    # `conclusion=failure` -- including run 34061981317, fired 21:44:42Z, two
+    # minutes AFTER the flip, at 3 of 5 links proven. The counters said 6/12
+    # verified with 0 failed; the gate's own probe said red; the counters won.
+    #
+    # Fails CLOSED in every ambiguous direction: a `Gate:` line that does not
+    # resolve to a repo and a workflow file, a workflow with no completed run,
+    # or a `gh` read that errors all HOLD. A ticket that names its own proof
+    # and then cannot produce it is not a ticket to close on arithmetic.
+    SKIPPED_GATE_PROBE_RED = "skipped_gate_probe_red"
     # OMN-17658 bound readback. `issueUpdate` reported success but the
     # post-write read of the ticket's own state history did not show a
     # completed segment that the pre-write read did not already have. Recorded

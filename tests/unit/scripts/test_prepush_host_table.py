@@ -29,10 +29,12 @@ broken.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -228,7 +230,7 @@ def test_h101_is_authorizing_because_shadow_could_never_add_capacity() -> None:
 
 
 def test_h101_hostname_is_what_hostname_s_actually_prints() -> None:
-    """`ssh jonah@192.168.86.101 'hostname -s'` prints `Stickybeatz`, not
+    """A live `hostname -s` on that host prints `Stickybeatz`, not
     `stickybeatz.local`. The old value could never have matched an identity
     check, so the row would have failed silently the moment it was promoted."""
     hosts = {r[0]: r[2] for r in _rows()}
@@ -238,34 +240,122 @@ def test_h101_hostname_is_what_hostname_s_actually_prints() -> None:
     )
 
 
-def test_every_capacity_row_carries_an_absolute_uv_path_and_a_floor() -> None:
-    """uv is on no host's non-interactive PATH, and the live fleet spread is
-    0.8.3 -> 0.11.32 against a lockfile at revision 3. Presence is not enough;
-    the version floor is what makes a stale host skip rather than fail weirdly
-    mid-`uv sync`."""
+def test_every_capacity_row_declares_a_uv_floor() -> None:
+    """The live fleet spread is 0.8.3 -> 0.11.32 against a lockfile at revision
+    3. The floor is what makes a stale host skip rather than fail weirdly
+    mid-`uv sync`.
+
+    The uv PATH itself is a placement column and now reads ``@private``
+    (OMN-17996) -- that it is absolute is proven against the hydrated rows by
+    ``test_hydration_fills_the_placement_columns_from_the_private_overlay``.
+    The floor is policy, not an address, and stays here.
+    """
     for row in _rows():
         if row[1] != "capacity":
             continue
-        assert row[5].startswith("/"), (
-            f"{row[0]}: uv path must be absolute, got {row[5]!r}"
-        )
         assert row[6][0].isdigit(), (
             f"{row[0]}: expected a uv_min_version, got {row[6]!r}"
         )
 
 
-def test_101_workroot_avoids_the_tcc_protected_tree() -> None:
-    """`ssh jonah@.101 'ls ~/Code'` returns `Operation not permitted`, so the
-    workroot must live outside it -- the bundle design never needs `~/Code` on
-    a remote host, which is what removes the out-of-band GUI grant step."""
-    workroots = {r[0]: r[7] for r in _rows()}
-    assert not workroots["h101"].startswith("/Users/jonah/Code")
-    assert workroots["h101"] == "/Users/Shared/onex-prepush"
+#: Columns 4, 6 and 8 -- ssh_target, uv_abs_path, workroot. Placement data.
+_PRIVATE_COLUMN_INDEXES = (3, 5, 7)
+
+
+def test_placement_columns_are_private_in_the_public_table() -> None:
+    """OMN-17996. The three placement columns carry the token, never a value.
+
+    This is the shape that makes the exposure unable to come back: a lab
+    address, a tailnet name or an operator home path cannot be re-added to a
+    row without failing here first. It is deliberately an equality check on
+    the token rather than a pattern sweep over the values -- a sweep can only
+    refuse the shapes somebody thought of.
+    """
+    for row in _rows():
+        for idx in _PRIVATE_COLUMN_INDEXES:
+            assert row[idx] in ("@private", "-"), (
+                f"{row[0]}: column {idx + 1} must be `@private` (or `-` on an "
+                f"identity row); got {row[idx]!r}. The real value belongs in "
+                f"$OMNI_HOME/config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+            )
+
+
+#: Every shape this file must never publish again. Each pattern matched the
+#: table at the OMN-17996 parent commit -- that is the positive control, and it
+#: is why an empty result here is evidence rather than an assumption.
+_FORBIDDEN_IN_THE_PUBLIC_TABLE = {
+    "an EC2 instance id": r"i-0[0-9a-f]{8,}",
+    "a tailnet MagicDNS name": r"tail[0-9a-f]+\.ts\.net",
+    "an RFC1918 address": (
+        r"(^|[^0-9.])(192\.168|10|172\.(1[6-9]|2[0-9]|3[01]))"
+        r"\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)"
+    ),
+    "a personal home path": r"/(Users|home)/(?!Shared/)[a-z][a-z0-9_-]*/",
+    "an ssh login pair": r"[a-z][a-z0-9_-]*@[a-z0-9.-]+\.(ts\.net|local)",
+}
+
+
+def test_the_public_table_publishes_no_lab_or_cloud_identifier() -> None:
+    """OMN-17992/OMN-17996. This repository is public.
+
+    The table used to carry, in one file, three RFC1918 addresses, a Tailscale
+    MagicDNS name embedding the tailnet identifier, six absolute home paths and
+    -- in the cloud row -- an EC2 instance id, its type, its availability zone
+    and the statement that it holds a routable Elastic IP.
+    """
+    text = TABLE.read_text(encoding="utf-8")
+    found = {
+        what: re.findall(pattern, text)
+        for what, pattern in _FORBIDDEN_IN_THE_PUBLIC_TABLE.items()
+    }
+    offenders = {what: hits for what, hits in found.items() if hits}
+    assert not offenders, (
+        f"{TABLE} publishes {sorted(offenders)}; move the value to "
+        "$OMNI_HOME/config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+    )
 
 
 # =============================================================================
 # Extract-and-execute harness
 # =============================================================================
+
+
+#: A synthetic placement overlay covering every label in the shipped table.
+#: Reserved-documentation values only -- RFC 5737 addresses, an RFC 6761
+#: `.example` name, `/tmp` paths -- so this fixture can never become the
+#: disclosure the OMN-17996 split exists to prevent. The ssh_target field is
+#: intentionally ignored by the resolver: transport comes from the committed
+#: hostname column and private ssh config, not the overlay.
+_SYNTHETIC_OVERLAY = (
+    "#label\tssh_target\tuv_abs_path\tworkroot\n"
+    "h200\thost200.example\t/opt/synthetic/bin/uv\t/tmp/onex-prepush\n"
+    "h201\t198.51.100.7\t/opt/synthetic/bin/uv\t/tmp/onex-prepush\n"
+    "h201c\t-\t-\t-\n"
+    "h101\t198.51.100.11\t/opt/synthetic/bin/uv\t/tmp/onex-prepush\n"
+    "h105\t198.51.100.5\t/opt/synthetic/bin/uv\t/tmp/onex-prepush\n"
+    "hcloud\t203.0.113.9\t/opt/synthetic/bin/uv\t/tmp/onex-prepush\n"
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _synthetic_overlay_home() -> Path:
+    """A throwaway $OMNI_HOME carrying the synthetic overlay."""
+    home = Path(tempfile.mkdtemp(prefix="prepush-overlay-"))
+    lab = home / "config" / "lab"
+    lab.mkdir(parents=True)
+    (lab / "prepush_hosts.omnibase_infra.overlay.tsv").write_text(
+        _SYNTHETIC_OVERLAY, encoding="utf-8"
+    )
+    return home
+
+
+def _omni_home_with_overlay(tmp_path: Path, overlay_text: str) -> Path:
+    home = tmp_path / "private_workspace"
+    (home / "config" / "lab").mkdir(parents=True)
+    (home / "config" / "lab" / "prepush_hosts.omnibase_infra.overlay.tsv").write_text(
+        overlay_text, encoding="utf-8"
+    )
+    return home
 
 
 def _run_driver(repo_root: Path, body: str) -> subprocess.CompletedProcess[str]:
@@ -300,6 +390,16 @@ host_load_ratio() {{ return 1; }}
             "PREPUSH_LOAD_OVERRIDE_MAP": "",
             "PREPUSH_SLOT_OVERRIDE_MAP": "",
             "PREPUSH_MEM_OVERRIDE_MAP": "",
+            # OMN-17996. The placement columns hydrate from
+            # $OMNI_HOME/config/lab/... on a real workstation. Left inherited,
+            # every one of these tests would read a DIFFERENT table on a
+            # developer machine than in CI, where no such file exists -- the
+            # test would pass in both places while asserting two different
+            # things, and the picker tests would silently stop exercising
+            # placement in CI at all. Pinned to a SYNTHETIC overlay whose
+            # addresses are reserved-documentation values, so these tests are
+            # identical everywhere and none of them can print a real one.
+            "OMNI_HOME": str(_synthetic_overlay_home()),
         },
     )
 
@@ -313,6 +413,159 @@ def _driver_both(repo_root: Path, body: str) -> str:
     return completed.stdout + completed.stderr
 
 
+# =============================================================================
+# The private placement overlay (OMN-17996)
+# =============================================================================
+
+
+def test_hydration_fills_the_placement_columns_from_the_private_overlay(
+    table_repo: Path, tmp_path: Path
+) -> None:
+    """OMN-17996. The real table, hydrated from a synthetic overlay.
+
+    This is where the VALUE contracts that used to be asserted against the
+    committed columns now live: an absolute uv path, and a workroot outside the
+    TCC-protected user tree. They are proven against the hydrated rows -- the
+    rows the picker actually sees -- rather than against the file, so the
+    contract survives the values having moved.
+    """
+    home = _omni_home_with_overlay(tmp_path, _SYNTHETIC_OVERLAY)
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -uo pipefail\n"
+            f"REPO_ROOT={table_repo}\n"
+            f"log() {{ :; }}\n"
+            f". {LIB}\n"
+            f"prepush_table_rows\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "OMNI_HOME": str(home)},
+    )
+    assert completed.returncode == 0, completed.stderr
+    rows = [line.split("\t") for line in completed.stdout.splitlines() if line]
+    assert rows, "expected hydrated rows"
+    by_label = {r[0]: r for r in rows}
+
+    assert by_label["h101"][3] == "stickybeatz", (
+        "ssh_target must come from the committed hostname, not the overlay"
+    )
+    for row in rows:
+        if row[1] != "capacity":
+            continue
+        assert row[3] == row[2], (
+            f"{row[0]}: transport must be the committed hostname; got {row[3]!r}"
+        )
+        assert row[5].startswith("/"), (
+            f"{row[0]}: hydrated uv path must be absolute, got {row[5]!r}"
+        )
+        assert not row[7].startswith("/Users/"), (
+            f"{row[0]}: the workroot must stay out of the TCC-protected user "
+            f"tree; got {row[7]!r}"
+        )
+        assert row[7].startswith("/"), f"{row[0]}: workroot must be absolute"
+
+
+def test_an_absent_overlay_skips_placement_and_never_refuses(
+    table_repo: Path,
+) -> None:
+    """OMN-17996. Absence is a SKIP, in the one direction that is safe.
+
+    A placement optimisation must never brick a push. With no overlay the rows
+    still parse and still carry their identity and mode; what they lose is a
+    reachable target, which every consumer already treats as "skip this row".
+    An unresolved row must never read as a usable one.
+    """
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -uo pipefail\nREPO_ROOT={table_repo}\nlog() {{ :; }}\n"
+            f". {LIB}\nprepush_table_rows\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env={k: v for k, v in os.environ.items() if k != "OMNI_HOME"},
+    )
+    assert completed.returncode == 0, completed.stderr
+    rows = [line.split("\t") for line in completed.stdout.splitlines() if line]
+    assert rows, "an absent overlay must not empty the table"
+    for row in rows:
+        assert row[3] == "-", (
+            f"{row[0]}: an unresolved ssh_target must read `-` (skip), got {row[3]!r}"
+        )
+        if row[1] == "capacity":
+            assert row[5] == "", f"{row[0]}: unresolved uv must be empty"
+            assert row[7] == "", f"{row[0]}: unresolved workroot must be empty"
+        # Identity survives: this is the half that never moved.
+        assert row[2], f"{row[0]}: hostname must survive an absent overlay"
+        assert row[11] in ("authorizing", "shadow", "disabled")
+
+
+def test_the_overlay_is_never_read_from_a_defaulted_location() -> None:
+    """CLAUDE.md rule 8. A silent default is what re-publishes the address book
+    on the day somebody's OMNI_HOME is unset and the hook quietly finds a
+    checked-in copy instead. There is no fallback path and no built-in
+    address: an unset OMNI_HOME resolves to nothing, and nothing is a skip."""
+    lib = LIB.read_text(encoding="utf-8")
+    resolver = lib.split("prepush_overlay_path() {", 1)[1].split("\n}", 1)[0]
+    assert 'if [ -z "${OMNI_HOME:-}" ]; then' in resolver, (
+        "the overlay resolver must fail fast on an unset OMNI_HOME"
+    )
+    assert "OMNI_HOME:-/" not in resolver and "OMNI_HOME:-$" not in resolver, (
+        "the overlay resolver must not default OMNI_HOME to anything"
+    )
+
+
+def test_partial_overlay_row_skips_the_whole_placement_row(
+    table_repo: Path, tmp_path: Path
+) -> None:
+    """A partial overlay row must not produce mixed usable/unusable state.
+
+    A row with a transport target but no path data used to look reachable until
+    later probes failed in less obvious ways. Transport now ignores the overlay,
+    and path hydration is coherent: complete absolute paths make the row usable;
+    anything less is an explicit skip.
+    """
+    home = _omni_home_with_overlay(
+        tmp_path,
+        "#label\tssh_target\tuv_abs_path\tworkroot\n"
+        "h101\t198.51.100.11\t/opt/synthetic/bin/uv\t\n",
+    )
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -uo pipefail\n"
+            f"REPO_ROOT={table_repo}\n"
+            f"log() {{ :; }}\n"
+            f". {LIB}\n"
+            f"prepush_table_rows\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "OMNI_HOME": str(home)},
+    )
+    assert completed.returncode == 0, completed.stderr
+    rows = [line.split("\t") for line in completed.stdout.splitlines() if line]
+    by_label = {r[0]: r for r in rows}
+    assert by_label["h101"][3] == "-"
+    assert by_label["h101"][5] == ""
+    assert by_label["h101"][7] == ""
+    assert "placement overlay incomplete for h101" in completed.stderr
+
+
 #: A table whose rows exist only to exercise the RULES, independent of whichever
 #: machines the lab happens to hold today. Two authorizing rows plus a shadow
 #: row is the exact shape the placement bug needed: the shadow host is the
@@ -321,9 +574,9 @@ _SYNTHETIC_TABLE = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
     "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local"
     "\tplacement_tier\tnote\n"
-    "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\tauthorizing\tallowed\tdefault\tbusier\n"
-    "hb\tcapacity\thostb\tjonah@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t1\t-\tauthorizing\tallowed\tdefault\tidler\n"
-    "hs\tcapacity\thosts\tjonah@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t1\t-\tshadow\tallowed\tdefault\tidlest of all\n"
+    "ha\tcapacity\thosta\tuser@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\tauthorizing\tallowed\tdefault\tbusier\n"
+    "hb\tcapacity\thostb\tuser@hostb\t24\t/bin/uv\t0.1.0\t/tmp/wb\tlockdir\t1\t-\tauthorizing\tallowed\tdefault\tidler\n"
+    "hs\tcapacity\thosts\tuser@hosts\t24\t/bin/uv\t0.1.0\t/tmp/ws\tlockdir\t1\t-\tshadow\tallowed\tdefault\tidlest of all\n"
 )
 
 #: A single disabled row, so the shipped table's promotion of h101 (its last
@@ -333,7 +586,7 @@ _SYNTHETIC_TABLE_DISABLED_ONLY = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
     "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local"
     "\tplacement_tier\tnote\n"
-    "hd\tcapacity\thostd\tjonah@hostd\t24\t/bin/uv\t0.1.0\t/tmp/wd\tlockdir\t1\t-\tdisabled\tallowed\tdefault\tstill unfit\n"
+    "hd\tcapacity\thostd\tuser@hostd\t24\t/bin/uv\t0.1.0\t/tmp/wd\tlockdir\t1\t-\tdisabled\tallowed\tdefault\tstill unfit\n"
 )
 
 
@@ -465,10 +718,21 @@ def _hook_func(name: str) -> str:
 
 
 def _impacted_selection_branch() -> str:
-    """The shipped impacted-selection branch, without the surrounding script exit."""
+    """The shipped impacted-selection branch, without the surrounding script exit.
+
+    OMN-18012 wrapped the two whole-suite guard calls in an outer
+    ``if [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]`` (an off-box integration
+    placement has already dispatched a superset, so re-entering the guard would
+    dispatch twice). The slice anchors on that outer ``if`` rather than on the
+    inner one: anchoring on the inner line still MATCHED as a substring and
+    silently produced a fragment with an unbalanced ``fi``, which surfaces as a
+    bash syntax error in the driver rather than as a readable assertion.
+    """
     text = HOOK.read_text(encoding="utf-8")
-    start = text.index('  if selection_is_whole_suite "$FULL_SUITE_TARGET"')
-    end = text.index('\nelse\n  log "no impacted unit tests', start)
+    start = text.index(
+        '  if [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]; then\n    if selection_is_whole_suite'
+    )
+    end = text.index('\nelif [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then', start)
     return text[start:end] + "\n"
 
 
@@ -500,6 +764,8 @@ def _pick(
     slot: str,
     uv: str,
     mem: str = "",
+    docker: str = "",
+    require_docker: bool = False,
     repo_name: str = "omnibase_core",
 ) -> str:
     body = (
@@ -507,6 +773,8 @@ def _pick(
         f'export PREPUSH_SLOT_OVERRIDE_MAP="{slot}"\n'
         f'export PREPUSH_MEM_OVERRIDE_MAP="{mem}"\n'
         f'export PREPUSH_UV_OVERRIDE_MAP="{uv}"\n'
+        f'export PREPUSH_DOCKER_OVERRIDE_MAP="{docker}"\n'
+        f"PREPUSH_REQUIRE_DOCKER={int(require_docker)}\n"
         f"if pick_capacity_host stickybeatz-studio {repo_name}; then\n"
         '  echo "PICK=$PREPUSH_PICK_LABEL"\n'
         "else\n"
@@ -518,6 +786,93 @@ def _pick(
 
 
 _GOOD_UV = "h200=0.11.32,h201=0.11.5,h101=0.8.3,h105=0.11.8"
+
+
+# =============================================================================
+# OMN-18012 -- the container-runtime requirement
+# =============================================================================
+# A REQUIREMENT the caller opts into, not a new ranking input. It exists so a
+# service-dependent integration selection is never placed on a row with no
+# docker daemon: that red is a statement about the HOST, not the tree, and a
+# guaranteed false red hard-blocks a push (the class OMN-17549 closed for PATH).
+
+
+def test_the_docker_requirement_is_off_unless_a_caller_turns_it_on(
+    table_repo: Path,
+) -> None:
+    """Every pre-OMN-18012 placement probes exactly the rows it probed before.
+
+    The negative control for the two tests below: with no docker anywhere and
+    the requirement off, the picker's answer is unchanged.
+    """
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        docker="",
+    )
+    assert "PICK=h105" in out, out
+    assert "no-docker" not in out, out
+
+
+def test_a_row_without_a_reachable_docker_daemon_is_refused_when_required(
+    table_repo: Path,
+) -> None:
+    """The fittest row loses to the only row that can actually run the suite."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        docker="h201=24.0.7",
+        require_docker=True,
+    )
+    assert "PICK=h201" in out, out
+    assert "h105=no-docker(unreadable)" in out, out
+
+
+def test_an_unreadable_docker_probe_is_not_fit(table_repo: Path) -> None:
+    """Fail-CLOSED. Unreadable is never "assume ample" -- the same posture the
+    load, memory, slot and uv probes already carry."""
+    out = _pick(
+        table_repo,
+        load="h200=0.90,h201=0.44,h105=0.21",
+        slot=_ALL_FREE,
+        uv=_GOOD_UV,
+        docker="h201=unreachable,h105=",
+        require_docker=True,
+    )
+    assert "PICK=none" in out, out
+    assert "h201=no-docker(unreachable)" in out, out
+
+
+def test_the_docker_probe_asks_for_a_daemon_not_a_client_binary() -> None:
+    """``docker info`` and not ``docker --version``: a client binary with no
+    reachable daemon answers the version and then fails the run."""
+    lib = LIB.read_text(encoding="utf-8")
+    assert "_PREPUSH_DOCKER_PROBE_SH='docker info" in lib, (
+        "the container-runtime probe must interrogate the DAEMON"
+    )
+    # Comment lines are stripped: the rationale ABOVE the probe names the
+    # rejected form on purpose, and asserting against the raw file would make
+    # the explanation of the rule violate the rule.
+    code = "\n".join(
+        line for line in lib.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "docker --version" not in code
+
+
+def test_the_docker_requirement_is_the_last_probe_in_the_ladder() -> None:
+    """It is the most expensive probe and the rarest requirement, so a row
+    already refused on slot/load/memory/uv is never charged for it."""
+    lib = LIB.read_text(encoding="utf-8")
+    picker = lib[lib.index("pick_capacity_host() {") :]
+    picker = picker[: picker.index("\n}\n")]
+    assert picker.index("prepush_probe_slot") < picker.index("prepush_probe_ratio")
+    assert picker.index("prepush_probe_ratio") < picker.index("prepush_probe_mem_ok")
+    assert picker.index("prepush_probe_mem_ok") < picker.index("prepush_probe_uv")
+    assert picker.index("prepush_probe_uv") < picker.index("prepush_probe_docker")
 
 
 def test_picker_chooses_the_least_loaded_fit_host(table_repo: Path) -> None:
@@ -594,8 +949,8 @@ def test_a_repo_denied_host_is_never_chosen(tmp_path: Path) -> None:
     it to whichever repo the lab happens to deny today made a capacity-policy
     edit look like a mechanism regression -- exactly the failure this run hit."""
     denied_table = _SYNTHETIC_TABLE.replace(
-        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\t",
-        "ha\tcapacity\thosta\tjonah@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\tsomerepo\t",
+        "ha\tcapacity\thosta\tuser@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\t-\t",
+        "ha\tcapacity\thosta\tuser@hosta\t24\t/bin/uv\t0.1.0\t/tmp/wa\tlockdir\t1\tsomerepo\t",
     )
     assert "\tsomerepo\t" in denied_table, "fixture edit did not take"
     repo = _repo_with_table(tmp_path, denied_table, name="denied")
@@ -675,7 +1030,7 @@ _SYNTHETIC_TABLE_MULTISLOT = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
     "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local"
     "\tplacement_tier\tnote\n"
-    "hm\tcapacity\thostm\tjonah@hostm\t10\t/bin/uv\t0.1.0\t/tmp/wm\tlockdir\t2\t-\tauthorizing\tallowed\tdefault\ttwo-slot test host\n"
+    "hm\tcapacity\thostm\tuser@hostm\t10\t/bin/uv\t0.1.0\t/tmp/wm\tlockdir\t2\t-\tauthorizing\tallowed\tdefault\ttwo-slot test host\n"
 )
 
 
@@ -1396,6 +1751,9 @@ def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup(
         'IS_FULL="false"\n'
         'PATHS=("tests/unit/runtime/")\n'
         'PATHS_STR="tests/unit/runtime/ "\n'
+        'ORDINARY_PATHS=("tests/unit/runtime/")\n'
+        'ORDINARY_PATHS_STR="tests/unit/runtime/ "\n'
+        "RUNNABLE_INTEGRATION_PATHS=()\n"
         'PREPUSH_PYTEST_ARGS=""\n'
         "REMOTE_FULL_SUITE_VERIFIED=0\n"
         "REMOTE_LAB_RUN_VERDICT=0\n"
@@ -1411,6 +1769,8 @@ def test_runtime_sized_impacted_selection_reuses_the_heavy_slot_and_cleanup(
         + _hook_func("selection_is_whole_suite")
         + _hook_func("guard_full_suite_host")
         + _hook_func("prepush_hook_cleanup")
+        + _hook_func("run_prepush_ordinary_tests")
+        + _hook_func("run_prepush_partitioned_tests")
         + _impacted_selection_branch()
         + 'printf "RC=%s\\n" "$RC"\n'
         "prepush_hook_cleanup\n"
@@ -1946,7 +2306,7 @@ def test_the_registry_root_is_established_on_target_never_inherited(
     remote_run_env: dict[str, Path],
 ) -> None:
     """Forwarding the LAUNCHER's OMNI_HOME is strictly worse than leaving it
-    unset: `/Users/jonah/Code/omni_home` exists on every lab Mac and is
+    unset: the launcher's workspace root exists on every lab Mac and is
     TCC-denied to `sshd`, so forwarding converts a fail-fast into a
     PermissionError deep inside a test. Pin that an inherited value loses."""
     launcher_value = "/nonexistent/launcher/Code/omni_home"
@@ -2365,8 +2725,11 @@ def test_the_local_leg_restores_a_developer_shell_path_too() -> None:
     assert "export PATH" in hook
 
     export_at = hook.index('PATH="$_prepush_devpath"')
-    first_pytest = hook.index("exec uv run pytest")
-    assert export_at < first_pytest, (
+    execution_start = hook.index("if ! type prepush_developer_shell_path")
+    first_pytest_dispatch = hook.index(
+        'run_prepush_partitioned_tests "', execution_start
+    )
+    assert export_at < first_pytest_dispatch, (
         "PATH must be exported before any local pytest invocation, not after"
     )
 
@@ -2456,7 +2819,8 @@ def test_the_local_leg_uses_the_table_uv_dir_not_only_the_actors_home() -> None:
 
     The remote leg resolves the host's provisioned tooling through
     `$(dirname "$UV")`, and `$UV` comes from the row -- so it works for any
-    actor. On `.201` the row declares `/home/jonah/.local/bin/uv`, and that is
+    actor. On `.201` the row's uv path resolves under that host's own
+    user-install prefix, and that is
     the directory `shellcheck` lives in; a collaborator's own
     `/home/<them>/.local/bin` holds neither binary. A local leg that only added
     `${HOME}/.local/bin` would still have returned the six false reds this
@@ -2544,9 +2908,9 @@ _TABLE_PREFER_REMOTE = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
     "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local"
     "\tplacement_tier\tnote\n"
-    "hp\tcapacity\thostp\tjonah@hostp\t24\t/bin/uv\t0.1.0\t/tmp/wp\tlockdir\t1\t-"
+    "hp\tcapacity\thostp\tuser@hostp\t24\t/bin/uv\t0.1.0\t/tmp/wp\tlockdir\t1\t-"
     "\tauthorizing\tprefer_remote\tdefault\tthe box we route off\n"
-    "hl\tcapacity\thostl\tjonah@hostl\t24\t/bin/uv\t0.1.0\t/tmp/wl\tlockdir\t1\t-"
+    "hl\tcapacity\thostl\tuser@hostl\t24\t/bin/uv\t0.1.0\t/tmp/wl\tlockdir\t1\t-"
     "\tauthorizing\tallowed\tdefault\ta lab host\n"
 )
 
@@ -2578,7 +2942,7 @@ def test_a_row_predating_the_column_reads_as_allowed(tmp_path: Path) -> None:
     legacy = (
         "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
         "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\tnote\n"
-        "hz\tcapacity\thostz\tjonah@hostz\t24\t/bin/uv\t0.1.0\t/tmp/wz\tlockdir\t1\t-"
+        "hz\tcapacity\thostz\tuser@hostz\t24\t/bin/uv\t0.1.0\t/tmp/wz\tlockdir\t1\t-"
         "\tauthorizing\tsome free text that is not a policy\n"
     )
     repo = _repo_with_table(tmp_path, legacy, name="pr4")
@@ -2612,7 +2976,7 @@ _TABLE_IDENTITY_POLICY = (
     "\tplacement_tier\tnote\n"
     "hc\tidentity\tcontainerhost\t-\t32\t-\t-\t-\tnone\t1\t-\tauthorizing"
     "\tprefer_remote\t-\tan executing container identity\n"
-    "hl\tcapacity\thostl\tjonah@hostl\t24\t/bin/uv\t0.1.0\t/tmp/wl\tlockdir\t1\t-"
+    "hl\tcapacity\thostl\tuser@hostl\t24\t/bin/uv\t0.1.0\t/tmp/wl\tlockdir\t1\t-"
     "\tauthorizing\tallowed\tdefault\ta lab host\n"
 )
 
@@ -2645,11 +3009,11 @@ _TABLE_TIERED = (
     "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
     "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local"
     "\tplacement_tier\tnote\n"
-    "hd1\tcapacity\thostd1\tjonah@hostd1\t24\t/bin/uv\t0.1.0\t/tmp/w1\tlockdir\t1\t-"
+    "hd1\tcapacity\thostd1\tuser@hostd1\t24\t/bin/uv\t0.1.0\t/tmp/w1\tlockdir\t1\t-"
     "\tauthorizing\tallowed\tdefault\tbusier default host\n"
-    "hd2\tcapacity\thostd2\tjonah@hostd2\t24\t/bin/uv\t0.1.0\t/tmp/w2\tlockdir\t1\t-"
+    "hd2\tcapacity\thostd2\tuser@hostd2\t24\t/bin/uv\t0.1.0\t/tmp/w2\tlockdir\t1\t-"
     "\tauthorizing\tallowed\tdefault\tidler default host\n"
-    "hlr\tcapacity\thostlr\tjonah@hostlr\t32\t/bin/uv\t0.1.0\t/tmp/w3\tlockdir\t1\t-"
+    "hlr\tcapacity\thostlr\tuser@hostlr\t32\t/bin/uv\t0.1.0\t/tmp/w3\tlockdir\t1\t-"
     "\tauthorizing\tprefer_remote\tlast_resort\tidlest host in the lab, demoted\n"
 )
 
@@ -2736,9 +3100,9 @@ def test_a_row_predating_the_tier_column_ranks_as_default(tmp_path: Path) -> Non
     mixed = (
         "#label\trole\thostname\tssh_target\tcores\tuv_abs_path\tuv_min_version"
         "\tworkroot\tslot_mode\tslots\trepos_denied\tmode\theavy_local\tnote\n"
-        "hy\tcapacity\thosty\tjonah@hosty\t24\t/bin/uv\t0.1.0\t/tmp/wy\tlockdir\t1\t-"
+        "hy\tcapacity\thosty\tuser@hosty\t24\t/bin/uv\t0.1.0\t/tmp/wy\tlockdir\t1\t-"
         "\tauthorizing\tallowed\tlegacy row, note in field 14\n"
-        "hlr\tcapacity\thostlr\tjonah@hostlr\t32\t/bin/uv\t0.1.0\t/tmp/w3\tlockdir\t1\t-"
+        "hlr\tcapacity\thostlr\tuser@hostlr\t32\t/bin/uv\t0.1.0\t/tmp/w3\tlockdir\t1\t-"
         "\tauthorizing\tprefer_remote\tlast_resort\tidlest, demoted\n"
     )
     repo = _repo_with_table(tmp_path, mixed, name="tier4")
@@ -3493,7 +3857,7 @@ def _remote_run_driver(
         'export STUB_HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"\n'
         "PATHS=(tests)\n"
         "PREPUSH_PICK_LABEL=hb\n"
-        "PREPUSH_PICK_SSH=jonah@hostb\n"
+        "PREPUSH_PICK_SSH=user@hostb\n"
         "PREPUSH_PICK_UV=/bin/uv\n"
         f'PREPUSH_PICK_WORKROOT="{tmp_path}/wb"\n'
         "PREPUSH_PICK_SLOT=1\n"

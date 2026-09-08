@@ -45,6 +45,23 @@ test_infrastructure_paths:
 #
 # Discovery method: grep -r "from omnibase_infra.<module>" src/omnibase_infra/ --include="*.py" -l
 # | sed 's|src/omnibase_infra/||' | cut -d'/' -f1 | sort -u
+# OMN-18012 -- BOUNDARY source -> the integration suite that proves it.
+# See ModelAdjacencyMap.boundary_integration_tests in scripts/ci/test_selection_loader.py
+# for why this exists and why it is hand-curated. Keys ending in "/" are
+# prefixes; every value must be a directory under tests/integration/.
+#
+# event_bus/kafka_auth.py + event_bus/models/config.py are the single choke
+# point through which all 15 client construction sites in this repo obtain
+# their broker credentials (kafka_transport.py, the runtime/effects/worker
+# providers). Every unit test around them mocks the broker, so the one thing
+# they cannot observe is the boundary itself: a client that opens PLAINTEXT
+# against an auth-required listener. tests/integration/customer_path/ starts a
+# real auth-required Redpanda and is the only suite in the repo that does.
+boundary_integration_tests:
+  src/omnibase_infra/event_bus/kafka_auth.py:
+    - tests/integration/customer_path/
+  src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py:
+    - tests/integration/customer_path/
 adjacency:
   # --- shared modules (full-suite escalation; reverse_deps kept for documentation) ---
   models:

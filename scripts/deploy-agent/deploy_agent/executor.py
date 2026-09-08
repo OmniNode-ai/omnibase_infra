@@ -29,6 +29,7 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
+from deploy_agent.tracking_ref import load_tracking_ref_from_env
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
 # Scope.FULL regenerates both core and runtime bundles.
@@ -46,7 +47,14 @@ REPO_DIR = os.environ.get(
 DEPLOY_AGENT_DIR = os.environ.get(
     "DEPLOY_AGENT_DIR", "/data/omninode/omnibase_infra/scripts/deploy-agent"
 )
+# The TRACKED compose base every deploy path layers its lane overlay on:
+# this agent, scripts/deploy-runtime.sh, and
+# scripts/runtime_build/refresh_stability_lane.sh alike. Its only writer is git.
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
+# OMN-17291: where the catalog render lands. A BUILD ARTIFACT, gitignored, never
+# the tracked file above -- see compose_gen() for why that distinction is the
+# whole point.
+COMPOSE_GEN_OUTPUT_FILE = f"{REPO_DIR}/docker/docker-compose.generated.yml"
 COMPOSE_PROJECT = "omnibase-infra"
 RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
 
@@ -408,6 +416,11 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
 def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
     """Load contract-rendered runtime policy env values."""
     env_path = RUNTIME_POLICY_ENV_FILE if path is None else path
+    return _load_dotenv_file(env_path)
+
+
+def _load_dotenv_file(env_path: Path) -> dict[str, str]:
+    """Parse one committed dotenv file with shell-compatible quoting."""
     if not env_path.exists():
         return {}
 
@@ -445,15 +458,25 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
         "postgresql://postgres:"
         f"{env.get('POSTGRES_PASSWORD', 'postgres')}@{postgres_host}:{postgres_port}/omnidash_analytics"
     )
-    defaults = {
-        "CI_CALLBACK_TOKEN": "deploy-agent-compose-parse-only",
-        "LINEAR_WEBHOOK_SECRET": "deploy-agent-compose-parse-only",
-        "WAITLIST_NOTIFIER_SLACK_BOT_TOKEN": "deploy-agent-compose-parse-only",
-        "WAITLIST_NOTIFIER_SLACK_CHANNEL_ID": "deploy-agent-compose-parse-only",
-        "OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN": postgres_dsn,
-    }
-    for key, value in defaults.items():
-        env.setdefault(key, value)
+    # OMN-17291: four sentinel placeholders used to be injected here --
+    # CI_CALLBACK_TOKEN, LINEAR_WEBHOOK_SECRET, WAITLIST_NOTIFIER_SLACK_BOT_TOKEN
+    # and WAITLIST_NOTIFIER_SLACK_CHANNEL_ID, all set to a literal
+    # "parse-only" string. They existed for one reason: compose_gen had
+    # overwritten the tracked compose file with the catalog render, and the
+    # render's ci-relay / linear-relay / waitlist-signup-notifier services carry
+    # those names as `${VAR:?}`, so `config` could not parse without them.
+    #
+    # They are gone because their reason is gone. Measured 2026-09-08 against
+    # this repo at 00a821b1: those four names appear in ZERO committed compose
+    # files -- not the base, not any lane overlay -- so no compose command this
+    # agent issues after the single-writer fix references them. They were also
+    # never sufficient: on the lab host, and in this agent's own process
+    # environment, the render still fails interpolation on ONEX_TENANT_DB_URL
+    # with all four supplied. Keeping a sentinel that neither fixes anything nor
+    # is needed by anything is the silent default this ticket exists to remove.
+    #
+    # This is a real derived DSN, not a sentinel, so it stays.
+    env.setdefault("OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN", postgres_dsn)
     # OMN-15181 round 3: prod-lane image repoint overrides (PROD_*_IMAGE) win
     # over any ambient os.environ value -- this is the one call site allowed
     # to override rather than setdefault, since it carries the caller's
@@ -678,10 +701,18 @@ class DeployExecutor:
                 )
 
     def self_update(self, *, skip: bool = False) -> None:
-        """Pull and re-exec deploy-agent itself if behind origin/main.
+        """Pull and re-exec deploy-agent itself if behind its tracking ref.
 
         Called as the first step of every rebuild_scope() invocation so that
-        a bug-fix merged to main is picked up before the next deploy runs.
+        a bug-fix merged to the lane's deploy branch is picked up before the
+        next deploy runs.
+
+        The branch is DECLARED, never hardcoded: ``DEPLOY_AGENT_TRACKING_REF``
+        is required and has no default (OMN-16442, see
+        ``deploy_agent.tracking_ref``). This method previously compared against
+        a literal ``origin/main``; the .201 dev agent's clone is on ``dev``,
+        hundreds of commits ahead of a release-synced ``main``, so it never
+        self-updated and could not pick up its own fixes.
 
         Safety rails:
         - Skipped entirely when DEPLOY_AGENT_NO_SELF_UPDATE=1 is set.
@@ -689,11 +720,18 @@ class DeployExecutor:
         - skip=True (--skip-self-update CLI flag) bypasses the check.
         - Container mode (DEPLOY_AGENT_MODE=container) exits with code 42
           instead of os.execv so the supervisor can respawn from the new binary.
+
+        Raises:
+            RuntimeError: when ``DEPLOY_AGENT_TRACKING_REF`` is unset. The
+                kill-switch and ``skip=True`` are checked first, so a
+                deliberately disabled self-update never needs the variable.
         """
         if skip or os.environ.get("DEPLOY_AGENT_NO_SELF_UPDATE") == "1":
             logger.info("self_update: skipped (kill-switch active)")
             return
 
+        branch = load_tracking_ref_from_env()
+        remote_ref = f"origin/{branch}"
         agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         timeout = 60
 
@@ -714,9 +752,9 @@ class DeployExecutor:
             )
             return
 
-        # Fetch latest origin/main.
+        # Fetch the declared tracking ref.
         fetch_result = _run(
-            ["git", "-C", agent_dir, "fetch", "origin", "main"],
+            ["git", "-C", agent_dir, "fetch", "origin", branch],
             timeout=timeout,
         )
         if fetch_result.returncode != 0:
@@ -732,7 +770,7 @@ class DeployExecutor:
             timeout=timeout,
         )
         remote_result = _run(
-            ["git", "-C", agent_dir, "rev-parse", "origin/main"],
+            ["git", "-C", agent_dir, "rev-parse", remote_ref],
             timeout=timeout,
         )
         if head_result.returncode != 0 or remote_result.returncode != 0:
@@ -744,19 +782,21 @@ class DeployExecutor:
 
         if local_sha == remote_sha:
             logger.info(
-                "self_update: already at origin/main (%s), nothing to do",
+                "self_update: already at %s (%s), nothing to do",
+                remote_ref,
                 local_sha[:12],
             )
             return
 
         logger.info(
-            "self_update: behind origin/main (local=%s remote=%s), pulling and re-execing",
+            "self_update: behind %s (local=%s remote=%s), pulling and re-execing",
+            remote_ref,
             local_sha[:12],
             remote_sha[:12],
         )
 
         pull_result = _run(
-            ["git", "-C", agent_dir, "pull", "--ff-only", "origin", "main"],
+            ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
             timeout=timeout,
         )
         if pull_result.returncode != 0:
@@ -853,16 +893,45 @@ class DeployExecutor:
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
     ) -> None:
-        """Regenerate docker-compose.infra.yml from the catalog CLI.
+        """Render the catalog to the build artifact and validate both composes.
 
         Runs ``uv run python -m omnibase_infra.docker.catalog.cli generate
-        <bundles> --output <COMPOSE_FILE>`` so every deploy reflects the current
-        catalog state rather than a static snapshot. This closes the drift window
-        where catalog changes (e.g. new LLM_* env vars) were merged but never
-        landed in the running containers (OMN-8430).
+        <bundles> --output <COMPOSE_GEN_OUTPUT_FILE>``, then validates the render
+        and the lane's real compose stack.
 
-        Non-fatal if the catalog CLI binary is unavailable — logs a warning and
-        continues so that a missing virtualenv does not block a deploy entirely.
+        OMN-17291 -- WHY THE OUTPUT IS NOT THE TRACKED FILE. Until this ticket
+        the ``--output`` here was ``COMPOSE_FILE``, so every deploy overwrote a
+        TRACKED file in place (OMN-8430). Two consequences, both measured on the
+        lab deploy-source clone:
+
+        1. The clone was permanently dirty. A ``git reset --hard`` in git_pull()
+           was undone six seconds later by this method, every deploy, with a
+           ~2900-line uncommitted delta that read like a lane edit and was not.
+        2. The two files are not the same stack. The render carries 12 services
+           the tracked file does not -- the ``runtime`` bundle pulls in
+           runtime-integrations (docker/catalog/bundles.yaml) -- and 31 required
+           ``${VAR:?}`` names against the tracked file's 50, nine of which
+           ``scripts/deploy-runtime.sh`` and
+           ``scripts/runtime_build/refresh_stability_lane.sh`` cannot supply. So
+           once the render had replaced the tracked file, the sanctioned deploy
+           scripts failed compose validation and auto-restored -- the dev and
+           stability lanes, the proof surface for beta work, were re-broken by
+           every run of this agent.
+
+        The catalog CLI's own declared default output is
+        ``docker/docker-compose.generated.yml`` and .gitignore already ignores
+        it: the ``--output`` override was the deviation, not the design. The
+        tracked file now has exactly one writer (git), and this agent's ``up``
+        path uses the same base + lane overlay as every other deploy path.
+
+        OMN-8430's purpose is kept, not dropped: the render is still produced on
+        every deploy and is still validated, so a catalog change that cannot
+        render fails the deploy here. What it no longer does is silently swap
+        the running stack for one no other deploy path can reproduce.
+
+        Generation is non-fatal if the catalog CLI is unavailable — a missing
+        virtualenv must not block a deploy. A render that PARSES INVALID is
+        fatal, as the lane validation already was (OMN-12865).
         """
         on_phase_update(Phase.COMPOSE_GEN, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS[Phase.COMPOSE_GEN]
@@ -879,7 +948,7 @@ class DeployExecutor:
             "generate",
             *selected,
             "--output",
-            COMPOSE_FILE,
+            COMPOSE_GEN_OUTPUT_FILE,
         ]
 
         result = _run(
@@ -890,13 +959,57 @@ class DeployExecutor:
         )
         if result.returncode != 0:
             logger.warning(
-                "compose_gen returned non-zero (exit=%d) — continuing with existing compose file. stderr: %s",
+                "compose_gen returned non-zero (exit=%d) — continuing; the tracked "
+                "compose base is unaffected either way. stderr: %s",
                 result.returncode,
                 result.stderr[:500],
             )
         else:
             logger.info("compose_gen complete: %s", result.stdout.strip())
             profile = "runtime" if "runtime" in selected else "core"
+
+            # Validate the render itself. This is what OMN-8430 bought and what
+            # OMN-17291 keeps: a catalog change that cannot render stops the
+            # deploy here, without that render ever touching the tracked file.
+            #
+            # --no-interpolate is load-bearing, not a weakening. The render
+            # requires nine ${VAR:?} names that resolve from no committed
+            # source, and five of them are absent from this agent's own process
+            # environment (measured 2026-09-08 on the lab host, /proc/<pid>/environ
+            # of the live agent: ONEX_TENANT_DB_URL among them). An interpolating
+            # check here would therefore fail every deploy on a value nobody can
+            # supply. Skipping interpolation still validates the render's schema
+            # and structure -- proven by control: the same flags reject a file
+            # carrying an unknown service key with exit 1. The render's env
+            # contract is covered separately and exactly, by
+            # docker/generated-compose-required-env.manifest.txt and its parity
+            # test, which is where a change to that contract now surfaces.
+            render_cmd = [
+                "docker",
+                "compose",
+                "-f",
+                COMPOSE_GEN_OUTPUT_FILE,
+                "--profile",
+                profile,
+                "config",
+                "--quiet",
+                "--no-interpolate",
+            ]
+            render_result = _run(
+                render_cmd,
+                timeout=timeout,
+                cwd=REPO_DIR,
+                env=_compose_env(),
+            )
+            if render_result.returncode != 0:
+                raise RuntimeError(
+                    "compose_gen produced an invalid catalog render at "
+                    f"{COMPOSE_GEN_OUTPUT_FILE}: "
+                    f"{render_result.stderr.strip() or render_result.stdout.strip()}"
+                )
+
+            # Validate the stack this deploy will actually bring up: the tracked
+            # base plus the lane overlay (OMN-12865).
             config = lane_config_for(lane)
             validate_cmd = [
                 "docker",
@@ -1294,14 +1407,21 @@ class DeployExecutor:
         return self.verify(on_phase_update=on_phase_update, lane=lane)
 
     @staticmethod
-    def _resolve_plugin_ref(repo_dir: str) -> str:
+    def _resolve_plugin_ref(repo_dir: str, *, fallback: str) -> str:
         """Return the HEAD SHA of a plugin repo for uv cache busting (OMN-10728).
 
         BuildKit's uv cache mount is keyed on the install URL, not the resolved
-        git HEAD. Passing @main always hits the stale cache entry. Passing the
-        full SHA forces a cache miss and a fresh fetch every time main advances.
+        git HEAD. Passing a bare branch always hits the stale cache entry.
+        Passing the full SHA forces a cache miss and a fresh fetch every time
+        the branch advances.
 
-        Falls back to "main" so manual docker builds without omni_home still work.
+        ``fallback`` is the branch name to use when the sibling clone is absent
+        or ``git rev-parse`` fails, so manual docker builds without omni_home
+        still work. It is supplied by the caller from the declared tracking ref
+        (OMN-16442) rather than hardcoded here: the old literal ``"main"``
+        resolved a release-synced branch on repos whose integration branch is
+        ``dev``, which is precisely the class of stale-ref defect the operator
+        ruling names.
         """
         result = subprocess.run(
             ["git", "-C", repo_dir, "rev-parse", "HEAD"],
@@ -1312,12 +1432,13 @@ class DeployExecutor:
         if result.returncode == 0:
             return result.stdout.strip()
         logger.warning(
-            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to branch default",
+            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to %s",
             repo_dir,
             result.returncode,
             result.stderr[:200],
+            fallback,
         )
-        return "main"
+        return fallback
 
     @staticmethod
     def _stage_workspace(repo_dir: str, omni_home: str) -> None:
@@ -1398,13 +1519,24 @@ class DeployExecutor:
                 )
             self._stage_workspace(REPO_DIR, omni_home)
 
+        # OMN-16442: the sibling-repo fallback branch is the declared tracking
+        # ref, not a literal. It used to be "dev" for omnimarket and "main" for
+        # omnibase_compat — an asymmetry with no stated reason, on two repos
+        # that both integrate on `dev`.
+        sibling_fallback = load_tracking_ref_from_env()
         omnimarket_ref = (
-            self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "dev"
+            self._resolve_plugin_ref(
+                f"{omni_home}/omnimarket", fallback=sibling_fallback
+            )
+            if omni_home
+            else sibling_fallback
         )
         compat_ref = (
-            self._resolve_plugin_ref(f"{omni_home}/omnibase_compat")
+            self._resolve_plugin_ref(
+                f"{omni_home}/omnibase_compat", fallback=sibling_fallback
+            )
             if omni_home
-            else "main"
+            else sibling_fallback
         )
         logger.info(
             "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s",

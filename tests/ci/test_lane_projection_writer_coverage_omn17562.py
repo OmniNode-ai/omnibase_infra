@@ -185,6 +185,26 @@ class WriterOwned(NamedTuple):
 # `projection_tenant_credentials` and `projection_tenant_registry` are recorded
 # by BOTH ledger branches (the runner entry takes every topic, its in-process
 # sibling is left with none) — which is why a deployed writer cannot clear them.
+# OMN-16025: the module namespace this registry governs. Every runner_module in
+# WRITER_OWNED_PROJECTIONS lives under it, and that set is DERIVED from the
+# omnimarket discovery manifest by `test_registry_matches_the_runtime_predicate`
+# -- so a module outside this namespace can never equal a `spec.runner_module`
+# and therefore can never satisfy a lane ratchet.
+#
+# The matcher below is scoped to it rather than matching any `python -m` service,
+# which was too broad: `docker-compose.dev-lane.yml` also runs
+# `omnibase_infra.services.observability.infra_routing_decisions.consumer`, an
+# observability consumer with no node contract (the same class as
+# `agent-actions-consumer`, which has always run this shape in the base compose
+# and was invisible here only because the base is not a lane overlay). Reporting
+# that as an untracked writer was a false positive, and the fix is to narrow the
+# matcher, never to allowlist a service name. Nothing is weakened: an omnimarket
+# runner that drifts to an unregistered module is still inside this namespace and
+# still fails, and one that moved OUT of it would change `derived_writer_owned`
+# and fail the derivation assertion instead.
+GOVERNED_RUNNER_NAMESPACE = "omnimarket.nodes."
+
+
 WRITER_OWNED_PROJECTIONS: dict[str, WriterOwned] = {
     "node_projection_cost_by_repo": WriterOwned(
         "main",
@@ -471,7 +491,8 @@ def _module_from_command(body: dict[str, Any]) -> str | None:
     parts = [str(item) for item in command]
     for index, part in enumerate(parts):
         if part == "-m" and index + 1 < len(parts):
-            return parts[index + 1]
+            module = parts[index + 1]
+            return module if module.startswith(GOVERNED_RUNNER_NAMESPACE) else None
     return None
 
 
@@ -557,6 +578,42 @@ def test_every_writer_service_maps_to_a_registered_projection() -> None:
         "service is not a projection writer and should not use the "
         "`command: [python, -m, ...]` runner shape on a lane overlay."
     )
+
+
+def test_matcher_ignores_a_non_governed_namespace_service() -> None:
+    """OMN-16025: a `python -m` service outside the runner namespace is not a writer.
+
+    Positive control for the narrowing: the dev lane runs
+    `omnibase_infra.services.observability.infra_routing_decisions.consumer`,
+    which owns a projection table but has no node contract and so can never be a
+    WRITER_OWNED_PROJECTIONS entry. It must not read as an untracked writer.
+    """
+    body = {
+        "command": [
+            "python",
+            "-m",
+            "omnibase_infra.services.observability.infra_routing_decisions.consumer",
+        ]
+    }
+    assert _module_from_command(body) is None
+
+
+def test_matcher_still_sees_an_unregistered_governed_runner() -> None:
+    """Negative control: drift INSIDE the runner namespace still fails the gate."""
+    body = {
+        "command": [
+            "python",
+            "-m",
+            "omnimarket.nodes.node_projection_not_real.handlers.handler_not_real",
+        ]
+    }
+    module = _module_from_command(body)
+    assert (
+        module == "omnimarket.nodes.node_projection_not_real.handlers.handler_not_real"
+    )
+    assert module not in {
+        spec.runner_module for spec in WRITER_OWNED_PROJECTIONS.values()
+    }
 
 
 @pytest.mark.parametrize("lane", sorted(GOVERNED_LANES))

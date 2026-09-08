@@ -65,6 +65,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.handlers.handler_dlq_replay imp
 from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_type import (
     EnumDlqReplayFilterType,
 )
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_record import (
+    ModelUnparseableDlqRecord,
+)
 from omnibase_infra.utils.util_datetime import is_timezone_aware
 
 logging.basicConfig(
@@ -327,6 +330,24 @@ async def cmd_list(args: argparse.Namespace) -> int:
             if count >= limit:
                 print(f"\n... (limited to {limit} messages)")
                 break
+            if isinstance(message, ModelUnparseableDlqRecord):
+                # OMN-17896: the drain now surfaces records it could not parse
+                # instead of skipping them. They have no parsed fields to
+                # print -- report the coordinate and the refusal, and never
+                # invent the fields a parsed record would have had.
+                print(f"[{count + 1}] <unparseable>")
+                print(f"    DLQ:       {message.dlq_topic}")
+                print(
+                    f"    Coord:     partition={message.dlq_partition} "
+                    f"offset={message.dlq_offset}"
+                )
+                print(
+                    f"    Bytes:     {0 if message.raw_value is None else len(message.raw_value)}"
+                )
+                print(f"    Status:    QUARANTINE: {message.reason}")
+                print()
+                count += 1
+                continue
             should, reason = should_replay(message, engine_config)
             status = "ELIGIBLE" if should else f"QUARANTINE: {reason}"
             print(f"[{count + 1}] {message.correlation_id}")
@@ -420,6 +441,16 @@ async def cmd_stats(args: argparse.Namespace) -> int:
         total = 0
         async for message in consumer.consume_messages():
             total += 1
+            if isinstance(message, ModelUnparseableDlqRecord):
+                # OMN-17896: counted under an explicit bucket rather than
+                # attributed to a topic or error type it never carried.
+                stats["by_topic"]["<unparseable>"] = (
+                    stats["by_topic"].get("<unparseable>", 0) + 1
+                )
+                stats["by_error_type"]["<unparseable>"] = (
+                    stats["by_error_type"].get("<unparseable>", 0) + 1
+                )
+                continue
             topic = message.original_topic
             stats["by_topic"][topic] = stats["by_topic"].get(topic, 0) + 1
             error_type = message.error_type

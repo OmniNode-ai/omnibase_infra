@@ -104,13 +104,39 @@ TOPIC_DLQ_ROUTER = EnumOmnibaseInfraTopic.DLQ_ROUTER_V1.value
 TOPIC_DLQ_RSD = EnumOmnibaseInfraTopic.DLQ_RSD_V1.value
 TOPIC_DLQ_SKILL = EnumOmnibaseInfraTopic.DLQ_SKILL_V1.value
 
-# Expected message_category per new topic. DLQ topics carry no evt/cmd/intent
-# segment (`onex.dlq.omnibase-infra.<category>.v1`); handler_wiring's
-# `_derive_message_category()` falls back to "event" for any unrecognized
-# segment (source: handler_wiring.py `_derive_message_category`), and
-# `EnumMessageCategory` (omnibase_core) has only 3 members (event/command/
-# intent) — no DLQ-specific value exists. "event" is therefore the
-# source-derived value, not a guess.
+# Expected message_category per new topic.
+#
+# OMN-18013 REWROTE THIS BLOCK, and the paragraph it replaced is the reason.
+# That paragraph read: DLQ topics carry no evt/cmd/intent segment, so
+# handler_wiring's `_derive_message_category()` "falls back to 'event' for any
+# unrecognized segment", and therefore "'event' is the source-derived value, not
+# a guess." It was a guess — it was the SILENT DEFAULT, and it was wrong in both
+# directions. The dispatch engine never used that fallback: it matches on
+# `EnumMessageCategory.from_topic`, which returns None for a name it cannot
+# derive. So registration said "event" while dispatch said "no category at all",
+# and the disagreement was invisible. The operator ruling of 2026-09-06 removed
+# the default: a category now comes from the topic's own name or the contract
+# must declare one, and a name that derives nothing may not be subscribed.
+#
+# What that means for the nine DLQ topics, measured rather than assumed:
+#   * commands / events / intents — `from_topic` DOES derive these, from the
+#     plural name segment, as command / event / intent respectively. They keep
+#     their subscription and are asserted at their real categories below.
+#   * omnibase-infra / platform / quarantine / router / rsd / skill —
+#     `from_topic` returns None. Dispatch rejected every message on them as an
+#     invalid topic category, so these six subscriptions were ALREADY dead on
+#     the parent commit; no `message_category:` declaration can revive them,
+#     because the engine derives the category from the topic and never reads the
+#     declaration. OMN-18013 deletes them rather than leave six subscriptions in
+#     the contract that the runtime provably cannot deliver. They are asserted
+#     ABSENT below, so a future re-add has to confront this comment.
+#
+# RESIDUAL, recorded on OMN-18013 rather than fixed here: `from_topic` keys off
+# the plural NAME segment for the three surviving DLQ topics, not the `dlq` KIND
+# segment, so `onex.dlq.omnibase-infra.commands.v1` classifies as a *command*.
+# That is arguably wrong — a dead-lettered command is not a command — but
+# `from_topic` lives in omnibase_core and changing it is a cross-repo contract
+# change, out of scope for this repo's half.
 EXPECTED_NEW_TOPICS: dict[str, str] = {
     TOPIC_CMD_BUILD_LOOP_APPEND: "command",
     TOPIC_EVT_BUILD_LOOP_APPENDED: "event",
@@ -121,19 +147,30 @@ EXPECTED_NEW_TOPICS: dict[str, str] = {
     TOPIC_OCC_COSMETIC_COMPLIANCE_SCORED: "event",
     TOPIC_OCC_RUNTIME_DEPLOYMENT_REQUEST: "command",
     TOPIC_OCC_RUNTIME_DEPLOYMENT_PROOF: "event",
-    TOPIC_DLQ_COMMANDS: "event",
+    TOPIC_DLQ_COMMANDS: "command",
     TOPIC_DLQ_EVENTS: "event",
-    TOPIC_DLQ_INTENTS: "event",
-    TOPIC_DLQ_OMNIBASE_INFRA: "event",
-    TOPIC_DLQ_PLATFORM: "event",
-    TOPIC_DLQ_QUARANTINE: "event",
-    TOPIC_DLQ_ROUTER: "event",
-    TOPIC_DLQ_RSD: "event",
-    TOPIC_DLQ_SKILL: "event",
+    TOPIC_DLQ_INTENTS: "intent",
 }
 
-assert len(EXPECTED_NEW_TOPICS) == 18, (
-    f"expected exactly 18 new topics named in-ticket, got {len(EXPECTED_NEW_TOPICS)}"
+# The six DLQ topics whose names derive no category. Asserted ABSENT, not
+# merely dropped from the expected map, so deleting them is a stated invariant
+# rather than a silent shrink.
+UNDERIVABLE_DLQ_TOPICS: frozenset[str] = frozenset(
+    {
+        TOPIC_DLQ_OMNIBASE_INFRA,
+        TOPIC_DLQ_PLATFORM,
+        TOPIC_DLQ_QUARANTINE,
+        TOPIC_DLQ_ROUTER,
+        TOPIC_DLQ_RSD,
+        TOPIC_DLQ_SKILL,
+    }
+)
+
+assert len(EXPECTED_NEW_TOPICS) == 12, (
+    f"expected exactly 12 dispatchable new topics, got {len(EXPECTED_NEW_TOPICS)}"
+)
+assert len(UNDERIVABLE_DLQ_TOPICS) == 6, (
+    f"expected exactly 6 underivable DLQ topics, got {len(UNDERIVABLE_DLQ_TOPICS)}"
 )
 
 
@@ -146,15 +183,43 @@ def _load_raw_contract() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_all_18_business_topics_are_subscribed() -> None:
-    """RED today: none of the 18 business/OCC/DLQ topics are in subscribe_topics."""
+def test_all_12_dispatchable_business_topics_are_subscribed() -> None:
+    """Every business/OCC/DLQ topic the runtime can actually deliver is subscribed.
+
+    OMN-15006 named 18. OMN-18013 measured that six of them (the DLQ topics whose
+    names derive no category) were never deliverable — dispatch rejects them on
+    `EnumMessageCategory.from_topic` returning None — and deleted those six. The
+    remaining 12 are asserted present here; the six are asserted absent in
+    ``test_underivable_dlq_topics_are_not_subscribed``.
+    """
     raw = _load_raw_contract()
     subscribed = set(raw.get("event_bus", {}).get("subscribe_topics") or [])
 
     missing = sorted(set(EXPECTED_NEW_TOPICS) - subscribed)
     assert not missing, (
-        f"node_ledger_projection_compute must subscribe to all 18 business/OCC/DLQ "
-        f"topics named in OMN-15006; missing: {missing}"
+        f"node_ledger_projection_compute must subscribe to all 12 dispatchable "
+        f"business/OCC/DLQ topics; missing: {missing}"
+    )
+
+
+def test_underivable_dlq_topics_are_not_subscribed() -> None:
+    """The six DLQ topics whose names derive no category stay deleted (OMN-18013).
+
+    A subscription the dispatch engine rejects on arrival is worse than no
+    subscription: the runtime consumes the message, matches it against nothing,
+    and commits the offset, so the record is gone and the consumer group still
+    reads Stable / LAG 0. Re-adding one of these requires a topic name whose kind
+    segment derives a category — not a `message_category:` declaration, which the
+    engine never reads.
+    """
+    raw = _load_raw_contract()
+    subscribed = set(raw.get("event_bus", {}).get("subscribe_topics") or [])
+
+    resurrected = sorted(UNDERIVABLE_DLQ_TOPICS & subscribed)
+    assert not resurrected, (
+        "these DLQ topics derive no message category from their names, so the "
+        "dispatch engine rejects every message on them; they must not be "
+        f"subscribed: {resurrected}"
     )
 
 

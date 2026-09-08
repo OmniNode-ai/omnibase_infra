@@ -102,22 +102,59 @@ def test_guard_function_is_defined() -> None:
     )
 
 
+# OMN-18012: the ONE sanctioned reason the guard call may not be the literal
+# first statement of the IS_FULL branch. `place_integration_selection_offbox`
+# runs BEFORE the controller and sets REMOTE_LAB_RUN_VERDICT=1 only after it has
+# resolved this host's identity, read the committed host table, and obtained a
+# green verdict from a DESIGNATED lab host -- strictly stronger evidence than
+# the guard's own check, and re-entering the guard would dispatch the identical
+# superset argv a second time. Anything other than this exact line still fails.
+_SANCTIONED_GUARD_SHORT_CIRCUIT = 'if [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]; then'
+
+
 def test_guard_is_called_before_every_full_suite_pytest_invocation() -> None:
-    """Every `if [ "$IS_FULL" = ... ]; then` branch must call
-    guard_full_suite_host as its first statement, so the heavy escalation can
-    never run without the host check firing first."""
+    """Every `if [ "$IS_FULL" = ... ]; then` branch must reach
+    guard_full_suite_host before anything else, so the heavy escalation can
+    never run without a host check firing first.
+
+    The invariant is unchanged; its EXPRESSION moved one level in (OMN-18012).
+    The pin follows it rather than being relaxed: the short-circuit is matched
+    literally, and its own body must open with the guard call. A future edit
+    that puts any other statement first -- or that widens the short-circuit
+    condition -- still turns this red.
+    """
     script_text = HOOK_SCRIPT.read_text(encoding="utf-8")
     full_suite_branches = _FULL_SUITE_BRANCH_RE.findall(script_text)
     assert full_suite_branches, "expected at least one IS_FULL branch in the hook"
     for branch_body in full_suite_branches:
-        first_stmt = next(
-            (line.strip() for line in branch_body.splitlines() if line.strip()),
-            "",
-        )
-        assert first_stmt == "guard_full_suite_host", (
+        statements = [line.strip() for line in branch_body.splitlines() if line.strip()]
+        first_stmt = statements[0] if statements else ""
+        if first_stmt == "guard_full_suite_host":
+            continue
+        assert first_stmt == _SANCTIONED_GUARD_SHORT_CIRCUIT, (
             "expected guard_full_suite_host to be the first statement in the "
             f"full-suite branch, found {first_stmt!r} instead"
         )
+        assert statements[1] == "guard_full_suite_host", (
+            "the REMOTE_LAB_RUN_VERDICT short-circuit must guard nothing but "
+            f"the guard call itself, found {statements[1]!r} instead"
+        )
+
+
+def test_the_offbox_integration_placement_precedes_the_local_controller() -> None:
+    """OMN-18012: the placement is what entitles the branch above to skip the
+    guard, so it must actually run FIRST -- before the IS_FULL branch, and
+    before any local pytest invocation."""
+    script_text = HOOK_SCRIPT.read_text(encoding="utf-8")
+    placement = script_text.index('place_integration_selection_offbox "')
+    refusal = script_text.index("assert_no_integration_path_runs_locally\n")
+    controller = script_text.index(
+        'if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then'
+    )
+    assert refusal < placement < controller, (
+        "the local-argv refusal and the off-box placement must both precede the "
+        "local execution controller"
+    )
 
 
 def test_guard_fails_closed_when_hostname_cannot_be_determined() -> None:
@@ -394,7 +431,12 @@ def test_full_suite_target_is_single_sourced() -> None:
         f"expected FULL_SUITE_TARGET to be set to {_FULL_SUITE_TARGET!r} in "
         f"{HOOK_SCRIPT}"
     )
-    assert 'uv run pytest "${FULL_SUITE_TARGET}"' in script_text, (
+    # OMN-17793 moved the invocation behind `run_prepush_ordinary_tests`, which
+    # is the single place `uv run pytest` is spelled for the ordinary lane. The
+    # assertion follows it rather than pinning the old inline literal: what this
+    # test protects is that the escalation runs THE SAME target the predicate is
+    # evaluated against, not the spelling of the command that runs it.
+    assert 'run_prepush_ordinary_tests "$FULL_SUITE_TARGET"' in script_text, (
         "expected the fail-closed escalation to run ${FULL_SUITE_TARGET} "
         "itself, so the guard predicate cannot drift from the run it guards"
     )
@@ -415,10 +457,25 @@ def test_escalation_is_a_superset_of_the_runnable_selection() -> None:
     alongside the single-sourced target, not instead of it.
     """
     script_text = HOOK_SCRIPT.read_text(encoding="utf-8")
+    # OMN-17793: the two runs are now separate invocations inside
+    # `run_prepush_partitioned_tests` rather than one argv. The superset
+    # property is unchanged and is asserted as the two facts that constitute
+    # it -- the full target is run, AND the runnable integration paths are run
+    # alongside it under the same function, guarded only by the ordinary run
+    # having passed.
+    assert 'run_prepush_ordinary_tests "$FULL_SUITE_TARGET"' in script_text, (
+        "expected the fail-closed escalation to run ${FULL_SUITE_TARGET}"
+    )
     assert (
-        'uv run pytest "${FULL_SUITE_TARGET}" '
-        '${RUNNABLE_INTEGRATION_PATHS[@]+"${RUNNABLE_INTEGRATION_PATHS[@]}"}'
+        'if [ "$rc" -eq 0 ] && [ "${#RUNNABLE_INTEGRATION_PATHS[@]}" -gt 0 ]; then'
     ) in script_text, (
+        "expected successful escalations to continue into the runnable "
+        "(service-free) integration partition"
+    )
+    assert (
+        'run_prepush_allowlisted_integration_tests "${RUNNABLE_INTEGRATION_PATHS[@]}"'
+        in script_text
+    ), (
         "expected the fail-closed escalation to append the runnable "
         "(service-free) integration paths to ${FULL_SUITE_TARGET}, so it "
         "remains a strict superset of the impacted-subset selection"

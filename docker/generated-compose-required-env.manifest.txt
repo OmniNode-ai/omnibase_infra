@@ -1,0 +1,70 @@
+# Declared manifest of required env var NAMES referenced via ${VAR:?...} in the
+# CATALOG RENDER -- the output of
+#   python -m omnibase_infra.docker.catalog.cli generate core runtime
+# which lands at docker/docker-compose.generated.yml (gitignored build artifact).
+#
+# WHY A SECOND MANIFEST (OMN-17291)
+# ---------------------------------
+# docker/required-env-vars.manifest.txt declares the required-var set of the
+# TRACKED docker/docker-compose.infra.yml, and scripts/check_required_env_vars.py
+# holds those two committed files in exact agreement. The catalog render is a
+# DIFFERENT file with a DIFFERENT service set -- the `runtime` bundle pulls in
+# runtime-integrations (docker/catalog/bundles.yaml), which the tracked compose
+# does not carry -- so it has its own required-var set and needs its own exact
+# declaration. Merging the two would make the tracked file's manifest inexact,
+# which is the property that manifest exists to guarantee.
+#
+# Until OMN-17291, nine of these names were declared NOWHERE in the repo. The
+# deploy agent supplied four of them from an inline sentinel dict and got the
+# rest from whatever the lab host's operator env happened to hold, so the
+# render's env contract existed only as the union of one host's environment and
+# one Python literal. This file makes it a reviewable committed artifact.
+#
+# Nine names -- CI_CALLBACK_TOKEN, KEYCLOAK_ADMIN_CLIENT_SECRET,
+# LINEAR_WEBHOOK_SECRET, OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN,
+# OMNIDASH_ANALYTICS_DB_URL, ONEX_TENANT_DB_URL, VALKEY_PASSWORD,
+# WAITLIST_NOTIFIER_SLACK_BOT_TOKEN, WAITLIST_NOTIFIER_SLACK_CHANNEL_ID -- still
+# have no committed source. That is why the render is validated with
+# --no-interpolate and why it is NOT a file any deploy path brings up. Declaring
+# them here does not give them values; it makes the gap visible and diffable
+# instead of surfacing as a failed lane deploy.
+#
+# NAMES ONLY -- never values, never secrets. Exactness is asserted by
+# tests/scripts/test_compose_generation_single_writer_omn17291.py, which runs the
+# generator in-process and diffs its ${VAR:?} set against this file.
+#
+# Where each name resolves from at deploy time:
+#   - docker/runtime-policy.env          (contract-rendered activation policy)
+#   - the operator env                   (~/.omnibase/.env or OMNIBASE_OPERATOR_ENV_FILE)
+#   - nowhere yet                        (the nine named above)
+AUXILIARY_SERVICES_OMNIMEMORY_ENABLED
+CI_CALLBACK_TOKEN
+DEPLOY_AGENT_HMAC_SECRET
+DEV_RUNTIME_EFFECTS_CAPABILITIES
+DEV_RUNTIME_MAIN_CAPABILITIES
+DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION
+DEV_RUNTIME_WORKER_CAPABILITIES
+DEV_TOPIC_PROVISIONER_MAX_PARTITIONS
+GITHUB_TOKEN
+INFISICAL_AUTH_SECRET
+INFISICAL_ENCRYPTION_KEY
+INFISICAL_REDIS_URL
+KEYCLOAK_ADMIN_CLIENT_SECRET
+LINEAR_WEBHOOK_SECRET
+LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST
+LLM_CODER_FAST_URL
+LLM_CODER_URL
+LLM_DEEPSEEK_R1_URL
+LLM_EMBEDDING_URL
+LLM_ENDPOINT_CIDR_ALLOWLIST
+LOCAL_LLM_SHARED_SECRET
+OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN
+OMNIDASH_ANALYTICS_DB_URL
+ONEX_ACTIVE_RUNTIME_PACKAGES
+ONEX_REGISTRATION_AUTO_ACK
+ONEX_SERVICE_CLIENT_SECRET
+ONEX_TENANT_DB_URL
+POSTGRES_PASSWORD
+VALKEY_PASSWORD
+WAITLIST_NOTIFIER_SLACK_BOT_TOKEN
+WAITLIST_NOTIFIER_SLACK_CHANNEL_ID

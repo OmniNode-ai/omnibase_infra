@@ -638,6 +638,91 @@ async def _cli_verify(
         await pool.close()
 
 
+# ---------------------------------------------------------------------------
+# Importable stamp API (OMN-17372)
+# ---------------------------------------------------------------------------
+#
+# ``docker/entrypoint-runtime.sh`` used to reach the stamp by launching a cold
+# ``python -m omnibase_infra.runtime.util_schema_fingerprint`` per database —
+# a full cold ``import omnibase_infra`` each time, measured at 141 s on the
+# onex-dev runtime container. The boot preflight now calls
+# :func:`stamp_manifest_fingerprint` in-process instead. The CLI keeps its
+# exact exit-code contract by routing through the same helper.
+
+
+def _resolve_manifest_object(manifest_name: str) -> ModelSchemaManifest | None:
+    """Return the manifest object for *manifest_name*.
+
+    ``None`` means "the packaged omnibase_infra default", which is what
+    :func:`_cli_stamp` already substitutes when handed no manifest.
+
+    Raises:
+        ImportError: ``omniintelligence`` was requested but is not installed.
+    """
+    if manifest_name == "omniintelligence":
+        import importlib
+
+        module = importlib.import_module(
+            "omniintelligence.runtime.model_schema_manifest"
+        )
+        manifest: ModelSchemaManifest = module.OMNIINTELLIGENCE_SCHEMA_MANIFEST
+        return manifest
+    return None
+
+
+def _run_stamp(
+    db_url: str, *, dry_run: bool, manifest: ModelSchemaManifest | None
+) -> int:
+    """Run the stamp and return the CLI exit code.
+
+    Exit codes are the contract ``docker/entrypoint-runtime.sh`` was written
+    against and must not drift:
+
+    * ``0`` — stamped.
+    * ``2`` — fingerprint mismatch / missing. Not retryable.
+    * ``1`` — connection or general error. Retryable.
+    """
+    import asyncio
+    import sys
+
+    try:
+        asyncio.run(_cli_stamp(db_url, dry_run=dry_run, manifest=manifest))
+    except (
+        SchemaFingerprintMismatchError,
+        SchemaFingerprintMissingError,
+    ) as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def stamp_manifest_fingerprint(*, manifest_name: str, db_url: str) -> int:
+    """Stamp *manifest_name*'s fingerprint into ``db_metadata``.
+
+    Args:
+        manifest_name: ``"omnibase_infra"`` or ``"omniintelligence"``.
+        db_url: PostgreSQL DSN for that database.
+
+    Returns:
+        The same exit code the CLI would have returned (0 / 1 / 2).
+    """
+    import sys
+
+    try:
+        manifest = _resolve_manifest_object(manifest_name)
+    except ImportError:
+        print(
+            "ERROR: omniintelligence package not installed. "
+            "Cannot use --manifest omniintelligence without it.",
+            file=sys.stderr,
+        )
+        return 1
+    return _run_stamp(db_url, dry_run=False, manifest=manifest)
+
+
 def _main() -> None:
     import argparse
     import asyncio
@@ -697,12 +782,7 @@ def _main() -> None:
     if args.manifest == "omniintelligence":
         env_var_name = "OMNIINTELLIGENCE_DB_URL"
         try:
-            import importlib
-
-            _intel_mod = importlib.import_module(
-                "omniintelligence.runtime.model_schema_manifest"
-            )
-            manifest_obj = _intel_mod.OMNIINTELLIGENCE_SCHEMA_MANIFEST
+            manifest_obj = _resolve_manifest_object("omniintelligence")
         except ImportError:
             print(
                 "ERROR: omniintelligence package not installed. "
@@ -724,10 +804,16 @@ def _main() -> None:
         )
         sys.exit(1)
 
+    if args.command == "stamp":
+        # Same helper the in-process boot preflight uses, so the CLI and the
+        # entrypoint can never drift on exit codes (OMN-17372).
+        rc = _run_stamp(db_url, dry_run=args.dry_run, manifest=manifest_obj)
+        if rc != 0:
+            sys.exit(rc)
+        return
+
     try:
-        if args.command == "stamp":
-            asyncio.run(_cli_stamp(db_url, dry_run=args.dry_run, manifest=manifest_obj))
-        elif args.command == "verify":
+        if args.command == "verify":
             asyncio.run(_cli_verify(db_url, manifest=manifest_obj))
     except (
         SchemaFingerprintMismatchError,

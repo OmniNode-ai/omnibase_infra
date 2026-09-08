@@ -76,11 +76,19 @@ from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntr
 # Kind prefix map
 # ---------------------------------------------------------------------------
 
+# OMN-17557: "snapshot" completes this map against the extractor's own
+# ``_VALID_KINDS``, which has admitted it since OMN-15832. The two had drifted:
+# a ``kind="snapshot"`` entry reaching ``_normalize_key`` raised KeyError, and
+# the only reason it never did was that every snapshot topic in this repo's own
+# node contracts also carried a dotted event name and was being skipped one
+# layer earlier for the wrong reason. Fixing that arity bug exposed this one,
+# so both are closed here rather than leaving a latent crash behind the fix.
 _KIND_PREFIX: dict[str, str] = {
     "evt": "EVT_",
     "cmd": "CMD_",
     "intent": "INTENT_",
     "dlq": "DLQ_",
+    "snapshot": "SNAPSHOT_",
 }
 
 # File header template (filled per producer)

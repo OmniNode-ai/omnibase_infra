@@ -158,8 +158,106 @@ class ProjectionNotMaterializedError(ProjectionError):
     """
 
 
+class QuarantinePublishUnconfirmedError(ProjectionError):
+    """A refused event's quarantine publication was never confirmed durable.
+
+    OMN-17862. ``handler_wiring._route_projection_error_to_dlq`` is declared
+    ``-> bool`` and returns ``False`` on three separate failures — no publishable
+    event bus bound, the bound bus's ``publish`` attribute not callable, and the
+    publish itself raising — each logged at ERROR, with its own docstring calling
+    the whole function "best-effort". **Its one call site discarded that
+    boolean**: the call was a bare ``await`` expression statement, so
+    ``write_path_failure`` stayed ``None``, the guard below it did not fire, and
+    the callback returned normally. A callback that returns normally IS an ACK.
+    On a broker refusal, a wedged connection, or a lane brought up with no bus,
+    a refused record was therefore **neither projected nor quarantined and its
+    offset advanced** — reached through the arm the design called the safe one.
+    ``record_active_error()`` fires at the top of that function regardless, so
+    the COUNTER moved while the RECORD was gone.
+
+    It is raised — and bound into ``write_path_failure`` — so the offset is
+    withheld until the quarantine actually lands. That deliberately answers the
+    "best-effort, so it cannot wedge the consumer" rationale rather than ignoring
+    it: withholding does stall the partition, and a stall is recoverable and
+    loud where a dropped record is neither. Redelivery re-refuses the record and
+    re-attempts the quarantine, so the stall clears as soon as the bus does.
+
+    **This type must be an EXCEPTION, never the boolean it replaces.**
+    ``write_path_failure = False`` satisfies the ``is not None`` guard and then
+    makes ``raise ProjectionNotMaterializedError(...) from False`` a ``TypeError``
+    (*exception causes must derive from BaseException*). A ``TypeError`` is not a
+    ``ProjectionNotMaterializedError``, so the offset-withholding arm does not
+    catch it; it falls to the bounded-retry loop's generic handler and then to the
+    boundary catch-all, which routes it to the swallowed-exception path and
+    returns normally — the same silent drop, one exception type further along.
+
+    Purpose-named rather than re-using the original refusal, because
+    ``ProjectionNotMaterializedError``'s message renders
+    ``type(write_path_failure).__name__``: binding the bare parse failure there
+    would name the PARSE while the QUARANTINE is what actually withheld the
+    offset, pointing an operator at the wrong seam. The parse failure stays
+    reachable through ``__cause__``.
+
+    Distinct from :class:`ProjectionNotMaterializedError` and deliberately NOT a
+    subclass of it: this is the *cause* bound into ``write_path_failure``, and
+    the withholding type is raised *from* it.
+    """
+
+
+class ProjectionQueryRowBudgetError(ProjectionNotMaterializedError):
+    """A projection read matched more rows than the seam will materialise.
+
+    OMN-17888. ``ProjectionDatabaseOperations._execute_query`` emitted
+    ``SELECT *`` with no row bound for any caller and then materialised the
+    result set twice, both copies alive at once
+    (``[dict(record) for record in cursor.fetchall()]``). Measured in the
+    deployed container against the live ``omnidash_analytics`` database, one
+    call over the ``session_id`` holding 91,633 of
+    ``public.session_replay_snapshots``' 94,571 rows cost 225.4 MiB: 200.7 MiB
+    of driver rows plus 24.8 MiB of plain dicts. ``asyncio.to_thread`` ran the
+    blocking handler on the loop's default 32-worker executor, so four to five
+    concurrent calls produced the ~1,062 MB RSS step that memcg-OOM-killed
+    ``onex-runtime`` on the ``.201`` DEV lane about every three minutes.
+
+    Raising is the deliberate choice over appending a ``LIMIT``. A truncated
+    answer is indistinguishable from a complete one at the call site, so a
+    ``LIMIT`` would convert an OOM into silently wrong projections -- the
+    silent-fallback shape this codebase refuses everywhere else. The refusal
+    names the relation, the bound, and the filter keys so the offending caller
+    is identifiable from one log line.
+
+    Classified as a write-path failure, not a content failure: the event is
+    well-formed and still owed a row, so the offset must be withheld and the
+    record redelivered once the caller is repaired. The remedy is never to
+    raise the bound -- it is to make the caller ask a bounded question (an
+    indexed single-row read, or a paged one), which is what the read it
+    replaced already needed.
+
+    IT IS A SUBCLASS OF :class:`ProjectionNotMaterializedError`, AND THAT IS
+    THE WHOLE MECHANISM. Until OMN-17888 second pass it was a direct sibling
+    under :class:`ProjectionError` and was caught NOWHERE. Every offset-unsafe
+    arm in the runtime matches ``ProjectionNotMaterializedError`` by EXACT type
+    (``event_bus_kafka._dispatch_to_subscriber``,
+    ``message_dispatch_engine._dispatch_one``, and both
+    ``handler_wiring`` boundary arms), so a sibling fell through to the generic
+    bounded-retry loop, then to ``_route_swallowed_exception`` -> DLQ -> and the
+    offset ADVANCED. The paragraph above claimed the opposite of what the code
+    did: the event was acknowledged into a dead-letter record and the row it was
+    owed was never written -- the exact OMN-17379 swallow this error was
+    supposed to be on the safe side of.
+
+    Subclassing rather than widening four ``except`` tuples is deliberate. The
+    two types state the SAME fact -- "this projection consumed an event, wrote
+    no row, and the cause is the runtime rather than the event" -- so the
+    relationship belongs in the hierarchy, where a fifth arm added later
+    inherits it, instead of in four call sites that a fifth arm can forget.
+    """
+
+
 __all__ = [
     "ProjectionError",
     "ProjectionNotMaterializedError",
+    "ProjectionQueryRowBudgetError",
     "ProjectionTenantContextError",
+    "QuarantinePublishUnconfirmedError",
 ]

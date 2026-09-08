@@ -98,6 +98,7 @@ _THIS_MODULE = "tests.unit.runtime.auto_wiring.test_omn17562_subscription_skip"
 _TOPIC = "onex.evt.omnimarket.projection-subject.v1"
 _RUNNER_ONLY = "node_projection_runner_owned"
 _MIXED = "node_projection_mixed_entries"
+_NO_ROUTING = "node_kernel_consumed_no_routing"
 _PATCH_IMPORT_HANDLER = (
     "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class"
 )
@@ -208,6 +209,16 @@ def _runner_only_contract() -> ModelDiscoveredContract:
     )
 
 
+def _empty_routing_contract() -> ModelDiscoveredContract:
+    """OMN-18013: declares a subscribe topic and an EMPTY ``handler_routing``.
+
+    Distinct from ``handler_routing: None``, which _prepare_contract_wiring
+    already short-circuits to SKIPPED. A present-but-empty routing block passes
+    that guard and reaches the subscribe decision with zero prepared wirings.
+    """
+    return _contract(_NO_ROUTING, ())
+
+
 def _mixed_contract() -> ModelDiscoveredContract:
     """The ``projection_pattern_learning`` shape: one runner, one LIVE sibling.
 
@@ -286,6 +297,45 @@ class TestImmediateSubscribeSeam:
             "the dispatcher registration must be unchanged; this ticket withholds "
             "the SUBSCRIPTION, not the route"
         )
+
+    @pytest.mark.asyncio
+    async def test_contract_with_empty_handler_routing_subscribes_zero_topics(
+        self,
+    ) -> None:
+        """OMN-18013: a contract with no usable handler_routing never consumes.
+
+        This is a REGRESSION PIN, not a fix — the invariant already holds, by two
+        independent guards, and this test exists to keep it holding:
+
+        * ``handler_routing: None`` short-circuits to SKIPPED in
+          ``_prepare_contract_wiring`` before the subscribe decision;
+        * a present-but-empty routing block reaches the decision and is caught by
+          the phantom-wiring check, which FAILS the contract rather than
+          subscribing it.
+
+        It is pinned here because OMN-18013 depends on it. The
+        subscriber-dispatcher-resolution gate flagged
+        ``node_contract_registry_reducer`` and ``node_context_audit_dlq_effect`` —
+        both of which declare subscribe topics and NO handler_routing — as
+        unresolved subscriptions, and the obvious "fix" was to delete those
+        declarations. That would have been wrong twice over: the runtime never
+        auto-subscribed them (this test is the proof), and both topics have real
+        consumers outside auto-wiring — the kernel's
+        ``ContractRegistrationEventRouter`` and ``ContextAuditConsumer``
+        respectively — plus the enum members that
+        ``models/projection/projection_contract_registry.py`` imports. The gate now
+        skips this shape for the same reason it skips ``plugin_managed``; if this
+        test ever goes red, that skip has become unsafe.
+        """
+        bus = _event_bus()
+        report, _engine, _manifest = await _wire(_empty_routing_contract(), bus)
+
+        result = next(r for r in report.results if r.contract_name == _NO_ROUTING)
+        assert result.topics_subscribed == (), (
+            "auto-wiring subscribed a contract with no handler_routing — there is "
+            "no route to reach, so every message is consumed, committed and lost"
+        )
+        bus.subscribe.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_a_mixed_contract_keeps_its_subscription(self) -> None:

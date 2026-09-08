@@ -75,7 +75,6 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import _topics_for_handle
 from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
 
 DEFAULT_SCAN_ROOT = Path("src/omnibase_infra")
-DEFAULT_BASELINE = Path("config/validation/operation_match_fanout_baseline.yaml")
 
 # A scan that discovers far fewer contracts than the repo actually has is a broken scan,
 # not a clean repo. A gate over a collapsed set is vacuously green, so the validator fails
@@ -148,17 +147,6 @@ def scan(scan_root: Path) -> tuple[list[FanoutEntry], int]:
     return operation_match_fanout_findings(contracts), len(contracts)
 
 
-def load_baseline(baseline_path: Path) -> set[tuple[str, str, str]]:
-    """Load the frozen shrink-only burn-down baseline of known fan-through entries."""
-    if not baseline_path.is_file():
-        return set()
-    data = yaml.safe_load(baseline_path.read_text()) or {}
-    return {
-        (str(row["contract"]), str(row["handler"]), str(row.get("operation") or ""))
-        for row in (data.get("known_fanout_entries") or [])
-    }
-
-
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -174,17 +162,12 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=str(DEFAULT_SCAN_ROOT),
         help="Root to scan for contract.yaml files.",
     )
-    parser.add_argument(
-        "--baseline",
-        default=str(DEFAULT_BASELINE),
-        help="Frozen shrink-only burn-down baseline.",
-    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
-    scan_root, baseline_path = Path(args.scan_root), Path(args.baseline)
+    scan_root = Path(args.scan_root)
 
     findings, contract_count = scan(scan_root)
     if contract_count < MIN_EXPECTED_CONTRACTS:
@@ -195,11 +178,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    baseline = load_baseline(baseline_path)
+    # OMN-18013: ZERO baseline. The five remaining rows were cleared by the
+    # per-topic `topic:` scoping this ticket applied — the fix the deleted
+    # baseline's own text prescribed for each of them — so the ratchet reached
+    # its stated end state ("End state is an empty list, at which point the gate
+    # hard-fails on any fan-through entry"). `no-baseline-refreeze` refuses the
+    # file's recreation, and the flag that read it is gone with it.
+    violations = sorted({f.key for f in findings})
     live: dict[tuple[str, str, str], FanoutEntry] = {f.key: f for f in findings}
-
-    violations = sorted(set(live) - baseline)
-    stale = sorted(baseline - set(live))
     exit_code = 0
 
     if violations:
@@ -223,25 +209,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write(
             "\n  Fix: add an explicit `topic:` (or `event_type:`) to the entry so it "
             "owns exactly the one topic its operation applies to (see "
-            f"node_gateway_attach_effect/contract.yaml, OMN-15978). Do NOT add the entry "
-            f"to {baseline_path} — that baseline is frozen and shrink-only.\n"
+            "node_gateway_attach_effect/contract.yaml, OMN-15978). There is no baseline "
+            "to add it to: OMN-18013 burned this ratchet to zero and deleted the file.\n"
         )
-
-    if stale:
-        exit_code = 1
-        sys.stderr.write(
-            f"[operation-match-fanout] FAIL: entry(ies) no longer fan out but are still "
-            f"listed in {baseline_path}. Remove them; the baseline is shrink-only and "
-            f"must never go stale:\n"
-        )
-        for contract, handler, operation in stale:
-            sys.stderr.write(f"  - {contract} :: {handler}/{operation or '(no-op)'}\n")
 
     if exit_code == 0:
         sys.stderr.write(
             f"[operation-match-fanout] OK: {contract_count} contracts scanned, "
-            f"{len(live)} fan-through entr{'y' if len(live) == 1 else 'ies'} "
-            f"(all in the frozen baseline), 0 new violations.\n"
+            "0 fan-through entries (zero baseline, none permitted).\n"
         )
     return exit_code
 

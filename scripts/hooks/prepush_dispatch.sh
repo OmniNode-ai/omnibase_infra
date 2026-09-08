@@ -57,9 +57,88 @@ prepush_table_text() {
   printf '%s\n' "$head_copy"
 }
 
-# prepush_table_rows -- data rows only (comments and blanks dropped).
+# -----------------------------------------------------------------------------
+# Private placement overlay -- OMN-17996 (epic OMN-17992)
+# -----------------------------------------------------------------------------
+# The committed table carries `@private` in ssh_target, uv_abs_path and
+# workroot. The transport target is resolved from the committed hostname column;
+# private ssh configuration may map that host alias to a lab address, but an
+# unversioned overlay may not choose where a git bundle is copied. The overlay
+# only hydrates the non-transport path values.
+#
+# Authorization is the (label, role, hostname, mode) columns of the committed
+# table, still read from HEAD, still refusing on working-tree divergence, and
+# still re-checked on the remote host by pytest_full_suite_host_guard.py against
+# its own `hostname -s`. So the OMN-16688 "no file on disk to forge" premise is
+# untouched: the overlay cannot add a host, redirect a bundle to a different
+# host, or make an unresolved row usable.
+#
+# Resolution is fail-fast with no default (CLAUDE.md rule 8): there is no
+# fallback path and no built-in address. OMNI_HOME unset, or the file absent,
+# leaves path columns UNRESOLVED and emits a diagnostic. A row with incomplete
+# overlay data is resolved the same way: `-` for ssh_target and empty for
+# uv/workroot, so lab placement is SKIPPED and the caller falls through to the
+# pre-existing precedence. It never refuses a push: a placement optimisation
+# that bricks pushes is the failure mode this hook family already rejected once.
+PREPUSH_HOST_OVERLAY_REL="config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+
+# prepush_overlay_path -- absolute path to the private overlay, or rc=1 with a
+# reason on stderr. There is no fallback path and no built-in address.
+prepush_overlay_path() {
+  local path
+  if [ -z "${OMNI_HOME:-}" ]; then
+    printf 'placement overlay unresolved: OMNI_HOME is not set (%s)\n' \
+      "$PREPUSH_HOST_OVERLAY_REL" >&2
+    return 1
+  fi
+  path="${OMNI_HOME}/${PREPUSH_HOST_OVERLAY_REL}"
+  if [ ! -f "$path" ]; then
+    printf 'placement overlay absent at %s\n' "$path" >&2
+    return 1
+  fi
+  printf '%s' "$path"
+}
+
+# prepush_table_rows -- data rows only (comments and blanks dropped), with the
+# `@private` placement columns hydrated from the overlay.
 prepush_table_rows() {
-  prepush_table_text | sed -e 's/#.*$//' -e '/^[[:space:]]*$/d'
+  local overlay
+  overlay="$(prepush_overlay_path)" || overlay="/dev/null"
+  prepush_table_text | sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' | awk \
+    -F'\t' -v OFS='\t' -v OVL="$overlay" '
+      # The overlay is matched by FILENAME rather than the NR==FNR idiom on
+      # purpose: an EMPTY or absent overlay (/dev/null) contributes zero
+      # records, and NR==FNR would then be true for the FIRST TABLE ROW and
+      # silently eat it.
+      FILENAME == OVL {
+        line = $0
+        sub(/#.*$/, "", line)
+        if (line ~ /^[ \t]*$/) next
+        split(line, f, "\t")
+        if (f[1] == "") next
+        uvv[f[1]] = f[3]
+        wrv[f[1]] = f[4]
+        next
+      }
+      {
+        needs_private = ($4 == "@private" || $6 == "@private" || $8 == "@private")
+        complete_overlay = (($1 in uvv) && uvv[$1] ~ /^\// && ($1 in wrv) && wrv[$1] ~ /^\//)
+        if (needs_private && !complete_overlay) {
+          print "placement overlay incomplete for " $1 "; skipping row placement" > "/dev/stderr"
+          if ($4 == "@private") { $4 = "-" }
+          if ($6 == "@private") { $6 = "" }
+          if ($8 == "@private") { $8 = "" }
+          print
+          next
+        }
+        # The transport target is the committed hostname. Private ssh config is
+        # where lab addresses and account-specific login details belong; the
+        # unversioned overlay never controls where the git bundle is copied.
+        if ($4 == "@private") { $4 = $3 }
+        if ($6 == "@private") { $6 = uvv[$1] }
+        if ($8 == "@private") { $8 = wrv[$1] }
+        print
+      }' "$overlay" -
 }
 
 # prepush_field ROW N -- Nth tab-separated field of ROW.
@@ -498,6 +577,64 @@ prepush_probe_uv() {
   prepush_uv_version_ok "$2" "$3" "$4"
 }
 
+# =============================================================================
+# Container-runtime capability probe (OMN-18012)
+# =============================================================================
+# A REQUIREMENT, not a ranking input, and it is off unless a caller turns it on.
+# `PREPUSH_REQUIRE_DOCKER` is set only by
+# prepush_smart_tests.sh::place_integration_selection_offbox, around the
+# placement of a service-dependent integration selection; every other placement
+# in this file probes exactly the rows it probed before.
+#
+# WHY it has to exist. The picker admits a row on load, memory, an exclusive
+# slot and a uv floor -- none of which says anything about whether a container
+# runtime is reachable there. `hcloud`'s own committed note says "NO docker",
+# and the lab Macs do not expose a daemon to a non-interactive ssh. Placing a
+# suite that starts a Redpanda container on such a row produces a red that is
+# a statement about the HOST, not about the tree, and a guaranteed false red
+# hard-blocks a push -- the identical failure class OMN-17549 closed for PATH
+# (six false reds from a missing ~/.local/bin on .201).
+#
+# Deliberately a LIVE probe rather than a new host-table column: a declared
+# capability goes stale silently the first time a daemon stops, and the picker
+# would then keep sending integration work to a row that cannot take it. The
+# override map exists for the same reason the load/uv/mem maps do -- so the
+# tests can drive every branch without a network.
+#
+# Fail-CLOSED: an empty or unreadable answer is NOT fit. `docker info` is used
+# rather than `docker --version` on purpose -- a client binary with no
+# reachable daemon answers the version and fails the run.
+PREPUSH_REQUIRE_DOCKER=0
+_PREPUSH_DOCKER_PROBE_SH='docker info --format "{{.ServerVersion}}" 2>/dev/null | head -1'
+
+# prepush_probe_docker LABEL TARGET -- 0 a docker daemon answered / 1 it did not.
+prepush_probe_docker() {
+  local out tcmd
+  PREPUSH_DOCKER_VERSION_SEEN=""
+  if [ -n "${PREPUSH_DOCKER_OVERRIDE_MAP:-}" ]; then
+    out="$(prepush_map_lookup "$PREPUSH_DOCKER_OVERRIDE_MAP" "$1")"
+  elif [ -z "$2" ]; then
+    out="$(eval "$_PREPUSH_DOCKER_PROBE_SH" 2> /dev/null || true)"
+  else
+    tcmd="$(_prepush_timeout_cmd)"
+    if [ -n "$tcmd" ]; then
+      out="$("$tcmd" 30 ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$2" "$_PREPUSH_DOCKER_PROBE_SH" 2> /dev/null || true)"
+    else
+      out="$(ssh -n -o ConnectTimeout=4 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$2" "$_PREPUSH_DOCKER_PROBE_SH" 2> /dev/null || true)"
+    fi
+  fi
+  out="$(printf '%s' "$out" | tr -d '[:space:]')"
+  # Recorded BEFORE the verdict, so the refusal can name what it actually read
+  # rather than only that it said no (OMN-17271 item 4: evidence-carrying
+  # routing). An empty read stays empty and the caller prints `unreadable`.
+  PREPUSH_DOCKER_VERSION_SEEN="$out"
+  [ -n "$out" ] || return 1
+  case "$out" in none | unreachable) return 1 ;; esac
+  return 0
+}
+
 # -----------------------------------------------------------------------------
 # Placement
 # -----------------------------------------------------------------------------
@@ -714,6 +851,17 @@ pick_capacity_host() {
         PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=uv-unfit(${PREPUSH_UV_VERSION_SEEN:-unreadable}<${floor}) "
         k=$((k + 1))
         continue
+      fi
+
+      # OMN-18012: last, and only when the caller asked for it -- it is the
+      # most expensive probe in the ladder and the rarest requirement, so a row
+      # already refused on slot/load/memory/uv is never charged for it.
+      if [ "${PREPUSH_REQUIRE_DOCKER:-0}" = "1" ]; then
+        if ! prepush_probe_docker "$slot_label" "$ssh_t"; then
+          PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG}${slot_label}=no-docker(${PREPUSH_DOCKER_VERSION_SEEN:-unreadable}) "
+          k=$((k + 1))
+          continue
+        fi
       fi
 
       # The fit record carries the MEASUREMENT, not just the verdict, so the
@@ -1383,6 +1531,18 @@ prepush_remote_pytest_flags() {
 # site runs ${PATHS[@]}. Shipping only tests/unit/ would silently drop
 # tests/integration/chains/, a required Event Chain Gate surface, with no test
 # firing.
+#
+# OMN-18012 adds a THIRD component, appended to BOTH branches:
+# ${OFFBOX_INTEGRATION_PATHS[@]}, the selected integration paths that may not
+# run on the launching host. Appending them here is what makes "placed
+# off-box" mean something -- until this change those paths were dropped from
+# the local argv and never added to the remote one, so the remote leg
+# faithfully reproduced the local blind spot. Because they are appended to
+# BOTH branches, a single dispatch always ships a SUPERSET of whatever the
+# local call site would have executed, which is how the caller is entitled to
+# treat the run as covered instead of dispatching twice. It also keeps
+# OMN-16825's invariant intact in its stronger form: an escalation is never a
+# coverage DOWNGRADE, and now neither is a placement.
 prepush_remote_argv() {
   if [ "${IS_FULL:-}" = "True" ] || [ "${IS_FULL:-}" = "true" ]; then
     printf '%s\n' "$FULL_SUITE_TARGET"
@@ -1394,6 +1554,18 @@ prepush_remote_argv() {
       printf '%s\n' "${PATHS[@]}"
     fi
   fi
+  # `${A[@]+"${A[@]}"}` and not a length test: this function is VENDORED into
+  # omnibase_core and omnimarket, and those copies advance in separate PRs. A
+  # bare `${#OFFBOX_INTEGRATION_PATHS[@]}` is an unbound-variable abort under
+  # `set -u` in any consumer whose prepush_smart_tests.sh has not yet been
+  # re-vendored -- i.e. this file would brick every heavy push in two repos for
+  # the length of a review. An absent array here is the ONLY case this tolerates,
+  # and it is not a silent coverage loss: a repo with no array also has no
+  # partition emitting one, and the repo that DOES have one refuses the push
+  # from its own backstop if the placement was skipped.
+  for _prepush_offbox_path in ${OFFBOX_INTEGRATION_PATHS[@]+"${OFFBOX_INTEGRATION_PATHS[@]}"}; do
+    printf '%s\n' "$_prepush_offbox_path"
+  done
 }
 
 # -----------------------------------------------------------------------------

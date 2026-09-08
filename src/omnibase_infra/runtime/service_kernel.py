@@ -143,6 +143,11 @@ from omnibase_infra.observability.wiring_health.wiring_health_checker import (
     WiringHealthChecker,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+from omnibase_infra.runtime.health.contract_attach_readiness_gate import (
+    CONTRACT_ATTACH_PROBE_NAME,
+    ContractAttachReadinessGate,
+    derive_required_contract_names,
+)
 from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
     ModelRuntimeConfig,
@@ -1301,8 +1306,10 @@ async def bootstrap() -> int:
         )
 
         # 1c. Load runtime profile to determine subsystem policies (OMN-10587).
-        # Reads RUNTIME_PROFILE env var; unknown values fall back to "default"
-        # (prefetch_policy="disabled") with a structured warning.
+        # Reads RUNTIME_PROFILE env var. Unset or blank resolves to "default";
+        # an UNREGISTERED name is REFUSED (OMN-17985) -- it used to fall back to
+        # "default" with a warning, which discarded the role identity while the
+        # process went on to wire zero contracts and pass readiness.
         # Named kernel_profile to avoid collision with the auto-wiring
         # runtime_profile string variable used later in the bootstrap loop.
         kernel_profile = load_runtime_profile()
@@ -3791,6 +3798,9 @@ async def bootstrap() -> int:
             from omnibase_infra.event_bus.enum_contract_attach_status import (
                 EnumContractAttachStatus,
             )
+            from omnibase_infra.event_bus.model_contract_attach_exclusion import (
+                ModelContractAttachExclusion,
+            )
             from omnibase_infra.event_bus.model_contract_attach_result import (
                 ModelContractAttachResult,
             )
@@ -3828,7 +3838,37 @@ async def bootstrap() -> int:
                 else {}
             )
 
+            # OMN-17372: readiness must require the wired COMMAND topics.
+            # required_for_readiness=True is passed at exactly three sites in
+            # this file (the contract-registry control topics below) and at
+            # NONE of the several hundred auto-wired command/event topics, so
+            # /ready answered 200 as soon as those three held assignments —
+            # with zero command topics subscribed and ~18 minutes of wiring
+            # still ahead. The required contract set is derived FROM THE
+            # CONTRACTS (every wired contract that subscribes an
+            # `onex.cmd.*.v<n>` topic), never from a hand list, and the gate is
+            # registered BEFORE the interleave runs so the whole wiring window
+            # is honestly 503 rather than falsely 200.
+            _contract_attach_gate = ContractAttachReadinessGate(
+                derive_required_contract_names(auto_wiring_manifest_for_subscriptions)
+            )
+            runtime.register_readiness_probe(
+                CONTRACT_ATTACH_PROBE_NAME,
+                _contract_attach_gate.probe,
+            )
+            logger.info(
+                "Contract-attach readiness gate armed for %d command contract(s) "
+                "(OMN-17372, correlation_id=%s)",
+                len(_contract_attach_gate.required_contract_names),
+                correlation_id,
+            )
+
             _attach_results: list[ModelContractAttachResult] = []
+            # OMN-17372: the interleave reports the contracts it will NEVER
+            # attempt, so the gate requires only what can actually report.
+            # Without this the gate waits forever on a contract the interleave
+            # filtered out, and /ready is 503 for the life of the process.
+            _attach_exclusions: list[ModelContractAttachExclusion] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=auto_wiring_manifest_for_subscriptions,
                 report=auto_wiring_report,
@@ -3839,8 +3879,25 @@ async def bootstrap() -> int:
                 provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
                 readiness_config=resolve_topic_readiness_config(),
                 attach_results_out=_attach_results,
+                exclusions_out=_attach_exclusions,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
+            )
+            _contract_attach_gate.exclude(tuple(_attach_exclusions))
+            _contract_attach_gate.record(tuple(_attach_results))
+            _gate_status = _contract_attach_gate.status()
+            logger.info(
+                "Contract-attach readiness gate: required=%d attached=%d "
+                "not_ready=%d failed=%d pending=%d excluded=%d ready=%s "
+                "(OMN-17372, correlation_id=%s)",
+                len(_gate_status.required_contracts),
+                len(_gate_status.attached_contracts),
+                len(_gate_status.not_ready_contracts),
+                len(_gate_status.failed_contracts),
+                len(_gate_status.pending_contracts),
+                len(_gate_status.excluded_contracts),
+                _gate_status.ready,
+                correlation_id,
             )
             _attach_readiness = ModelRuntimeAttachReadiness.from_results(
                 tuple(_attach_results)
@@ -3955,6 +4012,13 @@ async def bootstrap() -> int:
                             readiness_config=resolve_topic_readiness_config(),
                             core_runtime_topics=core_runtime_topics,
                             core_runtime_owners=core_runtime_owners,
+                            # OMN-17372: fold every retry outcome into the
+                            # readiness gate so a contract that converges late
+                            # flips /ready to 200 without a pod restart, and one
+                            # that regresses flips it back.
+                            on_attempt=lambda _subscribed, results: (
+                                _contract_attach_gate.record(results)
+                            ),
                         )
                     except asyncio.CancelledError:
                         raise

@@ -1,0 +1,368 @@
+{
+  "Id": "4715716b715cb4adb0a8c3063c151c7a46422ba760b0a2bee06ca7bb59128940",
+  "Created": "2026-09-06T13:34:00.891795022Z",
+  "Path": "/usr/bin/tini",
+  "Args": [
+    "--",
+    "/app/entrypoint-runtime.sh",
+    "onex-runtime"
+  ],
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 894285,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-09-06T14:14:26.411839503Z",
+    "FinishedAt": "2026-09-06T14:14:26.099251604Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 177,
+      "Log": [
+        {
+          "Start": "2026-09-06T15:17:17.681811758-04:00",
+          "End": "2026-09-06T15:17:21.361060983-04:00",
+          "ExitCode": 1,
+          "Output": "FAIL [runtime_degraded] runtime health DEGRADED \u2014 projection_dlq_saturation: 1 projection(s) routed 100% of consumed events to a DLQ/quarantine sink over 10 flow window(s) \u2014 offsets commit, so lag reads 0 over a total loss: projection_work_events\n"
+        },
+        {
+          "Start": "2026-09-06T15:17:51.362365558-04:00",
+          "End": "2026-09-06T15:17:51.652482155-04:00",
+          "ExitCode": 1,
+          "Output": "FAIL [runtime_degraded] runtime health DEGRADED \u2014 projection_dlq_saturation: 1 projection(s) routed 100% of consumed events to a DLQ/quarantine sink over 10 flow window(s) \u2014 offsets commit, so lag reads 0 over a total loss: projection_work_events\n"
+        },
+        {
+          "Start": "2026-09-06T15:18:21.652984511-04:00",
+          "End": "2026-09-06T15:18:27.008351752-04:00",
+          "ExitCode": 1,
+          "Output": "FAIL [probe_unreachable] health endpoint unreachable or unparseable\n"
+        },
+        {
+          "Start": "2026-09-06T15:18:57.009408829-04:00",
+          "End": "2026-09-06T15:18:57.256819572-04:00",
+          "ExitCode": 1,
+          "Output": "FAIL [runtime_degraded] runtime health DEGRADED \u2014 projection_dlq_saturation: 1 projection(s) routed 100% of consumed events to a DLQ/quarantine sink over 10 flow window(s) \u2014 offsets commit, so lag reads 0 over a total loss: projection_work_events\n"
+        },
+        {
+          "Start": "2026-09-06T15:19:27.257761411-04:00",
+          "End": "2026-09-06T15:19:28.895552867-04:00",
+          "ExitCode": 1,
+          "Output": "FAIL [runtime_degraded] runtime health DEGRADED \u2014 projection_dlq_saturation: 1 projection(s) routed 100% of consumed events to a DLQ/quarantine sink over 10 flow window(s) \u2014 offsets commit, so lag reads 0 over a total loss: projection_work_events\n"
+        }
+      ]
+    }
+  },
+  "Image": "sha256:9e6791f2d14c1cf976fcdf12f2de8504e934fbcaf115efc1d026cfa04ad4678d",
+  "ResolvConfPath": "/data/docker/containers/4715716b715cb4adb0a8c3063c151c7a46422ba760b0a2bee06ca7bb59128940/resolv.conf",
+  "HostnamePath": "/data/docker/containers/4715716b715cb4adb0a8c3063c151c7a46422ba760b0a2bee06ca7bb59128940/hostname",
+  "HostsPath": "/data/docker/containers/4715716b715cb4adb0a8c3063c151c7a46422ba760b0a2bee06ca7bb59128940/hosts",
+  "LogPath": "/data/docker/containers/4715716b715cb4adb0a8c3063c151c7a46422ba760b0a2bee06ca7bb59128940/4715716b715cb4adb0a8c3063c151c7a46422ba760b0a2bee06ca7bb59128940-json.log",
+  "Name": "/omninode-runtime",
+  "RestartCount": 1,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "docker-default",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": [
+      "omninode-runtime-logs:/app/logs:rw",
+      "omninode-runtime-data:/app/data:rw",
+      "/home/jonah/.omnibase/infra/deployed/0.38.19/contracts:/app/contracts:ro",
+      "/home/jonah/.omnibase/infra/deployed/0.38.19/docker/lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro",
+      "/data/omninode/omniclaude/plugins/onex/skills:/app/skills:ro",
+      "/dev/null:/run/secrets/vertex_access_token:ro"
+    ],
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": {
+        "max-file": "3",
+        "max-size": "10m"
+      }
+    },
+    "NetworkMode": "omnibase-infra-network",
+    "PortBindings": {
+      "8085/tcp": [
+        {
+          "HostIp": "",
+          "HostPort": "8085"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": null,
+    "DnsSearch": null,
+    "ExtraHosts": [],
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "Tmpfs": {
+      "/run/onex-runtime": "uid=1000,gid=1000,mode=0770"
+    },
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 1610612736,
+    "NanoCpus": 1000000000,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": null,
+    "BlkioDeviceReadBps": null,
+    "BlkioDeviceWriteBps": null,
+    "BlkioDeviceReadIOps": null,
+    "BlkioDeviceWriteIOps": null,
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": null,
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 268435456,
+    "MemorySwap": 3221225472,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "bind",
+      "Source": "/home/jonah/.omnibase/infra/deployed/0.38.19/docker/lane-overlays/dev.bifrost.yaml",
+      "Destination": "/app/config/delegation/dev.bifrost.yaml",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/data/omninode/omniclaude/plugins/onex/skills",
+      "Destination": "/app/skills",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/dev/null",
+      "Destination": "/run/secrets/vertex_access_token",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "volume",
+      "Name": "omninode-runtime-logs",
+      "Source": "/data/docker/volumes/omninode-runtime-logs/_data",
+      "Destination": "/app/logs",
+      "Driver": "local",
+      "Mode": "rw",
+      "RW": true,
+      "Propagation": ""
+    },
+    {
+      "Type": "volume",
+      "Name": "omninode-runtime-data",
+      "Source": "/data/docker/volumes/omninode-runtime-data/_data",
+      "Destination": "/app/data",
+      "Driver": "local",
+      "Mode": "rw",
+      "RW": true,
+      "Propagation": ""
+    },
+    {
+      "Type": "bind",
+      "Source": "/home/jonah/.omnibase/infra/deployed/0.38.19/contracts",
+      "Destination": "/app/contracts",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    }
+  ],
+  "Config": {
+    "Hostname": "4715716b715c",
+    "Domainname": "",
+    "User": "root",
+    "AttachStdin": false,
+    "AttachStdout": true,
+    "AttachStderr": true,
+    "ExposedPorts": {
+      "8085/tcp": {}
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "<REDACTED: container environment removed at capture time; carries live credentials>"
+    ],
+    "Cmd": [
+      "onex-runtime"
+    ],
+    "Healthcheck": {
+      "Test": [
+        "CMD",
+        "python",
+        "/usr/local/bin/onex-container-healthcheck",
+        "--degraded-policy",
+        "fail"
+      ],
+      "Interval": 30000000000,
+      "Timeout": 10000000000,
+      "StartPeriod": 1800000000000,
+      "Retries": 5
+    },
+    "Image": "omnibase-infra-omninode-runtime",
+    "Volumes": null,
+    "WorkingDir": "/app",
+    "Entrypoint": [
+      "/usr/bin/tini",
+      "--",
+      "/app/entrypoint-runtime.sh"
+    ],
+    "Labels": {
+      "com.docker.compose.config-hash": "53ade78a0beb32affd3f0c48c7f71e6569d3b89a1c2305982d769fc0934460b8",
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "",
+      "com.docker.compose.image": "sha256:9e6791f2d14c1cf976fcdf12f2de8504e934fbcaf115efc1d026cfa04ad4678d",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "omnibase-infra",
+      "com.docker.compose.project.config_files": "/home/jonah/.omnibase/infra/deployed/0.38.19/docker/docker-compose.infra.yml,/home/jonah/.omnibase/infra/deployed/0.38.19/docker/docker-compose.dev-lane.yml",
+      "com.docker.compose.project.working_dir": "/home/jonah/.omnibase/infra/deployed/0.38.19/docker",
+      "com.docker.compose.replace": "omninode-runtime",
+      "com.docker.compose.service": "omninode-runtime",
+      "com.docker.compose.version": "5.1.0",
+      "com.omninode.build_source": "workspace",
+      "com.omninode.layer": "runtime",
+      "com.omninode.non_main_lineage": "true",
+      "com.omninode.promotion_class": "stability-candidate",
+      "com.omninode.service": "runtime-main",
+      "com.omninode.version": "0.1.0",
+      "com.omninode.workspace_provenance_manifest": "/app/build-provenance.json",
+      "org.opencontainers.image.created": "2026-09-06T13:29:36Z",
+      "org.opencontainers.image.description": "ONEX Infrastructure Runtime Service - Contract-driven kernel for event-based infrastructure orchestration",
+      "org.opencontainers.image.documentation": "https://github.com/OmniNode-ai/omnibase_infra/blob/main/README.md",
+      "org.opencontainers.image.licenses": "MIT",
+      "org.opencontainers.image.revision": "2ea74bc4de76",
+      "org.opencontainers.image.source": "https://github.com/OmniNode-ai/omnibase_infra",
+      "org.opencontainers.image.title": "OmniBase Infra Runtime",
+      "org.opencontainers.image.vendor": "OmniNode",
+      "org.opencontainers.image.version": "0.38.19"
+    },
+    "StopTimeout": 90
+  },
+  "NetworkSettings": {
+    "SandboxID": "90694eb7e43e058f4ea343eb1e3ccd6ef92e7e313dcf666866e2a6f54d46191a",
+    "SandboxKey": "/var/run/docker/netns/90694eb7e43e",
+    "Ports": {
+      "8085/tcp": [
+        {
+          "HostIp": "0.0.0.0",
+          "HostPort": "8085"
+        },
+        {
+          "HostIp": "::",
+          "HostPort": "8085"
+        }
+      ]
+    },
+    "Networks": {
+      "omnibase-infra-network": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": [
+          "omninode-runtime",
+          "omninode-runtime"
+        ],
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "d5aae7ef83ea837b8e57e1b39db42f09e4f390006938de5a3734bfabb5b7b0e5",
+        "EndpointID": "1f150731ba6f072b3bf65f57d78bc45a4eaca24b3c8e44af921d2e2f2904d90d",
+        "Gateway": "172.19.0.1",
+        "IPAddress": "172.19.0.22",
+        "MacAddress": "6a:44:82:0d:48:dd",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "omninode-runtime",
+          "4715716b715c"
+        ]
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:845ae22a84a5cd62ce5a92e30f39c21c9575e2fb8a2cadd38002b5ac386b1bf4",
+    "size": 6558,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  },
+  "_sanitization": "Config.Env replaced with a single redaction marker at capture time. Nothing else altered. The guard reads Config.Labels and State.Status only."
+}

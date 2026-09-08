@@ -43,11 +43,23 @@
 # trusted runner (missing/mismatched dev broker) is a non-blocking red signal,
 # not a merge gate.
 #
-# LANE / SECRET (OMN-14801 / OMN-14800): lane=dev is resolved against omnimarket's
-# config/ci_bus_lanes.yaml@main overlay (contract-owned, authoritative). `dev` is
-# `from-secret` there, so the trusted-runner publish requires a repo-level
-# `KAFKA_BOOTSTRAP_SERVERS` secret on omnibase_infra pointed at the DEV broker
-# (never stability). See the reusable header for the full broker decision.
+# LANE / SECRET (OMN-14801 / OMN-14800; corrected OMN-14813 + OMN-18012): lane=dev
+# is resolved against omnimarket's config/ci_bus_lanes.yaml overlay at the ref the
+# reusable sources (contract-owned, authoritative). Two corrections to what this
+# paragraph used to assert:
+#   * `dev` is NOT `from-secret`. Since OMN-14813 it declares a CONCRETE broker in
+#     the committed overlay and the publisher uses it directly — this repo needs
+#     no `KAFKA_BOOTSTRAP_SERVERS` secret. Run 34150470410 logged exactly that
+#     ("KAFKA_BOOTSTRAP_SERVERS is not injected; publishing to the
+#     overlay-declared broker"), which is the intended path, not a warning.
+#   * The lane is no longer plaintext. OMN-18012 Phase B enabled
+#     SASL/SCRAM-SHA-256 on the dev-lane listener at ~16:40Z on 2026-09-07; the
+#     overlay declares `security_protocol: SASL_PLAINTEXT` /
+#     `sasl_mechanism: SCRAM-SHA-256`, and the publisher reads the protocol from
+#     there instead of inferring TLS from the presence of credentials. What this
+#     caller must supply is `secrets: inherit` (already present below) so the
+#     KAFKA_SASL_* credentials reach the publish step.
+# See the reusable header for the full broker decision.
 #
 # MANUAL REPLAY ENTRYPOINT (OMN-14993): `workflow_dispatch` lets an operator
 # manually re-request a mint for a PR whose original `pull_request` event was

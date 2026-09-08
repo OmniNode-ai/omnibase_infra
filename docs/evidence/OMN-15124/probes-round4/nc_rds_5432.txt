@@ -1,2 +1,0 @@
-nc: connectx to omninode-dev-postgres.cqjkkokeaqd2.us-east-1.rds.amazonaws.com port 5432 (tcp) failed: Operation timed out
-exit=1

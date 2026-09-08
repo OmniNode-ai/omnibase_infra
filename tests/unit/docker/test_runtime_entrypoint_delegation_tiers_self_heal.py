@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-15628 remediation: entrypoint self-heal for a stale DELEGATION_ROUTING_TIERS_PATH.
+"""OMN-15628 remediation: boot self-heal for a stale DELEGATION_ROUTING_TIERS_PATH.
 
 The k8s manifests (omninode_infra: deployment-omninode-runtime{,-effects,-worker}.yaml)
 pin ``DELEGATION_ROUTING_TIERS_PATH`` as a literal string embedding the venv's Python
@@ -10,190 +10,175 @@ minor version, e.g.::
     /app/.venv/lib/python3.12/site-packages/omnimarket/configs/routing_tiers.yaml
 
 A base-image Python version bump silently invalidates that literal path with no signal
-until the routing reducer fails closed at first use. ``docker/entrypoint-runtime.sh``
-now self-heals: when the pinned path does not exist on disk, it re-derives the path from
-the installed ``omnimarket`` package's OWN location (which always matches whatever
-Python actually ships in the image) and exports the corrected value before exec'ing the
-kernel. If re-derivation also fails, the original (possibly-stale) value is left
-untouched so the routing reducer still fails closed attributably (CLAUDE.md rule 8) --
-this is a best-effort correction, never a silent fallback that manufactures a config the
-reducer would otherwise refuse to load.
+until the routing reducer fails closed at first use. The boot preflight self-heals: when
+the pinned path does not exist on disk, it re-derives the path from the installed
+``omnimarket`` package's OWN location (which always matches whatever Python actually
+ships in the image) and exports the corrected value before the kernel starts. If
+re-derivation also fails, the original (possibly-stale) value is left untouched so the
+routing reducer still fails closed attributably (CLAUDE.md rule 8) -- this is a
+best-effort correction, never a silent fallback that manufactures a config the reducer
+would otherwise refuse to load.
 
-The behavioral tests execute the real ``docker/entrypoint-runtime.sh`` with a stubbed
-``python`` on PATH (no Docker, Postgres, or privilege drop involved), mirroring the
-harness in ``test_runtime_entrypoint_stamp_tolerance.py``.
+OMN-17372 moved this block out of ``docker/entrypoint-runtime.sh`` (where it cost a
+FIFTH cold ``python -c`` interpreter start) into
+``omnibase_infra.runtime.entrypoint_preflight``, in the same process as every other
+boot step. The behaviour, the operator-visible text and the never-fabricate rule are
+unchanged; these tests drive the function directly instead of a stubbed shell.
 """
 
 from __future__ import annotations
 
-import stat
-import subprocess
-import tempfile
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
-from tests.unit.docker.conftest import DOCKER_DIR
+from omnibase_infra.runtime import entrypoint_preflight
 
 pytestmark = [pytest.mark.unit]
 
-ENTRYPOINT = DOCKER_DIR / "entrypoint-runtime.sh"
 
-# Stub "python" that:
-#   * exits 0 for any `--manifest ... stamp` invocation (schema-fingerprint stamp,
-#     already covered by test_runtime_entrypoint_stamp_tolerance.py -- not under test
-#     here, so it always succeeds so boot reaches the delegation-tiers block).
-#   * for a `-c <code>` invocation (the re-derivation probe), prints
-#     $STUB_RESOLVED_TIERS_PATH and exits $STUB_C_RC (default 0) -- emulates a
-#     successful `import omnimarket` re-derivation when STUB_RESOLVED_TIERS_PATH is a
-#     real file, or a failed one when it is unset/empty.
-#   * exits 0 for anything else (render modules -- unexercised here since
-#     BIFROST_CONTRACT_PATH / ONEX_SECRET_RESOLVER_CONFIG_PATH stay unset).
-_PYTHON_STUB = """#!/bin/sh
-case "$1" in
-  --manifest)
-    exit 0
-    ;;
-  -c)
-    if [ "${STUB_C_RC:-0}" -ne 0 ]; then
-      exit "${STUB_C_RC}"
-    fi
-    printf '%s\\n' "${STUB_RESOLVED_TIERS_PATH:-}"
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-"""
+def _install_fake_omnimarket(
+    monkeypatch: pytest.MonkeyPatch, package_dir: Path
+) -> None:
+    """Make ``import omnimarket`` resolve to *package_dir*."""
+    module = types.ModuleType("omnimarket")
+    module.__file__ = str(package_dir / "__init__.py")
+    monkeypatch.setitem(sys.modules, "omnimarket", module)
 
 
-def _run_entrypoint(
+def _break_omnimarket_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``import omnimarket`` raise, emulating a package that is not installed."""
+    monkeypatch.setitem(sys.modules, "omnimarket", None)
+
+
+def test_missing_pinned_path_is_re_derived_and_exported(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
-    *,
-    delegation_tiers_path: str | None,
-    resolved_tiers_path: str | None = None,
-    c_rc: int = 0,
-) -> subprocess.CompletedProcess[str]:
-    """Run the real entrypoint with a stubbed python and a controlled self-heal probe."""
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    stub = bindir / "python"
-    stub.write_text(_PYTHON_STUB)
-    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+) -> None:
+    """Stale pin + a real re-derived path -> self-heal exports the corrected value."""
+    stale_pin = tmp_path / "does-not-exist" / "routing_tiers.yaml"
+    package_dir = tmp_path / "site-packages" / "omnimarket"
+    (package_dir / "configs").mkdir(parents=True)
+    resolved = package_dir / "configs" / "routing_tiers.yaml"
+    resolved.write_text("tiers: []\n")
+    _install_fake_omnimarket(monkeypatch, package_dir)
 
-    env = {
-        "PATH": f"{bindir}:/usr/bin:/bin",
-        "OMNIBASE_INFRA_DB_URL": "postgresql://u:p@db:5432/omnibase_infra",
-        "STUB_C_RC": str(c_rc),
-    }
-    if delegation_tiers_path is not None:
-        env["DELEGATION_ROUTING_TIERS_PATH"] = delegation_tiers_path
-    if resolved_tiers_path is not None:
-        env["STUB_RESOLVED_TIERS_PATH"] = resolved_tiers_path
+    env = {"DELEGATION_ROUTING_TIERS_PATH": str(stale_pin)}
+    entrypoint_preflight.self_heal_delegation_tiers_path(env)
 
-    return subprocess.run(
-        ["sh", str(ENTRYPOINT), "true"],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
+    out = capsys.readouterr().out
+    assert f"WARNING: DELEGATION_ROUTING_TIERS_PATH={stale_pin} does not exist" in out
+    assert f"Re-derived DELEGATION_ROUTING_TIERS_PATH={resolved}" in out
+    assert env["DELEGATION_ROUTING_TIERS_PATH"] == str(resolved)
+
+
+def test_missing_pinned_path_and_failed_rederivation_leaves_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Re-derivation ALSO fails -> warn, never fabricate, leave the stale pin.
+
+    The routing reducer then fails closed with an attributable error at first
+    use, which is the intended outcome -- not a silent config fallback.
+    """
+    stale_pin = tmp_path / "does-not-exist" / "routing_tiers.yaml"
+    _break_omnimarket_import(monkeypatch)
+
+    env = {"DELEGATION_ROUTING_TIERS_PATH": str(stale_pin)}
+    entrypoint_preflight.self_heal_delegation_tiers_path(env)
+
+    out = capsys.readouterr().out
+    assert f"WARNING: DELEGATION_ROUTING_TIERS_PATH={stale_pin} does not exist" in out
+    assert "WARNING: could not re-derive a valid routing_tiers.yaml path" in out
+    assert "Re-derived DELEGATION_ROUTING_TIERS_PATH=" not in out
+    assert env["DELEGATION_ROUTING_TIERS_PATH"] == str(stale_pin)
+
+
+def test_rederived_path_that_is_not_a_real_file_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """omnimarket imports, but ships no routing_tiers.yaml -> still no fabrication."""
+    stale_pin = tmp_path / "does-not-exist" / "routing_tiers.yaml"
+    package_dir = tmp_path / "site-packages" / "omnimarket"
+    package_dir.mkdir(parents=True)
+    _install_fake_omnimarket(monkeypatch, package_dir)
+
+    env = {"DELEGATION_ROUTING_TIERS_PATH": str(stale_pin)}
+    entrypoint_preflight.self_heal_delegation_tiers_path(env)
+
+    out = capsys.readouterr().out
+    assert "WARNING: could not re-derive a valid routing_tiers.yaml path" in out
+    assert env["DELEGATION_ROUTING_TIERS_PATH"] == str(stale_pin)
+
+
+def test_valid_pinned_path_is_left_untouched(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The pinned path exists -> the self-heal block is a no-op."""
+    valid_pin = tmp_path / "routing_tiers.yaml"
+    valid_pin.write_text("tiers: []\n")
+
+    env = {"DELEGATION_ROUTING_TIERS_PATH": str(valid_pin)}
+    entrypoint_preflight.self_heal_delegation_tiers_path(env)
+
+    out = capsys.readouterr().out
+    assert "does not exist -- attempting to re-derive" not in out
+    assert env["DELEGATION_ROUTING_TIERS_PATH"] == str(valid_pin)
+
+
+def test_unset_delegation_tiers_path_is_a_noop(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unset entirely (e.g. projection-api) -> the block never fires."""
+    env: dict[str, str] = {}
+    entrypoint_preflight.self_heal_delegation_tiers_path(env)
+
+    assert capsys.readouterr().out == ""
+    assert env == {}
+
+
+def test_self_heal_runs_after_both_renders_and_before_the_kernel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Order guard: stamp -> bifrost -> resolver -> self-heal, then the CMD.
+
+    This is the append-only placement the shell had, and the renders must run
+    before the self-heal because the routing tiers are read after boot config
+    is materialised.
+    """
+    order: list[str] = []
+
+    monkeypatch.setattr(
+        entrypoint_preflight,
+        "stamp_all_fingerprints",
+        lambda _env: (order.append("stamp"), 0)[1],
+    )
+    monkeypatch.setattr(
+        entrypoint_preflight,
+        "render_bifrost_contract",
+        lambda _env: (order.append("bifrost"), 0)[1],
+    )
+    monkeypatch.setattr(
+        entrypoint_preflight,
+        "render_resolver_config",
+        lambda _env: (order.append("resolver"), 0)[1],
+    )
+    monkeypatch.setattr(
+        entrypoint_preflight,
+        "self_heal_delegation_tiers_path",
+        lambda _env: order.append("self_heal"),
     )
 
+    rc = entrypoint_preflight.run_preflight({})
 
-def test_missing_pinned_path_is_re_derived_and_exported() -> None:
-    """Stale pin (file absent) + a real re-derived path -> self-heal, exports the
-    corrected value, and boot proceeds.
-    """
-    with tempfile.TemporaryDirectory() as td:
-        td_path = Path(td)
-        stale_pin = td_path / "does-not-exist" / "routing_tiers.yaml"
-        real_resolved = td_path / "resolved" / "routing_tiers.yaml"
-        real_resolved.parent.mkdir(parents=True)
-        real_resolved.write_text("tiers: []\n")
-
-        result = _run_entrypoint(
-            td_path,
-            delegation_tiers_path=str(stale_pin),
-            resolved_tiers_path=str(real_resolved),
-        )
-
-    assert result.returncode == 0, result.stderr
-    assert (
-        f"WARNING: DELEGATION_ROUTING_TIERS_PATH={stale_pin} does not exist"
-        in result.stdout
-    )
-    assert f"Re-derived DELEGATION_ROUTING_TIERS_PATH={real_resolved}" in result.stdout
-    assert "Starting runtime kernel..." in result.stdout
+    assert rc == 0
+    assert order == ["stamp", "bifrost", "resolver", "self_heal"]
 
 
-def test_missing_pinned_path_and_failed_rederivation_leaves_pin_and_boots() -> None:
-    """Stale pin + re-derivation ALSO fails (import error) -> the entrypoint does
-    NOT crash and does NOT fabricate a path; it warns and boots, leaving the
-    (still-stale) pin in place so the routing reducer fails closed attributably at
-    first use -- never a silent config fallback.
-    """
-    with tempfile.TemporaryDirectory() as td:
-        td_path = Path(td)
-        stale_pin = td_path / "does-not-exist" / "routing_tiers.yaml"
-
-        result = _run_entrypoint(
-            td_path,
-            delegation_tiers_path=str(stale_pin),
-            resolved_tiers_path=None,
-            c_rc=1,
-        )
-
-    assert result.returncode == 0, result.stderr
-    assert (
-        f"WARNING: DELEGATION_ROUTING_TIERS_PATH={stale_pin} does not exist"
-        in result.stdout
-    )
-    assert (
-        "WARNING: could not re-derive a valid routing_tiers.yaml path" in result.stdout
-    )
-    # Never a fabricated success message when re-derivation genuinely failed.
-    assert "Re-derived DELEGATION_ROUTING_TIERS_PATH=" not in result.stdout
-    assert "Starting runtime kernel..." in result.stdout
-
-
-def test_valid_pinned_path_is_left_untouched() -> None:
-    """The pinned path exists on disk -> the self-heal block is a no-op (no warning,
-    no re-derivation attempt).
-    """
-    with tempfile.TemporaryDirectory() as td:
-        td_path = Path(td)
-        valid_pin = td_path / "routing_tiers.yaml"
-        valid_pin.write_text("tiers: []\n")
-
-        result = _run_entrypoint(td_path, delegation_tiers_path=str(valid_pin))
-
-    assert result.returncode == 0, result.stderr
-    assert "does not exist -- attempting to re-derive" not in result.stdout
-    assert "Starting runtime kernel..." in result.stdout
-
-
-def test_unset_delegation_tiers_path_is_a_noop() -> None:
-    """DELEGATION_ROUTING_TIERS_PATH unset entirely (e.g. projection-api, which
-    deliberately has no delegation surface) -> the self-heal block never fires.
-    """
-    with tempfile.TemporaryDirectory() as td:
-        result = _run_entrypoint(Path(td), delegation_tiers_path=None)
-
-    assert result.returncode == 0, result.stderr
-    assert "DELEGATION_ROUTING_TIERS_PATH" not in result.stdout
-    assert "Starting runtime kernel..." in result.stdout
-
-
-def test_self_heal_block_is_source_ordered_after_secret_resolver_render() -> None:
-    """Static guard: the self-heal block must run after the existing render blocks
-    (BIFROST_CONTRACT_PATH / ONEX_SECRET_RESOLVER_CONFIG_PATH) and before the kernel
-    exec, matching the append-only placement of this remediation.
-    """
-    source = ENTRYPOINT.read_text()
-    secret_render_pos = source.index("render_secret_resolver_config")
-    self_heal_pos = source.index("does not exist -- attempting to re-derive")
-    exec_pos = source.index('exec "$@"')
-
-    assert secret_render_pos < self_heal_pos < exec_pos
+__all__: list[str] = []

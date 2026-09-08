@@ -148,6 +148,23 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # unconditional in ci.yml (`if: always()`), so a skip is anomalous and never a
     # legitimate opt-out.
     "Exposed Identifier Gate (OMN-17320)",  # exposed-identifier-gate
+    # OMN-18031: the per-run runner routing decision. THIS LINE IS HALF THE
+    # MECHANISM, on the identical reasoning as the three entries above: this
+    # repo requires exactly one context (`CI Summary`), the default-deny sweep
+    # below already fails when a registered job FAILS, but an unregistered job
+    # that is `skipped` or ABSENT yields SUCCESS. Without this entry, deleting
+    # the `route` job from ci.yml would silently retire per-run routing on a
+    # fully green run — and because routing is deliberately INERT while the
+    # trusted seam reads '["ubuntu-latest"]' (OMN-16682), nothing about job
+    # PLACEMENT would change to reveal it. That is the exact silent-retirement
+    # shape this tuple exists for, and it is worse here than elsewhere: the
+    # only observable difference between "routing works and chose hosted" and
+    # "routing is gone" is a decision artifact nobody is required to read.
+    # The job is unconditional in ci.yml (no needs/if), so a skip is anomalous
+    # and never a legitimate opt-out. Same "<caller display name> / <inner job
+    # name>" shape as the two `uses:` entries below; renaming either half
+    # breaks this registration.
+    "Runner Route (OMN-18031) / route",
     # OMN-15378 AC3: scripts/deploy-agent's standalone pytest root. ci.yml's
     # `deploy-agent-tests` job CALLS .github/workflows/deploy-agent-tests.yml,
     # so the inner job surfaces as "<caller display name> / <inner job name>"
@@ -223,6 +240,17 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # always completes success/failure and a skip/absence here is anomalous
     # -- correctly fails closed.
     "Lockfile Registry Allowlist (OMN-16516)",
+    # OMN-18012: the customer-path boundary chain (tests/integration/
+    # customer_path/). THIS LINE IS HALF THE MECHANISM, same as the two
+    # entries above -- the default-deny sweep fails CI Summary when the job
+    # FAILS, but an unregistered job that is `skipped` or absent yields
+    # SUCCESS, and a silently-absent boundary test is exactly the shape of
+    # the 2026-09-06 escapes it exists to catch. The job runs the ONLY
+    # per-PR proof in this repo that the terminal readback survives a
+    # retention-truncated partition and that the bus client can actually
+    # authenticate to an auth-required listener; the sharded test matrix
+    # excludes it by marker (`-m "not kafka"`).
+    "Customer Path Boundary (OMN-18012)",  # customer-path-boundary
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

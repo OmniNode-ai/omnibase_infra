@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ast
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts/hooks/prepush_smart_tests.sh"
 FUNCTION_NAME = "filter_prepush_runnable_paths"
 WHOLE_SUITE_PREDICATE = "selection_is_whole_suite"
+ALLOWLISTED_INTEGRATION_CLASSIFIER = "is_prepush_allowlisted_integration_path"
+PATH_PARTITIONER = "partition_prepush_runnable_paths"
+OVERRIDE_SCRUBBER = "scrub_prepush_override_env"
+ORDINARY_RUNNER = "run_prepush_ordinary_tests"
+ALLOWLISTED_INTEGRATION_RUNNER = "run_prepush_allowlisted_integration_tests"
+PARTITIONED_RUNNER = "run_prepush_partitioned_tests"
+LOCAL_INTEGRATION_REFUSAL = "assert_no_integration_path_runs_locally"
+OFFBOX_PLACEMENT = "place_integration_selection_offbox"
 SLOT_BACKED_IMPACTED_SCOPE = "tests/unit/runtime/"
 
 # The one integration subtree the hook is allowed to run locally (OMN-16825).
@@ -97,8 +106,12 @@ def _run_filter(paths: list[str], tmp_path: Path) -> list[str]:
     bash = shutil.which("bash")
     assert bash is not None, "bash not available"
     fragment = tmp_path / "fragment.sh"
+    source = HOOK.read_text(encoding="utf-8")
     fragment.write_text(
-        "set -euo pipefail\n" + _extract_function(HOOK.read_text(), FUNCTION_NAME),
+        "set -euo pipefail\n"
+        + _extract_function(source, ALLOWLISTED_INTEGRATION_CLASSIFIER)
+        + "\n"
+        + _extract_function(source, FUNCTION_NAME),
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -137,6 +150,165 @@ def _run_selection_is_whole_suite(target: str, paths: list[str]) -> bool:
     return result.returncode == 0
 
 
+def _bash_array(name: str, values: list[str]) -> str:
+    return f"{name}=({' '.join(shlex.quote(value) for value in values)})"
+
+
+def _extract_hook_execution_block(source: str) -> str:
+    """Return the hook's actual local-execution controller through its exit."""
+    start = source.index("if ! type prepush_developer_shell_path")
+    end = source.rindex('exit "$RC"') + len('exit "$RC"')
+    return source[start:end]
+
+
+def _run_real_partitioned_hook(
+    tmp_path: Path,
+    *,
+    is_full: bool,
+    remote_full_suite_verified: bool,
+    whole_suite_equivalent: bool = False,
+    selected_paths: list[str],
+    pytest_extra_args: str = "",
+    lab_placement_succeeds: bool = True,
+    expect_refusal: bool = False,
+) -> list[list[str]]:
+    """Run the hook's real local-execution controller with token-recording uv.
+
+    This is intentionally an execution seam, not a source assertion. The
+    shipped runner functions AND the controller that calls them are copied
+    directly from the hook into a minimal bash harness. The fake ``uv``
+    receives the exact argv that the real hook would give pytest. That makes
+    option order (especially the final enforced marker), the two-invocation
+    partition, and remote-evidence elision observable without starting a real
+    test suite from this unit test.
+    """
+    bash = shutil.which("bash")
+    assert bash is not None, "bash not available"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    argv_log = tmp_path / "uv-argv.log"
+    placement_log = tmp_path / "placement.log"
+    fake_uv = fake_bin / "uv"
+    fake_uv.write_text(
+        "#!/usr/bin/env bash\n"
+        "{\n"
+        "  printf 'CALL\\n'\n"
+        '  for arg in "$@"; do printf \'ARG:%s\\n\' "$arg"; done\n'
+        '} >> "$UV_ARGV_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    source = HOOK.read_text(encoding="utf-8")
+    fragment = tmp_path / "partitioned-hook.sh"
+    fragment.write_text(
+        "set -euo pipefail\n"
+        "log() {\n"
+        '  if [ "$REQUIRE_WHOLE_SUITE_GUARD" -eq 1 ] && [ "$WHOLE_SUITE_GUARD_CALLED" -ne 1 ]; then return 91; fi\n'
+        "}\n"
+        'die() { printf \'DIE:%s\\n\' "$1" >> "$PLACEMENT_LOG"; exit 66; }\n'
+        "guard_full_suite_host() { WHOLE_SUITE_GUARD_CALLED=1; }\n"
+        # OMN-18012: the off-box placement is stubbed at the SAME seam the real
+        # hook calls -- prepush_wait_for_lab_capacity -- so the extracted
+        # place_integration_selection_offbox body (its hostname resolution, its
+        # table read, its PREPUSH_REQUIRE_DOCKER toggle, its refusal on a
+        # failed placement) all execute for real.
+        'prepush_table_text() { printf "row\\n"; }\n'
+        'PREPUSH_HOST_TABLE_REL="scripts/hooks/prepush_hosts.tsv"\n'
+        "PREPUSH_OFFBOX_WAIT_BUDGET_SECONDS=0\n"
+        "PREPUSH_OFFBOX_WAIT_INTERVAL_SECONDS=0\n"
+        "PREPUSH_PICK_HOSTNAME=stub-lab\n"
+        "PREPUSH_PICK_LABEL=stub\n"
+        "PREPUSH_PROBE_LOG=stub\n"
+        "prepush_wait_for_lab_capacity() {\n"
+        '  printf \'PLACED:%s\\n\' "$1" >> "$PLACEMENT_LOG"\n'
+        '  printf \'REQUIRE_DOCKER:%s\\n\' "$PREPUSH_REQUIRE_DOCKER" >> "$PLACEMENT_LOG"\n'
+        + (
+            "  REMOTE_LAB_RUN_VERDICT=1; return 0\n"
+            if lab_placement_succeeds
+            else "  return 1\n"
+        )
+        + "}\n"
+        f"selection_is_whole_suite() {{ return {int(not whole_suite_equivalent)}; }}\n"
+        'prepush_developer_shell_path() { printf "%s" "$PATH"; }\n'
+        + _extract_function(source, ALLOWLISTED_INTEGRATION_CLASSIFIER)
+        + "\n"
+        + _extract_function(source, FUNCTION_NAME)
+        + "\n"
+        + _extract_function(source, PATH_PARTITIONER)
+        + "\n"
+        + _extract_function(source, OVERRIDE_SCRUBBER)
+        + "\n"
+        + _extract_function(source, ORDINARY_RUNNER)
+        + "\n"
+        + _extract_function(source, ALLOWLISTED_INTEGRATION_RUNNER)
+        + "\n"
+        + _extract_function(source, PARTITIONED_RUNNER)
+        + "\n"
+        + _extract_function(source, LOCAL_INTEGRATION_REFUSAL)
+        + "\n"
+        + _extract_function(source, OFFBOX_PLACEMENT)
+        + "\n"
+        + f"IS_FULL={str(is_full).lower()}\n"
+        + f"REMOTE_FULL_SUITE_VERIFIED={int(remote_full_suite_verified)}\n"
+        + "REMOTE_LAB_RUN_VERDICT=0\n"
+        + "REASON=seam\n"
+        + f"REQUIRE_WHOLE_SUITE_GUARD={int(whole_suite_equivalent)}\n"
+        + "WHOLE_SUITE_GUARD_CALLED=0\n"
+        + 'FULL_SUITE_TARGET="tests/unit/"\n'
+        + 'SLOT_BACKED_IMPACTED_SCOPE="tests/unit/runtime/"\n'
+        + "RC=0\n"
+        + _bash_array("ALL_PATHS", selected_paths)
+        + "\n"
+        + f"{PATH_PARTITIONER}\n"
+        + f"export PREPUSH_PYTEST_ARGS={shlex.quote(pytest_extra_args)}\n"
+        + _extract_hook_execution_block(source)
+        + "\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["UV_ARGV_LOG"] = str(argv_log)
+    env["PLACEMENT_LOG"] = str(placement_log)
+    result = subprocess.run(
+        [bash, str(fragment)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    if expect_refusal:
+        assert result.returncode == 66, (
+            "the hook was expected to REFUSE and exit non-zero, but it did not: "
+            + result.stdout
+            + result.stderr
+        )
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    if not argv_log.exists():
+        return []
+
+    calls: list[list[str]] = []
+    current: list[str] | None = None
+    for line in argv_log.read_text(encoding="utf-8").splitlines():
+        if line == "CALL":
+            current = []
+            calls.append(current)
+        else:
+            assert current is not None and line.startswith("ARG:"), line
+            current.append(line.removeprefix("ARG:"))
+    return calls
+
+
+def _placement_log(tmp_path: Path) -> list[str]:
+    """Lines the stubbed lab placement recorded during the last hook run."""
+    log = tmp_path / "placement.log"
+    if not log.exists():
+        return []
+    return [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+
+
 def test_hook_exists_and_defines_the_filter() -> None:
     assert HOOK.is_file()
     assert f"{FUNCTION_NAME}() {{" in HOOK.read_text()
@@ -171,6 +343,337 @@ def test_hook_still_ignores_integration_in_the_pytest_invocation() -> None:
     # The filter complements --ignore=tests/integration; it does not replace it.
     # A source diff can still pull an integration test in transitively.
     assert HOOK.read_text().count("--ignore=tests/integration") >= 2
+
+
+# ---------------------------------------------------------------------------
+# OMN-17793: integration markers outside tests/integration/ stay out of push
+# ---------------------------------------------------------------------------
+
+
+def test_partitioned_runner_executes_mixed_selection_in_two_lanes(
+    tmp_path: Path,
+) -> None:
+    """Ordinary targets get the safety marker; chains run as an explicit root.
+
+    OMN-18012 removed the service-backed path this case used to carry. It now
+    changes the OUTCOME rather than being inert: a selection carrying one is
+    placed off-box, and the placement covers the ordinary lane, so keeping it
+    here would have been asserting the local two-lane shape against a run that
+    correctly no longer has one. The mixed case has its own test below.
+    """
+    ordinary = "tests/unit/scripts/test_prepush_smart_tests_seam.py"
+    chains = "tests/integration/chains/test_event_chain_gate.py"
+    calls = _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=[ordinary, chains],
+    )
+    assert calls == [
+        [
+            "run",
+            "pytest",
+            ordinary,
+            "--ignore=tests/integration",
+            "--tb=short",
+            "-m",
+            "not integration",
+        ],
+        [
+            "run",
+            "pytest",
+            chains,
+            "--ignore=tests/integration",
+            "--tb=short",
+        ],
+    ]
+
+
+def test_partitioned_runner_does_not_invoke_empty_ordinary_pytest(
+    tmp_path: Path,
+) -> None:
+    """A chains-only selection must not produce pytest's no-tests exit 5."""
+    chains = "tests/integration/chains/"
+    assert _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=[chains],
+    ) == [
+        [
+            "run",
+            "pytest",
+            chains,
+            "--ignore=tests/integration",
+            "--tb=short",
+        ]
+    ]
+
+
+SERVICE_BACKED_INTEGRATION_PATH = (
+    "tests/integration/migrations/test_forward_migrations.py"
+)
+
+
+def test_service_backed_integration_selection_never_reaches_a_local_pytest_lane(
+    tmp_path: Path,
+) -> None:
+    """Service-backed integration paths never reach either local pytest lane.
+
+    Unchanged from OMN-16825 in what it asserts about the LOCAL lanes. What
+    changed underneath (OMN-18012) is that the path is no longer dropped on the
+    floor -- see the placement assertions below, which run against the same
+    hook execution.
+    """
+    assert (
+        _run_real_partitioned_hook(
+            tmp_path,
+            is_full=False,
+            remote_full_suite_verified=False,
+            selected_paths=[SERVICE_BACKED_INTEGRATION_PATH],
+        )
+        == []
+    )
+
+
+# =============================================================================
+# OMN-18012 -- integration paths are PLACED off-box, never deferred, never local
+# =============================================================================
+# The defect these pin, in one sentence: until this change a selected
+# service-dependent integration path was dropped from the local argv, logged as
+# "deferred to CI", and run by NOBODY before the push -- which is how
+# regression D on omnimarket#2336 (66bab082) selected at 18768, went green on
+# the lab leg, and came back red at 19664 in CI.
+#
+# RED TARGET: every assertion in this block fails against the hook as shipped
+# at omnibase_infra 0e23c66c5 (dev before this change), because
+# `place_integration_selection_offbox` does not exist there and the partition
+# emits no OFFBOX_INTEGRATION_PATHS.
+
+
+def test_a_service_dependent_selection_is_placed_off_box_not_dropped(
+    tmp_path: Path,
+) -> None:
+    """The path the hook refuses to run here is handed to the lab, not dropped."""
+    calls = _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=[SERVICE_BACKED_INTEGRATION_PATH],
+    )
+    assert calls == [], "no local pytest lane may receive a service-dependent path"
+    placement = _placement_log(tmp_path)
+    placed = [line for line in placement if line.startswith("PLACED:")]
+    assert len(placed) == 1, placement
+    assert SERVICE_BACKED_INTEGRATION_PATH in placed[0], placed
+
+
+def test_the_placement_requires_a_container_runtime_on_the_target(
+    tmp_path: Path,
+) -> None:
+    """PREPUSH_REQUIRE_DOCKER is set for the integration placement.
+
+    Without it the picker hands a suite that starts a Redpanda container to a
+    row with no docker daemon (``hcloud`` says "NO docker" in its own committed
+    note; the lab Macs expose none to a non-interactive ssh), and the resulting
+    red is a statement about the host, not the tree. A guaranteed false red
+    hard-blocks a push -- the same class OMN-17549 closed for PATH.
+    """
+    _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=[SERVICE_BACKED_INTEGRATION_PATH],
+    )
+    assert "REQUIRE_DOCKER:1" in _placement_log(tmp_path)
+
+
+def test_an_unplaceable_integration_selection_refuses_the_push(
+    tmp_path: Path,
+) -> None:
+    """Fail-CLOSED now means ESCALATED, and an escalation that cannot land refuses.
+
+    The pre-OMN-18012 behaviour on this exact input was exit 0 with the path
+    silently unrun. That is the fail-OPEN half wearing the word fail-closed.
+    """
+    _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=[SERVICE_BACKED_INTEGRATION_PATH],
+        lab_placement_succeeds=False,
+        expect_refusal=True,
+    )
+    refusals = [line for line in _placement_log(tmp_path) if line.startswith("DIE:")]
+    assert refusals, "an unplaceable integration selection must die(), not warn"
+    assert "could not be placed on any lab host" in refusals[0], refusals
+
+
+def test_a_mixed_selection_places_once_and_elides_the_covered_ordinary_lane(
+    tmp_path: Path,
+) -> None:
+    """One dispatch ships a SUPERSET, so the ordinary lane is covered, not re-run.
+
+    ``prepush_remote_argv`` appends ${OFFBOX_INTEGRATION_PATHS[@]} to the
+    selection this call site would have run, so the lab host executed the
+    ordinary target AND the integration target. Re-running the ordinary half
+    locally would re-execute identical tests on an identical tree. The chains
+    lane still runs, exactly as it does for remote unit evidence: tests/unit/
+    does not cover it.
+    """
+    ordinary = "tests/unit/scripts/test_prepush_smart_tests_seam.py"
+    chains = "tests/integration/chains/test_event_chain_gate.py"
+    calls = _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=[ordinary, chains, SERVICE_BACKED_INTEGRATION_PATH],
+    )
+    assert calls == [
+        ["run", "pytest", chains, "--ignore=tests/integration", "--tb=short"]
+    ], calls
+    flat = [arg for call in calls for arg in call]
+    assert SERVICE_BACKED_INTEGRATION_PATH not in flat
+    placed = [line for line in _placement_log(tmp_path) if line.startswith("PLACED:")]
+    assert len(placed) == 1, "exactly one dispatch, never two"
+    assert SERVICE_BACKED_INTEGRATION_PATH in placed[0]
+
+
+@pytest.mark.parametrize(
+    "directory_wide",
+    ["tests/integration/", "tests/integration/db/", "tests/integration/runtime/"],
+    ids=["whole-tree", "db-subtree", "runtime-subtree"],
+)
+def test_a_directory_wide_integration_run_is_refused_on_the_launching_host(
+    directory_wide: str, tmp_path: Path
+) -> None:
+    """CLAUDE.md Operating Rule 21, mechanically, for the case prose does not cover.
+
+    The rule says a broad selection routes off-box; the selector is what
+    CHOOSES the selection, so the refusal has to live here. This is the
+    integrity assertion executing against the final PATHS array -- a hard
+    refusal with a non-zero exit, not a warning and not a load threshold.
+    """
+    calls = _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=[directory_wide],
+    )
+    assert calls == [], "a directory-wide integration run never executes here"
+    placed = [line for line in _placement_log(tmp_path) if line.startswith("PLACED:")]
+    assert len(placed) == 1 and directory_wide in placed[0], _placement_log(tmp_path)
+
+
+def test_the_local_refusal_fires_if_an_off_box_path_ever_reaches_the_argv(
+    tmp_path: Path,
+) -> None:
+    """Third and last line of defence, executed against the final PATHS array.
+
+    The partitioner and ``filter_prepush_runnable_paths`` both already exclude
+    these. This asserts the backstop itself works, by handing the shipped
+    function a PATHS array that the partition could not have produced.
+    """
+    bash = shutil.which("bash")
+    assert bash is not None
+    source = HOOK.read_text(encoding="utf-8")
+    fragment = (
+        "set -euo pipefail\n"
+        'die() { printf "%s" "$1"; exit 66; }\n'
+        + _extract_function(source, ALLOWLISTED_INTEGRATION_CLASSIFIER)
+        + "\n"
+        + _extract_function(source, LOCAL_INTEGRATION_REFUSAL)
+        + "\n"
+        + _bash_array("PATHS", ["tests/unit/", "tests/integration/db/"])
+        + "\n"
+        + f"{LOCAL_INTEGRATION_REFUSAL}\n"
+    )
+    result = subprocess.run(
+        [bash, "-c", fragment], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 66, result.stdout + result.stderr
+    assert "will not run it on the launching host" in result.stdout
+
+
+def test_the_allowlisted_chain_lane_still_passes_the_local_refusal() -> None:
+    """The refusal is scoped to NON-allowlisted paths -- chains stay local."""
+    bash = shutil.which("bash")
+    assert bash is not None
+    source = HOOK.read_text(encoding="utf-8")
+    fragment = (
+        "set -euo pipefail\n"
+        "die() { exit 66; }\n"
+        + _extract_function(source, ALLOWLISTED_INTEGRATION_CLASSIFIER)
+        + "\n"
+        + _extract_function(source, LOCAL_INTEGRATION_REFUSAL)
+        + "\n"
+        + _bash_array("PATHS", ["tests/unit/", LOCALLY_RUNNABLE_INTEGRATION_PREFIX])
+        + "\n"
+        + f"{LOCAL_INTEGRATION_REFUSAL}\n"
+    )
+    result = subprocess.run(
+        [bash, "-c", fragment], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("is_full", "whole_suite_equivalent"),
+    [(True, False), (False, True)],
+    ids=["full-escalation", "whole-suite-equivalent-impacted-selection"],
+)
+def test_remote_full_unit_evidence_elides_ordinary_but_not_chains(
+    tmp_path: Path, is_full: bool, whole_suite_equivalent: bool
+) -> None:
+    """Remote unit evidence does not cover separately allowlisted chains.
+
+    The false branch is the whole-suite-equivalent impacted route. It must call
+    the partition controller too, rather than merely share the helper's
+    implementation in isolation.
+    """
+    chains = "tests/integration/chains/"
+    assert _run_real_partitioned_hook(
+        tmp_path,
+        is_full=is_full,
+        remote_full_suite_verified=True,
+        whole_suite_equivalent=whole_suite_equivalent,
+        selected_paths=["tests/unit/", chains],
+    ) == [
+        [
+            "run",
+            "pytest",
+            chains,
+            "--ignore=tests/integration",
+            "--tb=short",
+        ]
+    ]
+
+
+def test_ordinary_marker_deselection_overrides_entry_pytest_marker(
+    tmp_path: Path,
+) -> None:
+    """The enforced marker is the final token even if the entry adds ``-m``."""
+    calls = _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        selected_paths=["tests/scripts/"],
+        pytest_extra_args="-m integration --maxfail=1",
+    )
+    assert calls == [
+        [
+            "run",
+            "pytest",
+            "tests/scripts/",
+            "--ignore=tests/integration",
+            "--tb=short",
+            "-m",
+            "integration",
+            "--maxfail=1",
+            "-m",
+            "not integration",
+        ]
+    ]
 
 
 # ---------------------------------------------------------------------------

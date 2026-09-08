@@ -61,8 +61,20 @@ from omnibase_infra.nodes.node_coding_agent_invoke_effect.handlers.handler_codin
     ModelSubprocessInvocation,
     ModelSubprocessOutcome,
 )
+from omnibase_infra.testing.publisher_contract_fixture import PublisherContractCorpus
 
 _NODES_ROOT = Path(__file__).resolve().parents[4] / "src" / "omnibase_infra" / "nodes"
+
+# OMN-18013 (operator ruling item 4): this chain builds its input from the
+# PUBLISHER'S contract. ``PublisherContractCorpus`` resolves each topic against
+# the contract corpus, REFUSES a topic no contract publishes, and stamps the
+# derived wire alias — never the topic string. Before this change the chain fed
+# ``event_type="onex.cmd.omnibase-infra.coding-agent-invoke.v1"``, a spelling the
+# auto-wired consume boundary never produces, and passed only because the
+# dispatcher index happened to carry both spellings.
+_CORPUS = PublisherContractCorpus.from_repo_root(_NODES_ROOT.parent)
+TOPIC_INVOKE_REQUESTED = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"  # onex-topic-allow: the chain's entry topic, resolved against the publisher corpus on the next line
+TOPIC_WORKSPACE_VALIDATED = "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"  # onex-topic-allow: chain step topic, resolved against the publisher corpus
 
 
 def _resolve_handler_from_contract(node_dir: str, operation: str) -> type[Any]:
@@ -76,7 +88,15 @@ def _resolve_handler_from_contract(node_dir: str, operation: str) -> type[Any]:
     raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
     handlers = raw["handler_routing"]["handlers"]
     match = [h for h in handlers if h["operation"] == operation]
-    assert len(match) == 1, f"{node_dir}: expected one handler for {operation!r}"
+    assert match, f"{node_dir}: no handler declared for {operation!r}"
+    # OMN-18013 split multi-topic operation_match entries into one `topic:`-scoped
+    # entry per topic, so an operation can legitimately appear more than once. All
+    # entries for one operation must still name the SAME handler class — that is
+    # the invariant this resolution depends on, and it is what is asserted here.
+    specs = {(h["handler"]["module"], h["handler"]["name"]) for h in match}
+    assert len(specs) == 1, (
+        f"{node_dir}: entries for {operation!r} name different handlers: {sorted(specs)}"
+    )
     spec = match[0]["handler"]
     module = importlib.import_module(spec["module"])
     return getattr(module, spec["name"])
@@ -234,7 +254,7 @@ class TestOrchestratorDispatch:
             ModelEventEnvelope(
                 payload=command,
                 correlation_id=command.correlation_id,
-                event_type="onex.cmd.omnibase-infra.coding-agent-invoke.v1",
+                event_type=_CORPUS.event_type_for(TOPIC_INVOKE_REQUESTED),
             )
         )
         output = await handler.handle(envelope)
@@ -260,7 +280,7 @@ class TestOrchestratorDispatch:
             ModelEventEnvelope(
                 payload=command,
                 correlation_id=command.correlation_id,
-                event_type="onex.cmd.omnibase-infra.coding-agent-invoke.v1",
+                event_type=_CORPUS.event_type_for(TOPIC_INVOKE_REQUESTED),
             )
         )
         with pytest.raises(ValueError, match="allowed_workspace_roots"):
@@ -287,7 +307,7 @@ class TestOrchestratorDispatch:
                 "command": command.model_dump(mode="json"),
             },
             correlation_id=command.correlation_id,
-            event_type="onex.evt.omnibase-infra.coding-agent-workspace-validated.v1",
+            event_type=_CORPUS.event_type_for(TOPIC_WORKSPACE_VALIDATED),
         )
         output = await handler.handle(envelope)
         assert len(output.events) == 1
@@ -315,7 +335,7 @@ class TestOrchestratorDispatch:
                 "command": command.model_dump(mode="json"),
             },
             correlation_id=command.correlation_id,
-            event_type="onex.evt.omnibase-infra.coding-agent-workspace-validated.v1",
+            event_type=_CORPUS.event_type_for(TOPIC_WORKSPACE_VALIDATED),
         )
         output = await handler.handle(envelope)
         assert len(output.events) == 1
@@ -704,7 +724,7 @@ class TestEndToEndCredentialIndependentChain:
                     "command": command.model_dump(mode="json"),
                 },
                 correlation_id=corr,
-                event_type="onex.evt.omnibase-infra.coding-agent-workspace-validated.v1",
+                event_type=_CORPUS.event_type_for(TOPIC_WORKSPACE_VALIDATED),
             )
         )
         advance_event = orch_out.events[0]

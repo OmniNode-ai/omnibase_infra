@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Integration test: node_registration_orchestrator subscribes all declared topics.
 
-Regression test for OMN-9413: contract.yaml declares 7 subscribe_topics but
+Regression test for OMN-9413: contract.yaml declares 6 subscribe_topics but
 only 3 consumer groups were wired at runtime.
 
 The generic contract auto-wiring path owns these topic subscriptions. This test
-verifies that all 7 declared subscribe_topics receive Kafka consumer
+verifies that all declared subscribe_topics receive Kafka consumer
 subscriptions via subscribe_wired_contract_topics.
 """
 
@@ -37,7 +37,6 @@ _CONTRACT_PATH = (
 
 _EXPECTED_SUBSCRIBE_TOPICS = (
     "onex.evt.platform.node-introspection.v1",
-    "onex.evt.platform.registry-request-introspection.v1",
     "onex.intent.platform.runtime-tick.v1",
     "onex.cmd.platform.node-registration-acked.v1",
     "onex.evt.platform.node-heartbeat.v1",
@@ -46,8 +45,10 @@ _EXPECTED_SUBSCRIBE_TOPICS = (
 )
 
 
-async def test_registration_orchestrator_contract_has_7_subscribe_topics() -> None:
-    """Contract YAML declares exactly 7 subscribe_topics."""
+async def test_registration_orchestrator_contract_has_runtime_subscribe_topics() -> (
+    None
+):
+    """Contract YAML declares exactly its runtime subscribe_topics."""
     assert _CONTRACT_PATH.exists(), f"Contract not found: {_CONTRACT_PATH}"
     manifest = discover_contracts_from_paths([_CONTRACT_PATH])
     assert manifest.total_discovered == 1
@@ -65,7 +66,7 @@ async def test_registration_orchestrator_contract_has_7_subscribe_topics() -> No
 async def test_registration_orchestrator_all_declared_topics_get_subscribed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """All 7 contract subscribe_topics must receive a Kafka subscription.
+    """All contract subscribe_topics must receive a Kafka subscription.
 
     This is the regression test for OMN-9413. The generic auto-wiring path must
     subscribe every declared topic after registering the contract's dispatchers.

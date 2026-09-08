@@ -108,6 +108,12 @@ class _FakeConsumer:
     async def commit(self) -> None:
         self.commits += 1
 
+    async def commit_offsets(self, offsets: object) -> None:
+        """OMN-17896: the handler now commits an explicit offset map of the
+        records that COMPLETED, never the consumer's bare position."""
+        self.commits += 1
+        self.committed_offsets = dict(offsets)  # type: ignore[arg-type]
+
 
 class _FakeProducer:
     def __init__(self, *, fail: bool = False) -> None:
@@ -154,7 +160,7 @@ class _FakeQuarantineProducer:
 
     async def quarantine_message(
         self, message: ModelDlqMessage, reason: str, quarantine_correlation_id: object
-    ) -> None:
+    ) -> object:
         if self.fail:
             raise RuntimeError("quarantine broker down")
         payload = DLQQuarantineProducer.build_quarantine_payload(
@@ -164,6 +170,9 @@ class _FakeQuarantineProducer:
             self.config.dlq_topic,
         )
         self.quarantined.append((message, reason, payload))
+        # OMN-17896: mirrors the real producer, which returns the broker's own
+        # record metadata as the confirmation of publication.
+        return object()
 
 
 class _FakeTracking:
@@ -287,7 +296,11 @@ async def test_replay_failure_records_failed_not_false_success() -> None:
     assert len(tracking.records) == 1
     assert tracking.records[0].replay_status == EnumReplayStatus.FAILED
     assert tracking.records[0].success is False
-    assert consumer.commits == 1
+    # OMN-17896: was 1. A record whose replay publish FAILED is durable
+    # nowhere -- neither on the original topic nor in quarantine -- so its
+    # offset is withheld and it is redelivered. Committing it was the same
+    # silent drop the quarantine-failure case below used to make.
+    assert consumer.commits == 0
 
 
 async def test_quarantine_failure_records_failed_not_silent_loss() -> None:
@@ -305,7 +318,12 @@ async def test_quarantine_failure_records_failed_not_silent_loss() -> None:
     assert len(tracking.records) == 1
     assert tracking.records[0].replay_status == EnumReplayStatus.FAILED
     assert tracking.records[0].success is False
-    assert consumer.commits == 1
+    # OMN-17896: was 1. The offset used to advance past a record whose
+    # quarantine publish never became durable -- the silent drop §4 rule 1 of
+    # the lab repair plan forbids, reached through the quarantine path rather
+    # than through a skip. A FAILED record is durable NOWHERE, so its partition
+    # is withheld and the record is redelivered.
+    assert consumer.commits == 0
 
 
 async def test_dry_run_publishes_nothing() -> None:

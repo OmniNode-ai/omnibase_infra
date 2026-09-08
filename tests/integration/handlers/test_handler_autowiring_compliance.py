@@ -20,13 +20,13 @@ pytestmark = pytest.mark.integration
 class TestHandlerAutowiringCompliance:
     """Verify OMN-8735: handlers instantiate with no constructor arguments."""
 
-    def test_handler_contract_file_watcher_no_args(self) -> None:
-        from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher import (
-            HandlerContractFileWatcher,
-        )
-
-        handler = HandlerContractFileWatcher()
-        assert handler is not None
+    # OMN-18013: the contract file watcher case was removed from this file, not
+    # dropped. The property this file pins is "the auto-wiring framework calls
+    # handler_class() with no arguments", and the watcher is no longer
+    # auto-wired: it is ContractFileWatcher under services/, with no
+    # handler_routing entry and no dispatch entrypoint. Its no-argument
+    # construction is now pinned where the class lives, in
+    # tests/unit/nodes/node_artifact_change_detector_effect/test_contract_change_detection.py.
 
     def test_handler_chain_retrieval_no_args(self) -> None:
         from omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval import (

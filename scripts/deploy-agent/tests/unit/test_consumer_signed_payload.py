@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from deploy_agent.consumer import DeployConsumer
+from deploy_agent.events import EnumRuntimeLane
 
 
 @pytest.mark.unit
@@ -18,6 +19,8 @@ def test_signed_payload_strips_signature_before_command_validation() -> None:
     consumer.job_store = Mock()
     consumer.job_store.has_active_job.return_value = False
     consumer.job_store.is_duplicate.return_value = False
+    # OMN-16939: the lane fence is required; this payload is lane=dev.
+    consumer.allowed_lanes = frozenset({EnumRuntimeLane.DEV})
 
     payload = {
         "correlation_id": "aaaaaaaa-0000-0000-0000-000000000001",

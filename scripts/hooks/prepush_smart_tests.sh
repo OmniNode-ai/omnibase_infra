@@ -1113,11 +1113,27 @@ REASON="$(read_sel full_suite_reason 2> /dev/null || true)"
 # OMN-15245 SEAM: the selector now emits changed tests/integration/ paths -- a
 # changed test module is never dropped by narrowing (fail-closed invariant).
 # Most of that tree needs a live service (Postgres, a broker, a running lane)
-# that a developer's machine does not have, so those paths are deferred to CI,
-# which runs them. Filter them out here, visibly, rather than handing pytest a
-# selection it cannot execute. Keep this function self-contained (no globals):
-# it is extracted and EXECUTED by
-# tests/unit/scripts/test_prepush_smart_tests_seam.py.
+# that a developer's machine does not have. Filter them out of the LOCAL lane
+# here, visibly, rather than handing pytest a selection it cannot execute. The
+# allowlist classifier and this stream filter are extracted and EXECUTED
+# together by tests/unit/scripts/test_prepush_smart_tests_seam.py.
+#
+# OMN-18012 -- WHAT "FILTERED OUT" MEANS CHANGED. Until this change a
+# non-allowlisted integration path was DEFERRED: dropped from the argv, logged
+# as "deferred to CI", and then run by nobody before the push. That is the
+# fail-OPEN half wearing the word fail-closed, and it is exactly how regression
+# D on omnimarket#2336 (66bab082) selected at 18768 on the lab leg, went green,
+# and came back red at 19664 in CI. It is escape 6 of the 2026-09-06 set.
+#
+# Deferral is now PLACEMENT. A selected non-allowlisted integration path goes
+# into OFFBOX_INTEGRATION_PATHS and is dispatched to a lab host through the
+# same picker / slot / lock machinery prepush_dispatch.sh already owns, with
+# the SAME refusal semantics as a heavy escalation: a remote red refuses the
+# push, and a selection that cannot be placed anywhere refuses the push. It is
+# never run on the launching host, at any load, under any grant -- that is the
+# mechanical form of CLAUDE.md Operating Rule 21 for the case the prose does
+# not cover, because the selector is what CHOOSES the selection the rule talks
+# about.
 #
 # OMN-16825 NARROWING -- the classifier, not an override. "Lives under
 # tests/integration/" was doing duty for "needs a live service", and those are
@@ -1139,25 +1155,22 @@ REASON="$(read_sel full_suite_reason 2> /dev/null || true)"
 # `chain/` do NOT match. The allowlist's premise (these suites declare no
 # live-service marker) is itself asserted by the seam test, so a Postgres-backed
 # test dropped into chains/ reddens CI instead of every developer's pre-push.
+is_prepush_allowlisted_integration_path() {
+  # The complete, audited local-integration allowlist. A path segment match
+  # accepts both the chains directory and its descendants, never a prefix lookalike.
+  case "${1}/" in
+    tests/integration/chains/*) return 0 ;;
+  esac
+  return 1
+}
+
 filter_prepush_runnable_paths() {
-  local p prefix keep
-  # Integration subtrees proven service-free and therefore locally runnable.
-  local -a locally_runnable_integration_prefixes=(
-    "tests/integration/chains/"
-  )
+  local p
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     case "$p" in
       tests/integration/*)
-        keep=0
-        for prefix in "${locally_runnable_integration_prefixes[@]}"; do
-          # Append '/' to $p so a bare directory selection ("…/chains") matches
-          # the prefix on a segment boundary exactly as "…/chains/" does.
-          case "${p}/" in
-            "$prefix"*) keep=1 ;;
-          esac
-        done
-        [ "$keep" -eq 1 ] || continue
+        is_prepush_allowlisted_integration_path "$p" || continue
         ;;
     esac
     printf '%s\n' "$p"
@@ -1171,47 +1184,146 @@ while IFS= read -r p; do
   fi
 done < <(read_sel selected_paths)
 
-PATHS=()
-PATHS_STR=""
-DEFERRED_STR=""
-# OMN-16825: the subset of PATHS that lives under tests/integration/ -- i.e. the
-# allowlisted, service-free integration suites. Tracked separately because the
-# fail-closed FULL-suite escalation runs a fixed target (tests/unit/) that does
-# NOT contain them; without appending these, escalating would run FEWER of the
-# impacted tests than the narrow selection did. An escalation must never be a
-# coverage downgrade.
-RUNNABLE_INTEGRATION_PATHS=()
-RUNNABLE_INTEGRATION_STR=""
-# Guard the array expansions: bash 3.2 (macOS system bash) errors on
-# "${arr[@]}" for an empty array under `set -u`.
-if [ "${#ALL_PATHS[@]}" -gt 0 ]; then
+partition_prepush_runnable_paths() {
+  PATHS=()
+  PATHS_STR=""
+  DEFERRED_STR=""
+  # Paths outside tests/integration/. These must be marker-filtered because
+  # some service-dependent tests intentionally live beside their unit seams.
+  ORDINARY_PATHS=()
+  ORDINARY_PATHS_STR=""
+  # The explicit allowlisted, service-free integration lane is kept separately:
+  # tests/unit/ does not cover it during full-suite escalation.
+  RUNNABLE_INTEGRATION_PATHS=()
+  RUNNABLE_INTEGRATION_STR=""
+  # OMN-18012: selected integration paths that are NOT locally runnable. These
+  # are PLACED off-box, never dropped and never executed here.
+  OFFBOX_INTEGRATION_PATHS=()
+  OFFBOX_INTEGRATION_STR=""
+
+  [ "${#ALL_PATHS[@]}" -gt 0 ] || return 0
   while IFS= read -r p; do
-    if [ -n "$p" ]; then
-      PATHS+=("$p")
-      PATHS_STR="${PATHS_STR}${p} "
-      case "$p" in
-        tests/integration/*)
-          RUNNABLE_INTEGRATION_PATHS+=("$p")
-          RUNNABLE_INTEGRATION_STR="${RUNNABLE_INTEGRATION_STR}${p} "
-          ;;
-      esac
-    fi
+    [ -n "$p" ] || continue
+    case "$p" in
+      tests/integration/*)
+        # Defense in depth: even if the stream filter changes, an integration
+        # path enters the unfiltered lane only through the audited allowlist.
+        is_prepush_allowlisted_integration_path "$p" || continue
+        PATHS+=("$p")
+        PATHS_STR="${PATHS_STR}${p} "
+        RUNNABLE_INTEGRATION_PATHS+=("$p")
+        RUNNABLE_INTEGRATION_STR="${RUNNABLE_INTEGRATION_STR}${p} "
+        ;;
+      *)
+        PATHS+=("$p")
+        PATHS_STR="${PATHS_STR}${p} "
+        ORDINARY_PATHS+=("$p")
+        ORDINARY_PATHS_STR="${ORDINARY_PATHS_STR}${p} "
+        ;;
+    esac
   done < <(printf '%s\n' "${ALL_PATHS[@]}" | filter_prepush_runnable_paths)
   for p in "${ALL_PATHS[@]}"; do
     case " $PATHS_STR " in
-      *" $p "*) ;;
+      *" $p "*) continue ;;
+    esac
+    # OMN-18012: the complement of the runnable set is no longer one bucket.
+    # An integration path the local allowlist rejected is PLACED off-box; only
+    # a path that is neither runnable here nor an integration path at all can
+    # still be deferred, and that set is empty today -- it is kept as the
+    # fail-closed sink for a future filter that drops something else, so a new
+    # drop reason surfaces in the log instead of vanishing.
+    case "$p" in
+      tests/integration/*)
+        OFFBOX_INTEGRATION_PATHS+=("$p")
+        OFFBOX_INTEGRATION_STR="${OFFBOX_INTEGRATION_STR}${p} "
+        ;;
       *) DEFERRED_STR="${DEFERRED_STR}${p} " ;;
     esac
   done
-fi
+}
+
+partition_prepush_runnable_paths
 
 log "selection: is_full_suite=${IS_FULL} reason=${REASON:-none} paths=[ ${PATHS_STR}] (feature-flag=${FLAG})"
 if [ -n "$DEFERRED_STR" ]; then
-  log "deferred to CI (needs live services this hook cannot provide): [ ${DEFERRED_STR}]"
+  log "deferred to CI (dropped by a local filter, not an integration path): [ ${DEFERRED_STR}]"
+fi
+if [ "${#OFFBOX_INTEGRATION_PATHS[@]}" -gt 0 ]; then
+  log "PLACED OFF-BOX (service-dependent integration selection, never run on this host, OMN-18012): [ ${OFFBOX_INTEGRATION_STR}]"
 fi
 if [ "${#RUNNABLE_INTEGRATION_PATHS[@]}" -gt 0 ]; then
   log "running locally (service-free integration suite, OMN-16825): [ ${RUNNABLE_INTEGRATION_STR}]"
 fi
+
+# =============================================================================
+# Integration placement (OMN-18012)
+# =============================================================================
+# Two functions, and the split is the point.
+#
+# `assert_no_integration_path_runs_locally` is an INTEGRITY assertion, not a
+# policy knob: it re-derives, from the argv pytest is actually about to get,
+# that no service-dependent integration path leaked into the local lane. The
+# partitioner already guarantees this and `filter_prepush_runnable_paths`
+# guarantees it a second time; this is the third, and it is the one that runs
+# against the final array. A directory-wide integration selection is the case
+# it exists for -- `tests/integration/` itself can never be locally runnable,
+# because the allowlist matches on a segment boundary BELOW it -- and the
+# response is a hard refusal with a non-zero exit and a remediation message,
+# not a warning and not a load threshold.
+#
+# `place_integration_selection_offbox` is the replacement for the old silent
+# drop. It reuses `prepush_wait_for_lab_capacity` -> `dispatch_to_lab_host`
+# unchanged, so the picker, the placement tiers, the exclusive slot, the
+# bundle transport and the completion marker are all the machinery that
+# already governs a heavy escalation. What it deliberately does NOT reuse is
+# the refusal ladder's lower rungs: there is no local fallback, no
+# `prepush_local_actor_route`, and no `consume_override_grant`. Every one of
+# those ends with the suite running HERE, which is the single outcome this
+# function exists to make unreachable.
+assert_no_integration_path_runs_locally() {
+  local p
+  for p in ${PATHS[@]+"${PATHS[@]}"}; do
+    case "$p" in
+      tests/integration/*) ;;
+      *) continue ;;
+    esac
+    is_prepush_allowlisted_integration_path "$p" && continue
+    die "REFUSED: '${p}' is a service-dependent integration selection and this hook will not run it on the launching host" \
+        "CLAUDE.md Operating Rule 21: a directory-wide or service-dependent integration run is PLACED on a lab host, never executed on the machine you pushed from. Reaching this message means the partitioner let an off-box path into the local pytest argv, which is a hook-integrity failure and not a test failure. Repair the partition; do not narrow the selection by hand and do not add the path to the local allowlist unless it genuinely needs no live service"
+  done
+  return 0
+}
+
+place_integration_selection_offbox() {
+  local heavy_what="$1" host
+  host="$(hostname -s 2> /dev/null || true)"
+  if [ -z "$host" ]; then
+    die "could not determine the local hostname while placing ${heavy_what}" \
+        "placement is decided by host identity (OMN-15059) and an unidentifiable host cannot be routed. Fix 'hostname -s' (macOS: 'sudo scutil --set HostName <name>'; Linux: 'hostnamectl set-hostname <name>')"
+  fi
+  PREPUSH_LC_HOST="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  if ! prepush_table_text > /dev/null 2>&1; then
+    die "the pre-push host table (${PREPUSH_HOST_TABLE_REL}) could not be read from HEAD, so ${heavy_what} cannot be placed" \
+        "the table is read from the COMMITTED tree so an uncommitted row cannot self-designate a placement target. Commit ${PREPUSH_HOST_TABLE_REL}, then re-push"
+  fi
+  # A service-dependent integration suite needs a container runtime on the
+  # host that takes it. Without this requirement the picker would hand the
+  # work to a row that has no docker daemon (hcloud declares NO docker in its
+  # own committed note; the lab Macs do not expose one over ssh), the suite
+  # would go red for a reason that has nothing to do with the tree, and a
+  # guaranteed false red hard-blocks a push -- the same failure class OMN-17549
+  # fixed for PATH. Fail-closed: an unreadable probe is NOT fit.
+  PREPUSH_REQUIRE_DOCKER=1
+  if prepush_wait_for_lab_capacity "$heavy_what" \
+    "$PREPUSH_OFFBOX_WAIT_BUDGET_SECONDS" "$PREPUSH_OFFBOX_WAIT_INTERVAL_SECONDS"; then
+    PREPUSH_REQUIRE_DOCKER=0
+    PREPUSH_LAB_RUN_WHAT="${heavy_what}"
+    return 0
+  fi
+  PREPUSH_REQUIRE_DOCKER=0
+  die "REFUSED: ${heavy_what} could not be placed on any lab host, and this hook will not run it on '${host}'" \
+      "probed hosts: ${PREPUSH_PROBE_LOG:-none}. This is the fail-CLOSED half of OMN-18012: before this change the same selection was silently dropped and the push went through unverified, which is how a boundary regression reached CI green-on-lab / red-on-PR. Wait for a lab host with a reachable docker daemon and a free heavy slot, or let GitHub-hosted CI run this exact sha and re-push. Do NOT set PREPUSH_* / ENABLE_SMART_TESTS -- they are rejected at hook entry and would not run the suite anyway"
+}
 
 # Assemble the pytest target set. tests/integration is always ignored -- it needs
 # real services and stays a CI-only concern. On a fail-closed escalation we run
@@ -1281,6 +1393,78 @@ scrub_prepush_override_env() {
   unset ENABLE_SMART_TESTS || true
 }
 
+# The local hook is deliberately split into two pytest invocations. A path is
+# not a trustworthy proxy for a test's runtime needs: migration-fence tests are
+# integration-marked but live under tests/scripts/, so --ignore alone leaves
+# them eligible and can start a real forward-migration runner. Conversely,
+# tests/integration/chains/ is the narrowly allowlisted, service-free chain
+# gate and is itself integration-marked. Run ordinary targets with a final
+# marker deselection, then run that explicit allowlist separately without it.
+#
+# Keep `-m not integration` AFTER PREPUSH_PYTEST_ARGS. pytest accepts repeated
+# marker options; putting the enforced policy last means an entry override such
+# as PREPUSH_PYTEST_ARGS='-m integration' cannot re-enable service-dependent
+# tests in the child process.
+run_prepush_ordinary_tests() {
+  local _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
+  scrub_prepush_override_env
+  # shellcheck disable=SC2086
+  exec uv run pytest "$@" --ignore=tests/integration --tb=short ${_pytest_extra_args} -m "not integration"
+}
+
+run_prepush_allowlisted_integration_tests() {
+  local _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
+  scrub_prepush_override_env
+  # shellcheck disable=SC2086
+  exec uv run pytest "$@" --ignore=tests/integration --tb=short ${_pytest_extra_args}
+}
+
+# Execute the two partitioned local lanes. MODE communicates whether ordinary
+# unit coverage is needed here: a remotely verified full unit suite covers the
+# ordinary lane but NOT tests/integration/chains/, so "covered" intentionally
+# still executes the latter. Keeping the decision in this hook function gives
+# its token-level seam a single executable source of truth.
+run_prepush_partitioned_tests() {
+  local mode="$1"
+  local rc=0
+
+  case "$mode" in
+    full)
+      log "running FULL ordinary unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} --ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-} -m not integration"
+      (
+        run_prepush_ordinary_tests "$FULL_SUITE_TARGET"
+      ) || rc=$?
+      ;;
+    impacted)
+      if [ "${#ORDINARY_PATHS[@]}" -gt 0 ]; then
+        log "running impacted ordinary subset: uv run pytest ${ORDINARY_PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-} -m not integration"
+        (
+          run_prepush_ordinary_tests "${ORDINARY_PATHS[@]}"
+        ) || rc=$?
+      else
+        log "no ordinary impacted tests selected; skipping the empty ordinary pytest invocation."
+      fi
+      ;;
+    covered)
+      # The caller logged the remote full-unit evidence. Do not duplicate that
+      # unit run locally, but deliberately fall through to the chain lane.
+      ;;
+    *)
+      log "ERROR: invalid local pre-push partition mode '${mode}'"
+      return 2
+      ;;
+  esac
+
+  if [ "$rc" -eq 0 ] && [ "${#RUNNABLE_INTEGRATION_PATHS[@]}" -gt 0 ]; then
+    log "running allowlisted service-free integration suite: uv run pytest ${RUNNABLE_INTEGRATION_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
+    (
+      run_prepush_allowlisted_integration_tests "${RUNNABLE_INTEGRATION_PATHS[@]}"
+    ) || rc=$?
+  fi
+
+  return "$rc"
+}
+
 # =============================================================================
 # PATH parity with the remote leg (OMN-17549)
 # =============================================================================
@@ -1322,8 +1506,22 @@ PATH="$_prepush_devpath"
 export PATH
 unset _prepush_devpath
 
+# OMN-18012: the local argv is re-checked against the shipped classifier, then
+# any off-box integration selection is PLACED, both BEFORE the local
+# controller. Order matters: prepush_remote_argv appends
+# ${OFFBOX_INTEGRATION_PATHS[@]} to whichever selection this call site would
+# have run, so one dispatch always ships a SUPERSET of what the local lanes
+# below would execute, and the controller can then treat the run as covered
+# instead of dispatching a second time.
+assert_no_integration_path_runs_locally
+if [ "${#OFFBOX_INTEGRATION_PATHS[@]}" -gt 0 ]; then
+  place_integration_selection_offbox "impacted integration selection [ ${OFFBOX_INTEGRATION_STR}]"
+fi
+
 if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
-  guard_full_suite_host
+  if [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]; then
+    guard_full_suite_host
+  fi
   if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ] || [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
     # OMN-16688: the escalation is SATISFIED, not skipped -- the full suite ran
     # to green on GitHub-hosted CI against this exact sha. Re-running it locally
@@ -1336,22 +1534,12 @@ if [ "$IS_FULL" = "True" ] || [ "$IS_FULL" = "true" ]; then
     else
       log "FULL unit suite satisfied by the remote GitHub-hosted full-suite pass; not re-running it locally."
     fi
-  else
-    # OMN-16825: $FULL_SUITE_TARGET is tests/unit/, which does NOT contain the
-    # allowlisted service-free integration suites. Append them so the
-    # fail-closed escalation stays a strict SUPERSET of the narrow selection it
-    # replaces -- an escalation that ran FEWER of the impacted tests than the
-    # narrowing would be a coverage downgrade wearing the word "full". The
-    # escalation still runs $FULL_SUITE_TARGET itself (single-sourced with
-    # selection_is_whole_suite above); this only ADDS to it. bash 3.2 under
-    # `set -u` errors on "${arr[@]}" for an empty array, hence the ${arr[@]+...}
-    # guard rather than a bare expansion.
-    log "running FULL unit suite (fail-closed escalation): uv run pytest ${FULL_SUITE_TARGET} ${RUNNABLE_INTEGRATION_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
     (
-      _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
-      scrub_prepush_override_env
-      # shellcheck disable=SC2086
-      exec uv run pytest "${FULL_SUITE_TARGET}" ${RUNNABLE_INTEGRATION_PATHS[@]+"${RUNNABLE_INTEGRATION_PATHS[@]}"} --ignore=tests/integration --tb=short ${_pytest_extra_args}
+      run_prepush_partitioned_tests "covered"
+    ) || RC=$?
+  else
+    (
+      run_prepush_partitioned_tests "full"
     ) || RC=$?
   fi
 elif [ "${#PATHS[@]}" -gt 0 ]; then
@@ -1365,31 +1553,49 @@ elif [ "${#PATHS[@]}" -gt 0 ]; then
   # tests into an untracked concurrent local lane.  This branch intentionally
   # precedes no other narrowed execution path, so the existing EXIT cleanup
   # releases the acquired slot on either test success or failure.
-  if selection_is_whole_suite "$FULL_SUITE_TARGET" "${PATHS[@]}"; then
-    guard_full_suite_host "whole-suite-equivalent impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover the entire '${FULL_SUITE_TARGET}' escalation target)"
-  elif selection_is_whole_suite "$SLOT_BACKED_IMPACTED_SCOPE" "${PATHS[@]}"; then
-    guard_full_suite_host "slot-backed runtime impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover '${SLOT_BACKED_IMPACTED_SCOPE}')"
+  # OMN-18012: an off-box integration placement has already run PATHS plus the
+  # integration selection on a lab host under an exclusive slot, so re-entering
+  # the guard here would dispatch the identical superset a second time.
+  if [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]; then
+    if selection_is_whole_suite "$FULL_SUITE_TARGET" "${PATHS[@]}"; then
+      guard_full_suite_host "whole-suite-equivalent impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover the entire '${FULL_SUITE_TARGET}' escalation target)"
+    elif selection_is_whole_suite "$SLOT_BACKED_IMPACTED_SCOPE" "${PATHS[@]}"; then
+      guard_full_suite_host "slot-backed runtime impacted selection (is_full_suite=${IS_FULL}, selected paths [ ${PATHS_STR}] cover '${SLOT_BACKED_IMPACTED_SCOPE}')"
+    fi
   fi
   if [ "$REMOTE_FULL_SUITE_VERIFIED" -eq 1 ] || [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
     # Only reachable when the selection was whole-suite-equivalent (the guard
     # above is the sole setter), so the remote FULL suite strictly covers this
     # selection -- it ran MORE tests than this invocation would have.
     if [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
-      log "impacted selection is whole-suite-equivalent and was run on the designated lab host '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL}); not re-running it locally."
+      log "${PREPUSH_LAB_RUN_WHAT:-impacted selection is whole-suite-equivalent and} was run on the designated lab host '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL}); not re-running it locally."
     else
       log "impacted selection is whole-suite-equivalent and is covered by the remote GitHub-hosted full-suite pass; not re-running it locally."
     fi
-  else
-    log "running impacted subset: uv run pytest ${PATHS_STR}--ignore=tests/integration ${PREPUSH_PYTEST_ARGS:-}"
     (
-      _pytest_extra_args="${PREPUSH_PYTEST_ARGS:-}"
-      scrub_prepush_override_env
-      # shellcheck disable=SC2086
-      exec uv run pytest "${PATHS[@]}" --ignore=tests/integration --tb=short ${_pytest_extra_args}
+      run_prepush_partitioned_tests "covered"
+    ) || RC=$?
+  else
+    (
+      run_prepush_partitioned_tests "impacted"
     ) || RC=$?
   fi
+elif [ "$REMOTE_LAB_RUN_VERDICT" -eq 1 ]; then
+  # OMN-18012: the ONLY selected work was a service-dependent integration
+  # selection. Before this change this branch printed "nothing to run" and
+  # allowed the push -- a diff whose entire content was an integration test
+  # was the one diff this gate never tested. It has now been run off-box.
+  log "no ordinary impacted tests mapped; the integration selection was run on the designated lab host '${PREPUSH_PICK_HOSTNAME}' (${PREPUSH_PICK_LABEL})."
 else
   log "no impacted unit tests mapped for this push (no source/test change contributed a target); nothing to run."
+fi
+
+# OMN-18012 fail-closed backstop: reaching the end of the controller with an
+# unplaced integration selection would mean the placement was skipped by a
+# future edit to the branches above. Refuse rather than allow the push.
+if [ "${#OFFBOX_INTEGRATION_PATHS[@]}" -gt 0 ] && [ "$REMOTE_LAB_RUN_VERDICT" -ne 1 ]; then
+  die "REFUSED: the integration selection [ ${OFFBOX_INTEGRATION_STR}] was never placed on a lab host" \
+      "this is a hook-integrity failure: the placement call was bypassed by the local controller. Repair the controller; the selection must not be dropped"
 fi
 
 if [ "$RC" -ne 0 ]; then

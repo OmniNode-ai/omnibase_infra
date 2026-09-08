@@ -43,6 +43,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Final,
     Protocol,
     cast,
     get_args,
@@ -50,6 +51,7 @@ from typing import (
     runtime_checkable,
 )
 from uuid import UUID, uuid4
+from weakref import WeakKeyDictionary
 
 from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
@@ -85,13 +87,21 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ProjectionNotMaterializedError,
+    ProjectionQueryRowBudgetError,
+    QuarantinePublishUnconfirmedError,
     TopicReplicationPolicyError,
+)
+from omnibase_infra.event_bus.enum_contract_attach_exclusion_reason import (
+    EnumContractAttachExclusionReason,
 )
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
 )
 from omnibase_infra.event_bus.enum_topic_readiness_status import (
     EnumTopicReadinessStatus,
+)
+from omnibase_infra.event_bus.model_contract_attach_exclusion import (
+    ModelContractAttachExclusion,
 )
 from omnibase_infra.event_bus.model_contract_attach_result import (
     ModelContractAttachResult,
@@ -347,6 +357,7 @@ if TYPE_CHECKING:
         ModelProjectionIntent,
     )
     from omnibase_infra.enums import EnumMessageCategory
+    from omnibase_infra.handlers.handler_infisical import HandlerInfisical
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
@@ -2108,6 +2119,107 @@ class ProjectionDatabaseBindingTarget:
         return f"{self.dsn_env}"
 
 
+# ---------------------------------------------------------------------------
+# OMN-17888: the projection read seam's memory budget.
+#
+# Both numbers are POLICY, derived from measurements taken in the deployed
+# container on the .201 DEV lane (image sha256:21dd9d6a7401, revision
+# 743881e38f4c) and stated here so they can be re-derived rather than guessed:
+#
+#   container memory limit                              1,536 MiB
+#   post-subscription baseline RSS, measured              ~462 MiB
+#   headroom                                            ~1,051 MiB
+#   retained cost per row, measured (24.8 MiB / 91,571)      284 B
+#   share claimed by projection reads (the line below)      271 MiB
+#
+# THE DECLARED SHARE WAS WRONG UNTIL NOW, and the test that was supposed to
+# pin it did not catch that. The block said "share allotted 256 MiB", the very
+# next sentence said the worst case is 271 MiB, and
+# `test_shipped_bounds_fit_the_runtime_container_budget` asserted a THIRD
+# number, `<= 300 MiB`, while its own docstring repeated 256. Three numbers,
+# no contradiction detected, because the loose bound admitted all of them.
+# The arithmetic is exact and is now stated once:
+#
+#   MAX_INFLIGHT * MAX_ROWS * 284 B = 8 * 125,000 * 284 = 284,000,000 B
+#                                   = 270.84 MiB
+#
+# 271 MiB is the real share and is what the test asserts, to the byte. It is
+# 25.8% of the measured 1,051 MiB headroom, leaving ~780 MiB unclaimed, so the
+# correction is a restatement of what already ships and not a widening.
+# Pairing the two constants is the whole point: bounding rows alone leaves the
+# loop's default executor free to multiply it by 32, and bounding concurrency
+# alone leaves each call unbounded.
+#
+# WHAT MAX_ROWS IS NOT. The previous revision of this block justified 125,000
+# as "clears the live hot session (91,633 rows ... growing ~800/hour) ... about
+# six weeks of runway". Both figures were wrong. Re-measured on the .201 dev
+# lane 2026-09-07T15:53Z, that same `session_id`
+# (9787a4a3-ec49-4819-8bdc-5044efb94550) held 100,441 of
+# `session_replay_snapshots`' 103,468 rows and was growing ~3,029 rows/hour --
+# 3.8x the stated rate. The runway was therefore not six weeks but about eight
+# HOURS: the bound would have been crossed around 2026-09-08T00:00Z, after
+# which every event on the busiest session would have been refused.
+#
+# That number is no longer load-bearing, because the caller was repaired in the
+# same change (OMN-17888 D1): `HandlerProjectionSessionReplay.project` used to
+# re-read the WHOLE session on EVERY event -- O(n^2) in session length -- and
+# now issues two indexed single-row reads instead (an equality lookup on
+# `snapshot_id`, and `ORDER BY sequence DESC LIMIT 1` through the ordered-read
+# capability added on this seam below). No caller in the tree now asks this
+# seam an unbounded question. MAX_ROWS is a backstop against the NEXT such
+# caller, not a schedule; when it fires, the repair is that caller.
+PROJECTION_QUERY_MAX_ROWS: Final[int] = 125_000
+
+# `asyncio.to_thread` dispatches onto the running loop's DEFAULT executor,
+# whose worker count is `min(32, os.cpu_count() + 4)` -- 32 in this container.
+# That made the per-call allocation's multiplier a property of the host's core
+# count rather than a declared number, and py-spy caught 32 live `asyncio_N`
+# threads with 86% of sampled stacks inside one projection query.
+PROJECTION_HANDLER_MAX_INFLIGHT: Final[int] = 8
+
+# OMN-17888 second pass. Streaming the cursor removed the PYTHON-object term of
+# the per-call allocation but not the libpq one: a psycopg2 cursor with no
+# `name=` is CLIENT-side, so `PQexec` buffers the entire result set inside the
+# connection's PGresult before `for record in cursor` yields its first row.
+# Iterating that is iterating a buffer that already exists -- the per-row budget
+# below cannot refuse rows libpq has already paid for, and the 200.7 MiB of
+# driver rows measured on this seam had a libpq peer nobody accounted for.
+#
+# The read below therefore DECLAREs a server-side (named) cursor and FETCHes it
+# in `itersize` batches, so the client holds at most this many rows at once and
+# the per-row budget is checked against rows that have actually been paid for.
+# 1,000 rows at the measured 284 B is ~277 KiB of client buffer per in-flight
+# read (~2.2 MiB across all 8), against 284,000,000 B if the whole budget were
+# ever buffered. psycopg2's own default is 2,000; this is stated rather than
+# inherited because it is now part of the memory arithmetic above.
+PROJECTION_QUERY_CURSOR_ITERSIZE: Final[int] = 1_000
+
+# Keyed by the running loop rather than constructed once at import: an
+# asyncio.Semaphore binds itself to the first loop that awaits it, and the test
+# suite runs many loops in one process. `WeakKeyDictionary` lets a finished
+# loop's gate go with it instead of accumulating.
+_PROJECTION_INFLIGHT_GATES: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, asyncio.Semaphore
+] = WeakKeyDictionary()
+
+
+def _projection_inflight_gate() -> asyncio.Semaphore:
+    """Return this loop's gate over concurrent blocking projection invocations.
+
+    Runtime-wide rather than per handler: the budget above is a single share of
+    one container's memory, so the ceiling it buys has to be a single number.
+    A per-handler gate would multiply by however many projection contracts the
+    lane happens to wire, which is exactly the "bound is a property of the
+    deployment" shape this replaces.
+    """
+    loop = asyncio.get_running_loop()
+    gate = _PROJECTION_INFLIGHT_GATES.get(loop)
+    if gate is None:
+        gate = asyncio.Semaphore(PROJECTION_HANDLER_MAX_INFLIGHT)
+        _PROJECTION_INFLIGHT_GATES[loop] = gate
+    return gate
+
+
 @dataclass(frozen=True)
 class ProjectionCatalogBindingPolicy:
     """Composition-root choice of existing topology catalog identities."""
@@ -2712,10 +2824,31 @@ class ProjectionTableOperation:
         )
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
+        """Read rows, optionally ORDERed by one column and LIMITed.
+
+        OMN-17888. ``order_by``/``descending``/``limit`` are the minimal typed
+        capability a caller needs to ask for THE LATEST ROW rather than for the
+        whole partition it would then sort in Python. They are keyword-only and
+        default to the previous behaviour exactly, so every existing caller is
+        byte-unchanged; a caller that supplies none issues the same statement it
+        always did.
+        """
         self._assert_read_declared()
-        return self._adapter._execute_query(self._target, filters, tenant_context=None)
+        return self._adapter._execute_query(
+            self._target,
+            filters,
+            tenant_context=None,
+            order_by=order_by,
+            descending=descending,
+            limit=limit,
+        )
 
 
 class TenantProjectionTableOperation(ProjectionTableOperation):
@@ -2818,7 +2951,12 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
         )
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         self._assert_read_declared()
         context = self._context()
@@ -2843,6 +2981,9 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
                 attributed_filters,
                 tenant_context=None,
                 recorded_scope=_recorded_tenant_scope(attributed_filters),
+                order_by=order_by,
+                descending=descending,
+                limit=limit,
             )
         supplied_tenant = attributed_filters.get("tenant_id")
         if supplied_tenant is not None:
@@ -2852,6 +2993,9 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
             self._target,
             attributed_filters,
             tenant_context=context,
+            order_by=order_by,
+            descending=descending,
+            limit=limit,
         )
 
 
@@ -2869,10 +3013,17 @@ class InternalProjectionTableOperation(ProjectionTableOperation):
         return super().upsert(conflict_key, row)
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         _reject_canonical_tenant_field(filters, domain=self._target.domain)
-        return super().query(filters)
+        return super().query(
+            filters, order_by=order_by, descending=descending, limit=limit
+        )
 
 
 class CatalogProjectionTableOperation(ProjectionTableOperation):
@@ -2883,10 +3034,17 @@ class CatalogProjectionTableOperation(ProjectionTableOperation):
         return super().upsert(conflict_key, row)
 
     def query(
-        self, filters: dict[str, object] | None = None
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         _reject_canonical_tenant_field(filters, domain=self._target.domain)
-        return super().query(filters)
+        return super().query(
+            filters, order_by=order_by, descending=descending, limit=limit
+        )
 
 
 class ProjectionBindingConnections:
@@ -2963,6 +3121,31 @@ class ProjectionBindingConnections:
     def ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("Projection database adapter is closed")
+
+    @contextlib.contextmanager
+    def read_transaction(self, conn: object) -> Iterator[None]:
+        """Open an explicit transaction block for one unscoped read.
+
+        OMN-17888. The read seam DECLAREs a server-side cursor, and PostgreSQL
+        refuses ``DECLARE CURSOR`` outside a transaction block. The one form
+        that is legal in autocommit -- ``WITH HOLD`` -- materialises the entire
+        result into a server-side tuplestore at commit, which moves the buffer
+        onto the server rather than removing it. The connections this adapter
+        owns sit in autocommit (``get`` sets it), so an unscoped read opens its
+        own transaction and always ends it: committed on success, rolled back on
+        any exception, autocommit restored in ``finally`` either way. Exactly the
+        lifecycle ``tenant_transaction`` guarantees, minus the GUC -- a read that
+        named no tenant scope must not acquire one here.
+        """
+        conn.autocommit = False  # type: ignore[attr-defined]
+        try:
+            yield
+            conn.commit()  # type: ignore[attr-defined]
+        except BaseException:
+            conn.rollback()  # type: ignore[attr-defined]
+            raise
+        finally:
+            conn.autocommit = True  # type: ignore[attr-defined]
 
     @contextlib.contextmanager
     def tenant_transaction(self, conn: object, tenant_scope: str) -> Iterator[None]:
@@ -3132,6 +3315,9 @@ class ProjectionDatabaseOperations:
         *,
         tenant_context: VerifiedProjectionTenantAuthority | None,
         recorded_scope: str | None = None,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
         # Schema/table originate in validated typed declarations, never request data.
         select_sql = f'SELECT * FROM "{target.physical_schema}"."{target.table.name}"'  # noqa: S608
@@ -3144,17 +3330,89 @@ class ProjectionDatabaseOperations:
                 raise ValueError(f"Invalid filter keys: {bad_keys!r}")
             select_sql += " WHERE " + " AND ".join(f'"{key}" = %s' for key in filters)
             params = list(filters.values())
+        # OMN-17888. The ORDERED, LIMITED read is the shape a caller uses to ask a
+        # BOUNDED question -- "the latest row of this session" -- instead of
+        # reading the session and sorting it in Python. It is not a silent
+        # truncation of an unbounded question: the caller states the ordering and
+        # the count, so a short answer is the answer it asked for. That is the
+        # exact distinction the budget refusal below preserves, and why the two
+        # coexist rather than one replacing the other.
+        if order_by is not None:
+            if not _TABLE_NAME_RE.fullmatch(str(order_by)):
+                raise ValueError(f"Invalid order_by column: {order_by!r}")
+            direction = "DESC" if descending else "ASC"
+            select_sql += f' ORDER BY "{order_by}" {direction}'
+        elif descending:
+            raise ValueError("descending requires an order_by column")
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+                raise ValueError(f"limit must be a positive int, got {limit!r}")
+            select_sql += " LIMIT %s"
+            params = [*params, limit]
         conn = self._binding_connections.get(target.read_binding)
 
         def _query() -> list[dict[str, object]]:
             cursor_factory = self._extras.RealDictCursor  # type: ignore[attr-defined]
-            with conn.cursor(cursor_factory=cursor_factory) as cursor:  # type: ignore[attr-defined]
+            # A SERVER-side (named) cursor. OMN-17888 second pass: with no
+            # `name=`, psycopg2 issues `PQexec` and libpq buffers the ENTIRE
+            # result set inside the connection's PGresult before the loop below
+            # sees its first row -- so streaming removed the Python-object copy
+            # and left the libpq copy, and the per-row budget could only refuse
+            # rows the process had already paid for. DECLARE + FETCH in
+            # `itersize` batches makes the client-side peak a constant.
+            cursor_name = f"onex_projection_read_{uuid4().hex}"
+            with conn.cursor(  # type: ignore[attr-defined]
+                name=cursor_name, cursor_factory=cursor_factory
+            ) as cursor:
+                cursor.itersize = PROJECTION_QUERY_CURSOR_ITERSIZE
                 cursor.execute(select_sql, params or None)
-                return [dict(record) for record in cursor.fetchall()]
+                # OMN-17888. Two separate defects lived on this one line, which
+                # read `[dict(record) for record in cursor.fetchall()]`:
+                #
+                # (1) It materialised the result set TWICE with both copies
+                #     alive -- `fetchall()`'s full list of driver rows, plus the
+                #     comprehension's full list of plain dicts. Measured in the
+                #     deployed container against live `omnidash_analytics`, one
+                #     call over the session holding 91,633 of
+                #     `session_replay_snapshots`' 94,571 rows cost 225.4 MiB:
+                #     200.7 MiB of driver rows and 24.8 MiB of dicts. Streaming
+                #     the cursor drops each driver row as soon as it is copied,
+                #     leaving one copy: ~284 B/row, a ~9x reduction on the
+                #     measured shape.
+                #
+                # (2) It was unbounded by construction, for every caller. The
+                #     bound below is checked PER ROW, before the row is kept, so
+                #     the refusal never first allocates the thing it refuses.
+                #
+                # The refusal is deliberate over appending a `LIMIT` the caller
+                # did not ask for: a truncated result is indistinguishable from
+                # a complete one at the call site, so an implicit limit would
+                # trade an OOM for silently wrong projections. An EXPLICIT
+                # `limit=` above is the opposite -- the caller named the bound.
+                rows: list[dict[str, object]] = []
+                for record in cursor:
+                    if len(rows) >= PROJECTION_QUERY_MAX_ROWS:
+                        raise ProjectionQueryRowBudgetError(
+                            f"projection read of "
+                            f'"{target.physical_schema}"."{target.table.name}" '
+                            f"matched more than the {PROJECTION_QUERY_MAX_ROWS} "
+                            f"rows this seam will materialise "
+                            f"(filters={sorted(filters) if filters else []}); "
+                            "the read is refused rather than silently truncated "
+                            "(OMN-17888)",
+                            projection_type=target.table.name,
+                        )
+                    rows.append(dict(record))
+                return rows
 
         scope = _statement_tenant_scope(tenant_context, recorded_scope)
         if scope is None:
-            return _query()
+            # A named cursor cannot be DECLAREd outside a transaction block, and
+            # the connections here sit in autocommit, so the unscoped read opens
+            # (and always ends) its own. The scoped path below is already inside
+            # one.
+            with self._binding_connections.read_transaction(conn):
+                return _query()
         with self._binding_connections.tenant_transaction(conn, scope):
             return _query()
 
@@ -3162,9 +3420,17 @@ class ProjectionDatabaseOperations:
         return self._operation(table).upsert(conflict_key, row)
 
     def query(
-        self, table: str, filters: dict[str, object] | None = None
+        self,
+        table: str,
+        filters: dict[str, object] | None = None,
+        *,
+        order_by: str | None = None,
+        descending: bool = False,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
-        return self._operation(table).query(filters)
+        return self._operation(table).query(
+            filters, order_by=order_by, descending=descending, limit=limit
+        )
 
 
 # OMN-16874: the capability a runner-shaped handler declares to opt IN to
@@ -3380,16 +3646,44 @@ async def _route_projection_error_to_dlq(
     every drop reaches a declared, durable topic even when the contract has no
     DLQ topic of its own.
 
-    Generic for ALL projection handlers, not delegation-only. Best-effort:
-    returns ``True`` when the DLQ/quarantine envelope was published, ``False``
-    when no publishable event bus is available or the publish itself fails
-    (each logged at ERROR). A DLQ publish failure never propagates, so it
-    cannot wedge the consumer.
+    Generic for ALL projection handlers, not delegation-only.
+
+    OMN-17862: returns ``True`` ONLY when the quarantine envelope's publication
+    was **confirmed**, and ``False`` on every other outcome — no publishable
+    event bus is available, the bound ``publish`` attribute is not callable, the
+    publish raises, or the publish reports no durability coordinate. Each is
+    logged at ERROR. This function no longer decides whether that failure
+    propagates: **its caller binds the return value**, and a falsy result
+    withholds the offset. The old docstring's "a DLQ publish failure never
+    propagates, so it cannot wedge the consumer" described a real property and
+    the wrong tradeoff — the single call site discarded the boolean, so a
+    quarantine that never happened acked the record anyway. Withholding does
+    stall the partition; a stall is recoverable and loud, a dropped record is
+    neither, and redelivery re-attempts the quarantine so the stall clears as
+    soon as the bus does.
+
+    Canonical invariant 7 — *a publish return is not durability* — is stated in
+    ``EventBus.publish``'s own docstring, so the returned ``ModelPublishReceipt``
+    is no longer discarded either: it is put through a
+    ``ProtocolConfirmationStrategy`` before this returns ``True``.
     """
     import json
     from datetime import UTC, datetime
 
     from omnibase_infra.enums import EnumDlqFailureClass
+    from omnibase_infra.enums.enum_confirmation_state import EnumConfirmationState
+
+    # Imported from its own MODULE, not the `confirmation` package __init__:
+    # that __init__ also re-exports `KafkaReadbackSource`, whose raw
+    # `AIOKafkaConsumer` the imperative-contract guard blocks once a live
+    # module reaches it. This seam needs only the strategy, so it takes only
+    # the strategy rather than making a dead Kafka client live (OMN-17862).
+    from omnibase_infra.event_bus.confirmation.strategy_publish_return_only import (
+        PublishReturnOnlyStrategy,
+    )
+    from omnibase_infra.event_bus.models.model_publish_receipt import (
+        ModelPublishReceipt,
+    )
     from omnibase_infra.event_bus.topic_constants import build_dlq_topic
     from omnibase_infra.runtime.observability import (
         record_active_dlq,
@@ -3458,8 +3752,8 @@ async def _route_projection_error_to_dlq(
         )
         return False
     try:
-        await publish(dlq_topic, None, raw)
-    except Exception as exc:  # noqa: BLE001 — DLQ publish is best-effort; never wedge the consumer
+        receipt = await publish(dlq_topic, None, raw)
+    except Exception as exc:  # noqa: BLE001 — reported to the caller as False, which withholds the offset
         logger.error(
             "Projection handler %s failed to route malformed/erroring event to DLQ %s "
             "(correlation_id=%s): %s",
@@ -3467,6 +3761,40 @@ async def _route_projection_error_to_dlq(
             dlq_topic,
             correlation_id,
             _sanitize_exc(exc),
+        )
+        return False
+
+    # OMN-17862, canonical invariant 7: a publish RETURN is not durability. The
+    # receipt was previously discarded here, so "the produce call did not raise"
+    # was being reported to the caller as a durable quarantine.
+    #
+    # PublishReturnOnlyStrategy is the deliberately weakest shipped strategy and
+    # is NAMED here rather than assumed, which is the reason that class exists.
+    # A broker readback is the stronger choice and is not available at this seam:
+    # the auto-wiring binds an arbitrary publishable object, not a readback
+    # source, and this path is already the failure path for a record that will be
+    # redelivered and re-quarantined if the claim turns out to be wrong. What the
+    # strategy buys unconditionally is the coordinate check — even it refuses a
+    # ``None`` receipt, because a transport that cannot report a coordinate has
+    # told us nothing at all. Both shipped buses (``EventBusKafka``,
+    # ``EventBusInmemory``) return a ``ModelPublishReceipt``.
+    #
+    # A return that is not a receipt at all is treated as no coordinate: the
+    # fail-closed direction, never a reason to assume durability.
+    confirmation = await PublishReturnOnlyStrategy().confirm(
+        receipt if isinstance(receipt, ModelPublishReceipt) else None
+    )
+    if confirmation.state is not EnumConfirmationState.CONFIRMED:
+        logger.error(
+            "Projection handler %s produced a malformed/erroring event to DLQ %s "
+            "but the publication was NOT confirmed durable (correlation_id=%s, "
+            "strategy=%s, state=%s): %s — the offset must not advance (OMN-17862)",
+            handler_name,
+            dlq_topic,
+            correlation_id,
+            confirmation.strategy,
+            confirmation.state.value,
+            confirmation.detail,
         )
         return False
     record_active_dlq()
@@ -3608,6 +3936,119 @@ def _resolve_binding_dsn(
     return os.environ.get(binding.dsn_env, "")
 
 
+INFISICAL_BOOTSTRAP_VARS: Final[tuple[str, ...]] = (
+    "INFISICAL_ADDR",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_ID",
+    "INFISICAL_ENVIRONMENT_SLUG",
+)
+"""The lane bootstrap identity a store-carried binding is resolved through.
+
+OMN-17557. Names only. No value from this tuple is ever logged or interpolated
+into an error message -- a refusal names the VARIABLES that are missing, never
+what any of them held.
+
+Every name here is a member of ``scripts/check-env-reads.sh``'s own
+``BOOTSTRAP_ALLOWLIST`` (or is not secret-ish), for the circularity that
+allowlist exists to describe: this is the identity the store resolver
+authenticates WITH, so it cannot itself be resolved from the store.
+
+``INFISICAL_ENVIRONMENT_SLUG`` and not ``INFISICAL_ENVIRONMENT`` because that
+is the name the onex-dev ``onex-runtime-config`` ConfigMap actually sets --
+verified by read-only readback of the live ConfigMap, 2026-09-08 -- and the
+name ``omnimarket.inference.secret_store_resolver`` already reads for the same
+identity.
+"""
+
+
+async def build_lane_infisical_handler(
+    container: object | None = None,
+) -> HandlerInfisical:
+    """Build the Infisical handler this lane's own bootstrap identity affords.
+
+    OMN-17557. ``SecretResolver.from_container`` used to treat an absent
+    ``HandlerInfisical`` as graceful degradation, so a lane whose rendered
+    config declared ``source_type: infisical`` still got a resolver that could
+    not read Infisical: every such logical name resolved to ``None`` behind a
+    single "Infisical handler not configured" WARNING. Nothing registers
+    ``HandlerInfisical`` in the container's service registry -- it is not
+    contract-declared, and the only other construction site
+    (``RuntimeHostProcess._prefetch_config_from_infisical``) builds an INLINE
+    handler and shuts it down again -- so on every runtime process that
+    condition was permanent, not incidental. That is what left the onex-dev
+    ``tenant_projection`` binding unresolvable and all eight tenant-domain
+    projection contracts refusing to wire with "Projection handler requires
+    topology bindings with configured DSNs: tenant_projection".
+
+    This function lives HERE rather than beside ``SecretResolver`` because this
+    module is the declared env-resolution boundary
+    (``scripts/check-env-reads.sh`` approves ``/runtime/auto_wiring/handler_wiring.py``
+    for exactly the sibling case: resolving a binding's DSN carrier at wiring
+    time). Moving the read into ``secret_resolver.py`` would have moved a
+    boundary, which that gate correctly refuses.
+
+    It is the single CONSTRUCTION seam for the handler: tests replace it to
+    prove the wiring without reaching a real Infisical server.
+
+    The handler is created WITHOUT a ``secret_path``. That is deliberate: a
+    folder-qualified mapping carries its own folder through per read (see
+    ``secret_resolver._split_infisical_path``), so configuring a default folder
+    here would silently re-root every read whose mapping declares none.
+
+    The returned handler is NOT shut down: it backs a resolver held for the
+    process lifetime, and the binding boundary may be reached again on a
+    re-wire. This differs deliberately from the config-prefetch path, whose
+    inline handler is used once and released.
+
+    Raises:
+        ProtocolConfigurationError: naming every missing or blank bootstrap
+            variable at once. A lane that declares a store-carried source and
+            holds no identity to read it with is misconfigured, and saying so
+            by name is the only honest outcome -- returning a resolver that
+            answers ``None`` to every store read is what made this invisible.
+    """
+    from omnibase_core.container import ModelONEXContainer as _Container
+    from omnibase_infra.errors import ProtocolConfigurationError
+    from omnibase_infra.handlers.handler_infisical import (
+        HandlerInfisical as _HandlerInfisical,
+    )
+
+    values = {
+        "INFISICAL_ADDR": os.environ.get("INFISICAL_ADDR", "").strip(),
+        "INFISICAL_CLIENT_ID": os.environ.get("INFISICAL_CLIENT_ID", "").strip(),
+        "INFISICAL_CLIENT_SECRET": os.environ.get(
+            "INFISICAL_CLIENT_SECRET", ""
+        ).strip(),
+        "INFISICAL_PROJECT_ID": os.environ.get("INFISICAL_PROJECT_ID", "").strip(),
+        "INFISICAL_ENVIRONMENT_SLUG": os.environ.get(
+            "INFISICAL_ENVIRONMENT_SLUG", ""
+        ).strip(),
+    }
+    missing = sorted(name for name, value in values.items() if not value)
+    if missing:
+        raise ProtocolConfigurationError(
+            "Lane declares an Infisical-backed secret source but the Infisical "
+            "machine identity is not fully configured. Missing or blank: "
+            f"{missing}. Declared bootstrap variables: "
+            f"{list(INFISICAL_BOOTSTRAP_VARS)}."
+        )
+
+    handler = _HandlerInfisical(
+        cast("ModelONEXContainer", container) if container is not None else _Container()
+    )
+    await handler.initialize(
+        {
+            "host": values["INFISICAL_ADDR"],
+            "client_id": values["INFISICAL_CLIENT_ID"],
+            "client_secret": values["INFISICAL_CLIENT_SECRET"],
+            "project_id": values["INFISICAL_PROJECT_ID"],
+            "environment_slug": values["INFISICAL_ENVIRONMENT_SLUG"],
+        }
+    )
+    return handler
+
+
 async def build_topology_secret_resolver(
     container: object | None,
 ) -> SecretResolver | None:
@@ -3622,9 +4063,14 @@ async def build_topology_secret_resolver(
     load-bearing.
 
     The Infisical handler is resolved from the container when present, which is
-    what makes ``source_type: infisical`` mappings live; without it the
-    resolver still serves ``env``/``file`` mappings and reports the Infisical
-    miss rather than guessing.
+    what makes ``source_type: infisical`` mappings live. OMN-17557: nothing ever
+    registers one there, so "when present" was never true on a runtime process
+    and every store-carried binding resolved to nothing behind a single
+    "Infisical handler not configured" warning. When the rendered config
+    declares an Infisical source the handler is now built from the lane's own
+    bootstrap identity (see ``build_lane_infisical_handler``), and an
+    incomplete identity is a refusal naming the missing variables. A config
+    with no Infisical source is unchanged and still needs no identity.
     """
     import yaml
 
@@ -3635,7 +4081,10 @@ async def build_topology_secret_resolver(
     from omnibase_infra.runtime.runtime_profile import (
         resolve_secret_resolver_config_path,
     )
-    from omnibase_infra.runtime.secret_resolver import SecretResolver
+    from omnibase_infra.runtime.secret_resolver import (
+        SecretResolver,
+        config_declares_infisical_source,
+    )
 
     config_path_raw = resolve_secret_resolver_config_path()
     if not config_path_raw:
@@ -3650,9 +4099,20 @@ async def build_topology_secret_resolver(
             f"secret-resolver config at {config_path}"
         ) from exc
     if container is None:
+        # No container is the standalone/test path. It still may not hand back
+        # a resolver that cannot serve a source the config declares
+        # (OMN-17557), so the same factory supplies the handler here on exactly
+        # the terms ``from_container`` applies it below.
+        if config_declares_infisical_source(config):
+            return SecretResolver(
+                config=config,
+                infisical_handler=await build_lane_infisical_handler(None),
+            )
         return SecretResolver(config=config)
     return await SecretResolver.from_container(
-        cast("ModelONEXContainer", container), config
+        cast("ModelONEXContainer", container),
+        config,
+        infisical_handler_factory=lambda: build_lane_infisical_handler(container),
     )
 
 
@@ -3810,7 +4270,12 @@ def _make_projection_dispatch_callback(
                 # Why: Control flow narrows this union at runtime before the attribute access.
                 return handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
 
-            result = await asyncio.to_thread(_invoke_projection_handler)
+            # OMN-17888: the gate is the declared multiplier on the read
+            # budget above. Held only across the blocking call, so it caps
+            # concurrent materialisation without serialising the async work
+            # on either side of it.
+            async with _projection_inflight_gate():
+                result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
             # OMN-13360 (deterministic-truth gate): the terminal
@@ -3872,13 +4337,52 @@ def _make_projection_dispatch_callback(
                 # contract-declared DLQ topic (or the platform quarantine sink) and
                 # let the offset advance — otherwise one malformed record wedges
                 # the partition forever.
-                await _route_projection_error_to_dlq(
+                #
+                # OMN-17862: BIND the result. This call used to be a bare
+                # `await` expression statement — nothing assigned, nothing
+                # tested — while the function it calls returns False on three
+                # failures (no publishable bus, a non-callable `publish`, a
+                # publish that raises) and now a fourth (an unconfirmed
+                # publication). `write_path_failure` stayed None, the guard
+                # below did not fire, and the callback returned normally, which
+                # the consume boundary reads as success. A record this path
+                # refused was then NEITHER projected NOR quarantined while its
+                # offset advanced — the silent drop, reached through the arm
+                # this design calls the safe one, and reproduced end to end
+                # against this exact code.
+                quarantined = await _route_projection_error_to_dlq(
                     event_bus,
                     dlq_topics,
                     envelope,
                     handler_name,
                     f"{type(exc).__name__}: {_sanitize_exc(exc)}",
                 )
+                if not quarantined:
+                    # BIND AN EXCEPTION, NEVER THE BOOLEAN. `write_path_failure
+                    # = False` passes the `is not None` guard below and then
+                    # makes `raise ... from False` a TypeError (*exception
+                    # causes must derive from BaseException*), which is not a
+                    # ProjectionNotMaterializedError — so the offset-withholding
+                    # arm does not catch it, the bounded-retry loop's generic
+                    # handler re-raises it, and the boundary catch-all ACKs it.
+                    # That is the same silent drop this block closes, one
+                    # exception type further along.
+                    #
+                    # Purpose-named rather than re-using `exc`: the message
+                    # below renders `type(write_path_failure).__name__`, so
+                    # binding the parse failure would name the PARSE while the
+                    # QUARANTINE is what actually withheld the offset. The parse
+                    # failure stays reachable through __cause__.
+                    unconfirmed = QuarantinePublishUnconfirmedError(
+                        f"projection handler {handler_name} refused an event "
+                        f"from {_extract_projection_topic(envelope) or 'unknown'} "
+                        f"and its quarantine publication was not confirmed "
+                        f"durable, so the record is neither projected nor "
+                        f"captured (OMN-17862)",
+                        projection_type=handler_name,
+                    )
+                    unconfirmed.__cause__ = exc
+                    write_path_failure = unconfirmed
             else:
                 # OMN-17379: the WRITE PATH is the defect, not the event. Handing
                 # the record to a DLQ here and returning normally is an ACK, and
@@ -6160,19 +6664,21 @@ def _make_event_bus_callback(
                         event_type=derived or topic,
                         source_tool="auto-wiring",
                     )
-                explicit_event_type = (
-                    data.get("event_type") if isinstance(data, dict) else None
-                )
-                if explicit_event_type:
+                # OMN-18013 (operator ruling item 2): the event type a handler
+                # matches on is read from the TOPIC — the publisher's contract
+                # declares the topic, and ``derive_event_type_alias_for_topic``
+                # is the single source for the alias on both sides of the wire
+                # (OMN-17296). The payload's own ``event_type`` field is an
+                # untyped, uncontracted string that no contract declares and no
+                # gate checks; honouring it let a publisher re-key a message to
+                # any dispatcher at will, and is the only path by which the 12
+                # alias-mismatch handler entries are reachable at all. It is no
+                # longer consulted.
+                derived_event_type = _derive_event_type_from_topic(topic)
+                if derived_event_type is not None:
                     envelope = envelope.model_copy(
-                        update={"event_type": explicit_event_type}
+                        update={"event_type": derived_event_type}
                     )
-                else:
-                    derived_event_type = _derive_event_type_from_topic(topic)
-                    if derived_event_type is not None:
-                        envelope = envelope.model_copy(
-                            update={"event_type": derived_event_type}
-                        )
                 if tenant_scoped:
                     envelope = _stamp_tenant_id_from_topic_prefix(topic, envelope)
             else:
@@ -6970,24 +7476,80 @@ def _derive_topic_pattern_from_topic(topic: str) -> str:
     return topic
 
 
-def _derive_message_category(topic: str) -> str:
-    """Derive message category string from ONEX topic naming convention.
+def _derive_message_category(topic: str) -> str | None:
+    """Derive a message category from THIS topic's own name, or ``None`` (OMN-18013).
 
-    Convention: ``onex.<kind>.<producer>.<event-name>.v<n>``
-    where ``<kind>`` is one of: evt, cmd, intent.
+    Delegates to :meth:`EnumMessageCategory.from_topic` — the SAME derivation
+    ``MessageDispatchEngine._dispatch`` applies to the topic a message actually
+    arrived on. Registration and dispatch therefore cannot disagree: previously
+    this function carried its own segment parser plus an unconditional
+    ``return "event"`` fallback, so 32 live topics whose kind segment is neither
+    ``evt``/``cmd``/``intent`` (``onex.dlq.*``, ``onex.snapshot.*``) were
+    REGISTERED as ``event`` while ``from_topic`` returned ``None`` at dispatch
+    and the message was rejected as "invalid topic category". A silent default
+    is exactly the shape CLAUDE.md rule 8 forbids.
 
-    Returns lowercase values matching EnumMessageCategory enum values.
+    Returns ``None`` — never a guess — when the topic name carries no category.
+    Callers must fail closed on ``None``; :func:`derive_route_message_category`
+    is the fail-closed wrapper the wiring path uses.
     """
-    parts = topic.split(".")
-    if len(parts) >= 2:
-        kind = parts[1]
-        if kind == "evt":
-            return "event"
-        if kind == "cmd":
-            return "command"
-        if kind == "intent":
-            return "intent"
-    return "event"
+    from omnibase_infra.enums import EnumMessageCategory
+
+    category = EnumMessageCategory.from_topic(topic)
+    return None if category is None else str(category.value)
+
+
+def derive_route_message_category(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+    topic: str,
+) -> EnumMessageCategory:
+    """Return the category a route for *topic* registers under (OMN-18013).
+
+    THE CATEGORY IS THE TOPIC'S OWN, ALWAYS. It is never taken from
+    ``subscribe_topics[0]``, never from the entry's position in a list, and
+    never defaulted. That is the whole of the operator ruling's item (1):
+    a topic/category mismatch must be impossible by construction, not merely
+    detectable after a projection has silently DLQ'd for six hours
+    (OMN-16939, OMN-14605).
+
+    An explicit ``entry.message_category`` is honoured ONLY for a topic whose
+    name carries no derivable category (the ``onex.dlq.*`` family). Where the
+    name IS derivable, an explicit declaration that disagrees with it is a
+    contract lie and is refused here rather than being stamped on a route that
+    the dispatch path will then never match. ``contract-topic-category``
+    refuses the same shape at authoring time, so this raise is a backstop, not
+    the primary surface.
+    """
+    from omnibase_infra.enums import EnumMessageCategory
+
+    derived = _derive_message_category(topic)
+    declared_raw = (entry.message_category or "").strip().lower()
+    declared = declared_raw or None
+
+    if derived is not None:
+        if declared is not None and declared != derived:
+            raise ModelOnexError(
+                f"handler_wiring: contract {contract.name!r} handler entry "
+                f"{getattr(getattr(entry, 'handler', None), 'name', '?')!r} declares "
+                f"message_category={declared!r} for topic {topic!r}, whose own name "
+                f"derives {derived!r}. The dispatch engine matches on the topic's own "
+                "category, so the declared value would register a route no message can "
+                "ever reach. Remove the declaration or fix the topic."
+            )
+        return EnumMessageCategory(derived)
+
+    if declared is None:
+        raise ModelOnexError(
+            f"handler_wiring: contract {contract.name!r} subscribes to topic {topic!r}, "
+            "whose name carries no message category (EnumMessageCategory.from_topic "
+            "returns None), and the owning handler entry declares no explicit "
+            "message_category. Refusing to guess: the previous 'event' default "
+            "registered a route the dispatch path rejects as an invalid topic "
+            "category, losing 100% of the traffic while the container booted green. "
+            "Declare message_category on a topic-scoped handler entry for this topic."
+        )
+    return EnumMessageCategory(declared)
 
 
 def _node_kind_from_node_type(node_type: str | None) -> EnumNodeKind | None:
@@ -7160,11 +7722,25 @@ def derive_entry_message_category(
     through this exact function rather than re-deriving it (a re-implementation is free to
     drift from the runtime, which is how the class survived three prior gates).
     """
-    if entry.message_category:
-        return entry.message_category.strip().lower()
-    if contract.event_bus and contract.event_bus.subscribe_topics:
-        return _derive_message_category(contract.event_bus.subscribe_topics[0])
-    return "event"
+    topics = _topics_for_handler_entry(contract, entry)
+    categories = sorted(
+        {derived for topic in topics if (derived := _derive_message_category(topic))}
+    )
+    if len(categories) == 1:
+        return categories[0]
+    declared = (entry.message_category or "").strip().lower()
+    if declared:
+        return declared
+    if categories:
+        # A mixed-category entry has no single answer. Since OMN-18013 this
+        # value no longer decides ROUTING — every route carries its own topic's
+        # category via ``derive_route_message_category`` — so returning the
+        # first is a reporting choice, not a dispatch decision. The
+        # ``contract-topic-category`` gate refuses the shape outright.
+        return categories[0]
+    from omnibase_infra.enums import EnumMessageCategory
+
+    return str(EnumMessageCategory.EVENT.value)
 
 
 def derive_entry_message_types(
@@ -8000,6 +8576,7 @@ async def subscribe_wired_contract_topics(
     provisioner: ProtocolTopicProvisioner | None = None,
     readiness_config: ModelTopicReadinessConfig | None = None,
     attach_results_out: list[ModelContractAttachResult] | None = None,
+    exclusions_out: list[ModelContractAttachExclusion] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
 ) -> dict[str, tuple[str, ...]]:
@@ -8019,6 +8596,19 @@ async def subscribe_wired_contract_topics(
     never aborts the kernel or recycles the process (§3.5, §3.8). Per-contract
     attach outcomes are appended to *attach_results_out* when provided so the
     caller can build the runtime readiness tri-state.
+
+    OMN-17372 — the eligibility filters below drop contracts this function will
+    NEVER attempt, so those contracts never produce a
+    ``ModelContractAttachResult``. Each such drop is appended to
+    *exclusions_out* when provided, naming the contract and the structural
+    reason. Together the two out-params account for EVERY contract in *report*:
+    a caller can tell "has not reported yet" apart from "will never report"
+    instead of waiting forever on the second in the belief it is the first.
+    That is the whole defect OMN-17372's readiness gate hit — it required
+    ``manifest.contracts`` and could only ever be satisfied by this eligible
+    subset, so one structurally-skipped command contract pinned ``/ready`` at
+    503 for the life of the process. The exclusion list is filled BEFORE the
+    first await, so it is complete even for a caller that reads it early.
 
     Returns the map of attached contract -> attached topics (the contracts that
     actually subscribed). Backward-compatible: with no *provisioner* the
@@ -8042,14 +8632,59 @@ async def subscribe_wired_contract_topics(
 
     # Collect eligible contracts in priority order (projection appliers first).
     eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
+
+    def _exclude(
+        contract_name: str,
+        reason: EnumContractAttachExclusionReason,
+        detail: str = "",
+    ) -> None:
+        """Report a contract this function will never attempt (OMN-17372)."""
+        if exclusions_out is None:
+            return
+        exclusions_out.append(
+            ModelContractAttachExclusion(
+                contract_name=contract_name,
+                reason=reason,
+                detail=detail,
+            )
+        )
+
     for result in _prioritize_subscription_results(
         report,
         result_appliers_by_contract,
     ):
         if result.outcome is not EnumWiringOutcome.WIRED:
+            # OMN-17372: this was the one filter of the six that logged
+            # NOTHING. A contract SKIPPED upstream (no handler_routing, no
+            # subscribe_topics) vanished here without a line, which is why a
+            # permanently-503 runtime gave no diagnostic at all. Log it at the
+            # same level as its five siblings.
+            logger.info(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "contract '%s' because its wiring outcome is %s, not WIRED "
+                "(OMN-17372). reason=%s",
+                result.contract_name,
+                result.outcome.value,
+                result.reason,
+            )
+            _exclude(
+                result.contract_name,
+                EnumContractAttachExclusionReason.NOT_WIRED,
+                f"outcome={result.outcome.value} reason={result.reason}",
+            )
             continue
         contract = contract_by_name.get(result.contract_name)
         if contract is None:
+            logger.info(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "contract '%s' because it is absent from the manifest being "
+                "subscribed (OMN-17372)",
+                result.contract_name,
+            )
+            _exclude(
+                result.contract_name,
+                EnumContractAttachExclusionReason.ABSENT_FROM_MANIFEST,
+            )
             continue
         if not result.dispatchers_registered:
             # Resolver-owned skips and quarantines intentionally register no
@@ -8062,11 +8697,19 @@ async def subscribe_wired_contract_topics(
                 "contract '%s' because it owns zero dispatchers (OMN-15474)",
                 contract.name,
             )
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.NO_DISPATCHERS_REGISTERED,
+            )
             continue
         if _is_raw_event_projection_contract(contract) and (
             result_appliers_by_contract is None
             or contract.name not in result_appliers_by_contract
         ):
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.RAW_EVENT_PROJECTION_WITHOUT_APPLIER,
+            )
             continue
         # plugin_managed: domain plugin owns Kafka subscription (OMN-10864).
         if contract.event_bus is not None and contract.event_bus.plugin_managed:
@@ -8074,6 +8717,10 @@ async def subscribe_wired_contract_topics(
                 "Auto-wiring (deferred): skipping Kafka subscription for "
                 "plugin-managed contract '%s' (OMN-10864)",
                 contract.name,
+            )
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.PLUGIN_MANAGED,
             )
             continue
         # OMN-17562. The same withholding as the immediate seam, applied here
@@ -8091,6 +8738,11 @@ async def subscribe_wired_contract_topics(
                 contract.name,
                 len(result.wirings),
                 list(result.nonwriting_handlers),
+            )
+            _exclude(
+                contract.name,
+                EnumContractAttachExclusionReason.NO_LIVE_DISPATCHER,
+                f"nonwriting_handlers={list(result.nonwriting_handlers)}",
             )
             continue
         eligible.append((result, contract))
@@ -9809,10 +10461,13 @@ def _prepare_handler_wiring(
             route_id = _derive_route_id(contract.name, handler_key, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
+            # OMN-18013: the route's category is THIS topic's own, derived from
+            # its name. Stamping the entry-level ``category`` here is what made
+            # every off-category sibling topic a permanent NO_DISPATCHER.
             route = ModelDispatchRoute(
                 route_id=route_id,
                 topic_pattern=topic_pattern,
-                message_category=category,
+                message_category=derive_route_message_category(contract, entry, topic),
                 handler_id=dispatcher_id,
             )
             route_ids.append(route_id)

@@ -90,6 +90,12 @@ class _FakeConsumer:
     async def commit(self) -> None:
         self.commits += 1
 
+    async def commit_offsets(self, offsets: object) -> None:
+        """OMN-17896: the handler now commits an explicit offset map of the
+        records that COMPLETED, never the consumer's bare position."""
+        self.commits += 1
+        self.committed_offsets = dict(offsets)  # type: ignore[arg-type]
+
 
 class _FakeProducer:
     def __init__(self) -> None:
@@ -119,8 +125,12 @@ class _FakeQuarantineProducer:
 
     async def quarantine_message(
         self, message: ModelDlqMessage, reason: str, quarantine_correlation_id: object
-    ) -> None:
+    ) -> object:
         self.quarantined.append(str(message.correlation_id))
+        # OMN-17896: the real producer returns the broker's record metadata --
+        # the CONFIRMATION of publication. A None return is now read as "not
+        # shown to be durable" and withholds the offset.
+        return object()
 
 
 def _handler(

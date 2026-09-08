@@ -113,11 +113,55 @@ env:
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
+  # =============================================================================
+  # Per-run runner routing (OMN-18031)
+  # =============================================================================
+  # Decides ONCE PER RUN, from live org-runner capacity and the most recent lab
+  # load record, which runs-on label set the heavy jobs below should use. The
+  # trusted seam variable is the CEILING: this can only ever DOWNGRADE from what
+  # OMNI_TRUSTED_CI_RUNS_ON_JSON already allows, never widen (CLAUDE.md rule 14
+  # -- nothing here writes any Actions variable).
+  #
+  # IT IS INERT TODAY AND THAT IS THE POINT. With the seam at its current live
+  # value of '["ubuntu-latest"]' (the deliberate OMN-16682 re-flip) this job
+  # decides `seam_ceiling_hosted` on every run and every job below keeps the
+  # placement it has. Landing it proves the mechanism safe and records a
+  # decision artifact per run; changing placement is a separate single-owner
+  # claim on the seam, which is OMN-16682 and not this ticket.
+  #
+  # ONE CONSUMER IS WIRED: `lint`. Gate P1 -- the live proof in
+  # runner-route-probe.yml that `needs.<job>.outputs` resolves inside `runs-on`
+  # for a reusable-workflow job -- passed on real runs (34131478724, 34138114205:
+  # `consume-reusable` scheduled and succeeded), so the wiring is no longer an
+  # assumption. `lint` was chosen because it is the cheapest heavy job and runs
+  # on every event, which maximises how often the consumer is exercised and
+  # minimises what a routing defect costs. EVERY OTHER JOB BELOW STILL READS THE
+  # OMNI_RUNNER_SELECTOR_V1 EXPRESSION DIRECTLY and moves only on separate
+  # evidence -- a survey of all five routing repos found zero prior uses of this
+  # wiring, so widening it in one step would put the whole fan-out on one
+  # unproven shape.
+  #
+  # Registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS as
+  # "Runner Route (OMN-18031) / route". THAT REGISTRATION IS HALF THE
+  # MECHANISM: this repo requires exactly one context (CI Summary), and an
+  # unregistered job that is `skipped` or absent yields SUCCESS -- so without
+  # it, deleting this job would silently retire the routing decision on a green
+  # run, which is the same silent-retirement shape the Event Chain Gate and
+  # Subscribe Wiring Health entries already document there.
+  route:
+    name: Runner Route (OMN-18031)
+    uses: ./.github/workflows/runner-route-reusable.yml
+    with:
+      workflow_path: .github/workflows/ci.yml
+    secrets:
+      RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+
   # OCC preflight is the first non-OCC CI dependency. If central OCC
   # evidence is missing or red, no runner-heavy validation jobs fan out.
   occ-preflight:
     # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@fc20d08690f03593eb8c55fd2c02c5f0f75f2b68
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@53055e39c1a5f3e2329f0a80d583530fd16111ce
     permissions:
       contents: read
       pull-requests: read
@@ -195,17 +239,38 @@ jobs:
   # Phase 3 - Aggregation
   # =============================================================================
 
+  # OMN-18031 gate G6: `lint` is the FIRST and, for now, the ONLY job in this
+  # repo whose placement resolves from the per-run route decision instead of the
+  # seam expression read at the call site. Chosen because it is the cheapest
+  # heavy job and runs on every event, so the consumer is exercised constantly
+  # and a routing defect costs one job rather than the whole fan-out. Every
+  # other heavy job below is untouched and still reads the seam directly.
+  #
+  # FORK ISOLATION IS NOT RESTATED HERE, AND THAT IS THE POINT. The seam
+  # expression encodes it inline at each of the 46 selector call sites in this
+  # repo, any one of which can be edited wrong with nothing noticing. Routing
+  # holds it in ONE place -- scripts/ci/runner_route_decision.py step S1, ahead
+  # of every capacity signal: a fork PR gets OMNI_PUBLIC_PR_RUNS_ON_JSON's
+  # labels, and a public variable that names a self-hosted label is overridden
+  # back to hosted, so a fork can never widen onto the fleet at any idle level.
+  # scripts/audit-runner-routing.py REFUSES a route consumer whose own runs-on
+  # mentions that variable, precisely so the single place stays single.
+  #
+  # PLACEMENT IS UNCHANGED TODAY. With the trusted seam at '["ubuntu-latest"]'
+  # the decision is `seam_ceiling_hosted` and the seam is returned verbatim, so
+  # this job lands exactly where it landed before. The proof this change carries
+  # is that runs-on RESOLVED FROM THE ROUTE OUTPUT -- the run's decision
+  # artifact plus the jobs API -- never that anything moved onto the lab.
+  #
+  # `needs: route` is load-bearing twice: without the edge the expression
+  # resolves to nothing and the job fails to SCHEDULE, which does not surface as
+  # a failure; and the route job is fail-closed, so a probe fault yields hosted
+  # labels rather than a red gate.
   lint:
-    needs: occ-preflight
+    needs: [occ-preflight, route]
     name: Lint
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job's decision.
+    runs-on: ${{ fromJSON(needs.route.outputs.labels) }}
     timeout-minutes: 30
 
     steps:
@@ -311,16 +376,48 @@ jobs:
       - name: Check handler dispatch-entrypoint gate (OMN-14135)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
 
-      # OMN-14605: a handler_routing entry whose _topics_for_handler_entry-assigned
-      # topics span >1 real category (.cmd/.evt/.intent) gets ONE category stamped on
-      # every route by handler_wiring, so the off-category topics are permanent
-      # NO_DISPATCHER (silent DLQ/drop) while the node boots green — the OMN-14606
-      # (node_swarm_fanout_orchestrator) live defect. MixinNodeDispatch (OMN-12549)
-      # hard-rejects the same shape at registration; this gate flags it at CI time.
-      # Ratchet frozen in config/validation/mixed_category_routing_baseline.yaml
-      # (shrink-only). SYNC with pre-commit hook 'mixed-category-routing'.
-      - name: Check mixed-category routing gate (OMN-14605)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
+      # OMN-18013 (operator ruling item 1), superseding the OMN-14605 gate. Routing is
+      # now PER-TOPIC: derive_route_message_category stamps each ModelDispatchRoute
+      # with the category derived from THAT ROUTE'S OWN topic name, so the
+      # subscribe_topics[0] mechanism that made every off-category sibling topic a
+      # permanent NO_DISPATCHER is gone. This gate refuses the contract shapes that
+      # could still make a category wrong: an entry spanning >1 category, a
+      # message_category: contradicting its topic's own name, and a topic whose name
+      # derives no category at all (the old silent "event" default, which disagreed
+      # with EnumMessageCategory.from_topic at dispatch on 32 live topics).
+      # The OMN-14605 baseline is burned to zero and DELETED.
+      # SYNC with pre-commit hook 'contract-topic-category'.
+      - name: Check contract topic category gate (OMN-18013)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.contract_topic_category --scope omnibase_infra
+
+      # OMN-18013 (operator ruling item 2). The runtime stamps the DERIVED ALIAS for a
+      # topic as event_type (derive_event_type_alias_for_topic, the single source on
+      # both sides of the wire, OMN-17296) — never the topic string. Before OMN-18013
+      # the consume boundary ALSO honoured an `event_type` lifted out of the raw
+      # payload, an untyped field no contract declares, which let a publisher re-key a
+      # message onto any dispatcher and was the only path by which a hand-typed alias
+      # was ever reachable. That override is removed; this gate removes the shapes that
+      # depended on it. SYNC with pre-commit hook 'handler-event-type-source'.
+      - name: Check handler event_type source gate (OMN-18013)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_event_type_source --scope omnibase_infra
+
+      # OMN-18013 (operator ruling item 4). 108 test sites across the corpus passed a
+      # full ONEX TOPIC as an envelope event_type — a spelling the bus never carries.
+      # They were green only because derive_entry_message_types registers BOTH the
+      # topic and the alias as dispatcher index keys, so the wrong one still resolved
+      # inside the test while production used the other. SYNC with pre-commit hook
+      # 'no-literal-event-type-in-tests'.
+      - name: Check golden-chain contract input gate (OMN-18013)
+        run: uv run python -m omnibase_infra.validators.no_literal_event_type_in_tests tests
+
+      # OMN-18013 (operator ruling item 5). The subscriber-dispatcher-resolution and
+      # mixed-category baselines were burned to zero and DELETED. A shrink-only ratchet
+      # is better than an amnesty list but still takes a row from whoever cannot make
+      # the gate pass — every OMN-16939 live victim was a baselined row. A file that
+      # does not exist cannot take one. SYNC with pre-commit hook
+      # 'no-baseline-refreeze'.
+      - name: Check no baseline refreeze (OMN-18013)
+        run: uv run python -m omnibase_infra.validators.no_baseline_refreeze .
 
       # OMN-15468: an applier built outside its factory silently loses BOTH
       # re-route mechanisms — the published_events map (class-based routing to a
@@ -342,8 +439,8 @@ jobs:
       # shape: subscribe-wiring-health checks for a PUBLISHER, dispatcher-route-coverage
       # only looks at onex.cmd.* topics, and mixed-category-routing is scanned over
       # src/omnibase_infra only (its "Lane B" fan-out never landed, which is why the
-      # omnimarket victims went unseen). Ratchet frozen in
-      # config/validation/subscriber_dispatcher_resolution_baseline.yaml (shrink-only).
+      # omnimarket victims went unseen). OMN-18013 burned this repo's 22-row baseline
+      # to ZERO and DELETED the file; the validator has no --baseline flag left.
       # SYNC with pre-commit hook 'subscriber-dispatcher-resolution'.
       - name: Check subscriber dispatcher resolution gate (OMN-16939)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
@@ -354,9 +451,11 @@ jobs:
       # topic on the contract, so N operation-scoped handlers each register for all N
       # topics — a message on ANY topic reaches every handler, and the ones whose
       # `operation` does not match crash or misfire (the pre-fix
-      # node_gateway_attach_effect shape, OMN-15978). Ratchet frozen in
-      # config/validation/operation_match_fanout_baseline.yaml (shrink-only). SYNC with
-      # pre-commit hook 'operation-match-fanout'.
+      # node_gateway_attach_effect shape, OMN-15978). OMN-18013 burned this ratchet
+      # to ZERO — the per-topic `topic:` split it prescribed cleared its last five
+      # rows — and DELETED config/validation/operation_match_fanout_baseline.yaml;
+      # no --baseline flag remains and `no-baseline-refreeze` refuses its return.
+      # SYNC with pre-commit hook 'operation-match-fanout'.
       - name: Check operation_match fan-out gate (OMN-16088)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra
 
@@ -3736,6 +3835,105 @@ jobs:
           echo "A chain that dies into the quarantine sink FAILS here."
           echo "================================================================"
           uv run pytest tests/integration/chains/ -v --tb=short
+
+  # ===========================================================================
+  # Customer Path Boundary (OMN-18012)
+  # ---------------------------------------------------------------------------
+  # The 2026-09-06 escape set had one common cause: the boundaries where the
+  # defects lived -- broker AUTH, partition RETENTION, DB constraints, error
+  # bodies, host toolchain -- are mocked in unit tests and absent from every
+  # local proof lane (Redpanda no-auth, offsets from zero, the .201 dev lane),
+  # and the integration suite that could hold them never ran before push.
+  #
+  # This job runs the omnibase_infra half against a HERMETIC broker that
+  # actually requires SASL and a partition whose log start has actually been
+  # advanced above 0:
+  #   - the chain-canary terminal readback must find a terminal on a
+  #     retention-truncated partition (OMN-16931 / #3254, parent 10017ee52 --
+  #     the pre-fix `max(0, end - N)` seek reads 0 records and reports a
+  #     NOT_FOUND indistinguishable from a chain that never emitted)
+  #   - the bus client must be able to authenticate to a username/password
+  #     listener at all (OMN-18012 gate 0)
+  #
+  # RESIDUAL, stated because this job is NOT the production topology: staging
+  # and prod are MSK with AWS_MSK_IAM + SASL_SSL; this harness is SCRAM. What
+  # it proves is "this client did not silently open PLAINTEXT against an
+  # auth-required listener", NOT "this client speaks IAM".
+  #
+  # The sharded test matrix runs `-m "not kafka ..."`, so these tests run
+  # NOWHERE ELSE in this repo. Registered in STRICT_GATE_JOBS in
+  # scripts/ci/ci_summary_gate.py -- that registration is half the mechanism:
+  # an unregistered job that is skipped or deleted yields SUCCESS, and a
+  # silently-absent boundary test is the exact failure mode this job exists to
+  # end. OMN18012_REQUIRE_HARNESS=1 turns an unreachable docker daemon into a
+  # hard failure rather than a skip.
+  customer-path-boundary:
+    name: Customer Path Boundary (OMN-18012)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Pre-pull the harness broker image
+        # Digest-pinned, and identical to REDPANDA_IMAGE in
+        # tests/integration/customer_path/redpanda_sasl_harness.py -- a
+        # floating tag lets two runners resolve two different images.
+        # test_omn18012_harness_runner_topology.py asserts the two agree.
+        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+
+      - name: Run customer-path boundary tests
+        env:
+          # A missing docker daemon must be RED here, never a green skip.
+          OMN18012_REQUIRE_HARNESS: "1"
+          # WHICH BROKER (operator ruling, 2026-09-07). The harness does not
+          # start a Redpanda container on a host that already runs one. When
+          # these are set the harness ADOPTS that broker and starts nothing;
+          # when they are empty -- which is the case on GitHub-hosted runners,
+          # where no broker exists on the runner -- it starts one throwaway
+          # container advertising an address the test process can actually
+          # reach. A declaration that is incomplete, unreachable, or not
+          # enforcing SASL is a hard failure, never a fall-through, so setting
+          # these wrong cannot make this gate quietly pass on a private broker.
+          #
+          # A GitHub Actions `services:` container is deliberately NOT the
+          # hosted path: `services:` cannot override a container's command, and
+          # this image's default CMD is `redpanda start --overprovisioned` with
+          # `enable_sasl` off (`--set redpanda.enable_sasl=true` is
+          # command-line only -- verified by reading /entrypoint.sh out of
+          # redpandadata/redpanda:v24.2.7). A service container would be a
+          # NO-AUTH broker, which is the exact hole this job exists to close.
+          OMN18012_BROKER_BOOTSTRAP: ${{ vars.OMN18012_BROKER_BOOTSTRAP }}
+          OMN18012_BROKER_CONTAINER: ${{ vars.OMN18012_BROKER_CONTAINER }}
+          OMN18012_BROKER_INTERNAL_BOOTSTRAP: ${{ vars.OMN18012_BROKER_INTERNAL_BOOTSTRAP }}
+          OMN18012_BROKER_SASL_USERNAME: ${{ vars.OMN18012_BROKER_SASL_USERNAME }}
+          OMN18012_BROKER_SASL_PASSWORD: ${{ secrets.OMN18012_BROKER_SASL_PASSWORD }}
+          OMN18012_BROKER_SASL_MECHANISM: ${{ vars.OMN18012_BROKER_SASL_MECHANISM }}
+        run: |
+          echo "================================================================"
+          echo "Customer Path Boundary (OMN-18012)"
+          echo "Auth-required Redpanda + a partition trimmed above offset 0."
+          echo "RESIDUAL: this harness is SCRAM; staging/prod are AWS_MSK_IAM."
+          echo "================================================================"
+          uv run pytest tests/integration/customer_path/ \
+            tests/unit/event_bus/test_omn18012_sasl_scram_credentials.py \
+            -v --tb=short -p no:randomly
 
   # ===========================================================================
   # Subscribe Wiring Health (OMN-16795)

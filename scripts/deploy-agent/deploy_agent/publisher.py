@@ -18,6 +18,7 @@ from deploy_agent.events import (
 )
 from deploy_agent.job_state import JobState
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
+from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,12 @@ def build_completion_payload(
 
     return {
         "correlation_id": str(job.correlation_id),
-        "requested_git_ref": job.command.get("git_ref", "origin/main"),
+        # OMN-16442: the completion event records the ref this agent DECLARES
+        # it tracks when the command omitted one -- never a literal "main".
+        # This field is read back as the deployed lineage, so a wrong default
+        # here misreports what a lane is running.
+        "requested_git_ref": job.command.get("git_ref")
+        or load_tracking_remote_ref_from_env(),
         "git_sha": git_sha,
         "started_at": started_at.isoformat(),
         "completed_at": completed_at.isoformat(),

@@ -64,7 +64,11 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.evt.platform.node-introspection.v1"
-    - "onex.evt.platform.registry-request-introspection.v1"
+    # OMN-18013: `onex.evt.platform.registry-request-introspection.v1` DELETED.
+    # No handler_routing entry owned it (HandlerCatalogRequest's declared
+    # event_type alias `platform.request-introspection` resolves to the .cmd.
+    # topic, not this one) and no contract in the corpus publishes it, so it
+    # was a subscribe declaration with neither a producer nor a consumer.
     - "onex.intent.platform.runtime-tick.v1"
     - "onex.cmd.platform.node-registration-acked.v1"
     - "onex.evt.platform.node-heartbeat.v1"

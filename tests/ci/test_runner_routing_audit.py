@@ -260,3 +260,153 @@ def test_github_variable_audit_rejects_repo_hosted_override(
     assert len(findings) == 1
     assert findings[0].scope == "omnibase_core"
     assert "ubuntu-latest" in findings[0].message
+
+
+def test_github_variable_audit_honors_repository_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18031: a repo shadow that the policy declares is not drift.
+
+    ``expected_json`` is a single value applied to the org and every repo
+    shadow, so before this a deliberately different shadow was indistinguishable
+    from silent drift. The interim self-hosted relief flip on omnimarket and
+    omnibase_infra is exactly that shape.
+    """
+    module = _load_script()
+
+    def fake_variables(args: list[str]) -> list[dict[str, str]]:
+        if args == ["--org", "OmniNode-ai"]:
+            return [
+                {
+                    "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                    "value": '["ubuntu-latest"]',
+                }
+            ]
+        return [
+            {
+                "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                "value": '["self-hosted","omnibase-ci"]',
+            }
+        ]
+
+    monkeypatch.setattr(module, "_variables", fake_variables)
+
+    policy = {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repository_overrides": {
+                "omnimarket": {
+                    "expected_json": '["self-hosted","omnibase-ci"]',
+                    "revert_when": "interim",
+                }
+            },
+        },
+        "repositories": ["omnimarket"],
+    }
+
+    assert module.audit_github_variables(policy) == []
+
+
+def test_github_variable_audit_rejects_drift_from_a_repository_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An override is a new assertion to hold, not a hole in the audit."""
+    module = _load_script()
+
+    def fake_variables(args: list[str]) -> list[dict[str, str]]:
+        if args == ["--org", "OmniNode-ai"]:
+            return [
+                {
+                    "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                    "value": '["ubuntu-latest"]',
+                }
+            ]
+        return [
+            {
+                "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                "value": '["ubuntu-latest"]',
+            }
+        ]
+
+    monkeypatch.setattr(module, "_variables", fake_variables)
+
+    policy = {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repository_overrides": {
+                "omnimarket": {
+                    "expected_json": '["self-hosted","omnibase-ci"]',
+                    "revert_when": "interim",
+                }
+            },
+        },
+        "repositories": ["omnimarket"],
+    }
+
+    findings = module.audit_github_variables(policy)
+
+    assert len(findings) == 1
+    assert findings[0].scope == "omnimarket"
+    assert "self-hosted" in findings[0].message
+
+
+def test_repository_override_does_not_relax_the_org_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An override is repo-scoped: the org value is still judged on expected_json."""
+    module = _load_script()
+
+    def fake_variables(args: list[str]) -> list[dict[str, str]]:
+        if args == ["--org", "OmniNode-ai"]:
+            return [
+                {
+                    "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                    "value": '["self-hosted","omnibase-ci"]',
+                }
+            ]
+        return [
+            {
+                "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                "value": '["self-hosted","omnibase-ci"]',
+            }
+        ]
+
+    monkeypatch.setattr(module, "_variables", fake_variables)
+
+    policy = {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repository_overrides": {
+                "omnimarket": {
+                    "expected_json": '["self-hosted","omnibase-ci"]',
+                    "revert_when": "interim",
+                }
+            },
+        },
+        "repositories": ["omnimarket"],
+    }
+
+    findings = module.audit_github_variables(policy)
+
+    assert len(findings) == 1
+    assert findings[0].scope == "OmniNode-ai"
+
+
+def test_every_repository_override_carries_a_revert_condition() -> None:
+    """A deliberate divergence with no stated end is indistinguishable from drift."""
+    module = _load_script()
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    overrides = policy["trusted_runner_variable"].get("repository_overrides", {})
+
+    # Empty is the correct steady state; the assertion is about SHAPE, so it
+    # holds whether or not an override happens to be live right now.
+    for repo, entry in overrides.items():
+        assert repo in policy["repositories"], f"{repo} is not an audited repository"
+        assert entry["expected_json"], f"{repo} override has no expected_json"
+        module._canonical_json(entry["expected_json"])
+        assert entry.get("revert_when"), f"{repo} override has no revert_when"

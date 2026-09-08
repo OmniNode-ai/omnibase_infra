@@ -1,3 +1,17 @@
+## v0.38.21 (2026-09-07)
+
+### Release
+- Cut omnibase_infra from dev at 0.38.21 for the OMN-18034 omnimarket installability path.
+- PyPI currently has 0.38.19 as the latest published omnibase-infra release; dev is already versioned at 0.38.21, so this release intentionally does not edit dependency pins or downgrade the package version.
+
+### Included Since v0.38.19
+- fix(OMN-17888): add the ordered projection read capability required by the omnimarket session-replay fix (#3292).
+- fix(OMN-18012): inherit SASL credentials on the OCC companion-effect caller (#3295).
+- fix(OMN-18031): route Lint through the per-run runner output (#3291).
+- fix(OMN-17372): narrow readiness to the command topics the boot interleave attempts (#3290).
+- fix(OMN-17896): refuse empty DLQ bodies and quarantine at the consumer boundary (#3297).
+- feat(OMN-16106): serialize applying autoclose sweeps behind restrictive offer selection (#3294).
+
 ## v0.38.0 (2026-05-31)
 
 ### Features

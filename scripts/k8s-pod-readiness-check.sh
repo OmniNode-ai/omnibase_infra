@@ -26,7 +26,11 @@
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-onex-dev}"
-SSM_INSTANCE_ID="${SSM_INSTANCE_ID:-i-0e596e8b557e27785}"
+# OMN-18024: required, no default. This repository is public, so the instance id
+# of the k3s node fronting production hostnames is not written here; a literal
+# fallback default is exactly what published it. `--instance-id` below still
+# overrides. Fail fast rather than silently probing a wrong or absent host.
+SSM_INSTANCE_ID="${SSM_INSTANCE_ID:?SSM_INSTANCE_ID is required (public-cluster k3s node id); no default is published in this public repo}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 SSM_TIMEOUT="${SSM_TIMEOUT:-60}"
 

@@ -31,7 +31,6 @@ Usage:
 """
 
 import argparse
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -104,40 +103,65 @@ _ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
 
 
 def _repository_root(cwd: Path) -> Path | None:
-    """Resolve this validator's physical Git worktree root from ``cwd``.
+    """Resolve the script-owned worktree root when ``cwd`` is safely contained.
 
-    A filesystem entry called ``.git`` does not establish repository identity:
-    it can be an empty marker in a nested directory. Ask Git for the worktree
-    root, then require the physical result to be the repository that owns this
-    script. A validator invoked outside that worktree must fail closed.
+    The ARCH-004 baseline belongs to this validator's checkout, not to an
+    arbitrary repository selected by caller configuration. Require the
+    script-owned root to have a canonical ``.git`` directory or a linked
+    worktree gitfile. Linked worktrees must reciprocally identify their root
+    through the administrative ``gitdir`` backlink. A nested Git marker or a
+    caller outside the script-owned root fails closed.
     """
     resolved_cwd = cwd.resolve()
     expected_root = Path(__file__).resolve().parent.parent
+
     try:
-        result = subprocess.run(
-            ["git", "-C", str(resolved_cwd), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=10,
-        )
-        git_root = Path(result.stdout.strip()).resolve(strict=True)
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(
-            "Imperative Orchestrators: ERROR "
-            f"(cannot resolve Git worktree root from {resolved_cwd}: {exc})"
-        )
+        resolved_cwd.relative_to(expected_root)
+    except ValueError:
+        print("Imperative Orchestrators: ERROR (git-worktree-root-mismatch)")
         return None
 
-    if git_root == expected_root:
-        return git_root
+    root_marker = expected_root / ".git"
+    try:
+        if root_marker.is_dir():
+            root_marker_is_valid = (root_marker / "HEAD").is_file()
+        elif root_marker.is_file():
+            marker_text = root_marker.read_text(encoding="utf-8").strip()
+            marker_prefix = "gitdir: "
+            if not marker_text.startswith(marker_prefix):
+                root_marker_is_valid = False
+            else:
+                admin_git_dir = Path(marker_text.removeprefix(marker_prefix))
+                if not admin_git_dir.is_absolute():
+                    admin_git_dir = expected_root / admin_git_dir
+                resolved_admin_git_dir = admin_git_dir.resolve(strict=True)
+                backlink = resolved_admin_git_dir / "gitdir"
+                backlink_target = Path(backlink.read_text(encoding="utf-8").strip())
+                if not backlink_target.is_absolute():
+                    backlink_target = resolved_admin_git_dir / backlink_target
+                root_marker_is_valid = (
+                    resolved_admin_git_dir / "HEAD"
+                ).is_file() and backlink_target.resolve(
+                    strict=True
+                ) == root_marker.resolve(strict=True)
+        else:
+            root_marker_is_valid = False
+    except (OSError, RuntimeError, UnicodeError):
+        root_marker_is_valid = False
 
-    print(
-        "Imperative Orchestrators: ERROR "
-        f"(Git worktree root {git_root} does not match validator repository "
-        f"{expected_root})"
-    )
-    return None
+    if not root_marker_is_valid:
+        print("Imperative Orchestrators: ERROR (git-worktree-root-unresolved)")
+        return None
+
+    current = resolved_cwd
+    while current != expected_root:
+        nested_marker = current / ".git"
+        if nested_marker.is_file() or nested_marker.is_dir():
+            print("Imperative Orchestrators: ERROR (git-worktree-root-mismatch)")
+            return None
+        current = current.parent
+
+    return expected_root
 
 
 def _canonical_repository_name(repo_root: Path) -> str | None:

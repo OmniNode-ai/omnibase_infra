@@ -37,8 +37,25 @@ event_bus:
     - "onex.evt.omnibase-infra.event-forwarded.v1"
 handler_routing:
   routing_strategy: "operation_match"
+  # OMN-18013: split into per-topic `topic:`-scoped entries. Unscoped, this single
+  # operation_match entry was assigned EVERY subscribe topic by
+  # _topics_for_handler_entry — safe only for as long as it stayed the contract's
+  # ONLY handler, which is a property of the file, not of the routing. Routing is
+  # per-topic since OMN-18013; the contract now says so too. This clears the last
+  # rows of the OMN-16088 fan-out ratchet, which is deleted in the same commit.
   handlers:
     - operation: "event.forward"
+      topic: "onex.evt.omnibase-infra.service-lifecycle.v1"
+      handler:
+        name: "HandlerEventForward"
+        module: "omnibase_infra.nodes.node_event_forward_effect.handlers.handler_event_forward"
+    - operation: "event.forward"
+      topic: "onex.evt.omnibase-infra.system-alert.v1"
+      handler:
+        name: "HandlerEventForward"
+        module: "omnibase_infra.nodes.node_event_forward_effect.handlers.handler_event_forward"
+    - operation: "event.forward"
+      topic: "onex.evt.omnibase-infra.tool-update.v1"
       handler:
         name: "HandlerEventForward"
         module: "omnibase_infra.nodes.node_event_forward_effect.handlers.handler_event_forward"

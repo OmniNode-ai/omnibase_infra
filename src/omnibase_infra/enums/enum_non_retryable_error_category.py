@@ -41,6 +41,10 @@ class EnumNonRetryableErrorCategory(str, Enum):
     Categories:
         AUTHENTICATION_ERROR: Authentication/authorization failures (invalid credentials)
         CONFIGURATION_ERROR: Protocol or service configuration errors
+        CUSTOMER_KEY_REFUSED_ERROR: A customer delegation refused for want of a
+            registered provider key (or because the resolved route would have
+            run on a platform-owned one)
+        JSON_DECODE_ERROR: The message body is not JSON at all (OMN-17896)
         SECRET_RESOLUTION_ERROR: Secret/credential resolution failures (missing secrets)
         VALIDATION_ERROR: Input/schema validation errors (malformed data)
 
@@ -53,6 +57,10 @@ class EnumNonRetryableErrorCategory(str, Enum):
           Retrying will not fix malformed configuration. Requires code
           or configuration changes.
 
+        - CUSTOMER_KEY_REFUSED_ERROR: The tenant has registered no provider
+          key, so there is nothing for a retry to authenticate with. Only the
+          customer registering a key changes the outcome (OMN-17372).
+
         - SECRET_RESOLUTION_ERROR: Secret does not exist or is inaccessible.
           Retrying will not create the missing secret. Requires secret
           provisioning or path correction.
@@ -60,6 +68,9 @@ class EnumNonRetryableErrorCategory(str, Enum):
         - VALIDATION_ERROR: Input data is malformed or violates schema.
           Retrying with the same data will always fail. Requires data
           correction at the source.
+
+        - JSON_DECODE_ERROR: The bytes are not JSON. No amount of retrying
+          turns them into JSON. Requires correction at the producer.
 
     Example:
         >>> from omnibase_infra.enums import EnumNonRetryableErrorCategory
@@ -100,6 +111,35 @@ class EnumNonRetryableErrorCategory(str, Enum):
         configuration changes and redeployment.
     """
 
+    CUSTOMER_KEY_REFUSED_ERROR = "CustomerKeyRefusedError"
+    """A customer delegation refused at the routing terminus (OMN-17372).
+
+    Raised by ``omnimarket.routing.customer_key_terminus`` when:
+    - The tenant has registered no provider key and the surface offers no
+      credential-free terminus
+    - The resolved route would have authenticated customer work with an
+      OmniNode platform-owned key, which customer work may never use
+
+    Why non-retryable:
+        Neither condition is a transient one. The first is fixed only by the
+        CUSTOMER registering a provider key; the second only by correcting a
+        routing overlay on our side. A caller obeying ``retryable`` on this
+        failure retries a state no retry can reach — which is exactly what the
+        live ``onex-dev`` refusal did before this member existed, publishing
+        ``retryable=true`` on a delegation terminal whose remediation reads
+        "Register a provider key for this tenant and retry."
+
+    Named here rather than special-cased in ``classify_boundary_failure``
+    because this enum is the runtime's ONE answer to "is this worth retrying":
+    the consume boundary, DLQ replay's ``NON_RETRYABLE_ERRORS`` and the event
+    bus all resolve it through ``is_non_retryable``. A refusal that this enum
+    did not name would be quarantined by one surface and replayed by another.
+    Membership is by class NAME, which is what survives the dispatch engine's
+    flattening of the exception into text — omnibase_infra neither imports nor
+    may import the omnimarket class itself (repo layering: infra is below the
+    node packages).
+    """
+
     SECRET_RESOLUTION_ERROR = "SecretResolutionError"
     """Secret/credential resolution failures from omnibase_infra.errors.
 
@@ -113,6 +153,23 @@ class EnumNonRetryableErrorCategory(str, Enum):
         The secret either doesn't exist or is inaccessible by policy.
         Retrying will not create the missing secret. Requires secret
         provisioning or policy changes.
+    """
+
+    JSON_DECODE_ERROR = "JSONDecodeError"
+    """The message body could not be JSON-decoded at all (OMN-17896).
+
+    Raised when:
+    - The body is zero bytes (``Expecting value: line 1 column 1 (char 0)``)
+    - The body is truncated or is not JSON in any form
+
+    Why non-retryable:
+        A structurally undecodable body is undecodable on every attempt. Its
+        absence from this set is what let the dev lane replay a ZERO-BYTE
+        record five times per chain instead of exiting on the first pass:
+        measured 2026-09-07, 5,535 ``JSONDecodeError`` lines in a five-minute
+        window out of 27,109, every distinct correlation id appearing 16 times.
+        The replay cap bounded each chain; it never stopped new ones being
+        minted, so the topic sustained ~4 guaranteed-undecodable records/s.
     """
 
     VALIDATION_ERROR = "ValidationError"
@@ -209,6 +266,12 @@ class EnumNonRetryableErrorCategory(str, Enum):
                 "Configuration error - configuration is wrong or incompatible. "
                 "Requires code or configuration changes and redeployment."
             ),
+            cls.CUSTOMER_KEY_REFUSED_ERROR: (
+                "Customer key refusal - the tenant has no registered provider "
+                "key, or the resolved route would have used a platform-owned "
+                "one. Requires the customer to register a provider key, or a "
+                "routing overlay correction."
+            ),
             cls.SECRET_RESOLUTION_ERROR: (
                 "Secret resolution failure - secret does not exist or is inaccessible. "
                 "Requires secret provisioning or policy changes."
@@ -216,6 +279,11 @@ class EnumNonRetryableErrorCategory(str, Enum):
             cls.VALIDATION_ERROR: (
                 "Validation error - input data is malformed or violates schema. "
                 "Requires data correction at the source."
+            ),
+            cls.JSON_DECODE_ERROR: (
+                "JSON decode failure - the message body is not JSON (an empty "
+                "body decodes to nothing at all). Retrying cannot make it "
+                "JSON; requires correction at the producer."
             ),
         }
         return descriptions.get(error_type, "Unknown error category")

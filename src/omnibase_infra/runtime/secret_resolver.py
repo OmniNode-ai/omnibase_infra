@@ -88,6 +88,7 @@ import re
 import threading
 import time
 from collections import defaultdict, deque
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -128,6 +129,25 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def config_declares_infisical_source(config: ModelSecretResolverConfig) -> bool:
+    """Does this rendered lane config declare an Infisical-backed source?
+
+    OMN-17557. An Infisical source can be declared two ways and both count.
+    ``mappings`` names one logical name per entry -- the shape a platform
+    secret such as ``database.tenant_projection.dsn`` takes. ``namespaces``
+    declares an anchored ref PATTERN plus the source template every matching
+    ref resolves through, which is how a ref minted at request time is served.
+    Reading only one of the two is the OMN-16944 defect, in a second place.
+
+    A ``file``-backed namespace is deliberately NOT an Infisical declaration:
+    it needs no machine identity, and treating it as one would make a lane that
+    never touches Infisical start demanding Infisical credentials.
+    """
+    if any(mapping.source.source_type == "infisical" for mapping in config.mappings):
+        return True
+    return any(rule.source_type == "infisical" for rule in config.namespaces)
 
 
 def _split_infisical_path(path: str) -> tuple[str, str | None]:
@@ -453,6 +473,9 @@ class SecretResolver:
         cls,
         container: ModelONEXContainer,
         config: ModelSecretResolverConfig,
+        *,
+        infisical_handler_factory: Callable[[], Awaitable[HandlerInfisical]]
+        | None = None,
     ) -> SecretResolver:
         """Create SecretResolver from ONEX container with dependency injection.
 
@@ -479,6 +502,17 @@ class SecretResolver:
                 and convention fallback settings. This is required because secret
                 mappings are application-specific and cannot be auto-discovered
                 from the container.
+            infisical_handler_factory: OMN-17557. Keyword-only. Called ONLY when
+                the container registers no ``HandlerInfisical`` AND ``config``
+                declares an Infisical-backed source -- the state every runtime
+                process is permanently in, because nothing registers one there.
+                A factory rather than a handler so a lane that never needed a
+                store identity is never made to produce one. Omitting it keeps
+                the pre-OMN-17557 behaviour, which is correct for a caller whose
+                config declares no store source and wrong for one whose does;
+                the binding-boundary caller
+                (``handler_wiring.build_topology_secret_resolver``) always
+                supplies it.
 
         Returns:
             Configured SecretResolver instance with container-resolved dependencies.
@@ -487,6 +521,11 @@ class SecretResolver:
             ProtocolConfigurationError: If the container is invalid or missing
                 the required ``service_registry`` attribute. The error includes
                 :class:`ModelInfraErrorContext` with correlation_id for tracing.
+                Whatever ``infisical_handler_factory`` raises propagates
+                unchanged (OMN-17557): the binding-boundary factory refuses
+                with a ``ProtocolConfigurationError`` naming every missing
+                bootstrap variable, and that refusal must not be swallowed
+                here into a resolver that answers ``None``.
 
         Example:
             Basic usage with container-resolved dependencies::
@@ -509,13 +548,18 @@ class SecretResolver:
                 password = await resolver.get_secret_async("database.password")
 
         Example (Container Without Optional Services):
-            If HandlerInfisical is not registered, Infisical-sourced secrets will
-            fall back to env/file sources::
+            A container with no ``HandlerInfisical`` registered is fine for a
+            config whose sources are all ``env``/``file``::
 
                 container = ModelONEXContainer()
                 # No wire_infrastructure_services() call
                 resolver = await SecretResolver.from_container(container, config)
                 # Works for env/file secrets
+
+            When the config DOES declare an Infisical source and an
+            ``infisical_handler_factory`` is supplied, the handler comes from
+            that factory instead (OMN-17557) -- never a resolver that silently
+            answers ``None`` to every store read.
 
         Note:
             **Why config is a required parameter:**
@@ -570,10 +614,37 @@ class SecretResolver:
                 extra={"correlation_id": str(correlation_id)},
             )
         except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
-            # HandlerInfisical not registered - this is acceptable
+            # Not registered. Whether that is acceptable depends entirely on
+            # what THIS lane's config declares, decided immediately below --
+            # it is not a standing property of the container.
             logger.debug(
-                "HandlerInfisical not available in container, Infisical secrets disabled: %s",
+                "HandlerInfisical not available in container: %s",
                 type(e).__name__,
+                extra={"correlation_id": str(correlation_id)},
+            )
+
+        # OMN-17557. A config that declares an Infisical source and a resolver
+        # that cannot read Infisical is a contradiction, and the old code
+        # shipped it as "graceful degradation": the resolver was built anyway
+        # and every store-backed logical name answered None behind one WARNING.
+        # Nothing registers HandlerInfisical in the service registry, so that
+        # branch was taken on EVERY runtime process, permanently -- which is
+        # what left the onex-dev `tenant_projection` binding unresolvable and
+        # all eight tenant-domain projection contracts refusing to wire.
+        #
+        # The caller supplies the recovery as a FACTORY, not a built handler,
+        # so it is invoked only when the container genuinely has none and the
+        # config genuinely declares a store source. Building it eagerly would
+        # make a lane refuse for a missing identity it never needed.
+        if (
+            infisical_handler is None
+            and infisical_handler_factory is not None
+            and config_declares_infisical_source(config)
+        ):
+            infisical_handler = await infisical_handler_factory()
+            logger.info(
+                "Built HandlerInfisical from the caller-supplied lane factory "
+                "for a config declaring an Infisical-backed source (OMN-17557)",
                 extra={"correlation_id": str(correlation_id)},
             )
 

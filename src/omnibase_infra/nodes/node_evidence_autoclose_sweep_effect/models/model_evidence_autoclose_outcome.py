@@ -96,6 +96,49 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
             "confirm — which is ERROR_READBACK_UNCONFIRMED, never FLIPPED."
         ),
     )
+    # OMN-16106. THE ROLLBACK FLAG. Set when a flip was written, its bound
+    # readback could not confirm it, and this run therefore RESTORED the
+    # ticket's pre-write state.
+    #
+    # The label and the flip cannot coexist. Before this field existed, an
+    # unconfirmed readback left the Done standing on the board and posted a
+    # comment saying so -- "Treat this ticket's state as written but
+    # unverified, and check it by hand". That is a closed ticket carrying its
+    # own admission that nothing verified it, and the board reads Done to
+    # every downstream sweep, rollup and human that never opens the comment.
+    # OMN-16025 sat in exactly that shape from 2026-09-06T21:42:17Z until a
+    # person reverted it by hand twelve minutes later.
+    #
+    # A write nobody can read back is not a proven write, and the doctrine's
+    # own direction of conservatism is stated in this handler: a false hold
+    # costs a comment and a human glance, a false flip writes an unearned Done
+    # onto the board. Rolling back is the hold.
+    flip_rolled_back: bool = Field(
+        default=False,
+        description=(
+            "True when this run wrote a Done, could not read it back, and "
+            "restored the ticket's pre-write state. The board ends the run in "
+            "the state it started it in."
+        ),
+    )
+    # OMN-16106. The gate probe this ticket named for itself, and what its
+    # newest completed run concluded. Both empty on every path that did not
+    # consult one -- a ticket with no `Gate:` line declares no probe.
+    gate_probe_workflow: str = Field(
+        default="",
+        description=(
+            "`<owner>/<repo> <workflow-file>` parsed from the ticket "
+            "description's `Gate:` line, empty when the ticket names none."
+        ),
+    )
+    gate_probe_conclusion: str = Field(
+        default="",
+        description=(
+            "GitHub `conclusion` of the newest completed run of "
+            "`gate_probe_workflow` (`success`, `failure`, ...), or empty when "
+            "no probe was declared or none could be resolved."
+        ),
+    )
     # OMN-16106 D3. THE RUN-DISARM SIGNAL, and the only one.
     #
     # Set only on a FLIPPED outcome whose own post-write readback found the

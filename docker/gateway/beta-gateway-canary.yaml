@@ -126,7 +126,53 @@ lane_mirror_source_bus:
   security_protocol: "PLAINTEXT"
 lane_mirror_buses:
   dev:
-    bootstrap_servers: "omnibase-infra-redpanda:9092" # onex-allow-kafka-broker
+    # OMN-17201: the DEV target moved to the dev lane's EXTERNAL listener, for
+    # exactly the reason the source leg above did, and the residual recorded
+    # here on 2026-09-05 is why -- it fired.
+    #
+    # That comment said the dev leg "is correct but relies on which network
+    # Docker answers the alias from", and named the durable fix as one that
+    # needs a stability broker recreate. At 2026-09-06T20:44:38Z the DEV broker
+    # container was recreated, and while it was gone the only container still
+    # answering the shared `redpanda` alias was the STABILITY broker. The dev
+    # producer's reconnect re-resolved onto the source lane and stayed there:
+    # 754 `Lane mirror delivered` lines over three hours, every one of them a
+    # real broker acknowledgement from the wrong broker.
+    #
+    # The reason given for NOT applying the source leg's fix here was that the
+    # dev lane renders its external advertised host from
+    # `DEV_REDPANDA_ADVERTISE_HOST` at deploy time, so this repo cannot know the
+    # literal to pin. That is true of the repo and false of the deployment. The
+    # rendered value is readable off the running broker, and it is a literal
+    # that collides with nothing. Measured on .201 2026-09-07, read-only, no
+    # lane mutated:
+    #
+    #   docker inspect omnibase-infra-redpanda --format '{{json .Config.Cmd}}'
+    #     -> --advertise-kafka-addr internal://redpanda:9092,
+    #        external://omninode-pc.tail75df5e.ts.net:19092
+    #
+    #   docker exec omnibase-infra-redpanda rpk cluster metadata \
+    #     -X brokers=omninode-pc.tail75df5e.ts.net:19092
+    #     -> BROKERS  ID 0*  HOST omninode-pc.tail75df5e.ts.net  PORT 19092
+    #      (bootstrapping the external listener is handed the external
+    #       advertised address back -- it does not walk onto `redpanda`)
+    #
+    #   docker exec omninode-gateway-forwarder python3 -c 'socket.connect(...)'
+    #     -> CONNECT OK omninode-pc.tail75df5e.ts.net 19092 -> 100.109.203.94
+    #
+    # Same host as the source leg's 100.109.203.94, different PORT and
+    # therefore a different broker: 39092 is the stability lane's published
+    # external port, 19092 the dev lane's. Neither is the shared `redpanda`.
+    #
+    # A pin CAN go stale -- if the dev lane is redeployed with a different
+    # `DEV_REDPANDA_ADVERTISE_HOST` this address stops resolving. That failure
+    # is loud (the producer cannot connect, the lane's confirmed watermark
+    # stops advancing, the healthcheck's lane-mirror leg fails) and is the
+    # opposite of the silent mis-homing it replaces. The runtime destination
+    # guard is the second layer and needs no address at all: a source record
+    # read back at a coordinate this process wrote to a destination refuses the
+    # lane fail-closed, whatever the address says.
+    bootstrap_servers: "omninode-pc.tail75df5e.ts.net:19092" # onex-allow-kafka-broker
     environment: "beta-gateway-lane-mirror-dev"
     timeout_seconds: 30
     auto_offset_reset: "earliest"

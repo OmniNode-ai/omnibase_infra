@@ -6,7 +6,7 @@
 # Managed by launchd plist ai.omninode.cloud-bus-tunnel
 #
 # Architecture:
-#   1. SSM session → localhost:6443 → k8s API (i-0e596e8b557e27785:6443)
+#   1. SSM session → localhost:6443 → k8s API on the public-cluster k3s node
 #   2. kubectl port-forward → localhost:29092 → svc/omninode-redpanda:9092  # cloud-bus-ok OMN-4922
 #   3. kubectl port-forward → localhost:9092 → svc/omninode-redpanda:9092
 #
@@ -15,7 +15,12 @@
 set -euo pipefail
 
 KUBECONFIG="${HOME}/.kube/omninode-mvp1"
-SSM_INSTANCE="i-0e596e8b557e27785"
+# OMN-18024: required, no default. This repository is public, so the instance id
+# of the k3s node fronting production hostnames is not written here. A literal
+# default is exactly what published it. Resolve it from the environment (the
+# launchd plist, or `aws ec2 describe-instances --filters
+# Name=tag:Name,Values=omninode-k3s-system-public`) and fail fast when it is unset.
+SSM_INSTANCE="${SSM_INSTANCE_ID:?SSM_INSTANCE_ID is required (public-cluster k3s node id); no default is published in this public repo}"
 REGION="us-east-1"
 LOG_DIR="/tmp"
 

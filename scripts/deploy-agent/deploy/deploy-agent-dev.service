@@ -1,0 +1,148 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# User-scope systemd unit for the DEV-LANE ONEX deploy agent (OMN-16939).
+#
+# Install (the documented control path — same as the base unit):
+#   cp deploy-agent-dev.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now deploy-agent-dev.service
+#
+# WHY A SECOND UNIT EXISTS
+#
+# deploy-agent.service's tracked drop-in (deploy-agent.service.d/override.conf,
+# OMN-15181 Finding 3) deliberately pins that process to the PROD control bus
+# (192.168.86.201:49092). Its own header records the tradeoff verbatim: "this
+# process cannot serve both lanes at once", with a per-lane instance named as
+# the way out (OMN-13810). This IS that per-lane instance for dev.
+#
+# The consequence of only having the prod-pinned unit was measured on
+# 2026-09-06: onex.cmd.deploy.rebuild-requested.v1 on the DEV broker had zero
+# consumer groups while four correctly-formed, HMAC-signed rebuild commands sat
+# on it unconsumed, so the dev lane could not track `dev` over the bus no matter
+# how healthy the redeploy FSM upstream of it became.
+#
+# This unit does NOT touch deploy-agent.service. Prod's unit keeps its bus, its
+# port (8099) and its state dir; this one takes 8098 and its own state dir, so
+# the two can be enabled at the same time without a single-flight or port
+# collision. The Kafka consumer group id is the same on both, which is correct:
+# they are on different brokers, so the groups are different groups.
+#
+# LANE FENCE (required, fail-closed)
+#
+# DEPLOY_AGENT_ALLOWED_LANES is not decoration. The dev control bus carries
+# BOTH dev and stability-test rebuild commands by design — see
+# .github/workflows/runtime-rebuild-trigger.yml: "Control-bus routing is
+# independent of the requested runtime lane. Both dev and stability-test
+# commands enter through the dev control bus." Without the fence, a
+# stability-test command landing on the dev broker would be executed by this
+# agent against the stability-test lane, which is a governed lane this process
+# has no business mutating. deploy_agent.lane_policy refuses to start when the
+# variable is unset — there is no default.
+#
+# CONTROL-BUS TRANSPORT (declared, never inferred — OMN-18012)
+#
+# The dev-lane Redpanda EXTERNAL listener on :19092 has required SASL since
+# ~16:40Z on 2026-09-07 (OMN-18012 Phase B): SCRAM-SHA-256 over PLAINTEXT —
+# authenticated, NOT encrypted, there is no TLS on that port. This unit
+# DECLARES that transport beside the broker it already declares, exactly as
+# omnimarket config/ci_bus_lanes.yaml declares `security_protocol` /
+# `sasl_mechanism` beside each CI lane's broker and as
+# docker/docker-compose.dev-lane.yml binds the same two names onto every
+# dev-lane client. deploy_agent.kafka_config refuses to start on an undeclared
+# transport rather than guessing one, because the guess is what broke this
+# agent: it inferred the protocol from whether credentials happened to be in
+# the environment, found none, bootstrapped in the clear, and the broker
+# dropped every connection (53 restarts by 2026-09-08T04:12Z) while
+# onex.cmd.deploy.rebuild-requested.v1 sat unconsumed on the dev bus.
+#
+# KAFKA_SASL_ENV_PREFIX exists because systemd cannot expand one Environment=
+# value into another. The lane's SCRAM principal lives in the operator env
+# file (EnvironmentFile below) as DEV_KAFKA_SASL_USERNAME /
+# DEV_KAFKA_SASL_PASSWORD — the same names docker-compose.dev-lane.yml
+# resolves — and compose can write `${DEV_KAFKA_SASL_USERNAME}` into
+# KAFKA_SASL_USERNAME while a unit file cannot. Declaring the PREFIX keeps the
+# secret in the env file instead of duplicating it into a tracked unit, and
+# keeps the unprefixed KAFKA_SASL_* names free: setting those globally in the
+# operator env file would hand credentials to every other process that sources
+# it, which is the credential-presence inference this ticket is removing.
+#
+# The rest of the [Service] block is the base unit's, verbatim in intent:
+# canonical repo copy for both the working directory and the interpreter (the
+# OMN-13760 drift this repo already fixed once), no WatchdogSec (a rebuild is a
+# minutes-long synchronous subprocess that blocks the event loop; a liveness
+# watchdog cannot tell it apart from a hang), Type=simple, Restart=on-failure.
+
+#
+# TRACKING REF (declared, never inferred -- OMN-16442)
+#
+# DEPLOY_AGENT_TRACKING_REF names the branch this process tracks: the ref
+# self_update() fetches and re-execs onto, the default git_ref of a rebuild
+# command that omits one, and the sibling-repo fallback for the build-arg
+# cache-bust refs. It is REQUIRED and has no default -- deploy_agent.tracking_ref
+# raises rather than guessing.
+#
+# The value is `dev`, per the operator ruling of 2026-09-08 (firm): the deploy
+# agent tracks the lane deploy branch, never `main`. Until this landed, the
+# literal `origin/main` was compiled into self_update. This repo's `main` is
+# release-synced -- it is advanced only by an automated fast-forward to the last
+# released tag and is not a PR-merge target -- so a code clone checked out on
+# `dev` is hundreds of commits ahead of it. The dev agent therefore never
+# self-updated, could not pick up its own fixes (#3305, #3306, #3316), and the
+# manual path was the only dev deploy path for a full night.
+#
+# Setting this to `dev` on THIS unit does not open a prod promotion path. Prod
+# deploys a pinned, stability-proven image digest -- ModelRebuildRequested
+# refuses a prod command without image_digest, and prod never rebuilds from a
+# ref -- and prod image promotion is governed by the OMN-13418 grant path, not
+# by which branch this agent's own code tracks.
+#
+# PORT PREFLIGHT (fail-fast, never destructive)
+#
+# ExecStartPre runs deploy/preflight_port_free.sh, which refuses to start
+# when the port is already held and names the holder (command + pid) on
+# stderr. It never terminates the holder: that process may be a peer lane's
+# agent or a draining rebuild, and a unit file cannot judge the blast
+# radius. Exit 2 (no socket-inspection tool, bad argument, or a probe that
+# failed to RUN) also refuses -- an unprovable precondition is not a
+# satisfied one.
+#
+# A refusal must also STOP. With Restart=on-failure/RestartSec=5 and
+# systemd's default start limit (5 starts in 10s), five restarts spaced 5s
+# apart span ~25s and never trip it, so a held port would re-refuse every
+# five seconds forever and bury the journal. StartLimitIntervalSec and
+# StartLimitBurst below bound that: the unit lands in `failed` within ~30s,
+# where it is visible instead of merely noisy.
+
+[Unit]
+# OMN-16939: bound the fail-fast refusal loop (see PORT PREFLIGHT above).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+Description=ONEX Deploy Agent (dev lane) — Kafka-driven rebuild orchestrator
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent
+EnvironmentFile=/home/jonah/.omnibase/.env
+Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
+Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev
+Environment=DEPLOY_AGENT_PORT=8098
+Environment=DEPLOY_AGENT_TRACKING_REF=dev
+Environment=DEPLOY_AGENT_ALLOWED_LANES=dev
+Environment=KAFKA_BOOTSTRAP_SERVERS=192.168.86.201:19092
+Environment=KAFKA_ENVIRONMENT=dev
+Environment=KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
+Environment=KAFKA_SASL_MECHANISM=SCRAM-SHA-256
+Environment=KAFKA_SASL_ENV_PREFIX=DEV_
+ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
+ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/.venv/bin/python -m deploy_agent
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deploy-agent-dev
+
+[Install]
+WantedBy=default.target

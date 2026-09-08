@@ -24,6 +24,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_sync_event_publisher,
 )
@@ -36,6 +37,13 @@ from omnibase_infra.runtime.runtime_local_ingress import (
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 pytestmark = pytest.mark.unit
+
+
+# OMN-18013: the auto-wired consume boundary stamps the DERIVED ALIAS for a
+# topic, never the topic string. Deriving it here means these tests cannot pass
+# on a spelling the bus does not carry.
+_PATTERN_B_TOPIC = "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"  # onex-topic-allow: the topic whose alias is derived below
+_PATTERN_B_EVENT_TYPE = derive_event_type_alias_for_topic(_PATTERN_B_TOPIC)
 
 
 def _route() -> ModelRuntimeLocalIngressRoute:
@@ -347,7 +355,7 @@ async def test_service_pattern_b_broker_round_trips_terminal_event() -> None:
         payload=command,
         correlation_id=command.correlation_id,
         envelope_timestamp=datetime.now(UTC),
-        event_type="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        event_type=_PATTERN_B_EVENT_TYPE,
         source_tool="codex",
     )
     await bus.publish(
@@ -412,7 +420,7 @@ async def test_service_pattern_b_broker_returns_failed_for_failure_terminal() ->
         payload=command,
         correlation_id=command.correlation_id,
         envelope_timestamp=datetime.now(UTC),
-        event_type="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        event_type=_PATTERN_B_EVENT_TYPE,
         source_tool="codex",
     )
     await bus.publish(
@@ -764,7 +772,7 @@ async def test_service_pattern_b_broker_publishes_timeout_result() -> None:
         payload=command,
         correlation_id=command.correlation_id,
         envelope_timestamp=datetime.now(UTC),
-        event_type="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        event_type=_PATTERN_B_EVENT_TYPE,
         source_tool="codex",
     )
     await bus.publish(
@@ -811,7 +819,7 @@ async def test_service_pattern_b_broker_publishes_failed_result_for_unknown_rout
         payload=command,
         correlation_id=command.correlation_id,
         envelope_timestamp=datetime.now(UTC),
-        event_type="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        event_type=_PATTERN_B_EVENT_TYPE,
         source_tool="codex",
     )
     await bus.publish(
@@ -1205,7 +1213,7 @@ async def test_discovered_route_surfaces_failure_terminal_as_failed_status(
             },
             correlation_id=envelope.correlation_id,
             envelope_timestamp=datetime.now(UTC),
-            event_type=failure_topic,
+            event_type=derive_event_type_alias_for_topic(failure_topic),
             source_tool="gen_seam_demo",
         )
         await bus.publish(

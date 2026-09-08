@@ -389,6 +389,65 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "opt one ticket back into a halted sweep."
         ),
     )
+    # ------------------------------------------------------------------
+    # OMN-16106 Item 1 — THE SELECTOR, and why it REPLACES discovery.
+    #
+    # Both existing arms are WINDOWS over merged companions.
+    # `lookback_hours` sees a companion once, in the hours after it merges.
+    # `backfill_lookback_hours` re-offers older ones on a rotating slice of
+    # `backfill_max_candidates` drawn from a pool capped at
+    # `backfill_pool_size`. Neither can be aimed at a named ticket:
+    # `exclude_tickets` only subtracts, so acting on one aged ticket meant
+    # waiting for its slice — measured 2026-09-05 at ~34 ticks (~17h) for a
+    # single pass of a 168-companion pool — or widening the window past the
+    # run budget that `dod_verify` (~15s per candidate) already dominates.
+    #
+    # Empty (the default, and what every scheduled tick carries) leaves
+    # discovery exactly as it was: same candidates, same order, same I/O.
+    #
+    # Non-empty is RESTRICTIVE, and that is the design rather than a
+    # convenience. The offered tickets REPLACE discovery; they are not
+    # prepended to it. A selector that added to the forward window would let a
+    # one-ticket request drag an unscoped five-wide applying run along behind
+    # it, which is exactly what a bounded pilot must not be able to do by
+    # accident. Each nominated ticket's NEWEST MERGED companion is resolved
+    # directly, so a companion outside the freshness window, outside the pool
+    # and outside the current slice is still reachable — filtering the slice
+    # never could have reached it.
+    #
+    # What it does NOT touch: anything about what counts as proven. The
+    # resolved companion goes through the same changed-file binding check and
+    # the same per-ticket path as any other candidate, so the verifier, the
+    # AC-coverage guard, the behaviour conjunct, the children conjunct, the
+    # cited-PR conjunct, the prior-revert fence, the label gate, the disarm,
+    # the flip budget, the comment dedup and the bound readback all still gate
+    # the write. `exclude_tickets` wins over this field, and wins before the
+    # companion search runs: a caller asserting "another lane is writing this
+    # ticket right now" must not be overridden by the same caller's own
+    # nomination.
+    #
+    # There is deliberately NO standing repo variable for this. The standing
+    # fence ONEX_AUTOCLOSE_EXCLUDE is a variable because a FENCE has to reach
+    # the runs nobody is watching. An offer is the opposite kind of thing — it
+    # selects what a run acts on — so a standing one would silently narrow
+    # every scheduled tick to a fixed list and stop the closer adjudicating the
+    # board at all, a restriction nobody typed on every run nobody sees.
+    offer_tickets: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Ticket ids this run must adjudicate INSTEAD of its ordinary "
+            "forward-window and rotating-backfill discovery (OMN-16106). "
+            "Empty (the default) preserves discovery unchanged. Non-empty is "
+            "restrictive: each id's newest merged OCC companion is resolved "
+            "directly -- reachable outside the freshness window, outside the "
+            "pool cap and outside the current slice -- and routed through the "
+            "identical binding check and per-ticket pipeline. It widens WHICH "
+            "ticket is asked and narrows the run to that set; it can never "
+            "widen what the flip predicate accepts. Matched case-insensitively "
+            "after stripping surrounding whitespace. `exclude_tickets` wins "
+            "over an offer, before any GitHub or Linear I/O about it."
+        ),
+    )
     close_if_done_label: str = Field(
         default="close-if-done",
         description=(

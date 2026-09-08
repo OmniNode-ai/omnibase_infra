@@ -2,11 +2,15 @@
 # SPDX-License-Identifier: MIT
 """Async Kafka consumer for infra routing decisions observability (OMN-8692).
 
-Consumes routing-decided events from Kafka and persists them to PostgreSQL
+Consumes routing-decision events from Kafka and persists them to PostgreSQL
 via WriterInfraRoutingDecisionsPostgres.
 
+OMN-16025 moved this from ``onex.evt.omnibase-infra.routing-decided.v1`` (a
+topic no live producer creates) to the delegation routing reducer's real output,
+and taught it the ``ModelEventEnvelope`` wire shape those records carry.
+
 Topics consumed:
-    - onex.evt.omnibase-infra.routing-decided.v1
+    - onex.evt.omnibase-infra.routing-decision.v1
 
 Example:
     >>> from omnibase_infra.services.observability.infra_routing_decisions import (
@@ -46,6 +50,9 @@ from aiokafka.errors import KafkaError
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.services.observability.infra_routing_decisions.config import (
     ConfigInfraRoutingDecisionsConsumer,
+)
+from omnibase_infra.services.observability.infra_routing_decisions.model_routing_decision_ingest import (
+    ModelInfraRoutingDecisionIngest,
 )
 from omnibase_infra.services.observability.infra_routing_decisions.writer_postgres import (
     WriterInfraRoutingDecisionsPostgres,
@@ -328,20 +335,21 @@ class InfraRoutingDecisionsConsumer:
 
         logger.info("InfraRoutingDecisionsConsumer stopped")
 
-    def _parse_message(self, record: ConsumerRecord) -> dict[str, object] | None:
-        """Parse and decode a Kafka message."""
+    def _parse_message(
+        self, record: ConsumerRecord
+    ) -> ModelInfraRoutingDecisionIngest | None:
+        """Decode one record into the row it becomes, or ``None`` for the DLQ.
+
+        OMN-16025. This previously returned the decoded JSON object verbatim and
+        handed it to the writer, which read ``selected_provider`` /
+        ``selected_tier`` / ``reason`` off the TOP level. Live records are
+        ``ModelEventEnvelope``-shaped, so every one of those lookups missed and
+        the row would have been written blank -- had the consumer been running at
+        all. :class:`ModelInfraRoutingDecisionIngest` owns the unwrap and the
+        wire-name-to-column-name translation.
+        """
         try:
             raw = json.loads(record.value.decode("utf-8"))
-            if isinstance(raw, dict):
-                return dict(raw)
-            elif isinstance(raw, list) and len(raw) == 1 and isinstance(raw[0], dict):
-                logger.warning(
-                    "Unwrapping array-wrapped legacy message",
-                    extra={"topic": record.topic, "offset": record.offset},
-                )
-                return dict(raw[0])
-            else:
-                return None
         except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
             logger.warning(
                 "Failed to parse Kafka message",
@@ -352,6 +360,10 @@ class InfraRoutingDecisionsConsumer:
                 },
             )
             return None
+
+        if not isinstance(raw, dict):
+            return None
+        return ModelInfraRoutingDecisionIngest.from_envelope(raw)
 
     async def _send_to_dlq(self, record: ConsumerRecord, reason: str) -> None:
         """Forward a failed message to the dead letter queue."""
@@ -398,12 +410,12 @@ class InfraRoutingDecisionsConsumer:
     ) -> dict[TopicPartition, int]:
         """Process a batch of Kafka messages.
 
-        All routing-decided events go into a single list for batch write.
+        All routing-decision events go into a single list for batch write.
 
         Returns:
             Dict mapping TopicPartition to max committed offset.
         """
-        events: list[dict[str, object]] = []
+        events: list[ModelInfraRoutingDecisionIngest] = []
         partition_offsets: dict[TopicPartition, int] = {}
         failed_partitions: set[TopicPartition] = set()
 

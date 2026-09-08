@@ -26,6 +26,7 @@ Exports:
     ComputeRegistryError: Compute registry operation errors
     EventBusRegistryError: Event bus registry operation errors
     LaneMirrorRecordRefusedError: Lane-mirror record carries no usable identity
+    LaneMirrorLoopDetectedError: Lane-mirror destination IS its own source lane
     ChainPropagationError: Correlation/causation chain validation errors
     ArchitectureViolationError: Architecture validation errors (blocks startup)
     InvariantViolation: Runtime contract invariant violations
@@ -43,7 +44,9 @@ Exports:
     EventRegistryFingerprintMissingError: Event registry artifact file not found
     ProjectionError: Raised by NodeProjectionEffect when a synchronous projection write fails
     ProjectionNotMaterializedError: Projection write-path failure — offset must not advance (OMN-17379)
+    ProjectionQueryRowBudgetError: Projection read matched more rows than the seam materialises — a ProjectionNotMaterializedError subclass, so the offset is withheld (OMN-17888)
     ProjectionTenantContextError: Projection write refused — no tenant resolved under enforcement
+    QuarantinePublishUnconfirmedError: A refused event's quarantine publication was not confirmed — offset must not advance (OMN-17862)
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -149,14 +152,19 @@ from omnibase_infra.errors.error_infra import (
     UnknownHandlerTypeError,
 )
 from omnibase_infra.errors.error_invariant_violation import InvariantViolation
-from omnibase_infra.errors.error_lane_mirror import LaneMirrorRecordRefusedError
+from omnibase_infra.errors.error_lane_mirror import (
+    LaneMirrorLoopDetectedError,
+    LaneMirrorRecordRefusedError,
+)
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.error_projection import (
     ProjectionError,
     ProjectionNotMaterializedError,
+    ProjectionQueryRowBudgetError,
     ProjectionTenantContextError,
+    QuarantinePublishUnconfirmedError,
 )
 from omnibase_infra.errors.error_schema_fingerprint import (
     SchemaFingerprintMismatchError,
@@ -185,7 +193,9 @@ __all__: list[str] = [
     # Projection errors (OMN-2510)
     "ProjectionError",
     "ProjectionNotMaterializedError",
+    "ProjectionQueryRowBudgetError",
     "ProjectionTenantContextError",
+    "QuarantinePublishUnconfirmedError",
     # Binding resolution errors
     "BindingResolutionError",
     "ChainPropagationError",
@@ -200,6 +210,7 @@ __all__: list[str] = [
     # Error catalog (OMN-518)
     "ErrorResolution",
     "EventBusRegistryError",
+    "LaneMirrorLoopDetectedError",
     "LaneMirrorRecordRefusedError",
     # Payload-size errors (OMN-16267)
     "EventPayloadTooLargeError",

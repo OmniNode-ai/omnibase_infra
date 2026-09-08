@@ -129,10 +129,15 @@ class TestInfraValidatorConstants:
         - 131 (2026-03-01): OMN-3202 graph handler signature fix (+1 union)
           - HandlerGraph.initialize(): dict[str, object] | str
 
-        Current: 154 (as of projection freshness SLA monitor OMN-11200). Target: Keep below 160 - if this grows, consider typed patterns from omnibase_core.
+        - 155 (2026-09-07): OMN-17896 DlqDrainRecord (+1 union)
+          - the DLQ drain yields a parsed message OR the typed refusal that
+            carries the raw bytes of one that would not parse; declared once as
+            a `type` alias used at both seams instead of spelled at each.
+
+        Current: 155 (as of the DLQ drain refusal alias OMN-17896). Target: Keep below 160 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 154, (
-            "INFRA_MAX_UNIONS should be 154 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 155, (
+            "INFRA_MAX_UNIONS should be 155 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

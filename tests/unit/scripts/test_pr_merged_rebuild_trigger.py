@@ -184,7 +184,18 @@ class TestRebuildTriggerLogic:
 
 @pytest.mark.unit
 def test_workflow_uses_authoritative_overlay_not_raw_kafka_secrets() -> None:
-    """The post-merge producer must resolve its target from checked-in truth."""
+    """The post-merge producer must resolve its target from checked-in truth.
+
+    CONFIG vs CREDENTIAL, and why only one of them is a secret here (OMN-18012).
+    The broker address and the transport are CONFIG: both are declared in
+    omnimarket's ``config/ci_bus_lanes.yaml``, which the job checks out, so
+    neither may arrive as an opaque secret — a ``KAFKA_BOOTSTRAP_SERVERS``
+    injection is exactly what let a silent dev->stability repoint run green
+    (OMN-14800). The SCRAM principal is a CREDENTIAL and can only arrive as a
+    secret. The lane now declares ``SASL_PLAINTEXT`` / ``SCRAM-SHA-256``, and
+    the publisher refuses to downgrade a declared SASL transport, so these two
+    secrets MUST be injected — their absence is the failure this asserts against.
+    """
     workflow = WORKFLOW_PATH.read_text()
 
     assert "repository: OmniNode-ai/omnimarket" in workflow
@@ -197,8 +208,8 @@ def test_workflow_uses_authoritative_overlay_not_raw_kafka_secrets() -> None:
     assert "--consumer-model" in workflow
     assert "--runtime-path-validator" in workflow
     assert "secrets.KAFKA_BOOTSTRAP_SERVERS" not in workflow
-    assert "secrets.KAFKA_SASL_USERNAME" not in workflow
-    assert "secrets.KAFKA_SASL_PASSWORD" not in workflow
+    assert "secrets.KAFKA_SASL_USERNAME" in workflow
+    assert "secrets.KAFKA_SASL_PASSWORD" in workflow
     assert "secrets.DEPLOY_AGENT_HMAC_SECRET" not in workflow
 
 
@@ -239,6 +250,7 @@ class TestRedeployStartPublish:
             "lanes:\n"
             "  dev:\n"
             "    broker: omninode-pc.tail75df5e.ts.net:19092\n"
+            "    security_protocol: PLAINTEXT\n"
         )
 
         model = self.mod.load_ci_bus_overlay(overlay)
@@ -247,20 +259,31 @@ class TestRedeployStartPublish:
             lane="dev",
             injected_broker="",
         )
+        protocol, mechanism = self.mod.resolve_ci_bus_security(
+            overlay=model,
+            lane="dev",
+        )
         config = self.mod.build_kafka_producer_config(
             broker,
-            username="",
-            password="",
+            "",
+            "",
+            protocol,
+            mechanism,
         )
 
         assert broker == "omninode-pc.tail75df5e.ts.net:19092"
-        assert config == {"bootstrap.servers": "omninode-pc.tail75df5e.ts.net:19092"}
+        assert config == {
+            "bootstrap.servers": "omninode-pc.tail75df5e.ts.net:19092",
+            "security.protocol": "PLAINTEXT",
+        }
 
     def test_overlay_rejects_injected_broker_drift(self, tmp_path: Path) -> None:
         """An opaque broker injection may not override checked-in lane truth."""
         overlay = tmp_path / "ci_bus_lanes.yaml"
         overlay.write_text(
-            "default: inmemory\nlanes:\n  dev:\n    broker: declared:19092\n"
+            "default: inmemory\nlanes:\n  dev:\n"
+            "    broker: declared:19092\n"
+            "    security_protocol: PLAINTEXT\n"
         )
 
         model = self.mod.load_ci_bus_overlay(overlay)
@@ -283,8 +306,10 @@ class TestRedeployStartPublish:
         with pytest.raises(ValueError, match="both be set or both be empty"):
             self.mod.build_kafka_producer_config(
                 "broker:9092",
-                username=username,
-                password=password,
+                username,
+                password,
+                "SASL_PLAINTEXT",
+                "SCRAM-SHA-256",
             )
 
     def test_malformed_overlay_fails_validation(self, tmp_path: Path) -> None:
@@ -295,6 +320,7 @@ class TestRedeployStartPublish:
             "lanes:\n"
             "  dev:\n"
             "    broker: declared:19092\n"
+            "    security_protocol: PLAINTEXT\n"
             "    typo_broker: wrong:9092\n"
         )
 
@@ -307,7 +333,9 @@ class TestRedeployStartPublish:
         """OMN-15009: a runtime merge publishes without any Kafka/HMAC secret."""
         overlay = tmp_path / "ci_bus_lanes.yaml"
         overlay.write_text(
-            "default: inmemory\nlanes:\n  dev:\n    broker: declared:19092\n"
+            "default: inmemory\nlanes:\n  dev:\n"
+            "    broker: declared:19092\n"
+            "    security_protocol: PLAINTEXT\n"
         )
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         monkeypatch.delenv("KAFKA_SASL_USERNAME", raising=False)
@@ -363,6 +391,8 @@ class TestRedeployStartPublish:
                 bootstrap_servers="broker:9092",
                 username="user",
                 password="pass",
+                security_protocol="SASL_PLAINTEXT",
+                sasl_mechanism="SCRAM-SHA-256",
                 runtime_lane="dev",
                 build_source="workspace",
                 source_sha="abc1234",
@@ -393,6 +423,8 @@ class TestRedeployStartPublish:
                 bootstrap_servers="broker:9092",
                 username="user",
                 password="pass",
+                security_protocol="SASL_PLAINTEXT",
+                sasl_mechanism="SCRAM-SHA-256",
                 runtime_lane="stability-test",
                 build_source="release",
                 source_sha="deadbeef",
@@ -554,3 +586,158 @@ class TestRedeployStartCLI:
         )
         assert result.returncode != 0
         assert "release" in (result.stdout + result.stderr)
+
+
+@pytest.mark.unit
+class TestLaneDeclaredTransport:
+    """OMN-18012 — the bus transport is read from the lane, never inferred.
+
+    omnimarket#2387 added ``security_protocol`` / ``sasl_mechanism`` to the
+    ``dev`` lane of ``config/ci_bus_lanes.yaml`` because the .201 dev-lane
+    Redpanda external listener began requiring SASL/SCRAM-SHA-256 over PLAINTEXT.
+    ``runtime-rebuild-trigger.yml`` sparse-checks that exact file out of
+    ``omnimarket@dev`` and validates it here with ``extra="forbid"``, so a model
+    that knew only ``broker`` rejected the live overlay and took the dev-lane
+    redeploy trigger red on every runtime-touching PR (run 34160709151, job
+    101861818486: ``Extra inputs are not permitted ... lanes.dev.sasl_mechanism``).
+
+    ``_LIVE_DEV_LANE`` below is the live declaration verbatim. On ``origin/dev``
+    the first test fails with that same validation error.
+    """
+
+    _LIVE_DEV_LANE = (
+        "default: inmemory\n"
+        "lanes:\n"
+        "  dev:\n"
+        '    broker: "omninode-pc.tail75df5e.ts.net:19092"\n'
+        "    security_protocol: SASL_PLAINTEXT\n"
+        "    sasl_mechanism: SCRAM-SHA-256\n"
+        "  stability:\n"
+        "    broker: inmemory\n"
+        "  prod:\n"
+        "    broker: inmemory\n"
+    )
+
+    def setup_method(self) -> None:
+        self.mod = _import_trigger_module()
+
+    def _overlay(self, tmp_path: Path, body: str) -> Path:
+        overlay = tmp_path / "ci_bus_lanes.yaml"
+        overlay.write_text(body)
+        return overlay
+
+    def test_live_omnimarket_overlay_validates(self, tmp_path: Path) -> None:
+        """The overlay CI actually checks out loads and yields its transport."""
+        model = self.mod.load_ci_bus_overlay(
+            self._overlay(tmp_path, self._LIVE_DEV_LANE)
+        )
+
+        assert model.lanes["dev"].security_protocol == "SASL_PLAINTEXT"
+        assert model.lanes["dev"].sasl_mechanism == "SCRAM-SHA-256"
+        assert self.mod.resolve_ci_bus_security(overlay=model, lane="dev") == (
+            "SASL_PLAINTEXT",
+            "SCRAM-SHA-256",
+        )
+
+    def test_producer_config_honours_the_declared_sasl_plaintext(
+        self, tmp_path: Path
+    ) -> None:
+        """SASL over PLAINTEXT is used verbatim — never upgraded to SASL_SSL."""
+        model = self.mod.load_ci_bus_overlay(
+            self._overlay(tmp_path, self._LIVE_DEV_LANE)
+        )
+        protocol, mechanism = self.mod.resolve_ci_bus_security(
+            overlay=model, lane="dev"
+        )
+
+        config = self.mod.build_kafka_producer_config(
+            "omninode-pc.tail75df5e.ts.net:19092",
+            "ci-principal",
+            "ci-secret",
+            protocol,
+            mechanism,
+        )
+
+        assert config["security.protocol"] == "SASL_PLAINTEXT"
+        assert config["sasl.mechanisms"] == "SCRAM-SHA-256"
+        assert config["sasl.username"] == "ci-principal"
+
+    def test_sasl_lane_without_credentials_fails_closed(self, tmp_path: Path) -> None:
+        """A SASL lane with no credentials must red, not downgrade to plaintext."""
+        model = self.mod.load_ci_bus_overlay(
+            self._overlay(tmp_path, self._LIVE_DEV_LANE)
+        )
+        protocol, mechanism = self.mod.resolve_ci_bus_security(
+            overlay=model, lane="dev"
+        )
+
+        with pytest.raises(ValueError, match="are not set in this job's environment"):
+            self.mod.build_kafka_producer_config(
+                "broker:19092", "", "", protocol, mechanism
+            )
+
+    def test_publishing_lane_must_declare_a_security_protocol(
+        self, tmp_path: Path
+    ) -> None:
+        """A concrete broker with no declared transport is a wiring gap."""
+        with pytest.raises(ValueError, match="no security_protocol"):
+            self.mod.load_ci_bus_overlay(
+                self._overlay(
+                    tmp_path,
+                    "default: inmemory\nlanes:\n  dev:\n    broker: declared:19092\n",
+                )
+            )
+
+    def test_mechanism_beside_non_sasl_protocol_is_contradictory(
+        self, tmp_path: Path
+    ) -> None:
+        """Half a transport declaration is rejected rather than half-applied."""
+        with pytest.raises(ValueError, match="carries no"):
+            self.mod.load_ci_bus_overlay(
+                self._overlay(
+                    tmp_path,
+                    "default: inmemory\n"
+                    "lanes:\n"
+                    "  dev:\n"
+                    "    broker: declared:19092\n"
+                    "    security_protocol: PLAINTEXT\n"
+                    "    sasl_mechanism: SCRAM-SHA-256\n",
+                )
+            )
+
+    def test_sasl_protocol_without_mechanism_is_rejected(self, tmp_path: Path) -> None:
+        """SASL without a mechanism would leave librdkafka to pick one."""
+        with pytest.raises(ValueError, match="requires a"):
+            self.mod.load_ci_bus_overlay(
+                self._overlay(
+                    tmp_path,
+                    "default: inmemory\n"
+                    "lanes:\n"
+                    "  dev:\n"
+                    "    broker: declared:19092\n"
+                    "    security_protocol: SASL_PLAINTEXT\n",
+                )
+            )
+
+    def test_inmemory_lane_needs_no_transport(self, tmp_path: Path) -> None:
+        """An in-memory lane publishes nothing cross-process, so declares none."""
+        model = self.mod.load_ci_bus_overlay(
+            self._overlay(tmp_path, self._LIVE_DEV_LANE)
+        )
+
+        assert model.lanes["stability"].security_protocol is None
+        assert model.lanes["prod"].sasl_mechanism is None
+
+    def test_unknown_security_protocol_is_rejected(self, tmp_path: Path) -> None:
+        """Only librdkafka's four protocol names are accepted."""
+        with pytest.raises(ValueError, match="not a librdkafka security"):
+            self.mod.load_ci_bus_overlay(
+                self._overlay(
+                    tmp_path,
+                    "default: inmemory\n"
+                    "lanes:\n"
+                    "  dev:\n"
+                    "    broker: declared:19092\n"
+                    "    security_protocol: SASL_TLS\n",
+                )
+            )

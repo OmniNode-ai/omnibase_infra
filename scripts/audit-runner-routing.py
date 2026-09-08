@@ -31,6 +31,18 @@ FORK_PR_PREDICATE = (
     "github.event.pull_request.head.repo.full_name!=github.repository"
 )
 DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
+# OMN-18031: the per-run routing consumer shape. A job whose runs-on resolves
+# from a route job's output rather than from the seam expression directly.
+ROUTE_CONSUMER_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.labels")
+# OMN-18031: the selector-generation markers. V1 is the inline seam expression
+# that 94 job definitions in this repo carry; V2 is a job whose placement comes
+# from a route job's output. The marker is a COMMENT, so YAML parsing drops it
+# and these two passes are necessarily textual.
+SELECTOR_V1_MARKER = "OMNI_RUNNER_SELECTOR_V1"
+SELECTOR_V2_MARKER = "OMNI_RUNNER_SELECTOR_V2"
+# A marker sits directly above the `runs-on:` it describes. The bound exists so
+# an unrelated marker elsewhere in the same job cannot satisfy the requirement.
+SELECTOR_MARKER_WINDOW = 24
 
 
 @dataclass(frozen=True)
@@ -107,21 +119,55 @@ def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
                     f"{name} drifted to {org_actual!r}; expected {variable['expected_json']!r}",
                 )
             )
+    overrides = variable.get("repository_overrides") or {}
+    if not isinstance(overrides, dict):
+        raise ValueError(
+            "trusted_runner_variable.repository_overrides must be a mapping"
+        )
     for repo in policy.get("repositories", []):
         repo_name = str(repo)
+        # OMN-18031: a repo shadow the policy DECLARES is an asserted value in
+        # its own right, not drift from the org value. Without this the audit
+        # cannot tell a deliberate per-repo divergence from the silent drift it
+        # exists to catch, so a legitimate one produces a permanent red -- and a
+        # permanently red audit is the failure mode OMN-16727 recorded, where
+        # the job exits on the first finding set and masks every later surface.
+        override = overrides.get(repo_name)
+        if override is None:
+            repo_expected_raw = str(variable["expected_json"])
+        else:
+            if not isinstance(override, dict):
+                raise ValueError(f"repository_overrides[{repo_name}] must be a mapping")
+            if not str(override.get("revert_when", "")).strip():
+                raise ValueError(
+                    f"repository_overrides[{repo_name}] must carry a revert_when: "
+                    "a declared divergence with no stated end is indistinguishable "
+                    "from drift to the next lane"
+                )
+            repo_expected_raw = str(override["expected_json"])
+        repo_expected = _canonical_json(repo_expected_raw)
         actual = _variable_value(_variables(["--repo", f"{ORG}/{repo_name}"]), name)
         if actual is None:
+            if override is not None:
+                findings.append(
+                    Finding(
+                        repo_name,
+                        f"{name} has no repo shadow but the policy declares an "
+                        f"override of {repo_expected_raw!r}; the repo silently "
+                        f"inherits the org value instead",
+                    )
+                )
             continue
         try:
             normalized = _canonical_json(actual)
         except json.JSONDecodeError:
             findings.append(Finding(repo_name, f"{name} is not valid JSON: {actual!r}"))
             continue
-        if normalized != expected:
+        if normalized != repo_expected:
             findings.append(
                 Finding(
                     repo_name,
-                    f"{name} drifted to {actual!r}; expected {variable['expected_json']!r}",
+                    f"{name} drifted to {actual!r}; expected {repo_expected_raw!r}",
                 )
             )
     return findings
@@ -219,6 +265,262 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
     return findings
 
 
+def audit_route_wiring(policy: dict[str, Any], repo_root: Path) -> list[Finding]:
+    """Audit the OMN-18031 per-run routing consumer shape.
+
+    ADDITIVE ON PURPOSE. This is a new pass inside ``--local-workflows``; it
+    changes nothing about the two existing passes. That placement is deliberate
+    and was checked against the live workflow rather than assumed: the
+    OMN-16727 masking everyone cites is at the WORKFLOW-STEP level --
+    ``.github/workflows/runner-routing-audit.yml`` runs ``--local-workflows``
+    and ``--github-vars`` as two separate ``run:`` steps, so a failure in the
+    first means the second never executes. ``main()`` itself already extends
+    one findings list and prints them all, so adding a pass HERE inherits no
+    masking. Do not "fix" ``main()`` on the strength of that ticket's title.
+
+    What it enforces, and why each rule is mechanical rather than a review
+    convention:
+
+    1. A route consumer must NOT also reference ``OMNI_PUBLIC_PR_RUNS_ON_JSON``.
+       Fork isolation lives INSIDE ``runner_route_decision.py`` (step S1),
+       deliberately once, rather than being restated at each of the 46
+       selector-carrying call sites in this repo where one of them can be
+       edited wrong and nothing notices. A call site that re-implements the
+       fork branch is re-opening exactly that hole.
+    2. A route consumer must actually declare ``needs:`` on the job it reads.
+       Without it the expression resolves to nothing, the job fails to
+       SCHEDULE, and that does not look like a test failure.
+    3. A workflow that consumes a route output must contain a job that
+       produces one -- otherwise the consumer is reading a job that was
+       deleted or renamed, which is the silent-retirement shape again.
+    """
+    allowlist = {
+        str(item["path"])
+        for item in policy.get("hosted_runner_allowlist", [])
+        if isinstance(item, dict) and "path" in item
+    }
+    findings: list[Finding] = []
+    for path in _workflow_paths(repo_root):
+        rel = path.relative_to(repo_root).as_posix()
+        try:
+            workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            findings.append(Finding(rel, f"workflow is not parseable YAML: {exc}"))
+            continue
+        jobs = workflow.get("jobs", {}) if isinstance(workflow, dict) else {}
+        if not isinstance(jobs, dict):
+            continue
+
+        producers = {
+            name
+            for name, job in jobs.items()
+            if isinstance(job, dict)
+            and (
+                "runner-route-reusable" in str(job.get("uses", ""))
+                or "labels" in (job.get("outputs") or {})
+            )
+        }
+
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            runs_on = job.get("runs-on")
+            if not isinstance(runs_on, str):
+                continue
+            match = ROUTE_CONSUMER_RE.search(_normalized_expression(runs_on))
+            if match is None:
+                continue
+            producer = match.group(1)
+            scope = f"{rel}:{job_name}"
+
+            if PUBLIC_PR_RUNNER_VARIABLE in _normalized_expression(runs_on):
+                findings.append(
+                    Finding(
+                        scope,
+                        "a per-run route consumer must not also reference "
+                        f"{PUBLIC_PR_RUNNER_VARIABLE}; fork isolation is enforced inside "
+                        "scripts/ci/runner_route_decision.py (step S1), not restated at "
+                        "call sites where it can be edited wrong",
+                    )
+                )
+
+            needs = job.get("needs")
+            declared = (
+                [needs]
+                if isinstance(needs, str)
+                else list(needs)
+                if isinstance(needs, list)
+                else []
+            )
+            if producer not in declared:
+                findings.append(
+                    Finding(
+                        scope,
+                        f"runs-on reads needs.{producer}.outputs.labels but the job does not "
+                        f"declare needs: {producer} -- the expression would resolve to nothing "
+                        "and the job would fail to schedule, which does not surface as a failure",
+                    )
+                )
+
+            if producer not in jobs:
+                findings.append(
+                    Finding(
+                        scope,
+                        f"runs-on reads needs.{producer}.outputs.labels but no job named "
+                        f"{producer!r} exists in this workflow",
+                    )
+                )
+            elif producers and producer not in producers:
+                findings.append(
+                    Finding(
+                        scope,
+                        f"job {producer!r} is consumed as a route producer but declares no "
+                        "'labels' output and does not call the route reusable workflow",
+                    )
+                )
+
+        # A workflow carrying the routing decision must be pinned hosted: a
+        # router that queues behind the fleet it routes onto cannot report on
+        # saturation.
+        if producers and "runner-route" in rel and rel not in allowlist:
+            findings.append(
+                Finding(
+                    rel,
+                    "a workflow that produces a routing decision must be listed in "
+                    "hosted_runner_allowlist with a reason -- it must not share fate with "
+                    "the fleet it routes onto",
+                )
+            )
+    return findings
+
+
+def _runs_on_blocks(text: str) -> list[tuple[int, str]]:
+    """Yield ``(line_index, full_value)`` for every ``runs-on:`` key in ``text``.
+
+    Textual on purpose. The marker these blocks are matched against is a YAML
+    COMMENT, and ``yaml.safe_load`` discards comments -- so a pass built on the
+    parsed document literally cannot see the thing it must check. Continuation
+    lines of a folded scalar are joined in, because the V1 expression spans six
+    lines and a line-at-a-time match would miss it.
+    """
+    lines = text.splitlines()
+    blocks: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        match = re.match(r"^(\s*)runs-on:\s*(.*)$", line)
+        if match is None:
+            continue
+        indent = len(match.group(1))
+        value = [match.group(2)]
+        for follow in lines[idx + 1 :]:
+            if not follow.strip():
+                continue
+            if len(follow) - len(follow.lstrip()) <= indent:
+                break
+            value.append(follow.strip())
+        blocks.append((idx, " ".join(value)))
+    return blocks
+
+
+def _marker_comments_above(lines: list[str], runs_on_index: int) -> list[str]:
+    """Comment lines between the job key and ``runs-on:``.
+
+    Walking stops at the first NON-comment line indented less than the
+    ``runs-on:`` key -- that is the job key itself. Comment lines are collected
+    at any indentation, so the scan is not defeated by a marker written flush
+    left, and the window never reaches into the job above.
+    """
+    runs_on_indent = len(lines[runs_on_index]) - len(lines[runs_on_index].lstrip())
+    collected: list[str] = []
+    lower = max(0, runs_on_index - SELECTOR_MARKER_WINDOW)
+    for idx in range(runs_on_index - 1, lower - 1, -1):
+        line = lines[idx]
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            collected.append(stripped)
+            continue
+        if not stripped:
+            continue
+        if len(line) - len(line.lstrip()) < runs_on_indent:
+            break
+    return collected
+
+
+def audit_selector_markers(repo_root: Path) -> list[Finding]:
+    """Audit the OMN-18031 V2 selector marker (additive).
+
+    ADDITIVE AND TEXTUAL. ``audit_route_wiring`` above already enforces the
+    STRUCTURE of a route consumer -- the ``needs:`` edge, the producer's
+    existence, the fork-isolation prohibition. It cannot enforce the marker,
+    because the marker is a comment and the structural pass reads parsed YAML.
+
+    Why a comment is worth a gate at all, when it changes no behaviour: the V1
+    marker is how 94 job definitions in this repo are FOUND. Every survey,
+    migration and drift audit of runner placement to date -- including the one
+    that established this design had zero prior art in the org -- was a grep for
+    that string. A V2 consumer that carries no marker is invisible to the same
+    grep, so the next survey silently under-counts the very jobs that moved, and
+    the first person to notice is whoever is debugging a placement incident.
+
+    Both directions are enforced, because each alone is a half-measure:
+
+    1. A route-consuming ``runs-on:`` must carry the V2 marker above it.
+    2. A V2 marker must be followed by a route-consuming ``runs-on:``. Without
+       this, a job reverted from V2 back to the seam expression keeps a marker
+       that now lies, which is worse than no marker.
+    3. A route-consuming ``runs-on:`` must NOT still carry the V1 marker. That
+       pairing is a half-finished migration whose comment contradicts its code.
+    """
+    findings: list[Finding] = []
+    for path in _workflow_paths(repo_root):
+        rel = path.relative_to(repo_root).as_posix()
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+
+        consumer_indices: set[int] = set()
+        for idx, value in _runs_on_blocks(text):
+            if ROUTE_CONSUMER_RE.search(_normalized_expression(value)) is None:
+                continue
+            consumer_indices.add(idx)
+            comments = "\n".join(_marker_comments_above(lines, idx))
+            if SELECTOR_V2_MARKER not in comments:
+                findings.append(
+                    Finding(
+                        f"{rel}:{idx + 1}",
+                        "runs-on resolves from a route output but carries no "
+                        f"{SELECTOR_V2_MARKER} marker comment; every survey of runner "
+                        f"placement in this org is a grep for {SELECTOR_V1_MARKER}, so an "
+                        "unmarked consumer is invisible to the next one",
+                    )
+                )
+            if SELECTOR_V1_MARKER in comments:
+                findings.append(
+                    Finding(
+                        f"{rel}:{idx + 1}",
+                        f"runs-on resolves from a route output but still carries the "
+                        f"{SELECTOR_V1_MARKER} marker; the comment contradicts the "
+                        "expression it describes",
+                    )
+                )
+
+        for idx, line in enumerate(lines):
+            if SELECTOR_V2_MARKER not in line:
+                continue
+            if any(
+                idx < consumer <= idx + SELECTOR_MARKER_WINDOW
+                for consumer in consumer_indices
+            ):
+                continue
+            findings.append(
+                Finding(
+                    f"{rel}:{idx + 1}",
+                    f"{SELECTOR_V2_MARKER} is declared but no runs-on below it resolves "
+                    "from a route output; a marker left behind by a revert states a "
+                    "placement the workflow does not have",
+                )
+            )
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
@@ -235,6 +537,14 @@ def main() -> int:
     findings: list[Finding] = []
     if args.local_workflows:
         findings.extend(audit_local_workflows(policy, args.repo_root))
+        # OMN-18031, additive: the per-run routing consumer shape. Extends the
+        # same findings list, so its results print alongside the existing pass
+        # rather than replacing or short-circuiting it.
+        findings.extend(audit_route_wiring(policy, args.repo_root))
+        # OMN-18031, additive: the V2 selector marker. Textual rather than
+        # structural, because the marker is a YAML comment the parsed
+        # document above does not retain.
+        findings.extend(audit_selector_markers(args.repo_root))
     if args.github_vars:
         findings.extend(audit_github_variables(policy))
 

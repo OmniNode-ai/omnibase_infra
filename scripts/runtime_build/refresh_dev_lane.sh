@@ -157,12 +157,26 @@ readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projecti
 # it is the half that is provable here.
 readonly REFRESH_BUILD_SERVICES=(
     "${CORE_SERVICES[@]}"
+    redpanda-scram-user
+    # OMN-18012 phase B -- the SASL flip. In the scope for a DIFFERENT reason
+    # than the writers below: it is a one-shot on a pinned upstream image, so it
+    # cannot go stale. It is here because a governed refresh must RE-ASSERT the
+    # flip. `enable_sasl` and `superusers` live in the controller log, and a
+    # refresh that recreates every client with SASL credentials while never
+    # re-running the readback would leave the lane's central claim -- that the
+    # listener refuses a plaintext client -- unverified after the one operation
+    # most likely to have disturbed it.
+    redpanda-sasl-enable
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
+    # OMN-16025 -- the infra routing-decision projection consumer. Dev-lane-only
+    # for the same reason as the six above, and in the build scope for the same
+    # reason: `restart: unless-stopped` keeps a stale image running and healthy.
+    infra-routing-decisions-consumer
 )
 readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
 

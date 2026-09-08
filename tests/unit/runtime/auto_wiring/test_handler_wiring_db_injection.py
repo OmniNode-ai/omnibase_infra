@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -15,7 +16,10 @@ import pytest
 from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
     ModelDbTableDeclaration,
 )
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import ProjectionNotMaterializedError
+from omnibase_infra.event_bus.models.model_publish_receipt import ModelPublishReceipt
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _DB_URL_ENV_MAP,
     ProjectionDispatchSinks,
@@ -188,7 +192,7 @@ def test_projection_callback_preserves_typed_envelope_id() -> None:
     envelope = ModelEventEnvelope[object](
         payload={"service_name": "svc-a", "health_status": "healthy"},
         envelope_id=envelope_id,
-        event_type=topic,
+        event_type=derive_event_type_alias_for_topic(topic),
     )
     callback = _make_projection_dispatch_callback(
         EnvelopeAwareHandler(),
@@ -1211,13 +1215,34 @@ _DLQ_TOPIC = "onex.dlq.omnimarket.projection-delegation-malformed.v1"
 
 
 class _CapturingEventBus:
-    """Minimal event bus capturing publish(topic, key, value) calls."""
+    """Minimal event bus capturing publish(topic, key, value) calls.
+
+    OMN-17862: ``publish`` returns a ``ModelPublishReceipt``, as BOTH shipped
+    buses do (``EventBusKafka.publish`` and ``EventBusInmemory.publish`` are
+    annotated ``-> ModelPublishReceipt``). It previously returned ``None``,
+    which no real bus does. That mattered once the DLQ path stopped discarding
+    the receipt: the quarantine publication is now CONFIRMED before the offset
+    is allowed to advance, and a transport reporting no coordinate fails closed.
+    Teaching the double to report a coordinate fixes the DOUBLE; a double that
+    under-implements the real contract is how a test passes on a shape the real
+    stores reject (the OMN-15598 upsert-parity lesson, same class).
+    """
 
     def __init__(self) -> None:
         self.published: list[tuple[str, object, bytes]] = []
 
-    async def publish(self, topic: str, key: object, value: bytes) -> None:
+    async def publish(
+        self, topic: str, key: object, value: bytes
+    ) -> ModelPublishReceipt:
         self.published.append((topic, key, value))
+        return ModelPublishReceipt(
+            topic=topic,
+            partition=0,
+            offset=len(self.published) - 1,
+            cluster="test-cluster",
+            produced_at=datetime.now(UTC),
+            transport=EnumInfraTransportType.INMEMORY,
+        )
 
 
 def _raising_validation_handler() -> object:

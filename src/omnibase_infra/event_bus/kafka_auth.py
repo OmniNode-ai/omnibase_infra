@@ -5,6 +5,17 @@
 Keep direct aiokafka admin/producer/consumer call sites aligned with
 ``EventBusKafka`` so managed MSK IAM cutover does not leave health checks,
 topic provisioning, or lag checks on plaintext-only client construction.
+
+This module is a declared TEST-SELECTION BOUNDARY (OMN-18012). Every unit test
+around it mocks the broker, so the one failure it cannot observe is the only
+one that matters here: a client that silently opens PLAINTEXT against an
+auth-required listener. ``scripts/ci/test_selection_adjacency.yaml``
+(``boundary_integration_tests``) therefore maps this file to
+``tests/integration/customer_path/``, which starts a real auth-required
+Redpanda -- so a change here selects that suite and the governed pre-push
+places it on a lab host instead of deferring it. The edge is invisible from
+this file otherwise, which is why it is named here: if this module moves or is
+split, move the mapping with it.
 """
 
 from __future__ import annotations
@@ -112,7 +123,29 @@ def build_aiokafka_auth_kwargs(config: ModelKafkaEventBusConfig) -> dict[str, ob
     if config.sasl_mechanism is not None:
         kwargs["sasl_mechanism"] = config.sasl_mechanism
 
-    if config.sasl_mechanism == "OAUTHBEARER":
+    if config.sasl_mechanism in ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"):
+        # OMN-18012: the sasl_mechanism field pattern has always accepted PLAIN
+        # and SCRAM-SHA-*, but this builder never threaded the credentials, so
+        # a client configured for a username/password broker was constructed
+        # with a mechanism and no credentials -- aiokafka then dies inside its
+        # own SCRAM authenticator ("'NoneType' object has no attribute
+        # 'encode'"). Fail loudly on a missing credential instead.
+        if not config.sasl_plain_username or not config.sasl_plain_password:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="build_aiokafka_auth_kwargs",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                f"sasl_mechanism={config.sasl_mechanism!r} requires both "
+                "sasl_plain_username and sasl_plain_password",
+                context=context,
+                parameter="sasl_plain_username",
+                value=config.sasl_plain_username,
+            )
+        kwargs["sasl_plain_username"] = config.sasl_plain_username
+        kwargs["sasl_plain_password"] = config.sasl_plain_password
+    elif config.sasl_mechanism == "OAUTHBEARER":
         kwargs["sasl_oauth_token_provider"] = OAuthBearerTokenProvider(
             token_endpoint_url=str(config.sasl_oauthbearer_token_endpoint_url),
             client_id=str(config.sasl_oauthbearer_client_id),
@@ -144,3 +177,84 @@ def build_aiokafka_auth_kwargs(config: ModelKafkaEventBusConfig) -> dict[str, ob
 def build_aiokafka_auth_kwargs_from_env() -> dict[str, object]:
     """Build auth/TLS kwargs from the standard runtime Kafka env variables."""
     return build_aiokafka_auth_kwargs(ModelKafkaEventBusConfig.default())
+
+
+def build_confluent_auth_config(config: ModelKafkaEventBusConfig) -> dict[str, str]:
+    """Build confluent-kafka transport/auth config entries from runtime Kafka config.
+
+    The synchronous ``confluent_kafka`` clients (``AdminClient``, ``Producer``,
+    ``Consumer``) take a flat ``dict[str, str]`` using librdkafka's dotted key
+    names, so they cannot consume :func:`build_aiokafka_auth_kwargs` directly.
+    This function is the confluent-side projection of the *same* resolver --
+    :class:`ModelKafkaEventBusConfig` -- so both client families read one
+    declaration of the lane transport rather than two.
+
+    Returns ``{}`` for a ``PLAINTEXT`` lane, exactly as the aiokafka builder
+    does, so a plaintext lane keeps its current construction byte-for-byte.
+
+    OAUTHBEARER and AWS_MSK_IAM are refused rather than silently downgraded:
+    both require a token *callback* on the confluent client, which is not
+    expressible as a config entry. Failing loudly keeps a caller from opening
+    an unauthenticated connection against an auth-required listener, which is
+    the exact failure this module exists to prevent.
+
+    Args:
+        config: Resolved runtime Kafka configuration.
+
+    Returns:
+        librdkafka config entries (``security.protocol``, ``sasl.mechanism``,
+        ``sasl.username``, ``sasl.password``, ``ssl.ca.location``). Empty for
+        a PLAINTEXT lane.
+
+    Raises:
+        ProtocolConfigurationError: A SASL mechanism is declared without the
+            credentials it needs, or a token-callback mechanism is declared.
+    """
+    if config.security_protocol == "PLAINTEXT":
+        return {}
+
+    entries: dict[str, str] = {"security.protocol": config.security_protocol}
+
+    if config.sasl_mechanism is not None:
+        entries["sasl.mechanism"] = config.sasl_mechanism
+
+    if config.sasl_mechanism in ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"):
+        if not config.sasl_plain_username or not config.sasl_plain_password:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="build_confluent_auth_config",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                f"sasl_mechanism={config.sasl_mechanism!r} requires both "
+                "sasl_plain_username and sasl_plain_password",
+                context=context,
+                parameter="sasl_plain_username",
+                value=config.sasl_plain_username,
+            )
+        entries["sasl.username"] = config.sasl_plain_username
+        entries["sasl.password"] = config.sasl_plain_password
+    elif config.sasl_mechanism in ("OAUTHBEARER", "AWS_MSK_IAM"):
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="build_confluent_auth_config",
+            target_name="kafka_config",
+        )
+        raise ProtocolConfigurationError(
+            f"sasl_mechanism={config.sasl_mechanism!r} needs a token callback "
+            "on the confluent client and cannot be expressed as config "
+            "entries; use an aiokafka client for this lane",
+            context=context,
+            parameter="sasl_mechanism",
+            value=config.sasl_mechanism,
+        )
+
+    if config.security_protocol in ("SSL", "SASL_SSL") and config.ssl_ca_file:
+        entries["ssl.ca.location"] = config.ssl_ca_file
+
+    return entries
+
+
+def build_confluent_auth_config_from_env() -> dict[str, str]:
+    """Build confluent-kafka transport/auth entries from the runtime Kafka env vars."""
+    return build_confluent_auth_config(ModelKafkaEventBusConfig.default())

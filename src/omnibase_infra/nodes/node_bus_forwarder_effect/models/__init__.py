@@ -12,7 +12,9 @@ from .model_gateway_forwarder_runtime_config import ModelGatewayForwarderRuntime
 from .model_gateway_heartbeat import ModelGatewayHeartbeat
 from .model_gateway_https_ingest_config import ModelGatewayHttpsIngestConfig
 from .model_gateway_lane_mirror_config import ModelGatewayLaneMirrorConfig
+from .model_gateway_lane_mirror_health import ModelGatewayLaneMirrorHealth
 from .model_gateway_mirror_topics import ModelGatewayMirrorTopics
+from .model_gateway_publish_receipt import ModelGatewayPublishReceipt
 from .model_gateway_tenant_identity import ModelGatewayTenantIdentity
 
 __all__ = [
@@ -24,8 +26,10 @@ __all__ = [
     "ModelGatewayForwarderConfig",
     "ModelGatewayForwarderRuntimeConfig",
     "ModelGatewayHeartbeat",
-    "ModelGatewayLaneMirrorConfig",
     "ModelGatewayHttpsIngestConfig",
+    "ModelGatewayLaneMirrorConfig",
+    "ModelGatewayLaneMirrorHealth",
     "ModelGatewayMirrorTopics",
+    "ModelGatewayPublishReceipt",
     "ModelGatewayTenantIdentity",
 ]

@@ -8,7 +8,8 @@ of OMN-17298 / OMN-15359 / OMN-15425 / OMN-17440 answerable. The role that was
 provisioned first, on the ``.201`` dev lane, is not the one those four tickets
 validate against: they run against the ``onex-dev`` serving RDS
 ``omninode-dev-postgres`` (physical database ``omnidash_analytics``), reached
-through the dev-system cluster EC2 ``i-06169517a92b45f86``. The read path in use
+through the dev-system cluster node -- named by ROLE here, never by instance id,
+because this repository is public (OMN-18024). The read path in use
 there today is ``role_omnidash``, which OWNS its relations -- so it can DROP,
 ALTER and TRUNCATE them, and Postgres exempts a relation's owner from RLS
 unconditionally. The argument for this principal is not missing access; it is

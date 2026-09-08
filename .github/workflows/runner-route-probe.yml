@@ -1,0 +1,173 @@
+# runner-route-probe.yml — live proof of the routing WIRING (OMN-18031, gate P1)
+#
+# WHY THIS WORKFLOW EXISTS AS A PERMANENT ARTIFACT AND NOT A ONE-OFF EXPERIMENT.
+# The whole per-run routing design rests on one assumption: that a job's
+# `runs-on` can read `needs.<job>.outputs.<name>`. GitHub documents the `needs`
+# context as available to `jobs.<job_id>.runs-on`, but a survey of all five
+# routing repos on 2026-09-07 found ZERO existing uses of it -- 196 workflow
+# files carry the OMNI_RUNNER_SELECTOR_V1 seam expression (that was the positive
+# control for the search), and none of them resolves `runs-on` from `needs`. So
+# the assumption was unproven in this org, and the design named it the single
+# highest-risk item. This workflow is what proves it, and it stays in the tree
+# so a future Actions behaviour change breaks a small explicit probe rather than
+# silently breaking every consuming workflow at once.
+#
+# IT PROVES TWO SHAPES, because they are not the same claim:
+#   (a) a NORMAL job's outputs consumed by a peer job's `runs-on`
+#       (route-inline -> consume-inline). This is the fallback shape: one
+#       inline job per repo executing the same pinned module.
+#   (b) a REUSABLE-WORKFLOW (`uses:`) job's outputs consumed the same way
+#       (route-reusable -> consume-reusable). This is the CHOSEN shape, the one
+#       the fan-out to four sibling repos depends on. If only (a) works, the
+#       fan-out uses inline route jobs -- same module, same outputs, same tests,
+#       five call sites.
+#
+# SAFETY. Every job here is hosted today and cannot be otherwise: with the seam
+# at '["ubuntu-latest"]' the decision is `seam_ceiling_hosted` on every run, and
+# a fork PR is `fork_isolation` before any capacity signal is even read. The
+# consumers therefore schedule on ubuntu-latest. This probe can only ever prove
+# the WIRING resolves; it does not and cannot move a job onto the fleet.
+name: runner-route-probe
+
+on:
+  pull_request:
+    paths:
+      - "scripts/ci/runner_route_decision.py"
+      - "scripts/ci/runner_saturation_record.py"
+      - "config/runner_routing_policy.yaml"
+      - ".github/workflows/runner-route-probe.yml"
+      - ".github/workflows/runner-route-reusable.yml"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Compute the decision without gating anything"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  # --- shape (a): a normal job's outputs feeding a peer job's runs-on -------
+  route-inline:
+    name: route-inline
+    # Hosted by policy: a router must not queue behind the fleet it routes onto.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      labels: ${{ steps.decide.outputs.labels }}
+      decision: ${{ steps.decide.outputs.decision }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Decide runs-on
+        id: decide
+        env:
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          # Passed as data, never interpolated into the shell body -- see the
+          # long note in runner-route-reusable.yml. A JSON array rendered into
+          # a quoted argv loses its inner quotes and reaches the module as
+          # non-JSON, which is how the merged pilot's first live decision came
+          # back `probe_error:seam_unparseable` on run 34131479134.
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          SEAM_JSON: >-
+            ${{ (github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON)
+                || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}
+          PUBLIC_JSON: ${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}
+        run: |
+          set -uo pipefail
+          python3 scripts/ci/runner_route_decision.py \
+            --event-name "${EVENT_NAME}" \
+            --head-repo "${HEAD_REPO}" \
+            --repository "${REPOSITORY}" \
+            --workflow-path ".github/workflows/runner-route-probe.yml" \
+            --seam-json "${SEAM_JSON}" \
+            --public-json "${PUBLIC_JSON}" \
+            --policy config/runner_routing_policy.yaml || true
+          if ! grep -q '^labels=' "${GITHUB_OUTPUT}"; then
+            echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
+            echo 'decision=hosted' >> "${GITHUB_OUTPUT}"
+            echo 'reason=probe_error:module_unavailable' >> "${GITHUB_OUTPUT}"
+          fi
+
+  consume-inline:
+    name: consume-inline
+    needs: route-inline
+    # THE ASSERTION UNDER TEST (shape a). If `needs` did not resolve here this
+    # job would fail to schedule, not merely fail -- which is exactly the
+    # signal P1 is looking for.
+    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job's decision.
+    runs-on: ${{ fromJSON(needs.route-inline.outputs.labels) }}
+    timeout-minutes: 5
+    steps:
+      - name: Report where this job actually landed
+        run: |
+          set -euo pipefail
+          echo "decision=${{ needs.route-inline.outputs.decision }}"
+          echo "reason=${{ needs.route-inline.outputs.reason }}"
+          echo "labels=${{ needs.route-inline.outputs.labels }}"
+          echo "runner_name=${RUNNER_NAME:-unknown}"
+          echo "runner_environment=${RUNNER_ENVIRONMENT:-unknown}"
+          test -n "${{ needs.route-inline.outputs.labels }}"
+
+  # --- shape (b): a reusable-workflow job's outputs feeding runs-on --------
+  route-reusable:
+    name: route-reusable
+    uses: ./.github/workflows/runner-route-reusable.yml
+    with:
+      workflow_path: .github/workflows/runner-route-probe.yml
+    secrets:
+      RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+
+  consume-reusable:
+    name: consume-reusable
+    needs: route-reusable
+    # THE ASSERTION UNDER TEST (shape b) — the one the four-repo fan-out rests
+    # on. Documented as supported; never before exercised in this org.
+    # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job's decision.
+    runs-on: ${{ fromJSON(needs.route-reusable.outputs.labels) }}
+    timeout-minutes: 5
+    steps:
+      - name: Report where this job actually landed
+        run: |
+          set -euo pipefail
+          echo "decision=${{ needs.route-reusable.outputs.decision }}"
+          echo "reason=${{ needs.route-reusable.outputs.reason }}"
+          echo "labels=${{ needs.route-reusable.outputs.labels }}"
+          echo "runner_name=${RUNNER_NAME:-unknown}"
+          echo "runner_environment=${RUNNER_ENVIRONMENT:-unknown}"
+          test -n "${{ needs.route-reusable.outputs.labels }}"
+
+  # --- the gate: both shapes must have actually run ------------------------
+  route-wiring-proof:
+    name: Runner Route Wiring Proof (OMN-18031)
+    needs: [route-inline, consume-inline, route-reusable, consume-reusable]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Assert both wiring shapes resolved
+        run: |
+          set -euo pipefail
+          inline='${{ needs.consume-inline.result }}'
+          reusable='${{ needs.consume-reusable.result }}'
+          echo "consume-inline=${inline} consume-reusable=${reusable}"
+          echo "inline reason=${{ needs.route-inline.outputs.reason }}"
+          echo "reusable reason=${{ needs.route-reusable.outputs.reason }}"
+          # A `skipped` or `cancelled` consumer is NOT a pass. The failure mode
+          # this gate exists to catch is a consumer that never scheduled because
+          # its runs-on expression resolved to nothing -- which does not look
+          # like a test failure unless something asserts on it.
+          fail=0
+          [ "${inline}" = "success" ] || { echo "::error::shape (a) needs->runs-on did not resolve: ${inline}"; fail=1; }
+          [ "${reusable}" = "success" ] || { echo "::error::shape (b) reusable needs->runs-on did not resolve: ${reusable}"; fail=1; }
+          [ -n "${{ needs.route-inline.outputs.labels }}" ] || { echo "::error::inline route emitted no labels"; fail=1; }
+          [ -n "${{ needs.route-reusable.outputs.labels }}" ] || { echo "::error::reusable route emitted no labels"; fail=1; }
+          exit "${fail}"

@@ -296,7 +296,11 @@ class TestVerifyRegistrationFails:
             if c.check_type == EnumContractCheckType.SUBSCRIPTION
         )
         assert sub_check.verdict == EnumValidationVerdict.FAIL
-        assert "6/7" in sub_check.evidence  # 6 missing out of 7
+        # OMN-18013: was "6/7". node_registration_orchestrator now declares 6
+        # subscribe topics (the producer-less, consumer-less
+        # registry-request-introspection topic was deleted), and this fixture
+        # reports exactly one of them as subscribed, so 5 of 6 are missing.
+        assert "5/6" in sub_check.evidence  # 5 missing out of 6
 
     def test_fail_when_no_publication_data(self) -> None:
         report = verify_registration_contract(
