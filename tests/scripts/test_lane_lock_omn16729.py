@@ -65,6 +65,40 @@ def _holder_script(lock_dir: Path, hold_seconds: float, marker: Path) -> str:
     )
 
 
+def _start_holder(
+    lock_dir: Path, hold_seconds: float, marker: Path
+) -> subprocess.Popen[str]:
+    """Start a lock holder in its OWN process group.
+
+    The holder's `sleep` is a grandchild of this test, and killing only the
+    shell would orphan it (OMN-16995: that is how test_heavy_lock.py leaked a
+    busy loop per run until 19 of them held 18.6 of `.200`'s 24 cores). Every
+    Popen here is group-spawned and torn down with os.killpg.
+    """
+    return subprocess.Popen(
+        ["bash", "-c", _holder_script(lock_dir, hold_seconds, marker)],
+        env=_env(lock_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+
+
+def _stop_holder(holder: subprocess.Popen[str]) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(os.getpgid(holder.pid), signal.SIGKILL)
+    holder.wait(timeout=10)
+
+
+def _await_held(holder: subprocess.Popen[str], marker: Path) -> None:
+    deadline = time.monotonic() + 20
+    while not marker.exists():
+        assert holder.poll() is None, "holder exited before taking the lock"
+        assert time.monotonic() < deadline, "holder never signalled it held the lock"
+        time.sleep(0.05)
+
+
 @pytest.mark.unit
 def test_second_acquirer_times_out_and_names_the_holder(tmp_path: Path) -> None:
     """AC1: a second acquisition of the SAME lane refuses within its bounded
@@ -73,13 +107,7 @@ def test_second_acquirer_times_out_and_names_the_holder(tmp_path: Path) -> None:
     lock_dir = tmp_path / "locks"
     marker = tmp_path / "held"
 
-    holder = subprocess.Popen(
-        ["bash", "-c", _holder_script(lock_dir, 20, marker)],
-        env=_env(lock_dir),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    holder = _start_holder(lock_dir, 20, marker)
     try:
         deadline = time.monotonic() + 20
         while not marker.exists():
@@ -109,8 +137,7 @@ def test_second_acquirer_times_out_and_names_the_holder(tmp_path: Path) -> None:
         )
         waited = time.monotonic() - started
     finally:
-        holder.kill()
-        holder.wait(timeout=10)
+        _stop_holder(holder)
 
     assert second.returncode == 2, (
         "a contended lane acquisition must exit 2, not proceed. "
@@ -177,19 +204,9 @@ def test_different_lanes_do_not_block_each_other(tmp_path: Path) -> None:
     supplements did exactly that."""
     lock_dir = tmp_path / "locks"
     marker = tmp_path / "held"
-    holder = subprocess.Popen(
-        ["bash", "-c", _holder_script(lock_dir, 20, marker)],
-        env=_env(lock_dir),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    holder = _start_holder(lock_dir, 20, marker)
     try:
-        deadline = time.monotonic() + 20
-        while not marker.exists():
-            assert holder.poll() is None
-            assert time.monotonic() < deadline
-            time.sleep(0.05)
+        _await_held(holder, marker)
 
         other = subprocess.run(
             [
@@ -212,8 +229,7 @@ def test_different_lanes_do_not_block_each_other(tmp_path: Path) -> None:
             check=False,
         )
     finally:
-        holder.kill()
-        holder.wait(timeout=10)
+        _stop_holder(holder)
 
     assert other.returncode == 0, f"stderr={other.stderr!r}"
     assert "OTHER_OK" in other.stdout
@@ -227,23 +243,11 @@ def test_lock_is_released_when_the_holder_tree_is_killed(tmp_path: Path) -> None
     recovery (and therefore no wrong-guess mutation of a live lane) is possible."""
     lock_dir = tmp_path / "locks"
     marker = tmp_path / "held"
-    holder = subprocess.Popen(
-        ["bash", "-c", _holder_script(lock_dir, 60, marker)],
-        env=_env(lock_dir),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-    deadline = time.monotonic() + 20
-    while not marker.exists():
-        assert holder.poll() is None
-        assert time.monotonic() < deadline
-        time.sleep(0.05)
+    holder = _start_holder(lock_dir, 60, marker)
+    _await_held(holder, marker)
     # Kill the whole session: the descriptor is shared with children, so
     # releasing the lane means the holder TREE is gone, not just its shell.
-    os.killpg(os.getpgid(holder.pid), signal.SIGKILL)
-    holder.wait(timeout=10)
+    _stop_holder(holder)
 
     after = subprocess.run(
         [
@@ -344,25 +348,14 @@ def test_holder_sidecar_records_lane_ref_and_argv(tmp_path: Path) -> None:
     it carries lane, compose project, ref and argv, not just a pid."""
     lock_dir = tmp_path / "locks"
     marker = tmp_path / "held"
-    holder = subprocess.Popen(
-        ["bash", "-c", _holder_script(lock_dir, 20, marker)],
-        env=_env(lock_dir),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    holder = _start_holder(lock_dir, 20, marker)
     try:
-        deadline = time.monotonic() + 20
-        while not marker.exists():
-            assert holder.poll() is None
-            assert time.monotonic() < deadline
-            time.sleep(0.05)
+        _await_held(holder, marker)
         sidecar = json.loads(
             (lock_dir / f"{PROJECT}.lock.holder").read_text(encoding="utf-8")
         )
     finally:
-        holder.kill()
-        holder.wait(timeout=10)
+        _stop_holder(holder)
 
     assert sidecar["compose_project"] == PROJECT
     assert sidecar["lane"] == "dev"
