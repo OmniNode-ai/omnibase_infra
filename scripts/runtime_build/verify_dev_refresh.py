@@ -55,13 +55,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 
-# Sibling module in this same directory. These verifiers are executed as
-# scripts (``python scripts/runtime_build/verify_*.py`` or ``uv run python
-# <path>``), so ``sys.path[0]`` is this directory and the plain import
-# resolves. Sharing the verdict rather than re-copying it is the point:
-# OMN-17563 was one defect that had already been duplicated into both files.
 from health_payload import (
     DEFAULT_MAX_VERDICT_AGE,
     HEALTH_POLICY_STATUS_ONLY_STRICT,
@@ -72,6 +68,21 @@ from health_payload import (
     evaluate_health_body,
     unreachable_verdict,
     wait_for_verdict,
+)
+
+# Sibling module in this same directory. These verifiers are executed as
+# scripts (``python scripts/runtime_build/verify_*.py`` or ``uv run python
+# <path>``), so ``sys.path[0]`` is this directory and the plain import
+# resolves. Sharing the verdict rather than re-copying it is the point:
+# OMN-17563 was one defect that had already been duplicated into both files.
+from manifest_fetch import (
+    MANIFEST_FETCH_HISTORY_LIMIT,
+    MANIFEST_FETCH_INTERVAL_SECONDS,
+    MANIFEST_FETCH_WINDOW_SECONDS,
+    ManifestOpener,
+    RetryBudget,
+    count_manifest_contracts,
+    fetch_manifest_with_budget,
 )
 
 _REVISION_LABEL = "org.opencontainers.image.revision"
@@ -103,9 +114,9 @@ class ServiceDigestCheck:
 # OMN-16753: boot tolerance for the introspection-manifest fetch, mirroring
 # ``verify_stability_refresh``. The health probe beside it already waits a
 # derived window for the same runtime; a single-shot manifest fetch turns a
-# still-booting lane into INFRA_ERROR. Bounded, and still fail-closed.
-MANIFEST_FETCH_ATTEMPTS = 24
-MANIFEST_FETCH_INTERVAL_SECONDS = 15.0
+# still-booting lane into INFRA_ERROR. The window is a single shared
+# ``RetryBudget`` for the whole gate run, bounded by
+# ``MANIFEST_FETCH_WINDOW_SECONDS`` and still fail-closed on expiry.
 
 
 @dataclass
@@ -128,6 +139,10 @@ class HealthGateReport:
     # the failing criterion survives into the log and the receipt instead of
     # being reduced to one opaque `(verdict gate: runtime_degraded)` string.
     health_dimensions: list[dict[str, str]] = field(default_factory=list)
+    # OMN-16753: the last few manifest-fetch failures, oldest first, so a
+    # persistent failure is distinguishable from an intermittent one instead of
+    # being collapsed into whichever error happened to be last.
+    manifest_fetch_attempts: list[str] = field(default_factory=list)
     cluster_healthy: bool = False
     cluster_detail: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -170,6 +185,7 @@ class HealthGateReport:
             "health_policy": self.health_policy,
             "verdict_wait": self.verdict_wait,
             "health_dimensions": self.health_dimensions,
+            "manifest_fetch_attempts": self.manifest_fetch_attempts,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "revision_readback_ok": self.revisions_match,
@@ -286,57 +302,41 @@ def check_service_digest(
     )
 
 
-def _fetch_manifest_once(
-    manifest_url: str, *, opener: object | None = None
-) -> tuple[int | None, str | None]:
-    open_fn = opener or urllib.request.urlopen
-    try:
-        with open_fn(manifest_url, timeout=10) as resp:  # type: ignore[operator]
-            raw = resp.read()
-    except (urllib.error.URLError, OSError) as exc:
-        return None, f"manifest fetch failed: {exc}"
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        return None, f"manifest not valid JSON: {exc}"
-    if isinstance(payload, list):
-        contracts = payload
-    elif isinstance(payload, dict):
-        contracts = payload.get("contracts", [])
-    else:
-        return None, "manifest payload has unexpected shape"
-    return len(contracts), None
-
-
-def check_manifest_count(
+def fetch_manifest_contract_count(
     manifest_url: str,
-    min_contracts: int,
     *,
-    opener: object | None = None,
-    attempts: int = MANIFEST_FETCH_ATTEMPTS,
-    interval_seconds: float = MANIFEST_FETCH_INTERVAL_SECONDS,
-    sleep_fn: object | None = None,
-) -> tuple[int | None, str | None]:
+    opener: ManifestOpener | None = None,
+    budget: RetryBudget,
+) -> tuple[int | None, str | None, tuple[str, ...]]:
     """Count the manifest's contracts, tolerating a booting runtime (OMN-16753).
 
-    Only a TRANSPORT failure is retried; a 200 carrying a non-manifest body is
-    terminal, because waiting cannot turn it into one. Bounded attempts at a
-    fixed interval, LAST result returned -- the same shape as the health
-    probe's wait, and fail-closed on expiry.
+    Renamed from ``check_manifest_count``: it never checked anything. It
+    discarded its ``min_contracts`` argument and returned the raw count, while
+    ``run_health_gate`` did the floor comparison -- a signature promising a
+    check its body did not perform, which is exactly the ambiguity that lets a
+    caller treat "no error" as "the floor was met". The floor lives with the
+    caller that owns the report field; this function counts.
+
+    Only a TRANSPORT failure is retried, decided on the typed
+    ``EnumManifestFetchFailure`` and never on the wording of an error message.
+    A 200 carrying a non-manifest body is terminal, because waiting cannot turn
+    it into one. The ``budget`` is shared across the run and fail-closed on
+    expiry.
+
+    Returns:
+        ``(count, error, failure_history)`` -- the history is every failed
+        attempt's message, so a persistent failure is distinguishable from an
+        intermittent one in the receipt.
     """
-    _ = min_contracts
-    sleep = sleep_fn or time.sleep
-    count: int | None = None
-    err: str | None = f"manifest never fetched ({manifest_url})"
-    for attempt in range(1, attempts + 1):
-        count, err = _fetch_manifest_once(manifest_url, opener=opener)
-        if err is None:
-            return count, None
-        if not err.startswith("manifest fetch failed"):
-            return count, err
-        if attempt < attempts:
-            sleep(interval_seconds)  # type: ignore[operator]
-    return count, err
+    fetched = fetch_manifest_with_budget(manifest_url, opener=opener, budget=budget)
+    history = fetched.recent_history()
+    if fetched.error is not None or fetched.payload is None:
+        return (
+            None,
+            fetched.error or f"manifest fetch returned no payload ({manifest_url})",
+            history,
+        )
+    return count_manifest_contracts(fetched.payload), None, history
 
 
 def check_health(
@@ -375,7 +375,7 @@ def check_health_with_retry(
     max_verdict_age_seconds: float | None | object = DEFAULT_MAX_VERDICT_AGE,
     check_interval_seconds: float = 300.0,
     boot_grace_seconds: float = 120.0,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> tuple[HealthVerdict, str]:
     """Probe until a monitor verdict exists, for a bounded window (OMN-17624).
 
@@ -472,11 +472,13 @@ def run_health_gate(
     runner: object | None = None,
     opener: object | None = None,
     require_digest_change: bool = True,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
     require_verdict: bool = True,
     max_verdict_age_seconds: float | None = None,
     health_check_interval_seconds: float = 300.0,
     health_boot_grace_seconds: float = 120.0,
+    manifest_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
+    manifest_clock_fn: Callable[[], float] = time.monotonic,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -495,10 +497,19 @@ def run_health_gate(
             )
         )
 
-    count, err = check_manifest_count(
-        manifest_url, min_contracts, opener=opener, sleep_fn=sleep_fn
+    # OMN-16753: ONE budget for every manifest fetch in this run, sized to the
+    # health leg's own window rather than granted per URL.
+    manifest_budget = RetryBudget(
+        total_seconds=manifest_window_seconds,
+        interval_seconds=MANIFEST_FETCH_INTERVAL_SECONDS,
+        sleep_fn=sleep_fn or time.sleep,
+        monotonic_fn=manifest_clock_fn,
+    )
+    count, err, fetch_history = fetch_manifest_contract_count(
+        manifest_url, opener=opener, budget=manifest_budget
     )
     report.manifest_count = count
+    report.manifest_fetch_attempts = list(fetch_history[-MANIFEST_FETCH_HISTORY_LIMIT:])
     if err is not None:
         report.errors.append(err)
     else:
@@ -599,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"  manifest_count={report.manifest_count} (floor={report.manifest_floor}) ok={report.manifest_ok}"
         )
+        for attempt in report.manifest_fetch_attempts:
+            print(f"  manifest fetch attempt: {attempt}")
         print(f"  health_ok={report.health_ok} ({report.health_detail})")
         for dimension in report.health_dimensions:
             print(

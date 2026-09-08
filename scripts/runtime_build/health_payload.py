@@ -132,6 +132,14 @@ RUNTIME_HEALTH_DETAIL_KEY = "runtime_health"
 #: The only dimension ``status`` that needs no record.
 HEALTH_DIMENSION_STATUS_HEALTHY = "HEALTHY"
 
+#: Cap on one dimension ``detail`` copied out of a remote ``/health`` body.
+#: The body is network-adjacent and its content is exactly what is misbehaving
+#: in the scenarios where this runs, so a multi-megabyte detail would otherwise
+#: be preserved verbatim into the receipt artifact and printed to the refresh
+#: log. Truncation is marked so a reader can tell a short detail from a clipped
+#: one; the live dimension details are ~120 characters.
+MAX_DIMENSION_DETAIL_CHARS = 600
+
 DEFAULT_MAX_VERDICT_AGE = object()
 
 _WAITABLE_REASONS = frozenset(
@@ -206,25 +214,27 @@ class HealthDimension:
     detail: str
 
 
-def extract_non_healthy_dimensions(raw: bytes | str) -> tuple[HealthDimension, ...]:
-    """Every non-HEALTHY ``runtime_health`` dimension in a ``/health`` body.
+def extract_non_healthy_dimensions(document: object) -> tuple[HealthDimension, ...]:
+    """Every non-HEALTHY ``runtime_health`` dimension in a decoded body.
 
-    Pure and total: a body that is not JSON, not an object, carries no verdict
-    block, or carries a ``dimensions`` value of the wrong shape yields an empty
-    tuple rather than raising. This runs on the failure path of a gate that is
+    Takes the ALREADY-DECODED body, not the raw bytes. ``evaluate_health_body``
+    decoded it once for :func:`parse_health_payload` and once more for the
+    container verdict; a third decode here made the hot health path parse the
+    same document three times on every probe, so the decode was hoisted to a
+    single call site and the parsed object is passed down.
+
+    Pure and total: a document that is not a mapping, carries no verdict block,
+    or carries a ``dimensions`` value of the wrong shape yields an empty tuple
+    rather than raising. This runs on the failure path of a gate that is
     already reporting a problem -- it must never become a second failure.
 
     HEALTHY entries are dropped. The receipt records what was WRONG; carrying
     the passing six as well would bury the one that matters, which is the same
     unreadability in a longer form.
     """
-    try:
-        decoded = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+    if not isinstance(document, dict):
         return ()
-    if not isinstance(decoded, dict):
-        return ()
-    details = decoded.get("details")
+    details = document.get("details")
     if not isinstance(details, dict):
         return ()
     block = details.get(RUNTIME_HEALTH_DETAIL_KEY)
@@ -244,10 +254,20 @@ def extract_non_healthy_dimensions(raw: bytes | str) -> tuple[HealthDimension, .
             HealthDimension(
                 name=str(entry.get("name", "")).strip() or "unnamed",
                 status=status or "UNKNOWN",
-                detail=str(entry.get("detail", "")).strip(),
+                detail=_clip_detail(str(entry.get("detail", "")).strip()),
             )
         )
     return tuple(found)
+
+
+def _clip_detail(detail: str) -> str:
+    """Bound one remote detail string, marking the cut so it is not silent."""
+    if len(detail) <= MAX_DIMENSION_DETAIL_CHARS:
+        return detail
+    return (
+        detail[:MAX_DIMENSION_DETAIL_CHARS]
+        + f" [truncated, {len(detail)} chars in the probed body]"
+    )
 
 
 @dataclass(frozen=True)
@@ -280,6 +300,29 @@ class HealthVerdict:
     dimensions: tuple[HealthDimension, ...] = ()
 
 
+def decode_health_body(raw: bytes | str) -> dict[str, object]:
+    """Decode a ``/health`` body to a mapping, exactly once per probe.
+
+    Separated from :func:`parse_health_payload` so a caller that needs both the
+    typed payload and the raw document -- ``evaluate_health_body`` needs it for
+    the container verdict and for the dimensions -- decodes once and passes the
+    object down, instead of re-parsing the same body three times.
+
+    Raises:
+        HealthPayloadError: The body is not JSON or is not a JSON object.
+    """
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise HealthPayloadError(f"health payload not valid JSON: {exc}") from exc
+
+    if not isinstance(decoded, dict):
+        raise HealthPayloadError(
+            f"health payload is not a JSON object (got {type(decoded).__name__})"
+        )
+    return decoded
+
+
 def parse_health_payload(raw: bytes | str) -> HealthPayload:
     """Parse a ``/health`` body into a :class:`HealthPayload`.
 
@@ -293,16 +336,15 @@ def parse_health_payload(raw: bytes | str) -> HealthPayload:
         HealthPayloadError: The body is not JSON, is not a JSON object, or
             carries no usable top-level ``status``.
     """
-    try:
-        decoded = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-        raise HealthPayloadError(f"health payload not valid JSON: {exc}") from exc
+    return parse_health_document(decode_health_body(raw))
 
-    if not isinstance(decoded, dict):
-        raise HealthPayloadError(
-            f"health payload is not a JSON object (got {type(decoded).__name__})"
-        )
 
+def parse_health_document(decoded: dict[str, object]) -> HealthPayload:
+    """Build the typed payload from an already-decoded ``/health`` document.
+
+    Raises:
+        HealthPayloadError: The document carries no usable top-level ``status``.
+    """
     if "status" not in decoded:
         raise HealthPayloadError(
             "health payload carries no top-level 'status' -- health is unknown, "
@@ -437,7 +479,7 @@ def wait_for_verdict(
     probe: Callable[[], HealthVerdict],
     *,
     bound: VerdictWaitBound,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> tuple[HealthVerdict, str]:
     """Re-probe until a monitor verdict exists, for a bounded window.
 
@@ -476,7 +518,7 @@ def wait_for_verdict(
                 f"(reason={verdict.reason!r}) on attempt {attempt}"
             )
         if attempt < bound.attempts:
-            sleep(bound.interval_seconds)  # type: ignore[operator]
+            sleep(bound.interval_seconds)
     return verdict, f"{bound.describe()} exhausted without a verdict"
 
 
@@ -502,7 +544,8 @@ def evaluate_health_body(
     function (no clock, no I/O, no environment), so this stays hermetic.
     """
     try:
-        payload = parse_health_payload(raw)
+        document = decode_health_body(raw)
+        payload = parse_health_document(document)
     except HealthPayloadError as exc:
         return HealthVerdict(
             ok=False,
@@ -519,8 +562,9 @@ def evaluate_health_body(
 
     # OMN-16753. Extracted on BOTH policies and on the healthy path too: a
     # receipt that only records dimensions when it already failed cannot tell
-    # "the lane was clean" from "nothing was looked at".
-    dimensions = extract_non_healthy_dimensions(raw)
+    # "the lane was clean" from "nothing was looked at". Reads the document
+    # decoded above -- one decode per probe, not three.
+    dimensions = extract_non_healthy_dimensions(document)
 
     if not require_verdict:
         return HealthVerdict(
@@ -536,14 +580,9 @@ def evaluate_health_body(
         evaluate_health_response,
     )
 
-    # Re-decoded rather than threaded through HealthPayload: that dataclass is
-    # compared by equality in existing tests, so widening it would edit a test
-    # whose subject is not this change. parse_health_payload already proved the
-    # body decodes, so this cannot raise.
-    decoded_body = json.loads(raw)
     container_verdict = evaluate_health_response(
         http_status=200,
-        payload=decoded_body,
+        payload=document,
         require_verdict=True,
         max_verdict_age_seconds=max_verdict_age_seconds,
     )

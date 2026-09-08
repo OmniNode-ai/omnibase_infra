@@ -570,6 +570,38 @@ def describe_projection_attachment(verdict: ModelProjectionLivenessVerdict) -> s
     )
 
 
+def dlq_saturation_status(verdict: ModelProjectionLivenessVerdict) -> str:
+    """The ``projection_dlq_saturation`` dimension status for a verdict.
+
+    OMN-16753. Lives beside :func:`describe_dlq_saturation` and is the sole
+    source of the dimension's status, so the fact the prose reports and the
+    fact the verdict is taken from cannot drift apart -- the first revision of
+    this fix annotated the prose with the unattributable topics while the
+    status was still computed from ``dlq_saturated_projections`` alone at the
+    call site, which published a **HEALTHY** saturation dimension for a lane
+    whose flow could not be attributed at all.
+
+    ``DEGRADED`` when EITHER holds:
+
+    * a projection is fully DLQ-routed -- the measured failure; or
+    * a declared projection topic carried flow that no single projection can be
+      shown to have taken. That is not a clean lane, it is an unanswered
+      question, and this dimension exists precisely because a total loss reads
+      green on every other signal. Excluding those topics from the ratios (the
+      only honest arithmetic available) while still publishing HEALTHY would
+      convert "the gate could not tell" into "nothing is wrong", which is the
+      same false all-clear this ticket removes, in a new costume.
+
+    There is no third status here: the runtime health vocabulary is
+    HEALTHY/DEGRADED/CRITICAL, so an indeterminate saturation reading fails
+    closed to DEGRADED rather than being rendered as an UNKNOWN nobody gates
+    on.
+    """
+    if verdict.dlq_saturated_projections or verdict.unattributable_flow_topics:
+        return "DEGRADED"
+    return "HEALTHY"
+
+
 def describe_dlq_saturation(verdict: ModelProjectionLivenessVerdict) -> str:
     """Build the ``projection_dlq_saturation`` dimension detail."""
     if not verdict.saturation_evaluated:

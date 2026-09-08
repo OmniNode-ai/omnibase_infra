@@ -61,6 +61,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.runtime.health.projection_liveness import (
     describe_dlq_saturation,
+    dlq_saturation_status,
     evaluate_projection_liveness,
     select_projection_contracts,
     select_projection_group_suffixes,
@@ -365,6 +366,114 @@ class TestSaturationAttribution:
         detail = describe_dlq_saturation(verdict)
         assert HOOK_LEDGER in detail
         assert WORK_EVENTS not in detail
+
+
+@pytest.mark.unit
+class TestUnattributableFlowDegradesTheVerdict:
+    """MAJOR (adversarial review, omnibase_infra#3334).
+
+    The first revision of this fix carried ``unattributable_flow_topics`` onto
+    the model and appended a parenthetical to the prose, and stopped there. The
+    dimension status was still ``"DEGRADED" if dlq_saturated_projections else
+    "HEALTHY"`` at the call site, so a lane whose ENTIRE flow could not be
+    attributed published a **HEALTHY** ``projection_dlq_saturation`` -- the
+    excluded topics annotated in a detail string nothing gates on.
+
+    A lane whose flow cannot be attributed is not a clean lane. It is an
+    unanswered question on the one dimension that exists because a total loss
+    reads green on lag, on group state and on process health.
+    """
+
+    @staticmethod
+    def _unattributable_verdict():
+        manifest = _manifest(
+            _projection(HOOK_LEDGER),
+            _projection(SESSION_REPLAY),
+            _projection(WORK_EVENTS),
+        )
+        projections = select_projection_contracts(manifest)
+        return evaluate_projection_liveness(
+            projections=projections,
+            attached_topics=frozenset({TOOL_EXECUTED, PROMPT_SUBMITTED}),
+            flow_windows=[
+                _window((("an-unrecognised-group", TOOL_EXECUTED, 1855, 1855),))
+            ],
+        )
+
+    def test_an_unattributable_topic_is_not_healthy(self) -> None:
+        verdict = self._unattributable_verdict()
+        # The premise: nothing was PROVEN saturated ...
+        assert verdict.dlq_saturated_projections == ()
+        assert verdict.unattributable_flow_topics == (TOOL_EXECUTED,)
+        # ... and the dimension still refuses to say the lane is fine.
+        assert dlq_saturation_status(verdict) == "DEGRADED"
+
+    def test_a_measured_saturation_is_still_degraded(self) -> None:
+        """The original signal is untouched by the new one."""
+        manifest = _manifest(_projection(HOOK_LEDGER, topics=(TOOL_EXECUTED,)))
+        projections = select_projection_contracts(manifest)
+        verdict = evaluate_projection_liveness(
+            projections=projections,
+            attached_topics=frozenset({TOOL_EXECUTED}),
+            flow_windows=[_window(((_group(HOOK_LEDGER), TOOL_EXECUTED, 500, 500),))],
+        )
+        assert verdict.dlq_saturated_projections == (HOOK_LEDGER,)
+        assert dlq_saturation_status(verdict) == "DEGRADED"
+
+    def test_a_clean_attributed_lane_is_still_healthy(self) -> None:
+        """The control. Degrading everything would be its own false signal."""
+        manifest = _manifest(_projection(HOOK_LEDGER, topics=(TOOL_EXECUTED,)))
+        projections = select_projection_contracts(manifest)
+        verdict = evaluate_projection_liveness(
+            projections=projections,
+            attached_topics=frozenset({TOOL_EXECUTED}),
+            flow_windows=[_window(((_group(HOOK_LEDGER), TOOL_EXECUTED, 500, 0),))],
+        )
+        assert verdict.dlq_saturated_projections == ()
+        assert verdict.unattributable_flow_topics == ()
+        assert dlq_saturation_status(verdict) == "HEALTHY"
+
+    def test_the_status_and_the_prose_come_from_the_same_verdict(self) -> None:
+        """They drifted apart once; the status is now derived, not restated."""
+        verdict = self._unattributable_verdict()
+        assert dlq_saturation_status(verdict) == "DEGRADED"
+        assert TOOL_EXECUTED in describe_dlq_saturation(verdict)
+
+    def test_the_monitor_publishes_the_degraded_dimension_and_verdict(self) -> None:
+        """End to end through the monitor's own dimension construction.
+
+        Asserted on the monitor rather than only on the pure function, because
+        the defect WAS at the call site: the pure half was already right.
+        """
+        from omnibase_infra.models.health.model_runtime_health_dimension import (
+            ModelRuntimeHealthDimension,
+        )
+        from omnibase_infra.services.service_runtime_health_monitor import (
+            _as_health_status,
+            _worst,
+        )
+
+        verdict = self._unattributable_verdict()
+        dimension = ModelRuntimeHealthDimension(
+            name="projection_dlq_saturation",
+            status=_as_health_status(dlq_saturation_status(verdict)),
+            detail=describe_dlq_saturation(verdict),
+        )
+        assert dimension.status == "DEGRADED"
+        # And it carries the aggregate with it, so the refresh gate -- which
+        # requires a PASS verdict -- refuses rather than proving the lane.
+        assert _worst(["HEALTHY", "HEALTHY", dimension.status]) == "DEGRADED"
+        assert TOOL_EXECUTED in dimension.detail
+
+    def test_an_unrecognised_status_string_fails_closed(self) -> None:
+        from omnibase_infra.services.service_runtime_health_monitor import (
+            _as_health_status,
+        )
+
+        assert _as_health_status("HEALTHY") == "HEALTHY"
+        assert _as_health_status("CRITICAL") == "CRITICAL"
+        assert _as_health_status("UNKNOWN") == "DEGRADED"
+        assert _as_health_status("") == "DEGRADED"
 
 
 @pytest.mark.unit
