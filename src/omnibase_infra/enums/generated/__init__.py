@@ -20,6 +20,7 @@ from .enum_omnimemory_topic import EnumOmnimemoryTopic
 from .enum_omninode_topic import EnumOmninodeTopic
 from .enum_onex_change_control_topic import EnumOnexChangeControlTopic
 from .enum_platform_topic import EnumPlatformTopic
+from .enum_projection_topic import EnumProjectionTopic
 from .enum_router_topic import EnumRouterTopic
 from .enum_rsd_topic import EnumRsdTopic
 from .enum_skill_topic import EnumSkillTopic
