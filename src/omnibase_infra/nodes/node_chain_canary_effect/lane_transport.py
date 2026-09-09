@@ -300,22 +300,46 @@ _DSN_ENV_KEY = "dsn_env"
 # this can also be a DSN, because a DSN needs at least a ':' and a '/'.
 _ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
-# Markers of a connection STRING. `://` is the scheme separator of every libpq
-# URI form; the keyword/value form is spelled `host=... dbname=...`. Matching on
-# structure rather than on a keyword list is what makes this refuse a DSN shape
-# nobody anticipated.
-_DSN_URI_SCHEMES: tuple[str, ...] = (
-    "postgres://",
-    "postgresql://",
-    "postgres+asyncpg://",
-    "postgresql+asyncpg://",
+# Markers of a connection STRING, in the two forms libpq accepts.
+#
+# OMN-18060 follow-up. The first cut of this predicate also returned True for
+# ANY value containing `://`, reaching for "refuse a DSN shape nobody
+# anticipated". That over-reached in the one direction a refusal must never
+# over-reach: it made every URL a DSN. Run 34307514323 refused its own leg with
+# `projection_readback_refused` naming `--probe-url`, whose value is
+# `http://host.docker.internal:8085` — the ingress address the probe is FOR.
+# A canary that refuses to run because it was told where to probe reports a
+# wiring fault that does not exist, and hides the one that does.
+#
+# What replaces it is still structural, not a keyword list, but it matches the
+# two things that actually make a string a Postgres connection string:
+#
+#   * a POSTGRES URI scheme, with any SQLAlchemy-style `+driver` suffix; and
+#   * libpq keyword/value syntax, which needs `dbname=` or a `host=` paired
+#     with an identity keyword — `host=` alone is ordinary in URLs and CLI
+#     values and is not on its own evidence of a connection string.
+#
+# A bare `password=` stays a refusal on its own merits: whatever else it is,
+# it is a credential, and this predicate's job on argv is to keep credentials
+# off the command line.
+#: Anchored at the start of the value or immediately after an ``=``, so that the
+#: joined ``--flag=<dsn>`` form — which carries both halves in one argv token —
+#: is matched, while a scheme appearing deep inside some longer string is not.
+_DSN_URI_SCHEME_PATTERN = re.compile(r"(?:^|=)postgres(?:ql)?(?:\+[a-z0-9._-]+)?://")
+
+#: Any URI carrying a password in its userinfo section (`scheme://user:pw@host`).
+#: This is what remains of the "shape nobody anticipated" catch, kept because it
+#: keys on the HARM (an embedded credential) rather than on the scheme, so a
+#: non-Postgres store's DSN is still refused — while a credential-free URL like
+#: an HTTP probe address is not.
+_URI_USERINFO_PASSWORD_PATTERN = re.compile(
+    r"(?:^|=)[a-z][a-z0-9+.-]*://[^/@\s]+:[^/@\s]+@"
 )
-_DSN_KEYWORD_MARKERS: tuple[str, ...] = (
-    "dbname=",
-    "host=",
-    "password=",
-    "user=",
-)
+
+_DSN_DBNAME_MARKER = "dbname="
+_DSN_PASSWORD_MARKER = "password="
+_DSN_HOST_MARKER = "host="
+_DSN_IDENTITY_MARKERS: tuple[str, ...] = ("user=", "password=", "dbname=")
 
 
 def looks_like_a_dsn(value: str) -> bool:
@@ -324,15 +348,23 @@ def looks_like_a_dsn(value: str) -> bool:
     Used to refuse a VALUE anywhere a NAME is expected. Never include the
     value in a message built from this — the whole reason it is being refused
     is that it is a credential.
+
+    Deliberately FALSE for a credential-free URL of any other scheme. The
+    probe's own ``--probe-url`` is an ordinary ``http://`` address and must
+    survive this predicate; see the module comment above the patterns.
     """
     lowered = value.strip().lower()
     if not lowered:
         return False
-    if any(lowered.startswith(scheme) for scheme in _DSN_URI_SCHEMES):
+    if _DSN_URI_SCHEME_PATTERN.search(lowered):
         return True
-    if "://" in lowered:
+    if _URI_USERINFO_PASSWORD_PATTERN.search(lowered):
         return True
-    return any(marker in lowered for marker in _DSN_KEYWORD_MARKERS)
+    if _DSN_DBNAME_MARKER in lowered or _DSN_PASSWORD_MARKER in lowered:
+        return True
+    return _DSN_HOST_MARKER in lowered and any(
+        marker in lowered for marker in _DSN_IDENTITY_MARKERS
+    )
 
 
 def dsn_shaped_argv_flags(argv: Sequence[str]) -> tuple[str, ...]:
