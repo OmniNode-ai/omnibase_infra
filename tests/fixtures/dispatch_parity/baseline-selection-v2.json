@@ -4927,7 +4927,7 @@
       },
       "selection": {
         "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "_DictPayload",
         "status": "no_dispatcher"
@@ -4942,7 +4942,7 @@
       },
       "selection": {
         "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "_DictPayload",
         "status": "no_dispatcher"
@@ -4957,7 +4957,7 @@
       },
       "selection": {
         "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.intents.v1",
+        "dlq_topic": null,
         "message_category": "intent",
         "message_type": "_DictPayload",
         "status": "no_dispatcher"

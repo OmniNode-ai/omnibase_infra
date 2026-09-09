@@ -5968,6 +5968,23 @@ async def _route_apply_publish_failure(
     """
     from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
 
+    if _is_dead_letter_source_topic(topic):
+        # OMN-18084: same circular route as the NO_DISPATCHER and handler-error
+        # legs. Note this one must LOG AND RETURN rather than raise: raising
+        # withholds the offset so the record is redelivered, and a record whose
+        # apply-publish fails deterministically on a dead-letter topic would be
+        # redelivered forever. It is already durably captured on a dead-letter
+        # sink, so committing over it loses nothing.
+        logger.error(
+            "metric_name=boundary_dead_letter_apply_publish_failed dlq_routed=false "
+            "reason=already_on_dead_letter_topic topic=%s error_type=%s "
+            "correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
+
     publish_dlq_fn = (
         getattr(event_bus, "_publish_raw_to_dlq", None)
         if event_bus is not None
@@ -6490,6 +6507,33 @@ def _make_event_bus_callback(
             sanitized,
             correlation_id,
         )
+        if _is_dead_letter_source_topic(topic):
+            # OMN-18084: the third and last unguarded leg. The NO_DISPATCHER
+            # leg (`_raise_if_no_dispatcher_drop`) and the no-result-applier
+            # leg have taken this branch since OMN-16798; this one had not, and
+            # OMN-18013 moved DLQ traffic onto it by making the replay handler
+            # dispatch successfully and then fail. `get_dlq_topic_for_original`
+            # is a FIXED POINT on dead-letter names, so the write below would
+            # land the record back on the topic it was just read from —
+            # measured on the .201 dev lane 2026-09-09 at 193.8 records/s,
+            # ~151 GB/day, on a mount with 590 GB free shared with prod,
+            # stability-test and judge.
+            #
+            # No terminal is emitted either. A terminal is an answer, and the
+            # caller behind a record sitting on a dead-letter sink was already
+            # answered when it was first dead-lettered (the OMN-17432
+            # rationale); a second one would answer nobody and would be written
+            # to the quarantine sink this same handler consumes.
+            logger.error(
+                "metric_name=boundary_dead_letter_handler_error dlq_routed=false "
+                "reason=already_on_dead_letter_topic topic=%s error_type=%s "
+                "error=%s correlation_id=%s",
+                topic,
+                type(exc).__name__,
+                sanitized,
+                correlation_id,
+            )
+            return
         dlq_enabled = _boundary_dlq_enabled()
         publish_dlq_fn = (
             getattr(event_bus, "_publish_raw_to_dlq", None)
@@ -7048,6 +7092,22 @@ async def _route_sync_publisher_failure(
     from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
 
     correlation_id = uuid4()
+    if _is_dead_letter_source_topic(topic):
+        # OMN-18084: this helper's target is a PUBLISH topic, and
+        # node_dlq_replay_effect declares the quarantine dead-letter sink as
+        # one — so it genuinely can be handed a DLQ topic, and answering with
+        # `get_dlq_topic_for_original` would resolve that sink to itself.
+        logger.error(
+            "metric_name=boundary_dead_letter_sync_publish_failed dlq_routed=false "
+            "reason=already_on_dead_letter_topic handler=%s topic=%s "
+            "error_type=%s correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
+
     publish_dlq_fn = getattr(event_bus, "_publish_raw_to_dlq", None)
     if publish_dlq_fn is None or not callable(publish_dlq_fn):
         logger.error(

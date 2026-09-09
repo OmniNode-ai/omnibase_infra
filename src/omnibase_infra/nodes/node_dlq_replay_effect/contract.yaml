@@ -30,10 +30,10 @@ contract_version:
 node_version:
   major: 1
   minor: 1
-  patch: 0
+  patch: 1
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history. OMN-17896: a record whose original body cannot be established is refused at parse and quarantined with its RAW BYTES intact rather than replayed as a fabricated empty body; a record that cannot be JSON-decoded is quarantined rather than skipped; and the offset advances only on a CONFIRMED quarantine or replay publish, via an explicit per-partition offset map of the records that completed, never the consumer's bare position.
+  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history. OMN-17896: a record whose original body cannot be established is refused at parse and quarantined with its RAW BYTES intact rather than replayed as a fabricated empty body; a record that cannot be JSON-decoded is quarantined rather than skipped; and the offset advances only on a CONFIRMED quarantine or replay publish, via an explicit per-partition offset map of the records that completed, never the consumer's bare position. OMN-18084: runs over ONE shared consumer are SERIALISED by a run mutex keyed on the consumer instance. The three per-topic dispatcher entries below all resolve to the same dependencies["HandlerDlqReplay"] mapping because the kernel keys dependencies by handler NAME, so a peer's teardown could stop a DLQConsumer another dispatcher was mid-drain on; every message then failed with 'Consumer not started' and the auto-wiring boundary answered each failure by writing the record back onto the DLQ topic it came from, at 193.8 records/s on the .201 dev lane. A dispatcher whose consumer nobody else holds never waits, and a run holds the mutex for at most max_run_duration_seconds.
 
 # Event bus subscription/publication
 event_bus:

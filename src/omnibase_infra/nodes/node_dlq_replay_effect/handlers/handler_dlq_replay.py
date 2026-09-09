@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+from weakref import WeakKeyDictionary
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -58,6 +59,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 HANDLER_ID_DLQ_REPLAY: str = "dlq-replay-handler"
+
+_RUN_LOCKS: WeakKeyDictionary[object, asyncio.Lock] = WeakKeyDictionary()
+"""One run mutex per shared consumer object (OMN-18084).
+
+``service_kernel`` keys runtime dependencies by handler NAME, so the three
+per-topic dispatcher entries OMN-18013 split this node's routing into all
+resolve to the same ``dependencies["HandlerDlqReplay"]`` mapping — one
+``DLQConsumer`` behind three ``HandlerDlqReplay`` instances. Nothing then
+serialised them, and ``_ensure_runtime_dependencies_started`` skips a
+dependency already flagged ``_started``, so it does not put that dependency in
+the list its own ``finally`` stops while the peer that DID start it stops it
+unconditionally. One dispatcher's teardown therefore lands under another's
+drain, and the victim's next read of the consumer raises
+``RuntimeError("Consumer not started")``.
+
+Keyed on the consumer INSTANCE rather than held on the handler, because the
+consumer is the object that is actually shared: dispatchers that own separate
+consumers must not serialise against each other, and two handlers over one
+consumer must. Weak keys so a discarded consumer takes its lock with it.
+
+This also stops two runs iterating one ``AIOKafkaConsumer`` concurrently, which
+was never safe independently of the lifecycle flag.
+"""
+
+
+def _run_lock_for(consumer: object) -> asyncio.Lock:
+    """Return the mutex guarding one shared consumer's start/drain/stop."""
+    lock = _RUN_LOCKS.get(consumer)
+    if lock is None:
+        lock = asyncio.Lock()
+        _RUN_LOCKS[consumer] = lock
+    return lock
 
 
 class HandlerDlqReplay:
@@ -179,7 +212,29 @@ class HandlerDlqReplay:
         acquisition below is therefore driven through ``asyncio.wait_for``
         with the run's REMAINING budget, and both bounds are checked BEFORE
         the next record is requested.
+
+        OMN-18084: runs over ONE shared consumer are SERIALISED. OMN-18013 split
+        this node's routing into three per-topic dispatcher entries, and
+        ``service_kernel`` keys dependencies by handler name, so all three
+        resolve to a single ``DLQConsumer``. Concurrently, that object was
+        started and stopped by peers -- one dispatcher's ``finally`` tore down a
+        consumer another was mid-drain on, and the victim raised
+        ``RuntimeError("Consumer not started")`` on every message. Cost of the
+        mutex: a peer waits at most ``max_run_duration_seconds`` (10 s by
+        default, so at most ~30 s across three dispatchers), well inside
+        ``max_poll_interval_ms``. Two runs iterating one ``AIOKafkaConsumer``
+        was never safe anyway, so the serialisation is the correct semantics
+        for a shared consumer, not only a lifecycle repair.
         """
+        # OMN-18084: the whole start -> drain -> stop sequence is one critical
+        # section per shared consumer. Acquiring INSIDE run() rather than around
+        # the dispatch keeps the scope exactly the lifecycle that is shared; a
+        # dispatcher whose consumer nobody else holds never waits.
+        async with _run_lock_for(self._consumer):
+            return await self._run_locked()
+
+    async def _run_locked(self) -> ModelDlqReplayRunResult:
+        """One bounded drain, holding this consumer's run mutex."""
         started_dependencies = await self._ensure_runtime_dependencies_started()
         try:
             results: list[ModelDlqReplayResult] = []

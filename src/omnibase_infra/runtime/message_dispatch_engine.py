@@ -224,6 +224,8 @@ def _derive_dlq_topic(
     .. versionadded:: 0.7.0
         Added for DLQ routing of unknown event_type (OMN-2040).
     """
+    from omnibase_infra.errors import DlqTopicFixedPointError
+
     try:
         from omnibase_infra.event_bus.topic_constants import (
             derive_dlq_topic_for_event_type,
@@ -233,6 +235,26 @@ def _derive_dlq_topic(
             event_type=event_type,
             original_topic=original_topic,
         )
+    except DlqTopicFixedPointError:
+        # OMN-18084: NOT a derivation failure, and it must not be logged as one.
+        # This arm is reached only on the legacy no-event_type path, where the
+        # answer would be resolved from the topic's own segments -- and on a
+        # ``onex.dlq.*`` topic that resolves to ITSELF. Deriving it would name
+        # the topic the record was consumed from, the fixed point the .201 dev
+        # lane amplified at 193.8 records/s. A record already on a dead-letter
+        # sink is durably captured; None is the correct, deliberate answer.
+        #
+        # An event_type-derived answer is left alone: it names a DIFFERENT sink
+        # from the topic's own domain, so it terminates rather than looping, and
+        # narrowing this arm to the actual fixed point keeps the change to the
+        # defect.
+        _module_logger.info(
+            "No DLQ topic derived for a record consumed from a dead-letter "
+            "topic: topic=%s event_type=%s (already durably captured)",
+            original_topic,
+            event_type,
+        )
+        return None
     except Exception:  # noqa: BLE001 — boundary: returns degraded response
         # DLQ derivation must never crash the dispatch engine.
         # If derivation fails, return None and the caller will handle
