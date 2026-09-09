@@ -109,6 +109,12 @@ class HealthVerdictReason(StrEnum):
     VERDICT_ABSENT = "verdict_absent"
     VERDICT_STALE = "verdict_stale"
     STATUS_UNREADABLE = "status_unreadable"
+    #: OMN-18061. ``container_healthcheck.evaluate_health_response`` returns
+    #: this for a runtime whose monitor published a verdict that is readable,
+    #: fresh, and not healthy. It was outside this vocabulary, so
+    #: ``_normalise_verdict_reason`` mapped it to ``None`` and the wait loop
+    #: treated a first DEGRADED verdict as terminal on attempt 1.
+    RUNTIME_DEGRADED = "runtime_degraded"
 
 
 #: The reason string that justifies waiting for a first monitor verdict.
@@ -142,8 +148,37 @@ MAX_DIMENSION_DETAIL_CHARS = 600
 
 DEFAULT_MAX_VERDICT_AGE = object()
 
+#: Reasons a re-probe inside the bound can plausibly resolve.
+#:
+#: OMN-18061 adds ``RUNTIME_DEGRADED``. The monitor sleeps one
+#: ``check_interval`` BEFORE its first check and suppresses publication while
+#: ``elapsed < boot_grace``, so the FIRST verdict a freshly started runtime can
+#: publish arrives at ~``check_interval`` -- and it is taken over a lane whose
+#: consumers, projections and flow windows have existed for seconds. A DEGRADED
+#: reading there is a statement about a runtime that is still coming up, not
+#: about the image under test.
+#:
+#: Measured twice on the .201 stability lane (2026-09-08): first verdict at
+#: ~300s, treated as terminal on attempt 1, container destroyed ~30s later --
+#: 5m41s at attempt 2, 5m32s at attempt 3. The consequence is that the
+#: operator's exit criterion for that window, "zero OOM kills over 10 minutes
+#: on the NEW image", was unreachable through this path for ANY first verdict
+#: that was not already HEALTHY, whatever the retry knobs said. Attempt 3's own
+#: evidence is zero OOM kills across the whole 5m32s it was allowed to live, at
+#: ~37% RSS, against 31 kills/hour on the image it was rolled back to.
+#:
+#: This is a WINDOW, not retry-until-green: ``wait_for_verdict`` returns the
+#: LAST observed verdict, so a lane still degraded when the bound expires
+#: reports exactly that. ``STATUS_UNREADABLE`` stays terminal on attempt 1 --
+#: an unreadable body or dead endpoint will not become readable by being asked
+#: again, and waiting on it would convert a hard failure into a five-minute
+#: stall.
 _WAITABLE_REASONS = frozenset(
-    {HealthVerdictReason.VERDICT_ABSENT, HealthVerdictReason.VERDICT_STALE}
+    {
+        HealthVerdictReason.VERDICT_ABSENT,
+        HealthVerdictReason.VERDICT_STALE,
+        HealthVerdictReason.RUNTIME_DEGRADED,
+    }
 )
 
 
@@ -535,7 +570,14 @@ def wait_for_verdict(
             )
         if attempt < bound.attempts:
             sleep(bound.interval_seconds)
-    return verdict, f"{bound.describe()} exhausted without a verdict"
+    # OMN-18061: the window is now also how a DEGRADED first verdict gets a
+    # second look, so "without a verdict" is no longer the only way to arrive
+    # here. Name the verdict that actually settled, or the next reader will
+    # take a persistent DEGRADED for a monitor that never published.
+    return verdict, (
+        f"{bound.describe()} exhausted; last verdict "
+        f"status={verdict.status!r} reason={verdict.reason!r}"
+    )
 
 
 def evaluate_health_body(

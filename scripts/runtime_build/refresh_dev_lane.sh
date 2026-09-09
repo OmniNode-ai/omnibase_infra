@@ -79,6 +79,13 @@ source "${SCRIPT_DIR}/lane_lock.sh"
 # shellcheck source=./compose_files.sh
 source "${SCRIPT_DIR}/compose_files.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dev_refresh.py"
+# OMN-18061: the ONE rule that decides whether a failed refresh may DESTROY the
+# lane, shared byte-for-byte with refresh_stability_lane.sh. OMN-16729 landed
+# this rule here as a 45-line inline block and named the extraction as its
+# residual; the stability lane then kept the pre-fix trigger for eight hours
+# because a second lane cannot inherit a fix that lives in the first lane's
+# body. It is now one object, called by both.
+DECISION_SCRIPT="${SCRIPT_DIR}/lane_rollback_decision.py"
 # OMN-17530: the required-compose-env preflight. Reports EVERY unset ${VAR:?}
 # across the compose files this lane loads in ONE message, before compose
 # validation reports only the first one and stops.
@@ -324,10 +331,18 @@ else
 fi
 
 run_verify() {
+    run_python "${VERIFY_SCRIPT}" "$@"
+}
+
+run_python() {
+    # Run a sibling python script under whichever interpreter this host has.
+    # OMN-18061: extracted from run_verify() so the shared rollback decision
+    # reaches the SAME interpreter selection rather than growing a second one.
+    local script="$1"; shift
     if [[ "${PYTHON_BIN}" == "uv-run" ]]; then
-        uv run --project "${REPO_ROOT}" python "${VERIFY_SCRIPT}" "$@"
+        uv run --project "${REPO_ROOT}" python "${script}" "$@"
     else
-        "${PYTHON_BIN}" "${VERIFY_SCRIPT}" "$@"
+        "${PYTHON_BIN}" "${script}" "$@"
     fi
 }
 
@@ -731,51 +746,34 @@ GATE1_OVERALL="$(jq -r '.overall // "INFRA_ERROR"' "${GATE1_JSON}" 2>/dev/null |
 log "health-gate result: ${GATE1_OVERALL} (exit ${GATE_EXIT})"
 cat "${GATE1_JSON}" >&2
 
-# --- health dimensions vs provenance dimensions (OMN-16729) -----------------
+# --- the shared rollback decision (OMN-16729, extracted OMN-18061) ----------
 # The rollback below is DESTRUCTIVE -- it recreates every core container. It is
 # therefore gated on the dimensions that describe whether the lane is SERVING
-# (health probe, contract manifest, broker cluster, and the gate's own ability
-# to run its probes at all), and on nothing else. The provenance dimensions --
-# which revision label the running containers carry, whether any image digest
-# changed, whether the tracked clones moved forward -- say what the lane is
-# running, never whether it is up, and no container recreate repairs any of
-# them.
-GATE1_HEALTH_OK="$(jq -r '.health_ok // false' "${GATE1_JSON}" 2>/dev/null || echo false)"
-GATE1_MANIFEST_OK="$(jq -r '.manifest_ok // false' "${GATE1_JSON}" 2>/dev/null || echo false)"
-GATE1_CLUSTER_OK="$(jq -r '.cluster_healthy // false' "${GATE1_JSON}" 2>/dev/null || echo false)"
-GATE1_CORE_RUNNING="$(jq -r '.core_services_running // false' "${GATE1_JSON}" 2>/dev/null || echo false)"
-GATE1_ERROR_COUNT="$(jq -r '(.errors // []) | length' "${GATE1_JSON}" 2>/dev/null || echo 1)"
-GATE1_REVISION_OK="$(jq -r '.revision_readback_ok // false' "${GATE1_JSON}" 2>/dev/null || echo false)"
-GATE1_DIGEST_CHANGED="$(jq -r '.digest_changed // false' "${GATE1_JSON}" 2>/dev/null || echo false)"
-GATE1_REQUIRE_DIGEST="$(jq -r '.require_digest_change // false' "${GATE1_JSON}" 2>/dev/null || echo false)"
-GATE1_NOT_RUNNING="$(jq -r '((.core_services_not_running // []) | join(",")) // ""' "${GATE1_JSON}" 2>/dev/null || echo "")"
-
-declare -a UNHEALTHY_DIMENSIONS=()
-[[ "${GATE1_HEALTH_OK}" == true ]]   || UNHEALTHY_DIMENSIONS+=("health_ok=false")
-[[ "${GATE1_MANIFEST_OK}" == true ]] || UNHEALTHY_DIMENSIONS+=("manifest_ok=false")
-[[ "${GATE1_CLUSTER_OK}" == true ]]  || UNHEALTHY_DIMENSIONS+=("cluster_healthy=false")
-# A core service that is not RUNNING is a lane-health fact, not a provenance
-# one: this is precisely the depends_on-stranded State=created container the
-# 2026-09-08 rollback left behind, and a lane missing a core container SHOULD
-# be repaired by the recreate.
-[[ "${GATE1_CORE_RUNNING}" == true ]] || UNHEALTHY_DIMENSIONS+=("core_services_running=false[${GATE1_NOT_RUNNING}]")
-# Probe errors mean the gate could not SEE the lane. Fail closed: an unseen
-# lane is never treated as a healthy one.
-[[ "${GATE1_ERROR_COUNT}" == "0" ]]  || UNHEALTHY_DIMENSIONS+=("gate_errors=${GATE1_ERROR_COUNT}")
-
-declare -a PROVENANCE_FAILURES=()
-[[ "${GATE1_REVISION_OK}" == true ]] || PROVENANCE_FAILURES+=("revision_readback_ok=false")
-if [[ "${GATE1_REQUIRE_DIGEST}" == true && "${GATE1_DIGEST_CHANGED}" != true ]]; then
-    PROVENANCE_FAILURES+=("digest_changed=false")
-fi
-[[ "${ANCESTRY_OK}" == true ]] || PROVENANCE_FAILURES+=("merge_base_is_ancestor=false")
-
-LANE_IS_HEALTHY=false
-if [[ "${#UNHEALTHY_DIMENSIONS[@]}" -eq 0 ]]; then
-    LANE_IS_HEALTHY=true
-fi
-log "lane health dimensions: healthy=${LANE_IS_HEALTHY} failing=[${UNHEALTHY_DIMENSIONS[*]:-}]"
-log "build provenance      : failing=[${PROVENANCE_FAILURES[*]:-}]"
+# (health probe, contract manifest, broker cluster, every core container
+# running, and the gate's own ability to run its probes at all), and on nothing
+# else. The provenance dimensions -- which revision label the running
+# containers carry, whether any image digest changed, whether the tracked
+# clones moved forward -- say what the lane is running, never whether it is up,
+# and no container recreate repairs any of them.
+#
+# That rule used to live inline here. It now lives in lane_rollback_decision.py
+# and refresh_stability_lane.sh calls the SAME object: this rule was correct in
+# this file for eight hours while the stability lane -- the surface every live
+# prod grant's `stability-proven` premise resolves from -- still rolled a
+# serving lane back on a revision-label mismatch, because a fix in one script's
+# body cannot reach the other.
+DECISION_JSON="${WORKDIR}/rollback_decision.json"
+run_python "${DECISION_SCRIPT}" \
+    --gate-json "${GATE1_JSON}" \
+    --ancestry-ok "${ANCESTRY_OK}" \
+    --branch "${BRANCH}" > "${DECISION_JSON}"
+DECISION_RESULT="$(jq -r '.result' "${DECISION_JSON}")"
+LANE_IS_HEALTHY="$(jq -r '.lane_is_healthy' "${DECISION_JSON}")"
+DECISION_UNHEALTHY="$(jq -r '.unhealthy_dimensions | join(", ")' "${DECISION_JSON}")"
+DECISION_PROVENANCE="$(jq -r '.provenance_failures | join(", ")' "${DECISION_JSON}")"
+log "rollback decision: ${DECISION_RESULT}"
+log "lane health dimensions: healthy=${LANE_IS_HEALTHY} failing=[${DECISION_UNHEALTHY}]"
+log "build provenance      : failing=[${DECISION_PROVENANCE}]"
 
 RESULT="FAILED"
 if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
@@ -790,7 +788,7 @@ if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
             done
         done
     fi
-elif [[ "${BRANCH}" == "warm" && "${LANE_IS_HEALTHY}" == true ]]; then
+elif [[ "${DECISION_RESULT}" == "FAILED_BUILD_PROVENANCE" ]]; then
     # ============================================================
     # BUILD-PROVENANCE FINDING -- report, do NOT recreate (OMN-16729)
     # ============================================================
@@ -812,14 +810,14 @@ elif [[ "${BRANCH}" == "warm" && "${LANE_IS_HEALTHY}" == true ]]; then
     # is never a reason to touch a healthy lane's containers.
     RESULT="FAILED_BUILD_PROVENANCE"
     log "=== FAILURE: build-provenance only -- lane is healthy, NOT rolling back ==="
-    log "  failing provenance dimensions: ${PROVENANCE_FAILURES[*]:-<none named>}"
-    log "  health_ok=${GATE1_HEALTH_OK} manifest_ok=${GATE1_MANIFEST_OK} cluster_healthy=${GATE1_CLUSTER_OK} errors=0"
+    log "  failing provenance dimensions: ${DECISION_PROVENANCE:-<none named>}"
+    log "  every lane-health dimension held; see rollback.decision in the receipt"
     log "  the lane was NOT recreated and NOT retagged; it is exactly as this run found it."
     err "STOP AND REPORT: the refresh did not land the ref it intended, but the"
     err "lane is SERVING. Investigate the build/staging provenance -- do not"
     err "recreate containers to 'fix' a label mismatch."
-elif [[ "${BRANCH}" == "warm" ]]; then
-    log "=== FAILURE: lane is not healthy (${UNHEALTHY_DIMENSIONS[*]:-unknown}) -- triggering rollback ==="
+elif [[ "${DECISION_RESULT}" == "ROLLBACK_REQUIRED" ]]; then
+    log "=== FAILURE: lane is not healthy (${DECISION_UNHEALTHY:-unknown}) -- triggering rollback ==="
     ROLLBACK_TRIGGERED=true
     for svc in "${CORE_SERVICES[@]}"; do
         image_tag="${COMPOSE_PROJECT}-${svc}"
@@ -914,20 +912,12 @@ fi
 # OMN-16729: the receipt records WHY the rollback did or did not fire, so a
 # reader can tell a suppressed-by-design rollback from one that never got the
 # chance to run. `suppressed_reason` is null whenever the branch was not taken.
-ROLLBACK_SUPPRESSED_REASON="null"
-if [[ "${RESULT}" == "FAILED_BUILD_PROVENANCE" ]]; then
-    ROLLBACK_SUPPRESSED_REASON='"lane healthy on every health dimension; failing dimensions are build provenance only, which no container recreate repairs (OMN-16729)"'
-fi
-if [[ "${#PROVENANCE_FAILURES[@]}" -gt 0 ]]; then
-    PROVENANCE_FAILURES_JSON="$(printf '%s\n' "${PROVENANCE_FAILURES[@]}" | jq -Rn '[inputs]')"
-else
-    PROVENANCE_FAILURES_JSON='[]'
-fi
-if [[ "${#UNHEALTHY_DIMENSIONS[@]}" -gt 0 ]]; then
-    UNHEALTHY_DIMENSIONS_JSON="$(printf '%s\n' "${UNHEALTHY_DIMENSIONS[@]}" | jq -Rn '[inputs]')"
-else
-    UNHEALTHY_DIMENSIONS_JSON='[]'
-fi
+# OMN-18061: all three now come from the shared decision verbatim, so the
+# receipt cannot disagree with the rule that produced the outcome.
+ROLLBACK_SUPPRESSED_REASON="$(jq -c '.suppressed_reason' "${DECISION_JSON}")"
+PROVENANCE_FAILURES_JSON="$(jq -c '.provenance_failures' "${DECISION_JSON}")"
+UNHEALTHY_DIMENSIONS_JSON="$(jq -c '.unhealthy_dimensions' "${DECISION_JSON}")"
+DECISION_RECORD_JSON="$(cat "${DECISION_JSON}")"
 ROLLBACK_ARGV_JSON="$(rollback_recreate_argv | jq -Rn '[inputs]')"
 
 RECEIPT_PATH="${HISTORY_DIR}/${UTC_NOW}-${NEW_INFRA_SHA_SHORT}.json"
@@ -949,6 +939,7 @@ jq -n \
     --argjson lane_is_healthy "${LANE_IS_HEALTHY}" \
     --argjson unhealthy_dimensions "${UNHEALTHY_DIMENSIONS_JSON}" \
     --argjson provenance_failures "${PROVENANCE_FAILURES_JSON}" \
+    --argjson decision "${DECISION_RECORD_JSON}" \
     --arg result "${RESULT}" \
     '{
         ts_utc: $ts,
@@ -966,7 +957,8 @@ jq -n \
             triggered: $rollback_triggered,
             gate: $rollback_gate,
             suppressed_reason: $rollback_suppressed_reason,
-            argv: $rollback_argv
+            argv: $rollback_argv,
+            decision: $decision
         },
         result: $result
     }' > "${RECEIPT_PATH}"

@@ -1,0 +1,64 @@
+{
+  "lane": "dev",
+  "require_digest_change": true,
+  "digest_changed": false,
+  "manifest_count": 301,
+  "manifest_floor": 288,
+  "manifest_ok": true,
+  "health_ok": true,
+  "health_detail": "status='healthy' details.healthy=true",
+  "health_status": "healthy",
+  "health_policy": "verdict_required.v1",
+  "verdict_wait": "verdict_wait: 24 attempts x 15s = 360s sleep, worst case 600s wall clock (each probe may spend up to 10s before its sleep); first visible verdict ~300s from check_interval=300s, boot_grace=120s satisfied on attempt 1",
+  "cluster_healthy": true,
+  "cluster_detail": "CLUSTER HEALTH OVERVIEW",
+  "revision_readback_ok": false,
+  "services": [
+    {
+      "service": "omninode-runtime",
+      "container": "312f47bb709c27b9abd5d240706750cc0465f6d73414ca1a9f7961c80b42a2b4",
+      "pre_image_id": "sha256:1102f2870bb9fd028a4fb20fc0bf92ce0bb2f365887931503a57d696c262e210",
+      "post_image_id": "sha256:1102f2870bb9fd028a4fb20fc0bf92ce0bb2f365887931503a57d696c262e210",
+      "digest_changed": false,
+      "revision_label": "e42519c5b22f",
+      "expected_revision": "5773ffb03a82",
+      "revision_match": false,
+      "error": null
+    },
+    {
+      "service": "runtime-effects",
+      "container": "9d187132b587f2ed1636cbc5652a60831a2206fc95ede3cc76262d51bbd83598",
+      "pre_image_id": "sha256:a87b654a838402bd57c749f16bc9be6d77b4a58bd76e9d91efaf8353ba27c743",
+      "post_image_id": "sha256:a87b654a838402bd57c749f16bc9be6d77b4a58bd76e9d91efaf8353ba27c743",
+      "digest_changed": false,
+      "revision_label": "e42519c5b22f",
+      "expected_revision": "5773ffb03a82",
+      "revision_match": false,
+      "error": null
+    },
+    {
+      "service": "runtime-worker",
+      "container": "c84cc47d487ac1c76e635cc4bc0451cc826d9ec400c0da44c048b29c6695f334",
+      "pre_image_id": "sha256:79997f33436983d864ed3a316af886faedf148f759f1b3d7c3ef382bb55dd503",
+      "post_image_id": "sha256:79997f33436983d864ed3a316af886faedf148f759f1b3d7c3ef382bb55dd503",
+      "digest_changed": false,
+      "revision_label": "e42519c5b22f",
+      "expected_revision": "5773ffb03a82",
+      "revision_match": false,
+      "error": null
+    },
+    {
+      "service": "projection-api",
+      "container": "d8addcda805b158d4259b7c50e6105f23edab9136b6abfcdfc0f7c5280be3602",
+      "pre_image_id": "sha256:9bbcb8bb84727229cb9929300a46cccd006f76ceb2565ce6956e66b0931168d9",
+      "post_image_id": "sha256:9bbcb8bb84727229cb9929300a46cccd006f76ceb2565ce6956e66b0931168d9",
+      "digest_changed": false,
+      "revision_label": "e42519c5b22f",
+      "expected_revision": "5773ffb03a82",
+      "revision_match": false,
+      "error": null
+    }
+  ],
+  "errors": [],
+  "overall": "FAIL"
+}
