@@ -170,14 +170,25 @@ def _issue(
 
 
 def _history(*entries: tuple[str, str | None, str | None, str | None]):
-    """``(entry_id, from_type, to_type, actor_id)`` tuples -> history nodes."""
+    """``(entry_id, from_type, to_type, actor_id)`` tuples -> history nodes.
+
+    OMN-18106: the base was ``now - 10 days``, which put every transition —
+    including the audit revert — a week and a half BEFORE the companion these
+    fixtures merge at ``now - 1h`` and before the cited PR they merge on
+    2026-09-05. The prior-revert fence now reads that ordering, and a fixture
+    describing "reverted, then the evidence landed" is the OMN-15542 shape,
+    not the OMN-17957 one these tests are about. The base is therefore inside
+    the last few minutes, so the transitions follow the evidence rather than
+    preceding it; nothing else about the fixtures changes, and no consumer of
+    this helper reads the timestamps for anything but ordering.
+    """
     nodes: list[dict[str, object]] = []
-    base = datetime.now(tz=UTC) - timedelta(days=10)
+    base = datetime.now(tz=UTC) - timedelta(minutes=5)
     for index, (entry_id, from_type, to_type, actor_id) in enumerate(entries):
         nodes.append(
             {
                 "id": entry_id,
-                "createdAt": (base + timedelta(hours=index)).isoformat(),
+                "createdAt": (base + timedelta(seconds=index)).isoformat(),
                 "actorId": actor_id,
                 "fromState": None if from_type is None else {"type": from_type},
                 "toState": None if to_type is None else {"type": to_type},

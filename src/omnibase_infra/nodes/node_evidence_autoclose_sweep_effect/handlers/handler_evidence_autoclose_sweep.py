@@ -959,6 +959,110 @@ def _newest_revert_entry_id(history: list[dict[str, object]]) -> str:
     return ""
 
 
+def _newest_revert_entry_created_at(history: list[dict[str, object]]) -> str:
+    """``createdAt`` of the newest ``completed -> non-completed`` entry, or "".
+
+    OMN-18106. The mirror of ``_newest_revert_entry_id``, walking the same
+    entries in the same order and returning the OTHER field of the same node,
+    so the id and the timestamp can never be resolved from different reversals.
+
+    An empty return means "no reversal, or a reversal whose timestamp Linear
+    did not carry". The caller must not read that as "the reversal is old" —
+    see ``_evidence_after_revert``, which holds on it.
+    """
+    for entry in _newest_first(history):
+        from_state = entry.get("fromState")
+        to_state = entry.get("toState")
+        if not isinstance(from_state, dict) or not isinstance(to_state, dict):
+            continue
+        if str(from_state.get("type")) != "completed":
+            continue
+        if str(to_state.get("type")) == "completed":
+            continue
+        return str(entry.get("createdAt") or "")
+    return ""
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    """One ISO-8601 instant as an aware UTC ``datetime``, or None.
+
+    Linear's ``createdAt`` is ``2026-09-02T07:46:30.123Z`` and GitHub's
+    ``merged_at`` is ``2026-09-02T07:46:30Z``. Both are parsed here, and a
+    naive value is refused rather than assumed to be UTC — an assumed timezone
+    is exactly the kind of silent default that turns an ordering question into
+    a coin flip.
+    """
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _evidence_after_revert(
+    revert_at: str,
+    evidence: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Which pieces of this ticket's evidence POSTDATE the reversal.
+
+    OMN-18106. Returns ``(postdating, unreadable)`` as human-readable rows.
+
+    ``evidence`` is ``(label, iso timestamp)`` for every durable, un-forgeable
+    landing time this candidate has: the merged OCC evidence companion that
+    nominated it, and each product PR the ticket cites. Those are the two
+    surfaces the verified probative checks are resolved FROM — dod_verify's
+    per-check records carry no timestamp of their own, so this is the finest
+    grain the ordering can honestly be asked at, and the reason rows say which
+    artifact they are quoting rather than implying a per-check reading.
+
+    FAIL-CLOSED in both unknown directions. An unreadable revert timestamp
+    returns everything as unreadable — with no T0 there is no ordering at all,
+    not an ordering that happens to favour release. An unreadable evidence
+    timestamp is reported in ``unreadable`` rather than skipped, because a
+    piece of evidence silently dropped from the comparison is a piece of
+    evidence that cannot hold anything.
+    """
+    revert_moment = _parse_iso_utc(revert_at)
+    if revert_moment is None:
+        return (), tuple(
+            f"{label} (revert timestamp {revert_at or '<absent>'} could not be read)"
+            for label, _ in evidence
+        )
+    postdating: list[str] = []
+    unreadable: list[str] = []
+    for label, raw in evidence:
+        moment = _parse_iso_utc(raw)
+        if moment is None:
+            unreadable.append(
+                f"{label} (timestamp {raw or '<absent>'} could not be read)"
+            )
+            continue
+        if moment > revert_moment:
+            postdating.append(f"{label} landed {raw}, after the revert at {revert_at}")
+    return tuple(postdating), tuple(unreadable)
+
+
+def _has_verified_probative_check(verdict: dict[str, object]) -> bool:
+    """Whether any check on this verdict VERIFIED.
+
+    ``verified`` is the only status that is both a verdict and a proof:
+    ``non_probative`` ran and could not have gone the other way (OMN-15391),
+    ``skipped`` never ran, ``superseded`` was replaced. So "verified probative
+    check" and "check whose status is verified" are the same set, and this is
+    the release's second conjunct — evidence that postdates the revert releases
+    nothing when the checks it feeds prove nothing.
+    """
+    return any(
+        _check_status(check) == _CHECK_STATUS_VERIFIED
+        for check in _check_records(verdict)
+    )
+
+
 def _prior_flip_fingerprints(bodies: tuple[str, ...]) -> frozenset[str]:
     """Verdict fingerprints this closer has already flipped this ticket on.
 
@@ -1003,9 +1107,23 @@ def _post_revert_baseline_fingerprints(bodies: tuple[str, ...]) -> frozenset[str
     The gate is therefore POSITIVE: a reverted ticket holds until a check
     outcome has demonstrably CHANGED since the revert. The baseline recorded
     here is what "changed" is measured against — the first verdict observed
-    after the reversal. It bootstraps itself, so no ticket is deadlocked: the
-    hold that records the baseline is the same hold that makes a later,
-    different verdict releasable.
+    after the reversal.
+
+    OMN-18106 demoted this to the SECOND of two release conditions, because
+    "the first verdict observed after the reversal" is not "the verdict as it
+    stood at the reversal", and the gap between them is where remediation
+    lands. Measured on OMN-15542: reverted 2026-09-02T07:46:30Z, bindings
+    repaired over the following week, first post-revert look 2026-09-09T23:16Z
+    — which minted the already-repaired verdict as the baseline it would
+    forever be compared against. dod_verify being deterministic, no later tick
+    could ever differ from it and the ticket was held permanently.
+
+    The ordering test in ``_evidence_after_revert`` now runs FIRST and releases
+    on evidence that postdates the reversal. This function remains the answer
+    for the case that test cannot see: a ticket whose evidence all predates the
+    reversal but whose CHECKS move anyway (a live probe that starts passing, a
+    contract read that resolves differently). It still bootstraps, so a
+    reverted ticket with no new evidence is not deadlocked either.
     """
     found: set[str] = set()
     for body in bodies:
@@ -3299,6 +3417,11 @@ class HandlerEvidenceAutocloseSweep:
                 apply_writes=effective_apply,
                 disarmed_by=disarm_ticket,
                 flip_budget_remaining=flip_budget,
+                # OMN-18106: the landing time of the evidence this candidate is
+                # nominated by, taken from the payload the enumeration already
+                # sorted on. The prior-revert fence compares it against the
+                # reversal's own timestamp.
+                companion_merged_at=str(pr.get("merged_at") or ""),
                 # The state short-circuit above already read this ticket from
                 # Linear. Handing that read down rather than repeating it keeps
                 # the reordering a pure saving: one Linear read and one file
@@ -3933,6 +4056,13 @@ class HandlerEvidenceAutocloseSweep:
         apply_writes: bool,
         disarmed_by: str,
         flip_budget_remaining: int,
+        # OMN-18106. WHEN the evidence companion landed, carried down from the
+        # enumeration payload that already had it rather than re-fetched. The
+        # prior-revert fence reads it to answer the only question it was ever
+        # really asking: did this ticket's evidence move AFTER somebody
+        # disagreed with its close? An empty string is "not resolvable", and
+        # the fence holds on it.
+        companion_merged_at: str = "",
         prefetched_issue: dict[str, object] | None = None,
     ) -> ModelEvidenceAutocloseOutcome:
         # OMN-17891. The caller-asserted fence, and it is FIRST -- ahead of the
@@ -4425,6 +4555,12 @@ class HandlerEvidenceAutocloseSweep:
                 non_probative_count=non_probative_count,
                 behavior_proving_count=behavior_proving_count,
             )
+            # OMN-18106. Empty unless the prior-revert fence below RELEASES on
+            # evidence that postdates the reversal. Non-empty, it is the
+            # sentence that says so — carried onto the outcome and into the
+            # flip's Linear comment, because a fence that stopped applying is
+            # a fact somebody auditing this close has to be able to read.
+            post_revert_release = ""
 
             # OMN-16106 D1. THE CITED-PR MERGE CONJUNCT — the OMN-13856
             # done-flip guard's `pr_not_merged` refusal, replicated.
@@ -4444,6 +4580,12 @@ class HandlerEvidenceAutocloseSweep:
             # ticket body. Fails CLOSED on a read failure, for the reason every
             # other fence here does — "I could not check" must never resolve to
             # "so I will flip it".
+            # OMN-18106. Every cited PR is read here anyway, and its
+            # `merged_at` is the landing time of a piece of this ticket's
+            # evidence. Collected as it goes past rather than re-fetched below,
+            # so the prior-revert fence and this conjunct can never disagree
+            # about when the same PR merged.
+            cited_pr_merge_times: list[tuple[str, str]] = []
             cited_refs = _cited_product_pr_refs(description, _attachment_urls(issue))
             if len(cited_refs) > _MAX_CITED_PR_REFS:
                 return ModelEvidenceAutocloseOutcome(
@@ -4500,11 +4642,16 @@ class HandlerEvidenceAutocloseSweep:
                         verdict_fingerprint=fingerprint,
                         pre_write_head_entry_id=pre_write_head_entry_id,
                     )
-                if not cited_payload.get("merged_at"):
+                cited_merged_at = str(cited_payload.get("merged_at") or "")
+                if not cited_merged_at:
                     state = str(cited_payload.get("state") or "unknown").upper()
                     unmerged_citations.append(
                         f"{cited_repo}#{cited_number}: state={state}, merged_at=null"
                     )
+                    continue
+                cited_pr_merge_times.append(
+                    (f"cited product PR {cited_repo}#{cited_number}", cited_merged_at)
+                )
             if unmerged_citations:
                 return ModelEvidenceAutocloseOutcome(
                     ticket_id=ticket_id,
@@ -4633,8 +4780,125 @@ class HandlerEvidenceAutocloseSweep:
                 # recorded the checks have produced the same outcome since the
                 # reversal. Only a fingerprint that differs from every recorded
                 # baseline is the change, and only that releases.
+                # OMN-18106. THE ORDERING QUESTION, ASKED BEFORE THE BASELINE.
+                #
+                # The recorded-baseline mechanism below measures change against
+                # the FIRST verdict this sweep happened to observe after the
+                # reversal — not against the verdict as it stood AT the
+                # reversal. Those are the same thing only when the closer's
+                # first post-revert look beats every piece of remediation to
+                # the ticket, and it usually does not: work continues after a
+                # revert and this sweep ticks every half hour.
+                #
+                # Measured on OMN-15542. Reverted Done -> In Progress at
+                # 2026-09-02T07:46:30Z. Its bindings were then repaired —
+                # AC1/AC2/AC4/AC5 bound to verified checks, AC6 demoted out of
+                # the criterion set at 2026-09-09T22:05Z. The first post-revert
+                # look landed at 2026-09-09T23:16:09Z (run 34415223971) and
+                # recorded the ALREADY-REPAIRED verdict, ca128f676aa74a44, as
+                # the baseline. dod_verify is deterministic over the same
+                # ticket state, so every later tick reproduces that identical
+                # fingerprint, `fingerprint not in baselines` can never fire,
+                # and the ticket is held for good. "Hold until something
+                # changed since the revert" had become "hold forever".
+                #
+                # So the ordering is asked FIRST, from timestamps rather than
+                # from what this sweep remembers having seen: the reversal's
+                # own `createdAt`, against the landing times of the evidence
+                # the verdict is resolved from — the merged OCC companion that
+                # nominated this candidate, and every product PR the ticket
+                # cites. Evidence that landed AFTER the disagreement is
+                # positive proof that the thing disagreed with is not what is
+                # being re-asserted now.
+                #
+                # It is a RELEASE TO THE ORDINARY PREDICATE, not a flip. The
+                # AC-binding gate, the cited-PR conjunct, the re-draw and the
+                # flip budget all still stand between here and a Done, and the
+                # OMN-17934 recurrence fence has already refused the case where
+                # the "new" post-revert evidence is a standing bot emission
+                # rather than anybody's work.
+                #
+                # FAIL-CLOSED both ways: an unreadable reversal timestamp or an
+                # unreadable evidence timestamp leaves the ordering
+                # unresolvable, and an unresolvable ordering HOLDS, naming
+                # which timestamp could not be read.
+                revert_at = _newest_revert_entry_created_at(history)
+                evidence_landings: tuple[tuple[str, str], ...] = (
+                    (
+                        f"evidence companion {request.occ_repo}#{companion_pr_number}",
+                        companion_merged_at,
+                    ),
+                    *cited_pr_merge_times,
+                )
+                postdating, unreadable = _evidence_after_revert(
+                    revert_at, evidence_landings
+                )
+                if unreadable:
+                    return await self._emit_gap_comment(
+                        base=ModelEvidenceAutocloseOutcome(
+                            ticket_id=ticket_id,
+                            companion_pr_number=companion_pr_number,
+                            companion_pr_url=companion_pr_url,
+                            decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            reason=(
+                                "this ticket has been moved back out of a "
+                                "completed state, and whether its evidence "
+                                "landed before or after that reversal could "
+                                "not be read: "
+                                + "; ".join(unreadable)
+                                + ". An unresolvable ordering holds — "
+                                "'I cannot tell when this landed' is not 'it "
+                                "landed after the disagreement'."
+                            ),
+                            dod_verify_total_checks=total_checks,
+                            dod_verify_verified_count=verified_count,
+                            dod_verify_failed_count=failed_count,
+                            dod_verify_non_probative_count=non_probative_count,
+                            dod_verify_behavior_proving_count=behavior_proving_count,
+                            verdict_fingerprint=fingerprint,
+                            pre_write_head_entry_id=pre_write_head_entry_id,
+                            ac_binding_rows=ac_binding_rows,
+                        ),
+                        apply=apply_writes,
+                        issue_id=issue_id,
+                        marker=_sweep_comment_marker(
+                            EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            ("post-revert-ordering-unreadable", fingerprint),
+                        ),
+                        comment_body=(
+                            "Prior-revert hold (OMN-18106 evidence autoclose "
+                            "sweep) — NOT flipped.\n\n"
+                            f"Merged evidence companion: {companion_pr_url}\n\n"
+                            "This ticket was moved back out of a completed "
+                            "state, and this run could not read when its "
+                            "evidence landed relative to that reversal:\n"
+                            + "\n".join(f"- {row}" for row in unreadable)
+                            + "\n\nAn ordering that cannot be resolved holds."
+                        ),
+                    )
+                if postdating and _has_verified_probative_check(verdict):
+                    post_revert_release = (
+                        "released_post_revert_evidence: this ticket was moved "
+                        f"back out of a completed state at {revert_at}, and "
+                        "evidence it is judged on landed AFTER that reversal — "
+                        + "; ".join(postdating)
+                        + ". The reversal disagreed with a verdict resolved "
+                        "from evidence that has since moved, so re-judging it "
+                        "now is not re-asserting the overruled statement. The "
+                        "ordinary flip predicate decides from here."
+                    )
+                    reason = f"{reason} {post_revert_release}"
+                    logger.info(
+                        "POST-REVERT RELEASE ticket=%s revert_at=%s evidence=%s",
+                        ticket_id,
+                        revert_at,
+                        "; ".join(postdating),
+                    )
+
                 baselines = _post_revert_baseline_fingerprints(prior_bodies)
-                if not baselines or fingerprint in baselines:
+                if not post_revert_release and (
+                    not baselines or fingerprint in baselines
+                ):
                     baseline_base = ModelEvidenceAutocloseOutcome(
                         ticket_id=ticket_id,
                         companion_pr_number=companion_pr_number,
@@ -5104,7 +5368,9 @@ class HandlerEvidenceAutocloseSweep:
                     f"Readback (OMN-17658): state-history entry {readback_entry_id} "
                     "is the completed segment this flip produced; the pre-write "
                     f"head was {pre_write_head_entry_id or '<empty history>'}. "
-                    f"Verdict fingerprint {fingerprint}.\n\n"
+                    f"Verdict fingerprint {fingerprint}.\n"
+                    + (f"\n{post_revert_release}\n" if post_revert_release else "")
+                    + "\n"
                     "Acceptance criterion \u2192 evidence check (OMN-18056) — "
                     "which check discharged which criterion, rather than the "
                     "arithmetic that used to stand in for it:\n\n"
@@ -5131,6 +5397,7 @@ class HandlerEvidenceAutocloseSweep:
                 companion_pr_url=companion_pr_url,
                 decision=EnumEvidenceAutocloseDecision.FLIPPED,
                 reason=reason,
+                post_revert_evidence_release=post_revert_release,
                 dod_verify_total_checks=total_checks,
                 dod_verify_verified_count=verified_count,
                 dod_verify_failed_count=failed_count,
