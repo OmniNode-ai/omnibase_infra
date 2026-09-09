@@ -515,8 +515,9 @@ class TestAmbiguousGroupMatchDropsRatherThanGuesses:
                 TOOL_EXECUTED,
                 group_suffixes=suffixes,
                 topic_declarers=declarers,
-            )
-            is None
+                nonprojection_infixes={},
+            ).outcome
+            == "UNATTRIBUTABLE"
         )
         # Reversing the map's insertion order gives the same answer, which is
         # the property the first-match form could not hold.
@@ -526,8 +527,9 @@ class TestAmbiguousGroupMatchDropsRatherThanGuesses:
                 TOOL_EXECUTED,
                 group_suffixes=dict(reversed(list(suffixes.items()))),
                 topic_declarers=declarers,
-            )
-            is None
+                nonprojection_infixes={},
+            ).outcome
+            == "UNATTRIBUTABLE"
         )
 
     def test_exactly_one_matching_infix_still_attributes(self) -> None:
@@ -538,15 +540,15 @@ class TestAmbiguousGroupMatchDropsRatherThanGuesses:
             f".pkg.{HOOK_LEDGER}.consume.": HOOK_LEDGER,
             f".pkg.{SESSION_REPLAY}.consume.": SESSION_REPLAY,
         }
-        assert (
-            _attribute_delta(
-                f"env.pkg.{HOOK_LEDGER}.consume.1.0.0",
-                TOOL_EXECUTED,
-                group_suffixes=suffixes,
-                topic_declarers=declarers,
-            )
-            == HOOK_LEDGER
+        attribution = _attribute_delta(
+            f"env.pkg.{HOOK_LEDGER}.consume.1.0.0",
+            TOOL_EXECUTED,
+            group_suffixes=suffixes,
+            topic_declarers=declarers,
+            nonprojection_infixes={},
         )
+        assert attribution.outcome == "ATTRIBUTED"
+        assert attribution.projection == HOOK_LEDGER
 
     def test_an_ambiguous_match_reaches_the_verdict_as_unattributable(self) -> None:
         """And therefore degrades the dimension, rather than vanishing."""
