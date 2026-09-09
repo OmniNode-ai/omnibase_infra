@@ -587,7 +587,7 @@ _CHECK_STATUS_SUPERSEDED = "superseded"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.10.0"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.10.1"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
