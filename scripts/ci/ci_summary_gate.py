@@ -513,6 +513,54 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # surface on this repo. Admitted under POST_FIXTURE_WINDOW_CONTEXTS — it
     # postdates both fixture windows by construction.
     "kb-doc-gate / kb-doc-gate",
+    # OMN-18096. The CI-bus overlay binding gate
+    # (.github/workflows/ci-bus-overlay-binding.yml, job id AND job name
+    # `ci-bus-overlay-binding`, so the check-run name is that bare string —
+    # readback on #3371's head ac679580 and on the merge cc897440 both show
+    # exactly `ci-bus-overlay-binding`). It sparse-checks `omnimarket@dev`'s
+    # `config/ci_bus_lanes.yaml` and loads it through `ModelCiBusOverlay` in
+    # scripts/trigger_rebuild_on_merge.py — the publisher's own `extra="forbid"`
+    # model — so a producer-side key that the consumer cannot model reds HERE,
+    # named, instead of on whichever unrelated PR next touches runtime.
+    #
+    # THIS LINE IS THE MECHANISM, on the identical reasoning as the OMN-16878,
+    # OMN-17199 and OMN-17172 notes above: `dev` requires exactly ONE context
+    # ("CI Summary", the OMN-4497 single-umbrella design), so this tuple IS the
+    # whole external enforcement surface. The gate landed in #3371 (OMN-18060,
+    # cc897440) deliberately UNregistered and therefore advisory, and CLAUDE.md
+    # Operating Rule 5 is explicit that a detector which is not a merge gate is
+    # ignored — the two skews this gate exists to catch (OMN-18012 on
+    # 2026-09-07, OMN-18060 on 2026-09-09) each cost a red rebuild-trigger and
+    # hours of unrelated PRs paying for someone else's merge.
+    #
+    # ADMISSION IS BY CONSTRUCTION PLUS ONE MEASURED RUN, and the difference
+    # from the N-of-16 entries above is stated rather than glossed. The gate is
+    # one day old; a 16-merged-PR window cannot exist yet, and waiting for one
+    # leaves it unenforced during exactly the window it was filed to close —
+    # the same argument recorded for `exposure-reader-coverage`. What stands in
+    # for the measured record:
+    #   * The producer declares `pull_request` AND `merge_group` (plus push to
+    #     dev, a two-hourly schedule and workflow_dispatch), carries no
+    #     `needs:`, no job-level `if:` and no path filter — so it cannot be
+    #     skipped-as-passed and cannot wedge a queue SHA.
+    #   * It is proven able to FAIL on real input, which is the OMN-16876
+    #     finding-5 vacuous-pass check: this repo's model at the pre-#3371 tree
+    #     rejects the live omnimarket overlay with
+    #     `lanes.dev.projection_readback Extra inputs are not permitted`, the
+    #     exact error that reddened ten consecutive rebuild-trigger runs.
+    #   * It is proven able to PASS: run 2026-09-09T20:33:53Z on #3371's head
+    #     ac679580 concluded `success` against the 172-line live overlay, and
+    #     the same job concluded `success` on the merge commit cc897440.
+    #   * A silently-empty sparse checkout — the one failure shape that would
+    #     turn the job into a green no-op — is refused by the workflow's own
+    #     "Assert the overlay checkout produced the file" step (`set -euo
+    #     pipefail`, `[[ ! -s ... ]] && exit 1`, no `continue-on-error`, no
+    #     `|| true`) before pytest runs. Both repos are public, so the cross-
+    #     repo checkout resolves on a fork PR's default `github.token` too.
+    # Admitted under POST_FIXTURE_WINDOW_CONTEXTS — it postdates both fixture
+    # windows by construction. Pinned by
+    # tests/ci/test_omn18096_ci_bus_overlay_gate_wiring.py.
+    "ci-bus-overlay-binding",  # ci-bus-overlay-binding.yml
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -542,6 +590,10 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         # so no merged PR in either fixture window could have produced this
         # check-run. Comes out at the next fixture re-capture.
         "kb-doc-gate / kb-doc-gate",
+        # OMN-18096: the producer workflow landed 2026-09-09 in #3371, so no
+        # merged PR in either fixture window could have produced this check-run.
+        # Comes out at the next fixture re-capture.
+        "ci-bus-overlay-binding",
     }
 )
 

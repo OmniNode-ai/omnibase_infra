@@ -47,16 +47,19 @@
 # why it rides the ordinary trusted-CI seam rather than the dedicated LAN-bound
 # runner runtime-rebuild-trigger.yml requires (OMN-17888).
 #
-# ENFORCEMENT RESIDUAL, STATED RATHER THAN IMPLIED. This context is NOT yet in
-# `EXPECTED_EXTERNAL_CONTEXTS` in scripts/ci/ci_summary_gate.py, which on this
-# repository's `dev` IS the whole external enforcement surface (OMN-4497 single
-# umbrella). Until it is, this gate is advisory: a red run here does not block
-# a merge. It is deliberately not added in the same change that creates it --
-# every entry in that tuple cites a MEASURED present-and-green window over real
-# PRs, and a gate with zero runs has no such evidence. A first-run failure
-# added blind would also wedge the umbrella for every concurrent PR in the
-# repo, not only its own. Promotion into the tuple, once a window exists, is
-# the follow-up.
+# ENFORCEMENT. This context IS in `EXPECTED_EXTERNAL_CONTEXTS` in
+# scripts/ci/ci_summary_gate.py as of OMN-18096, which on this repository's
+# `dev` IS the whole external enforcement surface (OMN-4497 single umbrella) --
+# so a red run here now blocks a merge. It was deliberately NOT added in the
+# change that created it (OMN-18060, #3371): every other entry in that tuple
+# cites a MEASURED present-and-green window over real PRs, a gate with zero
+# runs has no such evidence, and a first-run failure added blind would have
+# wedged the umbrella for every concurrent PR in the repo. The promotion was
+# made once the job had a measured pass -- #3371's head ac679580 and its merge
+# cc897440 -- on the same admission-by-construction terms recorded there for
+# `exposure-reader-coverage`. Renaming this job or this workflow's `name:`
+# breaks that registration; tests/ci/test_omn18096_ci_bus_overlay_gate_wiring.py
+# pins the two equal.
 
 name: CI Bus Overlay Binding
 
