@@ -608,6 +608,12 @@ GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success", "skipped"})
 # name above was measured `success` on all 16 sampled PRs (never skipped), so
 # this costs nothing today and closes the skip-vector fail-open that OMN-15057 /
 # OMN-14854 exist to prevent.
+#
+# OMN-18062 narrows that bar by exactly one case, before resolution rather than
+# here: a `skipped` row for a name that ALSO carries a non-skipped row on the
+# same head is a re-trigger artifact and is dropped by
+# `drop_superseded_skips()`. A `skipped` with no non-skipped row on that head
+# still reaches this frozenset and still fails closed.
 EXTERNAL_GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success"})
 
 EXIT_SUCCESS = 0
@@ -680,6 +686,63 @@ def dedup_latest(
     return latest
 
 
+def _is_skipped_row(raw: dict[str, object]) -> bool:
+    """True for a completed check-run whose conclusion is ``skipped``."""
+
+    return (
+        str(raw.get("status") or "") == "completed"
+        and str(raw.get("conclusion") or "") == "skipped"
+    )
+
+
+def drop_superseded_skips(
+    check_runs: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Drop ``skipped`` rows for names that also carry a non-skipped row (OMN-18062).
+
+    MECHANISM this closes, measured on onex_change_control#8709 (2026-09-08): a
+    ``gh pr edit`` of the PR body fires a SECOND ``pull_request`` run of a
+    workflow whose ``types:`` include ``edited``. A job in that run whose own
+    ``if:`` excludes ``edited`` is SKIPPED, and GitHub writes a FRESH check-run
+    with conclusion ``skipped`` onto the same, unchanged head SHA where that
+    very job reported ``success`` 64 seconds earlier. Latest-wins resolution
+    picks the skip, :data:`EXTERNAL_GOOD_CONCLUSIONS` admits only ``success``,
+    and ``CI Summary`` fails closed on a head nothing regressed on. Re-running
+    ``CI Summary`` cannot clear it — the skip is and stays the newest row for
+    that name — so only a new head SHA can, and every lane that edits a PR body
+    pays a re-push cycle. The same shape is reachable in this repo:
+    ``security-scan.yml``'s ``CodeQL`` job carries a draft/label ``if:`` while
+    its workflow retriggers on ``labeled``/``unlabeled``/``ready_for_review``.
+
+    A ``skipped`` row is evidence about a WORKFLOW RUN — a job's ``if:`` was
+    false for that run's event — not about the head. When a non-skipped row for
+    the same name exists on the same head, that row is the verdict about the
+    head and the skip is a re-trigger artifact.
+
+    What this deliberately does NOT relax:
+
+    * ``skipped`` with **no** non-skipped row for that name still stands and
+      still fails closed — a producer whose ``if:`` was false for the whole life
+      of the head never ran, which is exactly the skip-as-pass vector
+      (OMN-15057 / OMN-14854) the strict external bar exists for.
+    * A ``failure`` (or ``cancelled``) after a ``success`` still wins on
+      recency — a failure IS a verdict about the head.
+    * A still-running row is non-skipped, so a later skip can never suppress
+      PENDING into a stale green.
+    """
+
+    named_non_skips = {
+        str(raw.get("name") or "")
+        for raw in check_runs
+        if str(raw.get("name") or "") and not _is_skipped_row(raw)
+    }
+    return [
+        raw
+        for raw in check_runs
+        if not (_is_skipped_row(raw) and str(raw.get("name") or "") in named_non_skips)
+    ]
+
+
 def latest_check_run_by_name(
     check_runs: list[dict[str, object]],
 ) -> dict[str, JobState]:
@@ -701,11 +764,15 @@ def latest_check_run_by_name(
     green. That ANY-vs-ALL ambiguity is tracked in OMN-15112 and is why
     ``occ-preflight / eligibility`` — the one name observed on both sides — is
     excluded here (see :data:`MEASURED_NOT_ENFORCED_CONTEXTS`).
+
+    Resolution runs over the rows that survive :func:`drop_superseded_skips`, so
+    a re-trigger skip cannot supersede a real conclusion already recorded for
+    that name on this head (OMN-18062).
     """
 
     latest: dict[str, JobState] = {}
     ordering: dict[str, tuple[str, int]] = {}
-    for raw in check_runs:
+    for raw in drop_superseded_skips(check_runs):
         name = str(raw.get("name") or "")
         if not name:
             continue
