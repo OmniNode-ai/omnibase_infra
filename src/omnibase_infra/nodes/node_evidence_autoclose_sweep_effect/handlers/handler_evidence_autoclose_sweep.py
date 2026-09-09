@@ -1321,6 +1321,12 @@ def _is_markdown_heading(line: str) -> bool:
     return line.lstrip().startswith("#")
 
 
+# Multi-word members of _AC_HEADING_TEXTS. Only these are eligible for the
+# leading-qualifier match, so a heading that merely ends in "ac" or "dod" is
+# not mistaken for one that names the section (OMN-18048 review).
+_AC_HEADING_PHRASES = frozenset(t for t in _AC_HEADING_TEXTS if " " in t)
+
+
 def _is_ac_heading(line: str) -> bool:
     """True when ``line`` reads as an 'Acceptance criteria' heading.
 
@@ -1379,9 +1385,18 @@ def _is_ac_heading(line: str) -> bool:
     trimmed = _TRAILING_QUALIFIER_RE.sub("", folded).strip().rstrip(":").strip()
     if trimmed in _AC_HEADING_TEXTS:
         return True
-    # Leading qualifier: "falsifiable acceptance criteria". Heading-shaped only.
+    # Leading qualifier: "falsifiable acceptance criteria". Heading-shaped only,
+    # and only against MULTI-WORD spellings.
+    #
+    # OMN-18048 review [MINOR]: matching this way against the single-token
+    # spellings ("ac", "acs", "dod") accepts any heading merely ENDING in one --
+    # measured, "## Notes on AC", "## Why we need DoD" and "## Dropping the AC"
+    # were all recognised, opening a criteria section over unrelated content.
+    # A one-word suffix carries no evidence that the heading NAMES the section
+    # rather than mentions it; a multi-word phrase does. "## Acceptance criteria"
+    # itself is unaffected -- it matches the exact-membership test above.
     return looks_like_heading and any(
-        trimmed.endswith(f" {known}") for known in _AC_HEADING_TEXTS
+        trimmed.endswith(f" {known}") for known in _AC_HEADING_PHRASES
     )
 
 
