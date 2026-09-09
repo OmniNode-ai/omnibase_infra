@@ -231,13 +231,32 @@
 #     list, it did not empty it. Measured 2026-09-06: 13 ids remain, each
 #     backed by a ledger CLAIM row. A residual that stops shrinking is the
 #     failure mode to look for.
+#
+#   - OMN-18048 (node_version 1.10.1): AC HEADING QUALIFIERS ARE PART OF THE
+#     TICKET'S HOUSE STYLE, NOT A DIFFERENT SECTION. The AC-coverage guard
+#     previously matched acceptance-criteria headings through a closed exact
+#     set after stripping markdown, leading enumeration and trailing colons.
+#     A real heading with a trailing qualifier such as
+#     "Acceptance criteria (falsifiable)" or a prefix qualifier such as
+#     "Falsifiable acceptance criteria" was therefore invisible. If no known
+#     heading remained, the documented whole-body fallback scanned unrelated
+#     bullets elsewhere in the ticket while bold criteria written as
+#     "**AC1** - ..." were also skipped because the item parser required the
+#     line to start at AC. The sweep could then compare dod_verify against a
+#     criterion count from the wrong section. The parser now normalizes
+#     trailing parenthetical qualifiers, accepts a known AC phrase at the end
+#     of the normalized heading, and tolerates leading emphasis markers before
+#     AC-numbered items. Prose that merely begins with "Acceptance" and
+#     unrelated headings remain rejected. This changes what the sweep is
+#     willing to say in a gap comment, so the gap-comment fingerprint version
+#     moves with the node_version.
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 7
   patch: 0
-node_version: "1.10.0"
+node_version: "1.10.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -519,7 +538,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-17"
-  updated: "2026-09-05"
+  updated: "2026-09-09"
   tags:
     - "effect"
     - "linear"
