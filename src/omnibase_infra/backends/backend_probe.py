@@ -136,12 +136,28 @@ def live_consumer_groups(
         from confluent_kafka.admin import AdminClient
 
         from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+        from omnibase_infra.event_bus.kafka_auth import (
+            build_confluent_auth_config_from_env,
+        )
 
+        # OMN-18012: honour the lane transport, exactly as ``probe_kafka``
+        # below already does. A PLAINTEXT lane resolves to ``{}`` and the
+        # construction is unchanged. On a SASL lane an unauthenticated
+        # AdminClient is disconnected by the broker at the metadata call, so
+        # every question this function asks resolves to UNKNOWN — and because
+        # the dispatch gate fails closed on UNKNOWN (by design), the delegate
+        # locus gate refuses EVERY dispatched run on such a lane regardless of
+        # how healthy the lane is. Measured 2026-09-09 against the .201 dev
+        # lane after it required SCRAM-SHA-256: unauthenticated raised
+        # ``_TRANSPORT ... Failed to get metadata``, while the same call with
+        # these credentials returned 762 groups including the STABLE
+        # orchestrator group bound to the delegate command topic.
         admin = AdminClient(
             {
                 "bootstrap.servers": resolved,
                 "socket.timeout.ms": int(timeout * 1000),
                 "request.timeout.ms": int(timeout * 1000),
+                **build_confluent_auth_config_from_env(),
             }
         )
         # Metadata FIRST. On an unreachable broker librdkafka retries in the
