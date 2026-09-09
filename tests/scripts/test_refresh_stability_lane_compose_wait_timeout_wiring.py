@@ -79,7 +79,10 @@ def test_rollback_recreate_is_bounded() -> None:
         "must be wrapped in compose_up_bounded() (OMN-15718) -- an unbounded "
         "call here is the exact defect that hung indefinitely on 2026-08-05."
     )
-    assert '"${CORE_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?' in text
+    # OMN-18061: the recreate now targets the FULL deployed set. Rolling back
+    # the four CORE_SERVICES while the refresh deployed ten left the lane on
+    # mixed revisions (attempt 3, 2026-09-09).
+    assert '"${ROLLBACK_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?' in text
 
 
 @pytest.mark.unit

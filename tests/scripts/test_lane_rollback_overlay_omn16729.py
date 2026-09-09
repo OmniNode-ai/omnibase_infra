@@ -260,44 +260,39 @@ def test_receipt_of_the_18_48_41z_shape_is_provenance_only(tmp_path: Path) -> No
     gate_path.write_text(json.dumps(GATE_18_48_41Z))
 
     script_text = REFRESH_DEV.read_text()
-    # The four dimensions the destructive rollback is gated on, each read from
-    # the gate JSON by name. A dimension dropped from this list would silently
-    # widen what counts as "healthy".
-    for dim in (
-        "health_ok",
-        "manifest_ok",
-        "cluster_healthy",
-        "core_services_running",
-    ):
-        assert f'UNHEALTHY_DIMENSIONS+=("{dim}=false' in script_text, dim
     assert "FAILED_BUILD_PROVENANCE" in script_text
+    # OMN-18061 moved the rule OUT of this script and into
+    # lane_rollback_decision.py, which refresh_stability_lane.sh calls too.
+    # The dimension names are asserted where they now live; here we assert the
+    # script delegates rather than keeping a private second copy.
+    assert "lane_rollback_decision.py" in script_text
+    assert "UNHEALTHY_DIMENSIONS+=(" not in script_text
 
-    # Reproduce the script's rule with the same jq reads it performs.
-    def _jq(expr: str) -> str:
-        out = subprocess.run(
-            ["jq", "-r", expr, str(gate_path)],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert out.returncode == 0, out.stderr
-        return out.stdout.strip()
-
-    unhealthy = [
-        name
-        for name, expr in (
-            ("health_ok", ".health_ok // false"),
-            ("manifest_ok", ".manifest_ok // false"),
-            ("cluster_healthy", ".cluster_healthy // false"),
-            ("core_services_running", ".core_services_running // false"),
-        )
-        if _jq(expr) != "true"
-    ]
-    assert _jq("(.errors // []) | length") == "0"
-    assert unhealthy == [], unhealthy
-    assert _jq(".revision_readback_ok // false") == "false"
-    assert _jq(".digest_changed // false") == "false"
+    # Drive the REAL decision the script drives, on the real fixture.
+    out = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "runtime_build" / "lane_rollback_decision.py"),
+            "--gate-json",
+            str(gate_path),
+            "--ancestry-ok",
+            "true",
+            "--branch",
+            "warm",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert out.returncode == 0, out.stderr
+    decision = json.loads(out.stdout)
+    assert decision["result"] == "FAILED_BUILD_PROVENANCE"
+    assert decision["rollback_warranted"] is False
+    assert decision["lane_is_healthy"] is True
+    assert decision["unhealthy_dimensions"] == []
+    assert "revision_readback_ok=false" in decision["provenance_failures"]
+    assert "digest_changed=false" in decision["provenance_failures"]
 
 
 @pytest.mark.unit
@@ -310,10 +305,13 @@ def test_rollback_branch_is_guarded_by_lane_health() -> None:
     placed second would never be consulted.
     """
     text = REFRESH_DEV.read_text()
+    # OMN-18061: both branches now key off the shared decision's own result.
     provenance_at = text.index(
-        'elif [[ "${BRANCH}" == "warm" && "${LANE_IS_HEALTHY}" == true ]]; then'
+        'elif [[ "${DECISION_RESULT}" == "FAILED_BUILD_PROVENANCE" ]]; then'
     )
-    rollback_at = text.index('elif [[ "${BRANCH}" == "warm" ]]; then')
+    rollback_at = text.index(
+        'elif [[ "${DECISION_RESULT}" == "ROLLBACK_REQUIRED" ]]; then'
+    )
     assert provenance_at < rollback_at, (
         "the provenance branch must precede the unconditional warm rollback, "
         "or a healthy lane still gets recreated"

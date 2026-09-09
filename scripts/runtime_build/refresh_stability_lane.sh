@@ -26,7 +26,10 @@
 #   - a health-gate (verify_stability_refresh.py): digest changed, manifest
 #     contract-count floor, /health, rpk cluster health, declared consumer
 #     groups Stable, and image-revision readback,
-#   - automatic rollback-and-re-verify on ANY health-gate failure, and
+#   - automatic rollback-and-re-verify on a LANE-HEALTH failure only
+#     (OMN-18061: shared with refresh_dev_lane.sh via lane_rollback_decision.py
+#     -- a provenance-only failure on a serving lane is reported, never
+#     recreated, because no container recreate repairs a revision label), and
 #   - a durable JSON receipt (~/.omnibase/state/stability_lane_refresh/) so a
 #     future session can trust freshness from one cheap file read instead of
 #     re-deriving the whole forensic chain by hand.
@@ -72,7 +75,10 @@
 #
 # Exit codes:
 #   0  plan printed (dry-run) or refresh SUCCEEDED (health-gate PASS)
-#   1  refresh FAILED and rollback restored a healthy lane (FAILED_ROLLED_BACK)
+#   1  refresh FAILED and the lane is HEALTHY -- either the rollback restored it
+#      (FAILED_ROLLED_BACK) or no rollback was needed because the only failing
+#      dimensions were build provenance on an otherwise healthy lane
+#      (FAILED_BUILD_PROVENANCE, OMN-18061; the lane was left exactly as it was)
 #   2  refresh FAILED and rollback ALSO could not restore health -- STOP AND
 #      REPORT, do not retry-until-green. Includes FAILED_ROLLBACK_STRANDED_CONTAINERS
 #      (OMN-15718): the rollback recreate timed out or otherwise could not
@@ -80,6 +86,11 @@
 #      was explicitly torn down (docker rm -f) rather than left stranded in
 #      'Created' -- see rollback.stranded_services / rollback.census in the
 #      receipt for exactly which service(s) and pre/post container state.
+#      Also includes FAILED_ROLLBACK_ANCHOR_INCOMPLETE (OMN-18061): the lane is
+#      unhealthy and a rollback IS warranted, but this run could not anchor
+#      every service it deployed, so restoring the subset would leave the lane
+#      on a revision combination nothing has ever run. The lane is left as
+#      found; see rollback.missing_rollback_anchors in the receipt.
 #   64 usage / precondition error
 
 set -euo pipefail
@@ -109,6 +120,13 @@ source "${SCRIPT_DIR}/compose_wait_timeout.sh"
 # shellcheck source=./compose_files.sh
 source "${SCRIPT_DIR}/compose_files.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_stability_refresh.py"
+# OMN-18061: the ONE rule that decides whether a failed refresh may DESTROY the
+# lane, shared byte-for-byte with refresh_dev_lane.sh. Both scripts hand it the
+# gate JSON they just wrote; neither re-derives the health/provenance split.
+# Two implementations of one rule is how the stability lane kept the dev lane's
+# 2026-09-08T18:48:41Z rollback trigger for eight hours after the dev lane was
+# fixed.
+DECISION_SCRIPT="${SCRIPT_DIR}/lane_rollback_decision.py"
 CONSUMER_GROUPS_FILE="${SCRIPT_DIR}/consumer_groups_stability.yaml"
 
 log() { printf '[refresh-stability-lane] %s\n' "$*" >&2; }
@@ -227,6 +245,25 @@ readonly REFRESH_BUILD_SERVICES=(
     projection-tenant-credentials-writer
     projection-live-events-writer
 )
+# OMN-18061: the ROLLBACK set is the DEPLOYED set, not the core four.
+#
+# The refresh builds and recreates all ten REFRESH_BUILD_SERVICES, but the
+# preflight anchor, the retag and the recreate all used CORE_SERVICES. A
+# rollback therefore restored four services and left six on the new image --
+# a lane on MIXED revisions that was never built, tested or proven in that
+# combination. Measured twice: attempt 2 (2026-09-08T17:41Z) and attempt 3
+# (2026-09-09T00:06Z), which ended with four core services on 2ea74bc4 and six
+# projection writers on 915a1044.
+#
+# CORE_SERVICES stays the narrow four: it drives the health gate, the pre-image
+# census and CORE_CONTAINERS, and verify_stability_refresh.py carries its own
+# CORE_SERVICE_NAMES matched to it. Widening the VERIFICATION surface is a
+# separate change with its own live proof. What must not stay narrow is the
+# set a DESTRUCTIVE operation touches: a rollback narrower than its deploy is
+# not a rollback.
+readonly ROLLBACK_SERVICES=(
+    "${REFRESH_BUILD_SERVICES[@]}"
+)
 # service -> lane-scoped container_name (docker-compose.stability-test.yml).
 # projection-api's container_name is prefixed "omnimarket-", not "omninode-" --
 # resolve by explicit map, never assume a pattern (OMN-13826-class lesson).
@@ -340,6 +377,12 @@ if [[ ! -f "${VERIFY_SCRIPT}" ]]; then
     err "verify_stability_refresh.py not found at ${VERIFY_SCRIPT}"
     exit 64
 fi
+if [[ ! -f "${DECISION_SCRIPT}" ]]; then
+    # Fail here rather than fall back to "roll back on any FAIL": the fallback
+    # IS the defect this script's decision module removes (OMN-18061).
+    err "lane_rollback_decision.py not found at ${DECISION_SCRIPT}"
+    exit 64
+fi
 
 PYTHON_BIN=""
 if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
@@ -355,10 +398,18 @@ fi
 
 run_verify() {
     # Run verify_stability_refresh.py with the given extra args, print JSON to stdout.
+    run_python "${VERIFY_SCRIPT}" "$@"
+}
+
+run_python() {
+    # Run a sibling python script under whichever interpreter this host has.
+    # OMN-18061: extracted from run_verify() so the shared rollback decision
+    # reaches the SAME interpreter selection rather than growing a second one.
+    local script="$1"; shift
     if [[ "${PYTHON_BIN}" == "uv-run" ]]; then
-        uv run --project "${REPO_ROOT}" python "${VERIFY_SCRIPT}" "$@"
+        uv run --project "${REPO_ROOT}" python "${script}" "$@"
     else
-        "${PYTHON_BIN}" "${VERIFY_SCRIPT}" "$@"
+        "${PYTHON_BIN}" "${script}" "$@"
     fi
 }
 
@@ -523,12 +574,27 @@ done
 # =============================================================================
 # 2. Preflight rollback tag (BEFORE any build can overwrite :latest in place)
 # =============================================================================
+# OMN-18061: anchored over the FULL rollback set (== the deployed set), not the
+# core four. An anchor that covers fewer services than the rollback recreates
+# cannot restore them, and produces the mixed-revision lane attempt 3 ended on.
+# A service with no `:latest` to anchor is recorded by name rather than skipped:
+# the rollback refuses a PARTIAL restore, and the refusal has to be able to say
+# which services it could not have restored.
 log "=== Tag preflight rollback anchor (${UTC_NOW}) ==="
-for svc in "${CORE_SERVICES[@]}"; do
+MISSING_ROLLBACK_ANCHORS=()
+for svc in "${ROLLBACK_SERVICES[@]}"; do
     image_tag="${COMPOSE_PROJECT}-${svc}"
-    docker tag "${image_tag}:latest" "${image_tag}:preflight-${UTC_NOW}"
-    log "  tagged ${image_tag}:latest -> ${image_tag}:preflight-${UTC_NOW}"
+    if docker tag "${image_tag}:latest" "${image_tag}:preflight-${UTC_NOW}" 2>/dev/null; then
+        log "  tagged ${image_tag}:latest -> ${image_tag}:preflight-${UTC_NOW}"
+    else
+        MISSING_ROLLBACK_ANCHORS+=("${svc}")
+        err "  NO preflight anchor for ${image_tag}:latest -- a rollback could not restore this service"
+    fi
 done
+if [[ "${#MISSING_ROLLBACK_ANCHORS[@]}" -gt 0 ]]; then
+    err "preflight anchor INCOMPLETE: ${MISSING_ROLLBACK_ANCHORS[*]}"
+    err "  a rollback from this run would be PARTIAL and will be refused rather than performed."
+fi
 
 # =============================================================================
 # 3. Refresh the omnibase_infra ambient clone itself to --ref
@@ -683,22 +749,88 @@ declare -A POST_CONTAINER_STATUS
 GATE2_JSON=""
 RESULT="FAILED"
 
+# --- the shared rollback decision (OMN-18061) --------------------------------
+# One object, called by both lanes, over the gate JSON this run just wrote. It
+# separates the dimensions that say the lane is SERVING (health, manifest,
+# cluster, core containers running, and the gate's own ability to probe at all)
+# from the dimensions that say what the lane is RUNNING (revision label, image
+# digest, clone ancestry). A DESTRUCTIVE rollback is gated on the first group
+# and on nothing else, because no container recreate repairs the second.
+#
+# This branch is always `warm` for this script: the preflight anchor above ran
+# unconditionally, so a rollback target exists (its completeness is a separate
+# question, answered by MISSING_ROLLBACK_ANCHORS).
+DECISION_JSON="${WORKDIR}/rollback_decision.json"
+run_python "${DECISION_SCRIPT}" \
+    --gate-json "${GATE1_JSON}" \
+    --ancestry-ok "${ANCESTRY_OK}" \
+    --branch warm > "${DECISION_JSON}"
+DECISION_RESULT="$(jq -r '.result' "${DECISION_JSON}")"
+DECISION_UNHEALTHY="$(jq -r '.unhealthy_dimensions | join(", ")' "${DECISION_JSON}")"
+DECISION_PROVENANCE="$(jq -r '.provenance_failures | join(", ")' "${DECISION_JSON}")"
+log "rollback decision: ${DECISION_RESULT}"
+log "  lane health dimensions failing: [${DECISION_UNHEALTHY}]"
+log "  build provenance failing      : [${DECISION_PROVENANCE}]"
+
 if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     RESULT="SUCCESS"
     log "=== SUCCESS: health-gate PASS, ancestry OK ==="
     # Prune old preflight tags (keep last 3) -- bounded local rollback history.
-    for svc in "${CORE_SERVICES[@]}"; do
+    # Over the full anchored set (OMN-18061), or the writers accumulate tags
+    # forever because nothing ever prunes what nothing ever anchored.
+    for svc in "${ROLLBACK_SERVICES[@]}"; do
         image_tag="${COMPOSE_PROJECT}-${svc}"
         old_tags="$(docker images --format '{{.Tag}}' "${image_tag}" | grep '^preflight-' | sort -r | tail -n +4 || true)"
         for t in ${old_tags}; do
             docker rmi "${image_tag}:${t}" >/dev/null 2>&1 || true
         done
     done
+elif [[ "${DECISION_RESULT}" == "FAILED_BUILD_PROVENANCE" ]]; then
+    # ============================================================
+    # BUILD-PROVENANCE FINDING -- report, do NOT recreate (OMN-18061)
+    # ============================================================
+    # The shared decision says this lane is SERVING on every health dimension
+    # and the only failing dimensions are provenance ones -- the running
+    # containers do not carry the revision this refresh expected, and/or no
+    # image digest changed, and/or a tracked clone did not move forward.
+    #
+    # No container recreate repairs any of those. It can only take a serving
+    # lane down, which is what it did to the dev lane at 2026-09-08T18:48:41Z
+    # on a receipt carrying health_ok=true, manifest_ok=true and errors=[].
+    # This lane is the surface every live prod grant's `stability-proven`
+    # premise resolves from, so the same trigger here rolls the proof lane
+    # back onto the image the refresh was replacing.
+    RESULT="FAILED_BUILD_PROVENANCE"
+    log "=== FAILURE: build-provenance only -- lane is healthy, NOT rolling back ==="
+    log "  failing provenance dimensions: ${DECISION_PROVENANCE:-<none named>}"
+    log "  the lane was NOT recreated and NOT retagged; it is exactly as this run found it."
+    err "STOP AND REPORT: the refresh did not land the ref it intended, but the"
+    err "lane is SERVING. Investigate the build/staging provenance -- do not"
+    err "recreate containers to 'fix' a label mismatch."
+elif [[ "${#MISSING_ROLLBACK_ANCHORS[@]}" -gt 0 ]]; then
+    # ============================================================
+    # REFUSE A PARTIAL ROLLBACK (OMN-18061 item 6)
+    # ============================================================
+    # The lane IS unhealthy and a rollback is warranted, but this run could not
+    # anchor every service it deployed. Restoring the subset it can would leave
+    # the lane on a revision combination that was never built, tested or
+    # proven -- exactly the mixed state attempt 3 ended on, arrived at
+    # deliberately this time. Refusing is the honest outcome: it leaves the
+    # lane where the operator can see it, and names what could not be restored.
+    RESULT="FAILED_ROLLBACK_ANCHOR_INCOMPLETE"
+    log "=== FAILURE: lane unhealthy (${DECISION_UNHEALTHY:-unknown}) but the rollback would be PARTIAL ==="
+    err "REFUSING to roll back: no preflight anchor exists for ${MISSING_ROLLBACK_ANCHORS[*]}"
+    err "  Rolling back the rest would leave this lane on MIXED revisions -- a"
+    err "  combination nothing has ever run. The lane is left as this run found"
+    err "  it; see rollback.missing_rollback_anchors in the receipt."
 else
-    log "=== FAILURE: triggering rollback ==="
+    log "=== FAILURE: lane is not healthy (${DECISION_UNHEALTHY:-unknown}) -- triggering rollback ==="
     ROLLBACK_TRIGGERED=true
 
-    for svc in "${CORE_SERVICES[@]}"; do
+    # OMN-18061: retag the FULL deployed set. Rolling back four of ten is what
+    # left attempt 3 on four core services at 2ea74bc4 and six projection
+    # writers at 915a1044.
+    for svc in "${ROLLBACK_SERVICES[@]}"; do
         image_tag="${COMPOSE_PROJECT}-${svc}"
         docker tag "${image_tag}:preflight-${UTC_NOW}" "${image_tag}:latest"
         log "  rolled back ${image_tag}:latest <- ${image_tag}:preflight-${UTC_NOW}"
@@ -725,7 +857,7 @@ else
         "${LANE_COMPOSE_FILE_ARGS[@]}" \
         --profile runtime \
         up -d --no-deps --no-build --force-recreate \
-        "${CORE_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?
+        "${ROLLBACK_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?
     if [[ "${ROLLBACK_RECREATE_EXIT}" -eq 124 ]]; then
         ROLLBACK_RECREATE_TIMED_OUT=true
         err "ROLLBACK_RECREATE_TIMEOUT: targeted recreate did not complete within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s -- killed."
@@ -859,6 +991,16 @@ PRIOR_REFS_JSON="$(for r in "${ALL_TRACKED_REPOS[@]}"; do printf '%s\t%s\n' "${r
 NEW_REFS_JSON="$(for r in "${ALL_TRACKED_REPOS[@]}"; do printf '%s\t%s\n' "${r}" "${NEW_REFS[${r}]:-${PRIOR_REFS[${r}]}}"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')"
 ANCESTRY_COMMANDS_JSON="$(printf '%s\n' "${ANCESTRY_COMMANDS[@]}" | jq -Rn '[inputs]')"
 BUILD_SCOPE_JSON="$(printf '%s\n' "${REFRESH_BUILD_SERVICES[@]}" | jq -Rn '[inputs]')"
+ROLLBACK_SCOPE_JSON="$(printf '%s\n' "${ROLLBACK_SERVICES[@]}" | jq -Rn '[inputs]')"
+if [[ "${#MISSING_ROLLBACK_ANCHORS[@]}" -gt 0 ]]; then
+    MISSING_ANCHORS_JSON="$(printf '%s\n' "${MISSING_ROLLBACK_ANCHORS[@]}" | jq -Rn '[inputs]')"
+else
+    MISSING_ANCHORS_JSON='[]'
+fi
+# OMN-18061: the shared decision, verbatim, so a receipt reader can tell a
+# suppressed-by-design rollback from one that never got the chance to run --
+# and can see WHICH dimensions were consulted, without re-deriving them.
+DECISION_RECORD_JSON="$(cat "${DECISION_JSON}")"
 ROLLBACK_GATE_JSON="null"
 if [[ -n "${GATE2_JSON}" && -f "${GATE2_JSON}" ]]; then
     ROLLBACK_GATE_JSON="$(cat "${GATE2_JSON}")"
@@ -889,6 +1031,9 @@ jq -n \
     --argjson rollback_census_pre "${PRE_STATUS_JSON}" \
     --argjson rollback_census_post "${POST_STATUS_JSON}" \
     --argjson attribution "${ATTRIBUTION_RECORD_JSON}" \
+    --argjson rollback_scope "${ROLLBACK_SCOPE_JSON}" \
+    --argjson missing_rollback_anchors "${MISSING_ANCHORS_JSON}" \
+    --argjson decision "${DECISION_RECORD_JSON}" \
     --arg result "${RESULT}" \
     '{
         ts_utc: $ts,
@@ -903,7 +1048,10 @@ jq -n \
             gate: $rollback_gate,
             recreate_timed_out: $rollback_recreate_timed_out,
             stranded_services: $rollback_stranded_services,
-            census: {pre: $rollback_census_pre, post: $rollback_census_post}
+            census: {pre: $rollback_census_pre, post: $rollback_census_post},
+            scope: $rollback_scope,
+            missing_rollback_anchors: $missing_rollback_anchors,
+            decision: $decision
         },
         attribution: $attribution,
         result: $result
@@ -915,6 +1063,9 @@ log "result: ${RESULT}"
 
 case "${RESULT}" in
     SUCCESS) exit 0 ;;
-    FAILED_ROLLED_BACK) exit 1 ;;
+    # 1 == refresh failed, lane HEALTHY. FAILED_ROLLED_BACK got there by being
+    # restored; FAILED_BUILD_PROVENANCE got there by never being touched
+    # (OMN-18061).
+    FAILED_ROLLED_BACK|FAILED_BUILD_PROVENANCE) exit 1 ;;
     *) exit 2 ;;
 esac

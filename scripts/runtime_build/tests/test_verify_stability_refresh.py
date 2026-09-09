@@ -199,6 +199,7 @@ def test_digest_unchanged_fails_digest_changed_check():
         side_effect=[
             _completed(stdout="sha256:same"),  # image id (unchanged)
             _completed(stdout="deadbeef1234"),  # revision label
+            _completed(stdout="running"),  # .State.Status (OMN-18061)
         ]
     )
     result = check_service_digest(
@@ -217,6 +218,7 @@ def test_digest_changed_and_revision_match_passes():
         side_effect=[
             _completed(stdout="sha256:new"),
             _completed(stdout="deadbeef1234"),
+            _completed(stdout="running"),  # .State.Status (OMN-18061)
         ]
     )
     result = check_service_digest(
@@ -235,6 +237,7 @@ def test_revision_mismatch_is_exists_but_wrong_not_silent_pass():
         side_effect=[
             _completed(stdout="sha256:new"),
             _completed(stdout="stalerevision00"),
+            _completed(stdout="running"),  # .State.Status (OMN-18061)
         ]
     )
     result = check_service_digest(
@@ -534,6 +537,10 @@ def _full_pass_runner():
             fmt = cmd[-1]
             if "Image" in fmt:
                 return _completed(stdout="sha256:new-image")
+            # OMN-18061: the gate now also reads .State.Status, so a running
+            # container is a stated fact rather than an assumption.
+            if "State.Status" in fmt:
+                return _completed(stdout="running")
             return _completed(stdout="newrevision1234")
         if "config" in cmd and "get" in cmd:
             return _completed(stdout="15000\n")
@@ -595,6 +602,10 @@ def test_health_gate_overall_fail_when_a_group_is_dead():
             fmt = cmd[-1]
             if "Image" in fmt:
                 return _completed(stdout="sha256:new-image")
+            # OMN-18061: the gate now also reads .State.Status, so a running
+            # container is a stated fact rather than an assumption.
+            if "State.Status" in fmt:
+                return _completed(stdout="running")
             return _completed(stdout="newrevision1234")
         if "config" in cmd and "get" in cmd:
             return _completed(stdout="15000\n")
@@ -780,6 +791,10 @@ def test_health_gate_overall_fail_when_partition_cap_reached():
             fmt = cmd[-1]
             if "Image" in fmt:
                 return _completed(stdout="sha256:new-image")
+            # OMN-18061: the gate now also reads .State.Status, so a running
+            # container is a stated fact rather than an assumption.
+            if "State.Status" in fmt:
+                return _completed(stdout="running")
             return _completed(stdout="newrevision1234")
         if "config" in cmd and "get" in cmd:
             return _completed(stdout="7000\n")
@@ -843,6 +858,10 @@ def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
             fmt = cmd[-1]
             if "Image" in fmt:
                 return _completed(stdout="sha256:new-image")
+            # OMN-18061: the gate now also reads .State.Status, so a running
+            # container is a stated fact rather than an assumption.
+            if "State.Status" in fmt:
+                return _completed(stdout="running")
             return _completed(stdout="newrevision1234")
         if "config" in cmd and "get" in cmd:
             return _completed(stdout="8000\n")
@@ -940,6 +959,11 @@ def test_receipt_success_when_gate_passes():
             revision_label="r",
             expected_revision="r",
             revision_match=True,
+            # OMN-18061: core_services_running is a health dimension the
+            # overall verdict now ANDs in, so a fixture asserting PASS has to
+            # say the container is up rather than leave it defaulted.
+            container_state="running",
+            running=True,
         )
     ]
     passing.group_audit = _passing_audit()
@@ -995,6 +1019,11 @@ def test_receipt_rollback_reverified_success():
             revision_label="old-rev",
             expected_revision="old-rev",
             revision_match=True,
+            # OMN-18061: core_services_running is a health dimension the
+            # overall verdict now ANDs in, so a fixture asserting PASS has to
+            # say the container is up rather than leave it defaulted.
+            container_state="running",
+            running=True,
         )
     ]
     passing_rollback_gate.group_audit = _passing_audit()

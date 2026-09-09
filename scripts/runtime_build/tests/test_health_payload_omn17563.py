@@ -289,6 +289,10 @@ def _all_green_runner(revision: str = "deadbeef1234") -> object:
         joined = " ".join(cmd)
         if "{{.Image}}" in joined:
             stdout = "sha256:new\n"
+        elif "{{.State.Status}}" in joined:
+            # OMN-18061: the gate now also reads .State.Status, and ANDs
+            # core_services_running into the overall verdict.
+            stdout = "running\n"
         elif _REVISION_LABEL_FMT in joined:
             stdout = f"{revision}\n"
         elif "cluster health" in joined:

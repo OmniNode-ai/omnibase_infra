@@ -173,6 +173,15 @@ class ServiceDigestCheck:
     revision_label: str | None
     expected_revision: str
     revision_match: bool
+    # OMN-18061 (porting OMN-16753's dev-lane split): the container's live
+    # ``.State.Status``, and whether that status is ``running``. A service whose
+    # container sits in ``created`` behind an unmet ``depends_on`` produces ZERO
+    # log lines, so it is invisible to every log-grep triage. This is a LANE
+    # HEALTH fact -- it is what tells ``lane_rollback_decision`` that a recreate
+    # would actually repair something. ``None`` means compose has no container
+    # for the service at all.
+    container_state: str | None = None
+    running: bool = False
     error: str | None = None
 
 
@@ -238,7 +247,9 @@ class HealthGateReport:
     # {name, status, detail}. The gate decides on this block and the rollback
     # destroys the container that held it, so it has to survive into the log
     # and the receipt or the failing criterion is unrecoverable.
-    health_dimensions: list[dict[str, str]] = field(default_factory=list)
+    #: OMN-18061 widened the value type: a dimension now also carries
+    #: ``consumer_groups`` (a list), joined from the live broker enumeration.
+    health_dimensions: list[dict[str, object]] = field(default_factory=list)
     # OMN-16753: the last few manifest-fetch failures, oldest first. A retry
     # loop that keeps only its final error cannot tell a persistent failure
     # from an intermittent one, which is the distinction a reader of this
@@ -258,6 +269,31 @@ class HealthGateReport:
     @property
     def revisions_match(self) -> bool:
         return bool(self.services) and all(s.revision_match for s in self.services)
+
+    @property
+    def core_services_running(self) -> bool:
+        """Every core service has a container and that container is running.
+
+        A lane-HEALTH dimension, not a provenance one (OMN-18061): the caller
+        hands it to ``lane_rollback_decision`` to decide whether a DESTRUCTIVE
+        rollback is warranted. A lane missing a core container SHOULD be
+        repaired by a recreate; a lane whose containers are all up and serving
+        should never be.
+        """
+        return bool(self.services) and all(s.running for s in self.services)
+
+    @property
+    def core_services_not_running(self) -> list[str]:
+        """Name every core service that is not running, with the state it is in.
+
+        Named rather than merely counted so the failure reads as
+        ``runtime-effects=created`` instead of a bare False.
+        """
+        return [
+            f"{s.service}={s.container_state or 'absent'}"
+            for s in self.services
+            if not s.running
+        ]
 
     @property
     def groups_stable(self) -> bool:
@@ -292,6 +328,7 @@ class HealthGateReport:
             and self.manifest_ok
             and self.health_ok
             and self.cluster_healthy
+            and self.core_services_running
             and self.groups_stable
             and self.revisions_match
             and self.partition_headroom_ok
@@ -316,6 +353,8 @@ class HealthGateReport:
             "manifest_fetch_attempts": self.manifest_fetch_attempts,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
+            "core_services_running": self.core_services_running,
+            "core_services_not_running": self.core_services_not_running,
             "consumer_groups": (
                 self.group_audit.to_dict() if self.group_audit is not None else None
             ),
@@ -407,6 +446,39 @@ def _revisions_match(actual: str, expected: str) -> bool:
     return a == b or a.startswith(b) or b.startswith(a)
 
 
+def get_container_state(
+    container: str, *, runner: object | None = None
+) -> tuple[str | None, str | None]:
+    """Return ``(state, error)`` for a container's live ``.State.Status``.
+
+    OMN-18061, porting OMN-16753's dev-lane probe. ``docker compose ps -q``
+    returns nothing for a container that is not running, so a service stranded
+    in ``created`` behind an unmet ``depends_on`` looked identical to a service
+    compose had never created. The caller resolves ids with ``ps -aq`` and this
+    reads the real state, so the gate can say ``runtime-effects=created``
+    instead of "no container".
+    """
+    try:
+        result = _run(
+            ["docker", "inspect", container, "--format", "{{.State.Status}}"],
+            runner=runner,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"timed out inspecting state of {container}"
+    except FileNotFoundError:
+        return None, "docker command not found"
+    if result.returncode != 0:
+        return (
+            None,
+            f"docker inspect (state) failed (exit {result.returncode}): "
+            f"{(result.stderr or '').strip()}",
+        )
+    state = (result.stdout or "").strip()
+    if not state:
+        return None, f"empty container state for {container}"
+    return state, None
+
+
 def check_service_digest(
     service: str,
     container: str,
@@ -415,9 +487,30 @@ def check_service_digest(
     *,
     runner: object | None = None,
 ) -> ServiceDigestCheck:
+    if not container:
+        # OMN-18061: an absent container is a NAMED not-running finding, not a
+        # silent pass through the digest/revision probes below.
+        return ServiceDigestCheck(
+            service=service,
+            container=container,
+            pre_image_id=pre_image_id,
+            post_image_id=None,
+            digest_changed=False,
+            revision_label=None,
+            expected_revision=expected_revision,
+            revision_match=False,
+            container_state=None,
+            running=False,
+            error="no container resolved for this service (compose has none)",
+        )
     post_image_id, image_err = get_image_id(container, runner=runner)
     revision, rev_err = get_revision_label(container, runner=runner)
-    error = image_err or rev_err
+    state, state_err = get_container_state(container, runner=runner)
+    running = state == "running"
+    error = image_err or rev_err or state_err
+    if error is None and not running:
+        # Named, so the receipt carries the state rather than a bare False.
+        error = f"container is {state!r}, not running"
     digest_changed = bool(
         pre_image_id and post_image_id and pre_image_id != post_image_id
     )
@@ -433,6 +526,8 @@ def check_service_digest(
         revision_label=revision,
         expected_revision=expected_revision,
         revision_match=revision_match,
+        container_state=state,
+        running=running,
         error=error,
     )
 
@@ -858,11 +953,81 @@ CORE_SERVICES: dict[str, str] = {
 
 def _render_dimensions(
     dimensions: tuple[HealthDimension, ...],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """Render the probe's non-HEALTHY dimensions for the log and the receipt."""
     return [
         {"name": d.name, "status": d.status, "detail": d.detail} for d in dimensions
     ]
+
+
+#: How a derived consumer-group identity encodes the topic it consumes:
+#: ``<lane>.<repo>.<node>.consume.<ver>.__t.<topic>``. Declared here rather
+#: than re-spelled at the match site so a change to the identity shape is one
+#: edit, and a group that does not carry the marker is simply not attributed
+#: instead of being sliced at a guessed offset.
+CONSUMER_GROUP_TOPIC_MARKER = ".__t."
+
+#: Cap on how many groups are spelled into one dimension detail. The detail is
+#: printed to the refresh log and stored in the receipt; a lane can carry 600+
+#: groups and a saturation finding that names all of them is unreadable.
+MAX_NAMED_CONSUMER_GROUPS = 8
+
+
+def consumer_group_topic(group: str) -> str | None:
+    """The topic a derived consumer-group identity consumes, or ``None``."""
+    marker_at = group.rfind(CONSUMER_GROUP_TOPIC_MARKER)
+    if marker_at < 0:
+        return None
+    topic = group[marker_at + len(CONSUMER_GROUP_TOPIC_MARKER) :]
+    return topic or None
+
+
+def annotate_dimension_consumer_groups(
+    dimension: dict[str, object],
+    live_groups: Sequence[str],
+) -> dict[str, object]:
+    """Name the CONSUMER GROUP behind a dimension, not only the topic [OMN-18061].
+
+    ``projection_dlq_saturation`` reports the topics whose flow no declaring
+    projection could be attributed. The topic says WHAT moved; the consumer
+    group says WHO was reading it, which is the fact that identifies the cause.
+    On 2026-09-09 the group had to be recovered by hand from broker enumeration
+    AFTER the rollback destroyed the runtime that knew it -- the gate had the
+    live group list in the same report and did not connect the two.
+
+    Deliberately implemented HERE and not in the runtime's dimension producer
+    (``runtime/health/projection_liveness.py``): that module derives the
+    attribution itself and is being changed concurrently under OMN-16753. The
+    gate is the surface that has both the dimension and the live broker
+    enumeration in hand at the same moment, so the join costs nothing and
+    crosses no ownership boundary.
+
+    Attribution is by exact topic match against the identity's own ``.__t.``
+    suffix, so an unrelated group is never swept in. A dimension whose detail
+    names no topic this lane has a group for is annotated as SUCH -- "no
+    consumer group named" and "no consumer group exists" are different facts,
+    and the second one is the finding.
+    """
+    detail = str(dimension.get("detail", ""))
+    matched = [
+        group
+        for group in live_groups
+        if (topic := consumer_group_topic(group)) is not None and topic in detail
+    ]
+    annotated = dict(dimension)
+    annotated["consumer_groups"] = matched
+    if not matched:
+        annotated["detail"] = (
+            f"{detail} [no consumer group on this lane declares a topic named in "
+            "this finding -- the reader is enumerating a broker for a group that "
+            "may not exist]"
+        )
+        return annotated
+    shown = matched[:MAX_NAMED_CONSUMER_GROUPS]
+    elided = len(matched) - len(shown)
+    suffix = f" (+{elided} more)" if elided else ""
+    annotated["detail"] = f"{detail} [consumer group(s): {', '.join(shown)}{suffix}]"
+    return annotated
 
 
 def run_health_gate(
@@ -1004,6 +1169,16 @@ def run_health_gate(
         runner=runner,
         sleep_fn=sleep_fn,
     )
+
+    # OMN-18061: join the health dimensions to the live broker enumeration the
+    # audit just performed. Done LAST, once both halves exist, so a dimension
+    # recorded before the audit ran is never annotated with an empty list and
+    # read later as "no group exists".
+    live_group_names = [f.group for f in report.group_audit.findings]
+    report.health_dimensions = [
+        annotate_dimension_consumer_groups(dimension, live_group_names)
+        for dimension in report.health_dimensions
+    ]
 
     return report
 
