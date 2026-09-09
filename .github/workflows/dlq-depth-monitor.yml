@@ -23,7 +23,11 @@
 #   red never carried information, so the sink this monitor exists to watch
 #   has been unmeasured for the monitor's entire existence.
 #
-#   Three defects, compounding:
+#   Four defects, compounding. The fourth was invisible until the first
+#   three were fixed: with the runner, the address and the transport all
+#   correct, the probe still never opened a socket, because the omnimarket
+#   drift guard refused the dispatch before the broker was ever contacted.
+#   See "(4) THE GUARD" on the probe step below.
 #
 #   (1) THE RUNNER. `runs-on` read the trusted-CI routing variable, which
 #       resolves to `ubuntu-latest` (asserted intent — `config/
@@ -234,6 +238,43 @@ jobs:
           # KAFKA_SASL_MECHANISM the resolve step exported.
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          # (4) THE GUARD — the fourth defect, found only after the first three
+          # were fixed and the probe still never reached the broker.
+          #
+          # The omnimarket drift guard (OMN-14060) refuses `onex skill`
+          # whenever $OMNI_HOME/omnimarket exists and the running
+          # interpreter's omnimarket is not a git co-install. The deploy
+          # runner sets OMNI_HOME to its private clone tree
+          # (DEPLOY_RUNNER_OMNI_HOME, docker/docker-compose.runners.yml),
+          # which DOES contain omnimarket, so the guard fires here on a
+          # dispatch it has no bearing on: node_dlq_depth_monitor_effect is
+          # provided by omnibase_infra itself (pyproject.toml `onex.nodes`
+          # entry point) and invokes no omnimarket node in-process.
+          #
+          # It cannot be satisfied rather than overridden. This job's
+          # interpreter is the ephemeral `uv sync` venv under _work, and
+          # omnimarket is DELIBERATELY absent from this repo's pyproject.toml
+          # and uv.lock — it sits above infra in the compat -> core -> spi ->
+          # infra graph, so declaring it would publish a cycle (the workspace-
+          # venv reconciler's own header states this). `uv sync` therefore can
+          # never install it here, and the guard's OMN-17190 self-heal cannot
+          # close the gap either: that reconciler repairs
+          # $OMNI_HOME/omnibase_infra/.venv, which is neither this interpreter
+          # nor a venv the runner workspace has ever had.
+          #
+          # NOTE — the reconciler's path is named by family, not spelled, on
+          # purpose. check_incident_replay_coverage.py regex-scans the FULL
+          # text of every workflow file (comments included) for
+          # `scripts/**.sh`, so spelling it here registers it as a newly wired
+          # enforcement guard and fails that gate on a prose mention. Same
+          # family of trap as omni_home CLAUDE.md rule 15.
+          #
+          # The guard's own docstring names this variable as the sanctioned
+          # way past a refusal and calls unsetting OMNI_HOME "strictly worse
+          # ... silently". The override downgrades to a logged WARNING, so
+          # genuine drift stays visible in this run's log. chain-canary.yml
+          # carries the identical override for the identical reason.
+          ONEX_ALLOW_OMNIMARKET_DRIFT: "1"
         run: |
           set -euo pipefail
           if [ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]; then
