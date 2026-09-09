@@ -518,7 +518,25 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # neither. Net-new file; 0034's bytes are NOT edited, it is retired in place
     # by a row in _ledger/migration-supersessions.tsv, exactly as 0034 retired
     # 0033.
-    assert len(result.declarations) == 173
+    #
+    # 173 -> 174 for OMN-15683's
+    # nodes/node_projection_delegation/
+    # 0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql,
+    # the successor that supersedes 0036. 0036 reads tenant_registry_mirror
+    # AFTER set_config('role', <delegation_events' owner>, true), and the mirror
+    # is owned by a DIFFERENT role: on onex-dev its ACL is
+    # {role_omnidash=arwdDxt, app_dashboard=r, omninode_runtime=arw, jake_ro=r}
+    # with role_omninode_owner absent, so
+    # has_table_privilege('role_omninode_owner','tenant_registry_mirror',
+    # 'SELECT') is false. Staging deploy run 34281092205 ran 0036's blindness
+    # reconciliation and debris DELETE correctly and then aborted with
+    # `permission denied for table tenant_registry_mirror` at inline_code_block
+    # line 262, rolling the whole transaction back. 0037 copies the mirror into
+    # a session-local TEMP table as the MIGRATE IDENTITY, before the role
+    # switch, and joins that snapshot in every guard below. Net-new file;
+    # 0036's bytes are NOT edited, it is retired in place by a row in
+    # _ledger/migration-supersessions.tsv, exactly as 0036 retired 0034.
+    assert len(result.declarations) == 174
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

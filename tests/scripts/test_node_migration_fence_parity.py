@@ -451,9 +451,17 @@ FENCED_HOOK_EVENT_CAPTURE_IDS = (
 # fail-closed on neither; proven by execution against the seeded onex-dev shape
 # on the .201 dev-lane Postgres. There is no 0035 in this chain -- 0035 is an
 # unrelated GRANT and 0036 is simply the next free ordinal.
-# 0031, 0032, 0033 and 0034 all stay in this tuple permanently: they are
-# RETIRED, not released, and when the operator un-gates it is 0036 and only
-# 0036.
+# 0036 JOINED THEM on 2026-09-08, later the same day, superseded by 0037: it
+# reads tenant_registry_mirror AFTER set_config('role', <delegation_events'
+# owner>, true), and on onex-dev that owner is absent from the mirror's ACL --
+# staging deploy run 34281092205 aborted with `permission denied for table
+# tenant_registry_mirror` at inline_code_block line 262 and rolled its whole
+# transaction back. 0037 snapshots the mirror into a session-local TEMP table
+# as the MIGRATE IDENTITY, before the role switch, and joins that snapshot
+# everywhere below.
+# 0031, 0032, 0033, 0034 and 0036 all stay in this tuple permanently: they are
+# RETIRED, not released, and when the operator un-gates it is 0037 and only
+# 0037.
 FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql",
     "node:node_projection_delegation:"
@@ -464,6 +472,8 @@ FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "0034_delegation_events_uuid_via_registry_role_set_guard.sql",
     "node:node_projection_delegation:"
     "0036_delegation_events_uuid_mixed_representation.sql",
+    "node:node_projection_delegation:"
+    "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
 )
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
@@ -600,7 +610,7 @@ DEV_LANE_VALUE = "dev"
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
     "node:node_projection_delegation:"
-    "0036_delegation_events_uuid_mixed_representation.sql",
+    "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
 )
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
@@ -1067,7 +1077,7 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
     )
     assert set(LANE_RELEASED_IDS) - set(FENCED_REGISTRATION_IDS) == {
         "node:node_projection_delegation:"
-        "0036_delegation_events_uuid_mixed_representation.sql",
+        "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
     }, "the dev-lane release carries ids no operator ruling names"
 
 
@@ -1107,7 +1117,7 @@ def test_unreleasable_delegation_ids_are_not_releasable_on_any_lane() -> None:
         FENCED_DELEGATION_UUID_CONVERSION_IDS
     ) - {
         "node:node_projection_delegation:"
-        "0036_delegation_events_uuid_mixed_representation.sql"
+        "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
     }
     for label, released in parse_lane_release_policies(extract_fence_block()).items():
         leaked = sorted(set(released or ()) & forbidden)
