@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -70,9 +71,11 @@ def _f_paths(argv: list[str]) -> list[str]:
 def _print_rollback_cmd(tmp_path: Path) -> list[str]:
     """Run the real script's ``--print-rollback-cmd`` and return its argv.
 
-    ``--print-rollback-cmd`` invokes no docker and takes no lane lock, so this
-    runs anywhere. ``OMNI_HOME`` is a scratch dir: the printed paths are derived
-    from it, never read.
+    ``--print-rollback-cmd`` invokes no docker and takes no lane lock, but the
+    script still gates on ``docker`` being on PATH before it prints anything,
+    so this does NOT in fact run anywhere -- see the skipif on the test below.
+    ``OMNI_HOME`` is a scratch dir: the printed paths are derived from it,
+    never read.
     """
     env = dict(os.environ)
     env["OMNI_HOME"] = str(tmp_path)
@@ -95,6 +98,21 @@ def _print_rollback_cmd(tmp_path: Path) -> list[str]:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    shutil.which("docker") is None,
+    reason=(
+        "refresh_dev_lane.sh refuses with exit 64 ('docker' is required but not "
+        "found in PATH) before --print-rollback-cmd prints anything, so this "
+        "assertion needs docker on PATH even though it never invokes it. "
+        "Measured 2026-09-09: the governed pre-push places remote legs on lab "
+        "hosts that have no docker installed (h105/omnibook, and the cloud row "
+        "is provisioned deliberately without it), where this test failed on "
+        "every push touching tests/scripts/ regardless of the change under "
+        "test -- a false red that hard-blocks an unrelated push. Same posture "
+        "as the GNU `realpath -m` guards in "
+        "tests/scripts/test_runner_job_started_root_owned_debris.py."
+    ),
+)
 def test_dev_rollback_command_carries_both_compose_files(tmp_path: Path) -> None:
     """The dev rollback recreate names infra.yml AND the dev-lane overlay."""
     argv = _print_rollback_cmd(tmp_path)
