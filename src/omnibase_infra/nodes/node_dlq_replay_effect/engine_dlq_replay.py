@@ -31,9 +31,10 @@ from aiokafka.errors import KafkaConnectionError, KafkaError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from omnibase_infra.enums import EnumNonRetryableErrorCategory
+from omnibase_infra.errors import DlqTopicFixedPointError
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.mixin_kafka_dlq import DLQ_UNREADABLE_VALUE_MARKER
-from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+from omnibase_infra.event_bus.topic_constants import build_dlq_topic, is_dlq_topic
 from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_type import (
     EnumDlqReplayFilterType,
 )
@@ -57,6 +58,21 @@ NON_RETRYABLE_ERRORS = EnumNonRetryableErrorCategory.get_all_values()
 # the dlq-replay-consumer service must set. Replaces the legacy ephemeral
 # "dlq-replay-{pid}" group that left no durable read position.
 DLQ_REPLAY_CONSUMER_GROUP: str = "onex-dlq-replay"
+
+# OMN-18084: how many dead-letter envelope layers ``unwrap_nested_dlq_record``
+# will strip before it refuses.
+#
+# Each layer JSON-escapes the one below it, so a nest DOUBLES in size per layer:
+# measured, a 300-byte innermost record reaches 12,736 bytes at 8 layers (the
+# live .201 record was 14,939 bytes at 8) and ~10 MB at 18. ``max_request_size``
+# is 10 MB, so ~18 layers is the deepest nest that can physically be produced,
+# and the deepest actually observed was 9. A cap of 16 therefore sits above
+# every real nest while keeping the bound cheap to exercise.
+#
+# The cap is a termination guarantee, not a tuning knob. Exceeding it is a
+# REFUSAL, never a truncation: a record whose real original topic was not
+# reached is quarantined durably rather than published somewhere approximate.
+MAX_DLQ_UNWRAP_DEPTH: int = 16
 
 
 def generate_replay_correlation_id() -> UUID:
@@ -181,6 +197,100 @@ def _is_boundary_failure_terminal(original_value: str) -> bool:
     return decoded.get("payload_type") == ModelBoundaryFailureTerminal.__name__
 
 
+def unwrap_nested_dlq_record(
+    message: ModelDlqMessage,
+) -> tuple[ModelDlqMessage, int]:
+    """Resolve a nested dead letter down to the record it actually wraps.
+
+    A DLQ record whose ``original_topic`` is ITSELF a dead-letter topic is a
+    dead letter about a dead letter: its ``original_value`` is another DLQ
+    envelope. Replaying it publishes that inner envelope back onto the topic it
+    was consumed from, one layer per pass — the fourth fixed point of OMN-18084,
+    and the one #3365 did not close. Measured on the .201 dev lane 2026-09-09,
+    the record at offset 21685100 of ``onex.dlq.omnibase-infra.events.v1`` was
+    14,939 bytes carrying SEVEN such layers around one real record on
+    ``onex.evt.omniclaude.prompt-submitted.v1``; ~1.67M retained records sat at
+    depth 8-9, worth order 10M further writes at the observed 34 records/s.
+
+    Reading the nest is strictly better than refusing it. The innermost envelope
+    is the record the DLQ was built to preserve, so unwrapping hands
+    ``should_replay`` the real ``original_topic``, ``error_type``,
+    ``retry_count`` and body, and every existing eligibility clause then applies
+    to the thing that actually failed rather than to an envelope about it.
+
+    THE OUTER DLQ COORDINATES ARE CARRIED THROUGH DELIBERATELY. The record
+    physically lives at the OUTER offset on the drained topic, and
+    ``HandlerDlqReplay._mark_offset`` commits ``dlq_offset + 1`` there. Adopting
+    the inner envelope's own ``offset``/``partition`` — which describe the
+    original topic, not this one — would rewind the replay group.
+
+    Args:
+        message: The record as read off the DLQ topic.
+
+    Returns:
+        ``(message, 0)`` unchanged — the SAME object, unparsed — when
+        ``original_topic`` is not a dead-letter topic, and ``(innermost, depth)``
+        otherwise, where ``depth`` is the number of layers stripped.
+
+    Raises:
+        DlqTopicFixedPointError: The nest could not be read to a real original
+            topic — a layer is not JSON, is not a DLQ envelope, or the nest is
+            deeper than ``MAX_DLQ_UNWRAP_DEPTH``. Callers terminalise on this;
+            they must never fall through to a publish.
+    """
+    if not is_dlq_topic(message.original_topic):
+        return (message, 0)
+
+    current = message
+    for depth in range(1, MAX_DLQ_UNWRAP_DEPTH + 1):
+        try:
+            decoded = json.loads(current.original_value)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise DlqTopicFixedPointError(
+                f"Refusing a record on {message.original_topic}: its "
+                f"original_topic is a dead-letter topic, so its body should be "
+                f"another dead-letter envelope, but layer {depth} is not JSON "
+                f"({exc}). Its real original topic cannot be established, so "
+                "there is nowhere to replay it (OMN-18084).",
+                original_topic=message.original_topic,
+                unwrap_depth=depth,
+            ) from exc
+        if not isinstance(decoded, dict):
+            raise DlqTopicFixedPointError(
+                f"Refusing a record on {message.original_topic}: layer {depth} "
+                f"of its nest decoded to {type(decoded).__name__}, not a "
+                "dead-letter envelope, so its real original topic cannot be "
+                "established (OMN-18084).",
+                original_topic=message.original_topic,
+                unwrap_depth=depth,
+            )
+        try:
+            current = ModelDlqMessage.from_kafka_message(
+                decoded,
+                dlq_offset=message.dlq_offset,
+                dlq_partition=message.dlq_partition,
+            )
+        except DlqRecordUnparseableError as exc:
+            raise DlqTopicFixedPointError(
+                f"Refusing a record on {message.original_topic}: layer {depth} "
+                f"of its nest is not a usable dead-letter envelope ({exc}), so "
+                "its real original topic cannot be established (OMN-18084).",
+                original_topic=message.original_topic,
+                unwrap_depth=depth,
+            ) from exc
+        if not is_dlq_topic(current.original_topic):
+            return (current, depth)
+
+    raise DlqTopicFixedPointError(
+        f"Refusing a record on {message.original_topic}: it is still a "
+        f"dead-letter envelope after {MAX_DLQ_UNWRAP_DEPTH} layers, so its "
+        "real original topic cannot be established within the unwrap bound "
+        "(OMN-18084).",
+        original_topic=message.original_topic,
+        unwrap_depth=MAX_DLQ_UNWRAP_DEPTH,
+    )
+
+
 def should_replay(
     message: ModelDlqMessage, config: ModelDlqReplayEngineConfig
 ) -> tuple[bool, str]:
@@ -234,6 +344,25 @@ def should_replay(
             f"original value could not be read ({DLQ_UNREADABLE_VALUE_MARKER}); "
             "those marker bytes are a statement, not a body, and must not be "
             "published to the original topic (OMN-17896)",
+        )
+
+    # OMN-18084: a record whose original topic is ITSELF a dead-letter topic
+    # cannot be replayed anywhere -- publishing to ``original_topic`` writes it
+    # back onto the sink it was consumed from. ``HandlerDlqReplay`` unwraps the
+    # nest before it gets here, so in the wired path this clause is reached only
+    # by a caller that does NOT unwrap (``scripts/dlq_replay.py``). It is an
+    # ELIGIBILITY refusal rather than only the producer's raise on purpose: a
+    # refusal here routes the record to the durable quarantine topic and the
+    # offset advances, whereas a raise inside ``replay_message`` is recorded
+    # FAILED, which blocks the partition and redelivers the record forever.
+    if is_dlq_topic(message.original_topic):
+        return (
+            False,
+            "Dead-letter original topic: the record's original_topic "
+            f"{message.original_topic} is itself a dead-letter topic, so "
+            "replaying it would write the record back onto the sink it was "
+            "consumed from — the loop that ran at 34 records/s on the .201 dev "
+            "lane after the first three fixed points were closed (OMN-18084)",
         )
 
     if _is_boundary_failure_terminal(message.original_value):
@@ -501,6 +630,25 @@ class DLQProducer:
         if not self._started or self._producer is None:
             raise RuntimeError("Producer not started")
 
+        # OMN-18084: last-resort refusal, checked BEFORE the rate limiter so a
+        # refusal never sleeps. This producer's destination is whatever the
+        # record names, and until now nothing in this file consulted
+        # ``is_dlq_topic`` at all -- a record whose ``original_topic`` was
+        # ``onex.dlq.omnibase-infra.events.v1`` was published straight back onto
+        # it. ``should_replay`` and ``unwrap_nested_dlq_record`` mean the wired
+        # path never reaches this raise; it is here so that no future caller can
+        # publish onto a dead-letter sink through this producer without saying
+        # so out loud, exactly as the zero-byte refusal below does for a body.
+        if is_dlq_topic(message.original_topic):
+            raise DlqTopicFixedPointError(
+                "Refusing to replay onto a dead-letter topic: "
+                f"{message.original_topic} is the sink this record was consumed "
+                "from, so publishing there re-dead-letters it rather than "
+                "re-attempting it. Unwrap the nested envelope to its innermost "
+                "real original topic, or terminalise the record (OMN-18084).",
+                original_topic=message.original_topic,
+            )
+
         if self._last_publish is not None:
             elapsed = (datetime.now(UTC) - self._last_publish).total_seconds()
             if elapsed < self._interval:
@@ -713,6 +861,7 @@ class DLQQuarantineProducer:
 __all__ = [
     "DLQ_REPLAY_CONSUMER_GROUP",
     "DLQ_UNREADABLE_VALUE_MARKER",
+    "MAX_DLQ_UNWRAP_DEPTH",
     "DLQConsumer",
     "DLQProducer",
     "DLQQuarantineProducer",
@@ -722,4 +871,5 @@ __all__ = [
     "safe_truncate",
     "sanitize_bootstrap_servers",
     "should_replay",
+    "unwrap_nested_dlq_record",
 ]
