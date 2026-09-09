@@ -998,6 +998,14 @@ class DeployExecutor:
         - skip=True (--skip-self-update CLI flag) bypasses the check.
         - Container mode (DEPLOY_AGENT_MODE=container) exits with code 42
           instead of os.execv so the supervisor can respawn from the new binary.
+        - Host mode re-execs ``DEPLOY_AGENT_LAUNCHER`` when the launcher
+          exported it, and the bare interpreter otherwise (OMN-18073). os.execv
+          inherits the caller's environment, so an interpreter re-exec can only
+          ever carry forward the environment this process started with -- which
+          is how a mangled credential survived four self-updates on 2026-09-09
+          while the code advanced normally. The launcher re-``source``s the
+          operator env store, so code-on-disk and env-on-disk both become
+          code-and-env-in-process.
 
         Raises:
             RuntimeError: when ``DEPLOY_AGENT_TRACKING_REF`` is unset. The
@@ -1133,11 +1141,34 @@ class DeployExecutor:
             )
             sys.exit(42)
         else:
-            logger.info(
-                "self_update[boundary=%s]: host mode — re-execing process image",
-                boundary.value,
-            )
-            os.execv(sys.executable, [sys.executable] + sys.argv)  # noqa: S606
+            launcher = os.environ.get("DEPLOY_AGENT_LAUNCHER")
+            if launcher:
+                # OMN-18073: re-exec THROUGH the launcher, not the bare
+                # interpreter. os.execv replaces the process image but inherits
+                # the caller's environment verbatim, so an interpreter re-exec
+                # carries the environment this process started with forward
+                # forever. On 2026-09-09 that is exactly what happened: the
+                # agent re-execed four times across the day, advancing its code
+                # from b0b46c18 to c65d8a8b normally, while the mangled
+                # ONEXBOT_OCC_PRIVATE_KEY it had inherited from systemd's
+                # EnvironmentFile= at 01:38:54Z survived every one of them.
+                # Only a systemd restart re-read the file. Going through
+                # deploy/deploy-agent-launch.sh re-`source`s the operator env
+                # store, so a repaired or rotated value is picked up at the next
+                # job boundary instead of needing an operator restart.
+                logger.info(
+                    "self_update[boundary=%s]: host mode — re-execing through "
+                    "launcher %s (re-reads the operator env store)",
+                    boundary.value,
+                    launcher,
+                )
+                os.execv(launcher, [launcher, *sys.argv[1:]])  # noqa: S606
+            else:
+                logger.info(
+                    "self_update[boundary=%s]: host mode — re-execing process image",
+                    boundary.value,
+                )
+                os.execv(sys.executable, [sys.executable] + sys.argv)  # noqa: S606
 
     def preflight(self, on_phase_update: PhaseCallback) -> None:
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.IN_PROGRESS)

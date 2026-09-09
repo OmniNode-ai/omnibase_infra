@@ -127,16 +127,27 @@ def test_dev_lane_unit_exists_and_is_fenced_to_dev() -> None:
         "Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev"
         in text
     )
-    # canonical repo copy for both cwd and interpreter (OMN-13760)
+    # canonical repo copy for both cwd and interpreter (OMN-13760).
+    #
+    # OMN-18073 moved the interpreter off ExecStart: the unit now execs
+    # deploy/deploy-agent-launch.sh, which bash-`source`s the operator env store
+    # (systemd's EnvironmentFile= parser mangles its ANSI-C-quoted value) and
+    # then execs DEPLOY_AGENT_PYTHON. Both halves must still resolve inside the
+    # canonical repo copy, so the OMN-13760 invariant is asserted on both.
     assert "WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent" in text
     exec_start_lines = [
         line for line in text.splitlines() if line.startswith("ExecStart=")
     ]
     assert exec_start_lines
     assert all(
-        "/data/omninode/omnibase_infra/scripts/deploy-agent/.venv/bin/python" in line
+        line.startswith("ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/")
         for line in exec_start_lines
     ), exec_start_lines
+    assert (
+        "Environment=DEPLOY_AGENT_PYTHON=/data/omninode/omnibase_infra/"
+        "scripts/deploy-agent/.venv/bin/python" in text
+    )
+    assert "/data/omninode/deploy-agent/venv" not in text
     assert not any(ln.strip().startswith("WatchdogSec=") for ln in text.splitlines())
 
 
