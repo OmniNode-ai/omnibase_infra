@@ -219,7 +219,7 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
-      - name: Probe DLQ depth (read-only; non-zero exit == alert)
+      - name: Probe DLQ depth (read-only; the alert is a field, not an exception)
         env:
           TOPIC_PREFIX: ${{ github.event.inputs.topic_prefix || 'onex.dlq.' }}
           WINDOW_SECONDS: ${{ github.event.inputs.window_seconds || '1800' }}
@@ -296,31 +296,179 @@ jobs:
             "${suppress_flag[@]}" \
             | tee dlq-monitor-result.json
 
-      - name: Post summary
+      # OMN-18088 — THE RED RUN HAS TO SAY WHY IT IS RED.
+      #
+      # This step is BOTH the alert gate and the summary, and it is the only
+      # place either one happens. That is deliberate: while the gate lived in
+      # the node (as a raise) and the summary lived in a separate step (as
+      # prose), the summary asserted "the failing step's log names each
+      # offending topic with its arrival count, its bound, and its retained
+      # depth" and that sentence was FALSE on every alerting run — the raise
+      # was swallowed between RuntimeLocal and receipt mode and the run emitted
+      # handler_result=null / terminal_payload=null / error="" (run
+      # 34399417506, 67 topics measured, none named).
+      #
+      # Now the node returns the histogram and the derived gating decision, and
+      # this step renders the offenders it is about to go red for. The claim
+      # and the evidence are produced by the same code, so they cannot drift.
+      #
+      # `always()` because a probe that died BEFORE writing a result must still
+      # produce a summary saying so. Every unreadable case below fails closed
+      # with a named reason: an absent file, an unparseable one, and a payload
+      # that is not a monitor result all exit non-zero rather than reporting a
+      # clean bill of health for a sweep that never happened.
+      - name: Name the offenders and gate the run
         if: always()
         run: |
-          {
-            echo "## DLQ Depth Monitor (OMN-16769, read-only)"
-            echo ""
-            echo "Probed every \`onex.dlq.*\` topic on the dev lane broker for retained"
-            echo "depth and arrivals-in-window. No writes of any kind were performed:"
-            echo "the node's only broker surface is read-only and its consumer is"
-            echo "group-less, so it commits nothing."
-            echo ""
-            echo "The broker address and its transport both come from the lane"
-            echo "declaration in omnimarket \`config/ci_bus_lanes.yaml\` (OMN-17163);"
-            echo "an unresolvable lane stops the run before the probe."
-            echo ""
-            if [ "${{ job.status }}" = "failure" ]; then
-              echo "**RED = at least one DLQ sink exceeded its declared arrival bound.**"
-              echo "The failing step's log names each offending topic with its arrival"
-              echo "count, its bound, and its retained depth."
-            else
-              echo "No DLQ sink exceeded its arrival bound this window."
-            fi
-            echo ""
-            echo "Standing depth is REPORTED but does not gate the run — see the"
-            echo "\`alert_policy\` block in node_dlq_depth_evaluate_compute/contract.yaml"
-            echo "for why a depth bound cannot be the primary signal on a topic"
-            echo "already holding ~8.88M records (OMN-16769 AC4)."
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          uv run python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+
+          RESULT_PATH = pathlib.Path("dlq-monitor-result.json")
+          MONITOR_MODEL = "ModelDlqDepthMonitorResult"
+          OK_VERDICT = "ok"
+          # A histogram of 67 topics does not need 67 rows to make its point,
+          # and an unbounded splice is how a summary hits GitHub's size cap.
+          MAX_ROWS = 40
+
+          lines = [
+              "## DLQ Depth Monitor (OMN-16769, read-only)",
+              "",
+              "Probed every `onex.dlq.*` topic on the dev lane broker for retained",
+              "depth and arrivals-in-window. No writes of any kind were performed:",
+              "the node's only broker surface is read-only and its consumer is",
+              "group-less, so it commits nothing.",
+              "",
+              "The broker address and its transport both come from the lane",
+              "declaration in omnimarket `config/ci_bus_lanes.yaml` (OMN-17163);",
+              "an unresolvable lane stops the run before the probe.",
+              "",
+          ]
+
+          def finish(exit_code):
+              text = "\n".join(lines) + "\n"
+              summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as handle:
+                      handle.write(text)
+              sys.stdout.write(text)
+              raise SystemExit(exit_code)
+
+          def row(verdict):
+              return (
+                  f"| `{verdict.get('topic', '<unnamed>')}` "
+                  f"| {verdict.get('verdict', '?')} "
+                  f"| {verdict.get('arrivals_in_window', '?')} "
+                  f"| {verdict.get('max_arrivals_per_window', '?')} "
+                  f"| {verdict.get('retained_depth', '?')} |"
+              )
+
+          if not RESULT_PATH.exists() or not RESULT_PATH.read_text(
+              encoding="utf-8"
+          ).strip():
+              lines += [
+                  "**NO RESULT — the probe wrote nothing.**",
+                  "",
+                  f"`{RESULT_PATH}` is absent or empty, so this run measured no sink",
+                  "and its red says nothing about DLQ depth. Read the probe step's log.",
+              ]
+              finish(1)
+
+          raw = [
+              line
+              for line in RESULT_PATH.read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          ][-1]
+          try:
+              payload = json.loads(raw)
+          except json.JSONDecodeError as exc:
+              lines += [
+                  "**UNREADABLE RESULT — the probe's output is not JSON.**",
+                  "",
+                  f"`{exc}`",
+                  "",
+                  "```",
+                  raw[:500],
+                  "```",
+              ]
+              finish(1)
+
+          if not str(payload.get("result_model", "")).endswith(MONITOR_MODEL):
+              inner = payload.get("result")
+              inner = inner if isinstance(inner, dict) else {}
+              lines += [
+                  "**THE PROBE DID NOT COMPLETE — no histogram was produced.**",
+                  "",
+                  "This red is a malfunction, not a DLQ alert. No sink was measured.",
+                  "",
+                  f"- status: `{payload.get('status', '?')}`",
+                  f"- exit code: `{payload.get('exit_code', '?')}`",
+                  f"- error: `{inner.get('error') or '(none recorded)'}`",
+                  "",
+                  "Capture log:",
+                  "",
+                  "```",
+                  str(inner.get("capture_log") or "(empty)")[:4000],
+                  "```",
+              ]
+              finish(1)
+
+          result = payload["result"]
+          evaluation = result["evaluation"]
+          verdicts = list(evaluation.get("verdicts", []))
+          offenders = [v for v in verdicts if v.get("verdict") != OK_VERDICT]
+
+          lines += [
+              f"Observed **{evaluation.get('topics_observed', 0)}** topic(s) "
+              f"({result.get('topics_matched', 0)} matched the prefix) over a "
+              f"{result.get('window_seconds', '?')}s window: "
+              f"**{evaluation.get('total_arrivals_in_window', 0)}** arrival(s), "
+              f"**{evaluation.get('total_retained_depth', 0)}** retained.",
+              "",
+          ]
+
+          if offenders:
+              lines += [
+                  f"**{len(offenders)} DLQ sink(s) exceeded a declared bound.**",
+                  "",
+                  "| topic | verdict | arrivals in window | bound | retained depth |",
+                  "| -- | -- | --: | --: | --: |",
+              ]
+              lines += [row(v) for v in offenders[:MAX_ROWS]]
+              if len(offenders) > MAX_ROWS:
+                  lines.append(
+                      f"| _+{len(offenders) - MAX_ROWS} more — see "
+                      f"`{RESULT_PATH}`_ | | | | |"
+                  )
+              lines.append("")
+          else:
+              lines += ["No DLQ sink exceeded its bound this window.", ""]
+
+          if result.get("suppress_alert_exit"):
+              lines += [
+                  "Characterization run (`suppress_alert_exit=true`): a breach is",
+                  "reported above but does NOT gate this run.",
+                  "",
+              ]
+
+          lines += [
+              "Standing depth is REPORTED but does not gate the run — see the",
+              "`alert_policy` block in node_dlq_depth_evaluate_compute/contract.yaml",
+              "for why a depth bound cannot be the primary signal on a topic",
+              "already holding ~8.88M records (OMN-16769 AC4).",
+          ]
+
+          gate = result.get("alert_exit_requested")
+          if not isinstance(gate, bool):
+              lines += [
+                  "",
+                  "**MALFORMED RESULT — `alert_exit_requested` is missing or not a",
+                  "boolean, so this run cannot state whether it should gate.**",
+              ]
+              finish(1)
+
+          finish(1 if gate else 0)
+          PY
