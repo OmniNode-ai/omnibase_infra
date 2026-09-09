@@ -31,6 +31,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.dlq.models.enum_replay_status import EnumReplayStatus
 from omnibase_infra.dlq.models.model_dlq_replay_record import ModelDlqReplayRecord
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors import DlqTopicFixedPointError
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQConsumer,
     DLQProducer,
@@ -38,6 +39,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     ModelDlqReplayEngineConfig,
     generate_replay_correlation_id,
     should_replay,
+    unwrap_nested_dlq_record,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
     ModelDlqMessage,
@@ -462,7 +464,37 @@ class HandlerDlqReplay:
         )
 
     async def _process_message(self, message: ModelDlqMessage) -> ModelDlqReplayResult:
+        # OMN-18084: resolve a nested dead letter to the record it actually
+        # wraps BEFORE deciding anything about it. A record whose original_topic
+        # is itself a DLQ topic has a dead-letter envelope for a body; replaying
+        # it strips one layer and writes the rest back onto the topic it came
+        # from. Unwrapping hands every clause below the record that really
+        # failed, and the refusal path terminalises rather than falling through
+        # to a publish.
+        try:
+            message, unwrap_depth = unwrap_nested_dlq_record(message)
+        except DlqTopicFixedPointError as exc:
+            return await self._quarantine(message, str(exc))
+
         eligible, reason = should_replay(message, self._config)
+
+        if unwrap_depth:
+            # The note goes on the reason (and so into the quarantine record and
+            # dlq_replay_history) rather than only into a log line, so the
+            # nesting a record arrived with is recoverable after the fact.
+            reason = (
+                f"[unwrapped {unwrap_depth} dead-letter envelope layer(s) to "
+                f"{message.original_topic} (OMN-18084)] {reason}"
+            )
+            logger.info(
+                "UNWRAPPED %d dead-letter envelope layer(s) on %s/%s to %s "
+                "(eligible=%s)",
+                unwrap_depth,
+                self._config.dlq_topic,
+                message.dlq_offset,
+                message.original_topic,
+                eligible,
+            )
 
         if not eligible:
             return await self._quarantine(message, reason)
