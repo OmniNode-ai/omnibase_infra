@@ -139,3 +139,41 @@ def _derive_runtime_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -
         )
 
     monkeypatch.setattr(executor_mod, "runtime_compose_up_budget", _budget)
+
+
+@pytest.fixture(autouse=True)
+def _derive_image_build_budget_from_this_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18072: derive the runtime image-build ceiling from THIS checkout.
+
+    ``_compose_build`` now reads the compose file it is about to invoke, and the
+    Dockerfile that file names, to derive its ceiling
+    (``deploy_agent.build_budget``) and refuses fail-closed when it cannot.
+    ``REPO_DIR`` is a deploy-HOST path absent from the unit-test sandbox, so the
+    compose file is repointed at the repository under test -- the same visible
+    path repoint the compose-up budget already takes above.
+
+    This is a repoint, not a stub: the real derivation runs against the real
+    ``docker/docker-compose.infra.yml`` and ``docker/Dockerfile.runtime``, so
+    adding a runtime service or a Dockerfile step moves what these tests
+    observe. The derivation's own behaviour is asserted directly in
+    ``test_build_budget_omn18072.py``.
+    """
+    from deploy_agent import build_budget
+    from deploy_agent import executor as executor_mod
+
+    compose_file = str(
+        Path(__file__).resolve().parents[4] / "docker" / "docker-compose.infra.yml"
+    )
+
+    def _budget(profile: str) -> build_budget.ModelBuildBudget:
+        return build_budget.derive_image_build_budget(
+            (compose_file,),
+            profile,
+            per_step_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
+            per_image_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
+            floor_seconds=executor_mod.RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
+        )
+
+    monkeypatch.setattr(executor_mod, "runtime_image_build_budget", _budget)

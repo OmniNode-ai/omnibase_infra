@@ -19,6 +19,10 @@ from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict
 
+from deploy_agent.build_budget import (
+    ModelBuildBudget,
+    derive_image_build_budget,
+)
 from deploy_agent.compose_budget import (
     ModelPhaseBudget,
     derive_runtime_phase_budget,
@@ -96,6 +100,31 @@ RUNTIME_COMPOSE_UP_MARGIN_SECONDS = 300
 # sits above it with room, and applies when the compose model declares no
 # health-gated start_period at all.
 RUNTIME_COMPOSE_UP_FLOOR_SECONDS = 600
+
+# OMN-18072: the runtime IMAGE-BUILD ceiling's two derived terms. `docker
+# compose --profile runtime build` runs ONE BuildKit solve over the Dockerfile
+# every buildable service in the profile shares, then exports one image per
+# service -- so the cost scales with the Dockerfile's work-step count and with
+# the service count, and both are read from the model in build_budget.
+#
+# MEASURED on the dev lane, 2026-09-09, from this agent's own job history:
+#   6c323639  build start 01:44:30.717Z -> first core container Created
+#             01:48:24.652Z  =>  <= 233.9s over 60 steps / 9 images, SUCCEEDED
+#             (~3.9s per step)
+#   79171e79  images exported at t+209.3s, killed at t+300.0s
+#   2788af33  killed at t+300.3s with a WARM BuildKit cache
+# The per-step budget is ~4x the measured per-step cost and the per-image
+# budget ~7x the measured export cost, because this ceiling exists to catch a
+# HUNG build, not to be tight around a healthy one: two of the three
+# observations above are right-censored (killed, not measured), and a genuinely
+# cold cache after a prune is longer than any of them.
+RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS = 15
+RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS = 20
+
+# OMN-18072: twice the flat constant that killed two consecutive live rebuilds.
+# A model that read as unexpectedly small must never re-derive a ceiling at or
+# below the one already proven insufficient.
+RUNTIME_IMAGE_BUILD_FLOOR_SECONDS = 600
 
 PhaseCallback = Callable[[Phase, PhaseStatus], None]
 
@@ -728,6 +757,26 @@ def runtime_compose_up_budget(
         expected_services,
         margin_seconds=RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
         floor_seconds=RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+    )
+
+
+def runtime_image_build_budget(profile: str) -> ModelBuildBudget:
+    """Derive the ``docker compose --profile <profile> build`` ceiling (OMN-18072).
+
+    Reads the SAME compose file the build is about to invoke -- the tracked
+    base, which is the only ``-f`` argument ``_compose_build`` passes -- and the
+    Dockerfile that file names, so a new runtime service or a new Dockerfile
+    step moves the ceiling with it. See ``deploy_agent.build_budget`` for the
+    measurements and for why a percentile over the recorded history is not
+    derivable from a history whose two longest entries were killed at the flat
+    constant rather than measured.
+    """
+    return derive_image_build_budget(
+        (COMPOSE_FILE,),
+        profile,
+        per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
+        per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
+        floor_seconds=RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
     )
 
 
@@ -1795,10 +1844,15 @@ class DeployExecutor:
         For BUILD_SOURCE=workspace, stages sibling repos into the build context
         via stage_workspace.sh before invoking docker compose build (OMN-9470).
         """
-        timeout = PHASE_TIMEOUTS.get(
-            Phase.CORE if scope == Scope.CORE else Phase.RUNTIME, 300
-        )
         profile = "core" if scope == Scope.CORE else "runtime"
+        # OMN-18072: derived from the build model, never a bare constant. The
+        # flat PHASE_TIMEOUTS entry that used to bound this killed two
+        # consecutive sanctioned dev rebuilds at exactly 300s, the second with a
+        # warm BuildKit cache. It still bounds the pinned-digest pull and the
+        # migration preflight, which are not builds and are not affected.
+        budget = runtime_image_build_budget(profile)
+        timeout = budget.timeout_seconds
+        logger.info("Phase %s image-build ceiling %s", profile, budget.describe())
 
         # Validate build-source selector agreement before any side effects.
         # This surfaces selector mismatch and missing OMNI_HOME before staging.
@@ -1881,7 +1935,23 @@ class DeployExecutor:
             f"OMNIMARKET_REF={omnimarket_ref}",
         ]
         cmd.extend(validated_args)
-        result = _run(cmd, timeout=timeout, env=_compose_env())
+        # OMN-18072: a blown build ceiling is a build OUTCOME with a name, not
+        # a raw TimeoutExpired carrying a forty-token argv dump into the
+        # terminal record. Nothing has been recreated at this point -- the build
+        # precedes every compose up -- so unlike the OMN-18057 compose-up path
+        # there is no residue to recover; the verdict states that explicitly so
+        # the terminal event settles instead of leaving an operator to go and
+        # check whether the lane is half-recreated.
+        try:
+            result = _run(cmd, timeout=timeout, env=_compose_env())
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"runtime image build for profile {profile!r} exceeded its "
+                f"{timeout}s ceiling and was killed. Ceiling derivation: "
+                f"{budget.describe()}. The lane was NOT mutated: the build runs "
+                f"before any compose up, so no container was stopped, created "
+                f"or recreated by this command."
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose build failed: {result.stderr}")
 

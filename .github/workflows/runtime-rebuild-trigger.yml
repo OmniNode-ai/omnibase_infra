@@ -18,7 +18,15 @@
 #
 # Trigger conditions (evaluated by scripts/trigger_rebuild_on_merge.py):
 #   - PR had the "runtime_change" label, OR
-#   - omniclaude's canonical deploy-gate classifier identifies a runtime path
+#   - omniclaude's canonical deploy-gate classifier identifies a runtime path, OR
+#   - the merge touches a LANE-STATE path (OMN-18072): the forward-migration
+#     runner, the docker/migrations corpus it applies, the compose model or the
+#     runtime policy env. The canonical classifier answers "does this PR need
+#     deploy EVIDENCE" and is right to miss these; this trigger answers the
+#     wider "does this merge change what the lane RUNS". omnibase_infra#3352
+#     changed the migration runner and produced NO trigger (run 34330947198),
+#     so the seam never executed on the lane. The list is unioned with the
+#     canonical result, never replacing it — see LANE_STATE_PATH_PATTERNS.
 #
 # Control-bus routing is independent of the requested runtime lane. Both dev
 # and stability-test commands enter through the dev control bus where
