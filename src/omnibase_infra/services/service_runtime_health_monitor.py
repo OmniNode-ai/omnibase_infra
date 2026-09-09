@@ -55,6 +55,7 @@ from omnibase_infra.runtime.health.projection_liveness import (
     dlq_saturation_status,
     evaluate_projection_liveness,
     select_kernel_nonwriting_projections,
+    select_nonprojection_group_infixes,
     select_projection_contracts,
     select_projection_group_suffixes,
 )
@@ -541,6 +542,13 @@ class ServiceRuntimeHealthMonitor:
         # nothing can be attributed, and the saturation half then reports only
         # what a sole-declarer topic proves.
         projection_group_suffixes: dict[str, str] = {}
+        # OMN-16753 round 3. The complement: group infixes belonging to
+        # consumers that are NOT projections (a reducer, an effect, a
+        # forwarder). Their flow on a topic a projection also declares is
+        # dropped from the arithmetic rather than counted as unattributable,
+        # which is what failed the stability refresh at 915a10446. Empty is the
+        # conservative value: nothing excluded, so nothing is silenced.
+        nonprojection_group_infixes: dict[str, str] = {}
         try:
             manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
             contract_count = manifest.total_discovered
@@ -567,6 +575,9 @@ class ServiceRuntimeHealthMonitor:
             )
             projection_group_suffixes = select_projection_group_suffixes(
                 manifest, projections
+            )
+            nonprojection_group_infixes = select_nonprojection_group_infixes(
+                manifest, projection_group_suffixes
             )
             live_expected_groups = _expected_consumer_groups_from_event_bus(
                 self._event_bus
@@ -768,6 +779,7 @@ class ServiceRuntimeHealthMonitor:
             flow_windows=get_consumer_flow_counters().retained_windows.snapshot(),
             kernel_nonwriting=nonwriting_projections,
             projection_group_suffixes=projection_group_suffixes,
+            nonprojection_group_infixes=nonprojection_group_infixes,
         )
         dimensions.append(
             ModelRuntimeHealthDimension(

@@ -45,6 +45,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.health.model_flow_attribution import ModelFlowAttribution
+
 
 class ModelProjectionLivenessVerdict(BaseModel):
     """Per-cycle projection liveness facts for one runtime process."""
@@ -95,6 +97,27 @@ class ModelProjectionLivenessVerdict(BaseModel):
             "instead is what published a healthy projection "
             "(``projection_work_events``) as the site of a peer's total loss "
             "on the .201 stability lane at 2026-09-08T17:31:44Z."
+        ),
+    )
+    excluded_nonprojection_flow: tuple[ModelFlowAttribution, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "OMN-16753 round 3. Consumer groups that carried flow on a "
+            "declared projection topic and were dropped from the arithmetic "
+            "because they are provably NOT a projection's: the group's "
+            "``{package}.{node}.consume.`` infix belongs to a contract that "
+            "declares no ``db_io.db_tables`` projection target, so it is a "
+            "reducer, an effect or a forwarder that happens to share the "
+            "topic. Flow a non-projection consumer took was never a "
+            "projection's to take and says nothing about projection liveness, "
+            "so unlike ``unattributable_flow_topics`` this list does NOT "
+            "degrade the dimension. It is carried and rendered so the "
+            "exclusion is visible: an invisible exclusion would be the same "
+            "false all-clear a misattribution is. One entry per consumer "
+            "group, not per delta. Recording ``node_session_phase_reducer``'s "
+            "two session-topic groups as unattributable instead is what failed "
+            "stability refresh attempt 3 of 3 at 915a10446 and rolled the lane "
+            "back with every other gate leg passing."
         ),
     )
     nonwriting_projections: tuple[str, ...] = Field(
