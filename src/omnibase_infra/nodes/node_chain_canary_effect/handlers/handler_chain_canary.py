@@ -175,6 +175,8 @@ TypeProjectionReadback = Callable[
     [str, str, float],
     Awaitable[ModelProjectionReadbackOutcome],
 ]
+# (environment variable name) -> environment variable value.
+TypeProjectionDsnLookup = Callable[[str], str]
 
 # (source, correlation_id, timeout_s) -> (hops, replay_green, verdict, error)
 # hops is None when the ledger could not be read at all. The transport returns
@@ -717,6 +719,10 @@ def _kill_switch_engaged(raw: str) -> bool:
     return raw.strip().lower() in _KILL_SWITCH_TRUTHY_VALUES
 
 
+def _lookup_projection_dsn_env(name: str) -> str:
+    return os.environ.get(name, "")  # ONEX_EXCLUDE
+
+
 class HandlerChainCanary:
     """Fire one live delegation and report whether the chain carried it."""
 
@@ -726,6 +732,7 @@ class HandlerChainCanary:
         quarantine_scan: TypeQuarantineScan | None = None,
         terminal_readback: TypeTerminalReadback | None = None,
         projection_readback: TypeProjectionReadback | None = None,
+        projection_dsn_lookup: TypeProjectionDsnLookup | None = None,
         ledger_replay: TypeLedgerReplay | None = None,
         kill_switch_disabled: bool | None = None,
     ) -> None:
@@ -738,6 +745,9 @@ class HandlerChainCanary:
         )
         self._projection_readback: TypeProjectionReadback = (
             projection_readback or _readback_projection_via_asyncpg
+        )
+        self._projection_dsn_lookup: TypeProjectionDsnLookup = (
+            projection_dsn_lookup or _lookup_projection_dsn_env
         )
         self._ledger_replay: TypeLedgerReplay = (
             ledger_replay or _replay_ledger_chain_via_asyncpg
@@ -1074,7 +1084,7 @@ class HandlerChainCanary:
                 ),
             )
 
-        dsn = os.environ.get(declared_name, "")
+        dsn = self._projection_dsn_lookup(declared_name)
         if not dsn.strip():
             return (
                 EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED,
