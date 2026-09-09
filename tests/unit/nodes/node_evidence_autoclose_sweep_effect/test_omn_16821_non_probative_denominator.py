@@ -54,6 +54,10 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+    redraw_marker_comment,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -80,14 +84,29 @@ def _merged_pr(number: int) -> dict[str, object]:
     }
 
 
-def _check(evidence_id: str, status: str, proof_class: str) -> dict[str, object]:
-    return {
+def _check(
+    evidence_id: str,
+    status: str,
+    proof_class: str,
+    *,
+    binds_ac: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """One check on the terminal payload.
+
+    OMN-18056: ``binds_ac`` is written only when a caller names it -- an
+    absent key models a verifier predating the field, and an empty list a
+    contract that declares none, which are different facts to the gate.
+    """
+    check: dict[str, object] = {
         "evidence_id": evidence_id,
         "description": evidence_id,
         "status": status,
         "message": "OK (1ms)",
         "proof_class": proof_class,
     }
+    if binds_ac is not None:
+        check["binds_ac"] = list(binds_ac)
+    return check
 
 
 def _skill_result(
@@ -191,7 +210,7 @@ def _verdict_of(receipt: dict[str, object]) -> dict[str, object]:
 
 
 class _FakeLinear:
-    def __init__(self, description: str | None = None) -> None:
+    def __init__(self, description: str | None = BOUND_AC_DESCRIPTION) -> None:
         self.description = description
         self.state_updates: list[tuple[str, str]] = []
         self.comments: list[tuple[str, str]] = []
@@ -292,7 +311,8 @@ def _omn_16260_shape() -> list[dict[str, object]]:
     flip.
     """
     checks: list[dict[str, object]] = [
-        _check("dod-ac1-pytest", "verified", "behavior"),
+        # OMN-18056: the behaviour proof declares WHICH criterion it covers.
+        _check("dod-ac1-pytest", "verified", "behavior", binds_ac=("AC1",)),
     ]
     checks += [
         _check(f"dod-ac{i}-artifact", "verified", "artifact") for i in range(2, 7)
@@ -308,11 +328,46 @@ def _omn_16260_shape() -> list[dict[str, object]]:
 # --------------------------------------------------------------------------
 
 
-async def test_omn_16260_shape_reaches_a_flip() -> None:
-    """verified / 0 failed / behavior-proven, with non-probative siblings."""
+async def test_omn_16260_shape_reaches_the_flip_path() -> None:
+    """verified / 0 failed / behavior-proven, with non-probative siblings.
+
+    OMN-18056 narrowed what this case can assert, and the narrowing is honest
+    rather than a loosening. The subject here is the DENOMINATOR: a 6-of-12
+    verdict whose other six entries are non-probative is `all_verified`, so it
+    must reach the flip path instead of being refused as a shortfall
+    (GAP_POSTED, the refusal this ticket fixed).
+
+    It used to end in FLIPPED, but only because the fixture's body was `None`:
+    `_ac_coverage_gap` returns early on an empty description, so its rule 3
+    (`non_probative >= verified`, and 6 >= 6) never ran. A body is no longer
+    optional -- the binding gate holds a ticket whose criteria cannot be read
+    -- so the moment this fixture has one, rule 3 refuses it, correctly and
+    for a reason that has nothing to do with the denominator.
+
+    So the assertion is placement, which is what the denominator change is
+    about: the run reaches a conjunct INSIDE the `all_verified` block and
+    carries the measured counters. `test_no_non_probative_entries_still_flips`
+    below is the positive control that the flip path itself still terminates
+    in a flip.
+    """
     linear = _FakeLinear()
     payload = _skill_result(checks=_omn_16260_shape())
     terminal = _verdict_of(payload)
+    # OMN-18056: DRY-RUN writes nothing, so it cannot arm its own re-draw.
+    # The marker an APPLY tick would have left is seeded instead, so the
+    # rehearsal previews the flip rather than previewing a hold forever.
+    linear.comments.append(
+        (
+            "issue-uuid-1",
+            redraw_marker_comment(
+                total_checks=12,
+                verified_count=6,
+                non_probative_count=6,
+                behavior_proving_count=1,
+            ),
+        )
+    )
+    seeded = list(linear.comments)
 
     # Pin the double against the measured numbers before trusting the verdict.
     assert terminal["status"] == "verified"
@@ -325,8 +380,11 @@ async def test_omn_16260_shape_reaches_a_flip() -> None:
     result = await _handler(payload, linear).handle(_request())
     outcome = result.outcomes[0]
 
-    assert outcome.decision is EnumEvidenceAutocloseDecision.FLIPPED
-    assert result.tickets_flipped == 1
+    # INSIDE the all_verified block: the coverage rule can only be reached by
+    # a verdict the denominator accepted.
+    assert outcome.decision is EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+    assert outcome.decision is not EnumEvidenceAutocloseDecision.GAP_POSTED
+    assert result.tickets_flipped == 0
     assert outcome.dod_verify_total_checks == 12
     assert outcome.dod_verify_verified_count == 6
     assert outcome.dod_verify_behavior_proving_count == 1
@@ -334,11 +392,13 @@ async def test_omn_16260_shape_reaches_a_flip() -> None:
     # released the flip, or "6/12 ACs verified" reads as an unexplained
     # shortfall to whoever audits the first automatic close-out.
     assert outcome.dod_verify_non_probative_count == 6
-    assert "6/12 ACs verified (6 non-probative)" in outcome.reason
+    assert "6 non-probative check(s) against 6 verified probative one(s)" in (
+        outcome.reason
+    )
     # DRY-RUN: the decision is reached, nothing is written.
     assert outcome.applied is False
     assert linear.state_updates == []
-    assert linear.comments == []
+    assert linear.comments == seeded
 
 
 async def test_no_non_probative_entries_still_flips() -> None:
@@ -346,9 +406,19 @@ async def test_no_non_probative_entries_still_flips() -> None:
     linear = _FakeLinear()
     payload = _skill_result(
         checks=[
-            _check("dod-ac1-pytest", "verified", "behavior"),
-            _check("dod-ac2-pytest", "verified", "behavior"),
+            _check("dod-ac1-pytest", "verified", "behavior", binds_ac=("AC1",)),
+            _check("dod-ac2-pytest", "verified", "behavior", binds_ac=("AC1",)),
         ]
+    )
+    # OMN-18056: DRY-RUN writes nothing, so it cannot arm its own re-draw.
+    # The marker an APPLY tick would have left is seeded instead.
+    linear.comments.append(
+        (
+            "issue-uuid-1",
+            redraw_marker_comment(
+                total_checks=2, verified_count=2, behavior_proving_count=2
+            ),
+        )
     )
     result = await _handler(payload, linear).handle(_request())
     assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED

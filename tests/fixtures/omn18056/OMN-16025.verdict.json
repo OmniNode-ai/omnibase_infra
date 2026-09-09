@@ -1,0 +1,93 @@
+{
+  "_provenance": {
+    "captured_by": "uv run onex skill dod_verify <TICKET> --dry-run, omnibase_infra canonical clone",
+    "captured_at_utc": "2026-09-08T22:40Z-23:00Z",
+    "occ_resolved_sha": "89bfa2fed5a02a2ae5dec88a33eb524404e00e58",
+    "note": "Verbatim counters and per-check statuses as measured. `binds_ac` is EMPTY on every check because no contract in the corpus declares one - that absence is the fixture's whole point, not an omission."
+  },
+  "result_model": "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState",
+  "exit_code": 0,
+  "verdict": {
+    "status": "verified",
+    "total_checks": 12,
+    "verified_count": 6,
+    "failed_count": 0,
+    "skipped_count": 0,
+    "non_probative_count": 6,
+    "behavior_proving_count": 1,
+    "checks": [
+      {
+        "evidence_id": "dod-OmniNode-ai-omnibase_infra-pr-3063",
+        "status": "verified",
+        "proof_class": "merge-state",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "dod-OmniNode-ai-omnibase_infra-pr-3063::pr-live-state",
+        "status": "verified",
+        "proof_class": "merge-state",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "dod-deploy-assessment",
+        "status": "verified",
+        "proof_class": "indeterminate",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "dod-deploy-assessment::pr-live-state",
+        "status": "verified",
+        "proof_class": "merge-state",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "dod-occ-diff-derived-behavior-proof",
+        "status": "verified",
+        "proof_class": "behavior",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "dod-occ-diff-derived-behavior-proof::pr-live-state",
+        "status": "verified",
+        "proof_class": "merge-state",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "occ-self-bind-pr-7822",
+        "status": "non_probative",
+        "proof_class": "surrogate",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "occ-self-bind-pr-7822::pr-live-state",
+        "status": "non_probative",
+        "proof_class": "merge-state",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "occ-self-bind-pr-7845",
+        "status": "non_probative",
+        "proof_class": "surrogate",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "occ-self-bind-pr-7845::pr-live-state",
+        "status": "non_probative",
+        "proof_class": "merge-state",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "occ-self-bind-pr-8436",
+        "status": "non_probative",
+        "proof_class": "surrogate",
+        "binds_ac": []
+      },
+      {
+        "evidence_id": "occ-self-bind-pr-8436::pr-live-state",
+        "status": "non_probative",
+        "proof_class": "merge-state",
+        "binds_ac": []
+      }
+    ]
+  }
+}

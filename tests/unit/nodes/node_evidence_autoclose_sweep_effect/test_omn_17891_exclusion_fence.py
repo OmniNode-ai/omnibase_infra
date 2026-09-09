@@ -51,6 +51,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -99,6 +102,9 @@ def _flip_clearing_skill_result() -> dict[str, object]:
                 "status": "verified",
                 "message": "OK (1ms)",
                 "proof_class": "behavior",
+                # OMN-18056: the behaviour proof declares WHICH criterion it
+                # covers -- the one the issue body below labels.
+                "binds_ac": ["AC1"],
             },
         ],
         "total_checks": 2,
@@ -146,7 +152,10 @@ class _RecordingLinear:
             # drifted, so the double must speak the real payload.
             "children": {"nodes": []},
             "team": {"id": "team-1"},
-            "description": None,
+            # OMN-18056: one labelled, parseable criterion. `None` is a body
+            # the closer cannot read criteria from, which the AC-binding gate
+            # holds -- and the exclusion fence lives past that gate.
+            "description": BOUND_AC_DESCRIPTION,
         }
 
     async def fetch_done_state_id(self, team_id: str) -> str:
@@ -253,11 +262,14 @@ async def test_the_same_candidate_flips_when_the_list_is_empty() -> None:
     linear = _RecordingLinear()
     handler = _handler(linear)
 
+    # OMN-18056: the first eligible observation arms the re-draw; the flip is
+    # the second tick on the same fingerprint.
+    await handler.handle(_request())
     result = await handler.handle(_request())
 
     assert result.tickets_flipped == 1
     assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
-    assert linear.reads == [_TICKET]
+    assert linear.reads == [_TICKET, _TICKET]
     assert linear.state_updates == [("issue-uuid-1", "state-done-id")]
 
 
@@ -295,6 +307,8 @@ async def test_a_non_matching_exclusion_list_does_not_fence_anything() -> None:
     linear = _RecordingLinear()
     handler = _handler(linear)
 
+    # OMN-18056: two ticks; the second is the flip.
+    await handler.handle(_request(exclude_tickets=("OMN-99999",)))
     result = await handler.handle(_request(exclude_tickets=("OMN-99999",)))
 
     assert result.tickets_flipped == 1

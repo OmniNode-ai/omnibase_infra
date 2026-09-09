@@ -33,6 +33,7 @@ import pytest
 
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
+    _ac_coverage_gap,
     _is_recurring_bot_product_pr,
     _product_pr_ref,
 )
@@ -47,6 +48,11 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
+)
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+    bound_ac_checks,
+    redraw_marker_comment,
 )
 
 pytestmark = pytest.mark.unit
@@ -82,7 +88,10 @@ def _flip_clearing_receipt() -> dict[str, object]:
         "ticket_id": "OMN-0000",
         "status": "verified",
         "dry_run": False,
-        "checks": [],
+        # OMN-18056: the corpus DECLARES which criterion it proves. Without a
+        # binding the AC-binding gate holds every fixture in this file before
+        # the fence under test runs.
+        "checks": bound_ac_checks(),
         "total_checks": 2,
         "verified_count": 2,
         "failed_count": 0,
@@ -111,9 +120,16 @@ def _issue(
     identifier: str = "OMN-0000",
     state_type: str = "started",
     children: tuple[tuple[str, str], ...] = (),
-    description: str | None = None,
+    description: str | None = BOUND_AC_DESCRIPTION,
 ) -> dict[str, object]:
-    """A Linear issue payload in the shape ``_ISSUE_QUERY`` actually returns."""
+    """A Linear issue payload in the shape ``_ISSUE_QUERY`` actually returns.
+
+    OMN-18056: ``description`` defaults to a body carrying ONE labelled,
+    parseable acceptance criterion. It used to default to ``None``, which the
+    AC-binding gate now holds -- a closer that cannot read a ticket's criteria
+    can say nothing about them -- so every fence in this file would be
+    unreachable behind a guard that fires first.
+    """
     return {
         "id": issue_id,
         "identifier": identifier,
@@ -185,8 +201,16 @@ class FakeLinear:
         self, issue_id: str, page_size: int, max_pages: int
     ) -> tuple[list[dict[str, object]] | None, str]:
         self.history_calls.append(issue_id)
-        # A second read of the same ticket is the post-write readback.
-        if self.history_calls.count(issue_id) > 1 and issue_id in self._post_flip:
+        # OMN-18056: the history moves when the WRITE happens, not on the
+        # second read. The re-draw makes every flip a two-tick sequence, so a
+        # read-counting double would serve the post-flip history to tick two's
+        # PRE-write read and the bound readback would then find no segment the
+        # pre-write read did not already have -- turning every legitimate flip
+        # in this file into ERROR_READBACK_UNCONFIRMED.
+        if (
+            any(target == issue_id for target, _state in self.state_updates)
+            and issue_id in self._post_flip
+        ):
             return self._post_flip[issue_id], ""
         history = self._histories.get(issue_id, [])
         if history is None:
@@ -320,6 +344,9 @@ class TestChildrenConjunct:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         assert [o.decision for o in result.outcomes] == [
@@ -543,13 +570,20 @@ class TestAutoDisarm:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         assert result.mode is EnumEvidenceAutocloseMode.APPLY_DISPATCHED
         assert result.disarm_triggered_by == ""
         assert result.disarm_reason == ""
         decisions = [o.decision for o in result.outcomes]
-        # The refused ticket is held, and ONLY it.
+        # The refused ticket is held, and ONLY it. This fixture is refused by
+        # the integration-authored-Done branch, which sits ahead of the
+        # OMN-18056 positive fence, so the decision and the reason are both
+        # unchanged by this ticket -- what changed is only that the run under
+        # test is now the second tick.
         assert decisions[0] is EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
         assert result.outcomes[0].ticket_id == "OMN-17292"
         assert not result.outcomes[0].flip_reverted_during_run
@@ -603,6 +637,9 @@ class TestAutoDisarm:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         decisions = [o.decision for o in result.outcomes]
@@ -646,6 +683,9 @@ class TestAutoDisarm:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         assert [o.decision for o in result.outcomes] == [
@@ -694,11 +734,28 @@ def _receipt(
     verified: int,
     non_probative: int,
     behavior: int = 1,
+    binds_ac: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
-    """A dod_verify receipt with the counters spelled out by the caller."""
+    """A dod_verify receipt with the counters spelled out by the caller.
+
+    OMN-18056: ``binds_ac`` replaces the default single-`AC1` binding for the
+    fixtures whose bodies label several criteria. Several criteria binding to
+    ONE verified check is honest and common -- `verified_count` counts checks,
+    not criteria -- and it is the shape the counting rules still have to
+    refute, which is why they are not made redundant here.
+    """
     receipt = _flip_clearing_receipt()
     verdict = receipt["result"]
     assert isinstance(verdict, dict)
+    if binds_ac is not None:
+        verdict["checks"] = [
+            {
+                "evidence_id": "omn18056-bound-check",
+                "status": "verified",
+                "proof_class": "behavior",
+                "binds_ac": list(binds_ac),
+            }
+        ]
     verdict.update(
         {
             "total_checks": total,
@@ -737,11 +794,18 @@ The materialise step exports `GIT_ASKPASS` only within that step.
 
 ## Acceptance criteria
 
-1. The sweep step and the diagnose step both export a git credential path.
-2. Proven by execution: a diagnostic run reaches a real verdict.
-3. A test pins that the sweep step carries the credential wiring.
-4. A scheduled tick reaches `behavior_proving_count > 0` unattended.
+1. AC1: The sweep step and the diagnose step both export a git credential path.
+2. AC2: Proven by execution: a diagnostic run reaches a real verdict.
+3. AC3: A test pins that the sweep step carries the credential wiring.
+4. AC4: A scheduled tick reaches `behavior_proving_count > 0` unattended.
 """
+# OMN-18056: the four items above carry `AC<n>` labels the measured body did
+# not. They are the POSITIVE control, and after this ticket a criterion no
+# contract can point at is held by the binding gate before any counting rule
+# runs -- so an unlabelled control would assert a hold from the wrong
+# conjunct and stop being a control at all. The item COUNT, the heading
+# spelling and the bullet style -- the three things the counting rules read --
+# are unchanged.
 
 
 @pytest.mark.asyncio
@@ -778,16 +842,28 @@ class TestTheMeasuredVerdictShapes:
 
         result = await handler.handle(_request())
 
+        # OMN-18056 changed WHICH conjunct holds it, and that change is the
+        # measurement rather than a regression. The four prose bullets carry
+        # no `AC<n>` label and the contract behind this verdict declares no
+        # `binds_ac` -- true of all 8709 contracts in the corpus -- so the
+        # binding gate reaches it first and names the criteria nothing proves
+        # instead of reporting a ratio. It does not flip, which is the claim
+        # this case exists to make.
         assert [o.decision for o in result.outcomes] == [
-            EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+            EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND
         ]
         assert result.tickets_flipped == 0
         assert linear.state_updates == []
         # The four prose bullets are named, so the receipt says WHAT was
         # unproven rather than only that something was.
         assert len(result.outcomes[0].uncovered_acceptance_criteria) == 4
-        # And the refusal states the arithmetic that produced it.
-        assert "18" in result.outcomes[0].reason
+
+        # CONTROL: the counting rule that used to hold this body still refutes
+        # it on its own terms, and still states the arithmetic. The binding
+        # gate has replaced no coverage; it runs ahead of it.
+        coverage_reason, uncovered = _ac_coverage_gap(_OMN_17556_DESCRIPTION, 4, 18)
+        assert "18" in coverage_reason
+        assert len(uncovered) == 4
 
     async def test_the_omn_17976_shape_still_flips(self) -> None:
         """Positive control. 4/6 verified, 2 non-probative, all covered.
@@ -813,9 +889,19 @@ class TestTheMeasuredVerdictShapes:
                 {8328: ["contracts/OMN-17976.yaml"]},
                 _clean_product_prs(),
             ),
-            _dod_fake(_receipt(total=6, verified=4, non_probative=2)),
+            _dod_fake(
+                _receipt(
+                    total=6,
+                    verified=4,
+                    non_probative=2,
+                    binds_ac=("AC1", "AC2", "AC3", "AC4"),
+                )
+            ),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         assert [o.decision for o in result.outcomes] == [
@@ -854,6 +940,9 @@ class TestFlipBudgetAndReadback:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request(max_flips_per_run=2))
         result = await handler.handle(_request(max_flips_per_run=2))
 
         decisions = [o.decision for o in result.outcomes]
@@ -887,6 +976,9 @@ class TestFlipBudgetAndReadback:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         outcome = result.outcomes[0]
@@ -917,6 +1009,9 @@ class TestFlipBudgetAndReadback:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         assert [o.decision for o in result.outcomes] == [
@@ -939,6 +1034,17 @@ class TestFlipBudgetAndReadback:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: a DRY-RUN writes nothing, so it can never arm its own
+        # re-draw. The marker an APPLY tick would have left is seeded, so the
+        # rehearsal previews the flip rather than a hold forever.
+        linear.comments.append(
+            (
+                "issue-1",
+                redraw_marker_comment(
+                    total_checks=2, verified_count=2, behavior_proving_count=1
+                ),
+            )
+        )
         result = await handler.handle(
             _request(apply=False, trigger=EnumEvidenceAutocloseTrigger.DISPATCH)
         )
@@ -994,13 +1100,16 @@ class TestScheduledApplyIsTheArmingAuthority:
 
     async def test_a_scheduled_run_under_an_armed_contract_applies(self) -> None:
         linear = self._linear()
-        result = await self._handler_for(linear).handle(
-            _request(
-                apply=False,
-                trigger=EnumEvidenceAutocloseTrigger.SCHEDULE,
-                scheduled_apply=True,
-            )
+        handler = self._handler_for(linear)
+        request = _request(
+            apply=False,
+            trigger=EnumEvidenceAutocloseTrigger.SCHEDULE,
+            scheduled_apply=True,
         )
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(request)
+        result = await handler.handle(request)
         assert result.mode is EnumEvidenceAutocloseMode.APPLY_SCHEDULED
         assert result.dry_run is False
         assert len(linear.state_updates) == 1
@@ -1024,13 +1133,16 @@ class TestScheduledApplyIsTheArmingAuthority:
         self,
     ) -> None:
         linear = self._linear()
-        result = await self._handler_for(linear).handle(
-            _request(
-                apply=True,
-                trigger=EnumEvidenceAutocloseTrigger.DISPATCH,
-                scheduled_apply=False,
-            )
+        handler = self._handler_for(linear)
+        request = _request(
+            apply=True,
+            trigger=EnumEvidenceAutocloseTrigger.DISPATCH,
+            scheduled_apply=False,
         )
+        # OMN-18056: the first eligible observation arms the re-draw; the
+        # flip is the second tick on the same fingerprint.
+        await handler.handle(request)
+        result = await handler.handle(request)
         assert result.mode is EnumEvidenceAutocloseMode.APPLY_DISPATCHED
         assert len(linear.state_updates) == 1
 
