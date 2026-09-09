@@ -72,6 +72,7 @@ import fnmatch
 import importlib.util
 import json
 import os
+import re
 import sys
 import uuid
 from collections.abc import Callable
@@ -108,6 +109,16 @@ _SASL_PROTOCOLS = frozenset({"SASL_PLAINTEXT", "SASL_SSL"})
 _NON_SASL_PROTOCOLS = frozenset({"PLAINTEXT", "SSL"})
 _VALID_SECURITY_PROTOCOLS = _SASL_PROTOCOLS | _NON_SASL_PROTOCOLS
 
+# Lane-declared projection-readback reference (OMN-18060). The overlay declares
+# the NAME of the environment variable the chain canary's link-2 Postgres DSN
+# arrives under -- never the DSN. This publisher does not perform a readback and
+# never reads the variable; it models the block so that `extra="forbid"` keeps
+# meaning "unknown key" instead of "key this script has not learned yet".
+# A NAME is spelled as an environment variable is spelled, which is also what
+# mechanically excludes a value: a connection string carries `:`, `/`, `@` or
+# `=`, none of which can appear here.
+_ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 RuntimePathClassifier = Callable[[list[str]], list[str]]
 
 # Maps the merged PR's base branch to a runtime lane. Values match
@@ -118,6 +129,49 @@ _BASE_BRANCH_LANES: dict[str, str] = {
     "dev": "dev",
     "main": "stability-test",
 }
+
+
+class ModelCiBusLaneProjectionReadback(BaseModel):
+    """One lane's declared projection-readback DSN *reference* (OMN-18060).
+
+    Carries a NAME and never a value. omnimarket
+    ``config/ci_bus_lanes.yaml`` is committed, diffable, CODEOWNERS-reviewed
+    config, which is what makes it the right home for a variable name and the
+    wrong home for a credential; the value is injected into the job env from
+    the lab store and is read by the chain canary
+    (``omnibase_infra.nodes.node_chain_canary_effect.lane_transport``), never
+    here.
+
+    This publisher is not a consumer of the block. It models it because the
+    overlay is validated ``extra="forbid"``: a key this script has never
+    learned is indistinguishable from a typo, and on 2026-09-09 that
+    indistinguishability took every agent-path dev-lane rebuild red (the exact
+    repeat of the OMN-18012 episode recorded in ``ModelCiBusLane`` below).
+    Modelling the key is therefore the fix; loosening the model is not.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    dsn_env: str
+
+    @field_validator("dsn_env")
+    @classmethod
+    def validate_dsn_env(cls, value: str) -> str:
+        """Accept an environment-variable NAME, which refuses a DSN by shape."""
+        if not value:
+            raise ValueError("dsn_env must not be empty when declared")
+        if not _ENV_VAR_NAME_PATTERN.match(value):
+            # This message names the field and not the value. Note the honest
+            # limit: `load_ci_bus_overlay` wraps pydantic's ValidationError,
+            # whose rendering includes `input_value`, so a DSN committed here
+            # still reaches the run log. The point of the refusal is that the
+            # overlay never carries the value -- a credential in a committed,
+            # reviewed file is disclosed by the commit, not by the error.
+            raise ValueError(
+                "dsn_env must be the NAME of an environment variable "
+                "(matching [A-Za-z_][A-Za-z0-9_]*), never a DSN value"
+            )
+        return value
 
 
 class ModelCiBusLane(BaseModel):
@@ -135,12 +189,23 @@ class ModelCiBusLane(BaseModel):
       contradictory (rejected) beside a non-SASL protocol or with no protocol
       at all.
 
+    * ``projection_readback`` -- OPTIONAL, OMN-18060, and never read by this
+      publisher; see ``ModelCiBusLaneProjectionReadback``.
+
     ``extra="forbid"`` stays: an unknown key in this overlay is a typo that
     would otherwise route a publisher to a default it never declared. That
     strictness is also why this model had to learn the two transport keys --
     once the overlay declared them, a model that knew only ``broker`` rejected
     the live overlay outright and took the dev-lane redeploy trigger red on
-    every runtime PR (omnibase_infra run 34160709151).
+    every runtime PR (omnibase_infra run 34160709151). It happened a second
+    time on 2026-09-09 with ``projection_readback``, added to the overlay by
+    omnimarket#2420: the strict half of this contract lives in a different
+    repository from the file it validates, so every key added there must be
+    learned here in the same window or the dev-lane rebuild trigger is red for
+    every runtime merge in between. That coupling is the real cost of the
+    strictness and it is worth paying; what is not acceptable is paying it by
+    relaxing to ``extra="allow"``, which would restore exactly the silent
+    misroute this model exists to refuse.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -148,6 +213,12 @@ class ModelCiBusLane(BaseModel):
     broker: str
     security_protocol: str | None = None
     sasl_mechanism: str | None = None
+    # OMN-18060. Optional and unread by this publisher; see
+    # ModelCiBusLaneProjectionReadback for why it is modelled rather than
+    # ignored. The lane-scope rule (dev only) is enforced by the one component
+    # that acts on the declaration, node_chain_canary_effect.lane_transport,
+    # and is deliberately not duplicated here: two copies of a policy drift.
+    projection_readback: ModelCiBusLaneProjectionReadback | None = None
 
     @field_validator("broker")
     @classmethod
@@ -237,7 +308,17 @@ class ModelCiBusOverlay(BaseModel):
 # The script is also loaded directly from its file path by hermetic tests. Give
 # Pydantic the explicit namespace so postponed annotations resolve without
 # depending on the module having first been inserted into sys.modules.
-ModelCiBusOverlay.model_rebuild(_types_namespace={"ModelCiBusLane": ModelCiBusLane})
+ModelCiBusOverlay.model_rebuild(
+    _types_namespace={
+        "ModelCiBusLane": ModelCiBusLane,
+        "ModelCiBusLaneProjectionReadback": ModelCiBusLaneProjectionReadback,
+    }
+)
+ModelCiBusLane.model_rebuild(
+    _types_namespace={
+        "ModelCiBusLaneProjectionReadback": ModelCiBusLaneProjectionReadback,
+    }
+)
 
 
 class ModelRedeployStartCommandWire(BaseModel):

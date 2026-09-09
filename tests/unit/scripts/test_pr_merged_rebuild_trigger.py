@@ -327,6 +327,127 @@ class TestRedeployStartPublish:
         with pytest.raises(ValueError, match="Invalid CI bus overlay"):
             self.mod.load_ci_bus_overlay(overlay)
 
+    def test_overlay_accepts_declared_projection_readback(self, tmp_path: Path) -> None:
+        """OMN-18060: the lane's declared link-2 DSN NAME is modelled, not rejected.
+
+        This is the live shape of omnimarket ``config/ci_bus_lanes.yaml`` after
+        omnimarket#2420. Before the field existed here, ``extra="forbid"``
+        rejected the real overlay outright -- "lanes.dev.projection_readback
+        Extra inputs are not permitted" -- and every agent-path dev-lane rebuild
+        trigger failed on it, which is the whole unblock chain for the chain
+        canary, the OCC mint outage and the OMN-18072 verification.
+        """
+        overlay = tmp_path / "ci_bus_lanes.yaml"
+        overlay.write_text(
+            "default: inmemory\n"
+            "lanes:\n"
+            "  dev:\n"
+            "    broker: omninode-pc.tail75df5e.ts.net:19092\n"
+            "    security_protocol: SASL_PLAINTEXT\n"
+            "    sasl_mechanism: SCRAM-SHA-256\n"
+            "    projection_readback:\n"
+            "      dsn_env: CHAIN_CANARY_PROJECTION_DSN\n"
+            "  stability:\n"
+            "    broker: inmemory\n"
+            "  prod:\n"
+            "    broker: inmemory\n"
+        )
+
+        model = self.mod.load_ci_bus_overlay(overlay)
+
+        declaration = model.lanes["dev"].projection_readback
+        assert declaration is not None
+        assert declaration.dsn_env == "CHAIN_CANARY_PROJECTION_DSN"
+        # The block must not disturb what this publisher actually reads.
+        assert (
+            self.mod.resolve_ci_bus_broker(
+                overlay=model, lane="dev", injected_broker=""
+            )
+            == "omninode-pc.tail75df5e.ts.net:19092"
+        )
+        assert self.mod.resolve_ci_bus_security(overlay=model, lane="dev") == (
+            "SASL_PLAINTEXT",
+            "SCRAM-SHA-256",
+        )
+
+    def test_lane_without_projection_readback_is_none(self, tmp_path: Path) -> None:
+        """Absent means absent -- the field is optional, with no invented default."""
+        overlay = tmp_path / "ci_bus_lanes.yaml"
+        overlay.write_text(
+            "default: inmemory\n"
+            "lanes:\n"
+            "  dev:\n"
+            "    broker: declared:19092\n"
+            "    security_protocol: PLAINTEXT\n"
+        )
+
+        model = self.mod.load_ci_bus_overlay(overlay)
+
+        assert model.lanes["dev"].projection_readback is None
+
+    def test_projection_readback_rejects_unknown_key(self, tmp_path: Path) -> None:
+        """The nested block is strict too; the fix widened the model, not the door."""
+        overlay = tmp_path / "ci_bus_lanes.yaml"
+        overlay.write_text(
+            "default: inmemory\n"
+            "lanes:\n"
+            "  dev:\n"
+            "    broker: declared:19092\n"
+            "    security_protocol: PLAINTEXT\n"
+            "    projection_readback:\n"
+            "      dsn_env: CHAIN_CANARY_PROJECTION_DSN\n"
+            "      dsn: postgresql://someone@host:5432/db\n"
+        )
+
+        with pytest.raises(ValueError, match="Invalid CI bus overlay"):
+            self.mod.load_ci_bus_overlay(overlay)
+
+    @pytest.mark.parametrize(
+        "declared",
+        [
+            "postgresql://reader:pw@db.example.invalid:5432/onex",
+            "host=db.example.invalid dbname=onex password=pw",
+            "",
+        ],
+    )
+    def test_projection_readback_refuses_a_value_where_a_name_belongs(
+        self, tmp_path: Path, declared: str
+    ) -> None:
+        """A DSN pasted where a NAME belongs is a red gate, not committed config.
+
+        The declaration is a variable NAME, so the check is a NAME check --
+        which excludes every connection string by shape, since a DSN carries
+        ``:``, ``/``, ``@`` or ``=`` and an environment-variable name carries
+        none of them. Empty is refused on the same terms rather than treated as
+        "not declared": ``projection_readback: {dsn_env: ""}`` is a half-written
+        declaration, and silently reading it as ABSENT would hand the chain
+        canary a SKIPPED verdict for a lane that meant to declare one.
+
+        HONEST LIMIT, stated rather than implied: the validator's own message
+        names the field and never the value, but ``load_ci_bus_overlay`` wraps
+        pydantic's ``ValidationError``, whose rendering includes
+        ``input_value``. So a DSN committed here still reaches the run log. The
+        gate this test pins is that the overlay REFUSES the value, not that the
+        log hides it -- a credential in a committed, CODEOWNERS-reviewed file is
+        already disclosed by the commit, and the fix is to never land it, never
+        to quiet the error.
+        """
+        overlay = tmp_path / "ci_bus_lanes.yaml"
+        overlay.write_text(
+            "default: inmemory\n"
+            "lanes:\n"
+            "  dev:\n"
+            "    broker: declared:19092\n"
+            "    security_protocol: PLAINTEXT\n"
+            "    projection_readback:\n"
+            f"      dsn_env: {declared!r}\n"
+        )
+
+        with pytest.raises(ValueError, match="Invalid CI bus overlay") as excinfo:
+            self.mod.load_ci_bus_overlay(overlay)
+
+        assert "dsn_env" in str(excinfo.value)
+
     def test_cli_uses_overlay_broker_without_kafka_secrets(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
