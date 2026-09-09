@@ -252,3 +252,118 @@ def test_health_monitor_admin_client_is_plaintext_on_a_plaintext_lane(
         "socket.timeout.ms",
         "request.timeout.ms",
     }
+
+
+# ---------------------------------------------------------------------------
+# OMN-17304: the delegate locus gate's liveness probe is the third synchronous
+# confluent admin client in this repo, and it was built implicitly PLAINTEXT
+# like the two above. It is the strictest of the three: ``probe_kafka`` and the
+# health monitor degrade on a failed answer, while ``live_consumer_groups``
+# raises and ``resolve_delegate_locus`` fails closed on UNKNOWN. So on a SASL
+# lane an unauthenticated client did not make the gate noisy -- it made the
+# gate refuse EVERY dispatched delegation, with a message about the lane
+# rather than about the client's own missing credentials.
+# ---------------------------------------------------------------------------
+
+_DELEGATE_COMMAND_TOPIC = "onex.cmd.omnimarket.delegate-skill.v1"
+
+
+class _FakeEnumState:
+    """``live_consumer_groups`` reads ``group.state.name``, not ``group.state``."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeEnumGroup:
+    def __init__(self, group_id: str, state: str) -> None:
+        self.group_id = group_id
+        self.state = _FakeEnumState(state)
+
+
+class _RecordingLivenessAdminClient:
+    """Captures the config dict ``live_consumer_groups`` builds."""
+
+    seen_config: dict[str, Any] = {}
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        _RecordingLivenessAdminClient.seen_config = dict(config)
+
+    def list_topics(self, timeout: float) -> object:
+        # The metadata call the function makes first, deliberately, so that an
+        # unreachable broker raises instead of resolving to an empty listing.
+        return types.SimpleNamespace(topics={})
+
+    def list_consumer_groups(self, request_timeout: float) -> _FakeFuture:
+        from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+
+        bound = (
+            "local.omnimarket.node_delegate_skill_orchestrator.consume.1.1.0"
+            f".__i.runtime-effects{TOPIC_SCOPE_INFIX}{_DELEGATE_COMMAND_TOPIC}"
+        )
+        return _FakeFuture(_FakeResult([_FakeEnumGroup(bound, "STABLE")]))
+
+
+@pytest.fixture
+def _stub_liveness_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = types.ModuleType("confluent_kafka.admin")
+    module.AdminClient = _RecordingLivenessAdminClient  # type: ignore[attr-defined]
+    parent = sys.modules.get("confluent_kafka") or types.ModuleType("confluent_kafka")
+    monkeypatch.setitem(sys.modules, "confluent_kafka", parent)
+    monkeypatch.setitem(sys.modules, "confluent_kafka.admin", module)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_stub_liveness_admin")
+def test_locus_gate_liveness_admin_client_carries_the_sasl_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The delegate locus gate authenticates to a SASL lane (OMN-17304 AC4)."""
+    from omnibase_infra.backends.backend_probe import live_consumer_groups
+
+    monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
+    monkeypatch.setenv("KAFKA_SASL_MECHANISM", "SCRAM-SHA-256")
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", _SYNTHETIC_USER)
+    monkeypatch.setenv("KAFKA_SASL_PASSWORD", _SYNTHETIC_PASSWORD)
+
+    with caplog.at_level(logging.DEBUG):
+        groups = live_consumer_groups(
+            topic=_DELEGATE_COMMAND_TOPIC,
+            bootstrap_servers="lane-broker.invalid:19092",
+        )
+
+    assert len(groups) == 1
+    assert groups[0].endswith(_DELEGATE_COMMAND_TOPIC)
+
+    config = _RecordingLivenessAdminClient.seen_config
+    assert config["bootstrap.servers"] == "lane-broker.invalid:19092"
+    assert config["security.protocol"] == "SASL_PLAINTEXT"
+    assert config["sasl.mechanism"] == "SCRAM-SHA-256"
+    assert config["sasl.username"] == _SYNTHETIC_USER
+    assert config["sasl.password"] == _SYNTHETIC_PASSWORD
+
+    assert _SYNTHETIC_PASSWORD not in caplog.text
+    assert _SYNTHETIC_PASSWORD not in repr(groups)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_stub_liveness_admin")
+def test_locus_gate_liveness_admin_client_is_plaintext_on_a_plaintext_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PLAINTEXT lane keeps exactly the three pre-existing config entries."""
+    from omnibase_infra.backends.backend_probe import live_consumer_groups
+
+    _clear_kafka_env(monkeypatch)
+
+    live_consumer_groups(
+        topic=_DELEGATE_COMMAND_TOPIC,
+        bootstrap_servers="redpanda:9092",
+    )
+
+    assert set(_RecordingLivenessAdminClient.seen_config) == {
+        "bootstrap.servers",
+        "socket.timeout.ms",
+        "request.timeout.ms",
+    }
