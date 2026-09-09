@@ -1583,3 +1583,69 @@ class TestSupersededSkipOnUnchangedHead:
             },
         ]
         assert drop_superseded_skips(rows) == rows
+
+
+class TestSupersededSkipIsPartitionedByHeadSha:
+    """OMN-18062 follow-up — the head SHA partitions supersession.
+
+    The original fix keyed :func:`drop_superseded_skips` on the context NAME
+    alone. A ``success`` recorded on head A would then clear a ``skipped``
+    recorded on head B, re-opening the skip-as-pass vector (OMN-15057 /
+    OMN-14854) on the head actually being gated. That is unreachable through
+    the sanctioned caller — it fetches ``commits/{sha}/check-runs`` for ONE
+    head — but the safety rested on convention. These tests make it a property
+    of the function.
+
+    Rows are stamped, not rebuilt: the real #2567 merge-time payload carries no
+    ``head_sha`` key, which is exactly the backward-compatible partition
+    (``""``) the guard must preserve.
+    """
+
+    HEAD_A = "a" * 40
+    HEAD_B = "b" * 40
+    VICTIM = TestSupersededSkipOnUnchangedHead.VICTIM
+    T0_PLUS_64 = TestSupersededSkipOnUnchangedHead.T0_PLUS_64
+
+    def _rows_on_heads(
+        self, first_head: str, second_head: str
+    ) -> list[dict[str, object]]:
+        rows = [
+            {**row, "head_sha": first_head}
+            for row in TestSupersededSkipOnUnchangedHead()._rows("skipped")
+        ]
+        rows[-1] = {**rows[-1], "head_sha": second_head}
+        return rows
+
+    def test_skip_on_a_different_head_is_not_superseded(self) -> None:
+        """RED: success@headA + skipped@headB must FAIL, not read success."""
+        rows = self._rows_on_heads(self.HEAD_A, self.HEAD_B)
+        assert len(drop_superseded_skips(rows)) == len(rows)
+        assert latest_check_run_by_name(rows)[self.VICTIM].conclusion == "skipped"
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_FAILURE
+        assert self.VICTIM in report
+
+    def test_same_head_supersession_still_works(self) -> None:
+        """POSITIVE CONTROL: the partition does not break the fix it guards."""
+        rows = self._rows_on_heads(self.HEAD_A, self.HEAD_A)
+        assert latest_check_run_by_name(rows)[self.VICTIM].conclusion == "success"
+        code, _ = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_SUCCESS
+
+    def test_rows_without_a_head_sha_still_supersede(self) -> None:
+        """POSITIVE CONTROL: rows carrying no ``head_sha`` share one partition,
+        so a payload without head SHAs behaves exactly as it did before this
+        guard — which is the shape of every real fixture in this file."""
+        rows: list[dict[str, object]] = [
+            {"name": "x", "status": "completed", "conclusion": "success"},
+            {"name": "x", "status": "completed", "conclusion": "skipped"},
+        ]
+        assert [r["conclusion"] for r in drop_superseded_skips(rows)] == ["success"]
