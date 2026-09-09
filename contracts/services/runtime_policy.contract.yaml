@@ -85,6 +85,40 @@ profiles:
         source:
           source_type: env
           source_path: SLACK_BOT_TOKEN
+      # OMN-18073: the OCC companion machine path's App credentials. Same
+      # defect class as the OMN-16921 SLACK_BOT_TOKEN entry directly above,
+      # and the same fix. github_app_auth.resolve_app_installation_token_from_contract
+      # resolves these through contract_secret_ref(_CONTRACT_PATH, name),
+      # which returns the LITERAL dict key from the node's own contract.yaml
+      # secrets: block -- "ONEXBOT_OCC_APP_ID" / "ONEXBOT_OCC_PRIVATE_KEY" --
+      # not a dotted convention name. Neither literal was a mapped
+      # logical_name, so under this lane's enable_convention_fallback: false
+      # posture every lookup missed and logged "Secret resolution failed
+      # (configuration issue)" with reason no_mapping, on every companion mint.
+      #
+      # That warning was the only signal, and it was survivable-looking: the
+      # call site passes env_var_fallback=ref, so the miss silently fell
+      # through to os.environ and kept working for as long as the container's
+      # env happened to hold a good value. When the OMN-18073 transport defect
+      # put a mangled PEM in that env instead, the undeclared mapping is what
+      # turned a transport bug into an invisible one -- the resolver never
+      # claimed ownership of the key, so nothing on the store path reported a
+      # failure a human would act on.
+      #
+      # Declared source_type is env, matching the ten mappings around it and
+      # the compose allowlist that carries these two names
+      # (docker-compose.infra.yml, ONEXBOT_OCC_APP_ID/ONEXBOT_OCC_PRIVATE_KEY).
+      # This lane has no store-sourced mapping at all and no store identity to
+      # resolve one with -- see OMN-18073 for the measured evidence and what
+      # provisioning a store-sourced entry would require.
+      - logical_name: ONEXBOT_OCC_APP_ID
+        source:
+          source_type: env
+          source_path: ONEXBOT_OCC_APP_ID
+      - logical_name: ONEXBOT_OCC_PRIVATE_KEY
+        source:
+          source_type: env
+          source_path: ONEXBOT_OCC_PRIVATE_KEY
       # OMN-15918: gateway_attach dependency wiring (node_gateway_attach_effect /
       # ModelGatewayAttachConfig, omnibase_infra#2731's ONEX_CORE_041 fail-closed
       # check in service_kernel.py). This is completion of #2731's landed

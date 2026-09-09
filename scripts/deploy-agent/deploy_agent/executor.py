@@ -506,10 +506,82 @@ def _parse_runtime_policy_env_value(value: str) -> str:
     return tokens[0].split("=", 1)[1]
 
 
+class UndecodedAnsiCQuotingError(RuntimeError):
+    """Raised when an inherited env value is still in un-decoded ANSI-C form.
+
+    See :func:`_undecoded_ansi_c_quoted_names` for why this is fatal rather
+    than repairable.
+    """
+
+
+def _undecoded_ansi_c_quoted_names(env: Mapping[str, str]) -> list[str]:
+    """Return the NAMES of values still wrapped in bash ANSI-C ``$'...'`` quoting.
+
+    OMN-18073. This agent inherits its environment from systemd, whose unit
+    files declare ``EnvironmentFile=<the operator env store>``. **systemd's
+    env-file parser does not implement bash ANSI-C ``$'...'`` quoting.** Given
+    a line written in that form it keeps the literal ``$'`` and ``'`` wrapper
+    and drops every backslash escape, so each ``\\n`` collapses to the bare
+    letter ``n``. ``deploy-runtime.sh`` bash-``source``s the very same file and
+    decodes it correctly, which is why only the agent path is affected.
+
+    Measured on the lab host 2026-09-09 with a synthetic, non-secret value of
+    the same shape: bash ``source`` yielded a 60-byte value with 4 real
+    newlines; systemd's ``EnvironmentFile`` yielded the same bytes still
+    wrapped in ``$'``/``'`` with those 4 newlines rendered as the letter ``n``.
+
+    **The damage is irreversible in transit, so this guard refuses rather than
+    repairs.** Once the backslashes are gone, nothing downstream can tell a
+    newline's ``n`` from an ``n`` that belongs to the payload -- a base64 PEM
+    body legitimately contains the letter. Any "normalizer" that guesses is
+    reconstructing a different value and calling it the original.
+
+    Refusing is the whole point. :func:`_compose_env` hands this mapping
+    straight to ``docker compose``, whose ``${VAR:-}`` interpolation writes it
+    into every container the deploy creates. Passing a provably-mangled
+    credential through silently is what produced a 100% OCC-mint outage that
+    ran for eight hours before anyone noticed: the runtime's own secret
+    resolver logged only a ``no_mapping`` warning, the call site's
+    ``env_var_fallback`` handed the mangled bytes to pyjwt, and the resulting
+    ``InvalidKeyError`` surfaced nowhere near the transport that caused it.
+
+    Names only -- a value is never returned, logged, or included in the error.
+    """
+    return sorted(
+        name
+        for name, value in env.items()
+        if value.startswith("$'") and value.endswith("'") and len(value) >= 3
+    )
+
+
+def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
+    """Fail loud if any inherited value is still ANSI-C quoted (OMN-18073)."""
+    offenders = _undecoded_ansi_c_quoted_names(env)
+    if not offenders:
+        return
+    raise UndecodedAnsiCQuotingError(
+        "Refusing to hand docker compose an environment carrying un-decoded "
+        f"bash ANSI-C quoting. Variable name(s): {', '.join(offenders)}. "
+        "These values reached this process through systemd's "
+        "EnvironmentFile=, which does not implement $'...' quoting: it keeps "
+        "the literal wrapper and drops every backslash escape, so each \\n "
+        "became the bare letter n. The original bytes cannot be recovered "
+        "from what is left, so this is refused rather than repaired. Repair "
+        "the operator env store: write the value as a real multi-line "
+        'double-quoted entry (VAR="<line>\\n<line>\\n") -- the one shape both '
+        "bash `source` and systemd's EnvironmentFile decode identically -- "
+        "then restart this unit so it re-reads the file. No value is printed "
+        "by this guard."
+    )
+
+
 def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
+    # OMN-18073: refuse before compose interpolation writes a provably-mangled
+    # value into every container this deploy creates.
+    _assert_no_undecoded_ansi_c_quoting(env)
     postgres_host = env.get("POSTGRES_HOST", "127.0.0.1")
     postgres_port = env.get("POSTGRES_PORT", "5436")
     postgres_dsn = env.get("OMNIDASH_ANALYTICS_DB_URL") or (
