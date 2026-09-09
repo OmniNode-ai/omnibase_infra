@@ -52,9 +52,9 @@ def _scan_subscribers(
         if not isinstance(data, dict):
             continue
         name: str = data.get("name", path.parent.name)
-        subscribe_topics: list[str] = (
-            (data.get("event_bus") or {}).get("subscribe_topics") or []
-        )
+        subscribe_topics: list[str] = (data.get("event_bus") or {}).get(
+            "subscribe_topics"
+        ) or []
         for topic in subscribe_topics:
             if topic in sink_topics:
                 violators.append((name, path, topic))
