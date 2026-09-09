@@ -59,11 +59,17 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link import
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link_status import (
     EnumChainLinkStatus,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readback_status import (
+    EnumProjectionReadbackStatus,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_request import (
     ModelChainCanaryRequest,
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result import (
     ModelChainCanaryResult,
+)
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    ModelProjectionReadbackOutcome,
 )
 
 # Endpoints use the RFC 2606 reserved `.invalid` TLD, matching the sibling
@@ -75,6 +81,21 @@ _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+# OMN-18060: the request carries the NAME of the variable the DSN arrives in,
+# never the DSN. Tests set the variable through the autouse fixture below, so
+# the handler resolves it exactly the way the workflow makes it resolve.
+_PROJECTION_DSN_ENV = "CHAIN_CANARY_PROJECTION_DSN"
+
+
+@pytest.fixture(autouse=True)
+def _projection_dsn_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the DSN where the handler reads it, under the declared NAME."""
+    monkeypatch.setenv(_PROJECTION_DSN_ENV, _PROJECTION_DSN)
+    # argv is refused when it carries a DSN, and pytest's own argv is a list
+    # of test paths -- pin it anyway so a future `--dsn=...` in someone's
+    # invocation cannot silently turn every case in this file into REFUSED.
+    monkeypatch.setattr(sys, "argv", ["pytest"])
+
 
 # The three non-terminal states OMN-14843 actually measured, with the count it
 # found for each. Parametrizing on the measured set rather than one invented
@@ -90,7 +111,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "budget_ms": 5_000,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
-        "projection_dsn": _PROJECTION_DSN,
+        "projection_dsn_env": _PROJECTION_DSN_ENV,
         "settle_seconds": 0,
     }
     fields.update(overrides)
@@ -147,6 +168,12 @@ class _ProjectionReadback:
     readback already uses: a state name for "row found", ``""`` for "read, no
     row", and ``None`` for "the read could not be completed" — which must never
     be reported as either a pass or a clean miss.
+
+    OMN-18060 moved the transport's return type from that tuple to a typed
+    outcome, because the leg can now also DECLINE (a privileged DSN). This
+    fake keeps the three-way constructor the existing cases are written
+    against and maps it onto the outcome, so the classification under test is
+    the handler's and not the fixture's.
     """
 
     def __init__(self, state: str | None = "COMPLETED", error: str = "") -> None:
@@ -156,9 +183,24 @@ class _ProjectionReadback:
 
     async def __call__(
         self, dsn: str, correlation_id: str, timeout_s: float
-    ) -> tuple[str | None, str]:
+    ) -> ModelProjectionReadbackOutcome:
         self.calls.append((dsn, correlation_id, timeout_s))
-        return self.state, self.error
+        if self.state is None:
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.ERROR,
+                error=self.error or "projection readback failed",
+            )
+        if not self.state:
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.ROW_ABSENT
+            )
+        if self.state.strip().upper() in ("COMPLETED", "FAILED"):
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.TERMINAL, state=self.state
+            )
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.STRANDED, state=self.state
+        )
 
 
 def _handler(
@@ -267,7 +309,7 @@ async def test_unconfigured_projection_is_not_configured_never_pass() -> None:
     bus terminal must not be allowed to stand in for a projection nobody read.
     """
     handler = _handler(terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC))
-    result = await handler.handle(_request(projection_dsn=""))
+    result = await handler.handle(_request(projection_dsn_env=""))
 
     assert (
         _link(result, EnumChainLink.ROUTING_PROJECTED)
@@ -334,21 +376,21 @@ async def test_projection_is_read_for_the_probes_own_correlation_id() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("projection", "dsn", "expected"),
+    ("projection", "dsn_env", "expected"),
     [
         (
             _ProjectionReadback(state="RECEIVED"),
-            _PROJECTION_DSN,
+            _PROJECTION_DSN_ENV,
             EnumChainCanaryVerdict.PROJECTION_STRANDED,
         ),
         (
             _ProjectionReadback(state=""),
-            _PROJECTION_DSN,
+            _PROJECTION_DSN_ENV,
             EnumChainCanaryVerdict.PROJECTION_ROW_ABSENT,
         ),
         (
             _ProjectionReadback(state=None, error="connection refused"),
-            _PROJECTION_DSN,
+            _PROJECTION_DSN_ENV,
             EnumChainCanaryVerdict.PROJECTION_READBACK_FAILED,
         ),
         (
@@ -361,7 +403,7 @@ async def test_projection_is_read_for_the_probes_own_correlation_id() -> None:
 )
 async def test_non_passing_link_two_is_never_green(
     projection: _ProjectionReadback,
-    dsn: str,
+    dsn_env: str,
     expected: EnumChainCanaryVerdict,
 ) -> None:
     """Each non-passing projection outcome gets its own scalar verdict.
@@ -378,7 +420,7 @@ async def test_non_passing_link_two_is_never_green(
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
-    result = await handler.handle(_request(projection_dsn=dsn))
+    result = await handler.handle(_request(projection_dsn_env=dsn_env))
 
     assert result.verdict is expected
     assert result.success is False
@@ -427,16 +469,18 @@ async def test_quarantine_outranks_a_stranded_projection() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("state", "dsn"),
+    ("state", "dsn_env"),
     [
-        ("RECEIVED", _PROJECTION_DSN),
-        ("ROUTED", _PROJECTION_DSN),
-        ("INFERENCE_COMPLETED", _PROJECTION_DSN),
-        ("", _PROJECTION_DSN),
+        ("RECEIVED", _PROJECTION_DSN_ENV),
+        ("ROUTED", _PROJECTION_DSN_ENV),
+        ("INFERENCE_COMPLETED", _PROJECTION_DSN_ENV),
+        ("", _PROJECTION_DSN_ENV),
         ("COMPLETED", ""),
     ],
 )
-async def test_success_and_link_two_can_never_disagree(state: str, dsn: str) -> None:
+async def test_success_and_link_two_can_never_disagree(
+    state: str, dsn_env: str
+) -> None:
     """The invariant, stated directly rather than per-case.
 
     If link 2 is anything other than PASS, ``success`` must be False. This is
@@ -448,7 +492,7 @@ async def test_success_and_link_two_can_never_disagree(state: str, dsn: str) -> 
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
-    result = await handler.handle(_request(projection_dsn=dsn))
+    result = await handler.handle(_request(projection_dsn_env=dsn_env))
 
     link_two_passed = (
         _link(result, EnumChainLink.ROUTING_PROJECTED) is EnumChainLinkStatus.PASS
@@ -469,15 +513,33 @@ class _FakeConnection:
         row: dict[str, object] | None = None,
         fetch_delay_s: float = 0.0,
         close_raises: bool = False,
+        role_row: dict[str, object] | None = None,
     ) -> None:
         self._row = row
         self._fetch_delay_s = fetch_delay_s
         self._close_raises = close_raises
+        # OMN-18060: the readback asks who it is before it reads anything.
+        # The default stands for the least-privilege reader the dev lane
+        # provisions (`chain_canary_reader`, NOSUPERUSER NOBYPASSRLS); the
+        # privileged variants are supplied per-test.
+        self._role_row: dict[str, object] | None = (
+            role_row
+            if role_row is not None
+            else {
+                "rolname": "chain_canary_reader",
+                "rolsuper": False,
+                "rolbypassrls": False,
+            }
+        )
         self.closed = False
+        self.queries: list[str] = []
 
-    async def fetchrow(self, query: str, correlation_id: str) -> object:
+    async def fetchrow(self, query: str, *args: object) -> object:
+        self.queries.append(query)
         if self._fetch_delay_s:
             await asyncio.sleep(self._fetch_delay_s)
+        if "pg_roles" in query:
+            return self._role_row
         return self._row
 
     async def close(self) -> None:
@@ -516,12 +578,11 @@ async def test_close_failure_does_not_replace_the_read_result(
     connection = _FakeConnection(row={"state": "COMPLETED"}, close_raises=True)
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
 
-    state, error = await _readback_projection_via_asyncpg(
-        _PROJECTION_DSN, str(uuid4()), 5.0
-    )
+    outcome = await _readback_projection_via_asyncpg(_PROJECTION_DSN, str(uuid4()), 5.0)
 
-    assert state == "COMPLETED"
-    assert error == ""
+    assert outcome.status is EnumProjectionReadbackStatus.TERMINAL
+    assert outcome.state == "COMPLETED"
+    assert outcome.error == ""
     assert connection.closed is True
 
 
@@ -545,11 +606,9 @@ async def test_connect_and_query_share_one_deadline(
     )
 
     started = time.monotonic()
-    state, error = await _readback_projection_via_asyncpg(
-        _PROJECTION_DSN, str(uuid4()), 0.3
-    )
+    outcome = await _readback_projection_via_asyncpg(_PROJECTION_DSN, str(uuid4()), 0.3)
     elapsed = time.monotonic() - started
 
-    assert state is None
-    assert error
+    assert outcome.status is EnumProjectionReadbackStatus.ERROR
+    assert outcome.error
     assert elapsed < 0.6

@@ -1,0 +1,90 @@
+-- ============================================================================
+-- BLOCKED, NOT APPLIED. This file is NOT in any migration corpus (OMN-18060).
+-- ============================================================================
+-- It is parked here, with a `.blocked` suffix and outside `forward/` entirely,
+-- because nothing scans this directory: the flat stream is
+-- `forward/*.sql` (non-recursive) and the node stream is
+-- `forward/nodes/<node>/*.sql` at exactly depth 2. Neither reaches here.
+--
+-- WHY IT COULD NOT LAND WITH THE REST OF OMN-18060
+--
+--   The grant it carries is on `omnibase_infra.public.delegation_workflow_state`,
+--   so it can only be delivered by a FLAT forward migration: node-stream
+--   migrations run against `NODE_POSTGRES_DB`, which every compose lane sets to
+--   `omnidash_analytics` (docker-compose.infra.yml, docker-compose.judge.yml),
+--   a database this table is not in.
+--
+--   The flat forward stream is currently FROZEN.
+--   `tests/unit/db/test_migration_104_retired_omn17923.py`
+--   ::test_surviving_stream_is_byte_identical_to_the_pre_3190_stream asserts the
+--   stream fingerprints byte-identically to its pre-#3190 state over exactly 88
+--   files. Measured 2026-09-09, with a positive control: adding this file as
+--   ordinal 104 fails four assertions in that module (104 is a BURNED ordinal),
+--   and adding a byte-identical copy as ordinal **105** still fails
+--   `test_surviving_stream_is_byte_identical_to_the_pre_3190_stream`. So the
+--   freeze is on ANY new flat migration, not on the burned ordinal. A restamp
+--   does not lift it either: that assertion compares against hardcoded
+--   pre-#3190 constants, and only editing them would satisfy it -- which would
+--   destroy the retirement proof those constants exist to be.
+--
+--   That freeze is OMN-17923's to lift, and weakening another ticket's
+--   retirement proof from inside this one is not a fix.
+--
+-- WHAT TO DO WHEN OMN-17923 LANDS
+--
+--   Move this file to `docker/migrations/forward/<NNN>_create_chain_canary_reader_role.sql`
+--   and its sibling to `docker/migrations/rollback/rollback_<NNN>_...sql`, at a
+--   NEW ordinal (104 stays burned), then
+--   `python scripts/check_schema_fingerprint.py stamp`.
+--
+-- WHAT IS TRUE ON THE LANE UNTIL THEN, stated rather than implied
+--
+--   The role `chain_canary_reader` IS provisioned -- the credential seams in
+--   this same change create it least-privilege and attach its LOGIN. It simply
+--   holds no grant on the table, so the canary's link-2 readback connects,
+--   passes the pg_roles identity probe, and fails the SELECT with a permission
+--   error. That surfaces as verdict `projection_readback_failed`, naming the
+--   permission denial: RED and diagnosable, never green. Which is the whole
+--   posture of this ticket.
+-- ============================================================================
+
+-- SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+-- SPDX-License-Identifier: MIT
+-- =============================================================================
+-- ROLLBACK 104: revoke the chain_canary_reader grants (OMN-18060)
+-- =============================================================================
+-- Revokes what 104 granted and does NOT drop the role.
+--
+-- Two reasons, and the second is the operative one. Roles are cluster-wide, so
+-- a DROP here reaches beyond this database; and the role's LOGIN credential is
+-- owned by the deployment seams (000_create_multiple_databases.sh Phase 2b and
+-- scripts/run-forward-migrations.sh), which would simply recreate it on the
+-- next compose up -- a rollback whose effect is undone by the next deploy is
+-- worse than one that is honestly narrow.
+--
+-- Effect of running this: the chain canary's link-2 readback connects and then
+-- fails its SELECT, so the run reports `projection_readback_failed` -- RED,
+-- and pointing at the database rather than at the chain. To take the leg out
+-- cleanly instead, remove the lane's `projection_readback` declaration from
+-- omnimarket config/ci_bus_lanes.yaml; the canary then reports
+-- `skipped_not_configured`, which is also red but names the real cause.
+-- =============================================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'chain_canary_reader'
+  ) THEN
+    RAISE NOTICE 'chain_canary_reader absent; nothing to revoke';
+    RETURN;
+  END IF;
+
+  EXECUTE
+    'REVOKE SELECT (correlation_id, state) '
+    'ON public.delegation_workflow_state FROM chain_canary_reader';
+  EXECUTE 'REVOKE USAGE ON SCHEMA public FROM chain_canary_reader';
+  EXECUTE format(
+    'REVOKE CONNECT ON DATABASE %I FROM chain_canary_reader', current_database()
+  );
+END
+$$;

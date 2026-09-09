@@ -327,6 +327,14 @@ services:
       # credential, matching docker-compose.infra.yml and the fresh-volume
       # bootstrap map.
       TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
+      # OMN-18060: the third LOGIN_ONLY_ROLE_MAP entry -- chain_canary_reader,
+      # the read-only instrument identity node_chain_canary_effect uses for its
+      # OMN-16025 link-2 projection readback. Empty-means-skip, exactly as on
+      # the two keys above: a lane with no canary provisioned leaves the role
+      # absent, migration 104 skips its grants with a NOTICE, and the canary
+      # reports skipped_not_configured -- red and honest, never a green from a
+      # check that never ran.
+      CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro

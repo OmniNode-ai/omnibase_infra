@@ -240,6 +240,46 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
+      # OMN-18060. Deliberately NOT fail-loud the way the transport step above
+      # is, and the asymmetry is the point. An unresolvable BROKER means the
+      # probe would read the wrong lane and report it clean, so the run must
+      # stop before it publishes anything. An unresolvable projection
+      # declaration means one leg has no instrument -- which the node already
+      # renders honestly, as SKIPPED_NOT_CONFIGURED against OMN-16025 link 2,
+      # and therefore RED. Killing the job here instead would throw away the
+      # three links the probe CAN prove and leave no receipt naming the one it
+      # cannot, which is a worse report of the same failure.
+      #
+      # Only the NAME is exported. The DSN itself is injected as a secret on
+      # the probe step under that same name and never passes through an
+      # output, a log line, or a command line.
+      - name: Resolve the declared projection-readback DSN reference
+        id: projection
+        env:
+          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+        run: |
+          set -euo pipefail
+          uv run python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              load_lane_projection_readback, projection_readback_env,
+          )
+          lane = os.environ['BUS_LANE']
+          try:
+              declaration = load_lane_projection_readback(
+                  pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+              )
+          except ValueError as exc:
+              print(f'::warning::no projection readback declared for lane {lane!r}: {exc}')
+              print('OMN-16025 link 2 will report SKIPPED_NOT_CONFIGURED, which is RED.')
+              raise SystemExit(0)
+          print(f'lane {lane!r} declares its projection DSN under '
+                f'{declaration.dsn_env} (a NAME; the value is a job secret)')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in projection_readback_env(declaration).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
       - name: Fire one live delegation through the dev-lane ingress
         env:
           # Inside the deploy-runner container `localhost` is the container
@@ -274,6 +314,21 @@ jobs:
           # exported.
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          # OMN-18060: link 2's Postgres DSN, injected as ENVIRONMENT under the
+          # literal name the dev lane declares in omnimarket
+          # config/ci_bus_lanes.yaml (`projection_readback.dsn_env`). GitHub
+          # requires a literal key here, so the declaration and this line are
+          # two halves that must agree; if they ever diverge the node reports
+          # SKIPPED_NOT_CONFIGURED naming the variable it looked for, which is
+          # red and diagnosable rather than silently green.
+          #
+          # The DSN authenticates as `chain_canary_reader` -- SELECT on
+          # delegation_workflow_state and nothing else, NOSUPERUSER
+          # NOBYPASSRLS -- and the node probes pg_roles on connect and REFUSES
+          # a role carrying either attribute. It is never passed as a flag:
+          # argv is world-readable through /proc, and the dispatch step echoes
+          # its own broker values into this log.
+          CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
           # The omnimarket drift guard (OMN-14060) refuses `onex skill`
           # whenever $OMNI_HOME/omnimarket exists and the venv's omnimarket
           # is not a git co-install. The deploy runner sets OMNI_HOME to its
@@ -301,12 +356,16 @@ jobs:
           TERMINAL_BOOTSTRAP="${TERMINAL_BOOTSTRAP_OVERRIDE:-${KAFKA_BOOTSTRAP_SERVERS:-}}"
           echo "quarantine broker: ${QUARANTINE_BOOTSTRAP:-<unset>}"
           echo "terminal broker:   ${TERMINAL_BOOTSTRAP:-<unset>}"
+          # The NAME is safe to print and is the one thing worth printing: it
+          # is what a reader needs to check the declaration against the secret.
+          echo "projection dsn var: ${CHAIN_CANARY_PROJECTION_DSN_ENV:-<undeclared>}"
           uv run onex skill chain_canary \
             --probe-url "${PROBE_URL}" \
             --task-type "${TASK_TYPE}" \
             --budget-ms "${BUDGET_MS}" \
             --terminal-bootstrap-servers "${TERMINAL_BOOTSTRAP}" \
             --quarantine-bootstrap-servers "${QUARANTINE_BOOTSTRAP}" \
+            --projection-dsn-env "${CHAIN_CANARY_PROJECTION_DSN_ENV:-}" \
             > chain-canary-receipt.json
 
       - name: Publish receipt and set the verdict

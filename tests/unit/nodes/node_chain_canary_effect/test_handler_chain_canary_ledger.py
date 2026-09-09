@@ -51,11 +51,17 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link import
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link_status import (
     EnumChainLinkStatus,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readback_status import (
+    EnumProjectionReadbackStatus,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_request import (
     ModelChainCanaryRequest,
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result import (
     ModelChainCanaryResult,
+)
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    ModelProjectionReadbackOutcome,
 )
 
 # Endpoints use the RFC 2606 reserved `.invalid` TLD, matching the sibling
@@ -68,6 +74,39 @@ _BOOTSTRAP = "broker.invalid:19092"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+# OMN-18060: the request now carries the NAME of the environment variable the
+# DSN arrives in, never the DSN, and the readback transport returns a typed
+# outcome rather than a two-state tuple. The fixture below puts the value where
+# the handler reads it, so these cases exercise the real resolution path.
+_PROJECTION_DSN_ENV = "CHAIN_CANARY_PROJECTION_DSN"
+
+
+def _outcome(state: str | None, error: str = "") -> ModelProjectionReadbackOutcome:
+    """Map the old three-way (state | "" | None) convention onto the outcome."""
+    if state is None:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ERROR,
+            error=error or "projection readback failed",
+        )
+    if not state:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ROW_ABSENT
+        )
+    if state.strip().upper() in ("COMPLETED", "FAILED"):
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.TERMINAL, state=state
+        )
+    return ModelProjectionReadbackOutcome(
+        status=EnumProjectionReadbackStatus.STRANDED, state=state
+    )
+
+
+@pytest.fixture(autouse=True)
+def _projection_dsn_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the DSN where the handler reads it, under the declared NAME."""
+    monkeypatch.setenv(_PROJECTION_DSN_ENV, _PROJECTION_DSN)
+    monkeypatch.setattr(sys, "argv", ["pytest"])
+
 
 # The hops a complete chain must carry, end to end. A run missing any one of
 # these is CHAIN_INCOMPLETE — "no gaps tolerated silently" is the scope's own
@@ -88,7 +127,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         # outranks every ledger verdict in `_decide`, so without this these
         # fixtures would all stop at PROJECTION_READBACK_NOT_CONFIGURED and
         # never reach the link-5 branch they exist to exercise.
-        "projection_dsn": _PROJECTION_DSN,
+        "projection_dsn_env": _PROJECTION_DSN_ENV,
         "settle_seconds": 0,
     }
     fields.update(overrides)
@@ -129,8 +168,8 @@ class _TerminalReadback:
 class _ProjectionReadback:
     async def __call__(
         self, dsn: str, correlation_id: str, timeout_s: float
-    ) -> tuple[str | None, str]:
-        return "COMPLETED", ""
+    ) -> ModelProjectionReadbackOutcome:
+        return _outcome("COMPLETED")
 
 
 class _LedgerReplay:
