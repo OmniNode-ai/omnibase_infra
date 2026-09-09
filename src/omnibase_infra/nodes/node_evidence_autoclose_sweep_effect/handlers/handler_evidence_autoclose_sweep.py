@@ -1249,7 +1249,18 @@ _UNCHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[ \t]\][ \t]*(.*)$", re.MU
 _LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(.*)$")
 # An `AC1: ...` / `AC-2 ...` line with no bullet at all -- a common shape in
 # these tickets that a list-item-only parser would silently count as zero.
-_AC_ITEM_RE = re.compile(r"^[ \t]*(AC[-_ ]?\d+\b.*)$", re.IGNORECASE)
+# OMN-18048: leading emphasis markers must not hide the item. Criteria written
+# `**AC1** - ...` matched NEITHER regex -- not _LIST_ITEM_RE (no bullet, no
+# number) and not this one (the line starts with `*`, not `AC`). Measured on
+# OMN-18035: four criteria in that shape, zero parsed. The optional `[*_]*`
+# prefix is stripped from the captured text below so the item reads the same
+# however it was written.
+_AC_ITEM_RE = re.compile(r"^[ \t]*[*_]*[ \t]*(AC[-_ ]?\d+\b.*)$", re.IGNORECASE)
+
+# OMN-18048: a trailing parenthetical qualifier on an otherwise-recognised
+# heading -- `Acceptance criteria (falsifiable)`, `DoD (per repo)`. Stripped
+# before the closed-set membership test in _is_ac_heading.
+_TRAILING_QUALIFIER_RE = re.compile(r"\s*\([^)]*\)\s*$")
 # A leading `[ ]` / `[x]` task marker, stripped from item text for readability.
 _TASK_MARKER_RE = re.compile(r"^\[[ \t xX]\][ \t]*")
 # Leading enumeration on a heading line: `3. Acceptance criteria`.
@@ -1309,16 +1320,63 @@ def _is_ac_heading(line: str) -> bool:
 
     Tolerates ``## Acceptance Criteria``, ``**Acceptance criteria:**``,
     ``### 3. Acceptance criteria`` and bare ``AC``.
+
+    OMN-18048 -- A QUALIFIER MUST NOT HIDE THE HEADING.
+    ------------------------------------------------------
+    ``_AC_HEADING_TEXTS`` is a closed set of nine spellings, and the
+    normalisation below did not remove qualifiers. So ``## Acceptance criteria
+    (falsifiable)`` -- the house style on operator-authored tickets -- was NOT
+    recognised, ``_saw_ac_heading`` was False, and the OMN-16106 whole-body
+    fallback fired: the scan ran over the entire description and counted
+    whatever unrelated bullets it found. On OMN-18035 that reported **2**
+    acceptance criteria for a ticket declaring **four**, and the two were
+    bullets from a ``## Fence`` section.
+
+    That is not the over-count the fallback's docstring reasons about. It is a
+    count of DIFFERENT ITEMS, so the "over-counting holds a flip" safety
+    argument does not apply and both failure directions are reachable.
+
+    Measured (OMN-18048 AC3, 110 ticket descriptions read at full text):
+    **14.5%** carry an AC-looking heading this set does not recognise, across
+    **12 distinct spellings**. Every one is a recognised base spelling plus a
+    qualifier, which is why this strips the qualifier instead of adding twelve
+    more strings -- that set would never close.
+
+    Two qualifier positions, both measured in that corpus:
+
+    * TRAILING, usually parenthesised -- ``Acceptance criteria (falsifiable)``,
+      ``DoD (per repo)``, ``Definition of Done (dod_evidence)``.
+    * LEADING -- ``Falsifiable acceptance criteria`` (5 occurrences). A fix
+      that only stripped the trailing form would leave every one of these
+      invisible.
+
+    The leading form is gated on the line actually looking like a heading (a
+    markdown ``#`` rule, or bold-wrapped). Without that gate an ordinary prose
+    sentence ending in the phrase would open the section mid-paragraph, which
+    is a real false positive -- it was hit while measuring the corpus.
     """
-    text = line.strip()
-    if not text:
+    raw = line.strip()
+    if not raw:
         return False
-    text = text.lstrip("#").strip()
+    looks_like_heading = raw.startswith("#") or (
+        raw.startswith("**") and raw.endswith("**")
+    )
+    text = raw.lstrip("#").strip()
     text = text.strip("*_").strip()
     text = _HEADING_ENUM_RE.sub("", text)
     text = text.rstrip(":").strip()
     text = text.strip("*_").strip()
-    return text.casefold() in _AC_HEADING_TEXTS
+    folded = text.casefold()
+    if folded in _AC_HEADING_TEXTS:
+        return True
+    # Trailing qualifier: "acceptance criteria (falsifiable)" -> "acceptance criteria".
+    trimmed = _TRAILING_QUALIFIER_RE.sub("", folded).strip().rstrip(":").strip()
+    if trimmed in _AC_HEADING_TEXTS:
+        return True
+    # Leading qualifier: "falsifiable acceptance criteria". Heading-shaped only.
+    return looks_like_heading and any(
+        trimmed.endswith(f" {known}") for known in _AC_HEADING_TEXTS
+    )
 
 
 def _acceptance_criteria_items(description: str) -> list[str]:
