@@ -9,12 +9,16 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from kafka import KafkaProducer
 
 from deploy_agent.events import (
     TOPIC_REBUILD_COMPLETED,
+    ModelContainerResidue,
     ModelHealthCheck,
+    ModelRebuildCompleted,
+    Phase,
 )
 from deploy_agent.job_state import JobState
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
@@ -68,40 +72,74 @@ class PublishCircuitBreaker:
 
 
 def build_completion_payload(
-    job: JobState, git_sha: str, health_checks: list[ModelHealthCheck] | None = None
-) -> dict:
-    """Build the completion event payload from job state."""
+    job: JobState,
+    git_sha: str,
+    health_checks: list[ModelHealthCheck] | None = None,
+    *,
+    services_restarted: list[str] | None = None,
+    container_residue: list[ModelContainerResidue] | None = None,
+) -> dict[str, Any]:
+    """Build the completion event payload from job state.
+
+    OMN-18057. Three things changed here, each closing a way the terminal event
+    could disagree with what happened:
+
+    * The payload is VALIDATED through ``ModelRebuildCompleted`` instead of
+      being hand-assembled as a dict that merely resembled it. The model was
+      never on the publish path, so nothing enforced its shape and its
+      ``status`` verdict never reached the wire at all -- every consumer had to
+      re-derive a verdict from phase strings.
+    * ``Phase.PUBLISH`` is stripped. This event IS the publish; it was always
+      recorded as ``in_progress`` at the moment the payload was built, so a
+      ``status`` derived from ``phase_results`` would have read "failed" for
+      every deploy the agent ever completed.
+    * ``services_restarted`` comes from what ``rebuild_scope`` actually brought
+      up. It used to echo ``command["services"]``, which is EMPTY for a
+      scope-default deploy -- so the field read as "nothing was restarted" on
+      exactly the deploys that restarted everything.
+    """
     started_at = job.accepted_at
     completed_at = job.completed_at or datetime.now(UTC)
     duration = (completed_at - started_at).total_seconds()
 
-    phase_results = {str(k): str(v) for k, v in job.phase_results.items()}
-    checks = [c.model_dump() for c in (health_checks or [])]
+    phase_results = {
+        phase: status
+        for phase, status in job.phase_results.items()
+        if phase != Phase.PUBLISH
+    }
 
-    return {
-        "correlation_id": str(job.correlation_id),
+    completed = ModelRebuildCompleted(
+        correlation_id=job.correlation_id,
         # OMN-16442: the completion event records the ref this agent DECLARES
         # it tracks when the command omitted one -- never a literal "main".
         # This field is read back as the deployed lineage, so a wrong default
         # here misreports what a lane is running.
-        "requested_git_ref": job.command.get("git_ref")
+        requested_git_ref=job.command.get("git_ref")
         or load_tracking_remote_ref_from_env(),
-        "git_sha": git_sha,
-        "started_at": started_at.isoformat(),
-        "completed_at": completed_at.isoformat(),
-        "duration_seconds": round(duration, 1),
-        "scope": job.command.get("scope", "runtime"),
-        "runtime_lane": job.command["runtime_lane"],
-        "image_ref": job.command.get("image_ref"),
-        "image_digest": job.command.get("image_digest"),
-        "services_restarted": job.command.get("services", []),
-        "phase_results": phase_results,
-        "errors": job.errors,
-        "health_checks": checks,
-    }
+        git_sha=git_sha,
+        started_at=started_at,
+        completed_at=completed_at,
+        duration_seconds=round(duration, 1),
+        scope=job.command.get("scope", "runtime"),
+        runtime_lane=job.command["runtime_lane"],
+        image_ref=job.command.get("image_ref"),
+        image_digest=job.command.get("image_digest"),
+        services_restarted=list(
+            services_restarted
+            if services_restarted is not None
+            else job.command.get("services", [])
+        ),
+        phase_results=phase_results,
+        errors=job.errors,
+        health_checks=list(health_checks or []),
+        container_residue=list(container_residue or []),
+    )
+    return completed.model_dump(mode="json")
 
 
-def publish_result(payload: dict, kafka_config: ModelDeployAgentKafkaConfig) -> bool:
+def publish_result(
+    payload: dict[str, Any], kafka_config: ModelDeployAgentKafkaConfig
+) -> bool:
     """Publish completion event to the same control bus consumed by deploy-agent."""
     try:
         producer = KafkaProducer(
@@ -125,7 +163,7 @@ def publish_result(payload: dict, kafka_config: ModelDeployAgentKafkaConfig) -> 
 
 
 def publish_with_retry(
-    payload: dict, kafka_config: ModelDeployAgentKafkaConfig
+    payload: dict[str, Any], kafka_config: ModelDeployAgentKafkaConfig
 ) -> bool:
     """Attempt to publish with exponential backoff."""
     total_waited = 0

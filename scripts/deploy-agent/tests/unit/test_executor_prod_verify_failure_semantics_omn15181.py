@@ -57,6 +57,9 @@ class _FakeExecutorRealDeployAndVerify:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self._real = DeployExecutor()
+        # OMN-18057: the agent reads residue from the executor when it
+        # builds the terminal event.
+        self.container_residue: list[object] = []
 
     def resolve_stability_ready_digest(
         self, service: str = "omninode-runtime"

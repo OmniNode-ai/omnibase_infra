@@ -19,10 +19,15 @@ from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict
 
+from deploy_agent.compose_budget import (
+    ModelPhaseBudget,
+    derive_runtime_phase_budget,
+)
 from deploy_agent.events import (
     BuildSource,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
+    ModelContainerResidue,
     ModelHealthCheck,
     ModelRebuildRequested,
     Phase,
@@ -64,9 +69,33 @@ PHASE_TIMEOUTS = {
     Phase.GIT: 60,
     Phase.COMPOSE_GEN: 120,
     Phase.CORE: 300,
+    # OMN-18057: this entry no longer bounds the runtime compose-up. It bounds
+    # the runtime IMAGE operations (build, pinned-digest pull) and the migration
+    # preflight, which are not gated on any healthcheck. The compose-up ceiling
+    # is derived from the compose model -- see runtime_compose_up_budget below,
+    # and deploy_agent.compose_budget for why a constant cannot express it.
     Phase.RUNTIME: 300,
     Phase.VERIFICATION: 120,
 }
+
+# OMN-18057: the two windows _compose_up gives the lane to settle after the
+# compose command returns -- named rather than inline so the recovery path reads
+# as a policy and can be exercised without a three-minute unit test.
+CONTAINER_VERIFY_TIMEOUT_SECONDS = 120
+CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS = 60
+
+# OMN-18057: added to the largest gating start_period to form the runtime
+# compose-up ceiling. It must cover the unhealthy-detection tail the compose
+# file states for the runtime family -- interval 30s x retries 5 = 150s beyond
+# start_period -- plus the stop/create/start of the rest of the selected set.
+RUNTIME_COMPOSE_UP_MARGIN_SECONDS = 300
+
+# OMN-18057: the floor the derived ceiling can never fall below. MEASURED
+# 2026-09-08 (ledger :5076): the minimum viable budget for the ten-service dev
+# force-recreate was 336s (bootstrap 249.6s, :8085 bound at t+321s). The floor
+# sits above it with room, and applies when the compose model declares no
+# health-gated start_period at all.
+RUNTIME_COMPOSE_UP_FLOOR_SECONDS = 600
 
 PhaseCallback = Callable[[Phase, PhaseStatus], None]
 
@@ -684,7 +713,65 @@ def verify_containers_up(
     return False, missing
 
 
+def runtime_compose_up_budget(
+    lane: EnumRuntimeLane, expected_services: list[str]
+) -> ModelPhaseBudget:
+    """Derive the runtime compose-up ceiling from the lane's own compose files.
+
+    Reads the SAME files the deploy is about to invoke (``lane_config_for``), so
+    a compose change that lengthens a gating healthcheck moves the ceiling with
+    it. See ``deploy_agent.compose_budget`` for the derivation and for why the
+    previous bare ``300`` could not express this.
+    """
+    return derive_runtime_phase_budget(
+        lane_config_for(lane).compose_files,
+        expected_services,
+        margin_seconds=RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
+        floor_seconds=RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+    )
+
+
 class DeployExecutor:
+    def __init__(self) -> None:
+        # OMN-18057: services a phase left in a non-running state, and whether
+        # per-container recovery then got them up. Read by the agent when it
+        # builds the terminal event so residue is a recorded fact rather than
+        # something an operator has to go and find on the host.
+        self.container_residue: list[ModelContainerResidue] = []
+
+    def reset_deploy_observations(self) -> None:
+        """Clear per-job observations at the start of a rebuild."""
+        self.container_residue = []
+
+    def _record_container_residue(
+        self, stuck: list[str], *, lane: EnumRuntimeLane
+    ) -> None:
+        """Record the live state of every service that did not reach running."""
+        try:
+            states = _compose_service_states(lane)
+        except RuntimeError as exc:
+            logger.warning(
+                "could not read compose state for residue recording: %s", exc
+            )
+            states = {}
+        known = {item.service for item in self.container_residue}
+        for service in stuck:
+            if service in known:
+                continue
+            state, exit_code = states.get(service, ("unknown", None))
+            self.container_residue.append(
+                ModelContainerResidue(service=service, state=state, exit_code=exit_code)
+            )
+
+    def _mark_residue_recovered(self, recovered: set[str]) -> None:
+        """Flip residue entries whose service came up under recovery."""
+        self.container_residue = [
+            item.model_copy(update={"recovered": True})
+            if item.service in recovered
+            else item
+            for item in self.container_residue
+        ]
+
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
         script = f"{REPO_DIR}/scripts/check_llm_endpoint_env_contract.py"
@@ -1284,6 +1371,8 @@ class DeployExecutor:
         # EnumSelfUpdateBoundary. The parameter is removed rather than defaulted
         # off so this path cannot reach self_update at all.
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
+        # OMN-18057: residue is per-rebuild, not per-process.
+        self.reset_deploy_observations()
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -1807,13 +1896,33 @@ class DeployExecutor:
         extra_env: Mapping[str, str] | None = None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
-        timeout = PHASE_TIMEOUTS.get(phase, 300)
 
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services)
+        # For runtime scope, verification MUST be bounded by the requested
+        # runtime service list so the runtime-only rebuild never implicitly
+        # waits on core infra containers (OMN-9455). The same list bounds the
+        # ceiling derivation, so an unrelated long healthcheck elsewhere in the
+        # compose file cannot inflate it.
+        expected = (
+            requested_services if requested_services else services_for_scope(scope)
+        )
+
         if scope == Scope.RUNTIME:
-            self._ensure_runtime_migrations_ready(lane=lane, timeout=timeout)
+            # OMN-18057: derived from the compose model, never a bare constant.
+            budget = runtime_compose_up_budget(lane, expected)
+            timeout = budget.timeout_seconds
+            logger.info(
+                "Phase %s compose-up ceiling %s", phase.value, budget.describe()
+            )
+            # The migration one-shots are not gated on any healthcheck, so they
+            # keep the flat phase bound.
+            self._ensure_runtime_migrations_ready(
+                lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
+            )
+        else:
+            timeout = PHASE_TIMEOUTS.get(phase, 300)
         cmd = [
             "docker",
             "compose",
@@ -1836,29 +1945,42 @@ class DeployExecutor:
         if requested_services:
             cmd.extend(requested_services)
 
-        result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
-        compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
-        if compose_up_error:
-            logger.warning(
-                "Docker compose up returned non-zero; verifying live service state before failing: %s",
-                compose_up_error[:500],
+        # OMN-18057: a blown ceiling is a compose-up OUTCOME, not a reason to
+        # skip the outcome check. Before this, TimeoutExpired propagated out of
+        # here and the verify + per-container recovery below -- the recovery a
+        # non-zero exit already gets -- never ran at all, which is how command
+        # 23edaf62 left three services in Created with :8086 down.
+        try:
+            result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
+        except subprocess.TimeoutExpired:
+            compose_up_error = (
+                f"docker compose up exceeded its {timeout}s ceiling for phase "
+                f"{phase.value} and was killed with the lane mid-recreate"
             )
+            logger.warning(
+                "%s; verifying live service state before deciding the phase verdict",
+                compose_up_error,
+            )
+        else:
+            compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
+            if compose_up_error:
+                logger.warning(
+                    "Docker compose up returned non-zero; verifying live service state before failing: %s",
+                    compose_up_error[:500],
+                )
 
         # Verify containers actually reached running state — docker compose up exits 0
         # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
-        # For runtime scope, verification MUST be bounded by the requested runtime
-        # service list so the runtime-only rebuild never implicitly waits on core
-        # infra containers (OMN-9455).
-        expected = (
-            requested_services if requested_services else services_for_scope(scope)
-        )
         logger.info(
             "Verifying %d container(s) reached running state: %s",
             len(expected),
             expected,
         )
-        ok, stuck = verify_containers_up(expected, timeout_s=120, lane=lane)
+        ok, stuck = verify_containers_up(
+            expected, timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
+        )
         if not ok:
+            self._record_container_residue(stuck, lane=lane)
             logger.warning(
                 "Containers stuck after compose up — attempting docker start recovery: %s",
                 stuck,
@@ -1887,15 +2009,28 @@ class DeployExecutor:
                     logger.warning(
                         "docker start %s failed: %s", name, start_result.stderr[:200]
                     )
-            ok, stuck = verify_containers_up(expected, timeout_s=60, lane=lane)
+            ok, still_stuck = verify_containers_up(
+                expected,
+                timeout_s=CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS,
+                lane=lane,
+            )
+            self._mark_residue_recovered(set(stuck) - set(still_stuck))
             if not ok:
-                detail = (
-                    f"Containers still not running after docker start recovery: {stuck}"
-                )
+                detail = f"Containers still not running after docker start recovery: {still_stuck}"
                 if compose_up_error:
                     detail = f"Docker compose up failed: {compose_up_error}; {detail}"
                 raise RuntimeError(detail)
             logger.info("Recovery succeeded — all containers now running")
+        elif compose_up_error:
+            # The command was killed or exited non-zero, yet every expected
+            # service is running. Stated rather than swallowed: the phase
+            # passes on live state, and VERIFICATION still has to prove health.
+            logger.warning(
+                "compose up did not exit cleanly (%s) but every expected "
+                "service is running; phase %s passes on live state",
+                compose_up_error,
+                phase.value,
+            )
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
 

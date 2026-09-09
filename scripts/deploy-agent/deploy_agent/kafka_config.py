@@ -184,7 +184,33 @@ class ModelDeployAgentKafkaConfig(BaseModel):
         return kwargs
 
     def producer_kwargs(self) -> dict[str, Any]:
-        return self.consumer_kwargs()
+        """Transport config plus the delivery guarantee every publish needs.
+
+        OMN-18057, MEASURED on the .201 dev bus 2026-09-08: six BYTE-IDENTICAL
+        copies of command ddc711ad's terminal event at offsets 96-101, and four
+        of 23edaf62's at 102-105, on
+        ``onex.evt.deploy.rebuild-completed.v1``. Byte-identical means the same
+        in-memory payload -- the retry loop rebuilds its payload with an empty
+        ``git_sha`` and so cannot produce a duplicate that matches -- which
+        leaves producer-side retry as the mechanism.
+
+        kafka-python 2.3.2 (the version in the agent venv) defaults to
+        ``retries=inf``, ``acks=1``, ``enable_idempotence=False``. Under
+        ``acks=1`` a produce request the broker COMMITTED but whose ack was lost
+        or slow (``request_timeout_ms=30000``, on a host mid-way through a
+        ten-service force-recreate) is retried, and the broker appends a second
+        copy. With no producer id and no sequence number it has no way to know
+        it has seen that batch before.
+
+        ``enable_idempotence=True`` makes the client claim a producer id and
+        stamp a sequence number per partition, so the broker drops a re-sent
+        batch instead of appending it. kafka-python overrides ``acks`` to
+        ``all`` for us when it is set. The .201 dev Redpanda declares
+        ``enable_idempotence: true`` at the cluster level (read back
+        2026-09-08), so the guarantee is available on the lane that produced the
+        duplicates.
+        """
+        return {**self.consumer_kwargs(), "enable_idempotence": True}
 
 
 def load_deploy_agent_kafka_config_from_env() -> ModelDeployAgentKafkaConfig:
