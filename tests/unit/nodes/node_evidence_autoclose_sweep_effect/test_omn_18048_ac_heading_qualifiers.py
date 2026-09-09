@@ -174,3 +174,60 @@ class TestWideningDoesNotBecomeOverMatching:
             "- filed the same day\n"
         )
         assert _acceptance_criteria_items(description) == ["AC1: the thing works"]
+
+
+class TestItemTextIsNotPollutedByEmphasis:
+    r"""OMN-18048 hostile review [MAJOR] — the captured TEXT, not just the count.
+
+    The first revision captured `(AC[-_ ]?\d+\b.*)` after consuming a leading
+    emphasis run, so `**AC1** - text` yielded `AC1** - text`: the CLOSING marker
+    survived, embedded mid-string. The count was right and the string was wrong,
+    which is exactly the divergence a count-only assertion cannot see.
+
+    It matters because the same criterion written two ways must compare equal.
+    Downstream the item text is used for evidence strings and de-duplication, so
+    a bold spelling and a bulleted spelling of one criterion would read as two.
+    """
+
+    def test_bold_and_bulleted_forms_of_one_criterion_are_equal(self) -> None:
+        bold = _acceptance_criteria_items(
+            "## Acceptance criteria\n**AC1** - a complete page\n"
+        )
+        bulleted = _acceptance_criteria_items(
+            "## Acceptance criteria\n- AC1 - a complete page\n"
+        )
+        assert bold == bulleted == ["AC1 - a complete page"]
+
+    def test_no_emphasis_marker_survives_in_captured_text(self) -> None:
+        items = _acceptance_criteria_items(
+            "## Acceptance criteria\n"
+            "**AC1** - bold wrapped\n"
+            "*AC2* - italic wrapped\n"
+            "__AC3__ - underscore bold\n"
+            "**AC4 - emphasis spans the whole item**\n"
+        )
+        assert items == [
+            "AC1 - bold wrapped",
+            "AC2 - italic wrapped",
+            "AC3 - underscore bold",
+            "AC4 - emphasis spans the whole item",
+        ]
+        for text in items:
+            assert "*" not in text and "_" not in text, text
+
+    def test_a_trailing_underscore_in_prose_is_preserved(self) -> None:
+        """The strip is conditional, and must be.
+
+        Stripping trailing emphasis unconditionally would corrupt item text that
+        legitimately ends in `_` and never used emphasis at all — turning a
+        capture bug into a truncation bug.
+        """
+        assert _acceptance_criteria_items(
+            "## Acceptance criteria\nAC1 names the column user_id_\n"
+        ) == ["AC1 names the column user_id_"]
+
+    def test_separator_after_the_token_is_preserved(self) -> None:
+        """`AC3: plain` must not become `AC3 : plain`."""
+        assert _acceptance_criteria_items("## Acceptance criteria\nAC3: plain\n") == [
+            "AC3: plain"
+        ]

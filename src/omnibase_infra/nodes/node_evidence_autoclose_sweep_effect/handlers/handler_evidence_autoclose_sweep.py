@@ -1255,7 +1255,13 @@ _LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(.*)$")
 # OMN-18035: four criteria in that shape, zero parsed. The optional `[*_]*`
 # prefix is stripped from the captured text below so the item reads the same
 # however it was written.
-_AC_ITEM_RE = re.compile(r"^[ \t]*[*_]*[ \t]*(AC[-_ ]?\d+\b.*)$", re.IGNORECASE)
+_AC_ITEM_RE = re.compile(
+    r"^[ \t]*([*_]*)[ \t]*(AC[-_ ]?\d+)(?!\d)[*_]*(.*?)[ \t]*$", re.IGNORECASE
+)
+# The closing half of a wrapped emphasis run, dropped ONLY when the item opened
+# with one. Unconditional stripping would eat a legitimate trailing `_` from
+# item text that never used emphasis at all.
+_TRAILING_EMPHASIS_RE = re.compile(r"[*_]+$")
 
 # OMN-18048: a trailing parenthetical qualifier on an otherwise-recognised
 # heading -- `Acceptance criteria (falsifiable)`, `DoD (per repo)`. Stripped
@@ -1430,7 +1436,15 @@ def _acceptance_criteria_items(description: str) -> list[str]:
             continue
         ac_match = _AC_ITEM_RE.match(line)
         if ac_match:
-            text = ac_match.group(1).strip()
+            # OMN-18048 review: the emphasis run is captured separately from the
+            # AC token and its remainder, so `**AC1** - text` yields the SAME
+            # string as the bulleted `- AC1 - text`. Capturing `.*` after the
+            # token embedded the closing `**` mid-string, and the two spellings
+            # of one criterion then compared and deduped as different items.
+            lead, token, rest = ac_match.groups()
+            text = f"{token}{rest}".strip()
+            if lead:
+                text = _TRAILING_EMPHASIS_RE.sub("", text).strip()
             if text:
                 items.append(text)
     return items
