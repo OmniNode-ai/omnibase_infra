@@ -16,8 +16,18 @@ Usage:
     uv run python scripts/run_baselines_batch_compute.py --dry-run
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS (optional, default: localhost:19092)
-        Kafka bootstrap address for publishing the command.
+    KAFKA_BOOTSTRAP_SERVERS (required unless --dry-run)
+        Kafka bootstrap address for publishing the command. There is NO
+        default (OMN-17163): the literal `localhost:19092` this script used to
+        fall back to is the .201 HOST-LOCAL Redpanda listener, unreachable
+        from every CI runner that is not in that host's network namespace, and
+        a publisher that guesses a broker publishes to a lane nobody asked
+        about. The caller resolves it from the lane declaration in omnimarket
+        `config/ci_bus_lanes.yaml` and exports it; an unset value is refused.
+    KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM /
+    KAFKA_SASL_USERNAME / KAFKA_SASL_PASSWORD (as the lane requires)
+        Read by `build_confluent_auth_config_from_env`. The dev lane has
+        required SASL_PLAINTEXT / SCRAM-SHA-256 since OMN-18012 Phase B.
 
 Exit Codes:
     0  Command published, or dry-run payload validated
@@ -42,7 +52,6 @@ import yaml  # ONEX_EXCLUDE: manual_yaml - reads node contract for command topic
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
-DEFAULT_BOOTSTRAP_SERVERS = "localhost:19092"
 SOURCE_TOOL = "run_baselines_batch_compute"
 TARGET_TOOL = "node_baselines_batch_compute"
 
@@ -162,7 +171,23 @@ def _publish(
         )
         raise RuntimeError(message) from exc
 
-    producer = Producer({"bootstrap.servers": bootstrap_servers})
+    # OMN-17163: the dev lane's external listener has required
+    # SASL_PLAINTEXT / SCRAM-SHA-256 since OMN-18012 Phase B. A bare
+    # `bootstrap.servers` config opens PLAINTEXT and is disconnected during
+    # the handshake, which surfaces as an opaque delivery timeout rather than
+    # an auth error. This is the confluent-side projection of the SAME
+    # resolver the aiokafka clients read, so both client families speak the
+    # one declared lane transport instead of two.
+    from omnibase_infra.event_bus.kafka_auth import (
+        build_confluent_auth_config_from_env,
+    )
+
+    producer = Producer(
+        {
+            "bootstrap.servers": bootstrap_servers,
+            **build_confluent_auth_config_from_env(),
+        }
+    )
     delivery_error: list[BaseException] = []
 
     def _on_delivery(err: object, _msg: object) -> None:
@@ -189,8 +214,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--bootstrap-servers",
-        default=os.environ.get("KAFKA_BOOTSTRAP_SERVERS", DEFAULT_BOOTSTRAP_SERVERS),
-        help="Kafka bootstrap servers (default: KAFKA_BOOTSTRAP_SERVERS or localhost:19092).",
+        default=os.environ.get("KAFKA_BOOTSTRAP_SERVERS", ""),
+        help=(
+            "Kafka bootstrap servers. Defaults to KAFKA_BOOTSTRAP_SERVERS; "
+            "there is no address fallback (OMN-17163) — an unset value is "
+            "refused rather than publishing to a guessed lane."
+        ),
     )
     parser.add_argument(
         "--correlation-id",

@@ -126,7 +126,7 @@ dependencies:
     type: "environment"
     env_var: "KAFKA_BOOTSTRAP_SERVERS"
     description: >
-      Broker to probe. On the .201 trusted runner the dev lane is localhost:19092 (compose project omnibase-infra), the same address the baselines-scheduler workflow uses. No default is applied in code.
+      Broker to probe. No default is applied in code, and the caller must not supply one either (OMN-17163): the dev lane's address AND its transport are declared together in omnimarket config/ci_bus_lanes.yaml, which the scheduled workflow resolves through load_lane_transport before dispatching this node. An address without a transport is what let a plaintext client open against the SASL_PLAINTEXT/SCRAM-SHA-256 listener OMN-18012 Phase B enabled on that lane.
 
     required: true
   - name: "dlq_monitor_kill_switch"

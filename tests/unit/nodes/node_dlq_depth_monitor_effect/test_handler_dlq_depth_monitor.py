@@ -368,3 +368,65 @@ class TestKillSwitchAndConfiguration:
 
         with pytest.raises(RuntimeHostError, match="KAFKA_BOOTSTRAP_SERVERS"):
             await HandlerDlqDepthMonitor().handle(_request())
+
+    async def test_missing_bootstrap_builds_no_client_at_all_omn17163(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The refusal must happen BEFORE a client is constructed, not during connect.
+
+        The sibling assertion above proves the typed error is raised. It does
+        not prove nothing was contacted, and that distinction is the whole of
+        OMN-17163: ``dlq-depth-monitor.yml`` supplied
+        ``KAFKA_BOOTSTRAP_SERVERS=localhost:19092`` as a workflow default, the
+        guard passed on it, and every one of 545 runs then went to the wire
+        against an address no CI runner can reach. A guard that only fires
+        after a client exists is one default away from probing a lane nobody
+        asked about and reporting it clean.
+
+        So this pins the ORDER: with no broker declared, the aiokafka reader is
+        never even instantiated.
+        """
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.delenv("ONEX_DLQ_MONITOR_DISABLED", raising=False)
+
+        constructed: list[str] = []
+
+        def _explode(bootstrap_servers: str, **_kwargs: object) -> None:
+            constructed.append(bootstrap_servers)
+            raise AssertionError(
+                "a broker client was constructed for an undeclared broker"
+            )
+
+        monkeypatch.setattr(
+            "omnibase_infra.nodes.node_dlq_depth_monitor_effect.handlers."
+            "handler_dlq_depth_monitor._AiokafkaDlqOffsetReader",
+            _explode,
+        )
+
+        with pytest.raises(RuntimeHostError, match="KAFKA_BOOTSTRAP_SERVERS"):
+            await HandlerDlqDepthMonitor().handle(_request())
+
+        assert constructed == []
+
+        # Positive control: the patch is live and the assertion above is not
+        # passing because the monkeypatch silently missed its target. With a
+        # broker declared, the same run DOES reach client construction.
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "declared.example:19092")
+        with pytest.raises(AssertionError, match="undeclared broker"):
+            await HandlerDlqDepthMonitor().handle(_request())
+        assert constructed == ["declared.example:19092"]
+
+    async def test_whitespace_only_bootstrap_is_not_a_broker_omn17163(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A blank-but-present value must fail closed like an absent one.
+
+        ``baselines-scheduler.yml``'s old "dry run" mode set the variable to
+        the empty string and expected a skip; a probe that treated whitespace
+        as a declaration would instead try to connect to nothing.
+        """
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "   ")
+        monkeypatch.delenv("ONEX_DLQ_MONITOR_DISABLED", raising=False)
+
+        with pytest.raises(RuntimeHostError, match="KAFKA_BOOTSTRAP_SERVERS"):
+            await HandlerDlqDepthMonitor().handle(_request())
