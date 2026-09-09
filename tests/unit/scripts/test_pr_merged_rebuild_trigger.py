@@ -862,3 +862,148 @@ class TestLaneDeclaredTransport:
                     "    security_protocol: SASL_TLS\n",
                 )
             )
+
+
+@pytest.mark.unit
+class TestNoPublishRunStillValidatesTheOverlay:
+    """OMN-18060 — a run that publishes nothing must still be probative.
+
+    THE FAIL-OPEN THIS CLOSES. ``main()`` classified the merge first and
+    returned before it had looked at the overlay at all: a merge with no
+    runtime path and no ``runtime_change`` label printed "No rebuild trigger"
+    and exited 0 without parsing ``config/ci_bus_lanes.yaml``. Every such run
+    was GREEN and proved nothing about the overlay contract, so a producer-side
+    key added in omnimarket sat undetected until the first RUNTIME merge, which
+    then failed on a skew introduced by an unrelated repository hours earlier.
+    That is exactly how 2026-09-09 played out: the ``projection_readback`` key
+    landed at 02:15Z and the ten trigger runs between then and the first
+    runtime merge all reported success.
+
+    The publisher validates the overlay it was HANDED, on every path that can
+    reach an exit. The no-publish semantics are unchanged -- no broker is
+    contacted, no command is produced, ``published=false`` is still emitted --
+    the run simply now fails when the checked-in contract it was given does not
+    load.
+
+    HONEST LIMIT, pinned rather than implied: with no ``--bus-overlay`` there
+    is nothing to validate and the early exit stays green. That is not a hole
+    in CI, because the workflow always passes the flag -- asserted by
+    ``test_workflow_uses_authoritative_overlay_not_raw_kafka_secrets`` above --
+    but it does mean a hand-run invocation without the flag is not a skew
+    check, and the local test below says so.
+    """
+
+    _SKEWED_OVERLAY = (
+        "default: inmemory\n"
+        "lanes:\n"
+        "  dev:\n"
+        "    broker: declared:19092\n"
+        "    security_protocol: PLAINTEXT\n"
+        "    a_key_this_publisher_has_never_learned: whatever\n"
+    )
+
+    _VALID_OVERLAY = (
+        "default: inmemory\n"
+        "lanes:\n"
+        "  dev:\n"
+        "    broker: declared:19092\n"
+        "    security_protocol: PLAINTEXT\n"
+        "    projection_readback:\n"
+        "      dsn_env: CHAIN_CANARY_PROJECTION_DSN\n"
+    )
+
+    @staticmethod
+    def _run(
+        overlay: Path | None,
+        *,
+        labels: str = "",
+        dry_run: bool = False,
+    ):
+        argv = [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--changed-files",
+            "README.md,docs/plans/foo.md",
+            "--runtime-path-validator",
+            str(RUNTIME_PATH_VALIDATOR),
+            "--labels",
+            labels,
+            "--base-branch",
+            "dev",
+            "--source-sha",
+            "abc123",
+        ]
+        if overlay is not None:
+            argv += ["--bus-lane", "dev", "--bus-overlay", str(overlay)]
+        if dry_run:
+            argv.append("--dry-run")
+        return subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=_script_env(),
+        )
+
+    def _overlay(self, tmp_path: Path, body: str) -> Path:
+        overlay = tmp_path / "ci_bus_lanes.yaml"
+        overlay.write_text(body)
+        return overlay
+
+    def test_no_runtime_change_with_skewed_overlay_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        """A docs-only merge reds on overlay skew instead of exiting 0 green."""
+        result = self._run(self._overlay(tmp_path, self._SKEWED_OVERLAY))
+
+        assert result.returncode == 1, f"stdout: {result.stdout}"
+        combined = result.stdout + result.stderr
+        assert "Invalid CI bus overlay" in combined
+        assert "a_key_this_publisher_has_never_learned" in combined
+
+    def test_no_runtime_change_with_valid_overlay_still_exits_zero(
+        self, tmp_path: Path
+    ) -> None:
+        """The no-publish semantics are unchanged when the contract is intact."""
+        result = self._run(self._overlay(tmp_path, self._VALID_OVERLAY))
+
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "no rebuild trigger" in result.stdout.lower()
+
+    def test_no_runtime_change_never_contacts_a_broker(self, tmp_path: Path) -> None:
+        """Validation is a parse of a checked-in file, not a connection.
+
+        The declared broker is a name that does not resolve. A run that tried
+        to reach it would hang for the 30-second flush and time out here; the
+        early exit must return immediately.
+        """
+        result = self._run(self._overlay(tmp_path, self._VALID_OVERLAY))
+
+        assert result.returncode == 0
+        assert "Published redeploy-start" not in result.stdout
+
+    def test_missing_overlay_file_fails_closed(self, tmp_path: Path) -> None:
+        """A checkout that silently produced no overlay is a wiring gap, not a skip."""
+        result = self._run(tmp_path / "does_not_exist.yaml")
+
+        assert result.returncode == 1
+        assert "CI bus overlay does not exist" in (result.stdout + result.stderr)
+
+    def test_without_the_flag_the_early_exit_is_unchanged(self) -> None:
+        """The stated limit: no overlay handed in means no skew check."""
+        result = self._run(None)
+
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "no rebuild trigger" in result.stdout.lower()
+
+    def test_dry_run_with_a_runtime_change_also_validates(self, tmp_path: Path) -> None:
+        """--dry-run is the local skew check, so it reds on a skewed overlay too."""
+        result = self._run(
+            self._overlay(tmp_path, self._SKEWED_OVERLAY),
+            labels="runtime_change",
+            dry_run=True,
+        )
+
+        assert result.returncode == 1, f"stdout: {result.stdout}"
+        assert "Invalid CI bus overlay" in (result.stdout + result.stderr)

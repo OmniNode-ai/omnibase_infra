@@ -368,6 +368,37 @@ def load_ci_bus_overlay(path: Path) -> ModelCiBusOverlay:
         raise ValueError(f"Invalid CI bus overlay {path}: {exc}") from exc
 
 
+def assert_declared_overlay_loads(bus_overlay: Path | None) -> None:
+    """Validate the handed-in overlay on a path that will NOT publish (OMN-18060).
+
+    WHY A NO-PUBLISH RUN VALIDATES ANYTHING. Until this existed, ``main()``
+    classified the merge and returned before it had looked at the overlay at
+    all: a merge with no runtime path and no ``runtime_change`` label printed
+    "No rebuild trigger" and exited 0 without parsing
+    ``config/ci_bus_lanes.yaml``. Those runs were green and PROVED NOTHING, so
+    the strict half of this cross-repo contract was only ever exercised on a
+    runtime merge -- and a producer-side key added in omnimarket therefore sat
+    undetected until whichever unrelated PR happened to touch runtime next.
+    On 2026-09-09 that gap was the whole failure: ``projection_readback``
+    landed in the overlay at 02:15Z, and every trigger run between then and the
+    first runtime merge reported success while carrying a skew it never read.
+
+    The semantics this preserves are exactly the no-publish ones: nothing here
+    contacts a broker, resolves a lane, or produces a command. It is a parse of
+    a checked-in file, and the only outcome it can change is green to red.
+
+    HONEST LIMIT. With no ``--bus-overlay`` there is nothing to validate and
+    the caller's early exit stays green. That is not a CI hole -- the workflow
+    always passes the flag, which
+    ``test_workflow_uses_authoritative_overlay_not_raw_kafka_secrets`` pins --
+    but a hand-run invocation without it is not a skew check, and saying so is
+    better than implying a guarantee the argument list does not carry.
+    """
+    if bus_overlay is None:
+        return
+    load_ci_bus_overlay(bus_overlay)
+
+
 def resolve_ci_bus_broker(
     *,
     overlay: ModelCiBusOverlay,
@@ -1013,6 +1044,13 @@ def main(
             "No rebuild trigger: no runtime_change label or runtime path changes detected."
         )
         emit_github_output(False, source_sha, runtime_lane)
+        # OMN-18060 — fail closed on overlay skew even with nothing to publish.
+        # This run is otherwise non-probative: see assert_declared_overlay_loads.
+        try:
+            assert_declared_overlay_loads(bus_overlay)
+        except ValueError as exc:
+            click.echo(f"ERROR: {exc}", err=True)
+            sys.exit(1)
         sys.exit(0)
 
     # OMN-17888: this line records the DECISION, never the delivery. It is
@@ -1030,6 +1068,16 @@ def main(
     if dry_run:
         click.echo("(dry-run: skipping Kafka publish)")
         emit_github_output(False, source_sha, runtime_lane)
+        # OMN-18060 — --dry-run is the local skew check, so it reads the
+        # overlay for the same reason the no-trigger exit above does. Without
+        # this, the one invocation a person reaches for to ask "would this
+        # merge publish?" answers without ever loading the contract that
+        # decides whether it could.
+        try:
+            assert_declared_overlay_loads(bus_overlay)
+        except ValueError as exc:
+            click.echo(f"ERROR: {exc}", err=True)
+            sys.exit(1)
         sys.exit(0)
 
     # A live publish targets the lane's LAN / tailnet broker. A github-hosted
