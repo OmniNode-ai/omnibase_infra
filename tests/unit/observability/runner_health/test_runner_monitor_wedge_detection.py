@@ -339,6 +339,7 @@ def _run_monitor(
         # never mutate anything.
         "MONITOR_AUTO_BOUNCE": "0",
         "AUTO_BOUNCE_LOCKFILE": str(tmp_path / "runner-monitor-bounce.lock"),
+        "AUTO_BOUNCE_BOUNCE_LOG": str(tmp_path / "runner-monitor-bounce.log"),
     }
     if extra_env:
         env.update(extra_env)
