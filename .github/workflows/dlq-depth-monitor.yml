@@ -15,6 +15,57 @@
 # with zero projection and zero alerting, and a total delegation outage
 # (OMN-16767) hid inside it silently until someone went looking by hand.
 #
+# WHAT OMN-17163 CHANGED — THE RUNNER AND THE BROKER WERE BOTH WRONG
+#   This workflow had never passed. 545 runs from 2026-08-28T05:17:29Z: 543
+#   failure, 2 cancelled, 0 success, every one of them the same
+#   `KafkaConnectionError: Unable to bootstrap from [('localhost', 19092,
+#   AF_UNSPEC)]`. There was no regression to find — it shipped broken and the
+#   red never carried information, so the sink this monitor exists to watch
+#   has been unmeasured for the monitor's entire existence.
+#
+#   Three defects, compounding:
+#
+#   (1) THE RUNNER. `runs-on` read the trusted-CI routing variable, which
+#       resolves to `ubuntu-latest` (asserted intent — `config/
+#       runner_routing_policy.yaml` `expected_json`, OMN-16682 single-owner —
+#       not drift). An Azure-hosted runner cannot reach a .201 host-published
+#       port. But the `omnibase-ci` label the old comment named would NOT have
+#       fixed it either: those runners are containers with no host networking
+#       and no `extra_hosts`, so `localhost` inside one is the container's own
+#       loopback. `omnibase-deploy` is the ONE runner carrying
+#       `extra_hosts: host.docker.internal:host-gateway`
+#       (docker/docker-compose.runners.yml), which is what puts it in the
+#       lane's reachability domain. That is a NETWORK-NAMESPACE fact, not a
+#       trust fact, and it is why this job now pins the label literally rather
+#       than reading a variable a routing flip can move underneath it.
+#
+#   (2) THE ADDRESS. `KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.… || 'localhost:19092' }}`
+#       resolved to the literal every single run: no secret of that name
+#       exists at repo or org scope, and `source ~/.omnibase/.env` is a no-op
+#       on a hosted runner AND on the deploy runner, whose operator env is
+#       mounted at /home/runner/.runner-creds/operator.env instead. The node
+#       applies no default and fails closed on an unset broker — and the
+#       workflow defeated that by supplying one the node then trusted. The
+#       header comment claiming otherwise was true of the node and false of
+#       this file.
+#
+#   (3) THE TRANSPORT. OMN-18012 Phase B enabled SASL/SCRAM-SHA-256 on the
+#       .201 dev-lane Redpanda EXTERNAL listener at ~2026-09-07T16:40Z. The
+#       handler already reads KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM /
+#       KAFKA_SASL_USERNAME / KAFKA_SASL_PASSWORD through
+#       build_aiokafka_auth_kwargs_from_env; this workflow injected none of
+#       the four. Fixing only the runner would have moved the failure from
+#       Errno 111 to an auth failure.
+#
+#   All three are one fix, and chain-canary.yml already carries it: the lane's
+#   ADDRESS and its TRANSPORT are declared together in omnimarket's
+#   config/ci_bus_lanes.yaml, and `load_lane_transport` RAISES on a missing
+#   lane, an in-memory lane, an undeclared protocol, or a host-alias broker.
+#   It never returns a default, which is the fail-closed behaviour this
+#   header used to claim and did not have. Credentials are not in that overlay
+#   and never reach argv: only the protocol NAMES are config; the SCRAM
+#   principal arrives as job environment from the org secrets.
+#
 # READ-ONLY BY CONSTRUCTION, not by convention. The backing node's only broker
 # surface is ProtocolDlqAdminTransport — five methods, all reads — and the live
 # adapter backs it with a GROUP-LESS AIOKafkaConsumer that joins no consumer
@@ -59,6 +110,10 @@ on:
         description: 'Only topics with this prefix are probed.'
         required: false
         default: 'onex.dlq.'
+      bus_lane:
+        description: 'CI bus lane whose DECLARED broker + transport this probe reads (omnimarket config/ci_bus_lanes.yaml).'
+        required: false
+        default: 'dev'
       suppress_alert_exit:
         description: 'Set true for a characterization run: collect the histogram WITHOUT failing the run on a breach. Leave false so a breach goes red.'
         required: false
@@ -81,16 +136,11 @@ concurrency:
 jobs:
   dlq-depth-monitor:
     name: DLQ Depth Monitor (read-only)
-    # Trusted runner required: needs LAN access to the dev lane broker
-    # (localhost:19092 on .201, same address baselines-scheduler.yml uses).
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # See "(1) THE RUNNER" above before changing this. Pinned literally, not
+    # read from a routing variable: the constraint is that this job must sit in
+    # the .201 host's network namespace, which no org-wide routing decision can
+    # satisfy and a routing flip must not be able to silently revoke.
+    runs-on: [self-hosted, omnibase-deploy]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -100,6 +150,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
+          # No git operations after checkout — do not leave the Actions
+          # token in local git config (zizmor artipacked).
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -116,25 +169,82 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # The SAME declaration chain-canary.yml and runtime-rebuild-trigger.yml
+      # already read. One declaration, read by every CI client of this bus, is
+      # the whole point: an address that lives in two places drifts in one of
+      # them silently (OMN-14800).
+      - name: Fetch the declared CI bus lanes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve the declared lane transport
+        id: transport
+        env:
+          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+        run: |
+          set -euo pipefail
+          # Fail-closed by construction: load_lane_transport RAISES on a
+          # missing lane, an in-memory lane, an undeclared protocol, or a
+          # broker that is itself a host alias. It never returns a default, so
+          # a broken overlay stops the run HERE — before any probe — instead of
+          # producing a sweep that read the wrong lane and reported it clean.
+          #
+          # Only the non-secret half is exported. The SCRAM credentials are
+          # injected as secrets on the probe step below and never pass through
+          # an output, a log line, or a command line.
+          uv run python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              lane_transport_env, load_lane_transport,
+          )
+          lane = os.environ['BUS_LANE']
+          transport = load_lane_transport(
+              pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+          )
+          print(f'lane {lane!r} declares {transport.bootstrap_servers} '
+                f'({transport.security_protocol}/{transport.sasl_mechanism})')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in lane_transport_env(transport).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
       - name: Probe DLQ depth (read-only; non-zero exit == alert)
         env:
           TOPIC_PREFIX: ${{ github.event.inputs.topic_prefix || 'onex.dlq.' }}
           WINDOW_SECONDS: ${{ github.event.inputs.window_seconds || '1800' }}
           SUPPRESS_ALERT_EXIT: ${{ github.event.inputs.suppress_alert_exit || 'false' }}
-          # Trusted runner: KAFKA_BOOTSTRAP_SERVERS comes from ~/.omnibase/.env,
-          # same sourcing pattern as baselines-scheduler.yml. The node applies
-          # NO default broker address — an unset value fails the run closed
-          # rather than silently probing the wrong lane and reporting a false
-          # clean bill of health.
-          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS || 'localhost:19092' }}
+          # No KAFKA_BOOTSTRAP_SERVERS line and no `|| '<host:port>'` default:
+          # the address arrives from the resolve step through $GITHUB_ENV, and
+          # an unresolved value means that step did not run, which the node
+          # fails closed on rather than probing a guess.
+          #
+          # OMN-17163: the lane declares SASL_PLAINTEXT / SCRAM-SHA-256 since
+          # OMN-18012 Phase B. These are the org-wide dev-lane SCRAM secrets
+          # chain-canary.yml and runtime-rebuild-trigger.yml already use,
+          # injected as ENVIRONMENT so that no credential reaches argv, the
+          # process list, or this log. build_aiokafka_auth_kwargs_from_env
+          # reads them together with the KAFKA_SECURITY_PROTOCOL /
+          # KAFKA_SASL_MECHANISM the resolve step exported.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
         run: |
           set -euo pipefail
-          # On the self-hosted runner the shell env from ~/.omnibase/.env wins.
-          source ~/.omnibase/.env 2>/dev/null || true
           if [ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]; then
-            echo "::error::KAFKA_BOOTSTRAP_SERVERS is not set — refusing to probe an unspecified broker."
+            echo "::error::KAFKA_BOOTSTRAP_SERVERS is unset — the lane-transport resolve step did not export it. Refusing to probe an unspecified broker."
             exit 1
           fi
+          # Safe to print and worth printing: this is the declared address, not
+          # a credential, and it is the one value a reader needs to check the
+          # run against the lane declaration.
+          echo "declared broker: ${KAFKA_BOOTSTRAP_SERVERS}"
+          echo "declared transport: ${KAFKA_SECURITY_PROTOCOL:-<unset>}/${KAFKA_SASL_MECHANISM:-<none>}"
           suppress_flag=()
           if [ "$SUPPRESS_ALERT_EXIT" = "true" ]; then
             suppress_flag=(--suppress-alert-exit)
@@ -155,6 +265,10 @@ jobs:
             echo "depth and arrivals-in-window. No writes of any kind were performed:"
             echo "the node's only broker surface is read-only and its consumer is"
             echo "group-less, so it commits nothing."
+            echo ""
+            echo "The broker address and its transport both come from the lane"
+            echo "declaration in omnimarket \`config/ci_bus_lanes.yaml\` (OMN-17163);"
+            echo "an unresolvable lane stops the run before the probe."
             echo ""
             if [ "${{ job.status }}" = "failure" ]; then
               echo "**RED = at least one DLQ sink exceeded its declared arrival bound.**"
