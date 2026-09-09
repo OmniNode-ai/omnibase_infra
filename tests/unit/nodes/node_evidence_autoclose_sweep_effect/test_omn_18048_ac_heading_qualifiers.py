@@ -174,3 +174,133 @@ class TestWideningDoesNotBecomeOverMatching:
             "- filed the same day\n"
         )
         assert _acceptance_criteria_items(description) == ["AC1: the thing works"]
+
+
+class TestItemTextIsNotPollutedByEmphasis:
+    r"""OMN-18048 hostile review [MAJOR] — the captured TEXT, not just the count.
+
+    The first revision captured `(AC[-_ ]?\d+\b.*)` after consuming a leading
+    emphasis run, so `**AC1** - text` yielded `AC1** - text`: the CLOSING marker
+    survived, embedded mid-string. The count was right and the string was wrong,
+    which is exactly the divergence a count-only assertion cannot see.
+
+    It matters because the same criterion written two ways must compare equal.
+    Downstream the item text is used for evidence strings and de-duplication, so
+    a bold spelling and a bulleted spelling of one criterion would read as two.
+    """
+
+    def test_bold_and_bulleted_forms_of_one_criterion_are_equal(self) -> None:
+        bold = _acceptance_criteria_items(
+            "## Acceptance criteria\n**AC1** - a complete page\n"
+        )
+        bulleted = _acceptance_criteria_items(
+            "## Acceptance criteria\n- AC1 - a complete page\n"
+        )
+        assert bold == bulleted == ["AC1 - a complete page"]
+
+    def test_no_emphasis_marker_survives_in_captured_text(self) -> None:
+        items = _acceptance_criteria_items(
+            "## Acceptance criteria\n"
+            "**AC1** - bold wrapped\n"
+            "*AC2* - italic wrapped\n"
+            "__AC3__ - underscore bold\n"
+            "**AC4 - emphasis spans the whole item**\n"
+        )
+        assert items == [
+            "AC1 - bold wrapped",
+            "AC2 - italic wrapped",
+            "AC3 - underscore bold",
+            "AC4 - emphasis spans the whole item",
+        ]
+        for text in items:
+            assert "*" not in text and "_" not in text, text
+
+    def test_a_trailing_underscore_in_prose_is_preserved(self) -> None:
+        """The strip is conditional, and must be.
+
+        Stripping trailing emphasis unconditionally would corrupt item text that
+        legitimately ends in `_` and never used emphasis at all — turning a
+        capture bug into a truncation bug.
+        """
+        assert _acceptance_criteria_items(
+            "## Acceptance criteria\nAC1 names the column user_id_\n"
+        ) == ["AC1 names the column user_id_"]
+
+    def test_separator_after_the_token_is_preserved(self) -> None:
+        """`AC3: plain` must not become `AC3 : plain`."""
+        assert _acceptance_criteria_items("## Acceptance criteria\nAC3: plain\n") == [
+            "AC3: plain"
+        ]
+
+
+class TestLeadingQualifierDoesNotOverAccept:
+    """OMN-18048 hostile review [MINOR] — a one-word suffix is not a heading.
+
+    The leading-qualifier path was introduced by this change, so its
+    over-acceptance is a regression this PR owns rather than a pre-existing gap.
+    Matching `endswith(" <spelling>")` against the SINGLE-TOKEN spellings
+    ("ac", "acs", "dod") accepted any heading merely ending in one. Measured
+    before the narrowing: `## Notes on AC`, `## Why we need DoD` and
+    `## Dropping the AC` were all recognised, opening a criteria section over
+    unrelated content — the same whole-body over-count this change exists to
+    stop, re-entering through the fix.
+
+    A one-word suffix carries no evidence the heading NAMES the section rather
+    than mentioning it. A multi-word phrase does.
+    """
+
+    def test_headings_merely_ending_in_a_short_spelling_are_rejected(self) -> None:
+        for heading in (
+            "## Notes on AC",
+            "## Why we need DoD",
+            "## Dropping the AC",
+            "## Pre-DoD",
+        ):
+            assert not _is_ac_heading(heading), heading
+
+    def test_multi_word_leading_qualifier_is_still_accepted(self) -> None:
+        for heading in (
+            "## Falsifiable acceptance criteria",
+            "## Detailed definition of done",
+            "**Falsifiable acceptance criteria:**",
+        ):
+            assert _is_ac_heading(heading), heading
+
+    def test_the_bare_short_spellings_still_open_a_section(self) -> None:
+        """Narrowing the qualifier path must not break exact membership."""
+        for heading in ("## AC", "## DoD", "## Acceptance criteria"):
+            assert _is_ac_heading(heading), heading
+
+
+class TestPrefixQualifiedHeadingStillBoundsItsSection:
+    """OMN-18048 hostile review, demoted finding — bounding under the NEW path.
+
+    Section bounding was only asserted under a plain trailing-qualifier heading.
+    The leading-qualifier path widens recognition in the riskiest direction, so
+    it needs its own bounding proof: a section opened by a prefix-qualified
+    heading must still be closed by the next heading and must not absorb later
+    bullets.
+    """
+
+    def test_section_opened_by_a_prefix_qualified_heading_is_closed(self) -> None:
+        description = (
+            "## Falsifiable acceptance criteria\n"
+            "- AC1: the thing works\n"
+            "\n"
+            "## Provenance\n"
+            "- found during a sweep\n"
+            "- filed the same day\n"
+        )
+        assert _acceptance_criteria_items(description) == ["AC1: the thing works"]
+
+    def test_qualified_heading_with_plain_unbulleted_items(self) -> None:
+        """The untested intersection: new heading path + non-bold, non-bulleted items."""
+        description = (
+            "## Falsifiable acceptance criteria\n"
+            "AC1: first\n"
+            "AC2: second\n"
+            "\n"
+            "## Fence\n"
+            "- not a criterion\n"
+        )
+        assert _acceptance_criteria_items(description) == ["AC1: first", "AC2: second"]

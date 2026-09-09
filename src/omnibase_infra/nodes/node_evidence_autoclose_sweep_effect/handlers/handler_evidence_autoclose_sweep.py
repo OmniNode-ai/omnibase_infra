@@ -587,7 +587,7 @@ _CHECK_STATUS_SUPERSEDED = "superseded"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.10.1"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.10.2"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -1255,7 +1255,13 @@ _LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(.*)$")
 # OMN-18035: four criteria in that shape, zero parsed. The optional `[*_]*`
 # prefix is stripped from the captured text below so the item reads the same
 # however it was written.
-_AC_ITEM_RE = re.compile(r"^[ \t]*[*_]*[ \t]*(AC[-_ ]?\d+\b.*)$", re.IGNORECASE)
+_AC_ITEM_RE = re.compile(
+    r"^[ \t]*([*_]*)[ \t]*(AC[-_ ]?\d+)(?!\d)[*_]*(.*?)[ \t]*$", re.IGNORECASE
+)
+# The closing half of a wrapped emphasis run, dropped ONLY when the item opened
+# with one. Unconditional stripping would eat a legitimate trailing `_` from
+# item text that never used emphasis at all.
+_TRAILING_EMPHASIS_RE = re.compile(r"[*_]+$")
 
 # OMN-18048: a trailing parenthetical qualifier on an otherwise-recognised
 # heading -- `Acceptance criteria (falsifiable)`, `DoD (per repo)`. Stripped
@@ -1313,6 +1319,12 @@ _MAX_AC_TEXT_CHARS = 200
 
 def _is_markdown_heading(line: str) -> bool:
     return line.lstrip().startswith("#")
+
+
+# Multi-word members of _AC_HEADING_TEXTS. Only these are eligible for the
+# leading-qualifier match, so a heading that merely ends in "ac" or "dod" is
+# not mistaken for one that names the section (OMN-18048 review).
+_AC_HEADING_PHRASES = frozenset(t for t in _AC_HEADING_TEXTS if " " in t)
 
 
 def _is_ac_heading(line: str) -> bool:
@@ -1373,9 +1385,18 @@ def _is_ac_heading(line: str) -> bool:
     trimmed = _TRAILING_QUALIFIER_RE.sub("", folded).strip().rstrip(":").strip()
     if trimmed in _AC_HEADING_TEXTS:
         return True
-    # Leading qualifier: "falsifiable acceptance criteria". Heading-shaped only.
+    # Leading qualifier: "falsifiable acceptance criteria". Heading-shaped only,
+    # and only against MULTI-WORD spellings.
+    #
+    # OMN-18048 review [MINOR]: matching this way against the single-token
+    # spellings ("ac", "acs", "dod") accepts any heading merely ENDING in one --
+    # measured, "## Notes on AC", "## Why we need DoD" and "## Dropping the AC"
+    # were all recognised, opening a criteria section over unrelated content.
+    # A one-word suffix carries no evidence that the heading NAMES the section
+    # rather than mentions it; a multi-word phrase does. "## Acceptance criteria"
+    # itself is unaffected -- it matches the exact-membership test above.
     return looks_like_heading and any(
-        trimmed.endswith(f" {known}") for known in _AC_HEADING_TEXTS
+        trimmed.endswith(f" {known}") for known in _AC_HEADING_PHRASES
     )
 
 
@@ -1430,7 +1451,15 @@ def _acceptance_criteria_items(description: str) -> list[str]:
             continue
         ac_match = _AC_ITEM_RE.match(line)
         if ac_match:
-            text = ac_match.group(1).strip()
+            # OMN-18048 review: the emphasis run is captured separately from the
+            # AC token and its remainder, so `**AC1** - text` yields the SAME
+            # string as the bulleted `- AC1 - text`. Capturing `.*` after the
+            # token embedded the closing `**` mid-string, and the two spellings
+            # of one criterion then compared and deduped as different items.
+            lead, token, rest = ac_match.groups()
+            text = f"{token}{rest}".strip()
+            if lead:
+                text = _TRAILING_EMPHASIS_RE.sub("", text).strip()
             if text:
                 items.append(text)
     return items

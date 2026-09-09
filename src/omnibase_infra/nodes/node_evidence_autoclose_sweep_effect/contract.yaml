@@ -250,13 +250,40 @@
 #     unrelated headings remain rejected. This changes what the sweep is
 #     willing to say in a gap comment, so the gap-comment fingerprint version
 #     moves with the node_version.
+#   THE CAPTURED ITEM TEXT IS PART OF THE CONTRACT (OMN-18048 review,
+#     node_version 1.10.2). The 1.10.x parser widening was correct about WHICH
+#     lines are criteria and wrong about WHAT TEXT they carry, in two ways an
+#     adversarial review caught and a count-only assertion could not:
+#
+#       (a) The item regex consumed a LEADING emphasis run and captured the
+#           rest, so the CLOSING marker survived embedded mid-string:
+#           `**AC1** - text` -> `AC1** - text`. The count was right and the
+#           string was wrong. Item text is used downstream for evidence strings
+#           and de-duplication, so ONE criterion written two ways compared as
+#           TWO. Measuring it also found `__AC8__ bolded` matching NOTHING: a
+#           word boundary does not fire between a digit and an underscore.
+#           Token, emphasis run and remainder are now captured separately, and
+#           the trailing run is dropped ONLY when the item opened with one --
+#           stripping unconditionally truncates text that legitimately ends in
+#           an underscore, trading a capture bug for a truncation bug.
+#
+#       (b) The leading-qualifier heading path matched `endswith(" <spelling>")`
+#           against the SINGLE-TOKEN spellings, so `## Notes on AC`,
+#           `## Why we need DoD` and `## Dropping the AC` all opened a criteria
+#           section over unrelated content -- the same whole-body over-count
+#           1.10.0 exists to stop, re-entering through its own fix. The path is
+#           now eligible only against MULTI-WORD phrases: a one-word suffix is
+#           no evidence that a heading NAMES the section rather than mentioning
+#           it. Exact membership is untouched, so bare `## AC` and `## DoD`
+#           still open a section.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 7
   patch: 0
-node_version: "1.10.1"
+node_version: "1.10.2"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
