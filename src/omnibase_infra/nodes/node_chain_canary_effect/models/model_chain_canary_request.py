@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
     host_aliases_in,
+    looks_like_a_dsn,
 )
 
 # Read off the generated topic enum, which is itself generated from the
@@ -122,17 +123,25 @@ class ModelChainCanaryRequest(BaseModel):
             "fallback is the OMN-16931 defect this field exists to remove."
         ),
     )
-    projection_dsn: str = Field(
+    projection_dsn_env: str = Field(
         default="",
         description=(
-            "Postgres DSN for the correlation-scoped PROJECTION readback — "
-            "the leg that discharges OMN-16025 link 2 ('routing decision "
-            "PUBLISHED and PROJECTED, readback from projection, not logs'). "
-            "EMPTY means the run has no evidence about the projection and "
-            "reports NOT_CONFIGURED. It deliberately does NOT fall back to "
-            "the bus terminal: OMN-14843 measured 26 of 38 correlations "
-            "stranded mid-FSM while the topic layer was healthy at that same "
-            "moment, so a green terminal is not evidence about this layer."
+            "NAME of the environment variable carrying the Postgres DSN for "
+            "the correlation-scoped PROJECTION readback — the leg that "
+            "discharges OMN-16025 link 2 ('routing decision PUBLISHED and "
+            "PROJECTED, readback from projection, not logs'). A NAME, never a "
+            "DSN: this field is serialised into the node payload, onto the "
+            "bus and into the event log, and it is built from a CLI flag that "
+            "lands in argv, so a DSN here would be durably persisted and "
+            "readable from /proc by every process on the host. The NAME is "
+            "resolved from the lane's declared `projection_readback.dsn_env` "
+            "(omnimarket config/ci_bus_lanes.yaml); the value is injected "
+            "into the job environment under that name and read there. EMPTY "
+            "means the run has no evidence about the projection and reports "
+            "NOT_CONFIGURED. It deliberately does NOT fall back to the bus "
+            "terminal: OMN-14843 measured 26 of 38 correlations stranded "
+            "mid-FSM while the topic layer was healthy at that same moment, "
+            "so a green terminal is not evidence about this layer."
         ),
     )
     ledger_source: str = Field(
@@ -305,6 +314,33 @@ class ModelChainCanaryRequest(BaseModel):
                 "client cannot know whether the listener speaks SASL. Resolve "
                 "the broker from the lane declaration (omnimarket "
                 "config/ci_bus_lanes.yaml) instead of naming a host literal."
+            )
+        return value
+
+    @field_validator("projection_dsn_env")
+    @classmethod
+    def _refuse_a_dsn_where_a_name_belongs(cls, value: str) -> str:
+        """This field takes a variable NAME. A DSN here is refused (OMN-18060).
+
+        The refusal is at the model boundary because that is the boundary the
+        credential would cross. ``onex skill`` builds the node payload from
+        CLI flags, so a value passed here is simultaneously in this process's
+        argv (world-readable through ``/proc/<pid>/cmdline``), echoed by the
+        dispatch step into the run log, and serialised into the event log as
+        part of the request — three durable copies of a credential, from one
+        flag.
+
+        The message deliberately does not echo the offending value.
+        """
+        if looks_like_a_dsn(value):
+            raise ValueError(
+                "projection_dsn_env takes the NAME of the environment "
+                "variable carrying the DSN, and the value supplied parses as "
+                "a connection string. A DSN passed here would land in argv, "
+                "in this run's log and in the event log. Pass the name "
+                "declared by the lane's projection_readback.dsn_env "
+                "(omnimarket config/ci_bus_lanes.yaml) and inject the value "
+                "into the environment under that name."
             )
         return value
 

@@ -57,11 +57,29 @@ node_type: "EFFECT_GENERIC"
 # partition's own beginning offset. No verdict, input or output changed; the
 # verdicts this node already declares are simply reachable for the right
 # reasons again.
+# 1.2.1 -> 1.3.0: DECLARED SURFACE CHANGE (OMN-18060). The link-2 projection
+# DSN is no longer an input VALUE. The request field `projection_dsn` is
+# replaced by `projection_dsn_env`, which carries the NAME of the environment
+# variable the DSN arrives under — resolved from the lane's declared
+# `projection_readback.dsn_env` (omnimarket config/ci_bus_lanes.yaml) and read
+# by the handler out of os.environ. `onex skill` serialises every input into
+# the node payload, onto the bus and into the event log, and builds them from
+# CLI flags that land in argv, so a DSN in an input field was three durable
+# copies of a credential; the model now refuses a value that parses as a
+# connection string, and there is no --projection-dsn flag to pass one on.
+#
+# One new declared error member, PROJECTION_READBACK_REFUSED: the readback
+# COULD have run and this node declined to run it — a DSN that reached the
+# process through argv, or a DSN whose role carries SUPERUSER / BYPASSRLS
+# (probed un-forgeably against pg_roles for current_user, BEFORE the row read).
+# Deliberately distinct from PROJECTION_READBACK_FAILED: an error is the store
+# not answering and sends you to the database, a refusal is this node declining
+# and sends you to the wiring.
 contract_version:
   major: 1
-  minor: 2
-  patch: 1
-node_version: "1.2.1"
+  minor: 3
+  patch: 0
+node_version: "1.3.0"
 description: >
   Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, and checks the platform quarantine sink for the same id. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof.
 
@@ -121,8 +139,17 @@ handler_routing:
         # OMN-16963 adds the correlation-scoped delegation_workflow_state
         # readback leg. It is deliberately direct asyncpg I/O because link 2
         # asks for projection evidence from the materialized projection.
+        #
+        # OMN-18060: the DSN this leg connects with is never an input. The
+        # request carries `projection_dsn_env` — a NAME — and the handler
+        # reads the value from os.environ under it, so no credential enters
+        # the payload, the bus, the event log or argv. On connect the leg
+        # asks the server for current_user's pg_roles row and REFUSES a role
+        # carrying SUPERUSER or BYPASSRLS before it reads anything: the
+        # canary is a reader, and either attribute would exempt it from the
+        # isolation the projection enforces.
         handler_type: "DATABASE"
-      description: "Declares the OMN-16963 projection readback transport used by the live canary handler."
+      description: "Declares the OMN-16963 projection readback transport used by the live canary handler, with the OMN-18060 declared-DSN-reference resolution and least-privilege identity probe."
 error_handling:
   retry_policy:
     # Zero retries on purpose. A retry would let an intermittently dead
@@ -175,7 +202,11 @@ error_handling:
       recoverable: true
       retry_strategy: "none"
     - name: "PROJECTION_READBACK_NOT_CONFIGURED"
-      description: "No DSN was configured for the projection readback, so the run has no evidence about link 2. Deliberately NOT green-with-a-caveat the way an unconfigured quarantine leg is: quarantine is a supplementary check, link 2 is one of the five OMN-16025 chain links, and a run that cannot see it is the three-links-rendered-as-five defect itself (OMN-16963)."
+      description: "No DSN reference resolved for the projection readback — the lane declared no `projection_readback.dsn_env`, or the variable it names is unset in this process — so the run has no evidence about link 2. Deliberately NOT green-with-a-caveat the way an unconfigured quarantine leg is: quarantine is a supplementary check, link 2 is one of the five OMN-16025 chain links, and a run that cannot see it is the three-links-rendered-as-five defect itself (OMN-16963). The detail names the variable that was looked for, so an unresolved reference is diagnosable rather than merely red (OMN-18060)."
+      recoverable: true
+      retry_strategy: "none"
+    - name: "PROJECTION_READBACK_REFUSED"
+      description: "The projection readback was configured and this node declined to run it (OMN-18060). Two refusals: a Postgres connection string reached the process through argv, where every process on the host can read it out of /proc and the dispatch step echoes its own configuration into the run log; or the DSN authenticates as a role carrying SUPERUSER or BYPASSRLS, established un-forgeably by asking the server for current_user's own pg_roles row BEFORE any data is read. The second is not about disclosure: such a role is exempt from row-level security unconditionally, so a green read through it cannot distinguish a readable projection from one readable only by an identity nothing else has. Distinct from PROJECTION_READBACK_FAILED — an error is the store not answering, a refusal is this node declining to ask."
       recoverable: true
       retry_strategy: "none"
     - name: "LEDGER_CHAIN_INCOMPLETE"

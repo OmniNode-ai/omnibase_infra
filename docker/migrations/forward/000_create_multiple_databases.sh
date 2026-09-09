@@ -90,9 +90,18 @@ INFRA_DATABASES=("infisical_db" "omniweb")
 # role the OMN-14894 tenant_isolation policies are enforced against, so CREATE
 # on schema public — and the table ownership it enables — would exempt every
 # tenant projection write from the isolation P5 exists to establish.
+# chain_canary_reader (OMN-18060) is the third and narrowest member: a READ-ONLY
+# instrument identity for node_chain_canary_effect's OMN-16025 link-2 readback.
+# It belongs here for the same reason as the two above -- grant_role_to_database()
+# would hand it CREATE on schema public, and a role that can own a table is
+# exempt from that table's RLS unconditionally, which is precisely what the
+# canary probes pg_roles to refuse. Migration 104 grants it CONNECT, USAGE on
+# schema public, and column-scoped SELECT (correlation_id, state) on
+# delegation_workflow_state -- nothing else, and nothing writable.
 LOGIN_ONLY_ROLE_MAP=(
     "omninode_runtime:OMNINODE_RUNTIME_PASSWORD"
     "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD"
+    "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD"
 )
 
 # =============================================================================

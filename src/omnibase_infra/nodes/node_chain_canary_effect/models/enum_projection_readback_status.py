@@ -26,9 +26,18 @@ class EnumProjectionReadbackStatus(StrEnum):
     never happened. Both are non-passing; conflating them would lose which
     layer to go look at.
 
-    ``SKIPPED_NOT_CONFIGURED`` and ``ERROR`` are both NON-passing, and neither
-    ever falls back to the bus terminal. Falling back is the defect — a leg
-    that could not run makes no claim.
+    ``SKIPPED_NOT_CONFIGURED``, ``REFUSED`` and ``ERROR`` are all NON-passing,
+    and none of them ever falls back to the bus terminal. Falling back is the
+    defect — a leg that could not run makes no claim.
+
+    ``REFUSED`` (OMN-18060) is deliberately distinct from ``ERROR``: an error
+    is the store failing to answer, a refusal is this node declining to ask.
+    The refusals are the ways a readback could have run and should not have —
+    a DSN that reached the process through argv (where every other process on
+    the host can read it), or a DSN whose role turns out to be ``SUPERUSER``
+    or ``BYPASSRLS`` (a canary is a reader, and a reader with those attributes
+    is exempt from the isolation the projection is supposed to enforce). Both
+    would have produced a perfectly good green.
     """
 
     # A row for the probe's own correlation id reached a terminal FSM state.
@@ -46,6 +55,11 @@ class EnumProjectionReadbackStatus(StrEnum):
     # No projection store was configured for the readback. No claim is made
     # about the routing decision, and therefore no green is available.
     SKIPPED_NOT_CONFIGURED = "skipped_not_configured"
+    # The readback COULD have run and this node declined to run it: the DSN
+    # arrived on the command line, or the role it authenticates as carries
+    # SUPERUSER / BYPASSRLS. Fails closed for the same reason as every other
+    # non-passing member — a refusal is not a result (OMN-18060).
+    REFUSED = "refused"
 
 
 __all__ = ["EnumProjectionReadbackStatus"]

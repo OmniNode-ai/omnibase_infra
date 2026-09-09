@@ -289,3 +289,76 @@ def test_red_verdict_fails_the_run(workflow_text: str) -> None:
     assert "sys.exit(1)" in workflow_text
     assert "::error::chain canary RED" in workflow_text
     assert "if: always()" in workflow_text
+
+
+@pytest.mark.unit
+def test_the_projection_dsn_is_declared_by_name_and_injected_as_env(
+    canary_job: dict[str, object], workflow_text: str
+) -> None:
+    """OMN-18060: the link-2 DSN reaches the node through the environment.
+
+    Run 34281968883 failed closed on ``projection_readback_not_configured``
+    because no DSN was declared anywhere. The fix declares its NAME in the same
+    lane overlay the broker comes from and injects the VALUE as a job secret.
+    Both halves are asserted, because either one alone is the bug: a name with
+    no secret makes a readback that silently never runs, and a secret with no
+    name makes one nobody can review.
+    """
+    resolve = _step(canary_job, "Resolve the declared projection-readback DSN")
+    body = str(resolve["run"])
+    assert "load_lane_projection_readback" in body
+    assert "projection_readback_env" in body
+    assert "ci_bus_lanes.yaml" in body
+
+    probe = _step(canary_job, "Fire one live delegation")
+    env = probe["env"]
+    assert isinstance(env, dict)
+    assert "CHAIN_CANARY_PROJECTION_DSN" in env, (
+        "the DSN must be injected as a job secret under the literal name the "
+        "lane declares"
+    )
+    assert str(env["CHAIN_CANARY_PROJECTION_DSN"]).startswith("${{ secrets."), (
+        "the DSN must come from a secret, never from a literal in the workflow"
+    )
+
+
+@pytest.mark.unit
+def test_no_dsn_ever_reaches_a_command_line(
+    canary_job: dict[str, object], workflow_text: str
+) -> None:
+    """argv is world-readable through /proc and this step echoes its config.
+
+    The flag the workflow passes carries the variable's NAME. There is
+    deliberately no ``--projection-dsn`` flag anywhere -- not in the workflow,
+    and not in the skill mapping, which is what builds argv.
+    """
+    probe = _step(canary_job, "Fire one live delegation")
+    body = str(probe["run"])
+
+    assert "--projection-dsn-env" in body
+    assert "--projection-dsn " not in body
+    assert "--projection-dsn=" not in body
+    assert "CHAIN_CANARY_PROJECTION_DSN}" not in body, (
+        "the run block must interpolate the NAME variable "
+        "(CHAIN_CANARY_PROJECTION_DSN_ENV), never the DSN one"
+    )
+
+    registry = yaml.safe_load(_SKILL_MAPPING.read_text(encoding="utf-8"))
+    mapping = next(
+        (s for s in registry["skills"] if s["skill_name"] == _SKILL_NAME), None
+    )
+    assert mapping is not None
+    declared = {f"--{arg['name']}" for arg in mapping["args"]}
+    assert "--projection-dsn-env" in declared
+    assert "--projection-dsn" not in declared, (
+        "a --projection-dsn flag would put the credential in argv, in this "
+        "run's log, and -- because `onex skill` serialises every arg into the "
+        "node payload -- durably into the event log"
+    )
+
+    # And no connection string is spelled anywhere in the workflow itself.
+    for marker in ("postgres://", "postgresql://", "password="):
+        assert marker not in workflow_text, (
+            f"the workflow spells {marker!r}; the DSN is a secret and belongs "
+            "in the lab store under the declared name"
+        )

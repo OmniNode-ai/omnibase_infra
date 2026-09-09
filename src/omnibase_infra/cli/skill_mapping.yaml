@@ -345,6 +345,15 @@ skills:
       - {name: terminal-failure-topics, payload_field: terminal_failure_topics, arg_type: string}
       - {name: terminal-scan-records, payload_field: terminal_scan_records, arg_type: integer}
       - {name: terminal-readback-timeout-seconds, payload_field: terminal_readback_timeout_seconds, arg_type: integer}
+      # OMN-18060: the NAME of the environment variable carrying the link-2
+      # projection DSN, never the DSN. `onex skill` serialises every arg here
+      # into the node payload, onto the bus and into the event log, and the
+      # flag itself lands in argv -- so a --projection-dsn flag would mint
+      # three durable copies of a credential. There is deliberately no such
+      # flag. The request model REFUSES a value that parses as a connection
+      # string, and the handler refuses one that reached the process on any
+      # other flag.
+      - {name: projection-dsn-env, payload_field: projection_dsn_env, arg_type: string}
       - {name: quarantine-bootstrap-servers, payload_field: quarantine_bootstrap_servers, arg_type: string}
       - {name: quarantine-topic, payload_field: quarantine_topic, arg_type: string}
       - {name: quarantine-scan-records, payload_field: quarantine_scan_records, arg_type: integer}

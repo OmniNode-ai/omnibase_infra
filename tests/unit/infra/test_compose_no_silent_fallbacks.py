@@ -38,6 +38,16 @@ ALLOWED_EMPTY_DEFAULTS = {
     # x-runtime-env, so an unset credential still wedges compose render for any
     # lane that actually runs the tenant projections.
     "TENANT_PROJECTION_WRITER_PASSWORD",
+    # OMN-18060: the third member of the same LOGIN_ONLY_ROLE_MAP seam, and the
+    # one where empty-means-skip is not merely tolerable but correct. This is
+    # the credential for `chain_canary_reader`, a READ-ONLY instrument identity
+    # used by node_chain_canary_effect's OMN-16025 link-2 projection readback.
+    # Unlike the two above it has NO fail-closed `:?` consumer, deliberately:
+    # nothing in the runtime needs it, so wedging compose render on a lane that
+    # simply does not run the canary would be a false failure. The fail-closed
+    # behaviour lives where the check is: an unprovisioned role makes the
+    # canary report `skipped_not_configured` against link 2, which is RED.
+    "CHAIN_CANARY_READER_PASSWORD",
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
     "OMNIMEMORY_MEMGRAPH_HOST",

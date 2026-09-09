@@ -1422,6 +1422,7 @@ echo "[forward-migration] Re-asserting deployment-owned login credentials..."
 for login_role_entry in \
   "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
   "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
+  "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD" \
 ; do
   entry_role_name=${login_role_entry%%:*}
   entry_password_var=${login_role_entry#*:}

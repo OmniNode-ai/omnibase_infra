@@ -49,22 +49,60 @@ carries the broker, the protocol and the mechanism, and nothing else. SASL
 username and password reach the client through the standard ``KAFKA_SASL_*``
 environment variables that ``build_aiokafka_auth_kwargs_from_env`` reads --
 never through argv, where they would land in a process list and in the run log.
+
+THE PROJECTION DSN IS DECLARED THE SAME WAY, BY NAME (OMN-18060)
+---------------------------------------------------------------
+Chain-canary run 34281968883 proved three of the five OMN-16025 links and
+failed closed on link 2 with ``projection_readback_not_configured -- no DSN was
+configured for the projection readback``. The refusal was right; the gate was
+unclosable, because there was nowhere to say where the DSN comes from.
+
+The same overlay is that place, and the rule that made the broker safe to
+commit applies unchanged: what is declared is a NAME, never a value. A lane's
+optional ``projection_readback.dsn_env`` block names the environment variable
+the DSN arrives under; the value is injected into the job environment from the
+lab store, read by the node out of ``os.environ``, and never passes through
+argv, a workflow output, or a log line. ``load_lane_projection_readback``
+REFUSES a declaration whose ``dsn_env`` parses as a DSN, so a value pasted
+where a name belongs is a red gate rather than a committed credential, and
+``dsn_shaped_argv_flags`` refuses a DSN that reached the process through the
+command line whatever flag carried it.
+
+The declaration is dev-lane-only, enforced here rather than trusted: the
+chain canary publishes a live delegation and then reads a database, and
+``chain-canary.yml``'s own header scopes both halves to the dev lane. A
+projection DSN declared against ``stability``, ``judge`` or ``prod`` would
+point the probe at a lane it has no authorization to read, so it raises
+instead of resolving.
 """
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_chain_canary_effect.model_lane_projection_readback import (
+    ModelLaneProjectionReadback,
+)
+
 __all__ = [
     "DOCKER_DESKTOP_HOST_ALIASES",
     "INMEMORY_BROKER",
+    "PROJECTION_READBACK_DSN_ENV_NAME_VAR",
+    "PROJECTION_READBACK_LANES",
+    "ModelLaneProjectionReadback",
     "ModelLaneTransport",
+    "dsn_shaped_argv_flags",
     "host_aliases_in",
     "lane_transport_env",
+    "load_lane_projection_readback",
     "load_lane_transport",
+    "looks_like_a_dsn",
+    "projection_readback_env",
 ]
 
 #: Hostnames that exist only inside a Docker-Desktop VM, or on a Linux
@@ -238,3 +276,203 @@ def lane_transport_env(transport: ModelLaneTransport) -> dict[str, str]:
     if transport.sasl_mechanism:
         env["KAFKA_SASL_MECHANISM"] = transport.sasl_mechanism
     return env
+
+
+# --- Declared projection DSN, by NAME (OMN-18060) -----------------------------
+
+#: The only lane a projection readback may be declared on. The chain canary
+#: publishes a live delegation and then reads a database; ``chain-canary.yml``
+#: scopes both halves to the dev lane (compose project ``omnibase-infra``, the
+#: pre-authorized fully-mutable test platform). stability-test, judge and prod
+#: are read-only surfaces this probe has no ticket for, so a declaration
+#: against one of them is refused rather than honoured.
+PROJECTION_READBACK_LANES: frozenset[str] = frozenset({"dev"})
+
+#: Env var the workflow exports the resolved NAME under. Deliberately distinct
+#: from the name it points at: this one carries a NAME and may be echoed, the
+#: one it names carries the DSN and may not.
+PROJECTION_READBACK_DSN_ENV_NAME_VAR = "CHAIN_CANARY_PROJECTION_DSN_ENV"
+
+_PROJECTION_READBACK_KEY = "projection_readback"
+_DSN_ENV_KEY = "dsn_env"
+
+# A POSIX-shell environment variable NAME. Narrow on purpose: nothing matching
+# this can also be a DSN, because a DSN needs at least a ':' and a '/'.
+_ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+# Markers of a connection STRING. `://` is the scheme separator of every libpq
+# URI form; the keyword/value form is spelled `host=... dbname=...`. Matching on
+# structure rather than on a keyword list is what makes this refuse a DSN shape
+# nobody anticipated.
+_DSN_URI_SCHEMES: tuple[str, ...] = (
+    "postgres://",
+    "postgresql://",
+    "postgres+asyncpg://",
+    "postgresql+asyncpg://",
+)
+_DSN_KEYWORD_MARKERS: tuple[str, ...] = (
+    "dbname=",
+    "host=",
+    "password=",
+    "user=",
+)
+
+
+def looks_like_a_dsn(value: str) -> bool:
+    """Whether ``value`` parses as a Postgres connection string.
+
+    Used to refuse a VALUE anywhere a NAME is expected. Never include the
+    value in a message built from this — the whole reason it is being refused
+    is that it is a credential.
+    """
+    lowered = value.strip().lower()
+    if not lowered:
+        return False
+    if any(lowered.startswith(scheme) for scheme in _DSN_URI_SCHEMES):
+        return True
+    if "://" in lowered:
+        return True
+    return any(marker in lowered for marker in _DSN_KEYWORD_MARKERS)
+
+
+def dsn_shaped_argv_flags(argv: Sequence[str]) -> tuple[str, ...]:
+    """Flag names in ``argv`` whose value parses as a DSN, in order.
+
+    Returns the FLAG, never the value. A DSN on a command line is readable by
+    every process on the host through ``/proc/<pid>/cmdline`` (and by anyone
+    reading the run log, since the dispatch step echoes what it ran), so the
+    refusal message this feeds must not reprint the thing it is refusing.
+
+    Positional occurrences are reported as ``argv[<index>]`` so a DSN that
+    arrived without a flag is still named precisely enough to find.
+    """
+    offenders: list[str] = []
+    for index, token in enumerate(argv):
+        if not looks_like_a_dsn(token):
+            continue
+        # `--flag=value` carries both halves in one token; report the flag.
+        if token.startswith("-") and "=" in token:
+            offenders.append(token.split("=", 1)[0])
+            continue
+        previous = argv[index - 1] if index > 0 else ""
+        if previous.startswith("-"):
+            offenders.append(previous)
+            continue
+        offenders.append(f"argv[{index}]")
+    return tuple(offenders)
+
+
+def load_lane_projection_readback(
+    overlay_path: Path, lane: str
+) -> ModelLaneProjectionReadback:
+    """Read ``lane``'s declared projection-readback DSN NAME out of the overlay.
+
+    Every failure raises. There is no default and no fallback to the bus
+    terminal: OMN-14843 measured 26 of 38 correlations stranded mid-FSM while
+    the topic layer was healthy at the same moment, so a green terminal is not
+    evidence about the projection layer and must never stand in for one.
+    """
+    if not lane.strip():
+        message = "a lane id is required to resolve a declared projection readback"
+        raise ValueError(message)
+    lane_key = lane.strip()
+
+    if lane_key not in PROJECTION_READBACK_LANES:
+        message = (
+            f"lane {lane_key!r} may not declare a projection readback; only "
+            f"{sorted(PROJECTION_READBACK_LANES)} may. The chain canary "
+            "publishes a live delegation and then reads a database, and both "
+            "halves are dev-lane-only by the workflow's own declared scope. "
+            "stability-test, judge and prod are read-only surfaces this probe "
+            "has no authorization to read."
+        )
+        raise ValueError(message)
+
+    try:
+        raw: object = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        message = f"cannot read the lane overlay at {overlay_path}: {exc}"
+        raise ValueError(message) from exc
+    except yaml.YAMLError as exc:
+        message = f"the lane overlay at {overlay_path} is not valid YAML: {exc}"
+        raise ValueError(message) from exc
+
+    if not isinstance(raw, dict):
+        message = f"the lane overlay at {overlay_path} is not a YAML mapping"
+        raise ValueError(message)
+
+    lanes = raw.get("lanes")
+    if not isinstance(lanes, dict) or lane_key not in lanes:
+        declared = sorted(lanes) if isinstance(lanes, dict) else []
+        message = (
+            f"lane {lane_key!r} is not declared in {overlay_path}; declared "
+            f"lanes: {declared}"
+        )
+        raise ValueError(message)
+
+    declaration = lanes[lane_key]
+    if not isinstance(declaration, dict):
+        message = f"lane {lane_key!r} in {overlay_path} is not a mapping"
+        raise ValueError(message)
+
+    block = declaration.get(_PROJECTION_READBACK_KEY)
+    if block is None:
+        message = (
+            f"lane {lane_key!r} in {overlay_path} declares no "
+            f"{_PROJECTION_READBACK_KEY!r} block, so there is no DSN reference "
+            "for OMN-16025 link 2. Declare the NAME the DSN is injected under "
+            f"(a {_DSN_ENV_KEY!r} entry) — never the DSN itself."
+        )
+        raise ValueError(message)
+    if not isinstance(block, dict):
+        message = (
+            f"lane {lane_key!r} in {overlay_path} declares "
+            f"{_PROJECTION_READBACK_KEY!r} as {type(block).__name__}, not a "
+            "mapping"
+        )
+        raise ValueError(message)
+
+    dsn_env = str(block.get(_DSN_ENV_KEY) or "").strip()
+    if not dsn_env:
+        message = (
+            f"lane {lane_key!r} in {overlay_path} declares "
+            f"{_PROJECTION_READBACK_KEY!r} with no {_DSN_ENV_KEY!r} entry"
+        )
+        raise ValueError(message)
+
+    if looks_like_a_dsn(dsn_env):
+        # The value is deliberately absent from this message.
+        message = (
+            f"lane {lane_key!r} in {overlay_path} declares a {_DSN_ENV_KEY} "
+            "entry that parses as a connection string. That is a VALUE where a "
+            "NAME belongs, and this overlay is committed, CODEOWNERS-reviewed "
+            "config that must never carry a credential. Declare the NAME the "
+            "DSN is injected under and put the value in the lab store under "
+            "that name."
+        )
+        raise ValueError(message)
+
+    if not _ENV_NAME_PATTERN.match(dsn_env):
+        message = (
+            f"lane {lane_key!r} in {overlay_path} declares {_DSN_ENV_KEY}="
+            f"{dsn_env!r}, which is not a POSIX environment variable name "
+            f"({_ENV_NAME_PATTERN.pattern}). The workflow injects the secret "
+            "under this literal name, so a name the shell cannot export is a "
+            "readback that silently never runs."
+        )
+        raise ValueError(message)
+
+    return ModelLaneProjectionReadback(lane=lane_key, dsn_env=dsn_env)
+
+
+def projection_readback_env(
+    declaration: ModelLaneProjectionReadback,
+) -> dict[str, str]:
+    """The declared NAME as the one env var the workflow may export.
+
+    Exactly the non-secret half, and the asymmetry is the point: this returns
+    the NAME of the variable the DSN arrives in. The DSN itself is injected by
+    the job's secret block under that same name and is never read, written or
+    echoed by this module.
+    """
+    return {PROJECTION_READBACK_DSN_ENV_NAME_VAR: declaration.dsn_env}
