@@ -302,6 +302,9 @@ class _RefRecordingExecutor:
         # OMN-18057: the agent reads residue from the executor when it
         # builds the terminal event.
         self.container_residue: list[object] = []
+        # OMN-17135: and the sibling SHAs the build vendored, since the
+        # command's git_ref pins omnibase_infra alone.
+        self.sibling_source_refs: dict[str, str] = {}
 
     def preflight(self, **kwargs: object) -> None:
         pass

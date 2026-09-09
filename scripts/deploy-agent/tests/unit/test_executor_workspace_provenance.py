@@ -95,8 +95,14 @@ def test_stage_workspace_called_for_workspace_mode(
     executor = DeployExecutor()
     stage_calls: list[tuple[str, str]] = []
 
-    def fake_stage(repo_dir: str, omni_home: str, deploy_ref: str = "") -> None:
+    def fake_stage(
+        repo_dir: str,
+        omni_home: str,
+        deploy_ref: str = "",
+        sibling_fallback_ref: str = "",
+    ) -> dict[str, str]:
         stage_calls.append((repo_dir, omni_home))
+        return {}
 
     captured_cmds: list[list[str]] = []
 
@@ -125,8 +131,14 @@ def test_stage_workspace_not_called_for_release_mode(
     executor = DeployExecutor()
     stage_calls: list[tuple] = []
 
-    def fake_stage(repo_dir: str, omni_home: str, deploy_ref: str = "") -> None:
+    def fake_stage(
+        repo_dir: str,
+        omni_home: str,
+        deploy_ref: str = "",
+        sibling_fallback_ref: str = "",
+    ) -> dict[str, str]:
         stage_calls.append((repo_dir, omni_home))
+        return {}
 
     captured_cmds: list[list[str]] = []
 
@@ -153,7 +165,12 @@ def test_stage_workspace_failure_aborts_build(
     monkeypatch.setenv("OMNI_HOME", "/data/omninode/omni_home")
     executor = DeployExecutor()
 
-    def fail_stage(repo_dir: str, omni_home: str, deploy_ref: str = "") -> None:
+    def fail_stage(
+        repo_dir: str,
+        omni_home: str,
+        deploy_ref: str = "",
+        sibling_fallback_ref: str = "",
+    ) -> dict[str, str]:
         raise RuntimeError("Workspace staging failed")
 
     captured_cmds: list[list[str]] = []
@@ -207,8 +224,13 @@ def test_workspace_build_passes_build_date_and_vcs_ref(
     executor = DeployExecutor()
     captured_cmds: list[list[str]] = []
 
-    def fake_stage(repo_dir: str, omni_home: str, deploy_ref: str = "") -> None:
-        pass
+    def fake_stage(
+        repo_dir: str,
+        omni_home: str,
+        deploy_ref: str = "",
+        sibling_fallback_ref: str = "",
+    ) -> dict[str, str]:
+        return {}
 
     def fake_run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
         captured_cmds.append(cmd)

@@ -316,6 +316,9 @@ class DeployAgent:
                 health_checks,
                 services_restarted=services_restarted,
                 container_residue=self.executor.container_residue,
+                # OMN-17135: which sibling commits this build actually vendored.
+                # The command's git_ref pins omnibase_infra alone.
+                sibling_refs=self.executor.sibling_source_refs,
             )
             if publish_result(payload, self._kafka_config):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS

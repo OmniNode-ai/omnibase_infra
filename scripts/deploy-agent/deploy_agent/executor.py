@@ -39,7 +39,10 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
-from deploy_agent.tracking_ref import load_tracking_ref_from_env
+from deploy_agent.tracking_ref import (
+    load_tracking_ref_from_env,
+    load_tracking_remote_ref_from_env,
+)
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
 # Scope.FULL regenerates both core and runtime bundles.
@@ -859,10 +862,16 @@ class DeployExecutor:
         # builds the terminal event so residue is a recorded fact rather than
         # something an operator has to go and find on the host.
         self.container_residue: list[ModelContainerResidue] = []
+        # OMN-17135: repo -> the commit SHA RT-1 actually resolved and vendored
+        # for that sibling. The requested ref pins omnibase_infra only, so
+        # without this the terminal event named one repository's commit and left
+        # the other three to be inferred from the image.
+        self.sibling_source_refs: dict[str, str] = {}
 
     def reset_deploy_observations(self) -> None:
         """Clear per-job observations at the start of a rebuild."""
         self.container_residue = []
+        self.sibling_source_refs = {}
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane
@@ -1869,7 +1878,12 @@ class DeployExecutor:
         return fallback
 
     @staticmethod
-    def _stage_workspace(repo_dir: str, omni_home: str, deploy_ref: str = "") -> None:
+    def _stage_workspace(
+        repo_dir: str,
+        omni_home: str,
+        deploy_ref: str = "",
+        sibling_fallback_ref: str = "",
+    ) -> dict[str, str]:
         """Stage sibling repos into the Docker build context for workspace mode.
 
         Runs docker/runtime_build/stage_workspace.sh from the repo root so that
@@ -1892,6 +1906,25 @@ class DeployExecutor:
         deliberately NOT substituted with a fallback ref — nothing is exported
         and the script refuses in its own words, which is the correct outcome
         for a caller that has no pin to offer.
+
+        OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
+        (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
+        constrains the published ``git_ref`` to a lowercase hex commit SHA of
+        **omnibase_infra**, and that commit exists in no sibling — so RT-1
+        aborted on the first one it tried (``ERROR: omnibase_core: cannot
+        resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
+        rebuild failed by construction, 13 seconds after acceptance (job
+        ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
+        each sibling resolves for itself instead: the declared tracking head.
+        Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
+        the fallback engages only where the primary names no commit.
+
+        Returns repo → the commit SHA RT-1 actually resolved for that sibling,
+        read back from the expected-refs manifest this call pins the location of.
+        The path is named explicitly, under the same ``~/.omnibase/state``
+        convention the script's own default uses but with a distinct
+        agent-and-pid basename, so two concurrent callers cannot read each
+        other's manifest and neither can collide with the script's default.
         """
         script = Path(repo_dir) / "scripts" / "runtime_build" / "stage_workspace.sh"
         if not script.exists():
@@ -1900,12 +1933,29 @@ class DeployExecutor:
                 "Cannot proceed with BUILD_SOURCE=workspace."
             )
         staging_env = {**os.environ, "OMNI_HOME": omni_home}
+        refs_out = (
+            Path.home()
+            / ".omnibase"
+            / "state"
+            / "deploy_source_refs"
+            / f"deploy-agent-{os.getpid()}.json"
+        )
+        refs_out.parent.mkdir(parents=True, exist_ok=True)
+        refs_out.unlink(missing_ok=True)
+        staging_env["DEPLOY_SOURCE_REFS_OUT"] = str(refs_out)
         if deploy_ref:
             staging_env["DEPLOY_REF"] = deploy_ref
             logger.info(
                 "_stage_workspace: staging siblings against DEPLOY_REF=%s "
                 "(the accepted command's git_ref)",
                 deploy_ref,
+            )
+        if sibling_fallback_ref:
+            staging_env["DEPLOY_SIBLING_FALLBACK_REF"] = sibling_fallback_ref
+            logger.info(
+                "_stage_workspace: siblings fall back to %s where the requested "
+                "ref names no commit in them (OMN-17135)",
+                sibling_fallback_ref,
             )
         result = subprocess.run(
             ["bash", str(script)],
@@ -1921,6 +1971,33 @@ class DeployExecutor:
                 f"{result.stderr.strip() or result.stdout.strip()}"
             )
         logger.info("_stage_workspace: %s", result.stdout.strip())
+        return DeployExecutor._read_resolved_sibling_refs(refs_out)
+
+    @staticmethod
+    def _read_resolved_sibling_refs(refs_out: Path) -> dict[str, str]:
+        """Read repo → resolved SHA out of the RT-1 expected-refs manifest.
+
+        Evidence, not a gate: the build already succeeded and its own assertion
+        already compared every vendored SHA against this same manifest. An
+        unreadable manifest is logged and yields an empty map rather than
+        failing a deploy that passed — the fail-closed decision belongs to RT-1,
+        which has already made it (OMN-14438).
+        """
+        try:
+            manifest = json.loads(refs_out.read_text(encoding="utf-8"))
+            repos = manifest["repos"]
+            return {
+                str(repo): str(row["expected_sha"])
+                for repo, row in repos.items()
+                if row.get("expected_sha")
+            }
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            logger.warning(
+                "_stage_workspace: could not read resolved sibling refs from %s: %s",
+                refs_out,
+                exc,
+            )
+            return {}
 
     def _compose_build(
         self,
@@ -1974,20 +2051,36 @@ class DeployExecutor:
         # default is PROD, so an undeclared lane still runs the gate.
         assert_release_build_promoted(selected_source, runtime_lane=runtime_lane)
 
+        # OMN-16442: the sibling-repo fallback branch is the declared tracking
+        # ref, not a literal. It used to be "dev" for omnimarket and "main" for
+        # omnibase_compat — an asymmetry with no stated reason, on two repos
+        # that both integrate on `dev`.
+        sibling_fallback = load_tracking_ref_from_env()
+
         if selected_source == BuildSource.WORKSPACE:
             if not omni_home:
                 raise RuntimeError(
                     "BUILD_SOURCE=workspace requires OMNI_HOME before build"
                 )
             # OMN-16442/OMN-17291: the accepted command's git_ref is the pin the
-            # staging script asserts the sibling clones against.
-            self._stage_workspace(REPO_DIR, omni_home, git_ref)
-
-        # OMN-16442: the sibling-repo fallback branch is the declared tracking
-        # ref, not a literal. It used to be "dev" for omnimarket and "main" for
-        # omnibase_compat — an asymmetry with no stated reason, on two repos
-        # that both integrate on `dev`.
-        sibling_fallback = load_tracking_ref_from_env()
+            # staging script asserts the INFRA clone against.
+            # OMN-17135: it is a pin on that ONE repository. The CI path
+            # publishes an omnibase_infra commit SHA, which names no commit in
+            # omnibase_core / omnibase_compat / omnimarket, so passing it as
+            # every sibling's ref made RT-1 abort on the first one and took
+            # every CI-triggered rebuild red. Each sibling resolves the declared
+            # tracking head instead, and the SHA it lands on is recorded.
+            self.sibling_source_refs = self._stage_workspace(
+                REPO_DIR,
+                omni_home,
+                git_ref,
+                load_tracking_remote_ref_from_env(),
+            )
+            if self.sibling_source_refs:
+                logger.info(
+                    "_compose_build: sibling source refs %s",
+                    {repo: sha[:12] for repo, sha in self.sibling_source_refs.items()},
+                )
         omnimarket_ref = (
             self._resolve_plugin_ref(
                 f"{omni_home}/omnimarket", fallback=sibling_fallback

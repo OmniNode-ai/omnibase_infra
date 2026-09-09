@@ -47,6 +47,18 @@
 #   with ALLOW_UNPINNED_DEPLOY_SOURCE=1 (loud, named, never the default).
 #   DEPLOY_HOTPATCH=1 deploys the dirty tree deliberately (labelled, not laundered).
 #
+# Per-sibling ref (OMN-17135):
+#   DEPLOY_REF pins ONE repository. The CI rebuild path publishes an
+#   omnibase_infra commit SHA there, and that commit exists in no sibling, so
+#   RT-1 used to abort on the first one (`ERROR: omnibase_core: cannot resolve
+#   ref '<infra sha>'`, exit 4) and every CI-triggered agent rebuild failed by
+#   construction. Each sibling now falls back to a ref of its own --
+#   DEPLOY_SIBLING_FALLBACK_REF, default `origin/dev` -- resolved at staging
+#   time, with the primary it stood in for recorded per repo as `fallback_from`
+#   in the expected-refs manifest. The fallback engages ONLY where the primary
+#   names no commit in that repository; a DEPLOY_REF that resolves everywhere is
+#   unaffected. A fallback that does not resolve either still exits 4.
+#
 # Exit codes:
 #   0  all sibling repos staged successfully
 #   1  OMNI_HOME not set
@@ -156,6 +168,17 @@ if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     done
     if [[ -n "${DEPLOY_REF}" ]]; then
         checkout_args+=(--ref "${DEPLOY_REF}")
+        # OMN-17135: DEPLOY_REF is a pin on ONE repository, and the CI rebuild
+        # path makes that literal -- the producer model constrains the published
+        # git_ref to a lowercase hex commit SHA of omnibase_infra. A commit of
+        # omnibase_infra is not a ref of omnibase_core, so RT-1 checking every
+        # sibling out at it fails for every sibling, every time. Give each
+        # sibling a ref of its OWN to fall back to: its declared tracking head,
+        # resolved here at staging time and recorded per repo in the manifest
+        # the end-of-staging assertion is resolved against. The fallback only
+        # engages where the primary names no commit, so a DEPLOY_REF that
+        # resolves everywhere (origin/dev) behaves exactly as before.
+        checkout_args+=(--fallback-ref "${DEPLOY_SIBLING_FALLBACK_REF:-origin/dev}")
     fi
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)
