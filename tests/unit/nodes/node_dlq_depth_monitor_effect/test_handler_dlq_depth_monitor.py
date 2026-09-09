@@ -234,19 +234,27 @@ class TestMultiPartitionFolding:
 class TestAlertGating:
     """The red-run alert surface."""
 
-    async def test_alert_raises_by_default_so_the_workflow_goes_red(self) -> None:
+    async def test_alert_gates_by_default_so_the_workflow_goes_red(self) -> None:
+        """OMN-18088: the gate is a returned field, no longer a raise.
+
+        It used to assert ``pytest.raises(RuntimeHostError)`` and read the
+        offender list out of the exception message. That message was the only
+        copy of the offender list, and two layers of runtime discarded it
+        between the handler and the receipt -- see the OMN-18088 test module
+        beside this one for the null-payload shape it produced.
+        """
         transport = FakeDlqAdminTransport(
             topics={_QUARANTINE: {0: (6, 8_878_948, 8_878_932)}}
         )
 
-        with pytest.raises(RuntimeHostError) as excinfo:
-            await HandlerDlqDepthMonitor(transport).handle(
-                _request(suppress_alert_exit=False)
-            )
+        result = await HandlerDlqDepthMonitor(transport).handle(
+            _request(suppress_alert_exit=False)
+        )
 
-        message = str(excinfo.value)
-        assert _QUARANTINE in message
-        assert "+16" in message
+        assert result.alert_exit_requested is True
+        offender = result.evaluation.alerting_verdicts[0]
+        assert offender.topic == _QUARANTINE
+        assert offender.arrivals_in_window == 16
 
     async def test_suppress_alert_exit_returns_the_histogram_instead(self) -> None:
         transport = FakeDlqAdminTransport(
@@ -280,10 +288,12 @@ class TestAlertGating:
             topics={_QUARANTINE: {0: (6, 8_878_932, None)}}
         )
 
-        with pytest.raises(RuntimeHostError):
-            await HandlerDlqDepthMonitor(transport).handle(
-                _request(suppress_alert_exit=False, max_retained_depth=1_000_000)
-            )
+        result = await HandlerDlqDepthMonitor(transport).handle(
+            _request(suppress_alert_exit=False, max_retained_depth=1_000_000)
+        )
+
+        assert result.alert_exit_requested is True
+        assert result.evaluation.alerting_verdicts[0].topic == _QUARANTINE
 
 
 class TestKillSwitch:
