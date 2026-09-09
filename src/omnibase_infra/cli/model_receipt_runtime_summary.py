@@ -16,6 +16,8 @@ log and error text travel inline in the receipt (parent invariant — see
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 __all__ = ["ModelReceiptRuntimeSummary"]
@@ -60,6 +62,47 @@ class ModelReceiptRuntimeSummary(BaseModel):
         description=(
             "Full error text (including traceback) when the runtime raised. "
             "Empty when the run produced a terminal workflow result."
+        ),
+    )
+    handler_locus: str = Field(
+        default="",
+        description=(
+            "Whether THIS process ran the handlers, read back from the "
+            "runtime's own workflow_result.json (OMN-17295 AC2): 'in_process' "
+            "when the CLI hosted the orchestrator, 'dispatched' when it "
+            "published the command and hosted nothing. Empty when the runtime "
+            "did not record it. Distinct from "
+            "ModelRuntimeIdentity.execution_locus (OMN-17308), which names "
+            "the venv or container this process itself lives in."
+        ),
+    )
+    wire_correlation_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The correlation id actually published on the command topic — the "
+            "id a lane-side log grep or projection row can be joined on. "
+            "``None`` when the run published no command (a compute-path node "
+            "publishes nothing) or when the runtime predates the field. Typed "
+            "as a real UUID, not a string: this value is the join key other "
+            "surfaces index on, and a join key that can hold '' is one that "
+            "can silently join nothing."
+        ),
+    )
+    orchestrator_distribution: str = Field(
+        default="",
+        description=(
+            "Installed distribution the dispatched contract resolved out of, "
+            "as '<name> <version> (<location>)'. For an in-process run this "
+            "IS the code that decided; for a dispatched run it is only the "
+            "source of the wire description."
+        ),
+    )
+    dispatch_target: str = Field(
+        default="",
+        description=(
+            "For a dispatched run: the command topic, the broker, and the "
+            "consumer groups observed live on that topic at dispatch time. "
+            "Empty for an in-process run, which dispatches to nobody."
         ),
     )
     capture_log: str = Field(

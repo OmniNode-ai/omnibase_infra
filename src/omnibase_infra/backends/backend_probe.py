@@ -76,6 +76,110 @@ def _has_live_consumer_group(admin: object, topic: str, *, timeout: float) -> bo
     return False
 
 
+class ConsumerGroupLivenessUnknownError(RuntimeError):
+    """The broker could not be asked which consumers are bound to a topic.
+
+    Distinct from "no live consumer": a caller that is about to hand work to
+    somebody else must be able to tell "nobody is listening" from "I could not
+    find out". :func:`_has_live_consumer_group` deliberately collapses both
+    into ``False`` because it feeds a health *grade* where a weaker signal is
+    an acceptable fallback. A fail-closed dispatch gate cannot use that
+    collapse — UNKNOWN has to refuse, not proceed (OMN-17295 AC1).
+    """
+
+
+def live_consumer_groups(
+    *,
+    topic: str,
+    bootstrap_servers: str | None = None,
+    timeout: float = 5.0,
+) -> tuple[str, ...]:
+    """Return the ids of every ``Stable`` consumer group bound to *topic*.
+
+    Wiring truth, not configuration: a group id ending in the
+    ``TOPIC_SCOPE_INFIX`` scope suffix for *topic*, in state ``STABLE``, is a
+    process that is subscribed and joined RIGHT NOW. This is the only
+    un-forgeable answer to "if I publish here, is anything going to pick it
+    up" available to an off-box caller — broker-identity string matching is
+    structurally blind through any address the broker does not advertise
+    (OMN-16529), and a topic's existence says nothing about consumers.
+
+    Unlike :func:`_has_live_consumer_group` this is NOT probe-safe: it raises
+    rather than reporting a bare ``False`` for a question it could not ask.
+    Callers gating a dispatch on the answer must fail closed on UNKNOWN.
+
+    Args:
+        topic: The exact topic the caller is about to publish to. Liveness on
+            a different topic proves nothing about this one — passing a
+            related-sounding topic is how a gate ends up green while the
+            actual command lands nowhere.
+        bootstrap_servers: Comma-separated broker addresses. Defaults to
+            ``KAFKA_BOOTSTRAP_SERVERS``.
+        timeout: Admin request timeout in seconds.
+
+    Returns:
+        Group ids, sorted, possibly empty. Empty is a real answer: the broker
+        was asked and no ``STABLE`` group is bound.
+
+    Raises:
+        ConsumerGroupLivenessUnknownError: the question could not be answered
+            — no broker configured, ``confluent_kafka`` absent, or the admin
+            call failed.
+    """
+    resolved = bootstrap_servers or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not resolved:
+        raise ConsumerGroupLivenessUnknownError(
+            "no broker address: neither an explicit bootstrap nor "
+            "KAFKA_BOOTSTRAP_SERVERS is set"
+        )
+    try:
+        from confluent_kafka.admin import AdminClient
+
+        from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+
+        admin = AdminClient(
+            {
+                "bootstrap.servers": resolved,
+                "socket.timeout.ms": int(timeout * 1000),
+                "request.timeout.ms": int(timeout * 1000),
+            }
+        )
+        # Metadata FIRST. On an unreachable broker librdkafka retries in the
+        # background and ``list_consumer_groups`` resolves to an EMPTY listing
+        # rather than raising — which reads as "nobody is bound" and is exactly
+        # the UNKNOWN/absent conflation this function exists to prevent.
+        # Observed live 2026-08-31 against a closed port: the group listing came
+        # back clean and empty while the connection was being refused. A
+        # cluster that cannot describe itself cannot be asked about consumers.
+        admin.list_topics(timeout=timeout)
+        future = admin.list_consumer_groups(request_timeout=timeout)
+        listing = future.result(timeout=timeout + 1.0)
+    except Exception as exc:
+        raise ConsumerGroupLivenessUnknownError(
+            f"could not list consumer groups on {resolved}: {exc}"
+        ) from exc
+
+    # A listing that reports per-group errors is partial, and a partial answer
+    # to "is anything consuming this" is not an answer.
+    listing_errors = getattr(listing, "errors", []) or []
+    if listing_errors:
+        raise ConsumerGroupLivenessUnknownError(
+            f"consumer-group listing on {resolved} returned "
+            f"{len(listing_errors)} error(s); the answer is incomplete: "
+            f"{listing_errors[0]}"
+        )
+
+    suffix = f"{TOPIC_SCOPE_INFIX}{topic}"
+    found: set[str] = set()
+    for group in getattr(listing, "valid", []):
+        try:
+            if group.group_id.endswith(suffix) and group.state.name == "STABLE":
+                found.add(str(group.group_id))
+        except AttributeError:
+            continue
+    return tuple(sorted(found))
+
+
 def probe_kafka(
     *,
     bootstrap_servers: str | None = None,

@@ -103,11 +103,16 @@ import click
 
 from omnibase_infra.backends.auto_configure import (
     BUS_INMEMORY,
+    BUS_KAFKA,
     SUPPORTED_BUS_TYPES,
     EventBusResolutionAmbiguousError,
     resolve_bus_type,
 )
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
+from omnibase_infra.cli.delegate_locus import (
+    DelegateLocusRefusedError,
+    resolve_delegate_locus,
+)
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
@@ -118,6 +123,7 @@ from omnibase_infra.cli.receipt_mode import (
     run_receipt_mode,
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
+from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
 logger = logging.getLogger(__name__)
@@ -130,6 +136,7 @@ __all__ = [
     "TASK_TYPE_CHOICES",
     "BUS_CHOICES",
     "DEFAULT_BUS",
+    "LOCUS_CHOICES",
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "classify_task_type",
@@ -189,16 +196,10 @@ TASK_TYPE_CHOICES = (
 )
 
 # Event-bus targets the CLI can select (OMN-13532). This is a TRANSPORT
-# choice, not an execution-locality choice (OMN-17295): the orchestrator runs
-# IN-PROCESS in this CLI, resolved from the local venv, for BOTH values.
-# ``build_backend_overrides`` — the only consumer of ``--bus`` — returns
-# ``{"event_bus": <bus>}`` (plus an optional ``kafka_bootstrap``) and hands it
-# to ``RuntimeLocal``; nothing in that map names an executor. ``inmemory``
-# keeps this run's events in-process; ``kafka`` routes the same in-process
-# run's events through the live broker so its evidence lands in the shared
-# projection. Neither hands the work to a deployed runtime consumer — there is
-# no remote-execution mode, and building one is deliberately out of scope (a
-# thin client, if it is ever built, is gateway-mediated).
+# choice. It is no longer ALSO the execution-locality choice by accident:
+# ``--locus`` owns that, and by default follows the transport, because a
+# shared bus is the only kind another runtime can consume from
+# (OMN-17295 / OMN-17304).
 # These mirror ``RuntimeLocal.SUPPORTED_EVENT_BUS_VALUES`` — the runtime is the
 # source of truth and rejects anything outside that set.
 BUS_CHOICES = SUPPORTED_BUS_TYPES
@@ -210,6 +211,10 @@ BUS_CHOICES = SUPPORTED_BUS_TYPES
 # ``runtime/tier0_runtime_config.yaml``'s ``event_bus.type``; the tier-0
 # golden tests pin the two together.
 DEFAULT_BUS = BUS_INMEMORY
+
+# Where the orchestrator makes the accept/climb decision. See
+# ``EnumDelegateLocus``; the flag takes the enum's string values.
+LOCUS_CHOICES: tuple[str, ...] = tuple(member.value for member in EnumDelegateLocus)
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -672,18 +677,33 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     type=click.Choice(BUS_CHOICES),
     default=None,
     help=(
-        "Event-bus backend — event TRANSPORT only. It does not change where "
-        "the work runs: the delegate orchestrator always executes in-process "
-        "in this CLI, resolved from the local venv, on both values. "
-        "'inmemory' keeps this run's events in-process (no broker); 'kafka' "
-        "routes the same in-process run's events through the live broker, so "
-        "its evidence lands in the shared delegation_events projection "
-        "instead of the local SQLite fallback. Neither value hands execution "
-        "to a deployed runtime consumer. Omit to resolve from the runtime's "
-        "configured authority (OMN-17304): the runtime config named by the "
-        "ONEX_CONTRACTS_DIR bootstrap pointer, else the shipped tier-0 "
+        "Event-bus backend — event TRANSPORT only. Where the work RUNS is "
+        "--locus, which by default follows this: 'kafka' means a shared "
+        "broker other runtimes consume from, so the deployed orchestrator "
+        "can decide and this CLI publishes and waits; 'inmemory' exists only "
+        "inside this process, so this CLI decides. Omit to resolve from the "
+        "runtime's configured authority (OMN-17304): the runtime config named "
+        "by the ONEX_CONTRACTS_DIR bootstrap pointer, else the shipped tier-0 "
         "default (inmemory). ONEX_EVENT_BUS_TYPE and broker reachability "
         "play no part. Pass explicitly to override the configured authority."
+    ),
+)
+@click.option(
+    "--locus",
+    "locus",
+    type=click.Choice(LOCUS_CHOICES),
+    default=EnumDelegateLocus.AUTO.value,
+    help=(
+        "Where the delegate orchestrator makes the accept/climb decision "
+        "(OMN-17295). 'auto' (default) follows the resolved transport: a "
+        "shared bus dispatches to the deployed runtime consuming the command "
+        "topic, an in-process bus runs here. 'deployed-lane' publishes the "
+        "typed command and awaits this run's own correlated terminal, hosting "
+        "nothing — it REFUSES if no live consumer group is bound to that "
+        "topic, rather than quietly running here and reporting the result as "
+        "the lane's. 'in-process' runs the orchestrator in this CLI from the "
+        "local venv and says so in the record. The resolved locus and its "
+        "evidence go into the run's capture log and receipt."
     ),
 )
 @click.option(
@@ -763,6 +783,7 @@ def delegate_command(
     max_tokens: int | None,
     source: str | None,
     bus: str | None,
+    locus: str,
     kafka_bootstrap: str | None,
     state_root: Path,
     timeout: int,
@@ -784,8 +805,10 @@ def delegate_command(
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
-        # Still runs in-process; --bus only routes this run's events through the broker:
-        onex delegate "document the router" --bus kafka --kafka-bootstrap "$KAFKA_BOOTSTRAP_SERVERS"
+        # Dispatch to the deployed orchestrator; refuses if nothing consumes the topic:
+        onex delegate "document the router" --bus kafka --locus deployed-lane
+        # Run it here on purpose, and say so in the record:
+        onex delegate "document the router" --bus kafka --locus in-process
     """
     try:
         exit_code = run_delegate(
@@ -794,6 +817,7 @@ def delegate_command(
             max_tokens=max_tokens,
             source=source,
             bus=bus,
+            locus=EnumDelegateLocus(locus),
             kafka_bootstrap=kafka_bootstrap,
             state_root=state_root,
             timeout=timeout,
@@ -814,6 +838,7 @@ def run_delegate(
     max_tokens: int | None,
     source: str | None = None,
     bus: str | None = None,
+    locus: EnumDelegateLocus = EnumDelegateLocus.AUTO,
     kafka_bootstrap: str | None = None,
     state_root: Path,
     timeout: int,
@@ -959,6 +984,23 @@ def run_delegate(
         correlation_id=correlation_id,
     )
     contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
+    # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
+    # dispatched run — prove a deployed one is actually consuming the command
+    # topic BEFORE anything is published. A refusal here is the point: the
+    # defect being closed is an invocation that silently ran in-process and
+    # was then read as evidence about a lane it never reached, so this path
+    # never degrades, it stops.
+    try:
+        locus_decision = resolve_delegate_locus(
+            requested=locus,
+            bus=bus,
+            kafka_bootstrap=kafka_bootstrap,
+            contract_path=contract_path,
+            shared_bus_value=BUS_KAFKA,
+        )
+    except DelegateLocusRefusedError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     try:
         with _hard_timeout(timeout + _HARD_TIMEOUT_GRACE_SECONDS):
             return run_receipt_mode(
@@ -970,6 +1012,13 @@ def run_delegate(
                 timeout=timeout,
                 verbose=verbose,
                 emit_socket=emit_socket or default_emit_socket_path(),
+                # OMN-17304: a dispatched run hosts NOTHING. Without this the
+                # CLI subscribes the entry handler to the command topic it is
+                # publishing to and executes a backlog command out of its own
+                # venv, while the lane executes the real one — two runs, and
+                # the receipt was the wrong one's.
+                host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
+                locus_decision=locus_decision,
                 # OMN-17295 / OMN-14872: the receipt layer cannot select by an
                 # identity it was never told. Handing it the id this CLI just
                 # minted is what lets it refuse another run's terminal
