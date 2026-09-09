@@ -219,6 +219,14 @@ class ModelRebuildCompleted(BaseModel):
     image_ref: str | None = None
     image_digest: str | None = None
     services_restarted: list[str] = Field(default_factory=list)
+    # OMN-17135: repo -> the commit SHA RT-1 resolved and vendored for that
+    # sibling in a workspace-mode build. ``requested_git_ref`` above pins ONE
+    # repository (omnibase_infra), so on its own it said nothing about which
+    # omnibase_core / omnibase_compat / omnimarket commit the image carries.
+    # This is EVIDENCE beside the infra pin, never a key: the rule-24 lab-pass
+    # receipt is keyed by the infra sha and stays that way. Empty for a
+    # release-mode or prod digest deploy, which vendors no sibling trees.
+    sibling_refs: dict[str, str] = Field(default_factory=dict)
     phase_results: dict[Phase, PhaseStatus]
     errors: list[str] = Field(default_factory=list)
     health_checks: list[ModelHealthCheck] = Field(default_factory=list)

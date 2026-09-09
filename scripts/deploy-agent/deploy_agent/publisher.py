@@ -78,6 +78,7 @@ def build_completion_payload(
     *,
     services_restarted: list[str] | None = None,
     container_residue: list[ModelContainerResidue] | None = None,
+    sibling_refs: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build the completion event payload from job state.
 
@@ -97,6 +98,12 @@ def build_completion_payload(
       up. It used to echo ``command["services"]``, which is EMPTY for a
       scope-default deploy -- so the field read as "nothing was restarted" on
       exactly the deploys that restarted everything.
+
+    OMN-17135 adds ``sibling_refs``: repo -> the commit SHA RT-1 resolved for
+    each sibling. ``requested_git_ref`` pins omnibase_infra only, so a reader
+    of this event could not previously say which omnibase_core or omnimarket
+    commit the image carried without going to the host and opening
+    ``/app/build-provenance.json``.
     """
     started_at = job.accepted_at
     completed_at = job.completed_at or datetime.now(UTC)
@@ -129,6 +136,7 @@ def build_completion_payload(
             if services_restarted is not None
             else job.command.get("services", [])
         ),
+        sibling_refs=dict(sibling_refs or {}),
         phase_results=phase_results,
         errors=job.errors,
         health_checks=list(health_checks or []),
