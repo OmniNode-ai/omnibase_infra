@@ -31,6 +31,7 @@ from scripts.ci.ci_summary_gate import (
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
     applicable_external_contexts,
+    drop_superseded_skips,
     evaluate,
     evaluate_external_contexts,
     latest_check_run_by_name,
@@ -1456,3 +1457,129 @@ class TestDocsOnlySkipTierOmn16661:
         )
         overlap = set(must_still_run) & set(DOCS_ONLY_SKIPPABLE_GATE_JOBS)
         assert not overlap, overlap
+
+
+class TestSupersededSkipOnUnchangedHead:
+    """OMN-18062 — a re-trigger ``skipped`` is not a verdict about the head.
+
+    Live shape being pinned (onex_change_control#8709, 2026-09-08): ``gh pr
+    edit`` fired a second ``guards.yml`` ``pull_request`` run with
+    ``action == "edited"``; ``dep-provenance-gate``'s ``if:`` admits only
+    ["opened","synchronize","reopened","ready_for_review"], so that run SKIPPED
+    it and GitHub wrote a fresh ``skipped`` check-run onto the unchanged head 64
+    seconds after the same job had reported ``success``. ``CI Summary`` read the
+    newest row and failed closed; a re-run could not clear it, only a new head.
+
+    The reachable shape in THIS repo is ``security-scan.yml``'s ``CodeQL`` job,
+    whose ``if:`` is draft/label-conditional while its workflow retriggers on
+    ``labeled`` / ``unlabeled`` / ``ready_for_review``.
+
+    Rows below are the real merge-time fixture for PR #2567 plus ONE appended
+    row, so the API shape is not hand-built. Every relaxation is paired with a
+    positive control that must still fail.
+    """
+
+    VICTIM = "CodeQL"
+    T0 = "2026-07-30T00:00:00Z"
+    T0_PLUS_64 = "2026-07-30T00:01:04Z"
+
+    def _rows(
+        self, conclusion: str | None, *, status: str = "completed"
+    ) -> list[dict[str, object]]:
+        payload = [dict(row) for row in _external_fixture("2567")]
+        for row in payload:
+            if row["name"] == self.VICTIM:
+                row["started_at"] = self.T0
+        payload.append(
+            {
+                "name": self.VICTIM,
+                "status": status,
+                "conclusion": conclusion,
+                "started_at": self.T0_PLUS_64,
+                "id": 10_000,
+            }
+        )
+        return payload
+
+    def test_victim_is_an_asserted_external_context(self) -> None:
+        """Positive control on the fixture: the name is really asserted."""
+        assert self.VICTIM in EXPECTED_EXTERNAL_CONTEXTS
+
+    def test_skip_after_success_on_same_head_is_not_a_regression(self) -> None:
+        """RED CONTROL: success at t0, skipped at t0+64s, same head."""
+        rows = self._rows("skipped")
+        assert latest_check_run_by_name(rows)[self.VICTIM].conclusion == "success"
+        # HISTORICAL_EXTERNAL_CONTEXTS, not the full tuple: the #2567 fixture
+        # predates POST_FIXTURE_WINDOW_CONTEXTS, whose absence would make this
+        # PENDING for a reason unrelated to the skip under test.
+        code, _ = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_SUCCESS
+
+    def test_failure_after_success_on_same_head_still_fails(self) -> None:
+        """POSITIVE CONTROL: a real verdict at t0+64s still wins on recency."""
+        rows = self._rows("failure")
+        assert latest_check_run_by_name(rows)[self.VICTIM].conclusion == "failure"
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_FAILURE
+        assert self.VICTIM in report
+
+    def test_skipped_with_no_prior_conclusion_still_fails(self) -> None:
+        """POSITIVE CONTROL: a name whose ONLY row is `skipped` fails closed."""
+        payload = [
+            dict(row) for row in _external_fixture("2567") if row["name"] != self.VICTIM
+        ]
+        payload.append(
+            {
+                "name": self.VICTIM,
+                "status": "completed",
+                "conclusion": "skipped",
+                "started_at": self.T0_PLUS_64,
+                "id": 10_001,
+            }
+        )
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=payload,
+            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_FAILURE
+        assert self.VICTIM in report
+
+    def test_in_progress_after_success_is_still_pending(self) -> None:
+        """POSITIVE CONTROL: a live re-run stays PENDING, never stale-green."""
+        rows = self._rows(None, status="in_progress")
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+        )
+        assert code == EXIT_PENDING
+        assert self.VICTIM in report
+
+    def test_filter_is_per_name(self) -> None:
+        """A non-skipped row for one name cannot clear a skip on another."""
+        rows: list[dict[str, object]] = [
+            {
+                "name": "a",
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": self.T0,
+                "id": 1,
+            },
+            {
+                "name": "b",
+                "status": "completed",
+                "conclusion": "skipped",
+                "started_at": self.T0,
+                "id": 2,
+            },
+        ]
+        assert drop_superseded_skips(rows) == rows
