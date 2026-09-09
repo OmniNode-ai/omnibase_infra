@@ -68,6 +68,7 @@
 from __future__ import annotations
 
 import ast
+import fnmatch
 import importlib.util
 import json
 import os
@@ -583,16 +584,100 @@ def load_runtime_path_classifier(path: Path) -> RuntimePathClassifier:
     return cast("RuntimePathClassifier", classifier)
 
 
+# OMN-18072: lane-STATE paths the canonical deploy-gate classifier does not
+# match, and is right not to match. Its question is "does this PR need deploy
+# EVIDENCE"; this trigger's question is the wider "does this merge change what
+# the lane RUNS". A migration runner, the migration corpus it applies and the
+# runtime policy env are all lane state that a rebuild applies and that nothing
+# else applies.
+#
+# MEASURED: omnibase_infra#3352 (0e9106da) changed
+# scripts/run-forward-migrations.sh and deleted files under
+# docker/migrations/_blocked/. The trigger ran on that merge (run 34330947198)
+# and reported "No rebuild trigger: no runtime_change label or runtime path
+# changes detected", so the seam has never executed on the dev lane.
+#
+# This supplements the canonical list HERE rather than widening it in
+# omniclaude, because that list is also the required deploy gate on four repos
+# and answers a different question. The canonical result is unioned, never
+# replaced or narrowed.
+LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
+    # The forward-migration runner every compose up executes against the lane DB.
+    "scripts/run-forward-migrations.sh",
+    # The migration corpus that runner applies, including the _blocked/ holding
+    # area -- moving a file out of it is exactly what changes the lane.
+    "docker/migrations/**",
+    # The compose model itself (already canonical for *.yml; declared here so
+    # the trigger does not depend on that overlap staying true) and the lane's
+    # runtime policy env, which the runtime reads at start.
+    "docker/docker-compose*.yml",
+    "docker/docker-compose*.yaml",
+    "docker/runtime-policy.env",
+)
+
+
+def _matches_pattern(path: str, pattern: str) -> bool:
+    """Segment-wise, repo-root-anchored glob match.
+
+    ``PurePosixPath.match`` is right-anchored (it matches a SUFFIX of the path)
+    and does not treat ``**`` as recursive, so it both over-matches a nested
+    ``a/b/docker/runtime-policy.env`` and under-matches
+    ``docker/migrations/_blocked/README.md``. Both are wrong for a path list
+    that decides whether a lane gets rebuilt, so the match is spelled out:
+    a trailing ``/**`` matches everything beneath that directory, and every
+    other pattern matches segment for segment from the repo root.
+    """
+    if pattern.endswith("/**"):
+        return path.startswith(pattern[: -len("**")])
+    pattern_parts = pattern.split("/")
+    path_parts = path.split("/")
+    if len(pattern_parts) != len(path_parts):
+        return False
+    return all(
+        fnmatch.fnmatchcase(actual, expected)
+        for actual, expected in zip(path_parts, pattern_parts, strict=True)
+    )
+
+
+def find_lane_state_paths(changed_files: list[str]) -> list[str]:
+    """Return the changed files that are lane STATE this trigger must rebuild for.
+
+    Order-preserving and de-duplicated, so the union below reads as the
+    canonical hits followed by the supplementary ones.
+    """
+    hits: list[str] = []
+    for path in changed_files:
+        if not isinstance(path, str) or not path.strip():
+            continue
+        candidate = path.strip()
+        if (
+            any(_matches_pattern(candidate, p) for p in LANE_STATE_PATH_PATTERNS)
+            and candidate not in hits
+        ):
+            hits.append(candidate)
+    return hits
+
+
 def classify_runtime_paths(
     changed_files: list[str], classifier: RuntimePathClassifier
 ) -> list[str]:
-    """Run and validate the canonical classifier's output fail-closed."""
+    """Run and validate the canonical classifier's output fail-closed.
+
+    OMN-18072: the canonical result is then UNIONED with the lane-state
+    supplement above. The validation stays ahead of the union so a broken
+    canonical classifier still fails closed rather than being papered over by a
+    supplementary hit.
+    """
     runtime_paths = classifier(changed_files)
     if not isinstance(runtime_paths, list) or any(
         not isinstance(path, str) or not path.strip() for path in runtime_paths
     ):
         raise ValueError("runtime path validator returned an invalid path list")
-    return runtime_paths
+    combined = list(runtime_paths)
+    for path in find_lane_state_paths(changed_files):
+        if path not in combined:
+            combined.append(path)
+    return combined
 
 
 def should_trigger(runtime_paths: list[str], labels: list[str]) -> bool:
