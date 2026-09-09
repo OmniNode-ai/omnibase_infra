@@ -9,7 +9,8 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://app.omninode.ai/signed-out##https://dev.app.omninode.ai/signed-out##http://localhost:3000/signed-out##http://localhost:8080/signed-out"
       },
       "redirectUris": [
         "https://app.omninode.ai/*",
