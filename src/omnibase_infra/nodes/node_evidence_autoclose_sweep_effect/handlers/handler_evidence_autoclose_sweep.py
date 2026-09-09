@@ -3282,6 +3282,12 @@ class HandlerEvidenceAutocloseSweep:
                 # bucket for the same reason -- the mechanism worked, the
                 # evidence was not strong enough to close on.
                 EnumEvidenceAutocloseDecision.GAP_NO_BEHAVIOR_PROOF,
+                # OMN-18056: the run DID form an opinion about the ticket's
+                # evidence -- it read the criteria and the contract's bindings
+                # and found a criterion nothing proves. That is a gap in the
+                # evidence base, exactly like GAP_AC_COVERAGE beside it, and
+                # not a statement about whether the mechanism may act.
+                EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND,
             )
         )
         skipped = sum(
@@ -3339,6 +3345,13 @@ class HandlerEvidenceAutocloseSweep:
                 # evidence, it read the surface the ticket named and found it
                 # not green.
                 EnumEvidenceAutocloseDecision.SKIPPED_GATE_PROBE_RED,
+                # OMN-18056. The re-draw. Every conjunct cleared and the run
+                # still wrote no Done, because this is the FIRST observation of
+                # the verdict. A skip and never a gap: nothing about the
+                # ticket's evidence is disputed and nobody has anything to do
+                # -- reporting it as a gap would put a clean ticket on somebody's
+                # repair list once per tick until it closed.
+                EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING,
             )
         )
         errored = sum(

@@ -548,6 +548,97 @@ async def test_the_revert_hold_bootstraps_and_does_not_deadlock() -> None:
 # -- the wiring: the counter-only predicate is not reachable ---------------
 
 
+async def test_the_gate_consumes_the_legs_verdict_not_merely_calls_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BEHAVIOURAL control on the source gate below, which it can defeat.
+
+    The AST assertion that follows proves `_ac_binding_gap` is CALLED and that
+    its call precedes the counting rules. It cannot prove the RESULT is acted
+    on. Measured during this ticket's own verify phase: wrapping the branch as
+    ``if False and ac_binding_reason:`` leaves the call in place, leaves its
+    position ahead of `_ac_coverage_gap` unchanged, leaves every name the
+    source gate greps for absent -- and the guard is dead. The AST test stays
+    green through it.
+
+    So this drives the seam from the outside. The leg is replaced with one
+    that reports a gap on a ticket whose evidence is otherwise flawless and
+    whose criteria are all genuinely bound -- a fixture that flips in
+    `test_a_fully_bound_ticket_flips_on_the_second_draw` above. If the
+    decision is anything but GAP_AC_UNBOUND, the run reached a verdict without
+    consulting the leg it just called, whatever the source says.
+
+    The stub takes and returns the production signature, so a change to that
+    signature reddens this rather than silently passing a mismatched double.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers import (
+        handler_evidence_autoclose_sweep as module,
+    )
+
+    sentinel = "STUBBED BINDING GAP: this criterion is bound to nothing."
+
+    def _always_a_gap(
+        description: str,
+        verdict: dict[str, object],
+        ticket_id: str,
+    ) -> tuple[str, tuple[str, ...], tuple[object, ...]]:
+        return sentinel, ("AC-STUB",), ()
+
+    monkeypatch.setattr(module, "_ac_binding_gap", _always_a_gap)
+
+    linear = _FakeLinear(_DESCRIPTION_THREE_LABELLED_ACS)
+    handler = _handler(
+        _skill_result(_omn_15660_checks(bound=("AC1", "AC2", "AC3"))), linear
+    )
+
+    result = await handler.handle(_request(apply=True))
+
+    outcome = result.outcomes[0]
+    assert outcome.decision is EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND, (
+        "the sweep reached a decision that ignored the binding leg's verdict "
+        "— the leg is called but its result is not consumed, which is the "
+        "neutering the AST gate below cannot see"
+    )
+    assert outcome.reason == sentinel
+    assert outcome.uncovered_acceptance_criteria == ("AC-STUB",)
+    assert result.tickets_flipped == 0
+    assert linear.state_updates == []
+
+
+async def test_the_leg_releasing_is_what_lets_the_same_ticket_flip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The positive control for the test above.
+
+    Without it, "GAP_AC_UNBOUND when the leg reports a gap" is also satisfied
+    by a sweep that holds this fixture for some other reason entirely. Same
+    ticket, same evidence, a stub that RELEASES -- and it closes.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers import (
+        handler_evidence_autoclose_sweep as module,
+    )
+
+    def _never_a_gap(
+        description: str,
+        verdict: dict[str, object],
+        ticket_id: str,
+    ) -> tuple[str, tuple[str, ...], tuple[object, ...]]:
+        return "", (), ()
+
+    monkeypatch.setattr(module, "_ac_binding_gap", _never_a_gap)
+
+    linear = _FakeLinear(_DESCRIPTION_THREE_LABELLED_ACS)
+    handler = _handler(
+        _skill_result(_omn_15660_checks(bound=("AC1", "AC2", "AC3"))), linear
+    )
+
+    await handler.handle(_request(apply=True))  # arms the re-draw
+    result = await handler.handle(_request(apply=True))
+
+    assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
+    assert result.tickets_flipped == 1
+
+
 def test_the_binding_leg_is_on_the_only_flip_path_and_has_no_off_switch() -> None:
     """A source gate, so removing the leg is a RED TEST, not a review catch.
 

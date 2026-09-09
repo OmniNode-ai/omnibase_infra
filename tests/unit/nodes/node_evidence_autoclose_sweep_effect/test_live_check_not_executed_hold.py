@@ -71,9 +71,17 @@ def _check(
     unverifiable_cause: str | None = None,
     unbindable_derived_overlay: bool = False,
     proof_class: str = "indeterminate",
+    binds_ac: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
-    """One `ModelEvidenceCheckResult` as it appears on the terminal payload."""
-    return {
+    """One `ModelEvidenceCheckResult` as it appears on the terminal payload.
+
+    OMN-18056 added ``binds_ac``, and it is emitted ONLY when a caller names
+    it. An absent key and an empty list are different facts to the binding
+    gate -- absent models a verifier that predates the field and cannot report
+    bindings at all -- so a default that always wrote the key would erase the
+    distinction from every fixture in this file.
+    """
+    check: dict[str, object] = {
         "evidence_id": evidence_id,
         "description": evidence_id,
         "status": status,
@@ -82,6 +90,9 @@ def _check(
         "unbindable_derived_overlay": unbindable_derived_overlay,
         "proof_class": proof_class,
     }
+    if binds_ac is not None:
+        check["binds_ac"] = list(binds_ac)
+    return check
 
 
 def _verdict(*checks: dict[str, object]) -> dict[str, object]:
@@ -449,21 +460,27 @@ async def test_the_merge_state_only_corpus_still_reports_its_gap() -> None:
 async def test_a_held_candidate_is_re_offered_and_flips_when_the_check_runs() -> None:
     """The point of a hold: no human launch when the surface comes back."""
     held = _omn_17201_run_33993316390()
+    # OMN-18056: the recovered corpus has to DECLARE which criterion it
+    # proves, not merely come back green -- the shared `_issue` body carries
+    # `AC1`, and a verified check that names no criterion discharges none.
     recovered = _receipt(
         checks=[
-            _check("dod-a", "verified", proof_class="behavior"),
-            _check("dod-b", "verified", proof_class="merge-state"),
+            _check("dod-a", "verified", proof_class="behavior", binds_ac=("AC1",)),
+            _check("dod-b", "verified", proof_class="merge-state", binds_ac=("AC1",)),
         ],
         verdict_status="verified",
         behavior_proving=1,
     )
-    outcomes, linear = await _sweep([held, recovered])
+    # The third tick is the re-draw: the first eligible observation of the
+    # recovered verdict arms it, the second one flips.
+    outcomes, linear = await _sweep([held, recovered, recovered])
 
     assert (
         outcomes[0].decision
         == EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED
     )
-    assert outcomes[1].decision == EnumEvidenceAutocloseDecision.FLIPPED
+    assert outcomes[1].decision == EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+    assert outcomes[2].decision == EnumEvidenceAutocloseDecision.FLIPPED
     assert len(linear.state_updates) == 1
 
 
