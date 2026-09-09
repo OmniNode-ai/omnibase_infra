@@ -247,6 +247,100 @@ def test_a_dsn_in_argv_is_detected_and_never_echoed(argv: list[str]) -> None:
     assert all(_DSN not in offender for offender in offenders)
 
 
+#: The argv the workflow's dispatch step actually builds, in the order it
+#: builds it. Kept as a literal rather than derived from the workflow so that a
+#: change to either half has to be made deliberately in both.
+_WORKFLOW_ARGV: tuple[str, ...] = (
+    "onex",
+    "skill",
+    "chain_canary",
+    "--probe-url",
+    "http://host.docker.internal:8085",
+    "--task-type",
+    "test",
+    "--budget-ms",
+    "120000",
+    "--terminal-bootstrap-servers",
+    "omninode-pc.tail75df5e.ts.net:19092",
+    "--quarantine-bootstrap-servers",
+    "omninode-pc.tail75df5e.ts.net:19092",
+    "--projection-dsn-env",
+    _DSN_ENV,
+)
+
+
+def test_the_workflows_own_argv_carries_no_dsn() -> None:
+    """THE NEGATIVE CONTROL for every argv assertion above.
+
+    Without it, ``dsn_shaped_argv_flags`` returning an offender for *every*
+    input would satisfy all three cases of the parametrized detection test, and
+    the probe could never run. That is not hypothetical — it is exactly what
+    shipped: the first cut treated any ``://`` as a DSN, so ``--probe-url``
+    (``http://host.docker.internal:8085``, the ingress address the probe is
+    FOR) was read as a credential and run 34307514323 refused its own link-2
+    leg with ``projection_readback_refused``. A canary that refuses because it
+    was told where to probe reports a fault that does not exist and hides the
+    one that does.
+
+    Every value here is one the real dispatch step passes. None is a DSN.
+    """
+    assert dsn_shaped_argv_flags(_WORKFLOW_ARGV) == ()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://host.docker.internal:8085",
+        "https://runtime.invalid/v1/skill",
+        "omninode-pc.tail75df5e.ts.net:19092",
+        "kafka://broker.invalid:9092",
+        _DSN_ENV,
+        "test",
+        "120000",
+    ],
+    ids=[
+        "probe-url",
+        "https-url",
+        "broker-hostport",
+        "credential-free-non-pg-uri",
+        "the-env-name",
+        "task-type",
+        "budget",
+    ],
+)
+def test_a_credential_free_value_is_not_a_dsn(value: str) -> None:
+    """No legitimate dispatch value may parse as a connection string."""
+    assert not looks_like_a_dsn(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "postgresql://u:p@h:5432/db",
+        "postgres://u:p@h/db",
+        "postgresql+asyncpg://u:p@h/db",
+        "host=h user=u password=p dbname=d",
+        "dbname=omnibase_infra host=h",
+        # The residue of the "shape nobody anticipated" catch: keyed on the
+        # embedded credential, so a NON-Postgres store's DSN is still refused.
+        "mysql://root:hunter2@db.invalid/app",
+        "redis://default:hunter2@cache.invalid:6379",
+    ],
+    ids=[
+        "pg-uri",
+        "pg-uri-short",
+        "pg-uri-driver",
+        "libpq-keyword",
+        "libpq-dbname-first",
+        "other-store-with-password",
+        "redis-with-password",
+    ],
+)
+def test_a_connection_string_is_still_a_dsn(value: str) -> None:
+    """The narrowing must not cost the refusals it was narrowing around."""
+    assert looks_like_a_dsn(value)
+
+
 def test_a_dsn_passed_as_the_name_field_is_refused_by_the_model() -> None:
     with pytest.raises(ValidationError) as excinfo:
         ModelChainCanaryRequest(
