@@ -120,10 +120,19 @@ def _collect_changed_files(
 ) -> tuple[str, ...] | None:
     """Collect the changed-file set for the diff.
 
-    Returns an explicit list when provided; otherwise diffs against ``base``
-    (three-dot, falling back to two-dot when the merge-base form is empty). Returns
-    ``None`` when neither a base nor an explicit list is available — the handler
-    then enforces the invariant (cannot prove the diff is exempt).
+    Returns an explicit list when provided; otherwise diffs against ``base`` with
+    MERGE-BASE semantics. Returns ``None`` when neither a base nor an explicit
+    list is available — the handler then enforces the invariant (cannot prove the
+    diff is exempt).
+
+    Both forms are anchored on ``git merge-base <base> HEAD`` (OMN-18058). The
+    committed set is the three-dot ``<base>...HEAD``; when that is empty the branch
+    has no commits of its own, and the fallback diffs the merge base against the
+    WORKING TREE so uncommitted edits are still seen. It must NOT fall back to the
+    two-dot ``git diff <base>``: that form describes the difference between two
+    trees, so on a stale base it reports every ``src/`` file a PEER landed on the
+    base branch as this branch's change, arming this version gate against a branch
+    that touched no packaged source at all.
     """
     if explicit:
         return tuple(explicit)
@@ -131,9 +140,12 @@ def _collect_changed_files(
         diff = _git(["diff", "--name-only", f"{base}...HEAD"])
         files = [f for f in diff.splitlines() if f.strip()]
         if not files:
-            # Fall back to a two-dot diff if the merge-base form yielded nothing.
-            diff = _git(["diff", "--name-only", base])
-            files = [f for f in diff.splitlines() if f.strip()]
+            # No commits of our own: look for uncommitted edits, still anchored on
+            # the merge base so a peer's landings are never attributed here.
+            merge_base = _git(["merge-base", base, "HEAD"])
+            if merge_base:
+                diff = _git(["diff", "--name-only", merge_base])
+                files = [f for f in diff.splitlines() if f.strip()]
         return tuple(files)
     return None
 
