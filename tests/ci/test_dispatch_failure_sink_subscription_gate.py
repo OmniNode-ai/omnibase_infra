@@ -17,9 +17,9 @@ republished into, creating a closed self-feeding loop:
 Fixed by OMN-18013 (Jonah, 2026-09-07): quarantine topic removed from
 node_ledger_projection_compute subscribe_topics. This gate prevents recurrence.
 
-The authoritative dispatch-failure sink set is derived at test time from
+The dispatch-failure quarantine sink is derived at test time from
 build_dlq_topic -- the same factory used by DLQQuarantineProducer -- so a
-renamed or extended sink is caught automatically without editing this file.
+renamed quarantine topic is caught without editing this file.
 
 RED ON PARENT (eee49719c): node_ledger_projection_compute subscribed to
 onex.dlq.omnibase-infra.quarantine.v1. PASSES on OMN-18013 and every commit
@@ -38,7 +38,10 @@ from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src" / "omnibase_infra"
 
-_DISPATCH_FAILURE_SINKS: frozenset[str] = frozenset({build_dlq_topic("quarantine")})
+
+def _dispatch_failure_sinks() -> frozenset[str]:
+    """Return dispatch-failure sink topics that contracts must not consume."""
+    return frozenset({build_dlq_topic("quarantine")})
 
 
 def _scan_subscribers(
@@ -69,6 +72,23 @@ def _repo_contract_paths() -> list[Path]:
     )
 
 
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _format_violators(violators: list[tuple[str, Path, str]]) -> str:
+    return (
+        "Contracts subscribing to a dispatch-failure sink (see OMN-17389):\n"
+        + "\n".join(
+            f"  {name} ({_display_path(path)}): {topic}"
+            for name, path, topic in violators
+        )
+    )
+
+
 @pytest.mark.unit
 def test_no_contract_subscribes_to_dispatch_failure_sink() -> None:
     """Zero contracts subscribe to any dispatch-failure sink topic.
@@ -78,14 +98,8 @@ def test_no_contract_subscribes_to_dispatch_failure_sink() -> None:
     of bug is structurally impossible: no contract may subscribe to a topic in
     the authoritative dispatch-failure sink set.
     """
-    violators = _scan_subscribers(_repo_contract_paths(), _DISPATCH_FAILURE_SINKS)
-    assert violators == [], (
-        "Contracts subscribing to a dispatch-failure sink (see OMN-17389):\n"
-        + "\n".join(
-            f"  {name} ({path.relative_to(REPO_ROOT)}): {topic}"
-            for name, path, topic in violators
-        )
-    )
+    violators = _scan_subscribers(_repo_contract_paths(), _dispatch_failure_sinks())
+    assert violators == [], _format_violators(violators)
 
 
 @pytest.mark.unit
@@ -96,7 +110,7 @@ def test_gate_fires_when_subscriber_injected(tmp_path: Path) -> None:
     asserts the scanner returns it as a violator. The source tree is never
     mutated; all writes go to tmp_path.
     """
-    quarantine_topic = next(iter(_DISPATCH_FAILURE_SINKS))
+    quarantine_topic = next(iter(_dispatch_failure_sinks()))
     contract_path = tmp_path / "contract.yaml"
     contract_path.write_text(
         "name: synthetic_bad_node\n"
@@ -105,9 +119,48 @@ def test_gate_fires_when_subscriber_injected(tmp_path: Path) -> None:
         f"    - {quarantine_topic!r}\n",
         encoding="utf-8",
     )
-    violators = _scan_subscribers([contract_path], _DISPATCH_FAILURE_SINKS)
+    violators = _scan_subscribers([contract_path], _dispatch_failure_sinks())
     assert len(violators) == 1
     name, path, topic = violators[0]
     assert name == "synthetic_bad_node"
     assert path == contract_path
     assert topic == quarantine_topic
+
+
+@pytest.mark.unit
+def test_failure_message_lists_multiple_violators_from_tmp_paths(
+    tmp_path: Path,
+) -> None:
+    """Positive control: failure output is robust for non-repo temp paths."""
+    quarantine_topic = next(iter(_dispatch_failure_sinks()))
+    other_topic = "onex.events.omnibase-infra.allowed.v1"
+    first = tmp_path / "one" / "contract.yaml"
+    second = tmp_path / "two" / "contract.yaml"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text(
+        "name: synthetic_bad_node_one\n"
+        "event_bus:\n"
+        "  subscribe_topics:\n"
+        f"    - {quarantine_topic!r}\n"
+        f"    - {other_topic!r}\n",
+        encoding="utf-8",
+    )
+    second.write_text(
+        "name: synthetic_bad_node_two\n"
+        "event_bus:\n"
+        "  subscribe_topics:\n"
+        f"    - {quarantine_topic!r}\n",
+        encoding="utf-8",
+    )
+
+    violators = _scan_subscribers([first, second], _dispatch_failure_sinks())
+    message = _format_violators(violators)
+
+    assert len(violators) == 2
+    assert "synthetic_bad_node_one" in message
+    assert "synthetic_bad_node_two" in message
+    assert str(first) in message
+    assert str(second) in message
+    assert quarantine_topic in message
+    assert other_topic not in message
