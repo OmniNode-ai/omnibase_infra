@@ -448,7 +448,7 @@ class TestAcceptanceCriteriaAreReadWithoutAHeading:
 
     def test_an_empty_body_is_not_a_gap(self) -> None:
         """Linear returns null for a bodyless ticket; that is not a criterion."""
-        assert _ac_coverage_gap("", 6, 6) == ("", ())
+        assert _ac_coverage_gap("", 6, 6, 6) == ("", ())
 
 
 class TestNonProbativeCoverageDoesNotProveACriterion:
@@ -459,14 +459,14 @@ class TestNonProbativeCoverageDoesNotProveACriterion:
         verified probative check". A tie is the absence of a majority either
         way, and a refutation bound must not read that as support.
         """
-        reason, uncovered = _ac_coverage_gap(_OMN_16025_DESCRIPTION, 6, 6)
+        reason, uncovered = _ac_coverage_gap(_OMN_16025_DESCRIPTION, 6, 6, 6)
         assert reason, "6 verified against 6 non-probative must hold"
         assert "at least half" in reason
         assert len(uncovered) == 5
 
     def test_a_single_criterion_with_only_non_probative_company_holds(self) -> None:
         description = "## Acceptance\n\n- the one thing this ticket claims\n"
-        reason, uncovered = _ac_coverage_gap(description, 1, 1)
+        reason, uncovered = _ac_coverage_gap(description, 1, 1, 1)
         assert reason
         assert uncovered == ("the one thing this ticket claims",)
 
@@ -477,7 +477,7 @@ class TestNonProbativeCoverageDoesNotProveACriterion:
         minority of provenance entries is exactly what it is meant to tolerate.
         """
         description = "## Acceptance criteria\n\n- one\n- two\n- three\n- four\n"
-        assert _ac_coverage_gap(description, 4, 2) == ("", ())
+        assert _ac_coverage_gap(description, 4, 4, 2) == ("", ())
 
 
 # ---------------------------------------------------------------------------
@@ -645,7 +645,7 @@ class TestOmn16025RegressionFixture:
 
         # CONTROL: the counting rule that used to hold this body still refutes
         # it on its own terms, so the binding gate has replaced no coverage.
-        coverage_reason, uncovered = _ac_coverage_gap(_OMN_16025_DESCRIPTION, 6, 6)
+        coverage_reason, uncovered = _ac_coverage_gap(_OMN_16025_DESCRIPTION, 6, 6, 6)
         assert coverage_reason
         assert len(uncovered) == 5
 

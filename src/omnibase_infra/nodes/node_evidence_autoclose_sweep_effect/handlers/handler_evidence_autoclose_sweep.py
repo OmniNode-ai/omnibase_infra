@@ -41,7 +41,10 @@ Pipeline
    record GAP_AC_COVERAGE naming the criteria: an unchecked markdown
    checkbox; an acceptance-criteria section listing more items than
    dod_verify returned VERIFIED PROBATIVE checks; and non-probative checks
-   outnumbering the verified probative ones. The last two are OMN-16106 D3,
+   outnumbering the verified probative ones AMONG THE CHECKS THAT DECLARE
+   THEY COVER ONE OF THIS TICKET'S CRITERIA (OMN-18125 — that last rule read
+   the verdict's totals until 2026-09-10, so a ticket's own accumulated
+   provenance items voted against it). The last two are OMN-16106 D3,
    and they exist because the denominator used to be ``total_checks`` —
    which made the guard depend on whether an author wrote criteria as
    checkboxes or as prose bullets rather than on the evidence. Criteria are
@@ -582,12 +585,18 @@ _CHECK_STATUS_VERIFIED = "verified"
 _CHECK_STATUS_FAILED = "failed"
 _CHECK_STATUS_SKIPPED = "skipped"
 _CHECK_STATUS_SUPERSEDED = "superseded"
+#: OMN-15391. Executed, exited 0, and its exit status could not have been
+#: otherwise for any product reason. Read by `_coverage_corpus_counts`, which
+#: needs the denominator term by name rather than as "everything that is not
+#: verified" — `skipped` and `superseded` are also not verified and are not
+#: this fact.
+_CHECK_STATUS_NON_PROBATIVE = "non_probative"
 
 #: This node's own `contract.yaml` `node_version`, part of the gap-comment
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.10.2"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.11.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -1654,7 +1663,8 @@ def _gate_probe_declaration(description: str) -> tuple[str, str, str]:
 def _ac_coverage_gap(
     description: str,
     verified_count: int,
-    non_probative_count: int,
+    coverage_verified_count: int,
+    coverage_non_probative_count: int,
 ) -> tuple[str, tuple[str, ...]]:
     """Decide whether ``description`` carries criteria dod_verify did not cover.
 
@@ -1722,6 +1732,32 @@ def _ac_coverage_gap(
     An empty/absent description is NOT a gap: Linear returns null for a ticket
     with no body, and treating "no criteria written down" as "criteria we
     cannot read" would turn the guard into a blanket hold on every such ticket.
+
+    OMN-18125 -- WHICH CHECKS RULE 3 IS OVER, and why rule 2 is not.
+    -----------------------------------------------------------------
+    Rule 3's arithmetic is unchanged; the POPULATION it counts is not. Its two
+    terms now arrive from :func:`_coverage_corpus_counts`, restricted to the
+    checks whose ``binds_ac`` names one of THIS ticket's criteria. They used
+    to be the verdict's TOTALS, which include every auto-minted provenance
+    item a ticket's companion history ever accumulated. Measured on OMN-17478
+    (closer run 34431989659): 22 of 34 were exactly that, and they held a
+    ticket whose six criteria were each already bound to a verified probative
+    check. Rule 3's own sentence names "the corpus that was supposed to prove
+    this ticket's criteria" -- items declaring they prove nothing were never
+    that corpus, and a count over them can neither support the coverage claim
+    nor refute it.
+
+    **Rule 2 deliberately keeps the verdict-wide** ``verified_count``. Its
+    question is different -- "do enough verified probative checks exist AT ALL
+    to cover this many criteria" -- and narrowing it too would convert a
+    legitimate contract whose single integration proof declares three criteria
+    into a hold, which is authorial over-claim, a separate question, and not
+    what was measured. Restricting one rule and not the other is the whole
+    change; widening it further needs its own evidence.
+
+    Why the OMN-18075 padding loophole cannot reopen through the narrower
+    population is argued where the population is computed:
+    :func:`_coverage_corpus_counts`.
     """
     if not description.strip():
         return "", ()
@@ -1757,16 +1793,20 @@ def _ac_coverage_gap(
             "product reason covers no criterion.)",
             items,
         )
-    if non_probative_count >= verified_count:
+    if coverage_non_probative_count >= coverage_verified_count:
         return (
-            f"dod_verify returned {non_probative_count} non-probative check(s) "
-            f"against {verified_count} verified probative one(s), so at least "
+            f"dod_verify returned {coverage_non_probative_count} non-probative check(s) "
+            f"against {coverage_verified_count} verified probative one(s), so at least "
             "half of the corpus that was supposed to prove this ticket's "
             f"{len(items)} acceptance criterion(s) proved nothing. A "
             "non-probative check executed and exited 0 in a way it could not "
             "have avoided, so it carries no product verdict; without a strict "
             "majority of probative ones, 'every criterion is covered by a "
-            "verified probative check' is not supportable from these counts.",
+            "verified probative check' is not supportable from these counts. "
+            "Both terms count only the checks whose `binds_ac` names one of "
+            "the criteria listed below (OMN-18125), so a provenance item that "
+            "declares no coverage is in neither -- the verdict's own totals "
+            "beside this reason are the wider corpus.",
             items,
         )
 
@@ -1856,6 +1896,104 @@ def _declared_ac_bindings(
                 continue
             collected.setdefault(label, []).append((check_id, status, proof_class))
     return field_present, {label: tuple(rows) for label, rows in collected.items()}
+
+
+def _coverage_corpus_counts(
+    verdict: dict[str, object], description: str
+) -> tuple[int, int]:
+    """``(verified, non_probative)`` over the checks that CLAIM to cover this ticket.
+
+    OMN-18125. The counting rules in :func:`_ac_coverage_gap` are refutations
+    of one claim -- "every acceptance criterion is covered by at least one
+    verified probative check". This is the population that claim is ABOUT: the
+    check records whose ``binds_ac`` names a criterion parsed from this
+    ticket's own body. A check the contract does not say covers anything is
+    evidence neither for the claim nor against it, so it belongs in neither
+    term.
+
+    WHY THIS EXISTS -- measured on OMN-17478, closer run 34431989659, comment
+    ``e1cb7e79`` at 2026-09-10T03:10:44Z. Its contract at ``70ae3b98`` binds
+    all six criteria to VERIFIED probative checks, so the OMN-18056 binding
+    leg released and the class moved from ``gap_ac_unbound`` to
+    ``gap_ac_coverage``. Rule 3 then held it anyway, on 22 non-probative
+    against 12 verified. **The 22 were auto-minted Evidence-Source provenance
+    items from four earlier companion PRs** -- the ``-ci`` product-diff-scope
+    items, the ``occ-self-bind-pr-<n>`` items, the bare PR-state items, each
+    with its derived ``::pr-live-state`` overlay. Every one is a bare ``gh pr
+    view --json ...``, which is exactly why omnimarket demotes them, and not
+    one declares ``binds_ac``. So the rule refuted a claim about coverage with
+    a population that was 22/34 outside coverage.
+
+    That population grows with every companion a ticket ever attracts and
+    never shrinks, so the defect is fleet-wide and monotone: the longer a
+    ticket's autobind history, the larger the majority its own evidence has to
+    out-vote. The two ways to clear it by hand -- superseding the shared
+    provenance items, or splitting six evidence items into seventeen -- both
+    move a counter and prove nothing further, which is why neither is the fix.
+
+    THE PADDING LOOPHOLE STAYS CLOSED, and by construction rather than by a
+    named exclusion:
+
+    * a ``non_probative`` check can never enter the NUMERATOR, because
+      :func:`_ac_binding_gap` binds only on ``verified`` and omnimarket's
+      ``_demote_non_probative`` demotes exactly the greens. A bare
+      ``occ-self-bind-pr-<n>`` cannot raise coverage whether it declares a
+      binding or not;
+    * one that DOES declare a binding lands in the DENOMINATOR, so declaring
+      it costs the contract that declared it;
+    * an unbound check moves neither term, so minting more companions cannot
+      release a hold either.
+
+    Nothing here matches on a check id, a command shape or the word
+    "self-bind". That distinction is deliberate: OMN-18075 owns removing the
+    self-bind AT THE MINT, on the 2026-09-09 ruling that the read is the wrong
+    place to filter it, and its Out of scope names this change as the separate
+    question it is. This narrows a population by what the contract itself
+    declares; it does not exempt anything.
+
+    Records, not items: the returned counts are check RECORDS, the same unit
+    the verdict's own ``verified_count``/``non_probative_count`` use, so the
+    reason a hold states can be checked against the counters beside it. A
+    record binding several criteria still counts ONCE.
+
+    An unlabelled criterion cannot join the corpus -- the join is on the
+    canonical ``AC<n>``/``DoD<n>`` label, and a criterion with no label is one
+    nothing in a contract can point at. That case returns ``(0, 0)``, which
+    HOLDS both rules. It is unreachable in production (the binding leg refuses
+    an unlabelled criterion first), and holding is the safe direction for the
+    day it is not.
+    """
+    labels = {
+        label
+        for label in (
+            _canonical_ac_label(item)
+            for item in _acceptance_criteria_items(description)
+        )
+        if label
+    }
+    if not labels:
+        return 0, 0
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return 0, 0
+
+    verified = 0
+    non_probative = 0
+    for entry in checks:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get(_CHECK_BINDS_AC_KEY)
+        if not isinstance(raw, list):
+            continue
+        declared = {_canonical_ac_label(str(item)) for item in raw}
+        if not declared & labels:
+            continue
+        status = str(entry.get(_CHECK_STATUS_KEY) or "").strip().lower()
+        if status == _CHECK_STATUS_VERIFIED:
+            verified += 1
+        elif status == _CHECK_STATUS_NON_PROBATIVE:
+            non_probative += 1
+    return verified, non_probative
 
 
 def _has_ac_heading(description: str) -> bool:
@@ -4496,8 +4634,33 @@ class HandlerEvidenceAutocloseSweep:
                     non_probative_count=non_probative_count,
                     behavior_proving_count=behavior_proving_count,
                 )
+            # OMN-18125. THE POPULATION RULE 3 JUDGES. Its arithmetic is
+            # unchanged; what changed is which numbers reach it. It used to
+            # read the verdict's TOTALS, which count every check in the
+            # contract including the auto-minted provenance items that declare
+            # coverage of nothing. Measured on OMN-17478 (closer run
+            # 34431989659): 22 of 34 were exactly that, and they held a ticket
+            # whose six criteria were each bound to a verified probative
+            # check. `_coverage_corpus_counts` restricts both of rule 3's
+            # terms to the checks the contract itself declares as covering one
+            # of THIS ticket's criteria; its docstring carries the measurement
+            # and the reason the padding loophole cannot reopen through it.
+            #
+            # `verified_count` is still passed for RULE 2, which asks a
+            # different question and is deliberately not narrowed — see
+            # `_ac_coverage_gap`.
+            #
+            # The verdict's own totals are also still what the outcome row and
+            # the comment render, below and in `_ac_coverage_outcome` — a
+            # receipt that hid the 22 would be less honest, not more.
+            coverage_verified, coverage_non_probative = _coverage_corpus_counts(
+                verdict, description
+            )
             ac_gap_reason, uncovered = _ac_coverage_gap(
-                description, verified_count, non_probative_count
+                description,
+                verified_count,
+                coverage_verified,
+                coverage_non_probative,
             )
             if ac_gap_reason:
                 return await self._ac_coverage_outcome(
