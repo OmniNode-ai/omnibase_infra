@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -86,12 +87,12 @@ def _require_psql() -> str:
 
 
 def _require_db() -> PostgresConfig:
-    os.environ.update(_read_omnibase_env())
     if os.environ.get(OPT_IN_ENV) != "1":
         pytest.skip(
             f"node-migration discovery test is opt-in (mutates DB); "
             f"set {OPT_IN_ENV}=1 and OMNIBASE_INFRA_DB_URL to a dedicated DB"
         )
+    os.environ.update(_read_omnibase_env())
     config = PostgresConfig.from_env()
     if not config.is_configured or not check_postgres_reachable(config):
         pytest.skip(
@@ -130,6 +131,37 @@ def _require_db() -> PostgresConfig:
             f"PostgreSQL reachable but auth/select failed: {probe.stderr.strip()}"
         )
     return config
+
+
+def test_disabled_node_migration_discovery_does_not_read_env_or_mutate_process_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Disabled discovery tests refuse before loading a home-style dotenv file."""
+    controlled_env = tmp_path / "conflicting-omnibase.env"
+    controlled_env.write_text(
+        "OMNIBASE_INFRA_DB_URL=postgresql://conflicting.example/forbidden\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "OMNIBASE_ENV", controlled_env)
+
+    read_attempts: list[Path] = []
+    original_read_text = Path.read_text
+
+    def _guarded_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == controlled_env:
+            read_attempts.append(path)
+            raise AssertionError("disabled discovery test must not read OMNIBASE_ENV")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _guarded_read_text)
+    monkeypatch.delenv(OPT_IN_ENV, raising=False)
+    before = dict(os.environ)
+
+    with pytest.raises(pytest.skip.Exception, match="opt-in"):
+        _require_db()
+
+    assert read_attempts == []
+    assert dict(os.environ) == before
 
 
 def _psql_env(config: PostgresConfig) -> dict[str, str]:
@@ -176,8 +208,8 @@ def _query(psql: str, config: PostgresConfig, sql: str) -> str:
 
 @pytest.mark.serial
 def test_node_migration_discovery_applies_views(tmp_path: Path) -> None:
-    psql = _require_psql()
     config = _require_db()
+    psql = _require_psql()
 
     # Isolate this test run in a dedicated schema-equivalent by using a unique
     # tracking-id namespace is not enough; instead drop the objects we create up
@@ -250,8 +282,8 @@ def test_node_migration_discovery_applies_views(tmp_path: Path) -> None:
 @pytest.mark.serial
 def test_node_076_does_not_collide_with_infra_flat_076() -> None:
     """node:<node>:076 and docker/076_* coexist (distinct PK strings)."""
-    psql = _require_psql()
     config = _require_db()
+    psql = _require_psql()
 
     # Apply infra flat 076 directly and record it under the flat id, mirroring
     # what the flat-sequence loop does.

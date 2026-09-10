@@ -78,7 +78,13 @@ RECONCILIATION_END = "-- ---- END OMN-15376 shape reconciliation:"
 # Roles the corpus GRANTs to. They are environment-provisioned in every real
 # lane (forward migration 094 / the RDS bootstrap), so the fixture provisions
 # them too -- otherwise this suite would prove role tolerance, not shape drift.
-SEED_ROLES = ("app_dashboard", "role_omnidash", "omninodeadmin")
+SEED_ROLES = (
+    "app_dashboard",
+    "role_omnidash",
+    "omninodeadmin",
+    "tenant_projection_writer",
+    "omninode_runtime",
+)
 
 # The two live instances, pinned to the error text and file line the deploy
 # printed. A change that moves either line without updating this is a signal.

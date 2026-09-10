@@ -143,7 +143,7 @@ async def db_handler(
 
 @pytest.fixture
 async def ledger_append_handler(
-    db_handler: HandlerDb, mock_container: MagicMock
+    postgres_dsn: str, mock_container: MagicMock
 ) -> AsyncGenerator[HandlerLedgerAppend, None]:
     """Create and initialize a HandlerLedgerAppend for tests.
 
@@ -154,7 +154,7 @@ async def ledger_append_handler(
         HandlerLedgerAppend,
     )
 
-    handler = HandlerLedgerAppend(mock_container, db_handler)
+    handler = HandlerLedgerAppend(mock_container, postgres_dsn)
     await handler.initialize({})
 
     try:
@@ -165,7 +165,7 @@ async def ledger_append_handler(
 
 @pytest.fixture
 async def ledger_query_handler(
-    db_handler: HandlerDb, mock_container: MagicMock
+    postgres_dsn: str, mock_container: MagicMock
 ) -> AsyncGenerator[HandlerLedgerQuery, None]:
     """Create and initialize a HandlerLedgerQuery for tests.
 
@@ -176,7 +176,7 @@ async def ledger_query_handler(
         HandlerLedgerQuery,
     )
 
-    handler = HandlerLedgerQuery(mock_container, db_handler)
+    handler = HandlerLedgerQuery(mock_container, postgres_dsn)
     await handler.initialize({})
 
     try:

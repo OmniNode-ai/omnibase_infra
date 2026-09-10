@@ -120,6 +120,7 @@ def _run_stage(
     deploy_ref: str | None = None,
     hotpatch: bool = False,
     allow_unpinned: bool = False,
+    repo_refs: list[str] | None = None,
     refs_out: Path | None = None,
     use_default_refs_out: bool = False,
     home: Path | None = None,
@@ -144,8 +145,11 @@ def _run_stage(
         env["DEPLOY_HOTPATCH"] = "1"
     if allow_unpinned:
         env["ALLOW_UNPINNED_DEPLOY_SOURCE"] = "1"
+    command = ["bash", str(STAGE_SCRIPT)]
+    for repo_ref in repo_refs or []:
+        command.extend(["--repo-ref", repo_ref])
     return subprocess.run(
-        ["bash", str(STAGE_SCRIPT)],
+        command,
         cwd=build_ctx,
         env=env,
         capture_output=True,
@@ -287,6 +291,128 @@ def test_unresolvable_deploy_ref_fails_build_closed(tmp_path: Path) -> None:
     assert "clean-ref checkout failed" in result.stderr
     # A failed checkout must NOT leave a provenance manifest claiming success.
     assert not (build_ctx / "workspace" / "sibling-vcs-provenance.json").exists()
+
+
+PINNED_SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
+
+
+def _current_repo_refs(omni_home: Path) -> list[str]:
+    return [
+        f"{repo}={_git(omni_home / repo, 'rev-parse', 'HEAD')}"
+        for repo in PINNED_SIBLINGS
+    ]
+
+
+def _make_pinned_clones(tmp_path: Path) -> Path:
+    """Only the checkout targets are needed for pre-staging refusal tests."""
+    omni_home = tmp_path / "omni_home"
+    for repo in PINNED_SIBLINGS:
+        _init_repo(omni_home / repo, _DIST_NAME[repo])
+    return omni_home
+
+
+@pytest.mark.unit
+def test_per_repo_pins_stage_distinct_immutable_commits(tmp_path: Path) -> None:
+    omni_home = _make_omni_home(tmp_path)
+    old_core, target_core = _behind_core(omni_home)
+    market = omni_home / "omnimarket"
+    _git(market, "checkout", "-q", "-b", "unmerged-change")
+    target_market = _advance_dev_keep_version(market)
+    _git(market, "checkout", "-q", "dev")
+    target_compat = _git(omni_home / "omnibase_compat", "rev-parse", "HEAD")
+    targets = {
+        "omnibase_core": target_core,
+        "omnibase_compat": target_compat,
+        "omnimarket": target_market,
+    }
+    result = _run_stage(
+        omni_home,
+        tmp_path / "ctx",
+        repo_refs=[f"{repo}={sha}" for repo, sha in targets.items()],
+    )
+    assert result.returncode == 0, result.stderr
+    assert target_core != old_core
+    expected = json.loads(_refs_out(tmp_path / "ctx").read_text())
+    vcs = json.loads(
+        (tmp_path / "ctx/workspace/sibling-vcs-provenance.json").read_text()
+    )
+    assert expected["ref_pinned"] is True
+    for repo, sha in targets.items():
+        assert _git(omni_home / repo, "rev-parse", "HEAD") == sha
+        assert expected["repos"][repo]["expected_sha"] == sha
+        assert expected["repos"][repo]["hotpatch"] is False
+        assert vcs["siblings"][repo]["vcs_ref"] == sha
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid",
+    ["missing", "duplicate", "unknown", "short_sha", "global", "hotpatch", "unpinned"],
+)
+def test_per_repo_pin_errors_preserve_every_clone(tmp_path: Path, invalid: str) -> None:
+    omni_home = tmp_path / "omni_home"
+    _init_repo(omni_home / "omnibase_core", "omnibase-core")
+    before_core, target_core = _behind_core(omni_home)
+    refs = [
+        f"omnibase_core={target_core}",
+        f"omnibase_compat={'b' * 40}",
+        f"omnimarket={'c' * 40}",
+    ]
+    if invalid == "missing":
+        refs.pop()
+    elif invalid == "duplicate":
+        refs.append(refs[0])
+    elif invalid == "unknown":
+        refs.append(f"other={target_core}")
+    elif invalid == "short_sha":
+        refs[-1] = "omnimarket=1234567"
+    result = _run_stage(
+        omni_home,
+        tmp_path / "ctx",
+        repo_refs=refs,
+        deploy_ref="dev" if invalid == "global" else None,
+        hotpatch=invalid == "hotpatch",
+        allow_unpinned=invalid == "unpinned",
+    )
+    assert result.returncode != 0
+    assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
+    assert not _refs_out(tmp_path / "ctx").exists()
+
+
+@pytest.mark.unit
+def test_per_repo_late_missing_commit_preserves_earlier_clone(tmp_path: Path) -> None:
+    omni_home = _make_pinned_clones(tmp_path)
+    before_core, target_core = _behind_core(omni_home)
+    refs = _current_repo_refs(omni_home)
+    refs[0] = f"omnibase_core={target_core}"
+    refs[-1] = f"omnimarket={'f' * 40}"
+    result = _run_stage(omni_home, tmp_path / "ctx", repo_refs=refs)
+    assert result.returncode == 4, result.stderr
+    assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
+    assert not _refs_out(tmp_path / "ctx").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ignored", [False, True])
+def test_per_repo_dirty_target_is_refused_without_deleting_work(
+    tmp_path: Path, ignored: bool
+) -> None:
+    omni_home = _make_pinned_clones(tmp_path)
+    before_core, target_core = _behind_core(omni_home)
+    market = omni_home / "omnimarket"
+    if ignored:
+        (market / ".gitignore").write_text("operator-work.txt\n")
+        _git(market, "add", ".gitignore")
+        _git(market, "commit", "-q", "-m", "ignore operator work")
+    sentinel = market / "operator-work.txt"
+    sentinel.write_text("must survive\n")
+    refs = _current_repo_refs(omni_home)
+    refs[0] = f"omnibase_core={target_core}"
+    result = _run_stage(omni_home, tmp_path / "ctx", repo_refs=refs)
+    assert result.returncode == 4, result.stderr
+    assert "dirty" in result.stderr.lower()
+    assert sentinel.read_text() == "must survive\n"
+    assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
 
 
 # ---------------------------------------------------------------------------

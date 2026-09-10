@@ -8,6 +8,13 @@
 # Usage:
 #   OMNI_HOME=/data/omninode/omni_home \
 #     bash docker/runtime_build/stage_workspace.sh
+#   Or pin each staged sibling independently using owned, clean disposable clones:
+#   OMNI_HOME=<disposable-clone-root> bash scripts/runtime_build/stage_workspace.sh \
+#     --repo-ref omnibase_core=<40-character-SHA> \
+#     --repo-ref omnibase_compat=<40-character-SHA> \
+#     --repo-ref omnimarket=<40-character-SHA>
+#   This mode requires every staged sibling and forbids global-ref/hotpatch/
+#   unpinned selectors. It resolves all pins before any non-forcing checkout.
 #
 # On success, creates:
 #   workspace/sibling-repos/<repo-name>/  (staged working tree copy)
@@ -81,6 +88,31 @@ SIBLING_REPOS=(
     "omnibase_compat"
     "omnimarket"
 )
+
+# Keep selectors as separate argv entries; never evaluate or word-split pins.
+REPO_REF_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --repo-ref)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --repo-ref requires NAME=<40-character-SHA>" >&2
+                exit 2
+            fi
+            REPO_REF_ARGS+=(--repo-ref "$2")
+            shift 2
+            ;;
+        *)
+            echo "ERROR: unknown staging argument: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+if [[ ${#REPO_REF_ARGS[@]} -gt 0 ]]; then
+    if [[ -n "${DEPLOY_REF:-}" || "${DEPLOY_HOTPATCH:-0}" == "1" || "${ALLOW_UNPINNED_DEPLOY_SOURCE:-0}" == "1" ]]; then
+        echo "ERROR: per-repo pins cannot be combined with DEPLOY_REF, DEPLOY_HOTPATCH=1, or ALLOW_UNPINNED_DEPLOY_SOURCE=1" >&2
+        exit 2
+    fi
+fi
 
 if [[ -z "${OMNI_HOME:-}" ]]; then
     echo "ERROR: OMNI_HOME must be set for workspace-mode build" >&2
@@ -157,7 +189,7 @@ DEPLOY_HOTPATCH="${DEPLOY_HOTPATCH:-0}"
 # never fires on a stale expected-refs manifest left by a prior pinned run.
 RT1_ENGAGED=false
 
-if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
+if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     RT1_ENGAGED=true
     EXPECTED_REFS_OUT="$(resolve_expected_refs_out)"
     echo "RT-1: expected-refs manifest -> ${EXPECTED_REFS_OUT} (outside the build context, OMN-16442)" >&2
@@ -166,6 +198,9 @@ if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     for repo in "${SIBLING_REPOS[@]}"; do
         checkout_args+=(--repo "${repo}=${OMNI_HOME}/${repo}")
     done
+    if [[ ${#REPO_REF_ARGS[@]} -gt 0 ]]; then
+        checkout_args+=(--require-immutable-refs "${REPO_REF_ARGS[@]}")
+    fi
     if [[ -n "${DEPLOY_REF}" ]]; then
         checkout_args+=(--ref "${DEPLOY_REF}")
         # OMN-17135: DEPLOY_REF is a pin on ONE repository, and the CI rebuild
@@ -183,7 +218,11 @@ if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)
     fi
-    echo "RT-1: clean-checkout siblings to ref '${DEPLOY_REF:-<hotpatch:HEAD>}' before staging (OMN-14438)" >&2
+    if [[ ${#REPO_REF_ARGS[@]} -gt 0 ]]; then
+        echo "RT-1: resolve all immutable per-repo pins before non-forcing checkout" >&2
+    else
+        echo "RT-1: clean-checkout siblings to ref '${DEPLOY_REF:-<hotpatch:HEAD>}' before staging (OMN-14438)" >&2
+    fi
     if ! python3 "${DEPLOY_SOURCE_REF_SCRIPT}" "${checkout_args[@]}"; then
         echo "ERROR: RT-1 clean-ref checkout failed; refusing to build from an unpinned tree (OMN-14438)" >&2
         exit 4
