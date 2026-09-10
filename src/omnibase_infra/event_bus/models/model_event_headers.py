@@ -69,6 +69,18 @@ class ModelEventHeaders(BaseModel):
     content_type: str = Field(default="application/json")
     correlation_id: UUID = Field(default_factory=uuid4)
     message_id: UUID = Field(default_factory=uuid4)
+    # OMN-18116: the CAUSAL EDGE on the wire -- the `message_id` of the
+    # message whose consumption caused this one to be published.
+    #
+    # This is the transport-side half of `ModelEventEnvelope.parent_envelope_id`.
+    # It exists because the readback surface a chain replay reads --
+    # `event_ledger` -- populates its per-hop identity column from THIS
+    # header (`handler_ledger_projection`), not from the envelope body. An
+    # edge recorded only in the body would be compared against a column
+    # holding an unrelated identity and would fail every hop.
+    #
+    # `None` is the checkable statement that this message is a chain HEAD.
+    parent_message_id: UUID | None = Field(default=None)
     # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
         ..., description="Message creation timestamp (must be explicitly provided)"

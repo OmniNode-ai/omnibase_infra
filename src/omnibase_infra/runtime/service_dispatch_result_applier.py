@@ -65,6 +65,9 @@ from omnibase_infra.runtime.contract_terminal_events import (
     apply_failure_terminal_guard,
     declared_failure_terminal_topics,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import (
+    current_dispatch_envelope,
+)
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 from omnibase_infra.utils import derive_event_type_from_topic, sanitize_error_message
@@ -705,6 +708,27 @@ class DispatchResultApplier:
 
         # Phase 2: Publish output events AFTER projection and intents have committed.
         if result.output_events:
+            # OMN-18116: THE causal-edge origination site.
+            #
+            # Every event this runtime publishes as a consequence of consuming
+            # another one is built here, and the consumed envelope is already
+            # bound to this dispatch on a contextvar. Until now that parent
+            # identity was in scope at the publish site and discarded, so a
+            # chain read back later was a set of hops sharing a correlation id
+            # with no recorded statement of what caused what -- and a
+            # "replay green" verdict over it could only be a claim.
+            #
+            # No handler sets this. The canonical handler signature is
+            # `handle(request: ModelX) -> ModelY` and never sees an envelope;
+            # origination belongs in the runtime adapter, which is why there is
+            # exactly one site rather than one per node.
+            #
+            # None here is a STATEMENT: nothing was consumed, so every event of
+            # this dispatch is a chain head. A verifier can check that.
+            consumed_envelope = current_dispatch_envelope()
+            parent_envelope_id = (
+                consumed_envelope.envelope_id if consumed_envelope is not None else None
+            )
             for idx, output_event in enumerate(result.output_events):
                 try:
                     publish_payload = self._publish_payload_for_output_event(
@@ -719,11 +743,30 @@ class DispatchResultApplier:
                         effective_correlation_id,
                         f"{type(output_event).__name__}:{idx}",
                     )
+                    # A self-edge is refused by the envelope model, and
+                    # refusing it here too keeps a pathological equality from
+                    # taking the publish down. Equality means the deterministic
+                    # uuid5 collided with the consumed envelope's own id, which
+                    # is a real anomaly worth naming rather than a case to
+                    # silently paper over -- so it is logged and the hop is
+                    # recorded as a head, which reads as a broken chain to a
+                    # verifier instead of as a valid self-caused one.
+                    edge = parent_envelope_id
+                    if edge is not None and edge == deterministic_id:
+                        logger.warning(
+                            "Refusing a self-referential causal edge: the consumed "
+                            "envelope id equals this output's deterministic id "
+                            "(correlation_id=%s, envelope_id=%s)",
+                            str(effective_correlation_id),
+                            str(deterministic_id),
+                        )
+                        edge = None
                     output_envelope: ModelEventEnvelope[BaseModel] = ModelEventEnvelope(
                         envelope_id=deterministic_id,
                         payload=publish_payload,
                         correlation_id=effective_correlation_id,
                         envelope_timestamp=self._clock(),
+                        parent_envelope_id=edge,
                     )
 
                     # Extract partition key for per-entity ordering.
