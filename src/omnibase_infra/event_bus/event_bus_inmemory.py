@@ -67,6 +67,9 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
+from omnibase_infra.event_bus.envelope_header_identity import (
+    header_identity_fields_from_envelope,
+)
 from omnibase_infra.event_bus.models import (
     ModelEventHeaders,
     ModelEventMessage,
@@ -323,11 +326,17 @@ class EventBusInmemory(_CoreEventBusInmemory):
                 value=str(type(envelope)),
             ) from e
 
+        # OMN-18116: identity and the causal edge come from the envelope, not
+        # from the header model's uuid4 defaults. Applied on this bus too, so a
+        # chain assembled from an in-memory run reads the same as one assembled
+        # from the broker -- a rule that holds on only one transport is a rule
+        # a verifier cannot rely on.
         headers = ModelEventHeaders(
             source=f"{self._environment}.{self._group}",
             event_type=topic,
             content_type="application/json",
             timestamp=datetime.now(UTC),
+            **header_identity_fields_from_envelope(envelope),
         )
         await self.publish(topic, key, value, headers)
 
