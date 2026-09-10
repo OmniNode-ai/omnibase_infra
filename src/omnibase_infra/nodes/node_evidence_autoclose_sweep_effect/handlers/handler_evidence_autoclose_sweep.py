@@ -605,7 +605,7 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.12.0"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.12.1"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -2034,6 +2034,17 @@ _STATE_MARKER_RE: re.Pattern[str] = re.compile(
     | \brows?\s+carrying\b
     | \b\d+\s+occurrences?\b
     | \bno\s+occurrences?\b
+    # OMN-18135 follow-up, measured against OMN-17771's REAL criteria: the
+    # first cut recognised only 2 of its 5, so the ticket the ruling names as
+    # its worked example would still have held. Every phrase below is lifted
+    # from one of those criteria, which is the standing rule for this set --
+    # a marker earns its way in by appearing in a criterion that exists, not
+    # by seeming plausible.
+    | \bzero\b[^.]{0,80}\boccurrences?\b   # "Zero `client_id=x` ... occurrences"
+    | \bcheckers?\b[^.]{0,24}\bgreen\b     # "`beta-layout` checkers green"
+    | \bexists\s+on\s+the\b                # "a client that exists on the plane"
+    | \bmerged\s+to\s+`?\w                 # "Merged to `main` and read back"
+    | \bHTTP\s+\d{3}\b                     # "returns HTTP 200 with a form"
     | \bis\s+(running|ready|healthy|present|absent|enabled|disabled)\b
     | \breaches\s+(running|ready)\b
     | \b\d+\s+restarts?\b
