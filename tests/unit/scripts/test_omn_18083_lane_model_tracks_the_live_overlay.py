@@ -32,11 +32,12 @@ would have passed happily through both outages. The failure mode is precisely
 that the two repos disagree, so the only test that can catch it is one that
 parses what omnibase_infra actually consumes at run time.
 
-That makes this test dependent on a sibling checkout. Local runs skip when the
-overlay is absent because a missing clone is not evidence of drift; CI runs fail
-closed when the expected live checkout is absent, because an unwired guard must
-not look green. When ``OMNI_HOME`` is set it is authoritative, so a stale
-ancestor checkout cannot silently win precedence.
+That makes this test dependent on a sibling checkout. Local runs and the
+ordinary hermetic suite skip when the overlay is absent because a missing clone
+is not evidence of drift. The dedicated ``ci-bus-overlay-binding`` workflow
+checks out the live file, exports ``CI_BUS_OVERLAY_LIVE_PATH`` and fails closed
+before pytest if that checkout is missing. When ``OMNI_HOME`` is set it is
+authoritative, so a stale ancestor checkout cannot silently win precedence.
 """
 
 from __future__ import annotations
@@ -58,9 +59,16 @@ _OVERLAY_RELATIVE = Path("config/ci_bus_lanes.yaml")
 def _live_overlay_path() -> Path | None:
     """Locate omnimarket's overlay beside this checkout, or via OMNI_HOME.
 
-    ``OMNI_HOME`` is authoritative when set. Returns None when the selected
-    checkout is absent; the caller distinguishes local skip from CI failure.
+    ``CI_BUS_OVERLAY_LIVE_PATH`` is authoritative when supplied by the
+    dedicated binding workflow. ``OMNI_HOME`` is authoritative otherwise.
+    Returns None when the selected checkout is absent; the caller distinguishes
+    a configured binding path from an ordinary hermetic-suite skip.
     """
+    ci_overlay = os.environ.get("CI_BUS_OVERLAY_LIVE_PATH")
+    if ci_overlay:
+        candidate = Path(ci_overlay)
+        return candidate if candidate.is_file() else None
+
     omni_home = os.environ.get("OMNI_HOME")
     if omni_home:
         candidate = Path(omni_home) / "omnimarket" / _OVERLAY_RELATIVE
@@ -84,9 +92,10 @@ def test_the_live_overlay_still_validates_against_this_repos_lane_model() -> Non
     """
     overlay = _live_overlay_path()
     if overlay is None:
-        if os.environ.get("CI", "").lower() == "true":
+        if os.environ.get("CI_BUS_OVERLAY_LIVE_PATH"):
             pytest.fail(
-                "CI could not find omnimarket's live "
+                "the configured CI_BUS_OVERLAY_LIVE_PATH does not contain "
+                "omnimarket's live "
                 "config/ci_bus_lanes.yaml; the cross-repository drift guard "
                 "is not wired to its required input"
             )
