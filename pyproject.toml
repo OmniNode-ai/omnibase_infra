@@ -498,6 +498,7 @@ markers = [
     "consul: Tests requiring a live Consul instance (legacy marker retained for existing tests — Consul removed in OMN-3995)",
     "ci: CI/CD parity and configuration tests that run without infrastructure (OMN-4307)",
     "linear: Tests requiring a real Linear API key (LINEAR_API_KEY env var)",
+    "bastion: Tests that dial the live MSK SNI bastion and AWS MSK (OMN-15744). Excluded from the nightly integration sweep, which runs on a runner with neither AWS credentials nor bastion reach -- there they would be permanent red noise. Selected deliberately by msk-bastion-canary.yml.",
     "live_github_api: Tests that call the live GitHub REST API directly (network-dependent) -- excluded from the merge-required test-parallel path and run on a scheduled, non-required canary instead (OMN-16096)",
 ]
 addopts = [

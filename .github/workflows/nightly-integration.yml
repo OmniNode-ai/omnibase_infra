@@ -467,8 +467,13 @@ jobs:
         run: |
           THRESHOLD="${{ github.event.inputs.success_threshold || env.SUCCESS_THRESHOLD }}"
           echo "Success threshold: $THRESHOLD consecutive green runs"
+          # OMN-15744: `not bastion` excludes the MSK SNI bastion canary
+          # tests. They dial live AWS and the bastion; this runner has
+          # neither AWS credentials nor tailnet reach to it, so they could
+          # only ever be permanent red noise here. They are selected
+          # deliberately by msk-bastion-canary.yml on omnibase-deploy.
           uv run pytest tests/integration/ \
-            -m integration \
+            -m "integration and not bastion" \
             -v \
             --tb=short \
             --junitxml=nightly-integration-junit.xml \
