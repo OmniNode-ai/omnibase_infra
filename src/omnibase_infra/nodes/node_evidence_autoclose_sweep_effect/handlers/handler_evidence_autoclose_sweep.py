@@ -995,8 +995,12 @@ def _parse_iso_utc(value: str) -> datetime | None:
     text = value.strip()
     if not text:
         return None
+    if "Z" in text[:-1]:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
     if parsed.tzinfo is None:
@@ -1042,8 +1046,10 @@ def _evidence_after_revert(
                 f"{label} (timestamp {raw or '<absent>'} could not be read)"
             )
             continue
-        if moment > revert_moment:
-            postdating.append(f"{label} landed {raw}, after the revert at {revert_at}")
+        if moment >= revert_moment:
+            postdating.append(
+                f"{label} landed {raw}, at or after the revert at {revert_at}"
+            )
     return tuple(postdating), tuple(unreadable)
 
 
@@ -4060,9 +4066,10 @@ class HandlerEvidenceAutocloseSweep:
         # enumeration payload that already had it rather than re-fetched. The
         # prior-revert fence reads it to answer the only question it was ever
         # really asking: did this ticket's evidence move AFTER somebody
-        # disagreed with its close? An empty string is "not resolvable", and
-        # the fence holds on it.
-        companion_merged_at: str = "",
+        # disagreed with its close? The value is required at the call boundary;
+        # if the upstream read cannot provide it, the caller must pass that
+        # unreadable fact explicitly and the fence holds on it.
+        companion_merged_at: str,
         prefetched_issue: dict[str, object] | None = None,
     ) -> ModelEvidenceAutocloseOutcome:
         # OMN-17891. The caller-asserted fence, and it is FIRST -- ahead of the

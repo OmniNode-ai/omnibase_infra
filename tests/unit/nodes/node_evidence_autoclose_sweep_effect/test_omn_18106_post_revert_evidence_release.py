@@ -35,6 +35,7 @@ import pytest
 
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
+    _parse_iso_utc,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,
@@ -286,6 +287,25 @@ async def test_evidence_that_postdates_the_revert_releases_the_fence() -> None:
     assert linear.state_updates == [(_ISSUE_ID, "state-done-id")]
 
 
+async def test_evidence_at_the_revert_instant_releases_the_fence() -> None:
+    """GitHub and Linear timestamps are second-granularity ordering facts.
+
+    Evidence recorded at the same instant as the revert is not before the
+    disagreement, so it must not disappear from the ordering report and fall
+    through to the baseline hold.
+    """
+    revert_at = _now() - timedelta(days=7)
+    evidence_merged_at = _iso(revert_at)
+    linear = _RevertedLinear(revert_at)
+
+    first = await _tick(linear, evidence_merged_at)
+    assert first is EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+
+    second = await _tick(linear, evidence_merged_at)
+    assert second is EnumEvidenceAutocloseDecision.FLIPPED
+    assert linear.state_updates == [(_ISSUE_ID, "state-done-id")]
+
+
 async def test_the_release_is_stated_in_the_flip_reason() -> None:
     """A release nobody can read is a release nobody can audit.
 
@@ -364,3 +384,21 @@ async def test_an_unreadable_revert_time_holds_rather_than_releases() -> None:
     assert outcome.decision is EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
     assert "could not be read" in outcome.reason
     assert linear.state_updates == []
+
+
+async def test_an_unreadable_evidence_time_holds_rather_than_releases() -> None:
+    """Fail-closed. Unreadable evidence cannot be silently dropped."""
+    linear = _RevertedLinear(_now() - timedelta(days=7))
+
+    outcome = (await _handler(linear, "not-a-timestamp").handle(_request())).outcomes[0]
+
+    assert outcome.decision is EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
+    assert "not-a-timestamp" in outcome.reason
+    assert "could not be read" in outcome.reason
+    assert linear.state_updates == []
+
+
+def test_iso_parser_accepts_only_trailing_z_designator() -> None:
+    assert _parse_iso_utc("2026-09-02T07:46:30Z") is not None
+    assert _parse_iso_utc("2026-09-02T07:46:30+00:00") is not None
+    assert _parse_iso_utc("2026-09-Z02T07:46:30Z") is None
