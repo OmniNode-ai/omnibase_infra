@@ -1299,18 +1299,43 @@ class HandlerChainCanary:
                 ),
             )
         if terminal_readback_status is EnumTerminalReadbackStatus.NOT_FOUND:
-            reason = (
-                "the ingress claimed terminal "
-                f"{ingress_terminal_event!r} that the bus never carried — "
-                "the ok=true-without-a-durable-terminal shape (OMN-15468)"
-                if ingress_ok and ingress_terminal_event
-                else (
-                    f"ingress also returned ok=false ({error_code or 'no code'}: "
-                    f"{error_message or 'no message'})"
-                    if not ingress_ok
-                    else "ingress returned ok=true and named no terminal"
+            if ingress_ok and ingress_terminal_event:
+                reason = (
+                    "the ingress claimed terminal "
+                    f"{ingress_terminal_event!r} that the bus never carried — "
+                    "the ok=true-without-a-durable-terminal shape (OMN-15468)"
                 )
-            )
+            elif not ingress_ok and elapsed_ms >= request.budget_ms:
+                # OMN-15504: `ok=false` here is NOT an ingress fault, and saying
+                # so cost a diagnosis. An ingress that consumed its ENTIRE
+                # budget and then reported a timeout accepted the request,
+                # published it, and waited for a terminal nobody produced --
+                # its own log and the command topic both show the publish. The
+                # previous wording ("ingress also returned ok=false ...") named
+                # the one component that had demonstrably done its whole job,
+                # and the 2026-09-10 investigation spent its first pass on the
+                # ingress while the delegate-skill consumer sat in a rebalance
+                # livelock one hop downstream. Attribute the silence to the
+                # chain, which is where it is.
+                reason = (
+                    f"the ingress accepted the request and waited its full "
+                    f"{request.budget_ms} ms budget before reporting "
+                    f"{error_code or 'no code'} — that is the ingress "
+                    "observing the same silence this readback did, NOT an "
+                    "ingress fault. Nothing downstream produced a terminal; "
+                    "look at the consumer for the command topic, not at the "
+                    "ingress"
+                )
+            elif not ingress_ok:
+                reason = (
+                    f"ingress returned ok=false ({error_code or 'no code'}: "
+                    f"{error_message or 'no message'}) after "
+                    f"{elapsed_ms} ms, inside its {request.budget_ms} ms "
+                    "budget — the ingress refused this request rather than "
+                    "waiting out a downstream silence"
+                )
+            else:
+                reason = "ingress returned ok=true and named no terminal"
             return (
                 EnumChainCanaryVerdict.TERMINAL_MISSING,
                 (
