@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -240,3 +241,39 @@ class TestTerminalEvent:
         assert payload["errors"] == [str(refusal)]
         assert "strictly behind" in payload["errors"][0]
         assert "origin/main" in payload["errors"][0]
+
+
+class TestNoEscapeHatch:
+    """AC4: the refusal is unconditional for a ref-mode deploy."""
+
+    def test_the_fence_reads_no_environment_variable_of_its_own(self) -> None:
+        """An override would make this fence advisory, which is what already failed.
+
+        The five jobs this ticket is about were stopped by nothing, so the
+        difference between this fence and the previous state is precisely that
+        there is no way to ask it to stand down. The only environment this
+        module may consult is the tracking ref the LANE declares -- which
+        narrows the fence's input, never disables it.
+        """
+        import deploy_agent.ref_fence as module
+
+        source = Path(module.__file__).read_text()
+        for escape in ("os.environ", "os.getenv", "getenv("):
+            assert escape not in source, (
+                f"{escape} appears in ref_fence.py; the fence must not be "
+                "switchable from the environment"
+            )
+
+    def test_the_decision_takes_no_override_argument(self) -> None:
+        """The signature is facts in, refusal or nothing out."""
+        import inspect
+
+        parameters = inspect.signature(assert_ref_not_stale_branch).parameters
+        assert list(parameters) == ["facts"], (
+            "assert_ref_not_stale_branch grew a parameter beyond the facts it "
+            f"decides on: {list(parameters)}"
+        )
+        for name in ModelRefLineageFacts.__dataclass_fields__:
+            assert not any(
+                token in name for token in ("force", "allow", "skip", "override")
+            ), f"ModelRefLineageFacts.{name} reads like an override switch"
