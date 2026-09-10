@@ -283,3 +283,46 @@ def test_onex_customer_admits_no_loopback_redirect_or_origin() -> None:
         assert "localhost" not in value
         assert "127.0.0.1" not in value
         assert "[::1]" not in value
+
+
+def test_all_clients_have_full_scope_allowed_explicitly_false() -> None:
+    """Every client in desired-clients.json must explicitly set fullScopeAllowed to false.
+
+    Keycloak defaults fullScopeAllowed to true when the field is absent, which puts every
+    realm role into the token regardless of defaultClientScopes. Setting it explicitly to
+    false makes the `roles` client scope meaningful: only roles reachable via configured
+    scope mappings appear in tokens, preventing privilege over-issuance.
+
+    Asserted in the positive -- the value must be the boolean False, not merely absent.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    violations = [
+        c["clientId"]
+        for c in config["clients"]
+        if c.get("fullScopeAllowed") is not False
+    ]
+    assert not violations, (
+        f"These clients are missing fullScopeAllowed=false: {violations}"
+    )
+
+
+def test_role_bearing_service_clients_have_matching_scope_mappings() -> None:
+    """Service clients with realmRoles must also declare clientScopeMappings.
+
+    realmRoles assigns roles to the service account user (user-level). With
+    fullScopeAllowed=false, Keycloak's scope filter drops those roles from
+    client_credentials tokens unless the same roles are also in the client's
+    scope (clientScopeMappings). Both lists must cover the same roles.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    for client in config["clients"]:
+        realm_roles = client.get("realmRoles", [])
+        if not realm_roles:
+            continue
+        scope_mappings = client.get("clientScopeMappings", [])
+        missing = set(realm_roles) - set(scope_mappings)
+        assert not missing, (
+            f"Client '{client['clientId']}' has realmRoles {sorted(missing)} not "
+            f"covered by clientScopeMappings -- those roles will be dropped from "
+            f"client_credentials tokens when fullScopeAllowed=false"
+        )

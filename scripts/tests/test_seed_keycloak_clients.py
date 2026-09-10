@@ -1148,3 +1148,228 @@ class TestMainExtended:
                     ) as mock_reset:
                         _ensure_mod().main()
         mock_reset.assert_called_once_with(_KC_URL)
+
+
+# ---------------------------------------------------------------------------
+# Tests: fullScopeAllowed reconciliation
+# ---------------------------------------------------------------------------
+
+
+class TestFullScopeAllowed:
+    def test_create_payload_includes_full_scope_allowed_false(self) -> None:
+        spec = {
+            "clientId": "onex-admin",
+            "publicClient": False,
+            "fullScopeAllowed": False,
+            "serviceAccountsEnabled": True,
+        }
+        payload = _ensure_mod()._build_create_payload(spec, secret=None)
+        assert payload.get("fullScopeAllowed") is False
+
+    def test_existing_client_with_true_triggers_put_to_false(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        existing = _make_existing_client(
+            "onex-admin",
+            serviceAccountsEnabled=True,
+            fullScopeAllowed=True,
+        )
+        spec = {
+            "clientId": "onex-admin",
+            "publicClient": False,
+            "fullScopeAllowed": False,
+            "serviceAccountsEnabled": True,
+            "defaultClientScopes": DESIRED_SCOPES,
+        }
+        put_payloads: list[dict[str, Any]] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId" in url:
+                return _client_list_response([existing])
+            if method == "GET" and "default-client-scopes" in url and "clients/" in url:
+                return (200, [{"name": n} for n in DESIRED_SCOPES])
+            if method == "GET" and "/client-scopes" in url:
+                return _scopes_response(DESIRED_SCOPES)
+            if method == "PUT" and "clients/internal-onex-admin" in url:
+                put_payloads.append(kwargs.get("payload", {}))
+                return _no_content()
+            return (200, None)
+
+        with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
+            _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
+
+        assert len(put_payloads) == 1
+        assert put_payloads[0].get("fullScopeAllowed") is False
+
+    def test_already_false_produces_no_put(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        existing = _make_existing_client(
+            "onex-admin",
+            serviceAccountsEnabled=True,
+            fullScopeAllowed=False,
+        )
+        spec = {
+            "clientId": "onex-admin",
+            "publicClient": False,
+            "fullScopeAllowed": False,
+            "serviceAccountsEnabled": True,
+            "defaultClientScopes": DESIRED_SCOPES,
+        }
+        put_calls: list[str] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId" in url:
+                return _client_list_response([existing])
+            if method == "GET" and "default-client-scopes" in url and "clients/" in url:
+                return (200, [{"name": n} for n in DESIRED_SCOPES])
+            if method == "GET" and "/client-scopes" in url:
+                return _scopes_response(DESIRED_SCOPES)
+            if method == "PUT":
+                put_calls.append(url)
+                return _no_content()
+            return (200, None)
+
+        with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
+            _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
+
+        assert not put_calls
+
+    def test_spec_without_field_does_not_inject_value(self) -> None:
+        spec = {
+            "clientId": "omniweb",
+            "publicClient": True,
+        }
+        payload = _ensure_mod()._build_create_payload(spec, secret=None)
+        assert "fullScopeAllowed" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Tests: clientScopeMappings reconciliation
+# ---------------------------------------------------------------------------
+
+
+class TestClientScopeMappings:
+    def test_scope_mappings_added_when_absent(self) -> None:
+        realm_mgmt_client = {"id": "realm-mgmt-id", "clientId": "realm-management"}
+        role_obj = {"id": "role-id-manage-users", "name": "manage-users"}
+        post_calls: list[Any] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId=realm-management" in url:
+                return (200, [realm_mgmt_client])
+            if method == "GET" and "scope-mappings/clients" in url:
+                return (200, [])  # none yet
+            if method == "GET" and "roles/manage-users" in url:
+                return (200, role_obj)
+            if method == "POST" and "scope-mappings/clients" in url:
+                post_calls.append(kwargs.get("payload", []))
+                return _no_content()
+            return (200, None)
+
+        with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
+            changed = _ensure_mod()._ensure_client_scope_mappings(
+                _KC_URL,
+                _REALM,
+                _TOKEN,
+                "internal-onex-admin",
+                ["realm-management:manage-users"],
+            )
+
+        assert "clientScopeMapping:manage-users" in changed
+        assert len(post_calls) == 1
+        assert post_calls[0][0]["name"] == "manage-users"
+
+    def test_already_mapped_role_not_reposted(self) -> None:
+        realm_mgmt_client = {"id": "realm-mgmt-id", "clientId": "realm-management"}
+        post_calls: list[Any] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId=realm-management" in url:
+                return (200, [realm_mgmt_client])
+            if method == "GET" and "scope-mappings/clients" in url:
+                return (200, [{"name": "manage-users"}])  # already present
+            if method == "POST" and "scope-mappings/clients" in url:
+                post_calls.append(kwargs.get("payload", []))
+                return _no_content()
+            return (200, None)
+
+        with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
+            changed = _ensure_mod()._ensure_client_scope_mappings(
+                _KC_URL,
+                _REALM,
+                _TOKEN,
+                "internal-onex-admin",
+                ["realm-management:manage-users"],
+            )
+
+        assert changed == []
+        assert post_calls == []
+
+    def test_get_failure_raises_die_not_silent_empty_set(self) -> None:
+        """A non-200 on the scope-mappings GET must die, not silently treat as empty."""
+        realm_mgmt_client = {"id": "realm-mgmt-id", "clientId": "realm-management"}
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId=realm-management" in url:
+                return (200, [realm_mgmt_client])
+            if method == "GET" and "scope-mappings/clients" in url:
+                return (403, None)
+            return (200, None)
+
+        with (
+            patch.object(_ensure_mod(), "_request", side_effect=fake_request),
+            pytest.raises(SystemExit),
+        ):
+            _ensure_mod()._ensure_client_scope_mappings(
+                _KC_URL,
+                _REALM,
+                _TOKEN,
+                "internal-onex-admin",
+                ["realm-management:manage-users"],
+            )
+
+    def test_reconcile_client_calls_scope_mappings_when_spec_declares_them(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        existing = _make_existing_client(
+            "onex-admin",
+            serviceAccountsEnabled=True,
+            fullScopeAllowed=False,
+        )
+        realm_mgmt_client = {"id": "realm-mgmt-id", "clientId": "realm-management"}
+        role_obj = {"id": "role-id-manage-users", "name": "manage-users"}
+        scope_post_calls: list[Any] = []
+
+        spec = {
+            "clientId": "onex-admin",
+            "publicClient": False,
+            "fullScopeAllowed": False,
+            "serviceAccountsEnabled": True,
+            "defaultClientScopes": DESIRED_SCOPES,
+            "clientScopeMappings": ["realm-management:manage-users"],
+        }
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId=onex-admin" in url:
+                return _client_list_response([existing])
+            if method == "GET" and "clients?clientId=realm-management" in url:
+                return (200, [realm_mgmt_client])
+            if method == "GET" and "default-client-scopes" in url and "clients/" in url:
+                return (200, [{"name": n} for n in DESIRED_SCOPES])
+            if method == "GET" and "/client-scopes" in url:
+                return _scopes_response(DESIRED_SCOPES)
+            if method == "GET" and "scope-mappings/clients" in url:
+                return (200, [])  # no mappings yet
+            if method == "GET" and f"roles/manage-users" in url:
+                return (200, role_obj)
+            if method == "POST" and "scope-mappings/clients" in url:
+                scope_post_calls.append(kwargs.get("payload", []))
+                return _no_content()
+            return (200, None)
+
+        with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
+            _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
+
+        assert len(scope_post_calls) == 1
+        assert scope_post_calls[0][0]["name"] == "manage-users"
