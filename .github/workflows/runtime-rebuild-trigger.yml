@@ -194,9 +194,31 @@ jobs:
     # uses, because the checkout below is pinned to the trusted base ref, so no
     # fork-authored code executes on the fleet.
     runs-on: [self-hosted, omnibase-deploy]
-    # 25-minute convergence wait + margin. The wait bound is derived from
-    # checked-in contracts: node_redeploy_orchestrator and
+    # 25-minute convergence wait + margin.
+    #
+    # WHAT THAT 25 MINUTES COVERS, stated honestly rather than derived from a
+    # number that measures something else. node_redeploy_orchestrator and
     # node_redeploy_deploy_effect each declare timeout_ms: 660000 (11 min).
+    # That bounds ONE correlation's execution. It is NOT the end-to-end latency
+    # from merge to lane, because the deploy effect is serial: it publishes one
+    # rebuild-requested, then polls for completion until that same timeout, so N
+    # correlations queued ahead of this merge cost at least N x 11 min before
+    # this merge's command is even published to the agent.
+    #
+    # So this bound covers a lane whose effect queue is EMPTY, and cannot cover
+    # a backlogged one. Measured 2026-09-10 (peer lane reading the control topic
+    # offsets 95..125 against the agent's own job store): five stale
+    # correlations occupied the effect from 07:06Z to 11:08Z, and the command
+    # for a 07:37:40Z merge did not reach the agent's topic until 11:08:23Z --
+    # 3h31m after this job's window had closed. Publish-to-accept, once a
+    # command existed, was 268ms.
+    #
+    # The bound is deliberately NOT widened to chase that: no wall clock short
+    # of hours would have caught it, and a longer wait holds the single
+    # omnibase-deploy runner slot longer, which serializes the NEXT merge's
+    # guard behind this one. The right fix is for the guard to read queue
+    # position rather than wall clock, and the queue it needs to read is the
+    # effect's. That is a design change, not a constant.
     timeout-minutes: 30
     steps:
       - name: Checkout the guard from the trusted base ref
@@ -262,6 +284,13 @@ jobs:
         id: probe
         if: always()
         env:
+          # Must equal this job's own `timeout-minutes`, and the settle budget
+          # below is derived from it. A tail is reserved for the three probe
+          # reads, the emit step and the artifact upload, so the settle wait can
+          # never consume the time the receipt needs to be WRITTEN -- an
+          # unwritten receipt is the one outcome worse than a failing one.
+          JOB_TIMEOUT_MINUTES: 30
+          RESERVED_TAIL_SECONDS: 120
           # `host.docker.internal`, NOT `localhost`. This job runs on the
           # lane's host's docker DAEMON, not in the host's network namespace:
           # the `omnibase-deploy` runner is a container
@@ -290,10 +319,40 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/lab-pass-receipt
+
+          # SETTLE BUDGET = WHATEVER REMAINS BEFORE THIS JOB'S CEILING.
+          #
+          # A convergence success hands this step a lane that has JUST been
+          # recreated: check_dev_lane_staleness.py returns the moment the
+          # RUNNING container carries the expected revision LABEL, and that
+          # label is set at create time, not when the runtime has bound its
+          # port. Measured on run 34478680748 -- convergence 13:12:28.544Z,
+          # probe 13:12:28.718Z, first Errno 111 at 13:12:28.826Z. 174ms.
+          #
+          # The consequence was perverse: the HTTP checks passed only when
+          # deployed_revision FAILED (a stale lane serving happily) and failed
+          # exactly when it SUCCEEDED, so a compose-dev receipt could not be a
+          # PASS by construction.
+          #
+          # The budget is NOT a constant. The compose x-healthcheck-defaults
+          # start_period is 10s and measures something else; deriving from it
+          # would repeat the false-derivation defect corrected above. It is the
+          # time left before this job's own ceiling, so the single
+          # omnibase-deploy runner slot stays bounded exactly as it is today and
+          # a probe with nothing left records that instead of racing silently.
+          CEILING_SECONDS=$(( ${JOB_TIMEOUT_MINUTES} * 60 ))
+          STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
+            || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
+          ELAPSED=$(( $(date -u +%s) - STARTED_EPOCH ))
+          SETTLE=$(( CEILING_SECONDS - ELAPSED - RESERVED_TAIL_SECONDS ))
+          [ "$SETTLE" -lt 0 ] && SETTLE=0
+          echo "settle budget: ${SETTLE}s (ceiling ${CEILING_SECONDS}s, elapsed ${ELAPSED}s, tail ${RESERVED_TAIL_SECONDS}s)"
+
           uv run python scripts/ci/lab_pass_receipt.py probe-lane \
             --lane compose-dev \
             --main-url "$DEV_LANE_MAIN_URL" \
             --effects-url "$DEV_LANE_EFFECTS_URL" \
+            --settle-timeout-seconds "$SETTLE" \
             > /tmp/lab-pass-checks.json
           cat /tmp/lab-pass-checks.json
 
