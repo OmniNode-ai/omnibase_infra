@@ -244,6 +244,27 @@ readonly REFRESH_BUILD_SERVICES=(
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
+    # OMN-18114 -- the tenant-projection profile CARRIER. Here for a DIFFERENT
+    # reason than the six writers above, stated separately so the two do not
+    # merge. Those exist only in this lane's overlay; this one is declared in
+    # docker/docker-compose.infra.yml behind the inert `profile-carrier-optin`
+    # compose profile, and what makes it a real service HERE is this lane's
+    # `profiles: !override` promoting it into `runtime`.
+    #
+    # Membership is mandatory, not tidiness. deploy-runtime.sh keeps the same
+    # name in STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES, but
+    # resolve_lane_runtime_services returns early whenever
+    # RUNTIME_BUILD_SERVICES_OVERRIDE is set -- and this script ALWAYS sets it.
+    # So that array is unreachable on the governed path and THIS array is the
+    # whole restart set. OMN-18114 landed the carrier everywhere except here,
+    # which left it declared, censused as critical drift, and never running:
+    # the lane census read `container_absent` on the surface the
+    # `stability-proven` premise of every live prod grant resolves from.
+    #
+    # It builds from docker/Dockerfile.runtime -- the same image as the four
+    # core services -- so the open OMN-14262 BUILD_SOURCE selector mismatch
+    # that scopes this array does not reach it.
+    tenant-projection-writer
 )
 # OMN-18061: the ROLLBACK set is the DEPLOYED set, not the core four.
 #
