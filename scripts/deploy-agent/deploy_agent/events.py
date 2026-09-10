@@ -131,10 +131,85 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 }
 
 
-def services_for_scope(scope: Scope) -> list[str]:
+# OMN-18108: the runtime services the DEV lane declares and no other lane does.
+#
+# These live only in ``docker/docker-compose.dev-lane.yml``. Membership in
+# ``SCOPE_SERVICES[Scope.RUNTIME]`` above would be FATAL, not merely wrong: the
+# service name does not exist in the prod, stability-test or judge merged
+# compose, so every deploy to those lanes would abort on `no such service`.
+# They are a DEV-lane addendum, resolved by ``services_for_scope`` only when the
+# caller names that lane.
+#
+# WHY THIS IS DECLARED HERE AND NOT PARSED FROM THE SHELL SCRIPT
+# --------------------------------------------------------------
+# ``scripts/deploy-runtime.sh`` carries the same eight names in its
+# ``DEV_LANE_ONLY_RUNTIME_SERVICES`` array, and three existing tests parse that
+# hand-written literal out of the script by regex. Reshaping the array into a
+# file both sides read would break those tests and edit the sanctioned deploy
+# path for a refactor's sake. The two declarations are instead bound
+# MECHANICALLY and bidirectionally by
+# ``tests/unit/test_dev_lane_only_scope_omn18108.py``, which parses the array
+# and asserts set equality both ways -- an edit to either side alone is a red
+# test, which is the property "single source of truth" was wanted for.
+#
+# The defect this closes, measured on the .201 dev lane 2026-09-10T00:45Z: the
+# runtime family carried the deploy agent's own build
+# ``4598a4358bd9f59528875b8b320b6cde54383fb1`` while all eight of these carried
+# ``3461e4b0aeae`` from the previous day, ~35 infra commits behind. Not an
+# intermittent miss -- the agent's scope could not reach them at all, and
+# ``restart: unless-stopped`` keeps a stale image running and healthy, so
+# nothing reported it.
+DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
+    "projection-tenant-registry-writer",
+    "projection-delegation-writer",
+    "projection-registration-writer",
+    "projection-savings-writer",
+    "projection-tenant-credentials-writer",
+    "projection-live-events-writer",
+    "infra-routing-decisions-consumer",
+    "onex-api",
+)
+
+# OMN-18108: the members of the array above that carry an ``image:`` and no
+# ``build:`` -- tag-referenced, not lane-built.
+#
+# ``onex-api`` resolves ``${ONEX_API_IMAGE}`` from the operator env file on the
+# host; the image is built out of a different repository. So a governed deploy
+# can RECREATE it, which is what it actually needs (a container that is never
+# recreated never reads a new environment, and this one carries the lane's
+# broker credentials and eleven fail-closed variables), but it CANNOT advance
+# the tag. Stating the boundary here, and asserting it in the test, rather than
+# leaving an operator to discover that a "successful" deploy left the tag where
+# it was. Advancing it needs an image build plus an env repoint, and no
+# sanctioned script does either.
+DEV_LANE_ONLY_TAG_REFERENCED_SERVICES: frozenset[str] = frozenset({"onex-api"})
+
+# The subset ``docker compose build`` can be handed. Derived, never a second
+# hand-written list.
+DEV_LANE_ONLY_BUILDABLE_SERVICES: tuple[str, ...] = tuple(
+    service
+    for service in DEV_LANE_ONLY_RUNTIME_SERVICES
+    if service not in DEV_LANE_ONLY_TAG_REFERENCED_SERVICES
+)
+
+
+def services_for_scope(
+    scope: Scope, *, lane: EnumRuntimeLane | None = None
+) -> list[str]:
+    """Return the services a deploy of ``scope`` targets on ``lane``.
+
+    ``lane`` defaults to ``None``, which resolves the lane-agnostic base list
+    exactly as before. A caller that does not name a lane therefore never
+    silently acquires dev-lane services, and prod/stability-test scope is
+    byte-unchanged whether the lane is passed or not (OMN-18108 AC3).
+    """
     if scope == Scope.FULL:
-        return SCOPE_SERVICES[Scope.CORE] + SCOPE_SERVICES[Scope.RUNTIME]
-    return SCOPE_SERVICES[scope]
+        base = SCOPE_SERVICES[Scope.CORE] + SCOPE_SERVICES[Scope.RUNTIME]
+    else:
+        base = list(SCOPE_SERVICES[scope])
+    if lane == EnumRuntimeLane.DEV and scope in (Scope.RUNTIME, Scope.FULL):
+        return base + list(DEV_LANE_ONLY_RUNTIME_SERVICES)
+    return base
 
 
 class ModelHealthCheck(BaseModel):
@@ -188,7 +263,9 @@ class ModelRebuildRequested(BaseModel):
     @model_validator(mode="after")
     def validate_services_subset(self) -> ModelRebuildRequested:
         if self.services:
-            allowed = services_for_scope(self.scope)
+            # OMN-18108: lane-aware, so a dev command may name one of the
+            # dev-lane-only services and a prod/stability command may not.
+            allowed = services_for_scope(self.scope, lane=self.runtime_lane)
             invalid = [s for s in self.services if s not in allowed]
             if invalid:
                 msg = f"Services {invalid} not in scope '{self.scope}'. Allowed: {allowed}"

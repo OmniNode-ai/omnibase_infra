@@ -111,7 +111,9 @@ class TestRuntimeScopeComposeUp:
 
         assert captured_cmds, "Expected a docker compose up invocation"
         compose_cmd = captured_cmds[0]
-        runtime_services = services_for_scope(Scope.RUNTIME)
+        # OMN-18108: _compose_up defaults to the DEV lane, whose runtime scope
+        # also carries the services declared only in the lane overlay.
+        runtime_services = services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV)
 
         assert "--no-deps" in compose_cmd, (
             "Runtime scope compose up must include --no-deps to prevent "
@@ -308,7 +310,8 @@ class TestCoreAndFullScopeComposeUp:
             and "omnidash_analytics" in cmd
             for cmd in captured_cmds
         )
-        assert captured_cmds[-1][-len(services_for_scope(Scope.RUNTIME)) :] == (
-            services_for_scope(Scope.RUNTIME)
+        dev_runtime_services = services_for_scope(
+            Scope.RUNTIME, lane=EnumRuntimeLane.DEV
         )
+        assert captured_cmds[-1][-len(dev_runtime_services) :] == dev_runtime_services
         assert verified[:2] == [["forward-migration"], ["migration-gate"]]
