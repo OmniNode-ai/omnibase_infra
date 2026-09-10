@@ -537,12 +537,21 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 0036's bytes are NOT edited, it is retired in place by a row in
     # _ledger/migration-supersessions.tsv, exactly as 0036 retired 0034.
     #
-    # 174 -> 175 (OMN-15504): node_projection_delegation/0038_delegation_events
-    # _writer_identity.sql, merged on omnimarket dev as OMN-18140 and vendored
-    # into this repo by scripts/sync-node-migrations.sh. Not an OMN-15504
-    # change -- the vendor-sync hook runs always_run and compares against the
-    # canonical omnimarket clone, so the owed vendoring blocked every commit in
-    # this repo until someone carried it.
+    # 174 -> 175 for OMN-18140's
+    # nodes/node_projection_delegation/
+    # 0038_delegation_events_writer_identity.sql, which adds a durable WRITER
+    # ATTESTATION to delegation_events: `writer_identity TEXT DEFAULT
+    # CURRENT_USER` and `written_at TIMESTAMPTZ DEFAULT NOW()`. Neither exists
+    # today, and `delegated_by` -- the closest existing column -- answers a
+    # different question: it names the DELEGATOR carried on the inbound event,
+    # a value the writing process chooses, not the database principal that
+    # performed the write. Both new columns are NULLABLE and unbackfilled on
+    # purpose: `NOT NULL DEFAULT CURRENT_USER` would rewrite the table and
+    # stamp every historical row with the MIGRATION runner's identity, which is
+    # a fabricated attestation for rows it did not write. Net-new file, no
+    # parent edited and nothing superseded -- it neither reads nor rewrites
+    # tenant_id, so it is independent of the 0031->0037 conversion chain above
+    # and does not participate in its supersession ledger.
     assert len(result.declarations) == 175
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
