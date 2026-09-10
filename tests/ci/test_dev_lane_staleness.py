@@ -328,3 +328,89 @@ class TestTheWiring:
             s for s in steps if str(s.get("uses", "")).startswith("actions/checkout")
         )
         assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.ref }}"
+
+
+class TestTheVerdictClaimsOnlyWhatTheGuardKnows:
+    """The NOT_CONVERGED text asserted a fact the guard cannot observe.
+
+    It read, verbatim: "The command was published; the lane did not apply it."
+
+    What CI publishes is a **redeploy-start** command
+    (``scripts/trigger_rebuild_on_merge.py`` ``TOPIC =
+    "onex.cmd.omnimarket.redeploy-start.v1"``), and that is the only thing the
+    job's ``published`` output attests. The deploy agent consumes a different
+    topic, ``onex.cmd.deploy.rebuild-requested.v1``, which only
+    ``node_redeploy``'s deploy effect emits. Between the two sits an
+    orchestrator and that effect. So "the command was published" is true of the
+    START command and says nothing about whether a rebuild command ever reached
+    the agent.
+
+    On 2026-09-10 it demonstrably had not. Measured by the peer lane that owns
+    the agent, reading the control topic offsets 95..125 against the agent's own
+    job store: pull request 3383 merged 07:37:40Z, and the first real
+    rebuild-requested command appeared at 11:08:23Z -- three and a half hours
+    after this guard's window had already closed. Publish-to-accept, once a
+    command existed, was 268 milliseconds. Nothing was slow on the agent side and
+    nothing was wrong with the clone. The effect is serial: it publishes one
+    command, then polls until its own eleven-minute timeout, and it was working
+    through five stale correlations ahead of the real ones.
+
+    The sentence is therefore the same defect class as the two probe defects
+    this ticket already fixed -- a comment asserting a premise the code cannot
+    know -- and it is more costly than either, because it is the first line a
+    lane reads when diagnosing a red convergence job. It sent two separate lanes
+    toward the agent's clone and toward the wall-clock bound, and the cause was
+    in neither.
+    """
+
+    @staticmethod
+    def _detail() -> str:
+        verdict = evaluate_convergence(
+            lane=DEV_LANE,
+            expected_revision=MEASURED_DEV_HEAD,
+            waited=timedelta(minutes=25),
+            wait_timeout=timedelta(minutes=25),
+        )
+        return verdict.findings[0].detail
+
+    def test_it_does_not_assert_the_rebuild_command_reached_the_agent(self) -> None:
+        detail = self._detail()
+        assert "The command was published; the lane did not apply it." not in detail, (
+            "the guard observes neither half of that sentence: it cannot see "
+            "the agent's topic, and a start command is not a rebuild command"
+        )
+
+    def test_it_names_the_hop_that_can_swallow_the_start_command(self) -> None:
+        detail = self._detail()
+        assert "rebuild-requested" in detail, (
+            "the reader has to be told the agent consumes a DIFFERENT topic, "
+            "or they will go looking at the agent for a command that never "
+            "reached it"
+        )
+        assert "redeploy-start" in detail
+        assert "serial" in detail.lower(), (
+            "the effect publishes one command then polls to its own timeout; a "
+            "backlog ahead of this merge is the measured 2026-09-10 cause and "
+            "is the first thing to check"
+        )
+
+    def test_it_still_names_the_dlq_and_keeps_the_finding_code(self) -> None:
+        # The pre-existing guidance is additive, not replaced: a DLQ'd
+        # downstream event is still a real cause of this shape (OMN-17888).
+        detail = self._detail()
+        assert "onex.dlq.omnibase-infra.omnimarket.v1" in detail
+        assert "delivered-but-not-applied" in detail
+
+    def test_the_workflow_does_not_derive_the_bound_as_end_to_end_latency(
+        self,
+    ) -> None:
+        from pathlib import Path
+
+        text = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
+            encoding="utf-8"
+        )
+        assert "The wait bound is derived from" not in text, (
+            "660000 ms bounds ONE correlation's execution, not the queue ahead "
+            "of it; deriving a wall-clock convergence bound from it is the "
+            "false premise that made a 25-minute wait look sufficient"
+        )

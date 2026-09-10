@@ -194,9 +194,31 @@ jobs:
     # uses, because the checkout below is pinned to the trusted base ref, so no
     # fork-authored code executes on the fleet.
     runs-on: [self-hosted, omnibase-deploy]
-    # 25-minute convergence wait + margin. The wait bound is derived from
-    # checked-in contracts: node_redeploy_orchestrator and
+    # 25-minute convergence wait + margin.
+    #
+    # WHAT THAT 25 MINUTES COVERS, stated honestly rather than derived from a
+    # number that measures something else. node_redeploy_orchestrator and
     # node_redeploy_deploy_effect each declare timeout_ms: 660000 (11 min).
+    # That bounds ONE correlation's execution. It is NOT the end-to-end latency
+    # from merge to lane, because the deploy effect is serial: it publishes one
+    # rebuild-requested, then polls for completion until that same timeout, so N
+    # correlations queued ahead of this merge cost at least N x 11 min before
+    # this merge's command is even published to the agent.
+    #
+    # So this bound covers a lane whose effect queue is EMPTY, and cannot cover
+    # a backlogged one. Measured 2026-09-10 (peer lane reading the control topic
+    # offsets 95..125 against the agent's own job store): five stale
+    # correlations occupied the effect from 07:06Z to 11:08Z, and the command
+    # for a 07:37:40Z merge did not reach the agent's topic until 11:08:23Z --
+    # 3h31m after this job's window had closed. Publish-to-accept, once a
+    # command existed, was 268ms.
+    #
+    # The bound is deliberately NOT widened to chase that: no wall clock short
+    # of hours would have caught it, and a longer wait holds the single
+    # omnibase-deploy runner slot longer, which serializes the NEXT merge's
+    # guard behind this one. The right fix is for the guard to read queue
+    # position rather than wall clock, and the queue it needs to read is the
+    # effect's. That is a design change, not a constant.
     timeout-minutes: 30
     steps:
       - name: Checkout the guard from the trusted base ref

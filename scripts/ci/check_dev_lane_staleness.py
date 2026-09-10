@@ -365,11 +365,22 @@ def evaluate_convergence(
             "NOT_CONVERGED",
             f"after {_format_age(waited)} (bound {_format_age(wait_timeout)}) the dev "
             f"lane still runs {lane.revision[:12]}, not the merge commit "
-            f"{expected_revision[:12]} this run published a redeploy-start for. The "
-            "command was published; the lane did not apply it. This is the "
-            "delivered-but-not-applied shape — check the runtime-effects DLQ "
-            "(onex.dlq.omnibase-infra.omnimarket.v1) and the orchestrator consumer "
-            "group before assuming the publisher failed.",
+            f"{expected_revision[:12]} this run published a redeploy-start for. "
+            "This is the delivered-but-not-applied shape. WHAT THIS RUN ACTUALLY "
+            "ATTESTS is that one redeploy-start command reached the broker — NOT "
+            "that a rebuild-requested command ever reached the deploy agent. Those "
+            "are different topics with an orchestrator and node_redeploy's deploy "
+            "effect between them, and that effect is SERIAL: it publishes one "
+            "rebuild-requested, then polls for completion until its own timeout, so "
+            "a backlog of correlations ahead of this merge delays it by that timeout "
+            "each. Check in this order: (1) whether a rebuild-requested exists for "
+            "this sha at all, and what else is queued ahead of it on "
+            "onex.cmd.deploy.rebuild-requested.v1; (2) the runtime-effects DLQ "
+            "(onex.dlq.omnibase-infra.omnimarket.v1); (3) the orchestrator consumer "
+            "group. Measured 2026-09-10: the command for one merge did not appear on "
+            "the agent's topic until 3h31m after this guard's window closed, while "
+            "publish-to-accept once it existed was 268ms — so a red verdict here is "
+            "usually about the hop BEFORE the agent, not the agent or its clone.",
         )
     )
     return verdict
