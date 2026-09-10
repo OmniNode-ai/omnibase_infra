@@ -129,6 +129,15 @@ esac
 _FAKE_SUDO = """#!/usr/bin/env bash
 # Strip `-o <owner> -g <group>` (real root ownership changes are not available
 # in a test sandbox) and special-case systemctl so no live unit is required.
+#
+# OMN-18134: the systemctl fake models real systemd ACTIVATION-STATE
+# semantics, not a blanket `exit 0`. onex-gateway-forwarder.service is
+# `Type=oneshot`, and systemd refuses `reload` on a unit that is not active
+# ("Job type reload is not applicable for unit ..."). A fake that succeeded
+# unconditionally is exactly why the state-unaware reload step passed every
+# test and still failed on .201 the first time the unit was in `failed`.
+# Unit state lives in GW_TEST_UNIT_STATE_FILE so it survives across the
+# several systemctl invocations one deploy makes.
 set -eu
 args=()
 skip_next=0
@@ -141,23 +150,63 @@ for a in "$@"; do
 done
 if [ "${args[0]:-}" = "systemctl" ]; then
   printf '%s\\n' "${args[*]}" >> "${GW_TEST_SYSTEMCTL_LOG:?}"
-  if [ "${args[1]:-}" = "reload" ] && [ "${GW_TEST_RELOAD_TAKES_EFFECT:-1}" = "1" ]; then
-    # Simulate the reload actually recreating the container onto whatever
-    # digest gateway.env holds at this point (update_gateway_env_digest()
-    # already ran before reload_service() is called) -- mirrors real compose
-    # behavior. GW_TEST_RELOAD_TAKES_EFFECT=0 simulates a reload that exits 0
-    # but does not actually recreate the container (the silent-failure case
-    # verify_deployment()'s digest check now catches).
-    state="${GW_TEST_RUNNING_IMAGE_STATE:-}"
+  state_file="${GW_TEST_UNIT_STATE_FILE:?}"
+  unit_state="$(cat "${state_file}" 2>/dev/null || printf 'active')"
+
+  verb=""
+  quiet=0
+  for a in "${args[@]:1}"; do
+    case "${a}" in
+      --quiet) quiet=1; continue ;;
+      -*) continue ;;
+    esac
+    if [ -z "${verb}" ]; then verb="${a}"; fi
+  done
+
+  # Simulate compose recreating the container onto whatever digest
+  # gateway.env holds at this point (update_gateway_env_digest() already ran
+  # before reload_service() is called). GW_TEST_RELOAD_TAKES_EFFECT=0
+  # simulates a reload/start that exits 0 but does not actually recreate the
+  # container -- the silent-failure case verify_deployment() now catches.
+  recreate_container() {
+    if [ "${GW_TEST_RELOAD_TAKES_EFFECT:-1}" != "1" ]; then return 0; fi
+    running="${GW_TEST_RUNNING_IMAGE_STATE:-}"
     env_file="${GATEWAY_ENV_FILE:-}"
-    if [ -n "${state}" ] && [ -n "${env_file}" ] && [ -f "${env_file}" ]; then
+    if [ -n "${running}" ] && [ -n "${env_file}" ] && [ -f "${env_file}" ]; then
       new_image="$(awk -F= '/^GATEWAY_IMAGE=/{print $2; exit}' "${env_file}")"
       if [ -n "${new_image}" ]; then
-        printf '%s' "${new_image}" > "${state}"
+        printf '%s' "${new_image}" > "${running}"
       fi
     fi
-  fi
-  exit 0
+  }
+
+  case "${verb}" in
+    is-active)
+      if [ "${quiet}" = "0" ]; then printf '%s\\n' "${unit_state}"; fi
+      if [ "${unit_state}" = "active" ]; then exit 0; fi
+      exit 3
+      ;;
+    reset-failed)
+      printf 'inactive' > "${state_file}"
+      exit 0
+      ;;
+    reload)
+      if [ "${unit_state}" != "active" ]; then
+        printf 'Failed to reload onex-gateway-forwarder.service: Job type reload is not applicable for unit onex-gateway-forwarder.service.\\n' >&2
+        exit 1
+      fi
+      recreate_container
+      exit 0
+      ;;
+    start|restart)
+      printf 'active' > "${state_file}"
+      recreate_container
+      exit 0
+      ;;
+    *)
+      exit 0
+      ;;
+  esac
 fi
 exec "${args[@]}"
 """
@@ -186,6 +235,11 @@ class _Harness:
         self.docker_log = tmp_path / "docker.log"
         self.systemctl_log = tmp_path / "systemctl.log"
         self.running_image_state = tmp_path / "running-image.state"
+        # OMN-18134: the systemd unit's activation state, as the fake
+        # systemctl sees it. Defaults to the happy path; a test simulating
+        # the 2026-09-10T18:16:19Z .201 condition writes "failed" here.
+        self.unit_state_file = tmp_path / "unit.state"
+        self.unit_state_file.write_text("active", encoding="utf-8")
         _write_fake_bin(self.bin_dir)
         self.env_file.write_text(
             "GATEWAY_IMAGE=sha256:" + ("0" * 64) + "\n"
@@ -216,8 +270,27 @@ class _Harness:
         e["GW_TEST_DOCKER_LOG"] = str(self.docker_log)
         e["GW_TEST_SYSTEMCTL_LOG"] = str(self.systemctl_log)
         e["GW_TEST_RUNNING_IMAGE_STATE"] = str(self.running_image_state)
+        e["GW_TEST_UNIT_STATE_FILE"] = str(self.unit_state_file)
         e.update(overrides)
         return e
+
+    def set_unit_state(self, state: str) -> None:
+        """Seed the fake systemd unit's activation state for this run."""
+        self.unit_state_file.write_text(state, encoding="utf-8")
+
+    def unit_state(self) -> str:
+        return self.unit_state_file.read_text(encoding="utf-8").strip()
+
+    def systemctl_verbs(self) -> list[str]:
+        """The systemctl subcommands the script issued, in order."""
+        if not self.systemctl_log.exists():
+            return []
+        verbs: list[str] = []
+        for line in self.systemctl_log.read_text(encoding="utf-8").splitlines():
+            parts = [p for p in line.split() if not p.startswith("-")]
+            if len(parts) >= 2:
+                verbs.append(parts[1])
+        return verbs
 
     def run(self, *args: str, **env_overrides: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -842,6 +915,172 @@ def test_skip_reload_leaves_container_on_previous_digest(harness: _Harness) -> N
         in (result.stdout + result.stderr)
     )
     assert not harness.systemctl_log.exists() or harness.systemctl_log.read_text() == ""
+
+
+# ---------------------------------------------------------------------------
+# OMN-18134 -- the reload step is state-aware
+#
+# onex-gateway-forwarder.service (docker/gateway/onex-gateway-forwarder.service)
+# is `Type=oneshot` with `RemainAfterExit=yes`. Its ExecReload force-recreates
+# the container; its ExecStart brings it up. systemd refuses a `reload` job on
+# a unit that is not active, so a bare `systemctl reload` is only a valid
+# deploy step while the unit is already running.
+#
+# On .201 the unit went to `failed` at 2026-09-10T18:16:19Z (health-gate
+# failure). Every subsequent `deploy-gateway.sh --execute` then died at its
+# last step -- the build, the host-file sync and the gateway.env digest pin
+# had all already been applied, so the lane was left pinned to a digest
+# nothing was running. `--skip-reload` plus a hand `systemctl start` was the
+# only way through. The deploy agent's `_deploy_gateway_lane` path
+# (omnibase_infra#3411) drives this same script, so it inherited the defect.
+#
+# The three cases below are the golden path and both error-recovery chains.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_reload_step_reloads_an_active_unit(harness: _Harness) -> None:
+    """Golden path, unchanged semantics: an ACTIVE unit is reloaded, so
+    ExecReload's `--force-recreate` is what swings the container onto the new
+    digest. No start, no reset-failed.
+    """
+    harness.set_unit_state("active")
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    verbs = harness.systemctl_verbs()
+    assert "reload" in verbs, verbs
+    assert "start" not in verbs, verbs
+    assert "reset-failed" not in verbs, verbs
+    assert harness.unit_state() == "active"
+
+
+@pytest.mark.unit
+def test_reload_step_recovers_a_failed_unit(harness: _Harness) -> None:
+    """The .201 condition: the unit is FAILED. systemd refuses a reload job
+    on it, so the deploy must clear the failure and start the unit instead.
+    """
+    harness.set_unit_state("failed")
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode == 0, (
+        "a deploy onto a FAILED oneshot unit must recover it, not die at the "
+        "last step with gateway.env already pinned to the new digest\n"
+        + result.stdout
+        + result.stderr
+    )
+    verbs = harness.systemctl_verbs()
+    assert "reload" not in verbs, (
+        f"must not issue a reload job against a failed unit: {verbs}"
+    )
+    assert verbs.index("reset-failed") < verbs.index("start"), verbs
+    assert harness.unit_state() == "active"
+
+
+@pytest.mark.unit
+def test_reload_step_starts_an_inactive_unit(harness: _Harness) -> None:
+    """An INACTIVE (cleanly stopped, never-failed) unit is started. There is
+    no failure to clear, so no reset-failed is issued.
+    """
+    harness.set_unit_state("inactive")
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    verbs = harness.systemctl_verbs()
+    assert "start" in verbs, verbs
+    assert "reload" not in verbs, verbs
+    assert "reset-failed" not in verbs, verbs
+    assert harness.unit_state() == "active"
+
+
+@pytest.mark.unit
+def test_registry_rollback_command_is_state_aware(harness: _Harness) -> None:
+    """The recorded rollback_command must carry the same state-aware
+    sequence. A rollback is most often reached FROM a failed unit -- a
+    rollback one-liner that ends in a bare `systemctl reload` is unrunnable
+    exactly when it is needed.
+    """
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    rollback_command = str(harness.registry()["rollback_command"])
+    assert "systemctl is-active" in rollback_command, rollback_command
+    assert "systemctl reset-failed" in rollback_command, rollback_command
+    assert "systemctl start" in rollback_command, rollback_command
+
+
+@pytest.mark.unit
+def test_recorded_rollback_command_recovers_a_failed_unit(
+    harness: _Harness,
+) -> None:
+    """End-to-end on the emitted string, not on its spelling: run the
+    systemctl half of the recorded rollback_command against a FAILED unit and
+    assert it exits 0 and leaves the unit active.
+    """
+    result = harness.run(
+        "--execute",
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    rollback_command = str(harness.registry()["rollback_command"])
+    # The `sed -i` half is GNU-sed-specific and not what is under test here.
+    _sed_half, _, systemctl_half = rollback_command.partition(" && ")
+    assert "systemctl" in systemctl_half, rollback_command
+
+    harness.set_unit_state("failed")
+    replay = subprocess.run(
+        ["bash", "-c", systemctl_half],
+        cwd=REPO_ROOT,
+        env=harness.env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert replay.returncode == 0, (
+        "the recorded rollback_command must be runnable from a failed unit\n"
+        + replay.stdout
+        + replay.stderr
+    )
+    assert harness.unit_state() == "active"
+
+
+@pytest.mark.unit
+def test_dry_run_preview_describes_the_state_aware_reload(
+    harness: _Harness,
+) -> None:
+    """The dry-run preview must not promise an unconditional reload -- an
+    operator reading it while the unit is failed would predict the wrong
+    command.
+    """
+    result = harness.run("--print-compose-cmd")
+    assert result.returncode == 0, result.stderr
+    preview = harness.run()
+    assert preview.returncode == 0, preview.stderr + preview.stdout
+    combined = preview.stdout + preview.stderr
+    assert "reload if active" in combined, combined
 
 
 @pytest.mark.unit
