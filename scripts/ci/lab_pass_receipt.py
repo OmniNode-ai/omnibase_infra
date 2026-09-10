@@ -468,13 +468,29 @@ def check_ready(name: str, url: str, timeout_seconds: float) -> ModelLabPassChec
     )
 
 
+#: Where the runtime actually mounts its dimension block, and the shape it
+#: mounts. NOT a guess: ``omnibase_infra.runtime.health.runtime_health_block``
+#: builds ``{"status", "observed_at", ..., "dimensions": [{name, status,
+#: detail}, ...]}`` and ``omnibase_infra.services.health_checker`` assigns it to
+#: ``details[RUNTIME_HEALTH_DETAIL_KEY]``, where that key is ``"runtime_health"``.
+#:
+#: The first revision of this check read a top-level ``dimensions`` OBJECT keyed
+#: by dimension name. Nothing in this repository has ever produced that shape.
+#: It went unnoticed because the probe never reached a lane -- the URL it used
+#: resolved inside the runner container, so every call ended in ``Errno 111``
+#: and the parser was never entered.
+HEALTH_DETAILS_KEY = "details"
+HEALTH_RUNTIME_BLOCK_KEY = "runtime_health"
+HEALTHY_DIMENSION_WORDS = frozenset({"healthy", "ok", "pass", "up"})
+
+
 def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassCheck:
     """Every dimension the health payload reports must be healthy.
 
-    Fails closed on an unparseable body and on a payload carrying no
-    dimensions at all: "we could not find an unhealthy dimension" is not the
-    same statement as "every dimension is healthy", and only the second one is
-    a check.
+    Fails closed on an unparseable body, on a payload carrying no dimension
+    block, and on a dimension carrying no status: "we could not find an
+    unhealthy dimension" is not the same statement as "every dimension is
+    healthy", and only the second one is a check.
     """
     status, body = _http_get(url, timeout_seconds)
     if status != 200:
@@ -491,21 +507,34 @@ def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassChe
             ok=False,
             evidence=f"GET {url} -> 200 but body is not JSON: {exc}",
         )
-    dimensions = payload.get("dimensions") if isinstance(payload, dict) else None
-    if not isinstance(dimensions, dict) or not dimensions:
+
+    def _absent(reason: str) -> ModelLabPassCheck:
         return ModelLabPassCheck(
             name="health_dimensions",
             ok=False,
             evidence=(
-                f"GET {url} -> 200 but carries no 'dimensions' object; "
-                "an absent dimension set is not a healthy dimension set"
+                f"GET {url} -> 200 but {reason}; an absent dimension set is not "
+                "a healthy dimension set"
             ),
         )
-    unhealthy = sorted(
-        key
-        for key, value in dimensions.items()
-        if str(_dimension_status(value)).lower() not in {"healthy", "ok", "pass", "up"}
-    )
+
+    details = payload.get(HEALTH_DETAILS_KEY) if isinstance(payload, dict) else None
+    if not isinstance(details, dict):
+        return _absent(f"carries no {HEALTH_DETAILS_KEY!r} object")
+    block = details.get(HEALTH_RUNTIME_BLOCK_KEY)
+    if not isinstance(block, dict):
+        return _absent(
+            f"{HEALTH_DETAILS_KEY}.{HEALTH_RUNTIME_BLOCK_KEY} is absent or not "
+            "an object"
+        )
+    dimensions = block.get("dimensions")
+    if not isinstance(dimensions, list) or not dimensions:
+        return _absent(
+            f"{HEALTH_DETAILS_KEY}.{HEALTH_RUNTIME_BLOCK_KEY}.dimensions is "
+            "absent, empty, or not a list"
+        )
+
+    unhealthy = sorted(_unhealthy_dimension_names(dimensions))
     return ModelLabPassCheck(
         name="health_dimensions",
         ok=not unhealthy,
@@ -516,11 +545,25 @@ def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassChe
     )
 
 
-def _dimension_status(value: Any) -> Any:
-    """A dimension is either a status string or an object carrying one."""
-    if isinstance(value, dict):
-        return value.get("status", value.get("state", "unknown"))
-    return value
+def _unhealthy_dimension_names(dimensions: list[Any]) -> list[str]:
+    """Name every dimension that is not affirmatively healthy.
+
+    A malformed entry counts as unhealthy rather than being skipped: an entry
+    the reader cannot judge is exactly the case a silent ``continue`` would
+    turn into a green run.
+    """
+    names: list[str] = []
+    for index, entry in enumerate(dimensions):
+        if not isinstance(entry, dict):
+            names.append(f"<dimension[{index}] is not an object>")
+            continue
+        name = str(entry.get("name") or f"<dimension[{index}] has no name>")
+        status = entry.get("status")
+        if not isinstance(status, str) or status.lower() not in (
+            HEALTHY_DIMENSION_WORDS
+        ):
+            names.append(name)
+    return names
 
 
 def probe_compose_dev(
