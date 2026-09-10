@@ -113,6 +113,32 @@ WRITER_CONTRACT_DOMAINS: dict[str, frozenset[str]] = {
     "projection-tenant-credentials-writer": frozenset({"public", "tenant"}),
 }
 
+# Single-domain, and STILL not moved -- for a reason that is not domain
+# multiplicity and must not be conflated with it.
+#
+# The handlers build their SQL from the contract's bare `name` and never its
+# declared `schema`, so an unqualified write resolves through `search_path` into
+# `public`. For the registration and tenant-registry writers that is harmless
+# here: `omninode_runtime` already holds INSERT/SELECT/UPDATE on
+# `public.node_service_registry` and `public.tenant_registry_mirror`, delivered
+# by `node_projection_registration/0006` and
+# `node_projection_tenant_registry/0001`, so moving them needs no grant at all.
+#
+# `public.live_events` is different: `omninode_runtime` holds nothing on it, and
+# the grant that would fix that cannot be written. The OMN-15361 application
+# database SQL gate refuses it by name -- "application relation target
+# 'public.live_events' is prohibited in public" and "requires exactly one
+# ownership declaration" -- because the platform's position is that this
+# relation belongs in `omninode_internal`, where its twin already exists and is
+# already granted. The gate is right, and a grant on the `public` copy would
+# cement the split rather than close it.
+#
+# So this writer stays on the legacy binding until the schema cutover moves its
+# write, and that is asserted here rather than left as a silent omission.
+BLOCKED_ON_PHYSICAL_SCHEMA_SPLIT: frozenset[str] = frozenset(
+    {"projection-live-events-writer"}
+)
+
 # The env var the runner reads when no binding overlay is declared
 # (`Settings.omnidash_analytics_db_url`, preferred by `from_legacy_settings`).
 LEGACY_DSN_ENV = "OMNIDASH_ANALYTICS_DB_URL"
@@ -167,8 +193,16 @@ def _declared_domains(service_name: str) -> frozenset[str]:
     return WRITER_CONTRACT_DOMAINS[service_name] | RUNNER_BASE_DOMAINS
 
 
-def _is_satisfiable(service_name: str) -> bool:
+def _is_single_domain(service_name: str) -> bool:
     return len(_declared_domains(service_name)) == 1
+
+
+def _is_satisfiable(service_name: str) -> bool:
+    """Single-domain AND its declared principal can actually be granted."""
+    return (
+        _is_single_domain(service_name)
+        and service_name not in BLOCKED_ON_PHYSICAL_SCHEMA_SPLIT
+    )
 
 
 def _expected_principal(service_name: str) -> str:
@@ -260,23 +294,31 @@ class TestSingleDomainWritersUseTheirDeclaredPrincipal:
 class TestMultiDomainWritersAreDeclaredUnsatisfiable:
     """AC3. The boundary is asserted, not left as an absence."""
 
-    def test_exactly_the_three_known_splits_are_unsatisfiable(self) -> None:
-        unsatisfiable = {
-            name for name in WRITER_CONTRACT_DOMAINS if not _is_satisfiable(name)
+    def test_exactly_the_three_known_splits_are_multi_domain(self) -> None:
+        multi = {
+            name for name in WRITER_CONTRACT_DOMAINS if not _is_single_domain(name)
         }
-        assert unsatisfiable == {
+        assert multi == {
             "projection-delegation-writer",
             "projection-savings-writer",
             "projection-tenant-credentials-writer",
         }, (
-            "the satisfiable/unsatisfiable split changed. A writer that became "
+            "the single/multi-domain split changed. A writer that became "
             "single-domain should be wired to its declared principal here; a "
             "writer that became multi-domain belongs to OMN-17454."
         )
 
+    def test_the_blocked_writer_is_single_domain_and_still_unmoved(self) -> None:
+        # The two reasons a writer is not moved must stay distinguishable: this
+        # one is single-domain and blocked on WHERE its relation physically
+        # lives, not on how many principals it needs.
+        for name in BLOCKED_ON_PHYSICAL_SCHEMA_SPLIT:
+            assert _is_single_domain(name), name
+            assert not _is_satisfiable(name), name
+
     @pytest.mark.parametrize(
         "service_name",
-        sorted(name for name in WRITER_CONTRACT_DOMAINS if not _is_satisfiable(name)),
+        sorted(name for name in WRITER_CONTRACT_DOMAINS if not _is_single_domain(name)),
     )
     def test_a_split_writer_spans_more_than_one_declared_domain(
         self, service_name: str
