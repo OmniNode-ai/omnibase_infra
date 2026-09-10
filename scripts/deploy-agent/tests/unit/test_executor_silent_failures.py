@@ -112,6 +112,9 @@ def test_happy_path() -> None:
 
     with patch("deploy_agent.executor._run", side_effect=fake_run):
         executor.preflight(on_phase_update=_noop_phase_update)
-        sha = executor.git_pull("origin/main", on_phase_update=_noop_phase_update)
+        # OMN-18122: the dev lane deploys the branch it declares it tracks. This
+        # read "origin/main" until the ref fence landed, which is the shape the
+        # incident was made of -- a dev deploy naming the release-synced branch.
+        sha = executor.git_pull("origin/dev", on_phase_update=_noop_phase_update)
 
     assert sha == sentinel_sha

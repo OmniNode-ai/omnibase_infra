@@ -40,6 +40,10 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
+from deploy_agent.ref_fence import (
+    ModelRefLineageFacts,
+    assert_ref_not_stale_branch,
+)
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
@@ -1233,6 +1237,14 @@ class DeployExecutor:
             if result.returncode != 0:
                 raise RuntimeError(f"Git fetch failed: {result.stderr}")
 
+        # OMN-18122: refuse a branch alias that would move the clone BACKWARDS
+        # before anything touches the tree. The fetch above is what makes the
+        # comparison meaningful -- both refs are now current -- and the reset
+        # below is the mutation being fenced.
+        assert_ref_not_stale_branch(
+            self._ref_lineage_facts(git_ref, timeout=timeout),
+        )
+
         # Reset to ref
         result = _run(
             ["git", "-C", REPO_DIR, "reset", "--hard", git_ref],
@@ -1250,6 +1262,71 @@ class DeployExecutor:
 
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
+
+    def _ref_lineage_facts(self, git_ref: str, *, timeout: int) -> ModelRefLineageFacts:
+        """Ask git where ``git_ref`` sits relative to this lane's tracking branch.
+
+        Gathers the facts :func:`assert_ref_not_stale_branch` decides on. Kept
+        separate from that decision so the rule itself is a pure function with
+        no repository on disk (OMN-18122).
+
+        ``git rev-parse --symbolic-full-name`` is what distinguishes a branch
+        alias from a commit SHA: it prints a full ref name for a branch and
+        nothing at all for a SHA. That is a git-native answer rather than a
+        regex over the string, so a tag, a ``HEAD``, and an abbreviated SHA are
+        all classified by what they actually resolve to.
+        """
+        tracking_ref = load_tracking_remote_ref_from_env()
+
+        symbolic = _run(
+            ["git", "-C", REPO_DIR, "rev-parse", "--symbolic-full-name", git_ref],
+            timeout=timeout,
+        )
+        is_branch_reference = bool(symbolic.stdout.strip())
+
+        behind = 0
+        ahead = 0
+        if is_branch_reference and git_ref != tracking_ref:
+            counts = _run(
+                [
+                    "git",
+                    "-C",
+                    REPO_DIR,
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    f"{tracking_ref}...{git_ref}",
+                ],
+                timeout=timeout,
+            )
+            # Left column: commits on the tracking ref only (the requested ref
+            # is BEHIND by these). Right column: commits on the requested ref
+            # only (it is AHEAD by these).
+            fields = counts.stdout.split()
+            if counts.returncode == 0 and len(fields) == 2:
+                behind, ahead = int(fields[0]), int(fields[1])
+            else:
+                # A comparison that could not be made is not evidence that the
+                # ref is fine. Refusing here would block every deploy on a
+                # transient git failure, so the fence is skipped and the reason
+                # is logged loudly rather than swallowed.
+                logger.warning(
+                    "OMN-18122 ref fence could not compare %s against %s "
+                    "(rc=%s, stdout=%r); the fence did NOT run for this deploy",
+                    git_ref,
+                    tracking_ref,
+                    counts.returncode,
+                    counts.stdout.strip(),
+                )
+                is_branch_reference = False
+
+        return ModelRefLineageFacts(
+            requested_ref=git_ref,
+            tracking_ref=tracking_ref,
+            is_branch_reference=is_branch_reference,
+            commits_ahead_of_tracking=ahead,
+            commits_behind_tracking=behind,
+        )
 
     def _preflight_required_compose_env(
         self,
