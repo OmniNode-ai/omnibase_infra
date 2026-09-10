@@ -572,7 +572,16 @@ class TestComposeDevProbeReachesTheLane:
         return dict(step["env"])
 
     def test_the_probe_does_not_address_the_lane_as_localhost(self) -> None:
-        for name, url in self._probe_env().items():
+        # Only the address-carrying entries; the step also carries numeric
+        # budget knobs, and a URL assertion over an int is a broken test rather
+        # than a finding.
+        addresses = {
+            name: value
+            for name, value in self._probe_env().items()
+            if isinstance(value, str) and "://" in value
+        }
+        assert addresses, "the probe step names no lane address at all"
+        for name, url in addresses.items():
             assert "localhost" not in url, (
                 f"{name}={url!r}: the compose-dev probe runs inside the "
                 "omninode-deploy-runner container, where localhost is the "
@@ -706,3 +715,156 @@ class TestHealthDimensionProbeReadsTheShapeTheRuntimeServes:
             lambda url, timeout: (200, body),
         )
         assert check_health_dimensions("http://lane/health", 1.0).ok is False
+
+
+def _install_fake_clock(monkeypatch: Any) -> None:
+    """A virtual clock so a settle-budget test costs no wall-clock time.
+
+    The production loop deliberately measures with ``time.monotonic``; patching
+    only ``time.sleep`` would leave the loop spinning against a real deadline,
+    which is how a unit test quietly becomes a 30-second one.
+    """
+    now = {"t": 0.0}
+    monkeypatch.setattr("time.monotonic", lambda: now["t"])
+    monkeypatch.setattr(
+        "time.sleep", lambda seconds: now.__setitem__("t", now["t"] + seconds)
+    )
+
+
+class TestTheProbeDoesNotRaceTheComposeRecreate:
+    """The probe fired 174 milliseconds after convergence, into a cold lane.
+
+    Measured on run 34478680748, from the job log, to the millisecond::
+
+        13:12:28.5442420Z  ok: dev lane converged onto c1874426216e after 0h22m
+        13:12:28.7181102Z  uv run python scripts/ci/lab_pass_receipt.py probe-lane
+        13:12:28.8260884Z  GET .../8085/ready -> 0 Errno 111 Connection refused
+
+    ``check_dev_lane_staleness.py`` returns as soon as the RUNNING container
+    carries the expected ``org.opencontainers.image.revision`` label. That label
+    is set when the container is created, not when the runtime has bound its
+    port. So convergence succeeding is precisely the moment the lane is LEAST
+    able to answer, and the three HTTP checks fired into a compose recreate that
+    had just happened.
+
+    That receipt is the proof of the perverse consequence: ``deployed_revision``
+    ok, all three HTTP checks refused. Compare the receipt one run earlier
+    (``ba15dd33``), where the lane had NOT converged and was therefore serving an
+    older revision quite happily: ``deployed_revision`` failed and both readiness
+    checks passed. The HTTP checks pass only when the revision check fails, and
+    fail exactly when it succeeds -- so a ``compose-dev`` receipt cannot be a
+    PASS by construction. That is the fail-always shape this module's docstring
+    names, one layer deeper than the two defects already fixed under this ticket.
+
+    Measured settle cost on this lane the same day, read-only: at 12:36:29Z
+    ``omninode-runtime-effects`` was still ``Created`` while ``omninode-runtime``
+    read ``Up 3 minutes (health: starting)``; by 12:37:29Z effects was ``Up 44
+    seconds``; all three endpoints answered 200 several minutes after that. The
+    compose ``x-healthcheck-defaults`` ``start_period`` is 10s and measures
+    something else entirely -- deriving a settle budget from it would repeat the
+    false-derivation defect corrected in the parent commit.
+
+    So the budget is not a constant at all: it is whatever remains before this
+    job's own ceiling, passed in by the caller. That keeps the single
+    omnibase-deploy runner slot bounded exactly as it is today, and the receipt
+    records what budget the probe had and how long it waited, so a probe that
+    had no budget left says so instead of racing silently.
+    """
+
+    def test_probe_compose_dev_accepts_a_settle_budget(self) -> None:
+        import inspect
+
+        from scripts.ci.lab_pass_receipt import probe_compose_dev
+
+        params = inspect.signature(probe_compose_dev).parameters
+        assert "settle_timeout_seconds" in params, (
+            "the probe must be able to wait for the lane to finish coming up"
+        )
+
+    def test_it_waits_for_readiness_then_passes(self, monkeypatch: Any) -> None:
+        """A lane that answers on the third poll must produce passing checks."""
+        from scripts.ci.lab_pass_receipt import probe_compose_dev
+
+        body = (
+            _CAPTURED_HEALTH := __import__("pathlib")
+            .Path("tests/fixtures/omn17530/compose_dev_health.captured.json")
+            .read_text(encoding="utf-8")
+        )
+        calls: dict[str, int] = {}
+
+        def fake_get(url: str, timeout: float) -> tuple[int, str]:
+            calls[url] = calls.get(url, 0) + 1
+            if "/ready" in url and calls[url] < 3:
+                return 0, "URLError: <urlopen error [Errno 111] Connection refused>"
+            return 200, body if "/health" in url else '{"status":"healthy"}'
+
+        monkeypatch.setattr("scripts.ci.lab_pass_receipt._http_get", fake_get)
+        _install_fake_clock(monkeypatch)
+        checks = probe_compose_dev(
+            main_url="http://lane:8085",
+            effects_url="http://lane:8086",
+            timeout_seconds=1.0,
+            settle_timeout_seconds=60.0,
+        )
+        assert [c.name for c in checks] == [
+            "ready_main",
+            "ready_effects",
+            "health_dimensions",
+        ]
+        assert all(c.ok for c in checks), [
+            (c.name, c.evidence) for c in checks if not c.ok
+        ]
+        assert _CAPTURED_HEALTH  # the fixture is the real payload, not a stub
+
+    def test_a_lane_that_never_comes_up_still_fails(self, monkeypatch: Any) -> None:
+        """The settle wait is a wait, never a pass. Fail-closed is preserved."""
+        from scripts.ci.lab_pass_receipt import probe_compose_dev
+
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (
+                0,
+                "URLError: <urlopen error [Errno 111] Connection refused>",
+            ),
+        )
+        _install_fake_clock(monkeypatch)
+        checks = probe_compose_dev(
+            main_url="http://lane:8085",
+            effects_url="http://lane:8086",
+            timeout_seconds=1.0,
+            settle_timeout_seconds=30.0,
+        )
+        assert not any(c.ok for c in checks)
+
+    def test_zero_budget_is_recorded_not_hidden(self, monkeypatch: Any) -> None:
+        """A probe with no time left must say so in its own evidence."""
+        from scripts.ci.lab_pass_receipt import probe_compose_dev
+
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (
+                0,
+                "URLError: <urlopen error [Errno 111] Connection refused>",
+            ),
+        )
+        checks = probe_compose_dev(
+            main_url="http://lane:8085",
+            effects_url="http://lane:8086",
+            timeout_seconds=1.0,
+            settle_timeout_seconds=0.0,
+        )
+        readiness = next(c for c in checks if c.name == "ready_main")
+        assert "settle" in readiness.evidence.lower(), (
+            "a probe that raced because it had no budget must be "
+            "distinguishable from one that waited and still failed"
+        )
+
+    def test_the_workflow_hands_the_probe_its_remaining_budget(self) -> None:
+        from pathlib import Path
+
+        text = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
+            encoding="utf-8"
+        )
+        assert "--settle-timeout-seconds" in text, (
+            "the probe step must pass a budget, or it races the recreate again"
+        )
