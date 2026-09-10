@@ -319,13 +319,24 @@ def test_runtime_config_rejects_inline_canary_literals(tmp_path: Path) -> None:
         )
 
 
-def test_staging_canary_resolves_topics_from_node_contract() -> None:
+def test_staging_canary_resolves_topics_from_node_contract(tmp_path: Path) -> None:
+    # OMN-18120: the shipped config's dev-lane legs authenticate, and the loader
+    # fails closed without the credential map. Obviously-fake values; the
+    # assertion below is about topic resolution, not about the credential.
+    credential_map = tmp_path / "lane-credentials.yaml"
+    credential_map.write_text(
+        "lane.dev.kafka.scram:\n"
+        "  username: fixture-principal\n"
+        "  password: fixture-not-a-real-secret\n",
+        encoding="utf-8",
+    )
     repo_root = Path(__file__).parents[3]
 
     loaded = gateway_forwarder.load_gateway_forwarder_runtime_config(
         repo_root / "docker/gateway/beta-gateway-canary.yaml",
         broker_ref_map_path=repo_root
         / "tests/fixtures/gateway/beta-gateway-canary-broker-ref-map.yaml",
+        lane_credential_map_path=credential_map,
     )
 
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
