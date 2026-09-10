@@ -20,7 +20,25 @@ import time
 
 import pytest
 
-_IS_CI: bool = os.environ.get("CI", "").strip().lower() in {"1", "true", "yes", "on"}
+# OMN-18162: these four microbenchmarks used to key their skip off the generic
+# `CI` environment variable, which GitHub Actions always sets. Combined with
+# ci.yml's `-m "not slow and not performance"`, that left them with NO CI
+# execution path at all: the pre-push test leg was the only surface that ever
+# ran them, and retiring it would have removed their last one silently.
+#
+# The switch is now an explicit opt-in. `microbenchmarks-nightly.yml` sets it;
+# nothing else does, so these stay skipped on an ordinary pull request and on a
+# developer machine, which is what the original `CI` check was reaching for.
+# Their reasons below are unchanged and still true -- they are timing-sensitive
+# and will read differently on a shared runner. The nightly exists to catch hard
+# breakage (an exception, a broken import, an order-of-magnitude regression),
+# not to be a precision benchmark harness. If variance makes it noisy, the fix
+# is to widen these assertions or delete the test, never to re-hide it behind a
+# condition that no surface satisfies.
+_RUN_MICROBENCHMARKS: bool = os.environ.get(
+    "ONEX_RUN_MICROBENCHMARKS", ""
+).strip().lower() in {"1", "true", "yes", "on"}
+_SKIP_MICROBENCHMARKS: bool = not _RUN_MICROBENCHMARKS
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
@@ -187,7 +205,8 @@ class TestPolicyRegistryPerformance:
         )
 
     @pytest.mark.skipif(
-        _IS_CI, reason="Flaky in CI: microbenchmark variance can show warm > cold time"
+        _SKIP_MICROBENCHMARKS,
+        reason="Flaky in CI: microbenchmark variance can show warm > cold time",
     )
     def test_semver_cache_performance(
         self, large_policy_registry: RegistryPolicy
@@ -522,7 +541,7 @@ class TestPolicyRegistryPerformanceRegression:
         return registry
 
     @pytest.mark.skipif(
-        _IS_CI,
+        _SKIP_MICROBENCHMARKS,
         reason="Flaky in CI: P99 latency microbenchmark too sensitive to environment variance",
     )
     def test_get_p99_latency_under_threshold(
@@ -574,7 +593,7 @@ class TestPolicyRegistryPerformanceRegression:
         )
 
     @pytest.mark.skipif(
-        _IS_CI,
+        _SKIP_MICROBENCHMARKS,
         reason="Flaky in CI: registration throughput microbenchmark too sensitive to shared runner variance",
     )
     def test_registration_throughput_regression(self) -> None:
@@ -671,7 +690,7 @@ class TestPolicyRegistryPerformanceRegression:
         )
 
     @pytest.mark.skipif(
-        _IS_CI,
+        _SKIP_MICROBENCHMARKS,
         reason="Flaky in CI: simulated O(n) is too fast for accurate comparison",
     )
     def test_secondary_index_speedup(self) -> None:
