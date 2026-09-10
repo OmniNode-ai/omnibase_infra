@@ -32,10 +32,11 @@ would have passed happily through both outages. The failure mode is precisely
 that the two repos disagree, so the only test that can catch it is one that
 parses what omnibase_infra actually consumes at run time.
 
-That makes this test dependent on a sibling checkout, so it SKIPS rather than
-fails when the overlay is absent — a missing clone is not evidence of drift. The
-skip is narrow: it fires only when the file cannot be found, never when it can
-be read and disagrees.
+That makes this test dependent on a sibling checkout. Local runs skip when the
+overlay is absent because a missing clone is not evidence of drift; CI runs fail
+closed when the expected live checkout is absent, because an unwired guard must
+not look green. When ``OMNI_HOME`` is set it is authoritative, so a stale
+ancestor checkout cannot silently win precedence.
 """
 
 from __future__ import annotations
@@ -57,13 +58,15 @@ _OVERLAY_RELATIVE = Path("config/ci_bus_lanes.yaml")
 def _live_overlay_path() -> Path | None:
     """Locate omnimarket's overlay beside this checkout, or via OMNI_HOME.
 
-    Returns None when it cannot be found, which is a skip rather than a
-    failure: the absence of a sibling clone says nothing about drift.
+    ``OMNI_HOME`` is authoritative when set. Returns None when the selected
+    checkout is absent; the caller distinguishes local skip from CI failure.
     """
-    candidates: list[Path] = []
     omni_home = os.environ.get("OMNI_HOME")
     if omni_home:
-        candidates.append(Path(omni_home) / "omnimarket" / _OVERLAY_RELATIVE)
+        candidate = Path(omni_home) / "omnimarket" / _OVERLAY_RELATIVE
+        return candidate if candidate.is_file() else None
+
+    candidates: list[Path] = []
     # The CI job checks the overlay out beside the workspace as .ci-bus-overlay.
     here = Path(__file__).resolve()
     for parent in here.parents:
@@ -81,12 +84,24 @@ def test_the_live_overlay_still_validates_against_this_repos_lane_model() -> Non
     """
     overlay = _live_overlay_path()
     if overlay is None:
+        if os.environ.get("CI", "").lower() == "true":
+            pytest.fail(
+                "CI could not find omnimarket's live "
+                "config/ci_bus_lanes.yaml; the cross-repository drift guard "
+                "is not wired to its required input"
+            )
         pytest.skip(
             "omnimarket's config/ci_bus_lanes.yaml is not present beside this "
             "checkout; a missing sibling clone is not evidence of drift"
         )
 
-    data = yaml.safe_load(overlay.read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(overlay.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        pytest.fail(f"could not read or parse live overlay {overlay}: {exc}")
+    if not isinstance(data, dict):
+        pytest.fail(f"live overlay {overlay} must contain a YAML mapping")
+
     try:
         ModelCiBusOverlay.model_validate(data)
     except ValidationError as exc:
@@ -109,7 +124,7 @@ def test_extra_forbid_is_retained_so_a_typo_is_still_refused() -> None:
     strictness itself, so a future fix cannot buy green by removing it.
     """
     lane = {"broker": "inmemory", "brokerr": "typo"}
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="brokerr"):
         ModelCiBusOverlay.model_validate(
             {"default": "inmemory", "lanes": {"dev": lane}}
         )
@@ -146,7 +161,7 @@ def test_an_unknown_key_inside_projection_readback_is_still_refused() -> None:
         "broker": "inmemory",
         "projection_readback": {"dsn_env": "X", "dsn_value": "postgres://leak"},
     }
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="dsn_value"):
         ModelCiBusOverlay.model_validate(
             {"default": "inmemory", "lanes": {"dev": lane}}
         )
