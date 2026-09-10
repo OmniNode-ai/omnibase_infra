@@ -238,12 +238,21 @@ def test_runtime_handler_dependencies_include_dlq_replay_when_kafka_configured()
 
     assert result is not None
     dlq_deps = result["HandlerDlqReplay"]
-    assert isinstance(dlq_deps["consumer"], DLQConsumer)
+    # OMN-18119: one consumer per DECLARED subscribe topic, keyed by topic. This
+    # assertion previously read a singular `consumer` and checked that its topic
+    # was the events DLQ -- which is exactly the defect, asserted as if it were
+    # the specification. The declared set is read from the contract in
+    # tests/integration/test_omn18119_per_topic_dlq_consumers_wired.py; here we
+    # only require that every wired consumer is real and points at the broker.
+    consumers = dlq_deps["consumers"]
+    assert isinstance(consumers, dict) and consumers, consumers
+    assert all(isinstance(c, DLQConsumer) for c in consumers.values()), consumers
     assert isinstance(dlq_deps["producer"], DLQProducer)
     assert isinstance(dlq_deps["quarantine_producer"], DLQQuarantineProducer)
-    consumer = dlq_deps["consumer"]
-    assert consumer.config.bootstrap_servers == "redpanda:9092"
-    assert consumer.config.dlq_topic == "onex.dlq.omnibase-infra.events.v1"
+    for topic, consumer in consumers.items():
+        assert consumer.config.bootstrap_servers == "redpanda:9092"
+        assert consumer.config.dlq_topic == topic
+    assert "onex.dlq.omnibase-infra.events.v1" in consumers, sorted(consumers)
 
 
 @pytest.mark.integration
@@ -377,11 +386,11 @@ async def test_kernel_runtime_dependencies_cover_dlq_replay_handler() -> None:
         def __init__(
             self,
             *,
-            consumer: object,
+            consumers: object,  # OMN-18119: one per declared subscribe topic
             producer: object,
             quarantine_producer: object,
         ) -> None:
-            self.consumer = consumer
+            self.consumers = consumers
             self.producer = producer
             self.quarantine_producer = quarantine_producer
 

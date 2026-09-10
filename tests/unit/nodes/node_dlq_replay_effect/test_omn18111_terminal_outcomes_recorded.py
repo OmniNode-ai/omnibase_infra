@@ -197,7 +197,7 @@ def _handler(
     tracking: _RecordingTracking | None,
 ) -> HandlerDlqReplay:
     return HandlerDlqReplay(
-        consumer=consumer,
+        consumers={consumer.config.dlq_topic: consumer},
         producer=producer,  # type: ignore[arg-type]
         quarantine_producer=quarantine,  # type: ignore[arg-type]
         tracking=tracking,  # type: ignore[arg-type]

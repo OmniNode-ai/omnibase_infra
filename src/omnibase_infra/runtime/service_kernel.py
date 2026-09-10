@@ -476,6 +476,38 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
     )
 
 
+def _dlq_replay_subscribe_topics() -> tuple[str, ...]:
+    """The DLQ topics ``node_dlq_replay_effect`` declares it subscribes to.
+
+    Read from the node's own ``contract.yaml`` (OMN-18119) rather than named in
+    this function, so the runtime cannot supply a set of consumers that
+    disagrees with what the contract says the node drains. The failure this
+    closes was exactly that disagreement: three declared topics, one consumer.
+
+    Fails CLOSED. An unreadable contract, a missing ``event_bus`` block or an
+    empty topic list raises rather than falling back to a hardcoded topic -- a
+    silent fallback here would reinstate the defect in the one situation where
+    nobody would look for it.
+    """
+    import omnibase_infra.nodes.node_dlq_replay_effect as _dlq_replay_pkg
+
+    contract_path = Path(str(_dlq_replay_pkg.__file__)).parent / "contract.yaml"
+    try:
+        contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        topics = tuple(contract["event_bus"]["subscribe_topics"])
+    except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+        raise ProtocolConfigurationError(
+            "DLQ replay wiring requires the contract-declared "
+            f"event_bus.subscribe_topics block at {contract_path}"
+        ) from exc
+    if not topics or not all(isinstance(topic, str) and topic for topic in topics):
+        raise ProtocolConfigurationError(
+            "DLQ replay wiring requires at least one non-empty declared "
+            f"subscribe topic at {contract_path}; got {topics!r}"
+        )
+    return topics
+
+
 async def _build_dlq_replay_tracking(
     correlation_id: UUID,
 ) -> ServiceDlqTracking | None:
@@ -627,7 +659,6 @@ def _build_runtime_handler_dependencies(
         dependencies["HandlerSavingsCorrelation"] = savings_dependencies
 
     if kafka_bootstrap_servers:
-        from omnibase_infra.event_bus.topic_constants import build_dlq_topic
         from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
             DLQConsumer,
             DLQProducer,
@@ -635,14 +666,40 @@ def _build_runtime_handler_dependencies(
             ModelDlqReplayEngineConfig,
         )
 
-        dlq_replay_config = ModelDlqReplayEngineConfig(
-            bootstrap_servers=kafka_bootstrap_servers,
-            dlq_topic=build_dlq_topic("events"),
-        )
+        # OMN-18119: one consumer per DECLARED subscribe topic, read from the
+        # node's own contract rather than named here. Before this, a single
+        # config pinned to the events topic was the whole drain: the resolver
+        # keys this map by handler NAME, so all three of the per-topic
+        # dispatcher entries OMN-18013 split the routing into resolved to the
+        # same one consumer, and the intents and commands DLQ topics were
+        # consumed by nothing at all. Live on the .201 dev lane the replay
+        # group held a committed offset for exactly one topic-partition while
+        # 1,661 records sat in the commands DLQ.
+        #
+        # The contract is the source of truth for WHICH topics, the same way
+        # the gateway block below reads its node's contract for config. Every
+        # consumer keeps DLQ_REPLAY_CONSUMER_GROUP: Kafka commits are per
+        # topic-partition, so one group covers all three and no new group is
+        # minted.
+        dlq_subscribe_topics = _dlq_replay_subscribe_topics()
+        dlq_replay_configs = {
+            topic: ModelDlqReplayEngineConfig(
+                bootstrap_servers=kafka_bootstrap_servers,
+                dlq_topic=topic,
+            )
+            for topic in dlq_subscribe_topics
+        }
+        # Producers are topic-agnostic — they publish to the original topic and
+        # to the single quarantine sink — so one of each is built from the
+        # primary config and shared across the per-topic consumers.
+        primary_config = dlq_replay_configs[dlq_subscribe_topics[0]]
         dlq_replay_dependencies: dict[str, object] = {
-            "consumer": DLQConsumer(dlq_replay_config),
-            "producer": DLQProducer(dlq_replay_config),
-            "quarantine_producer": DLQQuarantineProducer(dlq_replay_config),
+            "consumers": {
+                topic: DLQConsumer(config)
+                for topic, config in dlq_replay_configs.items()
+            },
+            "producer": DLQProducer(primary_config),
+            "quarantine_producer": DLQQuarantineProducer(primary_config),
         }
         # OMN-18111: only when the runtime actually HAS one. An explicit
         # ``"tracking": None`` and an absent key behave identically for the
