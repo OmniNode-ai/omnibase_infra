@@ -25,7 +25,13 @@ import sys
 from typing import Any
 
 import pytest
-from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus, Scope
+from deploy_agent.events import (
+    DEV_LANE_ONLY_RUNTIME_SERVICES,
+    EnumRuntimeLane,
+    Phase,
+    PhaseStatus,
+    Scope,
+)
 from deploy_agent.executor import DeployExecutor
 
 # The three services the live incident left in Created (ledger row :5076).
@@ -42,6 +48,11 @@ RUNNING_SERVICES = (
     "intelligence-migration",
     "intelligence-api",
     "autoheal",
+    # OMN-18108: a DEV runtime deploy also targets the lane's own services, so
+    # the modelled lane has to contain them. They came up; the three above did
+    # not. A service absent from this map reads as unresolvable, which would
+    # make this fixture assert recovery of services the incident never touched.
+    *DEV_LANE_ONLY_RUNTIME_SERVICES,
 )
 
 # The stub compose sleeps this long; the injected ceiling is far below it, so
