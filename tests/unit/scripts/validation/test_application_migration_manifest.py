@@ -536,7 +536,23 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # switch, and joins that snapshot in every guard below. Net-new file;
     # 0036's bytes are NOT edited, it is retired in place by a row in
     # _ledger/migration-supersessions.tsv, exactly as 0036 retired 0034.
-    assert len(result.declarations) == 174
+    #
+    # 174 -> 175 for OMN-18140's
+    # nodes/node_projection_delegation/
+    # 0038_delegation_events_writer_identity.sql, which adds a durable WRITER
+    # ATTESTATION to delegation_events: `writer_identity TEXT DEFAULT
+    # CURRENT_USER` and `written_at TIMESTAMPTZ DEFAULT NOW()`. Neither exists
+    # today, and `delegated_by` -- the closest existing column -- answers a
+    # different question: it names the DELEGATOR carried on the inbound event,
+    # a value the writing process chooses, not the database principal that
+    # performed the write. Both new columns are NULLABLE and unbackfilled on
+    # purpose: `NOT NULL DEFAULT CURRENT_USER` would rewrite the table and
+    # stamp every historical row with the MIGRATION runner's identity, which is
+    # a fabricated attestation for rows it did not write. Net-new file, no
+    # parent edited and nothing superseded -- it neither reads nor rewrites
+    # tenant_id, so it is independent of the 0031->0037 conversion chain above
+    # and does not participate in its supersession ledger.
+    assert len(result.declarations) == 175
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
