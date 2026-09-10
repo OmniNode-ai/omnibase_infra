@@ -132,6 +132,7 @@ import json
 import re
 import subprocess  # fixed argv, no shell, trusted gh binary
 import sys
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -566,16 +567,102 @@ def _unhealthy_dimension_names(dimensions: list[Any]) -> list[str]:
     return names
 
 
+#: How long to sleep between readiness polls while the lane finishes coming up.
+SETTLE_POLL_SECONDS = 10.0
+
+
+def wait_for_lane_ready(
+    ready_urls: Sequence[str], timeout_seconds: float, settle_timeout_seconds: float
+) -> str:
+    """Poll one readiness endpoint until it answers 200, or the budget expires.
+
+    Returns a phrase describing what happened, which every check below appends
+    to its own evidence. It is deliberately a WAIT and never a verdict: the
+    checks still run afterwards and still fail on a lane that never came up.
+
+    WHY THIS EXISTS. ``check_dev_lane_staleness.py`` returns the moment the
+    RUNNING container carries the expected ``org.opencontainers.image.revision``
+    label, and that label is set when the container is created, not when the
+    runtime has bound its port. So the instant convergence succeeds is the
+    instant the lane is LEAST able to answer. Measured on run 34478680748:
+    convergence at ``13:12:28.5442420Z``, probe at ``13:12:28.7181102Z``, first
+    ``Errno 111`` at ``13:12:28.8260884Z`` -- 174 milliseconds, straight into a
+    compose recreate.
+
+    The consequence was perverse and is the reason this is not cosmetic: the
+    HTTP checks passed only when ``deployed_revision`` FAILED (a stale lane
+    serving happily) and failed exactly when it SUCCEEDED, so a ``compose-dev``
+    receipt could not be a PASS by construction.
+
+    The budget is supplied by the caller rather than being a constant here. The
+    compose ``x-healthcheck-defaults`` ``start_period`` is 10s and measures
+    something else; deriving from it would repeat the false-derivation defect
+    this module's sibling commit corrected. What the caller passes is whatever
+    remains before the emitting job's own ceiling, so the runner slot stays
+    bounded exactly as it is today and a probe with nothing left says so.
+    """
+    if settle_timeout_seconds <= 0:
+        return "no settle budget remained, so this is a first-look read"
+    started = time.monotonic()
+    deadline = started + settle_timeout_seconds
+    while True:
+        pending = [
+            url for url in ready_urls if _http_get(url, timeout_seconds)[0] != 200
+        ]
+        waited = time.monotonic() - started
+        if not pending:
+            return (
+                f"lane ready after {waited:.0f}s of a "
+                f"{settle_timeout_seconds:.0f}s settle budget"
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return (
+                f"still not ready after the full {settle_timeout_seconds:.0f}s "
+                f"settle budget: {sorted(pending)}"
+            )
+        time.sleep(min(SETTLE_POLL_SECONDS, remaining))
+
+
 def probe_compose_dev(
-    main_url: str, effects_url: str, timeout_seconds: float
+    main_url: str,
+    effects_url: str,
+    timeout_seconds: float,
+    settle_timeout_seconds: float,
 ) -> list[ModelLabPassCheck]:
-    """The read-only probes the ``.201`` dev lane emitter runs."""
-    return [
+    """The read-only probes the ``.201`` dev lane emitter runs.
+
+    A convergence success hands us a lane that has just been recreated, so the
+    probes wait for it to come up before reading it. See
+    :func:`wait_for_lane_ready` for the measurement that made this necessary.
+    """
+    # BOTH readiness endpoints, not just main. Measured on the .201 lane
+    # 2026-09-10: at 12:36:29Z omninode-runtime read "Up 3 minutes (health:
+    # starting)" while omninode-runtime-effects was still "Created", and at
+    # 12:37:29Z main was healthy while effects had been up 44 seconds. Waiting
+    # on main alone would clear the race for ready_main and leave it for
+    # ready_effects.
+    settle = wait_for_lane_ready(
+        [f"{main_url.rstrip('/')}/ready", f"{effects_url.rstrip('/')}/ready"],
+        timeout_seconds,
+        settle_timeout_seconds,
+    )
+    checks = [
         check_ready("ready_main", f"{main_url.rstrip('/')}/ready", timeout_seconds),
         check_ready(
             "ready_effects", f"{effects_url.rstrip('/')}/ready", timeout_seconds
         ),
         check_health_dimensions(f"{main_url.rstrip('/')}/health", timeout_seconds),
+    ]
+    # Every check carries what the probe waited for, passing ones included: a
+    # green read taken with no settle budget is a different fact from a green
+    # read taken after the lane reported itself up, and the receipt should not
+    # make them look identical.
+    return [
+        ModelLabPassCheck(
+            name=check.name, ok=check.ok, evidence=f"{check.evidence} [{settle}]"
+        )
+        for check in checks
     ]
 
 
@@ -848,6 +935,19 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--main-url", required=True)
     probe.add_argument("--effects-url", required=True)
     probe.add_argument("--timeout-seconds", type=float, default=15.0)
+    probe.add_argument(
+        "--settle-timeout-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "seconds to wait for the lane to report ready before reading it. "
+            "A convergence success hands the probe a lane that has JUST been "
+            "recreated, so without a budget here the probes race the compose "
+            "recreate (measured: 174ms after convergence on run 34478680748). "
+            "The caller passes whatever remains before its own job ceiling; the "
+            "default of 0 preserves the first-look behaviour for an ad hoc read."
+        ),
+    )
 
     emit = sub.add_parser("emit", help="build, validate and write a receipt")
     emit.add_argument("--sha", required=True)
@@ -898,7 +998,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "probe-lane":
         checks = probe_compose_dev(
-            args.main_url, args.effects_url, args.timeout_seconds
+            args.main_url,
+            args.effects_url,
+            args.timeout_seconds,
+            args.settle_timeout_seconds,
         )
         print(json.dumps([c.to_dict() for c in checks], indent=2))
         return 0
