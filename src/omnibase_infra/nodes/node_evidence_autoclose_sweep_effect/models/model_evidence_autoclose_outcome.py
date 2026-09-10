@@ -196,6 +196,20 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
             "verdict' without re-parsing free text."
         ),
     )
+    # OMN-18106. Non-empty ONLY when the positive prior-revert fence stopped
+    # applying because this ticket's evidence landed after the reversal. It
+    # names the reversal's timestamp and each piece of evidence that postdates
+    # it, so a close taken over a prior human disagreement carries, in the
+    # receipt itself, the ordering that authorised it. Empty is the ordinary
+    # case — either no reversal, or a fence that held.
+    post_revert_evidence_release: str = Field(
+        default="",
+        description=(
+            "Why the prior-revert fence did not apply: the reversal timestamp "
+            "and the evidence landings that postdate it. Empty when the fence "
+            "was not reached or held."
+        ),
+    )
     linear_comment_posted: bool = Field(
         default=False, description="Whether an audit/gap comment was posted."
     )

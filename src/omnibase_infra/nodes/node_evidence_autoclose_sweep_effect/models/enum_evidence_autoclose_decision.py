@@ -176,6 +176,21 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # transition on the ticket. Same verdict + a reversal = refuse. A CHANGED
     # verdict has a different fingerprint and is free to close, so the hold is
     # on re-asserting an overruled statement, not on the ticket forever.
+    #
+    # OMN-18106. "Not on the ticket forever" was, for one population, false.
+    # The OMN-18056 positive form recorded its baseline from the FIRST verdict
+    # observed after the reversal, which on any ticket whose remediation landed
+    # before that first look is the already-repaired verdict — and, dod_verify
+    # being deterministic, one no later tick could ever differ from. OMN-15542
+    # was held permanently that way. The fence now asks the ORDERING first,
+    # from timestamps rather than from recall: the reversal's own `createdAt`
+    # against the landing times of the evidence the verdict is resolved from
+    # (the merged OCC companion, each cited product PR). Evidence that
+    # postdates the reversal RELEASES to the ordinary flip predicate, and the
+    # outcome carries `post_revert_evidence_release` naming the reversal time
+    # and every landing that beat it. Evidence that entirely predates the
+    # reversal still holds — that is the OMN-17298 case the fence exists for —
+    # and an ordering that cannot be read holds too, naming the timestamp.
     SKIPPED_PRIOR_REVERT = "skipped_prior_revert"
     # OMN-16106, D1. The ticket's own description (or a Linear-linked
     # attachment) CITES a product PR that is not merged. This is the OMN-13856
