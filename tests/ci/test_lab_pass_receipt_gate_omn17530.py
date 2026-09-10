@@ -275,7 +275,16 @@ class TestCheckArgumentParsing:
 
 
 class TestHealthDimensionProbe:
-    """An absent dimension set is not a healthy dimension set."""
+    """An absent dimension set is not a healthy dimension set.
+
+    The healthy and unhealthy cases that used to live here asserted against a
+    top-level ``dimensions`` OBJECT that no producer in this repository has
+    ever emitted, so they proved the fixture rather than the surface. They are
+    replaced by
+    :class:`TestHealthDimensionProbeReadsTheShapeTheRuntimeServes`, which reads
+    a payload captured off the live ``.201`` dev lane. What remains here are
+    the two shape-agnostic fail-closed cases, which are true of any payload.
+    """
 
     def test_missing_dimensions_object_fails(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(
@@ -285,35 +294,6 @@ class TestHealthDimensionProbe:
         check = check_health_dimensions("http://lane/health", 1.0)
         assert check.ok is False
         assert "not a healthy dimension set" in check.evidence
-
-    def test_unhealthy_dimension_is_named(self, monkeypatch: Any) -> None:
-        monkeypatch.setattr(
-            "scripts.ci.lab_pass_receipt._http_get",
-            lambda url, timeout: (
-                200,
-                json.dumps(
-                    {
-                        "dimensions": {
-                            "broker": {"status": "healthy"},
-                            "consumer_coverage": {"status": "degraded"},
-                        }
-                    }
-                ),
-            ),
-        )
-        check = check_health_dimensions("http://lane/health", 1.0)
-        assert check.ok is False
-        assert "consumer_coverage" in check.evidence
-
-    def test_all_healthy_passes(self, monkeypatch: Any) -> None:
-        monkeypatch.setattr(
-            "scripts.ci.lab_pass_receipt._http_get",
-            lambda url, timeout: (
-                200,
-                json.dumps({"dimensions": {"broker": "healthy", "db": "ok"}}),
-            ),
-        )
-        assert check_health_dimensions("http://lane/health", 1.0).ok is True
 
     def test_transport_failure_fails_closed(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(
@@ -621,3 +601,108 @@ class TestComposeDevProbeReachesTheLane:
             "the comment that justified the localhost probe is the false "
             "premise itself; leaving it in place invites the revert."
         )
+
+
+class TestHealthDimensionProbeReadsTheShapeTheRuntimeServes:
+    """The dimensions live at ``details.runtime_health.dimensions``, as a LIST.
+
+    ``check_health_dimensions`` was written against a top-level ``dimensions``
+    *object* keyed by dimension name. No producer in this repository has ever
+    emitted that shape. The runtime builds the block in
+    ``omnibase_infra.runtime.health.runtime_health_block.build_runtime_health_block``
+    -- a list of ``{name, status, detail}`` -- and
+    ``omnibase_infra.services.health_checker`` mounts it under
+    ``details[RUNTIME_HEALTH_DETAIL_KEY]``, where ``RUNTIME_HEALTH_DETAIL_KEY``
+    is ``"runtime_health"``.
+
+    Nobody could see this, because the probe never reached the lane: the URL
+    defect fixed in the parent commit meant every call returned ``Errno 111``
+    and the parser was never entered. The three existing cases in
+    :class:`TestHealthDimensionProbe` passed because they asserted against the
+    invented shape rather than a capture, which is the failure mode this class
+    replaces: the fixture below is a real payload, not a hand-written one.
+
+    Captured read-only 2026-09-10 from inside ``omninode-deploy-runner`` --
+    the container this job runs in -- via
+    ``curl http://host.docker.internal:8085/health`` against the ``.201`` dev
+    lane (compose project ``omnibase-infra``, runtime ``0.38.22``). Six
+    dimensions, every one ``HEALTHY``. Stored at
+    ``tests/fixtures/omn17530/compose_dev_health.captured.json``.
+    """
+
+    @staticmethod
+    def _captured() -> str:
+        from pathlib import Path
+
+        return Path(
+            "tests/fixtures/omn17530/compose_dev_health.captured.json"
+        ).read_text(encoding="utf-8")
+
+    def test_the_live_lane_payload_passes(self, monkeypatch: Any) -> None:
+        body = self._captured()
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, body),
+        )
+        check = check_health_dimensions("http://lane/health", 1.0)
+        assert check.ok is True, check.evidence
+        assert "6 dimensions" in check.evidence
+        assert "all healthy" in check.evidence
+
+    def test_the_fixture_is_the_shape_the_runtime_builds(self) -> None:
+        # Guards the capture itself: if it were hand-edited into the invented
+        # shape the test above would pass while proving nothing.
+        payload = json.loads(self._captured())
+        dimensions = payload["details"]["runtime_health"]["dimensions"]
+        assert isinstance(dimensions, list) and dimensions
+        assert all(set(entry) >= {"name", "status", "detail"} for entry in dimensions)
+        assert "dimensions" not in payload
+
+    def test_one_unhealthy_dimension_is_named_by_its_name_field(
+        self, monkeypatch: Any
+    ) -> None:
+        payload = json.loads(self._captured())
+        payload["details"]["runtime_health"]["dimensions"][3]["status"] = "DEGRADED"
+        body = json.dumps(payload)
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, body),
+        )
+        check = check_health_dimensions("http://lane/health", 1.0)
+        assert check.ok is False
+        assert "projection_attachment" in check.evidence
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            pytest.param(lambda p: p.pop("details"), id="no-details"),
+            pytest.param(
+                lambda p: p["details"].pop("runtime_health"), id="no-runtime-health"
+            ),
+            pytest.param(
+                lambda p: p["details"]["runtime_health"].update({"dimensions": []}),
+                id="empty-dimension-list",
+            ),
+            pytest.param(
+                lambda p: p["details"]["runtime_health"].update({"dimensions": {}}),
+                id="dimensions-not-a-list",
+            ),
+            pytest.param(
+                lambda p: p["details"]["runtime_health"]["dimensions"].append(
+                    {"name": "no_status"}
+                ),
+                id="dimension-without-a-status",
+            ),
+        ],
+    )
+    def test_it_fails_closed_on_every_way_the_block_can_be_absent(
+        self, monkeypatch: Any, mutate: Any
+    ) -> None:
+        payload = json.loads(self._captured())
+        mutate(payload)
+        body = json.dumps(payload)
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, body),
+        )
+        assert check_health_dimensions("http://lane/health", 1.0).ok is False
