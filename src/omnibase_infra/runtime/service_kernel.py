@@ -3902,9 +3902,6 @@ async def bootstrap() -> int:
             # process. The aggregate tri-state is logged for operator visibility.
             from typing import cast as _cast
 
-            from omnibase_infra.event_bus.enum_contract_attach_status import (
-                EnumContractAttachStatus,
-            )
             from omnibase_infra.event_bus.model_contract_attach_exclusion import (
                 ModelContractAttachExclusion,
             )
@@ -4086,28 +4083,36 @@ async def bootstrap() -> int:
                 )
 
             # OMN-15215: the boot interleave above makes exactly ONE
-            # provision->confirm->attach attempt per contract; a contract left
-            # NOT_READY (transient broker topic-metadata-convergence race,
-            # OMN-13237) is otherwise skipped for the rest of the process
+            # provision->confirm->attach attempt per contract; a contract that
+            # does not attach is otherwise skipped for the rest of the process
             # lifetime — no consumer group is ever created for it. Schedule a
             # bounded background retry so "runtime stays live" is actually
             # recoverable instead of a permanent skip.
-            _not_ready_at_boot = tuple(
-                r
-                for r in _attach_results
-                if r.status is EnumContractAttachStatus.NOT_READY
-            )
-            if _not_ready_at_boot:
+            #
+            # OMN-18110: selected by ``needs_reattach``, the ONE definition
+            # ``handler_wiring`` re-validates against, so the two cannot drift.
+            # This filter previously read NOT_READY alone (the transient broker
+            # topic-metadata-convergence race, OMN-13237) and so never retried
+            # the OTHER non-attached outcome: FAILED, where readiness PASSED
+            # and the Kafka group-join itself raised. On the .201 dev lane,
+            # boot 2026-09-10T00:03:45Z, four contracts recorded
+            # ``failed``/``InfraTimeoutError`` over a ready topic set and
+            # stayed unattached for the whole process — the runtime held
+            # ``projection_attachment`` DEGRADED with no path back short of a
+            # restart, while the eleven preceding boots of the same image
+            # attached all 215.
+            _unattached_at_boot = tuple(r for r in _attach_results if r.needs_reattach)
+            if _unattached_at_boot:
                 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
                     run_not_ready_reconciliation_loop,
                 )
 
-                async def _reconcile_not_ready_contracts() -> None:
+                async def _reconcile_unattached_contracts() -> None:
                     assert auto_wiring_manifest_for_subscriptions is not None
                     try:
                         await run_not_ready_reconciliation_loop(
                             auto_wiring_manifest_for_subscriptions,
-                            _not_ready_at_boot,
+                            _unattached_at_boot,
                             dispatch_engine,
                             event_bus,
                             environment,
@@ -4131,21 +4136,22 @@ async def bootstrap() -> int:
                         raise
                     except Exception:  # noqa: BLE001 — boundary: background reconciliation must never crash boot
                         logger.warning(
-                            "NOT_READY reconciliation loop raised, giving up "
+                            "Unattached-contract reconciliation loop raised, "
+                            "giving up "
                             "for this boot (correlation_id=%s)",
                             correlation_id,
                             exc_info=True,
                         )
 
                 not_ready_reconciliation_task = asyncio.create_task(
-                    _reconcile_not_ready_contracts(),
-                    name="not-ready-contract-reconciliation",
+                    _reconcile_unattached_contracts(),
+                    name="unattached-contract-reconciliation",
                 )
                 logger.info(
-                    "NOT_READY reconciliation scheduled for %d contract(s): "
-                    "%s (OMN-15215, correlation_id=%s)",
-                    len(_not_ready_at_boot),
-                    sorted(r.contract_name for r in _not_ready_at_boot),
+                    "Unattached-contract reconciliation scheduled for %d "
+                    "contract(s): %s (OMN-15215/OMN-18110, correlation_id=%s)",
+                    len(_unattached_at_boot),
+                    sorted(r.contract_name for r in _unattached_at_boot),
                     correlation_id,
                 )
 
@@ -4916,7 +4922,7 @@ async def bootstrap() -> int:
             except asyncio.CancelledError:
                 pass
             logger.debug(
-                "NOT_READY reconciliation loop stopped (correlation_id=%s)",
+                "Unattached-contract reconciliation loop stopped (correlation_id=%s)",
                 correlation_id,
             )
             not_ready_reconciliation_task = None

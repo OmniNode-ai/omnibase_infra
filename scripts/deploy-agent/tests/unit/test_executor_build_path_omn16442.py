@@ -40,6 +40,7 @@ from deploy_agent import executor as executor_mod
 from deploy_agent import trigger as trigger_mod
 from deploy_agent.agent import DeployAgent
 from deploy_agent.events import (
+    DEV_LANE_ONLY_BUILDABLE_SERVICES,
     BuildSource,
     EnumRuntimeLane,
     ModelRebuildRequested,
@@ -287,13 +288,22 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
         lane=EnumRuntimeLane.DEV,
     )
 
-    assert captured == [
-        {
-            "build_source": BuildSource.WORKSPACE,
-            "runtime_lane": EnumRuntimeLane.DEV,
-            "git_ref": "origin/dev",
-        }
-    ]
+    # OMN-18108: a DEV runtime rebuild issues a SECOND, additive build for the
+    # services declared only in the lane overlay. Both builds carry the same
+    # lane and ref, which is what this test is about; the second names its
+    # services explicitly and skips re-staging the siblings the first already
+    # vendored.
+    assert captured[0] == {
+        "build_source": BuildSource.WORKSPACE,
+        "runtime_lane": EnumRuntimeLane.DEV,
+        "git_ref": "origin/dev",
+    }
+    assert len(captured) == 2
+    assert captured[1]["build_source"] == BuildSource.WORKSPACE
+    assert captured[1]["runtime_lane"] == EnumRuntimeLane.DEV
+    assert captured[1]["git_ref"] == "origin/dev"
+    assert captured[1]["services"] == DEV_LANE_ONLY_BUILDABLE_SERVICES
+    assert captured[1]["stage_workspace"] is False
 
 
 class _RefRecordingExecutor:

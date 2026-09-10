@@ -441,18 +441,29 @@ class _RevertedLinear(_FakeLinear):
     state showed the projection node running with topic traffic. Nothing in
     that sequence carries a fingerprint THIS closer wrote, which is exactly
     why the negative fence could not see it.
+
+    OMN-18106 made the ORDERING of that shape load-bearing, and this fixture
+    did not have one. Its flip/revert pair was two fixed 2026-09-08 literals
+    while ``_merged_pr`` merges its companion at ``now - 1h`` — so as the wall
+    clock moved past 2026-09-08 the fixture quietly came to describe a ticket
+    whose evidence landed AFTER the revert, which is the OMN-15542 shape and
+    not the one the docstring names. The timestamps are therefore derived from
+    the same clock the companion is, preserving the incident's real sequence:
+    companion merges, somebody flips, somebody takes it back, nothing new
+    lands. Every assertion below is unchanged.
     """
 
     async def fetch_issue_history(
         self, issue_id: str, page_size: int, max_pages: int
     ) -> tuple[list[dict[str, object]] | None, str]:
+        now = datetime.now(tz=UTC)
         # Newest first, exactly as Linear's `orderBy: createdAt` returns it:
         # any completed segment this sweep has since written, then the human
         # flip/revert pair that predates the sweep entirely.
         later = [
             {
                 "id": f"entry-sweep-{index}",
-                "createdAt": f"2026-09-08T23:00:{index:02d}Z",
+                "createdAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "actorId": None,
                 "fromState": {"type": "started"},
                 "toState": {"type": "completed"},
@@ -466,14 +477,18 @@ class _RevertedLinear(_FakeLinear):
             *later,
             {
                 "id": "entry-revert",
-                "createdAt": "2026-09-08T22:03:49Z",
+                "createdAt": (now - timedelta(minutes=30)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
                 "actorId": "a-person",
                 "fromState": {"type": "completed"},
                 "toState": {"type": "started"},
             },
             {
                 "id": "entry-flip",
-                "createdAt": "2026-09-08T21:21:29Z",
+                "createdAt": (now - timedelta(minutes=45)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
                 "actorId": "a-person",
                 "fromState": {"type": "started"},
                 "toState": {"type": "completed"},

@@ -163,13 +163,19 @@ def _derive_image_build_budget_from_this_checkout(
     from deploy_agent import build_budget
     from deploy_agent import executor as executor_mod
 
-    compose_file = str(
-        Path(__file__).resolve().parents[4] / "docker" / "docker-compose.infra.yml"
-    )
+    docker_dir = Path(__file__).resolve().parents[4] / "docker"
+    compose_file = str(docker_dir / "docker-compose.infra.yml")
 
-    def _budget(profile: str) -> build_budget.ModelBuildBudget:
+    def _budget(
+        profile: str, compose_files: tuple[str, ...] = (compose_file,)
+    ) -> build_budget.ModelBuildBudget:
+        # OMN-18108: the DEV addendum build passes the lane overlay as well, so
+        # the repoint is per-file by basename rather than one fixed path.
+        repointed = tuple(
+            str(docker_dir / Path(candidate).name) for candidate in compose_files
+        )
         return build_budget.derive_image_build_budget(
-            (compose_file,),
+            repointed,
             profile,
             per_step_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
             per_image_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
