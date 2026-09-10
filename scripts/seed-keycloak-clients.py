@@ -120,6 +120,7 @@ BASE_FIELDS = {
     "attributes",
     "publicClient",
     "bearerOnly",
+    "fullScopeAllowed",
     "serviceAccountsEnabled",
     "standardFlowEnabled",
     "directAccessGrantsEnabled",
@@ -195,6 +196,7 @@ def _build_create_payload(spec: dict[str, Any], secret: str | None) -> dict[str,
     for field in (
         "publicClient",
         "bearerOnly",
+        "fullScopeAllowed",
         "serviceAccountsEnabled",
         "standardFlowEnabled",
         "directAccessGrantsEnabled",
@@ -341,6 +343,59 @@ def _ensure_realm_roles(
     return changed
 
 
+def _ensure_client_scope_mappings(
+    kc_url: str,
+    realm: str,
+    token: str,
+    internal_id: str,
+    role_specs: list[str],
+) -> list[str]:
+    """Add client-level scope mappings so roles remain reachable when fullScopeAllowed=false.
+
+    Without explicit scope mappings, Keycloak's scope filter drops service-account roles
+    from client_credentials tokens when fullScopeAllowed=false, even if those roles are
+    assigned to the service account user.
+    """
+    if not role_specs:
+        return []
+
+    realm_mgmt_id = _get_realm_mgmt_client_id(kc_url, realm, token)
+    if not realm_mgmt_id:
+        _die(f"realm-management client not found in realm '{realm}'")
+
+    current_url = (
+        f"{kc_url}/admin/realms/{realm}/clients/{internal_id}"
+        f"/scope-mappings/clients/{realm_mgmt_id}"
+    )
+    status, existing = _request("GET", current_url, token=token)
+    if status != 200:
+        _die(f"Failed to fetch client scope mappings: HTTP {status}")
+    existing_names = {r["name"] for r in (existing or [])}
+
+    changed = []
+    roles_to_add = []
+    for role_spec in role_specs:
+        parts = role_spec.split(":", 1)
+        role_name = parts[1] if len(parts) == 2 else parts[0]
+        if role_name in existing_names:
+            continue
+        role_url = (
+            f"{kc_url}/admin/realms/{realm}/clients/{realm_mgmt_id}/roles/{role_name}"
+        )
+        status, role_obj = _request("GET", role_url, token=token)
+        if status != 200 or not role_obj:
+            _die(f"Role '{role_name}' not found in realm-management client")
+        roles_to_add.append(role_obj)
+        changed.append(f"clientScopeMapping:{role_name}")
+
+    if roles_to_add:
+        status, _ = _request("POST", current_url, token=token, payload=roles_to_add)
+        if status not in (200, 201, 204):
+            _die(f"Failed to add client scope mappings: HTTP {status}")
+
+    return changed
+
+
 # ---------------------------------------------------------------------------
 # Core reconcile loop
 # ---------------------------------------------------------------------------
@@ -408,6 +463,13 @@ def _reconcile_client(
             kc_url, realm, token, internal_id, spec["realmRoles"]
         )
         all_changed.extend(role_changes)
+
+    # Client scope mappings (makes roles reachable in scope when fullScopeAllowed=false)
+    if "clientScopeMappings" in spec:
+        scope_mapping_changes = _ensure_client_scope_mappings(
+            kc_url, realm, token, internal_id, spec["clientScopeMappings"]
+        )
+        all_changed.extend(scope_mapping_changes)
 
     if "created" in all_changed:
         _log("created", client_id, [f for f in all_changed if f != "created"])
