@@ -41,7 +41,25 @@ local_bus:
   # fails closed on anything other than "earliest" on either leg.
   auto_offset_reset: "earliest"
   enable_auto_commit: false
-  security_protocol: "PLAINTEXT"
+  # OMN-18120: the dev lane's broker has enable_sasl=true (OMN-18012 phase B,
+  # #3276) and closes a plaintext connection at handshake. This leg dials that
+  # broker, so PLAINTEXT here is a client that cannot connect. Measured on .201
+  # 2026-09-10 with a positive control: an unauthenticated metadata request to
+  # the dev listener returns "SASL is required but not provided", while the SAME
+  # request to the stability listener returns cluster metadata.
+  #
+  # The credential is a REFERENCE, never a literal: this file is tracked in this
+  # repo and mounted into the container verbatim, so a value spelled here is a
+  # credential in git. The ref is resolved at the effect boundary
+  # (gateway_forwarder._materialize_lane_broker_credentials) against the
+  # operator-supplied lane-credential map mounted at
+  # /run/gateway/lane-credentials.yaml -- the same not-in-git, operator-mounted
+  # mechanism the cloud leg's endpoint already rides via --broker-ref-map. A
+  # missing map, a missing entry or an empty field is a refusal to start, never
+  # a plaintext fallback.
+  security_protocol: "SASL_PLAINTEXT"
+  sasl_mechanism: "SCRAM-SHA-256"
+  sasl_credential_ref: "lane.dev.kafka.scram"
 cloud_bus:
   # bootstrap_servers is deliberately absent: OMN-15743 resolves it from the
   # node contract's gateway_forwarder.cloud_leg.cloud_broker_ref at the
@@ -177,4 +195,19 @@ lane_mirror_buses:
     timeout_seconds: 30
     auto_offset_reset: "earliest"
     enable_auto_commit: false
-    security_protocol: "PLAINTEXT"
+    # OMN-18120: same reason as local_bus above, and this is the leg the hook
+    # wire actually depends on. OMN-18012 flipped the dev broker to SASL and
+    # credentialed "all 15 clients" through the x-dev-lane-broker-auth-env
+    # anchor in docker-compose.dev-lane.yml; this process is in a different
+    # compose project and configures its legs here, so it was outside that
+    # enumeration and kept dialing dev as a plaintext client. Zero records
+    # crossed for four days while the forwarder logged a delivery per attempted
+    # republish -- 110 "Lane mirror delivered" lines in three minutes against
+    # four dev hook topics whose high watermarks were static.
+    #
+    # The SOURCE leg above deliberately stays PLAINTEXT: stability's external
+    # listener still accepts one, and handing a governed lane a dev-lane
+    # principal would be wrong in both directions. The asymmetry is the point.
+    security_protocol: "SASL_PLAINTEXT"
+    sasl_mechanism: "SCRAM-SHA-256"
+    sasl_credential_ref: "lane.dev.kafka.scram"

@@ -84,6 +84,14 @@ services:
       - /tmp/gateway-forwarder-ready
       - --broker-ref-map
       - /run/gateway/broker-ref-map.yaml
+      # OMN-18120: the dev-lane legs (local_bus, lane_mirror_buses.dev) name a
+      # sasl_credential_ref; this map is where it resolves. Operator-supplied
+      # and outside this repo, exactly like the broker-ref map above -- a
+      # credential in a tracked file would be a credential in git, and an env
+      # var would be readable from `docker inspect` for the life of the
+      # container.
+      - --lane-credential-map
+      - /run/gateway/lane-credentials.yaml
       # OMN-17201: the egress denial/delivery counters the healthcheck below
       # reads. Both sides name the same path explicitly rather than relying on
       # the shared default, so a change to either is visible here.
@@ -123,6 +131,13 @@ services:
       # and no per-host IP override is needed at all. No broker
       # address/IP is committed to this repo.
       - ${GATEWAY_BROKER_REF_MAP_FILE:?GATEWAY_BROKER_REF_MAP_FILE is required}:/run/gateway/broker-ref-map.yaml:ro
+      # OMN-18120: `:?` and not `:-`, for the same reason
+      # x-dev-lane-broker-auth-env uses it -- a forwarder that starts with no
+      # credential produces a leg that connects to nothing while still logging
+      # a delivery per republish, which is precisely the silent four-day outage
+      # this ticket closes. NOT A ROTATION (Operating Rule 22): the map binds
+      # the principal OMN-18012 phase A provisioned.
+      - ${GATEWAY_LANE_CREDENTIAL_MAP_FILE:?GATEWAY_LANE_CREDENTIAL_MAP_FILE is required - the gateway forwarder authenticates to the dev lane broker as the synthetic SCRAM principal provisioned by redpanda-scram-user (OMN-18012); operator-supplied, never inlined here}:/run/gateway/lane-credentials.yaml:ro
     devices:
       # The wrapped private key is usable only through the .201 TPM. The raw
       # signing key never exists in a host file or inside the container.
