@@ -299,6 +299,12 @@ _DOD_VERIFY_STATUS_VERIFIED = "verified"
 # receipt in the existing corpus, so its absence is an ERROR (nothing to
 # decide on), never an inference in either direction.
 _DOD_VERIFY_BEHAVIOR_KEY = "behavior_proving_count"
+#: OMN-18135 AC4. VERIFIED readback-class checks. Read separately and
+#: never added to the behavior count: a readback says what the system
+#: currently IS, never what the code DOES. An ABSENT key means the
+#: verifier predates the class, which `_as_int` renders 0 — the
+#: fail-closed reading, since 0 releases nothing.
+_DOD_VERIFY_READBACK_KEY = "readback_proving_count"
 # How many checks executed, exited 0, and could not have exited otherwise for
 # a product reason — a bare `gh pr view` (green for every PR on GitHub) or a
 # ticket-independent foreign suite. `ModelDodVerifyState.non_probative_count`
@@ -582,6 +588,9 @@ _CHECK_BINDS_AC_KEY = "binds_ac"
 
 #: Per-check statuses, as `EnumEvidenceCheckStatus` spells them.
 _CHECK_STATUS_VERIFIED = "verified"
+#: OMN-18135 AC4. A check that read live state and asserted on it. It
+#: discharges a state-shaped criterion and never a behaviour-shaped one.
+_CHECK_PROOF_CLASS_READBACK = "readback"
 _CHECK_STATUS_FAILED = "failed"
 _CHECK_STATUS_SKIPPED = "skipped"
 _CHECK_STATUS_SUPERSEDED = "superseded"
@@ -596,7 +605,7 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.11.0"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.12.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -1996,6 +2005,93 @@ def _coverage_corpus_counts(
     return verified, non_probative
 
 
+# -- OMN-18135 AC4: which criteria a readback may discharge ----------------
+#
+# The ruling (docs/tracking/ROLLING_WORK_LEDGER.md:6148, orchestrator, under
+# the deterministic-truth doctrine) admits an asserted live readback as proof
+# class `readback` for a criterion whose text asserts live STATE, and never
+# for one that asserts what code DOES.
+#
+# omnimarket carries the class. This carries the JOIN, because the decision
+# needs the ticket's acceptance text and `node_dod_verify` never sees it.
+#
+# THE HONEST LIMIT, because this is prose and prose is not a contract. This
+# is a heuristic, and it is TIGHT on purpose. A criterion is state-shaped
+# only when it carries a positive state marker AND no behaviour marker;
+# everything else falls to behaviour and HOLDS. The asymmetry is deliberate:
+# a criterion wrongly read as behaviour-shaped costs a comment, while one
+# wrongly read as state-shaped RELEASES a flip on a readback. So the marker
+# set earns its way in one phrase at a time, and the veto wins ties.
+
+#: Positive evidence that a criterion asserts LIVE STATE — a condition, a
+#: row, a count, a config value read from the running system. Every entry is
+#: drawn from a criterion that actually exists in the corpus, not invented.
+_STATE_MARKER_RE: re.Pattern[str] = re.compile(
+    r"""(?xi)
+      \bread[\s-]?back\b
+    | \breadback\b
+    | \b\d+\s+rows?\b
+    | \brows?\s+carrying\b
+    | \b\d+\s+occurrences?\b
+    | \bno\s+occurrences?\b
+    | \bis\s+(running|ready|healthy|present|absent|enabled|disabled)\b
+    | \breaches\s+(running|ready)\b
+    | \b\d+\s+restarts?\b
+    | \breturns?\b
+    | \bresponds?\b
+    | \bserves?\b
+    | \bcontains?\b
+    | \bdigest\b
+    | \bconfig(uration)?\s+value\b
+    | \bon\s+the\s+(live|running)\b
+    | \b(live|running)\s+(plane|cluster|lane|realm|database|system|repository)\b
+    """,
+)
+
+#: Language that asserts what the CODE DOES. Vetoes a state marker, because a
+#: criterion carrying both is the ambiguous case and ambiguity must hold.
+_BEHAVIOUR_MARKER_RE: re.Pattern[str] = re.compile(
+    r"""(?xi)
+      \btests?\b
+    | \bred[\s-]first\b
+    | \bfails?\s+today\b
+    | \brefuses?\b
+    | \braises?\b
+    | \bretr(y|ies|ied)\b
+    | \bstops?\s+after\b
+    | \bhandler\b
+    | \bsuite\b
+    """,
+)
+
+
+def _criterion_is_state_shaped(criterion: str) -> bool:
+    """Whether a readback may discharge this criterion.
+
+    True only on POSITIVE evidence of live state and in the ABSENCE of
+    behaviour language. Both conditions, never one: see the module comment
+    above for why the veto wins ties.
+    """
+    if _BEHAVIOUR_MARKER_RE.search(criterion) is not None:
+        return False
+    return _STATE_MARKER_RE.search(criterion) is not None
+
+
+def _every_criterion_is_state_shaped(description: str) -> bool:
+    """True when a body parses at least one criterion and ALL are state-shaped.
+
+    A body with no parseable criteria returns False. The closer cannot say
+    anything about criteria it cannot read, and this leg must not be the one
+    that releases such a ticket -- the OMN-18056 binding gate holds it a
+    conjunct later, and this returning True would have let it past the
+    behaviour conjunct on a body nobody can check.
+    """
+    items = _acceptance_criteria_items(description)
+    if not items:
+        return False
+    return all(_criterion_is_state_shaped(item) for item in items)
+
+
 def _has_ac_heading(description: str) -> bool:
     """Whether the body carries a recognised acceptance-criteria heading."""
     return any(_is_ac_heading(line) for line in description.splitlines())
@@ -2047,11 +2143,37 @@ def _ac_binding_gap(
 
     rows: list[ModelAcBindingRow] = []
     unbound: list[str] = []
+    #: OMN-18135 AC4: criteria whose ONLY verified checks are readbacks and
+    #: whose text is not state-shaped. Tracked separately from `unbound` so
+    #: the hold can name the bar rather than say "declared by nothing", which
+    #: would be false and would send the author to fix the wrong thing.
+    readback_blocked: list[str] = []
     for item in items:
         text = item[:_MAX_AC_TEXT_CHARS]
         label = _canonical_ac_label(item)
         declared = bindings.get(label, ()) if label else ()
-        proving = tuple(row for row in declared if row[1] == _CHECK_STATUS_VERIFIED)
+        verified_rows = tuple(
+            row for row in declared if row[1] == _CHECK_STATUS_VERIFIED
+        )
+        # OMN-18135 AC4, and this half is a TIGHTENING. Until now binding
+        # keyed on status alone and never looked at proof class, so a readback
+        # silently discharged a criterion asserting what the code DOES. The
+        # ruling names that: readbacks are admissible for live STATE only.
+        #
+        # Scoped deliberately to readbacks. A criterion proved by a
+        # merge-state, surrogate or indeterminate check binds exactly as it
+        # did — narrowing those is a different argument nobody has made, and
+        # making it here would retroactively un-close tickets that flipped on
+        # that basis.
+        readback_only = bool(verified_rows) and all(
+            row[2] == _CHECK_PROOF_CLASS_READBACK for row in verified_rows
+        )
+        proving: tuple[tuple[str, str, str], ...]
+        if readback_only and not _criterion_is_state_shaped(item):
+            readback_blocked.append(_canonical_ac_label(item) or text)
+            proving = ()
+        else:
+            proving = verified_rows
         if proving:
             rows.extend(
                 ModelAcBindingRow(
@@ -2101,6 +2223,21 @@ def _ac_binding_gap(
             "item names it in `binds_ac` AND that check verified -- a "
             "non-probative or skipped declaration is a claim, not a proof."
         )
+    readback_note = (
+        (
+            " OMN-18135: "
+            + ", ".join(readback_blocked[:_MAX_UNCOVERED_LISTED])
+            + " IS declared by a verified check, but only by a READBACK — a "
+            "command that read live state and asserted on it. A readback "
+            "discharges a criterion asserting live STATE (a condition, a row, "
+            "a count, a config value); this criterion reads as asserting what "
+            "the code DOES, which needs a test runner or the ONEX CLI. Either "
+            "bind a behaviour check, or reword the criterion to state the live "
+            "fact it actually wants."
+        )
+        if readback_blocked
+        else ""
+    )
     unlabelled = sum(1 for text in unbound if not _canonical_ac_label(text))
     labelling = (
         f" {unlabelled} of them carry no `AC<n>`/`DoD<n>` label at all, so "
@@ -2129,7 +2266,7 @@ def _ac_binding_gap(
     return (
         f"{len(unbound)} of {len(items)} acceptance criterion(s) in this "
         f"ticket's description are bound to NO verified probative check in "
-        f"`{contract}`: {named}. {why}{labelling}{fallback}",
+        f"`{contract}`: {named}. {why}{readback_note}{labelling}{fallback}",
         tuple(unbound),
         tuple(rows),
     )
@@ -3899,12 +4036,35 @@ class HandlerEvidenceAutocloseSweep:
         pass: this one asks what the checks that RAN proved; the AC-coverage
         one asks what the ticket claimed that no check covers.
         """
+        # OMN-18135 AC3. The hold NAMES THE BAR. Three lanes spent a night
+        # rediscovering this rule by measurement because the comment stated a
+        # verdict and not a remedy; a hold that does not say what would clear
+        # it teaches nobody anything.
         reason = (
             f"dod_verify: {verified_count}/{total_checks} checks verified, 0 failed "
             "— and not one of them executed the claimed behavior. Every passing "
             "check binds merge state (a PR is merged) or is a surrogate (a file "
             "exists, a generic suite ran). That is evidence the code landed, not "
             "evidence the system does the thing, so the Done flip is withheld."
+            "\n\nWhat clears this. A check proves BEHAVIOR only when its "
+            "command runs a test runner or the ONEX CLI — `pytest`, `tox`, "
+            "`nox`, `unittest`, `vitest`, `jest`, `mocha`, `rspec`, `phpunit`, "
+            "`python -m <one of those>`, `make <test target>`, "
+            "`go`/`cargo`/`npm`/`pnpm`/`yarn`/`bun`/`dotnet`/`gradle`/`mvn "
+            "test`, or `onex`. A prefix that only says where or with what "
+            "environment it runs is transparent (`env` and its options, "
+            "`cd <dir>`, a bare `NAME=value`), so those do not cost you the "
+            "class."
+            "\n\nA live probe through `ssh`, `aws`, `kubectl`, `curl`, `psql` "
+            "or a hand-written shell loop is NOT behavior-proving, however "
+            "real the thing it exercised. It can be admissible as a READBACK "
+            "(OMN-18135): asserted live state — a condition, a row, a count, a "
+            "config value read from the running system — discharges a "
+            "criterion whose text asserts live STATE. It never discharges one "
+            "that asserts what the code DOES, and a criterion the sweep cannot "
+            "read as state-shaped is treated as behavior-shaped and holds. To "
+            "take that route the command must ASSERT: its exit status has to "
+            "be able to go red on what it read."
         )
         base = ModelEvidenceAutocloseOutcome(
             ticket_id=ticket_id,
@@ -4579,7 +4739,24 @@ class HandlerEvidenceAutocloseSweep:
                     # leaving one silent hole in it.
                     dod_verify_behavior_proving_count=0,
                 )
-            if behavior_proving_count <= 0:
+            # OMN-18135 AC4. The description is read HERE rather than after
+            # this conjunct, because the conjunct now needs it: whether a
+            # readback may stand in for a behaviour proof is a question about
+            # the ticket's criteria, not about its counters.
+            description_raw = issue.get("description")
+            description = description_raw if isinstance(description_raw, str) else ""
+            readback_proving_count = _as_int(verdict.get(_DOD_VERIFY_READBACK_KEY))
+            # The ruling's admission, and its exact bound. A readback releases
+            # this conjunct only when EVERY parsed criterion asserts live
+            # state. One behaviour-shaped criterion, or a body whose criteria
+            # cannot be read at all, and the behaviour proof is still required
+            # -- a ticket is judged by its strictest criterion, never on
+            # average.
+            readback_releases_the_conjunct = (
+                readback_proving_count > 0
+                and _every_criterion_is_state_shaped(description)
+            )
+            if behavior_proving_count <= 0 and not readback_releases_the_conjunct:
                 return await self._behavior_proof_outcome(
                     ticket_id=ticket_id,
                     companion_pr_number=companion_pr_number,
@@ -4593,11 +4770,10 @@ class HandlerEvidenceAutocloseSweep:
                 )
 
             # OMN-16736: dod_verify being green is necessary, not sufficient.
-            # Re-read the ticket body for criteria its checks never covered
-            # BEFORE any flip path (dry-run included, so a DRY-RUN report is
-            # an honest preview of what --apply would do).
-            description_raw = issue.get("description")
-            description = description_raw if isinstance(description_raw, str) else ""
+            # The ticket body was read just above, BEFORE any flip path
+            # (dry-run included, so a DRY-RUN report is an honest preview of
+            # what --apply would do). OMN-18135 moved that read one conjunct
+            # earlier; it is the same string, read once.
 
             # OMN-18056. THE BINDING LEG, and it is FIRST of the two AC guards
             # deliberately: the counting rules below can only refute coverage

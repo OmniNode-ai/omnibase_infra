@@ -300,13 +300,47 @@
 #     which verdicts the sweep is willing to release, so the gap-comment
 #     fingerprint version moves with the node_version.
 #
+#   - OMN-18135 (node_version 1.12.0): AN ASSERTED LIVE READBACK IS ADMISSIBLE
+#     FOR A CRITERION THAT ASSERTS LIVE STATE. Orchestrator ruling under the
+#     deterministic-truth doctrine, docs/tracking/ROLLING_WORK_LEDGER.md:6148.
+#     omnimarket carries the proof class; this node carries the JOIN, because
+#     the decision needs the ticket's acceptance text and node_dod_verify
+#     never sees it.
+#
+#     It moves in BOTH directions and both are deliberate. LOOSER: a ticket
+#     whose every parsed criterion asserts live state, each discharged by a
+#     verified readback, no longer dies on behavior_proving_count <= 0 --
+#     OMN-17771 is the worked example, five shell one-liners that read a live
+#     surface and assert on it. STRICTER: a BEHAVIOUR-shaped criterion whose
+#     only verified checks are readbacks now HOLDS. Binding used to key on
+#     status alone and never on proof class, so a readback silently
+#     discharged a criterion asserting what the code does.
+#
+#     Deliberately untouched: merge-state, surrogate and indeterminate checks
+#     bind exactly as before. Narrowing those is a different argument nobody
+#     has made, and making it here would retroactively un-close tickets that
+#     flipped on that basis.
+#
+#     The honest limit, recorded rather than implied: criterion shape is read
+#     from PROSE and is a heuristic. It is tight on purpose -- state-shaped
+#     requires a positive state marker AND no behaviour marker, everything
+#     else falls to behaviour and holds. The asymmetry is chosen: reading a
+#     criterion as behaviour-shaped costs a comment, reading one as
+#     state-shaped RELEASES a flip on a readback.
+#
+#     AC3 rides here too: the gap_no_behavior_proof comment now NAMES THE BAR
+#     -- which command shapes prove behaviour, which prefixes are transparent,
+#     and that a readback is the admissible route for live state. A hold that
+#     states a verdict without a remedy teaches nobody anything, which is what
+#     three lanes spent a night rediscovering by measurement.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 7
   patch: 0
-node_version: "1.11.0"
+node_version: "1.12.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
