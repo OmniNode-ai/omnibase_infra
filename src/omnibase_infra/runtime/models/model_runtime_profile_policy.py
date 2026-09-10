@@ -7,6 +7,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.runtime.models.model_runtime_process_policy import (
+    REQUIRED_RUNTIME_PROCESSES,
     ModelRuntimeProcessPolicy,
     RuntimeProcessName,
 )
@@ -42,11 +43,23 @@ class ModelRuntimeProfilePolicy(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _requires_three_runtime_processes(self) -> ModelRuntimeProfilePolicy:
-        required = {"main", "effects", "worker"}
+    def _requires_the_runtime_family_and_allows_optional_carriers(
+        self,
+    ) -> ModelRuntimeProfilePolicy:
+        # OMN-18114: the three shared kernels stay MANDATORY on every lane; a
+        # carrier process such as `tenant-projection` is optional and declared
+        # only by the lanes that deploy it. The check is therefore a subset
+        # relation in one direction and a superset in the other, not equality:
+        # equality would force every lane -- prod included -- to declare a
+        # lab-lane carrier the moment one lane needs it, which is a deploy this
+        # repo has no authority to make.
         observed = set(self.processes)
-        if observed != required:
-            msg = f"runtime profile processes must be {sorted(required)}, got {sorted(observed)}"
+        missing = REQUIRED_RUNTIME_PROCESSES - observed
+        if missing:
+            msg = (
+                "runtime profile is missing required process(es) "
+                f"{sorted(missing)}; declared {sorted(observed)}"
+            )
             raise ValueError(msg)
         logical_names = [
             mapping.logical_name for mapping in self.secret_resolver_mappings

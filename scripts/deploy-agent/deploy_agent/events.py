@@ -168,6 +168,21 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-live-events-writer",
     "infra-routing-decisions-consumer",
     "onex-api",
+    # OMN-18114: the TENANT-domain projection carrier, for a reason that is the
+    # OPPOSITE of the writers' reason above and is stated separately so the two
+    # do not merge. That service IS declared in docker-compose.infra.yml, so
+    # every lane resolves the name -- which is exactly why it cannot be
+    # lane-agnostic: a prod or judge `up -d --no-deps tenant-projection-writer`
+    # would SUCCEED and start the carrier on a lane that never opted into it,
+    # defeating the compose profile that keeps it inert there. Membership here
+    # scopes it to the lane whose overlay puts it in the `runtime` profile.
+    #
+    # It is the only process that owns the eight omnimarket contracts declaring
+    # `runtime_profiles: [tenant-projection]`, so an agent scope that could not
+    # reach it would leave those eight running an image the rest of the lane had
+    # moved past -- the exact defect measured above, on the one service where
+    # nothing else would ever notice.
+    "tenant-projection-writer",
 )
 
 # OMN-18108: the members of the array above that carry an ``image:`` and no

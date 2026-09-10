@@ -480,6 +480,58 @@ def test_dev_lane_renders_the_standalone_projection_writers() -> None:
 
 
 @pytest.mark.integration
+def test_dev_lane_renders_the_tenant_projection_carrier() -> None:
+    """OMN-18114: the dev lane STARTS a process for the `tenant-projection` profile.
+
+    Eight omnimarket contracts declare ``runtime_profiles: [tenant-projection]``
+    and are therefore dropped from ``main`` and ``effects`` by
+    ``filter_manifest_for_runtime_profile``. Before this service existed, no
+    process on any compose lane bound that profile, so all eight were discovered
+    and subscribed by nothing -- measured on the .201 dev lane 2026-09-10 as
+    eight Empty consumer groups, with
+    ``node_projection_delegation_inference_response`` at LAG 196 and rising.
+
+    Rendering under ``--profile runtime`` is the assertion that matters: the
+    service is declared in the base under a compose profile no lane requests, so
+    it appears here only because this lane's overlay opted it in.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    assert "tenant-projection-writer" in services, (
+        "the dev lane must START the tenant-projection carrier: without it the "
+        "eight contracts pinned to that profile are discovered and consumed by "
+        "nothing, with no error on any process (OMN-18114)"
+    )
+
+    carrier = services["tenant-projection-writer"]
+    assert carrier["environment"]["RUNTIME_PROFILE"] == "tenant-projection"
+
+    # It must be the KERNEL, not a runner. A `command:` override would start
+    # something else entirely and reproduce the defect while looking fixed.
+    assert "command" not in carrier or not carrier["command"], (
+        "the carrier is the runtime kernel under a different RUNTIME_PROFILE, "
+        "with no command override -- that is what gives it the real "
+        "topology-resolved projection arm a BaseProjectionRunner does not get"
+    )
+
+    # Distinct instance id, or its consumer groups collide with main's. The
+    # group name embeds KAFKA_INSTANCE_ID as `...__i.<instance>...`.
+    shared_instance_ids = {
+        services[name]["environment"]["KAFKA_INSTANCE_ID"]
+        for name in ("omninode-runtime", "runtime-effects", "runtime-worker")
+    }
+    assert carrier["environment"]["KAFKA_INSTANCE_ID"] not in shared_instance_ids, (
+        "the carrier must not share a KAFKA_INSTANCE_ID with a shared kernel; "
+        "the consumer group name embeds it, so a collision would put two "
+        "processes in one group"
+    )
+
+
+@pytest.mark.integration
 def test_writers_invoke_the_runner_module_entrypoint() -> None:
     """The command must be the handler module's own ``__main__``.
 

@@ -674,6 +674,43 @@ services:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   # ===========================================================================
+  # OMN-18114: opt the TENANT-domain projection carrier into this lane
+  # ===========================================================================
+  # The service is declared in docker/docker-compose.infra.yml, where the
+  # runtime env anchors live, under a compose profile no bring-up requests. This
+  # stanza is the lane's opt-in and nothing more: `profiles: !override` moves it
+  # into `runtime`, and the environment merge gives it the same analytics DSNs,
+  # strict wiring and broker SASL credentials the other runtime containers on
+  # this lane get.
+  #
+  # WITHOUT this stanza the eight contracts that declare
+  # `runtime_profiles: [tenant-projection]` are discovered here and subscribed by
+  # nothing: `filter_manifest_for_runtime_profile` drops them from `main` and
+  # `effects`, and no other process on the lane carries the profile. Measured
+  # 2026-09-10 before this landed, every one of their consumer groups read Empty
+  # and node_projection_delegation_inference_response was at LAG 196 and rising.
+  #
+  # `!override` and not a plain `profiles:` list: compose APPENDS sequences on
+  # merge, so a plain list would leave `profile-carrier-optin` in place beside
+  # `runtime`. That would still work here and would silently stop the base
+  # inertness assertion from meaning anything, so the override is load-bearing.
+  #
+  # This lane binds ONEX_TENANT_DB_URL (docker-compose.infra.yml x-runtime-env)
+  # and its local topology resolves `tenant_projection` by `dsn_env`, so the
+  # carrier needs no credential work here -- unlike onex-dev, where the same
+  # binding is store-resolved and the missing DSN is what moved these contracts
+  # onto the profile in the first place.
+  tenant-projection-writer:
+    profiles: !override ["runtime", "full"]
+    environment:
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
+    labels: !override
+      - "com.omninode.service=tenant-projection-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-18114"
+      - "autoheal=true"
+  # ===========================================================================
   # THE THREE OBSERVABILITY CONSUMERS THE PREFIX HID (OMN-18012, phase B)
   # ===========================================================================
   # These three are declared in docker-compose.infra.yml, not here, and they

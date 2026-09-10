@@ -230,7 +230,16 @@ readonly RUNTIME_SERVICES=(
 # carries a new migrate image tag does not apply the migrations in it. Re-run
 # them explicitly, or take the full bring-up, until the readback partition
 # lands.
+# OMN-18114 adds tenant-projection-writer for a reason that is the OPPOSITE of
+# the writers' reason above, and is stated separately so the two do not merge.
+# That service IS declared in docker/docker-compose.infra.yml, so every lane
+# resolves the name -- which is exactly why it cannot join RUNTIME_SERVICES: a
+# prod or judge `up -d --no-deps tenant-projection-writer` would succeed and
+# START the carrier on a lane that never opted into it, defeating the compose
+# profile that keeps it inert there. Membership here scopes the restart to the
+# two lanes whose overlays put it in the `runtime` compose profile.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
+    tenant-projection-writer
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
@@ -282,7 +291,12 @@ readonly DEV_LANE_EXTRA_BROKER_CLIENTS=(
 # Keyed by lane rather than by overlay filename so it reads the same way
 # resolve_lane_name() does, and so a lane that later gains its own writers adds
 # one array here instead of editing the resolution logic.
+# OMN-18114: the profile carrier, mirrored onto the PROOF lane for the same
+# reason the six writers were -- `stability-proven` is resolved from this lane,
+# so it must not carry fewer contracts than the mutable dev lane. Same
+# base-declared / lane-started split described on the dev array above.
 readonly STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES=(
+    tenant-projection-writer
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer

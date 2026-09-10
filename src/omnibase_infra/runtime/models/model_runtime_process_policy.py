@@ -8,7 +8,20 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-RuntimeProcessName = Literal["main", "effects", "worker"]
+# OMN-18114: `tenant-projection` joins the three shared kernels as a fourth
+# runtime process a lane may declare. It is OPTIONAL per lane (see
+# `ModelRuntimeProfilePolicy`) because it is a lab-lane carrier, not a member of
+# the runtime family every lane must run: the three below are required
+# everywhere, this one is declared by the lanes that deploy it.
+RuntimeProcessName = Literal["main", "effects", "worker", "tenant-projection"]
+
+# The three every lane must declare. Kept separate from the Literal above so
+# "a name the contract may use" and "a name every lane must supply" stay two
+# different statements — collapsing them is what would silently make a new
+# optional carrier mandatory on prod.
+REQUIRED_RUNTIME_PROCESSES: frozenset[RuntimeProcessName] = frozenset(
+    {"main", "effects", "worker"}
+)
 
 
 class ModelRuntimeProcessPolicy(BaseModel):
