@@ -66,6 +66,12 @@ ONEX_API_IMAGE
 # ref), never by tag recency -- docker/migrations/cloud/run-cloud-migrations.sh
 # refuses a MANIFEST-less image by name and has no lexicographic fallback.
 ONEX_CLOUD_MIGRATE_IMAGE
+# OMN-18109 provenance: the password half of the omninode_runtime DSN the
+# three single-domain standalone projection writers connect with. Already
+# required by docker/docker-compose.infra.yml's own ${VAR:?} render of
+# OMNINODE_INTERNAL_DB_URL, so this declares a name the dev lane already
+# needed -- it adds no new operator-supplied value on any host.
+OMNINODE_RUNTIME_PASSWORD
 ONEX_LAB_TENANT_STATE_DIR
 POSTGRES_PASSWORD
 ROLE_OMNIDASH_PASSWORD
