@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-18109 -- the runtime binding for the dev lane's live-events-writer.
+#
+# WHY A FILE AND NOT AN ENV VAR
+#   BaseProjectionRunner resolves its DSN through
+#   ModelProjectionRuntimeBinding.from_legacy_settings(), which prefers
+#   OMNIDASH_ANALYTICS_DB_URL and reads nothing else. That variable is bound by
+#   the topology to the app_dashboard principal, so pointing it at a different
+#   role would repeat the exact single-env-two-principals mistake OMN-15425
+#   removed. The runner's OWN declared override is a binding overlay named by
+#   OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY, and it takes precedence over
+#   the legacy resolution, so this file selects the principal by NAME and the
+#   legacy guess never runs.
+#
+# WHY PER WRITER AND NOT ONE SHARED FILE
+#   The binding carries the consumer group. A shared overlay would silently
+#   collapse six deliberately distinct groups onto the model default, splitting
+#   partitions between a writer and a no-op consumer -- a worse failure than the
+#   one being fixed, because it would look like it worked.
+#
+# NO CREDENTIAL MATERIAL. database_url_secret_ref names an ENV VAR; the compose
+# service renders that variable from ${OMNINODE_RUNTIME_PASSWORD:?...}, whose
+# value lives in the host env / secret store and in no committed file.
+kafka_bootstrap_servers: "redpanda:9092"
+kafka_consumer_group: "local.omnimarket-projections.live-events-writer.consume.v1"
+database_url_secret_ref: "env:OMNINODE_INTERNAL_DB_URL"

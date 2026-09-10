@@ -536,7 +536,20 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # switch, and joins that snapshot in every guard below. Net-new file;
     # 0036's bytes are NOT edited, it is retired in place by a row in
     # _ledger/migration-supersessions.tsv, exactly as 0036 retired 0034.
-    assert len(result.declarations) == 174
+    # +1 for OMN-18109's node_projection_live_events/
+    # 0003_grant_omninode_runtime_public_live_events.sql -- the TABLE grant on
+    # the relation the STANDALONE live-events writer actually writes. The
+    # contract declares `live_events` in schema `omninode_internal`, but the
+    # handler builds its SQL from the contract's bare `name` and never reads
+    # `schema`, so the statement is unqualified and resolves through
+    # `search_path` into `public`. Both relations exist on the dev lane, and
+    # only the `omninode_internal` twin was granted (099 and this lineage's
+    # 0002); `public.live_events` carried grants for `role_omnidash` alone, by
+    # flat migration 096's blanket ON ALL TABLES. Moving that writer to the
+    # topology-declared `omninode_runtime` principal without this file would
+    # trade a watermark refusal for a table refusal. Net-new file; nothing
+    # above it is edited.
+    assert len(result.declarations) == 175
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

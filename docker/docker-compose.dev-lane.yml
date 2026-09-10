@@ -146,6 +146,49 @@ x-dev-lane-logging: &dev_lane_logging
 x-dev-lane-analytics-env: &dev_lane_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set — the lab lane connects to omnidash_analytics as the non-BYPASSRLS role_omnidash (OMN-15363), never as the postgres superuser}@postgres:5432/omnidash_analytics"
 # =============================================================================
+# THE INTERNAL-PROJECTION CONNECTION IDENTITY (OMN-18109)
+# =============================================================================
+# The anchor above is the ANALYTICS identity. It is the wrong one for a
+# standalone projection writer whose contract declares its relations in the
+# `omninode_internal` domain, and the .201 dev lane proved it continuously:
+# `omnimarket-projection-live-events-writer` and
+# `omnimarket-projection-registration-writer` logged
+#
+#     Failed to update watermark: permission denied for schema omninode_internal
+#
+# 411 and 191 times in the thirty minutes to 2026-09-10T00:56:40Z, unbroken
+# since 2026-09-08T23:22:56Z. `role_omnidash` holds no grant of any kind inside
+# `omninode_internal` — read live, names only:
+#
+#     omninode_internal : postgres=UC, omninode_runtime=U, jake_ro=U
+#
+# and `projection_watermarks` lives there. Every writer's watermark write is
+# refused; those two are simply the two receiving traffic. What is lost is the
+# replay cursor and the staleness signal every projection-health surface reads,
+# while Kafka offsets keep advancing — so the projection looks permanently
+# stale to anything trusting watermarks and fine to anything trusting offsets.
+#
+# `omninode_runtime` is the principal the topology declares for that domain
+# (`_EXPECTED_BINDING_PRINCIPALS["omninode_runtime_service"]`), and
+# `OMNINODE_INTERNAL_DB_URL` is the env it declares for it
+# (`_EXPECTED_BINDING_DSN_ENVS["local"]`). Both are asserted against this file
+# by tests/ci/test_standalone_writer_declared_principal_omn18109.py.
+#
+# Byte-identical in form to the same variable in docker-compose.infra.yml,
+# repeated because YAML anchors do not cross compose files. That base file
+# already renders it with the same `${OMNINODE_RUNTIME_PASSWORD:?...}`, so this
+# introduces NO new operator-supplied variable on any host — `:?` and not `:-`
+# for the reason the analytics block above states: an empty password renders a
+# non-empty DSN and moves the failure from compose render to first connect.
+#
+# ONLY the three writers whose declared relations resolve to ONE principal use
+# this. The delegation, savings and tenant-credentials writers span two schema
+# domains, no single DSN satisfies them, and they stay on the analytics anchor
+# under OMN-17454 — which owns the multi-principal mechanism. Moving one of
+# them here would trade a watermark refusal for a table refusal.
+x-dev-lane-internal-projection-env: &dev_lane_internal_projection_env
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — a standalone internal-projection writer connects to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-18109), never as role_omnidash and never as the postgres superuser}@postgres:5432/omnidash_analytics"
+# =============================================================================
 # STRICT AUTO-WIRING (OMN-17531)
 # =============================================================================
 # `ONEX_WIRING_STRICT_MODE` is `${ONEX_WIRING_STRICT_MODE:-0}` in
@@ -793,7 +836,9 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_registry.handlers.handler_tenant_registry_projection
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
+      # OMN-18109: the INTERNAL-projection identity, not the analytics one.
+      # The overlay below selects it by name; this renders the DSN it names.
+      !!merge <<: [*dev_lane_internal_projection_env, *dev_lane_broker_auth_env]
       # KAFKA_BROKERS is the env `BaseProjectionRunner.kafka_bootstrap_servers`
       # reads first (runner.py KAFKA_BROKERS_ENV). Docker-internal hostname, as
       # every other runtime service on this lane uses.
@@ -809,6 +854,11 @@ services:
       # ModelProjectionRuntimeBinding.from_legacy_settings()'s
       # KAFKA_CONSUMER_GROUP fallback.
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.tenant-registry-writer.consume.v1"
+      # OMN-18109: the runner's OWN declared binding override, which takes
+      # precedence over ModelProjectionRuntimeBinding.from_legacy_settings().
+      # Without it the runner reads OMNIDASH_ANALYTICS_DB_URL and connects as
+      # role_omnidash, whose every omninode_internal write is refused.
+      OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY: /etc/onex/projection-runtime-binding.yaml
       # Opt-in readiness/liveness HTTP server
       # (BaseProjectionRunner.PROJECTION_RUNNER_HEALTH_PORT_ENV). Container-
       # internal only: the healthcheck below curls localhost, and publishing a
@@ -817,6 +867,11 @@ services:
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
       PYTHONUNBUFFERED: "1"
+    volumes:
+      # Read-only. The file carries no credential material: it names the
+      # DSN env var, which the environment block above renders from the
+      # fail-closed ${OMNINODE_RUNTIME_PASSWORD:?...} reference.
+      - ./projection-runtime-binding/tenant-registry-writer.yaml:/etc/onex/projection-runtime-binding.yaml:ro
     stop_grace_period: 60s
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8098/ready"]
@@ -952,14 +1007,26 @@ services:
       - -m
       - omnimarket.nodes.node_projection_registration.handlers.handler_registration
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
+      # OMN-18109: the INTERNAL-projection identity, not the analytics one.
+      # The overlay below selects it by name; this renders the DSN it names.
+      !!merge <<: [*dev_lane_internal_projection_env, *dev_lane_broker_auth_env]
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.registration-writer.consume.v1"
+      # OMN-18109: the runner's OWN declared binding override, which takes
+      # precedence over ModelProjectionRuntimeBinding.from_legacy_settings().
+      # Without it the runner reads OMNIDASH_ANALYTICS_DB_URL and connects as
+      # role_omnidash, whose every omninode_internal write is refused.
+      OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY: /etc/onex/projection-runtime-binding.yaml
       PROJECTION_RUNNER_HEALTH_PORT: "8100"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
       PYTHONUNBUFFERED: "1"
+    volumes:
+      # Read-only. The file carries no credential material: it names the
+      # DSN env var, which the environment block above renders from the
+      # fail-closed ${OMNINODE_RUNTIME_PASSWORD:?...} reference.
+      - ./projection-runtime-binding/registration-writer.yaml:/etc/onex/projection-runtime-binding.yaml:ro
     stop_grace_period: 60s
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8100/ready"]
@@ -1114,14 +1181,26 @@ services:
       - -m
       - omnimarket.nodes.node_projection_live_events.handlers.handler_live_events
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
+      # OMN-18109: the INTERNAL-projection identity, not the analytics one.
+      # The overlay below selects it by name; this renders the DSN it names.
+      !!merge <<: [*dev_lane_internal_projection_env, *dev_lane_broker_auth_env]
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.live-events-writer.consume.v1"
+      # OMN-18109: the runner's OWN declared binding override, which takes
+      # precedence over ModelProjectionRuntimeBinding.from_legacy_settings().
+      # Without it the runner reads OMNIDASH_ANALYTICS_DB_URL and connects as
+      # role_omnidash, whose every omninode_internal write is refused.
+      OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY: /etc/onex/projection-runtime-binding.yaml
       PROJECTION_RUNNER_HEALTH_PORT: "8103"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
       PYTHONUNBUFFERED: "1"
+    volumes:
+      # Read-only. The file carries no credential material: it names the
+      # DSN env var, which the environment block above renders from the
+      # fail-closed ${OMNINODE_RUNTIME_PASSWORD:?...} reference.
+      - ./projection-runtime-binding/live-events-writer.yaml:/etc/onex/projection-runtime-binding.yaml:ro
     stop_grace_period: 60s
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8103/ready"]
