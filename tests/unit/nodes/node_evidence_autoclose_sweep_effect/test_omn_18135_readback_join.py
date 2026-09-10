@@ -511,3 +511,71 @@ async def test_a_readback_does_discharge_a_state_criterion_beside_a_real_proof()
     _seed_redraw(linear, checks)
     result = await _handler(_skill_result(checks), linear).handle(_request())
     assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
+
+
+# --------------------------------------------------------------------------
+# The vocabulary, measured against the criteria it has to read.
+# --------------------------------------------------------------------------
+
+#: OMN-17771's acceptance section, verbatim from the ticket. The ruling names
+#: this ticket as its worked example, and the first cut of the marker set
+#: recognised only 2 of these 5 — so the example would still have held. Each
+#: phrase added afterwards is lifted from a criterion below rather than
+#: invented, which is the standing rule for this set.
+_OMN_17771_ACCEPTANCE = (
+    "## Acceptance\n"
+    "\n"
+    "AC1. Zero `client_id=omnidash-spa` and zero `client_id=omniweb` "
+    "occurrences in any customer-facing guide, proven by grep at the merged "
+    "tip.\n"
+    "AC2. The Step 1a registration URL, pasted verbatim, returns HTTP 200 "
+    "with a registration form — probed from a machine with no source checkout "
+    "and no org credential, not asserted by inspection.\n"
+    "AC3. The Step 1b token command names a client that exists on the plane "
+    "the guide names, proven by an `invalid_grant` (user rejected) rather "
+    "than `unauthorized_client` / `Client not found` (client rejected) "
+    "response against a deliberately invalid user.\n"
+    "AC4. `no-private-repo-links` and `beta-layout` checkers green.\n"
+    "AC5. Merged to `main` and read back from `origin/main`.\n"
+)
+
+
+def test_the_worked_example_reads_as_state_shaped_end_to_end() -> None:
+    """Every one of OMN-17771's five real criteria, not a paraphrase.
+
+    This is the assertion that would have caught the first cut shipping a
+    predicate too tight to admit the ticket the ruling names.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _acceptance_criteria_items,
+        _criterion_is_state_shaped,
+        _every_criterion_is_state_shaped,
+    )
+
+    items = _acceptance_criteria_items(_OMN_17771_ACCEPTANCE)
+    assert len(items) == 5
+    assert all(_criterion_is_state_shaped(item) for item in items)
+    assert _every_criterion_is_state_shaped(_OMN_17771_ACCEPTANCE) is True
+
+
+@pytest.mark.parametrize(
+    "criterion",
+    [
+        # The widened phrases must not drag behaviour criteria with them.
+        "AC1 the handler exists on the plane and refuses a bad envelope",
+        "AC1 a test asserts zero occurrences of the old symbol",
+        "AC1 merged to `main`, and the retry path stops after 3 attempts",
+        "AC1 the suite is green",
+    ],
+)
+def test_the_widened_vocabulary_did_not_drag_behaviour_along(criterion: str) -> None:
+    """Each of these carries a widened state phrase AND behaviour language.
+
+    The veto still wins, which is the property that keeps the widening from
+    becoming a general loosening.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _criterion_is_state_shaped,
+    )
+
+    assert _criterion_is_state_shaped(criterion) is False
