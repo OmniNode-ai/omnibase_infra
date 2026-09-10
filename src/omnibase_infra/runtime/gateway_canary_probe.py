@@ -480,6 +480,22 @@ def _build_parser() -> argparse.ArgumentParser:
             "without it"
         ),
     )
+    parser.add_argument(
+        "--lane-credential-map",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the operator-supplied lane-credential map (OMN-18120). Same "
+            "file the gateway-forwarder process itself is given, and for the same "
+            "reason: this probe calls the SAME "
+            "load_gateway_forwarder_runtime_config, which fails closed once any "
+            "bus leg names a sasl_credential_ref. Optional rather than required "
+            "-- a deployment whose legs are all PLAINTEXT names no ref and needs "
+            "no map, and the loader refuses by name when a ref is present and "
+            "this is absent, so making it required here would break that "
+            "deployment to restate a refusal the loader already owns"
+        ),
+    )
     return parser
 
 
@@ -493,6 +509,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     config = load_gateway_forwarder_runtime_config(
         args.config,
         broker_ref_map_path=args.broker_ref_map,
+        lane_credential_map_path=args.lane_credential_map,
     )
     passed, report = asyncio.run(
         probe(

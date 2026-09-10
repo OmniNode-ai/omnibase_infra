@@ -201,7 +201,17 @@ services:
       # the CANARY topic, which is authorized, so neither can see a forwarder
       # whose real traffic topics are all denied -- it quarantines every
       # record, drains its lag into the DLQ, and passes both broker legs.
-      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml", "--egress-health-file", "/tmp/gateway-egress-health.json", "--lane-mirror-health-file", "/tmp/gateway-lane-mirror-health.json"]
+      # OMN-18120 follow-up: --lane-credential-map is passed here for the same
+      # reason it is passed to the process above, and it must name the SAME
+      # file. This probe calls the SAME load_gateway_forwarder_runtime_config,
+      # which fails closed once a bus leg names a sasl_credential_ref. Without
+      # it the probe died in configuration load on every 15s tick and reported
+      # the traffic path dead while the forwarder beside it was authenticated
+      # and delivering -- the inverse of the 2026-08-04 outage this probe was
+      # built to catch, and just as misleading. A whole-file substring check
+      # could not see the omission, because the flag was already present on
+      # the process command; the pinning test asserts each argv separately.
+      test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml", "--lane-credential-map", "/run/gateway/lane-credentials.yaml", "--egress-health-file", "/tmp/gateway-egress-health.json", "--lane-mirror-health-file", "/tmp/gateway-lane-mirror-health.json"]
       interval: 15s
       timeout: 45s
       retries: 4

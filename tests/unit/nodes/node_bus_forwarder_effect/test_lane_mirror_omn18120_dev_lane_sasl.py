@@ -339,3 +339,113 @@ def test_boundary_leaves_a_leg_without_a_reference_alone() -> None:
         "environment": "t",
         "security_protocol": "PLAINTEXT",
     }
+
+
+# ---------------------------------------------------------------------------
+# The HEALTHCHECK is a second consumer of the same loader (OMN-18120 follow-up)
+# ---------------------------------------------------------------------------
+# `test_compose_passes_the_dev_lane_credential_fail_closed` above asserts
+# `"--lane-credential-map" in compose` -- a substring match over the WHOLE
+# file. That is why this defect shipped green: the flag IS in the file, on the
+# forwarder's `command:`, so the substring is satisfied while the healthcheck's
+# own `test:` array never received it.
+#
+# `onex-gateway-canary-probe` calls the SAME
+# `load_gateway_forwarder_runtime_config` the forwarder does. Once a dev-lane
+# leg names `sasl_credential_ref`, that loader fails closed without the map --
+# correctly, by design. So the probe inherited a hard refusal it was never
+# given the argument to satisfy, and every 15s healthcheck tick died in
+# argument parsing before dialing a single broker:
+#
+#   ValueError: gateway bus leg 'local_bus' names sasl_credential_ref=... but
+#   no lane-credential map was supplied; the gateway refuses to start rather
+#   than open a client that cannot authenticate
+#
+# Measured on `.201` 2026-09-10T18:17Z, on the deployed fix: the forwarder
+# itself was healthy and delivering (`Authenticated as onex-dev-lane via
+# SCRAM-SHA-256`, dev `tool-executed` 599687 -> 599711, `work_events`
+# n_tup_ins 71208 -> 71237 -- real INSERTs, not the no-op upsert loop), while
+# the container's own health status read `unhealthy` with FailingStreak 5 and
+# the traceback above as its last probe output. A healthcheck that cannot
+# resolve its own configuration reports the one state it must never invent: it
+# says the path is dead while the path is carrying traffic. The inverse of the
+# 2026-08-04 outage this probe was built for, and just as misleading.
+#
+# The assertions below are per-INVOCATION, not per-file, because per-file is
+# the exact granularity that let this through.
+
+_PROBE_ENTRYPOINT = "onex-gateway-canary-probe"
+_LANE_CREDENTIAL_FLAG = "--lane-credential-map"
+_BROKER_REF_FLAG = "--broker-ref-map"
+
+
+def _gateway_forwarder_service() -> dict[str, Any]:
+    """The `gateway-forwarder` service block from the shipped compose file."""
+    compose = cast(
+        "dict[str, Any]", yaml.safe_load(_GATEWAY_COMPOSE.read_text(encoding="utf-8"))
+    )
+    service = compose["services"]["gateway-forwarder"]
+    return cast("dict[str, Any]", service)
+
+
+def test_healthcheck_receives_the_same_lane_credential_map_as_the_process() -> None:
+    """The canary probe shares the forwarder's fail-closed loader, so it needs the map.
+
+    Asserted against the healthcheck's own argv rather than the file's text.
+    A whole-file substring is satisfied by the forwarder's `command:` alone,
+    which is precisely how a probe with no credential map shipped as green.
+    """
+    service = _gateway_forwarder_service()
+    healthcheck_test = service["healthcheck"]["test"]
+    assert _PROBE_ENTRYPOINT in healthcheck_test, (
+        "this test is pinned to the canary-probe healthcheck; the healthcheck "
+        f"no longer invokes {_PROBE_ENTRYPOINT!r}, so re-derive it rather than "
+        "letting the assertion below pass vacuously"
+    )
+    assert _LANE_CREDENTIAL_FLAG in healthcheck_test, (
+        f"the healthcheck invokes {_PROBE_ENTRYPOINT}, which calls the same "
+        "load_gateway_forwarder_runtime_config the forwarder process does. "
+        f"Once a dev-lane leg names {_CREDENTIAL_REF_KEY!r} that loader fails "
+        f"closed without {_LANE_CREDENTIAL_FLAG}, so the probe dies in "
+        "configuration load and reports the traffic path dead while it is "
+        "carrying traffic"
+    )
+
+
+def test_healthcheck_and_process_resolve_the_same_credential_map_path() -> None:
+    """Two argv lists naming two different maps is a probe testing a fiction.
+
+    The probe's whole value is dialing the legs with the same transport and
+    the same credentials as real traffic. A map path that disagrees with the
+    forwarder's makes it a check on a configuration nothing runs.
+    """
+    service = _gateway_forwarder_service()
+    command = service["command"]
+    healthcheck_test = service["healthcheck"]["test"]
+
+    for flag in (_LANE_CREDENTIAL_FLAG, _BROKER_REF_FLAG):
+        assert flag in command, f"the forwarder process must be given {flag}"
+        process_path = command[command.index(flag) + 1]
+        probe_path = healthcheck_test[healthcheck_test.index(flag) + 1]
+        assert process_path == probe_path, (
+            f"the forwarder resolves {flag} from {process_path!r} but its "
+            f"healthcheck reads {probe_path!r}; the probe would be verifying a "
+            "configuration the running process does not use"
+        )
+
+
+def test_canary_probe_accepts_the_lane_credential_map_argument() -> None:
+    """The compose flag is inert unless the probe's own parser takes it.
+
+    Both halves are load-bearing and they live in different files, so each is
+    asserted where it can actually fail.
+    """
+    from omnibase_infra.runtime.gateway_canary_probe import _build_parser
+
+    parser = _build_parser()
+    flags = {option for action in parser._actions for option in action.option_strings}
+    assert _LANE_CREDENTIAL_FLAG in flags, (
+        f"{_PROBE_ENTRYPOINT} must accept {_LANE_CREDENTIAL_FLAG}; compose "
+        "passing a flag argparse rejects turns the healthcheck into an "
+        "immediate usage error on every tick"
+    )
