@@ -262,10 +262,31 @@ jobs:
         id: probe
         if: always()
         env:
-          # localhost, because this job runs ON the lane's host. No LAN address
-          # is committed and none is needed.
-          DEV_LANE_MAIN_URL: http://localhost:8085
-          DEV_LANE_EFFECTS_URL: http://localhost:8086
+          # `host.docker.internal`, NOT `localhost`. This job runs on the
+          # lane's host's docker DAEMON, not in the host's network namespace:
+          # the `omnibase-deploy` runner is a container
+          # (`omninode-deploy-runner`, `NetworkMode=docker_default`) with
+          # `/var/run/docker.sock` bind-mounted. The socket is why the
+          # `docker inspect` revision read above works; the bridge network is
+          # why an HTTP probe of `localhost` reaches the runner container and
+          # nothing else.
+          #
+          # Measured 2026-09-10 with a positive control on both halves: from
+          # the .201 host shell both `:8085/ready` and `:8086/ready` answer
+          # 200; from inside `omninode-deploy-runner` the same two URLs answer
+          # 000 (Errno 111, connection refused) while the
+          # `host.docker.internal` forms answer 200. Every compose-dev receipt
+          # emitted before this change carried three identical Errno 111
+          # failures and none was ever a PASS.
+          #
+          # `omnibase-deploy` is the one runner carrying the host-gateway
+          # alias (`docker/docker-compose.runners.yml` `extra_hosts`), which is
+          # the same reason `chain-canary.yml` — same runner label — probes the
+          # lane ingress at `http://host.docker.internal:8085`. Still no LAN
+          # address committed: the alias resolves to the docker bridge gateway,
+          # where the lane's ports are published.
+          DEV_LANE_MAIN_URL: http://host.docker.internal:8085
+          DEV_LANE_EFFECTS_URL: http://host.docker.internal:8086
         run: |
           set -euo pipefail
           mkdir -p /tmp/lab-pass-receipt
