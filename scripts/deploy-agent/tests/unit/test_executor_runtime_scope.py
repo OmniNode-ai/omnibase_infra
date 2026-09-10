@@ -32,6 +32,7 @@ from deploy_agent.events import (
     PhaseStatus,
     Scope,
     services_for_scope,
+    without_gateway_services,
 )
 from deploy_agent.executor import (
     DeployExecutor,
@@ -113,7 +114,15 @@ class TestRuntimeScopeComposeUp:
         compose_cmd = captured_cmds[0]
         # OMN-18108: _compose_up defaults to the DEV lane, whose runtime scope
         # also carries the services declared only in the lane overlay.
-        runtime_services = services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV)
+        # OMN-18134: minus the gateway services. Those are in the DEV lane's
+        # SCOPE -- a DEV deploy is responsible for them -- but they belong to
+        # the omninode-gateway compose project, which this command's `-p
+        # omnibase-infra` does not address. Naming one here is a `no such
+        # service` abort, so scope membership and compose argument are
+        # deliberately not the same list.
+        runtime_services = without_gateway_services(
+            services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV)
+        )
 
         assert "--no-deps" in compose_cmd, (
             "Runtime scope compose up must include --no-deps to prevent "
@@ -310,8 +319,10 @@ class TestCoreAndFullScopeComposeUp:
             and "omnidash_analytics" in cmd
             for cmd in captured_cmds
         )
-        dev_runtime_services = services_for_scope(
-            Scope.RUNTIME, lane=EnumRuntimeLane.DEV
+        # OMN-18134: the gateway services are in DEV scope but are deployed by
+        # their own compose project, never named in this one's argv.
+        dev_runtime_services = without_gateway_services(
+            services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV)
         )
         assert captured_cmds[-1][-len(dev_runtime_services) :] == dev_runtime_services
         assert verified[:2] == [["forward-migration"], ["migration-gate"]]
