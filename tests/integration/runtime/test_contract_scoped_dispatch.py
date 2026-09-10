@@ -1131,7 +1131,7 @@ async def test_duplicate_typed_not_ready_names_fail_before_side_effects() -> Non
     bus = _RecordingBus()
     provisioner = _RecordingReadyProvisioner()
 
-    with pytest.raises(ModelOnexError, match="duplicate NOT_READY contract names"):
+    with pytest.raises(ModelOnexError, match="duplicate UNATTACHED contract names"):
         await reattach_not_ready_contracts(
             manifest,
             duplicate_results,
@@ -1217,7 +1217,7 @@ async def test_duplicate_initial_not_ready_fails_before_loop_side_effects() -> N
         f"confirm={provisioner.confirm_calls}, subscriptions={len(bus.subscriptions)}, "
         f"results={returned_results})"
     )
-    assert "duplicate NOT_READY contract names" in str(caught)
+    assert "duplicate UNATTACHED contract names" in str(caught)
     assert engine.dispatcher_count == baseline_dispatcher_count
     assert sleep_calls == []
     assert provisioner.ensure_calls == []
@@ -1317,8 +1317,8 @@ async def test_not_ready_names_must_be_canonical_manifest_subset() -> None:
     dispatcher_id = report.results[0].dispatchers_registered[0]
 
     for contract_name, error_match in (
-        (f" {contract.name} ", "noncanonical NOT_READY contract names"),
-        ("node_not_in_manifest", "NOT_READY.*manifest contract-name mismatch"),
+        (f" {contract.name} ", "noncanonical UNATTACHED contract names"),
+        ("node_not_in_manifest", "UNATTACHED.*manifest contract-name mismatch"),
     ):
         forged_result = ModelContractAttachResult.model_validate_json(
             json.dumps(
