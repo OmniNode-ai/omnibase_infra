@@ -4,6 +4,7 @@
     {
       "clientId": "omniweb",
       "publicClient": false,
+      "fullScopeAllowed": false,
       "secretEnv": "KEYCLOAK_CLIENT_SECRET",
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
@@ -79,12 +80,14 @@
     {
       "clientId": "onex-api",
       "publicClient": false,
+      "fullScopeAllowed": false,
       "bearerOnly": true,
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
       "clientId": "omnidash-spa",
       "publicClient": true,
+      "fullScopeAllowed": false,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
@@ -119,6 +122,7 @@
     {
       "clientId": "onex-customer",
       "publicClient": true,
+      "fullScopeAllowed": false,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
@@ -189,32 +193,38 @@
     {
       "clientId": "redpanda-events",
       "publicClient": false,
+      "fullScopeAllowed": false,
       "serviceAccountsEnabled": true,
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
       "clientId": "onex-admin",
       "publicClient": false,
+      "fullScopeAllowed": false,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "secretEnv": "KEYCLOAK_ADMIN_CLIENT_SECRET",
       "realmRoles": ["realm-management:manage-users", "realm-management:view-users"],
+      "clientScopeMappings": ["realm-management:manage-users", "realm-management:view-users"],
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
       "clientId": "omniweb-signup-admin",
       "publicClient": false,
+      "fullScopeAllowed": false,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "secretEnv": "KEYCLOAK_SIGNUP_CLIENT_SECRET",
       "realmRoles": ["realm-management:manage-users"],
+      "clientScopeMappings": ["realm-management:manage-users"],
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
       "clientId": "onex-service",
       "publicClient": false,
+      "fullScopeAllowed": false,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
@@ -235,6 +245,7 @@
     {
       "clientId": "onex-verify",
       "publicClient": false,
+      "fullScopeAllowed": false,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
