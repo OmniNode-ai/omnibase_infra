@@ -340,7 +340,7 @@ contract_version:
   major: 1
   minor: 7
   patch: 0
-node_version: "1.12.0"
+node_version: "1.12.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
