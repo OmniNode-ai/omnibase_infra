@@ -1339,31 +1339,45 @@ repos:
         always_run: true
         stages: [pre-commit]
         files: ^(\.pre-commit-config\.yaml|\.github/workflows/.*\.ya?ml|tests/incident_replays/.*|tests/fixtures/.*|scripts/.*\.(py|sh)|deploy/maintenance/.*)$
-  # Governed impacted-test selector at PRE-PUSH (OMN-13973 / WS7 OMN-14655 fan-out;
-  # canary = omnibase_core#1451). Runs the fast local IMPACTED SUBSET of the unit
-  # suite once per `git push`, via the SAME selector CI uses
-  # (scripts/ci/detect_test_paths.py + test_selection_adjacency.yaml,
-  # ENABLE_SMART_TESTS) -- never a hand-typed -k. PER-REPO SEAM-MATCH, not a paste:
-  # infra's selector hardcodes SRC_PREFIX=src/omnibase_infra/ + its own adjacency
-  # map and, unlike core, does NOT accept `--base-ref`, so the wrapper omits it.
-  # Fail-closed: escalates to the full UNIT suite when it cannot prove narrowing is
-  # safe (shared module / pyproject deps / tests infra / >=6 modules / main).
-  # NET-NEGATIVE-SURFACE: retires the "run the whole unit suite by hand before every
-  # push" default (root CLAUDE.md Rule #4). This is a fast local impacted subset
-  # ADVISORY of the full CI suite -- NOT byte-parity with an enforced CI context (on
-  # CI the selector is behind ENABLE_SMART_TESTS off-by-default; the enforced gate
-  # is the full suite). FAIL-LOUD: hard-errors (exit 1) if base/selector/adjacency
-  # cannot resolve; never a green skip.
-  - repo: local
-    hooks:
-      - id: prepush-smart-tests
-        name: Governed impacted-test selector (pre-push, OMN-13973)
-        entry: bash scripts/hooks/prepush_smart_tests.sh
-        language: system
-        pass_filenames: false
-        always_run: true
-        verbose: true
-        stages: [pre-push]
+  # ---------------------------------------------------------------------------
+  # RETIRED (OMN-18162, 2026-09-10): the pre-push TEST leg.
+  # ---------------------------------------------------------------------------
+  # The governed impacted-test selector -- `id: prepush-smart-tests`, entry
+  # `bash scripts/hooks/prepush_smart_tests.sh` (OMN-13973 / WS7 OMN-14655
+  # fan-out; canary omnibase_core#1451) -- used to run here. It was the ONLY hook
+  # in this repo that invoked a test runner, so with it gone pre-push is policy,
+  # type and lint only and finishes in seconds.
+  #
+  # Why. Hosted CI is the enforced merge gate, and has been the whole test surface
+  # in practice since the trusted-CI routing seam went hosted on 2026-08-27.
+  # Running an impacted subset again locally bought earlier feedback, not a
+  # verification guarantee, and it was the measured load on the lab: 67 heavy
+  # omnibase_infra pre-push runs in the five days to 2026-09-09, each budgeted at
+  # 5.0 runnable cores, heavy escalations taking 2h43m to 3h49m. Plan of record:
+  # knowledge-base-internal#328,
+  # `beta/plans/2026-09-09-ci-runner-placement-and-pre-push-retirement-plan.md`,
+  # phase 1. Operator ruling 2026-09-10: retire the test leg one repo at a time.
+  # The honest limit, stated rather than implied: feedback moves later, not away.
+  #
+  # What this deliberately does NOT change:
+  #   * The three remaining pre-push hooks -- mypy type check, architecture-layer
+  #     validation, and deploy-scope DoD parity -- are untouched, in place and in
+  #     order. This repo has no named test exception; the two the plan names (the
+  #     protocol identifier enforcement hook and the flip-bundle seam gate) are
+  #     both in omnibase_core.
+  #   * `scripts/hooks/prepush_smart_tests.sh` is NOT deleted. It stays as a
+  #     manually-invocable library -- `docker/docker-compose.gate-runner.yml` and
+  #     `config/runner_routing_policy.yaml` both reference it and its behaviour is
+  #     pinned by tests under `tests/unit/scripts/` and `tests/ci/`. See its
+  #     header for how to run it by hand.
+  #   * The CI-side selector (`scripts/ci/detect_test_paths.py` +
+  #     `scripts/ci/test_selection_adjacency.yaml`) is byte-unchanged.
+  #
+  # Do NOT re-add a test-running hook at the pre-push stage here without a ruling
+  # that supersedes the one above. No env knob restores this leg, and adding one
+  # would recreate the bypass surface the retirement exists to remove. Enforced by
+  # tests/ci/test_prepush_test_leg_retired_omn18162.py.
+  # ---------------------------------------------------------------------------
   # Deploy-scope DoD parity at PRE-PUSH (OMN-14681 / WS7 fan-out of the OMN-14655
   # canary). Shifts the hosted required `deploy-gate` check left: it runs the
   # deterministic, locally-decidable half of that gate at `git push` time so the
