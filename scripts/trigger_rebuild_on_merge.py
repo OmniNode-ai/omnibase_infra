@@ -131,23 +131,33 @@ _BASE_BRANCH_LANES: dict[str, str] = {
 }
 
 
-class ModelCiBusLaneProjectionReadback(BaseModel):
-    """One lane's declared projection-readback DSN *reference* (OMN-18060).
+class ModelCiBusLaneDsnReference(BaseModel):
+    """One lane's declared DSN *reference* — a NAME, never a value.
 
-    Carries a NAME and never a value. omnimarket
-    ``config/ci_bus_lanes.yaml`` is committed, diffable, CODEOWNERS-reviewed
-    config, which is what makes it the right home for a variable name and the
-    wrong home for a credential; the value is injected into the job env from
-    the lab store and is read by the chain canary
+    The shape of both ``projection_readback`` (OMN-18060) and
+    ``ledger_readback`` (OMN-16964). omnimarket ``config/ci_bus_lanes.yaml``
+    is committed, diffable, CODEOWNERS-reviewed config, which is what makes it
+    the right home for a variable name and the wrong home for a credential;
+    the value is injected into the job env from the lab store and is read by
+    the chain canary
     (``omnibase_infra.nodes.node_chain_canary_effect.lane_transport``), never
     here.
 
-    This publisher is not a consumer of the block. It models it because the
-    overlay is validated ``extra="forbid"``: a key this script has never
-    learned is indistinguishable from a typo, and on 2026-09-09 that
-    indistinguishability took every agent-path dev-lane rebuild red (the exact
-    repeat of the OMN-18012 episode recorded in ``ModelCiBusLane`` below).
-    Modelling the key is therefore the fix; loosening the model is not.
+    ONE shape class for both blocks, because this publisher is not a consumer
+    of either: it never reads a DSN and never acts on either declaration, so
+    the only property it needs from them is the shape. The two blocks are kept
+    as SEPARATE FIELDS below rather than one, because they are two legs
+    reading two relations for two links, and the consumer that does act on
+    them keeps them apart for exactly that reason. Sharing the shape here and
+    splitting the fields is the honest split: identical structure, distinct
+    meaning.
+
+    This publisher models these keys because the overlay is validated
+    ``extra="forbid"``: a key this script has never learned is
+    indistinguishable from a typo, and that indistinguishability has now taken
+    every agent-path dev-lane rebuild red three separate times (see
+    ``ModelCiBusLane`` below). Modelling the key is the fix; loosening the
+    model is not.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -190,7 +200,9 @@ class ModelCiBusLane(BaseModel):
       at all.
 
     * ``projection_readback`` -- OPTIONAL, OMN-18060, and never read by this
-      publisher; see ``ModelCiBusLaneProjectionReadback``.
+      publisher; see ``ModelCiBusLaneDsnReference``.
+    * ``ledger_readback`` -- OPTIONAL, OMN-16964, same shape, same silence:
+      this publisher never reads it either.
 
     ``extra="forbid"`` stays: an unknown key in this overlay is a typo that
     would otherwise route a publisher to a default it never declared. That
@@ -206,6 +218,17 @@ class ModelCiBusLane(BaseModel):
     strictness and it is worth paying; what is not acceptable is paying it by
     relaxing to ``extra="allow"``, which would restore exactly the silent
     misroute this model exists to refuse.
+
+    It happened a THIRD time on 2026-09-10 with ``ledger_readback``, added by
+    omnimarket#2437 (``9d14eecf``, merged 04:17:04Z) and learned here under
+    OMN-16964. The trigger went red on two unrelated branches within two
+    minutes (omnibase_infra#3379 at 04:18:09Z and the OMN-18108 lane at
+    04:19:24Z) while the last green run predated the merge at 02:08:49Z. Three
+    occurrences of one shape is a structural gap, not three mistakes: nothing
+    in omnimarket fails when a new key is added there, so the failure always
+    lands on an unrelated omnibase_infra PR afterwards. The cross-repo parity
+    gate that would move the failure to the PR that causes it is tracked
+    separately; until it exists, this docstring is the standing warning.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -214,11 +237,18 @@ class ModelCiBusLane(BaseModel):
     security_protocol: str | None = None
     sasl_mechanism: str | None = None
     # OMN-18060. Optional and unread by this publisher; see
-    # ModelCiBusLaneProjectionReadback for why it is modelled rather than
+    # ModelCiBusLaneDsnReference for why it is modelled rather than
     # ignored. The lane-scope rule (dev only) is enforced by the one component
     # that acts on the declaration, node_chain_canary_effect.lane_transport,
     # and is deliberately not duplicated here: two copies of a policy drift.
-    projection_readback: ModelCiBusLaneProjectionReadback | None = None
+    projection_readback: ModelCiBusLaneDsnReference | None = None
+    # OMN-16964. Optional and unread by this publisher, exactly like the
+    # projection block above, and a SEPARATE field rather than a reuse of it:
+    # two legs, two relations, two OMN-16025 links. The lane-scope rule (dev
+    # only) is enforced by the one component that acts on the declaration,
+    # node_chain_canary_effect.lane_transport, and is deliberately not
+    # duplicated here: two copies of a policy drift.
+    ledger_readback: ModelCiBusLaneDsnReference | None = None
 
     @field_validator("broker")
     @classmethod
@@ -311,12 +341,12 @@ class ModelCiBusOverlay(BaseModel):
 ModelCiBusOverlay.model_rebuild(
     _types_namespace={
         "ModelCiBusLane": ModelCiBusLane,
-        "ModelCiBusLaneProjectionReadback": ModelCiBusLaneProjectionReadback,
+        "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
     }
 )
 ModelCiBusLane.model_rebuild(
     _types_namespace={
-        "ModelCiBusLaneProjectionReadback": ModelCiBusLaneProjectionReadback,
+        "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
     }
 )
 

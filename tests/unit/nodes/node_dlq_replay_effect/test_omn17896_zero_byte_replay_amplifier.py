@@ -280,12 +280,12 @@ async def test_5_an_empty_bodied_dlq_record_is_quarantined_not_republished() -> 
     consumer.config = config  # type: ignore[assignment]
 
     handler = HandlerDlqReplay(
-        consumer=consumer,  # type: ignore[arg-type]
+        consumers={consumer.config.dlq_topic: consumer},  # type: ignore[dict-item]
         producer=producer,  # type: ignore[arg-type]
         quarantine_producer=quarantine,  # type: ignore[arg-type]
         tracking=None,
     )
-    result = await handler._process_message(_message(""))
+    result = await handler._process_message(_message(""), handler._config)
 
     assert producer.replayed == [], (
         "the producer published a zero-byte record back onto the original topic"

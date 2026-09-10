@@ -5,6 +5,9 @@
 from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_type import (
     EnumDlqReplayFilterType,
 )
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_commit_ledger import (
+    ModelDlqCommitLedger,
+)
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
     ModelDlqMessage,
 )
@@ -20,6 +23,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_res
 
 __all__ = [
     "EnumDlqReplayFilterType",
+    "ModelDlqCommitLedger",
     "ModelDlqMessage",
     "ModelDlqReplayCommand",
     "ModelDlqReplayResult",

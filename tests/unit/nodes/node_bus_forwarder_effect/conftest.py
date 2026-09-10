@@ -182,12 +182,39 @@ def lane_mirror_harness() -> _LaneMirrorHarness:
 
 
 @pytest.fixture
-def lane_mirror_runtime_raw() -> dict[str, Any]:
-    """Raw runtime-config mapping already materialized from the contract."""
+def lane_credential_map(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The operator-supplied lane-credential map the shipped config references.
+
+    OMN-18120 made the forwarder's dev-lane legs authenticate, and the loader
+    fails closed when the map is absent -- deliberately, since a leg that starts
+    without a credential is the silent-inertness bug the ticket closes. Every
+    test that loads the SHIPPED config therefore needs this map, and a fixture
+    is the one place to put it rather than three. Values are obviously fake; the
+    point of the change is that a real one never enters this repository.
+    """
+    path = tmp_path_factory.mktemp("gateway") / "lane-credentials.yaml"
+    path.write_text(
+        "lane.dev.kafka.scram:\n"
+        "  username: fixture-principal\n"
+        "  password: fixture-not-a-real-secret\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.fixture
+def lane_mirror_runtime_raw(lane_credential_map: Path) -> dict[str, Any]:
+    """Raw runtime-config mapping already materialized from the contract.
+
+    This mirrors the materialize chain ``load_gateway_forwarder_runtime_config``
+    runs, so a step missing here makes every consumer of this fixture validate a
+    config shape production never sees. OMN-18120 added the credential step.
+    """
     from omnibase_infra.runtime.gateway_forwarder import (
         _materialize_contract_canary_config,
         _materialize_contract_lane_mirror,
         _materialize_contract_mirror_topics,
+        _materialize_lane_broker_credentials,
     )
 
     resolved_path = _REPO_ROOT / "docker" / "gateway" / "beta-gateway-canary.yaml"
@@ -210,4 +237,5 @@ def lane_mirror_runtime_raw() -> dict[str, Any]:
     raw.setdefault("lane_mirror_buses", {}).setdefault("dev", {})[
         "bootstrap_servers"
     ] = _DEV_BOOTSTRAP
+    _materialize_lane_broker_credentials(raw, lane_credential_map)
     return raw
