@@ -40,6 +40,10 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
+from deploy_agent.lane_lock_client import (
+    DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+    lane_lock,
+)
 from deploy_agent.ref_fence import (
     ModelRefLineageFacts,
     assert_ref_not_stale_branch,
@@ -1248,7 +1252,47 @@ class DeployExecutor:
 
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.SUCCESS)
 
-    def git_pull(self, git_ref: str, on_phase_update: PhaseCallback) -> str:
+    def git_pull(
+        self,
+        git_ref: str,
+        *,
+        lane: EnumRuntimeLane,
+        on_phase_update: PhaseCallback,
+        lock_timeout: float = DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+    ) -> str:
+        """Fetch and reset the SHARED deploy-source clone to ``git_ref``.
+
+        OMN-18124: under the lane's per-compose-project host lock, the SAME lock
+        ``scripts/runtime_build/refresh_dev_lane.sh`` has held over its own
+        critical section since OMN-16729. ``REPO_DIR`` is shared with that
+        script and this method took nothing, so the two rewrote the same tree
+        concurrently -- recorded in the clone's reflog at 21:26:37 / 23:06:50 /
+        23:31:49 local on 2026-09-09.
+
+        ``lane`` is REQUIRED and has no default: it decides WHICH lane's lock is
+        taken, and a lock on the wrong lane excludes nobody while looking like
+        protection. Guessing ``dev`` here is the same class of defect as the
+        branch literal OMN-16442 removed from this package (rule 8).
+
+        The lock wraps the whole method rather than the reset alone, so a
+        contended lane is refused with the tree untouched -- not after a fetch
+        has already run.
+        """
+        with lane_lock(
+            lane_config_for(lane).compose_project,
+            lane=lane.value,
+            ref=git_ref,
+            timeout=lock_timeout,
+        ):
+            return self._git_pull_locked(git_ref, on_phase_update=on_phase_update)
+
+    def _git_pull_locked(self, git_ref: str, on_phase_update: PhaseCallback) -> str:
+        """The fetch/fence/reset body. Only :meth:`git_pull` may call this.
+
+        Split out so the lock is structurally impossible to skip: there is no
+        public entry point to the mutation that does not go through the
+        context manager above.
+        """
         on_phase_update(Phase.GIT, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS[Phase.GIT]
 

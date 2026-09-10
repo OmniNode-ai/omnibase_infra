@@ -43,7 +43,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from deploy_agent.events import Phase, PhaseStatus
+from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.job_state import JobState
 from deploy_agent.publisher import build_completion_payload
@@ -158,7 +158,11 @@ class TestExecutorWiring:
 
         with patch("deploy_agent.executor._run", side_effect=fake_run):
             with pytest.raises(StaleBranchRefError):
-                executor.git_pull("origin/main", on_phase_update=_noop_phase_update)
+                executor.git_pull(
+                    "origin/main",
+                    lane=EnumRuntimeLane.DEV,
+                    on_phase_update=_noop_phase_update,
+                )
 
         reset_commands = [cmd for cmd in issued if "reset" in cmd]
         assert reset_commands == [], (
@@ -196,7 +200,11 @@ class TestExecutorWiring:
             )
 
         with patch("deploy_agent.executor._run", side_effect=fake_run):
-            sha = executor.git_pull("origin/dev", on_phase_update=_noop_phase_update)
+            sha = executor.git_pull(
+                "origin/dev",
+                lane=EnumRuntimeLane.DEV,
+                on_phase_update=_noop_phase_update,
+            )
 
         assert sha == sentinel_sha
 

@@ -246,9 +246,14 @@ class DeployAgent:
             # Preflight
             self.executor.preflight(on_phase_update=on_phase_update)
 
-            # Git pull
+            # Git pull -- OMN-18124: under the lane's host lock, the same
+            # per-compose-project lock refresh_dev_lane.sh takes. The
+            # deploy-source clone is shared with that script, and this agent
+            # took nothing until now.
             self._current_git_sha = self.executor.git_pull(
-                cmd.git_ref, on_phase_update=on_phase_update
+                cmd.git_ref,
+                lane=cmd.runtime_lane,
+                on_phase_update=on_phase_update,
             )
 
             # Regenerate compose from catalog (non-fatal — logs warning on failure)
