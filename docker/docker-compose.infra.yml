@@ -521,9 +521,30 @@ services:
       # the read-only instrument identity node_chain_canary_effect uses for its
       # OMN-16025 link-2 projection readback. Empty-means-skip, exactly as on
       # the two keys above: a lane with no canary provisioned leaves the role
-      # absent, migration 104 skips its grants with a NOTICE, and the canary
-      # reports skipped_not_configured -- red and honest, never a green from a
-      # check that never ran.
+      # absent, run-forward-migrations.sh's LOGIN_ONLY_ROLE_GRANT_MAP seam
+      # skips its grants and names the role in the skip, and the canary reports
+      # skipped_not_configured -- red and honest, never a green from a check
+      # that never ran.
+      #
+      # OMN-18115: the GRANTS come from scripts/run-forward-migrations.sh, not
+      # from the flat migration stream. That seam re-asserts CONNECT, schema
+      # USAGE, and column-scoped SELECT (correlation_id, state) on every compose
+      # up, and FAILS the run when the readback does not confirm them -- a GRANT
+      # issued without grant option on the object warns and returns success, so
+      # the readback is the only thing separating a real grant from a silent
+      # no-op. This comment previously credited a numbered migration that does
+      # not exist, and that error is what OMN-18115 was filed against.
+      #
+      # TWO LANES, AND THE MANAGED ONE HAS NEITHER SEAM. This principal is a
+      # compose-lane instrument. It is minted by 000_create_multiple_databases.sh
+      # on a fresh volume and re-asserted by run-forward-migrations.sh's
+      # credential seam on a warm one -- both compose-only. The k8s migrate Job
+      # applies the flat SQL corpus and never runs that script, so on the
+      # managed (RDS) lane chain_canary_reader has no pg_roles row, holds
+      # nothing, and needs nothing. That asymmetry is the reason the grant lives
+      # in the runner rather than in the flat stream: a flat file would deliver
+      # on the lanes that already have the runner, and skip on the one lane that
+      # would otherwise apply it.
       CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
@@ -915,9 +936,30 @@ services:
       # the read-only instrument identity node_chain_canary_effect uses for its
       # OMN-16025 link-2 projection readback. Empty-means-skip, exactly as on
       # the two keys above: a lane with no canary provisioned leaves the role
-      # absent, migration 104 skips its grants with a NOTICE, and the canary
-      # reports skipped_not_configured -- red and honest, never a green from a
-      # check that never ran.
+      # absent, run-forward-migrations.sh's LOGIN_ONLY_ROLE_GRANT_MAP seam
+      # skips its grants and names the role in the skip, and the canary reports
+      # skipped_not_configured -- red and honest, never a green from a check
+      # that never ran.
+      #
+      # OMN-18115: the GRANTS come from scripts/run-forward-migrations.sh, not
+      # from the flat migration stream. That seam re-asserts CONNECT, schema
+      # USAGE, and column-scoped SELECT (correlation_id, state) on every compose
+      # up, and FAILS the run when the readback does not confirm them -- a GRANT
+      # issued without grant option on the object warns and returns success, so
+      # the readback is the only thing separating a real grant from a silent
+      # no-op. This comment previously credited a numbered migration that does
+      # not exist, and that error is what OMN-18115 was filed against.
+      #
+      # TWO LANES, AND THE MANAGED ONE HAS NEITHER SEAM. This principal is a
+      # compose-lane instrument. It is minted by 000_create_multiple_databases.sh
+      # on a fresh volume and re-asserted by run-forward-migrations.sh's
+      # credential seam on a warm one -- both compose-only. The k8s migrate Job
+      # applies the flat SQL corpus and never runs that script, so on the
+      # managed (RDS) lane chain_canary_reader has no pg_roles row, holds
+      # nothing, and needs nothing. That asymmetry is the reason the grant lives
+      # in the runner rather than in the flat stream: a flat file would deliver
+      # on the lanes that already have the runner, and skip on the one lane that
+      # would otherwise apply it.
       CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
