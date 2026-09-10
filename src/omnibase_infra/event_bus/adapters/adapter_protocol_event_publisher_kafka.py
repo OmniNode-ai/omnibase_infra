@@ -60,6 +60,9 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.envelope_header_identity import (
+    header_identity_fields_from_envelope,
+)
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.testing.model_publisher_metrics import (
     ModelPublisherMetrics,
@@ -283,11 +286,21 @@ class AdapterProtocolEventPublisherKafka:
 
             # Build headers explicitly so EventBusKafka.publish() does not
             # fall back to minting its own, independent correlation_id.
+            # OMN-18116: this seam already refused to let the header
+            # correlation diverge from the envelope's (OMN-14962). The same
+            # reasoning applies to IDENTITY and to the causal edge, and until
+            # now it did not: `message_id` was left to its uuid4 default, which
+            # is the value `event_ledger` records as the hop's identity.
+            # `resolved_correlation_id` still wins over the envelope's, because
+            # the block above may have just minted and stamped it.
             headers = ModelEventHeaders(
                 source=self._service_name,
                 event_type=event_type,
-                correlation_id=resolved_correlation_id,
                 timestamp=start_time,
+                **{
+                    **header_identity_fields_from_envelope(envelope),
+                    "correlation_id": resolved_correlation_id,
+                },
             )
 
             # Publish to underlying bus

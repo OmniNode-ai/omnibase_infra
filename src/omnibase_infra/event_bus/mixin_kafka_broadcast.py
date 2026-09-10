@@ -36,6 +36,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 
+from omnibase_infra.event_bus.envelope_header_identity import (
+    header_identity_fields_from_envelope,
+)
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_publish_receipt import (
     ModelPublishReceipt,
@@ -189,11 +192,15 @@ class MixinKafkaBroadcast:
 
         value = json.dumps(envelope_dict).encode("utf-8")
 
+        # OMN-18116: the wire headers take their IDENTITY and their CAUSAL
+        # EDGE from the envelope instead of minting their own. The rule and the
+        # measurement behind it live in `envelope_header_identity`.
         headers = ModelEventHeaders(
             source=self._environment,
             event_type=topic,
             content_type="application/json",
             timestamp=datetime.now(UTC),
+            **header_identity_fields_from_envelope(envelope),
         )
 
         await self.publish(topic, key, value, headers)

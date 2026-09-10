@@ -60,7 +60,19 @@ IMAGE = "postgres:16-alpine"
 # the usual predictable-temp-path attack has no reachable surface here.
 CONTAINER_SQL = "/tmp/103.sql"  # noqa: S108 - path inside the ephemeral container
 
-pytestmark = [pytest.mark.integration, pytest.mark.slow, pytest.mark.postgres]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+    pytest.mark.postgres,
+    # OMN-18116: the module-scoped fixture's container bring-up is charged to
+    # the FIRST test's clock, and on a loaded lab host pulling and starting a
+    # postgres image comfortably exceeds the suite-wide 60s cap. Three
+    # consecutive governed full-suite runs on the lab host errored here with a
+    # varying subset of this module's tests -- 4, then 3, then 3 -- while the
+    # other 27421 passed, which is the signature of a clock, not a defect in
+    # the code under test.
+    pytest.mark.timeout(600),
+]
 
 
 def _docker() -> str:
@@ -98,14 +110,43 @@ def pg() -> Iterator[str]:
         pytest.skip(f"could not start {IMAGE}: {exc}")
 
     try:
-        for _ in range(60):
+        # OMN-18116: readiness is proven by a real query on the real server,
+        # NOT by `pg_isready`.
+        #
+        # The postgres image's entrypoint runs initdb against a TEMPORARY
+        # server bound to a local socket, then stops it and starts the real
+        # one. `pg_isready` answers affirmatively for that temporary server, so
+        # the previous probe could return 0 while the server this fixture is
+        # about to issue `CREATE ROLE` against did not yet exist. The next
+        # statement then failed with psql exit 2 under `check=True`, surfacing
+        # as an ERROR in setup rather than a skip. Measured on the lab host: an
+        # exit-2 `CREATE ROLE role_omnibase_infra` immediately after a passing
+        # readiness probe.
+        #
+        # `SELECT 1` over TCP as the same user and host the tests use is the
+        # positive control that closes that window: it can only succeed against
+        # a server that is actually accepting the connections the tests make.
+        for _ in range(120):
             probe = subprocess.run(
-                [docker, "exec", name, "pg_isready", "-U", "postgres"],
+                [
+                    docker,
+                    "exec",
+                    "-e",
+                    "PGPASSWORD=scratch",
+                    name,
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "postgres",
+                    "-tAc",
+                    "SELECT 1",
+                ],
                 capture_output=True,
                 timeout=30,
                 check=False,  # not-ready is the expected loop condition, not an error
             )
-            if probe.returncode == 0:
+            if probe.returncode == 0 and probe.stdout.strip() == b"1":
                 break
             time.sleep(1)
         else:  # pragma: no cover
