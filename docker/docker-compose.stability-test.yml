@@ -915,7 +915,7 @@ services:
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     volumes: !override
-      - tenant_projection_logs:/app/logs
+      - stability_test_tenant_projection_logs:/app/logs
       - stability_test_tenant_projection_data:/app/data
       - ../contracts:/app/contracts:ro
       - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
@@ -964,15 +964,16 @@ volumes:
     name: omninode-stability-test-effects-data
   worker_logs:
     name: omninode-stability-test-worker-logs
-  # OMN-18114: the carrier's volumes. `tenant_projection_logs` is re-declared
-  # here rather than inherited, for the same reason worker_logs / effects_logs
-  # above are: this overlay is also merged over the CATALOG render
-  # (docker-compose.generated.yml) in the deploy agent's validation step, and a
-  # named volume that only the tracked base declares would make that render
-  # invalid. Only the state root gets a lane-scoped name, matching
-  # stability_test_worker_data above.
-  tenant_projection_logs:
-    name: omnimarket-tenant-projection-logs
+  # OMN-18114: the carrier's volumes. BOTH are lane-scoped, unlike worker_logs /
+  # effects_logs above which reuse the base's concrete names: this lane's own
+  # test_stability_lane_volumes_do_not_reuse_production_names requires every
+  # volume declared HERE to carry `stability-test` in its concrete name, and a
+  # log volume shared with the dev lane's carrier would put two processes'
+  # output in one place with no way to attribute a line. Declared in this
+  # overlay rather than inherited so it is also valid when the overlay is merged
+  # over the CATALOG render in the deploy agent's validation step.
+  stability_test_tenant_projection_logs:
+    name: omnimarket-stability-test-tenant-projection-logs
   stability_test_tenant_projection_data:
     name: omnimarket-stability-test-tenant-projection-data
   stability_test_worker_data:
