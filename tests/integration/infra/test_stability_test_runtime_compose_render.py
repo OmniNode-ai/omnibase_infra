@@ -70,6 +70,24 @@ _WRITER_MODULES = {
     ),
 }
 WRITER_SERVICES = frozenset(_WRITER_MODULES)
+# OMN-18114: the TENANT-domain projection CARRIER, mirrored onto the proof lane
+# on the same reasoning as the writers above.
+#
+# It is a DIFFERENT shape and is deliberately not folded into WRITER_SERVICES:
+# those are `python -m <runner>` BaseProjectionRunner processes, each owning one
+# contract through its own KAFKA_CONSUMER_GROUP. This is the ONEX runtime kernel
+# itself under RUNTIME_PROFILE=tenant-projection, with no `command:` override,
+# owning the eight contracts that declare `runtime_profiles: [tenant-projection]`
+# and are therefore dropped from `main` and `effects` by
+# filter_manifest_for_runtime_profile. Before it existed on this lane those eight
+# were consumed by nothing at all -- not consumed-and-discarded like a writerless
+# runner contract, but never subscribed.
+#
+# Declared in docker/docker-compose.infra.yml under a compose profile no lane
+# requests, so prod and judge render it and never start it; this lane's overlay
+# is what moves it into `runtime`. Cross-lane parity is held by
+# tests/ci/test_lane_runtime_profile_carriage_omn18114.py.
+PROFILE_CARRIER_SERVICES = frozenset({"tenant-projection-writer"})
 EXPECTED_RENDERED_SERVICES = {
     "postgres",
     "redpanda",
@@ -82,6 +100,7 @@ EXPECTED_RENDERED_SERVICES = {
     "projection-api",
     *REQUIRED_RUNTIME_SERVICES,
     *WRITER_SERVICES,
+    *PROFILE_CARRIER_SERVICES,
 }
 OUT_OF_LANE_SERVICES = {
     "agent-actions-consumer",
@@ -111,6 +130,11 @@ EXPECTED_PUBLISHED_PORTS = {
     # publishing it would put six processes with no host-side reader into the
     # lane port map, where a future lane would have to route around them.
     **{name: set() for name in WRITER_SERVICES},
+    # OMN-18114: the carrier publishes nothing either. It serves /health on the
+    # container-internal 8085 that its own healthcheck curls; publishing that
+    # would put a second runtime port in the lane map with no host-side reader
+    # and collide with the dev lane's carrier on the same host.
+    **{name: set() for name in PROFILE_CARRIER_SERVICES},
 }
 PRODUCTION_PUBLISHED_PORTS = {
     "5436",

@@ -1297,6 +1297,112 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
       - "autoheal=true"
   # ==========================================================================
+  # TENANT-domain projection carrier (Runtime Profile: tenant-projection)
+  # ==========================================================================
+  # OMN-18114. Eight omnimarket contracts declare
+  # `runtime_profiles: [tenant-projection]` -- canary_score_reducer,
+  # node_hook_event_capture, node_projection_cost_summary,
+  # node_projection_delegation_inference_response, node_projection_dep_health,
+  # projection_context_roi, projection_pattern_learning,
+  # projection_routing_decision -- because each resolves the `tenant_projection`
+  # topology binding and one process owns that binding (OMN-17641, ratified
+  # permanent by OMN-17556).
+  #
+  # `filter_manifest_for_runtime_profile` admits a contract to a profile only
+  # when the profile is named in the contract's own list, so `main` and
+  # `effects` SKIP all eight. Until this service existed, NO process on any
+  # compose lane bound RUNTIME_PROFILE=tenant-projection, so all eight were
+  # discovered and consumed by nothing. Measured on the .201 dev lane
+  # 2026-09-10: every one of their consumer groups Empty, and
+  # node_projection_delegation_inference_response at offset 644 / log-end 840 /
+  # LAG 196, last commit 2026-09-04T09:46Z. Nothing logged an error, because
+  # from each running process's own point of view the manifest never contained
+  # them.
+  #
+  # WHAT THIS IS. The ONEX runtime kernel under a different RUNTIME_PROFILE --
+  # same image, same entrypoint, same wire_from_manifest path, no `command:`
+  # override. It is NOT a BaseProjectionRunner like the six standalone writers
+  # in the lane overlays: those are OMN-15905 Shape A and get a topology-BLIND
+  # adapter, which handler_hook_event_capture's own docstring records as the
+  # reason it stopped extending that class. This shape mirrors the onex-dev
+  # Deployment `omnimarket-tenant-projection-writer` exactly.
+  #
+  # WHY IT IS DECLARED HERE AND STARTED NOWHERE BY DEFAULT. The runtime env
+  # anchors (`*runtime-base`, `*runtime-env`) live in this file and YAML anchors
+  # do not cross compose files, so declaring the carrier in a lane overlay would
+  # mean re-declaring ~340 lines of environment -- the duplication this repo has
+  # repeatedly paid for. Instead it is declared once here under a compose
+  # profile NO lane's bring-up requests, and the two lab lanes opt in by
+  # overriding `profiles:` in their own overlay. prod, judge and lakshman render
+  # this service and never start it; that inertness is asserted by
+  # tests/ci/test_lane_runtime_profile_carriage_omn18114.py, which also refuses
+  # a `runtime`/`full` value here.
+  #
+  # ITS OWN ROLE IDENTITY, not main's. A second kernel process reusing main's
+  # capabilities would put a second claimant on main-owned topics and start
+  # duplicate heartbeat loops for the same deterministic node IDs -- the reason
+  # the base gates OMNIINTELLIGENCE_PUBLISH_INTROSPECTION to one container. The
+  # contract declares `publish_introspection: false` for this process and it is
+  # not set here.
+  tenant-projection-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-tenant-projection-writer
+    profiles: ["profile-carrier-optin"]
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: omnimarket-tenant-projection-writer
+      RUNTIME_PROFILE: tenant-projection
+      ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DEV_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DEV_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      # A distinct group id and instance id are what keep this process off the
+      # shared kernels' partitions. The consumer group name embeds
+      # KAFKA_INSTANCE_ID (`...__i.<instance>...`), so the eight contracts get
+      # their own groups here rather than resuming the stranded
+      # `__i.runtime-main` ones the profile pin orphaned.
+      ONEX_GROUP_ID: ${ONEX_TENANT_PROJECTION_GROUP_ID:-onex-runtime-tenant-projection}
+      KAFKA_INSTANCE_ID: tenant-projection-writer
+      # OMN-9060: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly
+      # from env; without it the handler throws KeyError during wiring.
+      POSTGRES_HOST: postgres
+    stop_grace_period: 90s
+    volumes:
+      - tenant_projection_logs:/app/logs
+      - tenant_projection_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    # Sized as a strict subset of main's work: the same kernel over a manifest
+    # filtered to eight contracts. Matches the onex-dev Deployment's measured
+    # request rather than being guessed upward.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1024M
+        reservations:
+          cpus: '0.1'
+          memory: 256M
+    labels:
+      - "com.omninode.service=tenant-projection-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.ticket=OMN-18114"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
+  # ==========================================================================
   # Agent Actions Consumer - Observability (Runtime Profile)
   # ==========================================================================
   # Consumes agent action events from Kafka and persists to PostgreSQL.
@@ -1729,6 +1835,13 @@ volumes:
     name: omninode-effects-data
   worker_logs:
     name: omninode-worker-logs
+  # OMN-18114: the TENANT-domain projection carrier's own log/data volumes.
+  # Named, not shared with the shared kernels: two processes writing one
+  # /app/data state root is how a lane gets a state dir it cannot attribute.
+  tenant_projection_logs:
+    name: omnimarket-tenant-projection-logs
+  tenant_projection_data:
+    name: omnimarket-tenant-projection-data
   agent_actions_logs:
     name: omninode-agent-actions-logs
   skill_lifecycle_logs:

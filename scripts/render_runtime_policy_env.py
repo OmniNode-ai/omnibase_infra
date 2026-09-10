@@ -48,6 +48,11 @@ _PROCESS_ENV_PREFIX: dict[RuntimeProcessName, str] = {
     "main": "MAIN",
     "effects": "EFFECTS",
     "worker": "WORKER",
+    # OMN-18114: the lab-lane TENANT-domain projection carrier. Optional per
+    # lane, so only the lanes that declare it emit `*_RUNTIME_TENANT_PROJECTION_*`
+    # -- the base compose resolves the DEV_ spelling and the stability overlay
+    # the STABILITY_TEST_ one, and no other lane starts the service at all.
+    "tenant-projection": "TENANT_PROJECTION",
 }
 
 
