@@ -135,6 +135,12 @@ class EnumChainCanaryVerdict(StrEnum):
     # evidence about link 5. Red for the same reason link 2's is: link 5 is
     # one of the five OMN-16025 chain links, not a supplementary check.
     LEDGER_REPLAY_NOT_CONFIGURED = "ledger_replay_not_configured"
+    # The ledger leg COULD have run and this node declined to run it: a
+    # connection string arrived on the command line. Distinct from
+    # UNREADABLE on purpose — unreadable sends you to the database, refused
+    # sends you to how the canary was wired (OMN-16964, mirroring
+    # PROJECTION_READBACK_REFUSED above).
+    LEDGER_REPLAY_REFUSED = "ledger_replay_refused"
     # ONEX_CHAIN_CANARY_DISABLED was set. Zero I/O was performed.
     SKIPPED_DISABLED = "skipped_disabled"
 
