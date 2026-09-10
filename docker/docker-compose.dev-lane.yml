@@ -281,6 +281,41 @@ x-dev-lane-broker-auth-env: &dev_lane_broker_auth_env
   KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
   KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane authenticates to its own broker as the synthetic SCRAM principal provisioned by redpanda-scram-user (OMN-18012); resolved from the operator env file, never inlined here}
   KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane authenticates to its own broker as the synthetic SCRAM principal provisioned by redpanda-scram-user (OMN-18012); resolved from the operator env file, never inlined here}
+# ---------------------------------------------------------------------------
+# OMN-15504: the consumer poll deadline this lane runs its handlers under.
+# ---------------------------------------------------------------------------
+# aiokafka evicts a consumer whose handler has not returned to the poll loop
+# within max_poll_interval_ms. The eviction is not the visible failure: the
+# handler finishes a moment later, its OffsetCommit is refused with
+# UnknownMemberIdError, the committed offset never advances, and the same
+# records are redelivered on the next rejoin -- forever. It does not self-heal,
+# and a container restart does not clear it, because the committed offset lives
+# in the broker rather than in the container.
+#
+# This lane was the ONLY lane running the 300000 ms library default. judge
+# (docker-compose.judge.yml:177), stability-test
+# (docker-compose.stability-test.yml:213,298,393) and lakshman
+# (docker-compose.lakshman.yml:228) have all carried 1800000 for some time; the
+# dev lane was simply never brought along. On 2026-09-10 that gap took the
+# delegation chain down: node_delegate_skill_orchestrator's worst-case handler
+# duration is its contract's wait_timeout_seconds of 300, which landed on the
+# 300 s eviction deadline exactly, and the group livelocked from 11:56:43Z
+# through four identical ~300 s join-then-evict cycles.
+#
+# This is the SECOND of the two halves and deliberately not the first. The
+# handler now bounds itself (omnimarket, node_delegate_skill_orchestrator
+# handler_execution_budget) so it holds on any lane including one on the
+# library default. Raising the deadline here restores the MARGIN between the
+# two, so a handler that is merely slow degrades into a late terminal instead
+# of a permanent livelock.
+#
+# Scoped to this overlay, not to the shared base (docker-compose.infra.yml
+# x-runtime-env), because prod overlays that same base: setting it there would
+# change the prod lane's consumer behaviour, which is not this lane's to
+# change. Applied to the three services that host auto-wired consumers, which
+# is the same placement stability-test uses.
+x-dev-lane-consumer-poll-env: &dev_lane_consumer_poll_env
+  KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
 services:
   # ===========================================================================
   # (7) DEV-LANE BROKER PRINCIPAL -- phase A of OMN-18012
@@ -612,7 +647,7 @@ services:
   #   docker/docker-compose.stability-test.yml (OMN-15217).
   omninode-runtime:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
     healthcheck:
       test:
         - CMD
@@ -630,7 +665,7 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   runtime-effects:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
     healthcheck:
       test:
         - CMD
@@ -651,7 +686,7 @@ services:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   runtime-worker:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
     # Base runtime-worker inherits interval 30s / timeout 10s / retries 5 but
     # start_period 1200s, NOT 1800s. Restated rather than copied from the two
     # services above so the shorter window is a visible decision.
