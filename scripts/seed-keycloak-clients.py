@@ -368,6 +368,8 @@ def _ensure_client_scope_mappings(
         f"/scope-mappings/clients/{realm_mgmt_id}"
     )
     status, existing = _request("GET", current_url, token=token)
+    if status != 200:
+        _die(f"Failed to fetch client scope mappings: HTTP {status}")
     existing_names = {r["name"] for r in (existing or [])}
 
     changed = []

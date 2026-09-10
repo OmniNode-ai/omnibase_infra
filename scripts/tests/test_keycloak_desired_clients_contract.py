@@ -320,9 +320,7 @@ def test_role_bearing_service_clients_have_matching_scope_mappings() -> None:
         if not realm_roles:
             continue
         scope_mappings = client.get("clientScopeMappings", [])
-        realm_role_names = {r.split(":", 1)[-1] for r in realm_roles}
-        scope_mapping_names = {r.split(":", 1)[-1] for r in scope_mappings}
-        missing = realm_role_names - scope_mapping_names
+        missing = set(realm_roles) - set(scope_mappings)
         assert not missing, (
             f"Client '{client['clientId']}' has realmRoles {sorted(missing)} not "
             f"covered by clientScopeMappings -- those roles will be dropped from "
