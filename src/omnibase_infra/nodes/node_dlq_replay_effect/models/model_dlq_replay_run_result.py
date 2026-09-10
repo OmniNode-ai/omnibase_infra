@@ -26,7 +26,21 @@ class ModelDlqReplayRunResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    dlq_topic: str = Field(..., description="DLQ source topic that was drained.")
+    dlq_topic: str = Field(
+        ...,
+        description=(
+            "DLQ source topic the run STARTED on. The start rotates each run "
+            "(OMN-18119); the full visit order is topics_drained."
+        ),
+    )
+    topics_drained: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Every declared DLQ topic this run visited, in visit order. "
+            "OMN-18119: a run drains one consumer per declared subscribe "
+            "topic, so the counts below span more than one topic."
+        ),
+    )
     total_processed: int = Field(..., ge=0, description="Messages consumed this run.")
     completed: int = Field(..., ge=0, description="Successfully replayed.")
     quarantined: int = Field(

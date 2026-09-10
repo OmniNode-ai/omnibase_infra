@@ -391,7 +391,7 @@ async def cmd_replay(args: argparse.Namespace) -> int:
                 tracking = None
 
         handler = HandlerDlqReplay(
-            consumer=consumer,
+            consumers={engine_config.dlq_topic: consumer},
             producer=producer,
             quarantine_producer=quarantine_producer,
             tracking=tracking,

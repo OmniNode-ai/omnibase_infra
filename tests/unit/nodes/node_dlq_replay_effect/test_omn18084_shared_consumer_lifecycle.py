@@ -128,7 +128,7 @@ def _handler(
     quarantine: _ProducerDouble,
 ) -> HandlerDlqReplay:
     return HandlerDlqReplay(
-        consumer=consumer,
+        consumers={consumer.config.dlq_topic: consumer},
         producer=cast("DLQProducer", producer),
         quarantine_producer=cast("DLQQuarantineProducer", quarantine),
     )

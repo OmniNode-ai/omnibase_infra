@@ -245,7 +245,7 @@ def _handler(
     producer.config = cfg  # type: ignore[misc]
     quarantine = _FakeQuarantineProducer()
     handler = HandlerDlqReplay(
-        consumer=_FakeConsumer(cfg),  # type: ignore[arg-type]
+        consumers={cfg.dlq_topic: _FakeConsumer(cfg)},  # type: ignore[dict-item]
         producer=producer,
         quarantine_producer=quarantine,  # type: ignore[arg-type]
         tracking=None,
@@ -383,7 +383,7 @@ async def test_a_nested_record_is_replayed_once_to_the_real_topic_not_layer_by_l
         ),
     )
 
-    result = await handler._process_message(message)
+    result = await handler._process_message(message, handler._config)
 
     assert result.status == EnumReplayStatus.COMPLETED
     assert [topic for topic, _ in fake_kafka.sends] == [_OTHER_REAL_TOPIC], (
@@ -410,7 +410,7 @@ async def test_the_live_nested_population_is_quarantined_and_never_republished()
         original_value=_nest(layers=7, innermost_topic=_REAL_TOPIC, innermost_value=""),
     )
 
-    result = await handler._process_message(message)
+    result = await handler._process_message(message, handler._config)
 
     assert result.status == EnumReplayStatus.QUARANTINED
     assert fake_kafka.sends == [], "zero writes back onto any dead-letter topic"
@@ -447,7 +447,7 @@ async def test_eligibility_is_decided_on_the_innermost_record_not_the_envelope()
         error_type="HandlerDispatchFailureError",
     )
 
-    result = await handler._process_message(message)
+    result = await handler._process_message(message, handler._config)
 
     assert result.status == EnumReplayStatus.QUARANTINED
     assert fake_kafka.sends == []
@@ -466,7 +466,7 @@ async def test_a_record_whose_nest_cannot_be_read_is_quarantined_not_replayed() 
         original_value="this is not a dead-letter envelope at all",
     )
 
-    result = await handler._process_message(message)
+    result = await handler._process_message(message, handler._config)
 
     assert result.status == EnumReplayStatus.QUARANTINED
     assert fake_kafka.sends == []
@@ -543,7 +543,7 @@ async def test_the_ordinary_replay_path_still_replays_once_to_the_original_topic
         original_topic=_REAL_TOPIC, original_value=_replayable_body()
     )
 
-    result = await handler._process_message(message)
+    result = await handler._process_message(message, handler._config)
 
     assert result.status == EnumReplayStatus.COMPLETED
     assert [topic for topic, _ in fake_kafka.sends] == [_REAL_TOPIC]
@@ -559,7 +559,7 @@ async def test_an_ordinary_ineligible_record_is_quarantined_with_an_unprefixed_r
     handler, _, quarantine = _handler()
     message = _dlq_message(original_topic=_REAL_TOPIC, original_value="", retry_count=0)
 
-    result = await handler._process_message(message)
+    result = await handler._process_message(message, handler._config)
 
     assert result.status == EnumReplayStatus.QUARANTINED
     _, reason = quarantine.quarantined[0]

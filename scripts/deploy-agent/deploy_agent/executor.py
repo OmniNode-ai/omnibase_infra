@@ -40,6 +40,10 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
+from deploy_agent.ref_fence import (
+    ModelRefLineageFacts,
+    assert_ref_not_stale_branch,
+)
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
@@ -871,6 +875,36 @@ def runtime_image_build_budget(
     )
 
 
+def preflight_required_compose_env_script() -> str:
+    """Path to the stdlib-only required-compose-env preflight in the deploy source.
+
+    A named seam rather than an inline f-string so a test can point it at a
+    checkout that has the script, or at one that does not, without reaching into
+    ``REPO_DIR`` -- the same visible path repoint the compose-up and image-build
+    budget fixtures already take (OMN-18057, OMN-18072).
+    """
+    return f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+
+
+class PreflightScriptUnavailableError(RuntimeError):
+    """Raised when the required-compose-env preflight could not be executed.
+
+    OMN-18123. Distinct from ``REQUIRED_COMPOSE_ENV_MISSING``, which means the
+    preflight RAN and found unset variables. This one means it never ran, so
+    nothing is known about the compose environment either way.
+
+    Every dev-lane rebuild between 2026-09-10T00:49:01Z and 03:31:59Z failed
+    under the wrong class: the deploy-source clone had been reset onto a commit
+    predating ``scripts/preflight_required_compose_env.py``, the interpreter
+    could not open the file, and the refusal announced a compose-environment
+    problem that did not exist. The real cause survived only as a trailing
+    CPython message inside a differently-named error.
+
+    Both classes refuse the deploy. The refusal posture OMN-17530 established --
+    no soft-fail, no "continue if the script is missing" -- is unchanged.
+    """
+
+
 class DeployExecutor:
     def __init__(self) -> None:
         # OMN-18057: services a phase left in a non-running state, and whether
@@ -1233,6 +1267,14 @@ class DeployExecutor:
             if result.returncode != 0:
                 raise RuntimeError(f"Git fetch failed: {result.stderr}")
 
+        # OMN-18122: refuse a branch alias that would move the clone BACKWARDS
+        # before anything touches the tree. The fetch above is what makes the
+        # comparison meaningful -- both refs are now current -- and the reset
+        # below is the mutation being fenced.
+        assert_ref_not_stale_branch(
+            self._ref_lineage_facts(git_ref, timeout=timeout),
+        )
+
         # Reset to ref
         result = _run(
             ["git", "-C", REPO_DIR, "reset", "--hard", git_ref],
@@ -1250,6 +1292,71 @@ class DeployExecutor:
 
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
+
+    def _ref_lineage_facts(self, git_ref: str, *, timeout: int) -> ModelRefLineageFacts:
+        """Ask git where ``git_ref`` sits relative to this lane's tracking branch.
+
+        Gathers the facts :func:`assert_ref_not_stale_branch` decides on. Kept
+        separate from that decision so the rule itself is a pure function with
+        no repository on disk (OMN-18122).
+
+        ``git rev-parse --symbolic-full-name`` is what distinguishes a branch
+        alias from a commit SHA: it prints a full ref name for a branch and
+        nothing at all for a SHA. That is a git-native answer rather than a
+        regex over the string, so a tag, a ``HEAD``, and an abbreviated SHA are
+        all classified by what they actually resolve to.
+        """
+        tracking_ref = load_tracking_remote_ref_from_env()
+
+        symbolic = _run(
+            ["git", "-C", REPO_DIR, "rev-parse", "--symbolic-full-name", git_ref],
+            timeout=timeout,
+        )
+        is_branch_reference = bool(symbolic.stdout.strip())
+
+        behind = 0
+        ahead = 0
+        if is_branch_reference and git_ref != tracking_ref:
+            counts = _run(
+                [
+                    "git",
+                    "-C",
+                    REPO_DIR,
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    f"{tracking_ref}...{git_ref}",
+                ],
+                timeout=timeout,
+            )
+            # Left column: commits on the tracking ref only (the requested ref
+            # is BEHIND by these). Right column: commits on the requested ref
+            # only (it is AHEAD by these).
+            fields = counts.stdout.split()
+            if counts.returncode == 0 and len(fields) == 2:
+                behind, ahead = int(fields[0]), int(fields[1])
+            else:
+                # A comparison that could not be made is not evidence that the
+                # ref is fine. Refusing here would block every deploy on a
+                # transient git failure, so the fence is skipped and the reason
+                # is logged loudly rather than swallowed.
+                logger.warning(
+                    "OMN-18122 ref fence could not compare %s against %s "
+                    "(rc=%s, stdout=%r); the fence did NOT run for this deploy",
+                    git_ref,
+                    tracking_ref,
+                    counts.returncode,
+                    counts.stdout.strip(),
+                )
+                is_branch_reference = False
+
+        return ModelRefLineageFacts(
+            requested_ref=git_ref,
+            tracking_ref=tracking_ref,
+            is_branch_reference=is_branch_reference,
+            commits_ahead_of_tracking=ahead,
+            commits_behind_tracking=behind,
+        )
 
     def _preflight_required_compose_env(
         self,
@@ -1273,7 +1380,24 @@ class DeployExecutor:
         under the interpreter running this agent, so a missing project venv
         cannot be the reason the list goes unseen.
         """
-        script = f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+        script = preflight_required_compose_env_script()
+        # OMN-18123: a script that could not be RUN is not a script that RAN and
+        # found unset variables. Both refuse the deploy -- there is still no
+        # soft-fail branch -- but they are different facts and the caller is told
+        # which one happened. Checked here rather than inferred from the
+        # interpreter's stderr, because that text is a CPython message a reader
+        # has to know to look past the error class for, and it is what hid the
+        # real cause (a deploy clone reset onto a commit predating this script)
+        # behind REQUIRED_COMPOSE_ENV_MISSING for three hours.
+        if not Path(script).is_file():
+            raise PreflightScriptUnavailableError(
+                f"PREFLIGHT_SCRIPT_UNAVAILABLE for lane {lane.value} -- the "
+                f"required-compose-env preflight could not be run: {script} is "
+                f"not a file. The deploy source directory is {REPO_DIR}; a clone "
+                "checked out at a commit that predates this script produces "
+                "exactly this. Compose validation was not attempted, and this "
+                "says nothing about whether the compose environment is complete."
+            )
         cmd = [
             sys.executable,
             script,

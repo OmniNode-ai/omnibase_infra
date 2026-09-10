@@ -70,6 +70,47 @@
 # or the periodic tick that calls this script after a successful ff-only pull).
 #
 # ============================================================================
+# ...AND WHY THE VERDICT STILL HAS TO MENTION origin/dev (OMN-17295)
+# ============================================================================
+# Pinning to the clone is right. Reporting only that comparison is not. A clone
+# eleven commits behind origin/dev, with a venv installed exactly at its HEAD,
+# produced this line unchanged:
+#
+#     [reconcile] verdict: IN_SYNC (omnimarket 87afb9c33215)
+#
+# Every word of it is true about the layer this script owns and false about the
+# workspace the reader is asking about -- and the SessionStart hook advertises
+# this exact command as the way to "settle it now" when no tick has run. That is
+# the OMN-17295 defect class in the ticket's own words: a probe that silently
+# measures something narrower than it names does not fail loudly, it produces a
+# confident wrong answer. OMN-17295 AC5 is "local venv -> origin/dev drift is
+# detected on this Mac, not just venv -> clone".
+#
+# So the verdict now carries a THIRD leg: for every canonical clone named by
+# sibling_clone_manifest.sh, HEAD against origin/<branch>. Two properties of it
+# are deliberate and are asserted by
+# tests/scripts/test_reconcile_clone_origin_drift_omn17295.py:
+#
+#   1. It NEVER fetches. `--check` exempts itself from the OMN-17366 ownership
+#      plan on the grounds that a read-only probe writes nothing -- and a fetch
+#      writes, depositing objects, refs and reflogs. On the `.201` root cron
+#      that is exactly how 1118 root-owned paths ended up inside operator-owned
+#      clones. The target is read AS LAST FETCHED and the report says so;
+#      reconcile-host.sh is the actor that fetches, under an ownership plan.
+#   2. It NEVER advances a clone. There is exactly one clone reconciler
+#      (scripts/runtime_build/reconcile_deploy_clones.sh, OMN-17291) and one
+#      venv reconciler (this file), composed by reconcile-host.sh. A
+#      fast-forward added here would be the third implementation that
+#      composition exists to prevent, and AC5 says to coordinate with OMN-17291
+#      rather than duplicate its reconciler.
+#
+# Detection is therefore verdict-bearing in `--check` and report-only in the
+# repair path: the repair path's exit code answers for the surfaces this script
+# actually writes, and a clone it is forbidden to touch is not one of them.
+# Convergence is preserved because the command the message names is
+# reconcile-host.sh, not this script's own repair mode.
+#
+# ============================================================================
 # INTERIM BY DESIGN -- the node-based successor
 # ============================================================================
 # movement-proof-delegated-to: scripts/reconcile-host.sh
@@ -108,6 +149,7 @@
 # ----------------------------------------------------------------------------
 # Usage:
 #   reconcile-workspace-venvs.sh [--check] [--verbose] [--omni-home PATH]
+#                                [--branch NAME]
 #
 #     --check       Report the verdict and mutate NOTHING. This is the mode the
 #                   SessionStart line and any read-only probe must use.
@@ -116,6 +158,9 @@
 #                   argument exists so an in-process caller (the CLI drift
 #                   guard) can hand the root it already resolved without
 #                   rebuilding an environment for the subprocess.
+#     --branch      Branch the canonical clones are expected to track
+#                   (default: dev). Only the clone->origin/<branch> observation
+#                   reads it; it selects no behaviour and moves no ref.
 #
 # Env:
 #   OMNI_HOME                        (required unless --omni-home is passed --
@@ -130,7 +175,11 @@
 #
 # Exit codes:
 #   0  IN_SYNC (--check) / reconciled successfully (default)
-#   1  DRIFT detected (--check only -- never returned by the repair path)
+#   1  DRIFT detected (--check only -- never returned by the repair path).
+#      Two classes, and the message says which: a venv layer that does not
+#      match its target, which THIS script repairs; or a canonical clone behind
+#      origin/<branch> (OMN-17295), which reconcile-host.sh repairs and this
+#      script only reports.
 #   2  reconcile FAILED; the message names the exact command to run by hand
 #   3  INDETERMINATE configuration (no OMNI_HOME, no canonical clone, no uv,
 #      or a surface this process must not write)
@@ -152,6 +201,7 @@ readonly EXIT_INDETERMINATE=3
 MODE="repair"
 VERBOSE=0
 OMNI_HOME_ARG=""
+BRANCH="dev"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) MODE="check" ;;
@@ -165,7 +215,16 @@ while [[ $# -gt 0 ]]; do
       OMNI_HOME_ARG="$1"
       ;;
     --omni-home=*) OMNI_HOME_ARG="${1#--omni-home=}" ;;
-    -h|--help) sed -n '1,131p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
+    --branch)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "reconcile-workspace-venvs.sh: --branch requires a name" >&2
+        exit "$EXIT_INDETERMINATE"
+      fi
+      BRANCH="$1"
+      ;;
+    --branch=*) BRANCH="${1#--branch=}" ;;
+    -h|--help) sed -n '1,191p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
     *) echo "reconcile-workspace-venvs.sh: unknown argument: $1" >&2; exit "$EXIT_INDETERMINATE" ;;
   esac
   shift
@@ -261,6 +320,21 @@ if [[ ! -f "$_PRIVILEGE_LIB" ]]; then
 fi
 # shellcheck source=./reconcile_privilege_lib.sh
 source "$_PRIVILEGE_LIB"
+
+# The clone set is read from the SAME manifest reconcile-host.sh and
+# ensure_runner_clones.sh read (OMN-15137). A hand-maintained list here would be
+# the fourth copy, and the copy nobody updates is the one that silently stops
+# covering a repo.
+_CLONE_MANIFEST_SH="$_VENV_SCRIPT_DIR/runtime_build/sibling_clone_manifest.sh"
+if [[ ! -f "$_CLONE_MANIFEST_SH" ]]; then
+  say "INDETERMINATE: clone manifest missing at $_CLONE_MANIFEST_SH"
+  say "  Without it there is no way to know which clones this workspace is"
+  say "  supposed to carry, and guessing the set would report a clean bill of"
+  say "  health for whichever repo the guess left out."
+  exit "$EXIT_INDETERMINATE"
+fi
+# shellcheck source=./runtime_build/sibling_clone_manifest.sh
+source "$_CLONE_MANIFEST_SH"
 
 # Aliases for the names the rest of this script and its tests already use. The
 # library owns the mechanism; these two are this script's view of it.
@@ -390,6 +464,77 @@ market_head() {
   git -C "$MARKET_CLONE" rev-parse HEAD 2>/dev/null || true
 }
 
+# The clone -> origin/<branch> leg (OMN-17295). Prints one row per present
+# canonical clone and returns non-zero when at least one of them cannot be
+# asserted current against the branch it tracks.
+#
+# Read-only in the strongest sense available: `rev-parse` and `rev-list`, never
+# `fetch` and never `ls-remote`. See the header -- a fetch would void this
+# script's OMN-17366 check-mode ownership exemption, and the network call would
+# make every test here non-hermetic. The consequence is stated in the output
+# rather than hidden: the target is whatever the last fetch left, so this leg
+# can only ever prove staleness it can already see. reconcile-host.sh fetches
+# first and is the surface that closes that gap.
+clone_branch_report() {
+  local repo clone head target behind stale=0 printed=0
+
+  for repo in "${SIBLING_CLONE_MANIFEST[@]}"; do
+    clone="$OMNI_HOME/$repo"
+    # `-e`, not `-d`: a worktree's `.git` is a FILE. A `-d` test here would skip
+    # every worktree silently, which is the shape of gap this leg exists to end.
+    [[ -e "$clone/.git" ]] || continue
+
+    head="$(git -C "$clone" rev-parse HEAD 2>/dev/null || true)"
+    [[ -n "$head" ]] || continue
+
+    # No remote at all: there is no branch this clone tracks, so there is
+    # nothing for it to be stale against. Manufacturing a failure here would
+    # fire on every workspace where the question is not even askable.
+    #
+    # `config --get`, not `remote get-url`: the two answer the same question,
+    # but `git remote` is a WRITE verb to check_reconciler_privilege.py's
+    # matcher (`git remote add`/`set-url` mutate config) and it matches on the
+    # verb, not the subcommand. Narrowing that matcher to let `get-url` through
+    # would weaken a gate to admit a read -- and `config --get` is already named
+    # in its comments as read-only plumbing it deliberately does not guard. Use
+    # the primitive the gate blesses rather than teaching the gate an exception.
+    git -C "$clone" config --get remote.origin.url >/dev/null 2>&1 || continue
+
+    if [[ "$printed" -eq 0 ]]; then
+      say "clone surface vs origin/$BRANCH (as last fetched; this script does not fetch):"
+      printed=1
+    fi
+
+    target="$(git -C "$clone" rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" 2>/dev/null || true)"
+    if [[ -z "$target" ]]; then
+      # An unknown target renders as unproven, never as fresh -- the same rule
+      # the SessionStart hook applies to a verdict whose age it cannot read.
+      say "  $repo: HEAD ${head:0:12}  origin/$BRANCH UNFETCHED (no tracking ref; never fetched here)"
+      stale=1
+      continue
+    fi
+
+    behind="$(git -C "$clone" rev-list --count "HEAD..$target" 2>/dev/null || true)"
+    [[ "$behind" =~ ^[0-9]+$ ]] || behind=0
+    say "  $repo: HEAD ${head:0:12}  origin/$BRANCH ${target:0:12}  behind by $behind commit(s)"
+    [[ "$behind" -eq 0 ]] || stale=1
+  done
+
+  [[ "$stale" -eq 0 ]]
+}
+
+# The one message both modes share, so the two can never describe the same
+# state differently.
+say_clone_stale_remedy() {
+  say "  The venv layers are reconciled to the CLONE, so a clone behind"
+  say "  origin/$BRANCH means the installed code is behind what is merged --"
+  say "  even when every venv layer matches its target exactly."
+  say "  This script deliberately never advances a clone: there is exactly one"
+  say "  clone reconciler (scripts/runtime_build/reconcile_deploy_clones.sh)."
+  say "  Fetch, fast-forward and prove all three surfaces with:"
+  say "    bash $INFRA_DIR/scripts/reconcile-host.sh --omni-home $OMNI_HOME --branch $BRANCH"
+}
+
 # Whether the lock-governed layer is satisfied. `--inexact` is what makes this
 # answerable at all for the CLI venv: without it uv reports every provider
 # package as "extraneous" and the venv can never read as conformant. With it,
@@ -463,6 +608,15 @@ run_check() {
   local drift=0
   local head installed
 
+  # Reported FIRST, because it is the leg that decides what the other two mean:
+  # a venv proven equal to a clone that is itself behind dev is proven equal to
+  # the wrong thing (OMN-17295).
+  if ! clone_branch_report; then
+    say "DRIFT: a canonical clone is not at origin/$BRANCH"
+    say_clone_stale_remedy
+    drift=1
+  fi
+
   head="$(market_head)"
   if [[ -z "$head" ]]; then
     say "INDETERMINATE: could not read HEAD of $MARKET_CLONE"
@@ -519,6 +673,18 @@ fail() {
 
 run_repair() {
   local head installed need_lock=0 need_provider=0
+
+  # Report-only on this path. The exit code below answers for the surfaces this
+  # script WRITES, and a clone it is forbidden to touch is not one of them --
+  # so a stale clone must not turn a successful venv reconcile into a failure
+  # for pull-all.sh or the CLI drift guard, both of which read that status.
+  # Saying nothing, though, is how the venv gets pinned to a stale commit with
+  # a clean "reconciled" line over the top of it.
+  if ! clone_branch_report; then
+    say "NOTE: a canonical clone is not at origin/$BRANCH, so the pin below"
+    say "  tracks the clone, not what is merged."
+    say_clone_stale_remedy
+  fi
 
   head="$(market_head)"
   if [[ -z "$head" ]]; then
