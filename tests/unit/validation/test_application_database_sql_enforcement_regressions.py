@@ -576,11 +576,18 @@ def test_intent_classification_events_is_enumerated_in_the_shared_allowlist() ->
     )
 
 
+def test_ledger_chain_is_enumerated_in_the_shared_allowlist() -> None:
+    """OMN-16964: ledger_chain is internal but physically public until OMN-15359."""
+    assert "ledger_chain" in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+
+
 @pytest.mark.parametrize(
     "statement",
     [
         "ALTER TABLE intent_classification_events ADD COLUMN agent_source text;",
         "ALTER TABLE public.intent_classification_events ADD COLUMN agent_source text;",
+        "CREATE TABLE IF NOT EXISTS public.ledger_chain (correlation_id text);",
+        "COMMENT ON TABLE public.ledger_chain IS 'OMN-16964';",
     ],
 )
 def test_allowlisted_physically_public_table_passes_unqualified_or_public(

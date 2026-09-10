@@ -85,6 +85,9 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_chain_canary_effect.model_lane_ledger_readback import (
+    ModelLaneLedgerReadback,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.model_lane_projection_readback import (
     ModelLaneProjectionReadback,
 )
@@ -93,12 +96,17 @@ __all__ = [
     "DOCKER_DESKTOP_HOST_ALIASES",
     "INMEMORY_BROKER",
     "PROJECTION_READBACK_DSN_ENV_NAME_VAR",
+    "LEDGER_READBACK_DSN_ENV_NAME_VAR",
+    "LEDGER_READBACK_LANES",
     "PROJECTION_READBACK_LANES",
+    "ModelLaneLedgerReadback",
     "ModelLaneProjectionReadback",
     "ModelLaneTransport",
     "dsn_shaped_argv_flags",
     "host_aliases_in",
     "lane_transport_env",
+    "ledger_readback_env",
+    "load_lane_ledger_readback",
     "load_lane_projection_readback",
     "load_lane_transport",
     "looks_like_a_dsn",
@@ -294,6 +302,19 @@ PROJECTION_READBACK_LANES: frozenset[str] = frozenset({"dev"})
 PROJECTION_READBACK_DSN_ENV_NAME_VAR = "CHAIN_CANARY_PROJECTION_DSN_ENV"
 
 _PROJECTION_READBACK_KEY = "projection_readback"
+
+#: The lanes that may declare a LEDGER readback. Same set, same reasoning, and
+#: a SEPARATE constant on purpose: widening one leg's lane scope must be a
+#: deliberate edit to that leg, never a side effect of widening the other's
+#: (OMN-16964).
+LEDGER_READBACK_LANES: frozenset[str] = frozenset({"dev"})
+
+#: Env var the workflow exports the resolved LEDGER name under. Distinct from
+#: the projection one so that resolving either leg cannot overwrite the other's
+#: declaration and silently point both links at one relation.
+LEDGER_READBACK_DSN_ENV_NAME_VAR = "CHAIN_CANARY_LEDGER_DSN_ENV"
+
+_LEDGER_READBACK_KEY = "ledger_readback"
 _DSN_ENV_KEY = "dsn_env"
 
 # A POSIX-shell environment variable NAME. Narrow on purpose: nothing matching
@@ -394,25 +415,41 @@ def dsn_shaped_argv_flags(argv: Sequence[str]) -> tuple[str, ...]:
     return tuple(offenders)
 
 
-def load_lane_projection_readback(
-    overlay_path: Path, lane: str
-) -> ModelLaneProjectionReadback:
-    """Read ``lane``'s declared projection-readback DSN NAME out of the overlay.
+def _load_lane_dsn_declaration(
+    overlay_path: Path,
+    lane: str,
+    *,
+    block_key: str,
+    noun: str,
+    allowed_lanes: frozenset[str],
+    link_note: str,
+) -> tuple[str, str]:
+    """Read one lane's declared DSN NAME out of the overlay, or raise.
 
-    Every failure raises. There is no default and no fallback to the bus
-    terminal: OMN-14843 measured 26 of 38 correlations stranded mid-FSM while
-    the topic layer was healthy at the same moment, so a green terminal is not
-    evidence about the projection layer and must never stand in for one.
+    Shared by the projection (link 2) and ledger (link 5) legs. Factored
+    rather than duplicated because every refusal below is a case where a
+    plausible misconfiguration would otherwise yield a canary that reads the
+    wrong thing and reports it clean — and a copy-pasted second implementation
+    is exactly how one of the two quietly loses a refusal the other keeps.
+
+    The BLOCK KEY and the LANE SET are parameters, not constants, so widening
+    one leg's scope is a deliberate edit to that leg's call site. ``noun`` is
+    the human phrasing each leg's refusals already used before this function
+    existed, kept per-leg so the refactor changes no message a caller or a
+    test has ever read.
+
+    Every failure raises. There is no default and no fallback: a link with no
+    instrument pointed at it makes no claim.
     """
     if not lane.strip():
-        message = "a lane id is required to resolve a declared projection readback"
+        message = f"a lane id is required to resolve a declared {noun}"
         raise ValueError(message)
     lane_key = lane.strip()
 
-    if lane_key not in PROJECTION_READBACK_LANES:
+    if lane_key not in allowed_lanes:
         message = (
-            f"lane {lane_key!r} may not declare a projection readback; only "
-            f"{sorted(PROJECTION_READBACK_LANES)} may. The chain canary "
+            f"lane {lane_key!r} may not declare a {noun}; only "
+            f"{sorted(allowed_lanes)} may. The chain canary "
             "publishes a live delegation and then reads a database, and both "
             "halves are dev-lane-only by the workflow's own declared scope. "
             "stability-test, judge and prod are read-only surfaces this probe "
@@ -447,20 +484,19 @@ def load_lane_projection_readback(
         message = f"lane {lane_key!r} in {overlay_path} is not a mapping"
         raise ValueError(message)
 
-    block = declaration.get(_PROJECTION_READBACK_KEY)
+    block = declaration.get(block_key)
     if block is None:
         message = (
             f"lane {lane_key!r} in {overlay_path} declares no "
-            f"{_PROJECTION_READBACK_KEY!r} block, so there is no DSN reference "
-            "for OMN-16025 link 2. Declare the NAME the DSN is injected under "
+            f"{block_key!r} block, so there is no DSN reference "
+            f"for {link_note}. Declare the NAME the DSN is injected under "
             f"(a {_DSN_ENV_KEY!r} entry) — never the DSN itself."
         )
         raise ValueError(message)
     if not isinstance(block, dict):
         message = (
             f"lane {lane_key!r} in {overlay_path} declares "
-            f"{_PROJECTION_READBACK_KEY!r} as {type(block).__name__}, not a "
-            "mapping"
+            f"{block_key!r} as {type(block).__name__}, not a mapping"
         )
         raise ValueError(message)
 
@@ -468,7 +504,7 @@ def load_lane_projection_readback(
     if not dsn_env:
         message = (
             f"lane {lane_key!r} in {overlay_path} declares "
-            f"{_PROJECTION_READBACK_KEY!r} with no {_DSN_ENV_KEY!r} entry"
+            f"{block_key!r} with no {_DSN_ENV_KEY!r} entry"
         )
         raise ValueError(message)
 
@@ -494,7 +530,58 @@ def load_lane_projection_readback(
         )
         raise ValueError(message)
 
+    return lane_key, dsn_env
+
+
+def load_lane_projection_readback(
+    overlay_path: Path, lane: str
+) -> ModelLaneProjectionReadback:
+    """Read ``lane``'s declared projection-readback DSN NAME out of the overlay.
+
+    Every failure raises. There is no default and no fallback to the bus
+    terminal: OMN-14843 measured 26 of 38 correlations stranded mid-FSM while
+    the topic layer was healthy at the same moment, so a green terminal is not
+    evidence about the projection layer and must never stand in for one.
+    """
+    lane_key, dsn_env = _load_lane_dsn_declaration(
+        overlay_path,
+        lane,
+        block_key=_PROJECTION_READBACK_KEY,
+        noun="projection readback",
+        allowed_lanes=PROJECTION_READBACK_LANES,
+        link_note="OMN-16025 link 2",
+    )
     return ModelLaneProjectionReadback(lane=lane_key, dsn_env=dsn_env)
+
+
+def load_lane_ledger_readback(overlay_path: Path, lane: str) -> ModelLaneLedgerReadback:
+    """Read ``lane``'s declared ledger-readback DSN NAME out of the overlay.
+
+    The link-5 sibling of the loader above (OMN-16964). Every failure raises,
+    and none of them falls back to the projection or the bus terminal: link 5
+    asks whether the chain ASSEMBLED, REPLAYED and VERIFIED, and neither of
+    the other two legs is evidence about any of those three.
+    """
+    lane_key, dsn_env = _load_lane_dsn_declaration(
+        overlay_path,
+        lane,
+        block_key=_LEDGER_READBACK_KEY,
+        noun="ledger readback",
+        allowed_lanes=LEDGER_READBACK_LANES,
+        link_note="OMN-16025 link 5",
+    )
+    return ModelLaneLedgerReadback(lane=lane_key, dsn_env=dsn_env)
+
+
+def ledger_readback_env(declaration: ModelLaneLedgerReadback) -> dict[str, str]:
+    """The declared NAME as the one env var the workflow may export.
+
+    Exactly the non-secret half, the same asymmetry as its projection sibling:
+    this returns the NAME of the variable the DSN arrives in. The DSN itself is
+    injected by the job's secret block under that same name and is never read,
+    written or echoed by this module.
+    """
+    return {LEDGER_READBACK_DSN_ENV_NAME_VAR: declaration.dsn_env}
 
 
 def projection_readback_env(

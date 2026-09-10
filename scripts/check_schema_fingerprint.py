@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 # Repository root is two levels up from this script
@@ -42,7 +43,11 @@ _MIGRATIONS_DIR = _REPO_ROOT / "docker" / "migrations" / "forward"
 _ARTIFACT_PATH = _REPO_ROOT / "docker" / "migrations" / "schema_fingerprint.sha256"
 
 
-def compute_migration_fingerprint(migrations_dir: Path) -> tuple[str, int]:
+def compute_migration_fingerprint(
+    migrations_dir: Path,
+    *,
+    include: Callable[[Path], bool] | None = None,
+) -> tuple[str, int]:
     """Compute SHA-256 fingerprint from sorted forward migration files.
 
     Algorithm:
@@ -60,6 +65,13 @@ def compute_migration_fingerprint(migrations_dir: Path) -> tuple[str, int]:
 
     Args:
         migrations_dir: Path to the forward migrations directory.
+        include: Optional predicate selecting which files participate. The
+            default (None) fingerprints the whole stream, which is what the
+            committed artifact records. A predicate lets a caller make a
+            byte-identity statement about a SUBSET of the stream that stays
+            true as the stream grows -- the OMN-17923 retirement gate uses it
+            to assert that 001..103 are byte-unchanged without also asserting
+            that no migration may ever land again (OMN-16964).
 
     Returns:
         Tuple of (fingerprint_hex, file_count).
@@ -76,6 +88,8 @@ def compute_migration_fingerprint(migrations_dir: Path) -> tuple[str, int]:
         raise FileNotFoundError(f"Migrations path is not a directory: {migrations_dir}")
 
     sql_files = sorted(migrations_dir.glob("*.sql"))
+    if include is not None:
+        sql_files = [path for path in sql_files if include(path)]
 
     if not sql_files:
         # Empty migrations dir -- produce a deterministic empty hash

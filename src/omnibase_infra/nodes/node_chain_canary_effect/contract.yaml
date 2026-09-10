@@ -256,12 +256,15 @@ io_operations:
       - quarantine_topic
       - quarantine_scan_records
       - quarantine_timeout_seconds
-      # OMN-16964, link 5. An empty ledger_source makes NO claim about the
-      # chain and reports NOT_CONFIGURED — it never falls back to the bus
-      # terminal or the projection, because a link with no instrument pointed
-      # at it has no evidence. expected_ledger_hops is what "complete" is
-      # measured against, so a gap is never tolerated silently.
-      - ledger_source
+      # OMN-16964, link 5. A NAME, never a DSN: the value is injected into
+      # the job environment under this name and read there, so it never
+      # reaches argv, this node's serialised payload, or the event log. An
+      # empty ledger_source_env makes NO claim about the chain and reports
+      # NOT_CONFIGURED — it never falls back to the bus terminal or the
+      # projection, because a link with no instrument pointed at it has no
+      # evidence. expected_ledger_hops is what "complete" is measured
+      # against, so a gap is never tolerated silently.
+      - ledger_source_env
       - expected_ledger_hops
       - settle_seconds
     output_fields:

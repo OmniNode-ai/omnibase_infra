@@ -178,6 +178,12 @@ TypeProjectionReadback = Callable[
 # (environment variable name) -> environment variable value.
 TypeProjectionDsnLookup = Callable[[str], str]
 
+# Same shape as the projection lookup, kept as its own alias rather than
+# shared: the two legs resolve two independent lane declarations, and a single
+# alias would quietly suggest one variable serves both by design rather than
+# by this lane's current topology (OMN-16964).
+TypeLedgerDsnLookup = Callable[[str], str]
+
 # (source, correlation_id, timeout_s) -> (hops, replay_green, verdict, error)
 # hops is None when the ledger could not be read at all. The transport returns
 # raw facts rather than a verdict so the SKIP != PASS classification lives here
@@ -723,6 +729,10 @@ def _lookup_projection_dsn_env(name: str) -> str:
     return os.environ.get(name, "")  # ONEX_EXCLUDE
 
 
+def _lookup_ledger_dsn_env(name: str) -> str:
+    return os.environ.get(name, "")  # ONEX_EXCLUDE
+
+
 class HandlerChainCanary:
     """Fire one live delegation and report whether the chain carried it."""
 
@@ -734,6 +744,7 @@ class HandlerChainCanary:
         projection_readback: TypeProjectionReadback | None = None,
         projection_dsn_lookup: TypeProjectionDsnLookup | None = None,
         ledger_replay: TypeLedgerReplay | None = None,
+        ledger_dsn_lookup: TypeLedgerDsnLookup | None = None,
         kill_switch_disabled: bool | None = None,
     ) -> None:
         self._ingress: TypeIngressPost = ingress or _post_skill_via_httpx
@@ -751,6 +762,9 @@ class HandlerChainCanary:
         )
         self._ledger_replay: TypeLedgerReplay = (
             ledger_replay or _replay_ledger_chain_via_asyncpg
+        )
+        self._ledger_dsn_lookup: TypeLedgerDsnLookup = (
+            ledger_dsn_lookup or _lookup_ledger_dsn_env
         )
         # Read at construction, overridable for tests, re-read in handle()
         # so a zero-arg contract-driven construction cannot miss it.
@@ -1008,11 +1022,42 @@ class HandlerChainCanary:
         returned, so a chain that is short by a hop cannot look complete
         simply because every row present was well-formed.
         """
-        if not request.ledger_source.strip():
+        declared_name = request.ledger_source_env.strip()
+        if not declared_name:
             return EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED, ""
 
+        # A DSN on the command line is refused whatever flag carried it. The
+        # model validator already refuses one passed as this field's own
+        # value; this catches the DSN that arrived on some other flag, which
+        # is the same disclosure with a different spelling. Same refusal the
+        # projection leg makes, for the same reason (OMN-18060).
+        offending_flags = dsn_shaped_argv_flags(sys.argv)
+        if offending_flags:
+            return (
+                EnumLedgerReplayStatus.REFUSED,
+                (
+                    "a Postgres connection string was passed on the command "
+                    f"line ({', '.join(offending_flags)}). argv is readable "
+                    "from /proc by every process on this host and the "
+                    "dispatch step echoes what it ran into the run log. The "
+                    "DSN reaches this node through the environment, under the "
+                    "name the lane declares — never through a flag"
+                ),
+            )
+
+        source = self._ledger_dsn_lookup(declared_name)
+        if not source.strip():
+            return (
+                EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED,
+                (
+                    f"the lane declares its ledger DSN under {declared_name}, "
+                    "and that variable is unset or empty in this process. No "
+                    "claim is made about link 5"
+                ),
+            )
+
         hops, replay_green, verdict, error = await self._ledger_replay(
-            request.ledger_source,
+            source,
             probe_correlation_id,
             window_s,
         )
@@ -1372,6 +1417,15 @@ class HandlerChainCanary:
                     "as-PASS defect this ticket exists to end."
                 ),
             )
+        if ledger_status is EnumLedgerReplayStatus.REFUSED:
+            return (
+                EnumChainCanaryVerdict.LEDGER_REPLAY_REFUSED,
+                (
+                    "the ledger replay was refused rather than run: "
+                    f"{ledger_detail}. A refusal is not a pass, and it is not "
+                    "an error either — the store was never asked."
+                ),
+            )
         if ledger_status is EnumLedgerReplayStatus.ERROR:
             return (
                 EnumChainCanaryVerdict.LEDGER_REPLAY_UNREADABLE,
@@ -1545,6 +1599,12 @@ def _link_five(
             EnumChainLinkStatus.FAIL,
             "the tier-2 verifier returned SKIP — it was pointed at this run "
             "and checked nothing, which OMN-16025 counts as not proven",
+        )
+    if ledger_status is EnumLedgerReplayStatus.REFUSED:
+        return (
+            EnumChainLinkStatus.ERROR,
+            "the ledger replay was refused rather than run, so no claim is "
+            f"made about it: {ledger_detail}",
         )
     if ledger_status is EnumLedgerReplayStatus.ERROR:
         return (

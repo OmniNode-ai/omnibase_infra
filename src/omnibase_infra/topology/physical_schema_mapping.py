@@ -104,6 +104,7 @@ INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "gate_metrics",
         "generation_events",
         "intent_classification_events",
+        "ledger_chain",
         "llm_call_metrics",
         "llm_delegation_daily_projection",
         "llm_routing_decisions",

@@ -242,22 +242,46 @@ def test_stream_tops_out_at_103_until_the_reissue() -> None:
 def test_surviving_stream_is_byte_identical_to_the_pre_3190_stream() -> None:
     """The stream through 103 is byte-unchanged: the retirement removed ONLY 104.
 
-    ``compute_migration_fingerprint`` hashes every forward ``*.sql`` by name and
+    ``compute_migration_fingerprint`` hashes each forward ``*.sql`` by name and
     content, so equality with the value stamped at #3190's parent commit is a
-    byte-level statement about the whole surviving corpus, not just a count.
-    A new migration, or any edit to 001..103, changes this value and must land
-    as its own change with its own restamp -- never folded into a retirement.
+    byte-level statement about the surviving corpus, not just a count.
+
+    SCOPE (OMN-16964). This assertion is made over ordinals **at or below the
+    retired one**, not over the whole directory. The invariant OMN-17923 owns is
+    *"the retirement removed 104 and nothing in 001..103 changed"*, and that
+    statement stays true forever. Fingerprinting the whole directory instead
+    conflated it with a second, unintended claim -- *"no forward migration may
+    ever land again"* -- which this module's own docstring never asserted and
+    which the sibling test below deliberately allows for by bounding itself to
+    ``ordinal <= 104``.
+
+    That conflation was found by OMN-16964, the first new forward migration
+    since the retirement: adding ``105_create_ledger_chain.sql`` failed this
+    test for a reason that had nothing to do with the retirement it guards.
+    Narrowing the scope preserves the retirement proof exactly -- the same
+    algorithm, the same stamped digest, the same file count -- while letting the
+    stream grow above 104, which the record explicitly contemplates ("the
+    migration comes back as a NEW number").
+
+    A migration landing ABOVE 104 still restamps ``schema_fingerprint.sha256``;
+    the sibling test that checks the artifact against the on-disk stream is what
+    enforces that, and it is unscoped on purpose.
     """
-    fingerprint, count = compute_migration_fingerprint(FORWARD_DIR)
+    fingerprint, count = compute_migration_fingerprint(
+        FORWARD_DIR,
+        include=lambda path: (ordinal := _ordinal(path.name)) is not None
+        and ordinal <= 104,
+    )
     assert (fingerprint, count) == (
         PRE_3190_STREAM_SHA256,
         PRE_3190_STREAM_FILE_COUNT,
     ), (
-        f"the surviving forward stream fingerprints as {fingerprint} over {count} "
-        f"files; the stream before #3190 (parent {PRE_3190_PARENT_COMMIT[:9]}) "
-        f"was {PRE_3190_STREAM_SHA256} over {PRE_3190_STREAM_FILE_COUNT}. "
-        "Either the retirement removed more than 104, or something else in "
-        "001..103 changed and needs its own restamp."
+        f"the surviving forward stream at or below 104 fingerprints as "
+        f"{fingerprint} over {count} files; the stream before #3190 (parent "
+        f"{PRE_3190_PARENT_COMMIT[:9]}) was {PRE_3190_STREAM_SHA256} over "
+        f"{PRE_3190_STREAM_FILE_COUNT}. Either the retirement removed more "
+        "than 104, or something else in 001..103 changed and needs its own "
+        "restamp."
     )
 
 
