@@ -25,7 +25,13 @@ from deploy_agent.compose_budget import (
     derive_runtime_phase_budget,
     parse_compose_duration,
 )
-from deploy_agent.events import SCOPE_SERVICES, EnumRuntimeLane, Phase, Scope
+from deploy_agent.events import (
+    SCOPE_SERVICES,
+    EnumRuntimeLane,
+    Phase,
+    Scope,
+    services_for_scope,
+)
 from deploy_agent.executor import (
     RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
     RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
@@ -238,7 +244,10 @@ class TestComposeUpUsesTheDerivedCeiling:
         def _all_running(
             lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         ) -> dict[str, tuple[str, int | None]]:
-            return dict.fromkeys(SCOPE_SERVICES[Scope.RUNTIME], ("running", None))
+            return dict.fromkeys(
+                services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV),
+                ("running", None),
+            )
 
         monkeypatch.setattr(executor_mod, "_run", _fake_run)
         monkeypatch.setattr(executor_mod, "_compose_service_states", _all_running)
@@ -257,8 +266,12 @@ class TestComposeUpUsesTheDerivedCeiling:
             lane=EnumRuntimeLane.DEV,
         )
 
+        # OMN-18108: a DEV compose-up now also targets the dev-lane-only
+        # services, so the ceiling is derived over that wider set -- the same
+        # set the command itself passes.
         expected = _derive(
-            _LIVE_COMPOSE_FILES, SCOPE_SERVICES[Scope.RUNTIME]
+            _LIVE_COMPOSE_FILES,
+            services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV),
         ).timeout_seconds
         assert seen == [expected]
         assert seen != [300]
