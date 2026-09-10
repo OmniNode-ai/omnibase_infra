@@ -101,11 +101,17 @@
 -- repo's pattern gate, and renders them at the database boundary — typed in
 -- the domain, TEXT on the wire the reader already speaks.
 --
+-- EVERY RELATION REFERENCE IS SCHEMA-QUALIFIED. The application-database
+-- domain enforcement gate (OMN-15361, ci.yml "Enforce schema qualification in
+-- changed SQL") requires it of CHANGED SQL. Older files in this set are
+-- unqualified because the gate only ever inspects the diff; that is
+-- grandfathering, not a licence to add more.
+--
 -- Idempotent CREATE so warm dev/stability volumes reconcile cleanly, matching
 -- 090's own header.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS ledger_chain (
+CREATE TABLE IF NOT EXISTS public.ledger_chain (
     -- Consumer contract: the five columns node_chain_canary_effect reads.
     correlation_id      TEXT        NOT NULL,
     hop_index           INTEGER     NOT NULL,
@@ -137,18 +143,18 @@ CREATE TABLE IF NOT EXISTS ledger_chain (
 -- leading column already serves it. No second index is created — an unused
 -- index on a write-path table is cost with no reader.
 
-COMMENT ON TABLE ledger_chain IS
+COMMENT ON TABLE public.ledger_chain IS
     'OMN-16964: per-hop delegation chain with a re-derived replay result and '
     'an honest tier-2 verifier verdict. Read by node_chain_canary_effect for '
     'OMN-16025 link 5. verifier_verdict = skip is NOT a pass.';
 
-COMMENT ON COLUMN ledger_chain.replay_green IS
+COMMENT ON COLUMN public.ledger_chain.replay_green IS
     'Did this hop''s causal linkage RE-DERIVE from the recorded evidence? '
     'Recomputed from the preceding hop and compared — never a flag copied off '
     'the envelope. Covers linkage only; the inference hop is not deterministic '
     'and is not claimed to have been re-executed.';
 
-COMMENT ON COLUMN ledger_chain.verifier_verdict IS
+COMMENT ON COLUMN public.ledger_chain.verifier_verdict IS
     'Tier-2: does the observed hop match the DECLARED chain topology at this '
     'position? pass / fail / skip. skip means no declaration reached this hop, '
     'so no check ran — it is never counted as green (OMN-16025, OMN-16773).';
@@ -196,7 +202,7 @@ BEGIN
         GRANT USAGE ON SCHEMA public TO chain_canary_reader;
         GRANT SELECT (
             correlation_id, hop, hop_index, replay_green, verifier_verdict
-        ) ON ledger_chain TO chain_canary_reader;
+        ) ON public.ledger_chain TO chain_canary_reader;
         RAISE NOTICE
             'granted column-scoped SELECT on ledger_chain to '
             'chain_canary_reader as %', executing_role;
