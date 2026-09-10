@@ -552,7 +552,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # parent edited and nothing superseded -- it neither reads nor rewrites
     # tenant_id, so it is independent of the 0031->0037 conversion chain above
     # and does not participate in its supersession ledger.
-    assert len(result.declarations) == 175
+    #
+    # 175 -> 176 for OMN-18043's
+    # nodes/node_projection_consumer_flow/
+    # 0001_add_projection_cursor.sql, which adds the database-assigned,
+    # monotonic cursor required by the consumer-flow projection API. The
+    # omnimarket source PR must wait for this vendored migration to land in
+    # omnibase_infra first, so the node-migration vendor parity gate can prove
+    # a clean redeploy will create the projection column before the handler
+    # starts returning it.
+    assert len(result.declarations) == 176
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
