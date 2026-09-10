@@ -656,3 +656,156 @@ def test_the_call_site_feeds_the_coverage_corpus_not_the_verdict_totals() -> Non
     # gone from this call entirely.
     assert "verified_count," in call
     assert "non_probative_count," not in call
+
+
+# --------------------------------------------------------------------------
+# The second measured shape: provenance items that DO declare a binding.
+# --------------------------------------------------------------------------
+
+
+_FIVE_AC_DESCRIPTION = (
+    "## Acceptance criteria\n"
+    "\n"
+    "- **AC1** the governed job applies the manifest.\n"
+    "- **AC2** the uuid column cast is read back.\n"
+    "- **AC3** the uuid key is reachable.\n"
+    "- **AC4** the house tenant rows land.\n"
+    "- **AC5** the evidence is bound on the parent ticket.\n"
+)
+
+
+def _omn_16493_checks() -> list[dict[str, Any]]:
+    """OMN-16493's shape: 22 non-probative, four of which DECLARE a binding.
+
+    Measured on closer run 34443923859 at 2026-09-10T06:08:34Z, after OCC#8876
+    (`93df0cdb`) bound AC2-AC4 with a real hermetic execution proof. The
+    recorded class moved from `gap_no_behavior_proof` to `gap_ac_coverage`,
+    held at 6 probative against 22 non-probative.
+
+    It matters because it is NOT OMN-17478's shape. There, every one of the 22
+    provenance entries was unbound, so the coverage corpus had an empty
+    denominator and the rule released with room to spare. Here the lane
+    authored two STRUCTURAL self-binds carrying `binds_ac` — `occ-self-bind-pr-8858`
+    and `occ-self-bind-pr-8876` — and each brought a derived `::pr-live-state`
+    twin, so four non-probative records land in the denominator against six
+    verified. It clears by two, and a fixture built only on the first shape
+    never exercises that branch at all.
+
+    The carry-forward, recorded here because a merged contract cannot be
+    corrected (the append-only gate is the authority): **never put `binds_ac`
+    on a structural self-bind.** Autobind is right to omit it. A self-bind is a
+    bare `gh pr view`, it can never verify, and declaring a criterion on it
+    only moves it from outside the corpus into the denominator — it makes the
+    contract that declares it harder to close, never easier.
+    """
+    checks: list[dict[str, Any]] = []
+    for index in range(1, 6):
+        checks.append(
+            _check(
+                f"dod-omn16493-ac{index}-proof",
+                "verified",
+                "behavior",
+                binds_ac=(f"AC{index}",),
+            )
+        )
+    checks.append(
+        _check(
+            "dod-omn16493-behavior-proof",
+            "verified",
+            "behavior",
+            binds_ac=("AC2", "AC3", "AC4"),
+        )
+    )
+    # The four that declare a binding and can never satisfy it.
+    for pr in (8858, 8876):
+        labels = (
+            ("AC1", "AC2", "AC3", "AC4", "AC5") if pr == 8858 else ("AC2", "AC3", "AC4")
+        )
+        checks.append(
+            _check(
+                f"occ-self-bind-pr-{pr}", "non_probative", "surrogate", binds_ac=labels
+            )
+        )
+        checks.append(
+            _check(
+                f"occ-self-bind-pr-{pr}::pr-live-state",
+                "non_probative",
+                "merge-state",
+                binds_ac=labels,
+            )
+        )
+    # The remaining provenance, declaring nothing, exactly as autobind mints it.
+    for index in range(1, 10):
+        checks.append(
+            _check(f"dod-omn16493-pr-{index}", "non_probative", "merge-state")
+        )
+        checks.append(
+            _check(
+                f"dod-omn16493-pr-{index}::pr-live-state",
+                "non_probative",
+                "merge-state",
+            )
+        )
+    return checks
+
+
+async def test_the_omn_16493_shape_clears_with_a_denominator_of_exactly_four() -> None:
+    """RED. Six verified against four bound non-probative, and it clears.
+
+    Asserts the denominator directly, not only the decision: a change that
+    released this by emptying the corpus rather than by scoping it would pass
+    a decision-only test and would have reopened the padding loophole.
+    """
+    checks = _omn_16493_checks()
+    total = len(checks)
+    verified = sum(1 for c in checks if c["status"] == "verified")
+    non_probative = sum(1 for c in checks if c["status"] == "non_probative")
+    assert total == 28
+    assert verified == 6
+    assert non_probative == 22
+
+    # The decision first, so this case has a SUBSTANTIVE red at the parent
+    # commit (`gap_ac_coverage`, on 22 against 6) rather than only an
+    # ImportError on the helper that did not exist yet.
+    linear = _FakeLinear(description=_FIVE_AC_DESCRIPTION)
+    _seed_redraw(linear, checks)
+    result = await _handler(_skill_result(checks), linear).handle(_request())
+    outcome = result.outcomes[0]
+
+    assert outcome.decision is EnumEvidenceAutocloseDecision.FLIPPED
+    assert outcome.uncovered_acceptance_criteria == ()
+
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _coverage_corpus_counts,
+    )
+
+    verdict: dict[str, object] = {"checks": checks}
+    assert _coverage_corpus_counts(verdict, _FIVE_AC_DESCRIPTION) == (6, 4)
+
+
+async def test_a_structural_self_bind_declaring_a_criterion_only_ever_costs() -> None:
+    """The carry-forward rule, asserted rather than written down.
+
+    Take OMN-16493's shape and remove the four bindings the lane put on its
+    two structural self-binds — the shape autobind would have produced. The
+    denominator empties. So declaring a criterion on a self-bind moved four
+    records INTO the denominator and could never have moved one out of it: a
+    self-bind is a bare `gh pr view`, it can never verify, and the numerator
+    is verified records only.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _coverage_corpus_counts,
+    )
+
+    declared = _omn_16493_checks()
+    omitted = [
+        {k: v for k, v in check.items() if k != "binds_ac"}
+        if check["evidence_id"].startswith("occ-self-bind-pr-")
+        else check
+        for check in declared
+    ]
+
+    verdict_declared: dict[str, object] = {"checks": declared}
+    verdict_omitted: dict[str, object] = {"checks": omitted}
+    assert _coverage_corpus_counts(verdict_declared, _FIVE_AC_DESCRIPTION) == (6, 4)
+    assert _coverage_corpus_counts(verdict_omitted, _FIVE_AC_DESCRIPTION) == (6, 0)
