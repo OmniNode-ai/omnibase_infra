@@ -295,6 +295,15 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         # because RT-6 resolves a RUNNING container and a one-shot has already
         # exited 0 by the time the readback runs.
         "onex-api",
+        # OMN-18114: the ninth. The TENANT-domain projection CARRIER is the only
+        # process that owns the eight contracts pinned to
+        # `runtime_profiles: [tenant-projection]`, so a deploy that left it
+        # behind would certify a lane on which those eight are subscribed by
+        # nothing. Unlike the writers above it IS declared in the base compose,
+        # which is precisely why it must be in the lane-only recreate scope
+        # rather than in RUNTIME_SERVICES: a prod `up -d --no-deps` naming it
+        # would start it on a lane that never opted in.
+        "tenant-projection-writer",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -312,6 +321,7 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-live-events-writer": "projection-live-events-writer",
         "infra-routing-decisions-consumer": "omninode-infra-routing-decisions-consumer",
         "onex-api": "onex-api",
+        "tenant-projection-writer": "omnimarket-tenant-projection-writer",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not
@@ -357,6 +367,12 @@ def test_stability_lane_readback_covers_its_own_writer_services(
         "projection-savings-writer",
         "projection-tenant-credentials-writer",
         "projection-live-events-writer",
+        # OMN-18114: the profile carrier joins the proof lane's readback scope
+        # for the same reason the six writers did. It follows the same
+        # `omnimarket-stability-test-<service>` naming, so it needs no ps_map
+        # special case -- which is itself the check that the lane-scoped
+        # container_name in the overlay matches the convention.
+        "tenant-projection-writer",
     ]
     ps_map = {
         "omninode-runtime": "omninode-stability-test-runtime",

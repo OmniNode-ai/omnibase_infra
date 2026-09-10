@@ -355,12 +355,19 @@ def test_stability_test_boundary_dlq_wired_fail_fast_prod_and_judge_untouched() 
         encoding="utf-8"
     )
 
+    # FOUR since OMN-18114: main, effects, worker, and the tenant-projection
+    # carrier. The carrier is the same kernel under a different RUNTIME_PROFILE,
+    # so its auto-wired consume boundary makes the same DLQ-routing decision and
+    # must read the same lane-scoped stance. Leaving it unbound would give one
+    # process on the lane an implicit position on a flag every other process
+    # declares explicitly, which is the invisible-env-config shape this contract
+    # exists to remove.
     assert (
         stability_text.count(
             "ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?"
         )
-        == 3
-    ), "expected the flag wired on main, effects, and worker"
+        == 4
+    ), "expected the flag wired on main, effects, worker and tenant-projection"
     assert "${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:-" not in stability_text
     assert "ONEX_BOUNDARY_DLQ_ENABLED" not in prod_text
     assert "ONEX_BOUNDARY_DLQ_ENABLED" not in judge_text
