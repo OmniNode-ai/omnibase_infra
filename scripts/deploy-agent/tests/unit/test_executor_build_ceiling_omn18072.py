@@ -165,7 +165,9 @@ class TestBuildCeilingBreachVerdict:
             compose_files=("/repo/docker/docker-compose.infra.yml",),
         )
         monkeypatch.setattr(
-            executor_mod, "runtime_image_build_budget", lambda profile: tiny
+            executor_mod,
+            "runtime_image_build_budget",
+            lambda profile, compose_files=(): tiny,
         )
 
         def _sleeping_build(cmd: list[str], **kwargs: Any) -> Any:

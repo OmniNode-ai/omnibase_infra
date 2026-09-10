@@ -103,10 +103,15 @@ class TestCacheBust:
 
         executor.rebuild_scope(Scope.RUNTIME, [], _noop_phase_update, git_sha=git_sha)
 
-        assert call_order == [
-            "build",
-            "up",
-        ], f"_compose_build must precede _compose_up, got order: {call_order}"
+        # OMN-18108: the default lane is DEV, which issues a second additive
+        # build for the dev-lane-only services. What this test pins is the
+        # ORDER -- every build precedes every up, so nothing is recreated from
+        # a stale image.
+        assert call_order.count("up") == 1, call_order
+        assert call_order.index("up") == len(call_order) - 1, (
+            f"_compose_build must precede _compose_up, got order: {call_order}"
+        )
+        assert call_order[0] == "build"
 
     def test_compose_build_called_for_full_scope(self) -> None:
         """Full scope rebuild must call _compose_build for both core and runtime."""
@@ -151,8 +156,12 @@ class TestCacheBust:
             Scope.RUNTIME, [], _noop_phase_update, git_sha=sentinel_sha
         )
 
-        assert git_sha_seen_in_build == [sentinel_sha], (
-            f"Expected git_sha={sentinel_sha!r} forwarded to _compose_build, "
+        # OMN-18108: every build on the DEV path carries the same sha, the
+        # dev-lane-only addendum build included -- a second build on a
+        # different sha would ship two source trees in one deploy.
+        assert git_sha_seen_in_build, "no build was issued at all"
+        assert set(git_sha_seen_in_build) == {sentinel_sha}, (
+            f"Expected git_sha={sentinel_sha!r} forwarded to every _compose_build, "
             f"got {git_sha_seen_in_build}"
         )
 

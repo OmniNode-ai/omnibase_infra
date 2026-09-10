@@ -28,6 +28,7 @@ from deploy_agent.compose_budget import (
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
+    DEV_LANE_ONLY_BUILDABLE_SERVICES,
     BuildSource,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
@@ -420,7 +421,9 @@ def assert_prod_request_has_stability_digest(
         )
 
 
-def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
+def _requested_services_for_up(
+    scope: Scope, services: list[str], *, lane: EnumRuntimeLane | None = None
+) -> list[str]:
     """Return the explicit service list compose should recreate for this scope.
 
     Runtime scope must always target the runtime service list directly so a
@@ -435,11 +438,16 @@ def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
     collided with the live ``omnibase-infra-infisical`` container, breaking
     Redpanda/Postgres/Valkey/Phoenix. Forcing an explicit runtime service list
     combined with ``--no-deps`` in ``_compose_up`` prevents that regression.
+
+    OMN-18108: ``lane`` is threaded through so a DEV runtime deploy also
+    recreates the dev-lane-only services. It defaults to ``None`` (the
+    lane-agnostic base list) so a caller that names no lane cannot silently
+    acquire them, and prod/stability behaviour is unchanged.
     """
     if services:
         return services
     if scope == Scope.RUNTIME:
-        return services_for_scope(scope)
+        return services_for_scope(scope, lane=lane)
     return []
 
 
@@ -835,19 +843,27 @@ def runtime_compose_up_budget(
     )
 
 
-def runtime_image_build_budget(profile: str) -> ModelBuildBudget:
+def runtime_image_build_budget(
+    profile: str, compose_files: tuple[str, ...] = (COMPOSE_FILE,)
+) -> ModelBuildBudget:
     """Derive the ``docker compose --profile <profile> build`` ceiling (OMN-18072).
 
-    Reads the SAME compose file the build is about to invoke -- the tracked
-    base, which is the only ``-f`` argument ``_compose_build`` passes -- and the
-    Dockerfile that file names, so a new runtime service or a new Dockerfile
-    step moves the ceiling with it. See ``deploy_agent.build_budget`` for the
+    Reads the SAME compose files the build is about to invoke and the
+    Dockerfiles they name, so a new runtime service or a new Dockerfile step
+    moves the ceiling with it. See ``deploy_agent.build_budget`` for the
     measurements and for why a percentile over the recorded history is not
     derivable from a history whose two longest entries were killed at the flat
     constant rather than measured.
+
+    ``compose_files`` defaults to the tracked base alone, which is what the
+    lane-agnostic build passes. OMN-18108's DEV-lane addendum build passes the
+    base plus the lane overlay: the ceiling it derives is therefore an
+    over-estimate (it counts the base images too, which that command does not
+    rebuild). Over-estimating a ceiling only delays a kill; under-estimating it
+    kills a healthy build, which is the failure OMN-18072 existed to remove.
     """
     return derive_image_build_budget(
-        (COMPOSE_FILE,),
+        compose_files,
         profile,
         per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
         per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
@@ -1588,11 +1604,18 @@ class DeployExecutor:
                 runtime_lane=lane,
                 git_ref=git_ref,
             )
+            self._build_dev_lane_only_services(
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                lane=lane,
+                git_ref=git_ref,
+            )
             self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
             self._compose_up(
                 Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
             )
-            return services_for_scope(Scope.FULL)
+            return services_for_scope(Scope.FULL, lane=lane)
 
         self._compose_build(
             scope,
@@ -1602,8 +1625,60 @@ class DeployExecutor:
             runtime_lane=lane,
             git_ref=git_ref,
         )
+        if scope == Scope.RUNTIME:
+            self._build_dev_lane_only_services(
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                lane=lane,
+                git_ref=git_ref,
+            )
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
-        return services if services else services_for_scope(scope)
+        return services if services else services_for_scope(scope, lane=lane)
+
+    def _build_dev_lane_only_services(
+        self,
+        git_sha: str,
+        on_phase_update: PhaseCallback,
+        *,
+        build_source: BuildSource | str,
+        lane: EnumRuntimeLane,
+        git_ref: str,
+    ) -> None:
+        """Build the DEV lane's own runtime services (OMN-18108). No-op elsewhere.
+
+        These are declared only in ``docker/docker-compose.dev-lane.yml``, which
+        the lane-agnostic build above never passes, so without this command the
+        up phase recreates them from whatever image they already carry and
+        reports success. That is exactly what left eight services ~35 commits
+        behind on the .201 dev lane while the deploy agent's own terminal event
+        said the deploy succeeded.
+
+        Additive and explicit: a SECOND build naming the services, rather than
+        widening the first one's compose files, so prod and stability-test issue
+        a byte-identical command to before. The tag-referenced services are
+        excluded by ``DEV_LANE_ONLY_BUILDABLE_SERVICES`` -- ``docker compose
+        build`` has nothing to do for a service that carries only an ``image:``.
+        """
+        if lane != EnumRuntimeLane.DEV or not DEV_LANE_ONLY_BUILDABLE_SERVICES:
+            return
+        logger.info(
+            "_build_dev_lane_only_services: building %d dev-lane-only services "
+            "the base compose file does not declare: %s",
+            len(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+            ", ".join(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+        )
+        self._compose_build(
+            Scope.RUNTIME,
+            git_sha,
+            on_phase_update,
+            build_source=build_source,
+            runtime_lane=lane,
+            git_ref=git_ref,
+            compose_files=lane_config_for(lane).compose_files,
+            services=DEV_LANE_ONLY_BUILDABLE_SERVICES,
+            stage_workspace=False,
+        )
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
         """Resolve the exact stability-proven image digest for a prod deploy.
@@ -2009,6 +2084,9 @@ class DeployExecutor:
         expected_build_source: BuildSource | str | None = None,
         runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
         git_ref: str = "",
+        compose_files: tuple[str, ...] = (COMPOSE_FILE,),
+        services: tuple[str, ...] = (),
+        stage_workspace: bool = True,
     ) -> None:
         """Build images with --build-arg GIT_SHA to bust the COPY src/ layer cache.
 
@@ -2023,6 +2101,16 @@ class DeployExecutor:
 
         For BUILD_SOURCE=workspace, stages sibling repos into the build context
         via stage_workspace.sh before invoking docker compose build (OMN-9470).
+
+        OMN-18108: ``compose_files`` / ``services`` / ``stage_workspace`` exist
+        so a DEV deploy can issue a SECOND, additive build for the dev-lane-only
+        services, which are declared in the lane overlay this command otherwise
+        never passes. The defaults reproduce the previous command exactly, so
+        the prod and stability-test build is byte-unchanged. ``stage_workspace``
+        is False on that second call: staging is the expensive, tree-mutating
+        half and it has already run for the same refs in the same deploy --
+        re-running it would re-vendor identical siblings and reset
+        ``sibling_source_refs`` the terminal event reports.
         """
         profile = "core" if scope == Scope.CORE else "runtime"
         # OMN-18072: derived from the build model, never a bare constant. The
@@ -2030,7 +2118,7 @@ class DeployExecutor:
         # consecutive sanctioned dev rebuilds at exactly 300s, the second with a
         # warm BuildKit cache. It still bounds the pinned-digest pull and the
         # migration preflight, which are not builds and are not affected.
-        budget = runtime_image_build_budget(profile)
+        budget = runtime_image_build_budget(profile, compose_files)
         timeout = budget.timeout_seconds
         logger.info("Phase %s image-build ceiling %s", profile, budget.describe())
 
@@ -2057,7 +2145,7 @@ class DeployExecutor:
         # that both integrate on `dev`.
         sibling_fallback = load_tracking_ref_from_env()
 
-        if selected_source == BuildSource.WORKSPACE:
+        if selected_source == BuildSource.WORKSPACE and stage_workspace:
             if not omni_home:
                 raise RuntimeError(
                     "BUILD_SOURCE=workspace requires OMNI_HOME before build"
@@ -2107,11 +2195,13 @@ class DeployExecutor:
         build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         runtime_version = _runtime_version_from_pyproject()
 
+        compose_file_args: list[str] = []
+        for compose_file in compose_files:
+            compose_file_args.extend(["-f", compose_file])
         cmd = [
             "docker",
             "compose",
-            "-f",
-            COMPOSE_FILE,
+            *compose_file_args,
             "-p",
             COMPOSE_PROJECT,
             "--profile",
@@ -2131,6 +2221,10 @@ class DeployExecutor:
             f"OMNIMARKET_REF={omnimarket_ref}",
         ]
         cmd.extend(validated_args)
+        # Service names are positional and go last (`docker compose build
+        # [OPTIONS] [SERVICE...]`). Empty by default, which is the lane-agnostic
+        # "every buildable service in the profile" command.
+        cmd.extend(services)
         # OMN-18072: a blown build ceiling is a build OUTCOME with a name, not
         # a raw TimeoutExpired carrying a forty-token argv dump into the
         # terminal record. Nothing has been recreated at this point -- the build
@@ -2165,14 +2259,16 @@ class DeployExecutor:
 
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
-        requested_services = _requested_services_for_up(scope, services)
+        requested_services = _requested_services_for_up(scope, services, lane=lane)
         # For runtime scope, verification MUST be bounded by the requested
         # runtime service list so the runtime-only rebuild never implicitly
         # waits on core infra containers (OMN-9455). The same list bounds the
         # ceiling derivation, so an unrelated long healthcheck elsewhere in the
         # compose file cannot inflate it.
         expected = (
-            requested_services if requested_services else services_for_scope(scope)
+            requested_services
+            if requested_services
+            else services_for_scope(scope, lane=lane)
         )
 
         if scope == Scope.RUNTIME:
