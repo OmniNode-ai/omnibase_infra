@@ -1361,7 +1361,7 @@ class TestClientScopeMappings:
                 return _scopes_response(DESIRED_SCOPES)
             if method == "GET" and "scope-mappings/clients" in url:
                 return (200, [])  # no mappings yet
-            if method == "GET" and f"roles/manage-users" in url:
+            if method == "GET" and "roles/manage-users" in url:
                 return (200, role_obj)
             if method == "POST" and "scope-mappings/clients" in url:
                 scope_post_calls.append(kwargs.get("payload", []))

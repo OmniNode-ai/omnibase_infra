@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# microbenchmarks-nightly.yml — the execution path for unit tests that
+# pull-request CI deliberately deselects (OMN-18162).
+#
+# WHY THIS EXISTS
+#
+#   OMN-18162 retired the pre-push test leg in this repo. Pre-push ran
+#   `pytest ... -m "not integration"`; ci.yml runs
+#   `-m "not slow and not chaos and not kafka and not performance and not
+#   live_github_api"`. The gap between those two filters is real and was
+#   measured, not estimated: collecting tests/unit under each filter and
+#   diffing gives 39 tests -- 25 marked `performance`, 14 marked `slow` --
+#   across four files:
+#
+#     tests/unit/runtime/test_registry_compute.py             14
+#     tests/unit/nodes/reducers/test_reducer_performance.py   12
+#     tests/unit/mixins/test_mixin_node_introspection.py       7
+#     tests/unit/runtime/test_policy_registry_performance.py   6
+#
+#   The pre-push leg was their ONLY execution path. Retiring it without this
+#   workflow would have removed that path silently, which is the one outcome
+#   the OMN-18162 review explicitly called the bad option: not keeping the leg,
+#   not deleting the tests, but losing them with nobody noticing.
+#
+#   Four of those tests carried a second exclusion -- `skipif` on the generic
+#   `CI` environment variable, which Actions always sets, so scheduling alone
+#   would not have run them. That condition is now an explicit
+#   `ONEX_RUN_MICROBENCHMARKS` opt-in this workflow sets and nothing else does.
+#
+# WHAT THIS IS AND IS NOT
+#
+#   It is a breakage detector. It catches an exception, a broken import, a
+#   contract change that invalidates a benchmark, or an order-of-magnitude
+#   regression.
+#
+#   It is NOT a precision benchmark harness, and it is NOT a merge gate. These
+#   tests were deselected from pull-request CI because their timings are
+#   sensitive to shared-runner variance, and running them nightly does not make
+#   that untrue. If a threshold proves noisy here, widen that assertion or
+#   delete the test -- do not re-hide it behind a condition no surface
+#   satisfies, which is how it got lost the first time.
+#
+#   Scheduled and manually dispatchable only. It reports on no pull request and
+#   appears in no required-context list, so a red run blocks nothing. That is
+#   deliberate: a flaky benchmark must never be able to hold a merge.
+#
+# Ticket: OMN-18162. Plan of record: knowledge-base-internal#328,
+# beta/plans/2026-09-09-ci-runner-placement-and-pre-push-retirement-plan.md.
+
+name: Microbenchmarks Nightly
+
+on:
+  schedule:
+    # 07:00 UTC daily, after the 06:00 baselines job so the two do not contend
+    # for the same runners.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      marker_expression:
+        description: 'pytest -m expression to run. Defaults to the exact set pull-request CI deselects.'
+        required: false
+        default: '(performance or slow) and not integration'
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.6.0"
+
+permissions:
+  contents: read
+
+jobs:
+  microbenchmarks:
+    name: Deselected unit tests (performance, slow)
+    # OMNI_RUNNER_SELECTOR_V1 — reads the same trusted-CI routing seam every
+    # other trusted job here reads, so this workflow makes no placement
+    # decision of its own and follows the seam wherever it points. Schedule and
+    # workflow_dispatch only ever run on a branch of this repository, so there
+    # is no fork case to route.
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Run the deselected unit tests
+        env:
+          # Lifts the skipif on the four timing-sensitive microbenchmarks in
+          # tests/unit/runtime/test_policy_registry_performance.py. This is the
+          # only surface in the repository that sets it.
+          ONEX_RUN_MICROBENCHMARKS: "1"
+          MARKER_EXPRESSION: ${{ inputs.marker_expression || '(performance or slow) and not integration' }}
+        run: |
+          set -euo pipefail
+          # Serial by design. These assert wall-clock thresholds, so running
+          # them under xdist alongside each other would measure contention
+          # rather than the code. The per-test timeout is well above ci.yml's
+          # 60s because `slow` is exactly what these are.
+          uv run pytest tests/unit \
+            -m "${MARKER_EXPRESSION}" \
+            -p no:randomly \
+            --timeout=300 \
+            --timeout-method=signal \
+            --tb=short \
+            --junitxml=junit-microbenchmarks.xml
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: microbenchmarks-junit
+          path: junit-microbenchmarks.xml
+          if-no-files-found: warn

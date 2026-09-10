@@ -2,7 +2,33 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# Pre-push governed impacted-test selector (OMN-13973 / WS7 OMN-14655 fan-out).
+# Governed impacted-test selector -- MANUAL INVOCATION ONLY (OMN-13973 / WS7
+# OMN-14655 fan-out).
+#
+# RETIRED FROM THE PRE-PUSH STAGE, OMN-18162, 2026-09-10. This script is no
+# longer wired into `.pre-commit-config.yaml`. Nothing runs it on `git push`.
+# Hosted CI is the enforced merge gate and the test surface; the local test leg
+# bought earlier feedback rather than a verification guarantee, at a measured
+# 67 heavy lab runs in five days at 5.0 runnable cores each. Plan of record:
+# knowledge-base-internal#328,
+# `beta/plans/2026-09-09-ci-runner-placement-and-pre-push-retirement-plan.md`,
+# phase 1. Operator ruling 2026-09-10: retire the test leg one repo at a time.
+#
+# The script is retained rather than deleted because other surfaces still depend
+# on it: `docker/docker-compose.gate-runner.yml` and
+# `config/runner_routing_policy.yaml` reference it, and its behaviour is pinned
+# by tests under `tests/unit/scripts/` and `tests/ci/`. Run it by hand when you
+# want the impacted subset locally:
+#
+#   bash scripts/hooks/prepush_smart_tests.sh
+#
+# Do not re-wire it into the pre-push stage without a ruling that supersedes the
+# one above; `tests/ci/test_prepush_test_leg_retired_omn18162.py` asserts it stays
+# unwired. Everything below describes how the selector behaves when you invoke
+# it, and is unchanged by the retirement -- including the fail-closed escalation
+# and the refusal of ambient override variables, which still hold on a manual
+# run. References to "once per `git push`" and to root CLAUDE.md Rule #4 below
+# describe the retired wiring and are kept for provenance.
 #
 # Runs the FAST LOCAL IMPACTED SUBSET of the unit suite once per `git push`,
 # using the SAME governed selector CI uses -- scripts/ci/detect_test_paths.py +
