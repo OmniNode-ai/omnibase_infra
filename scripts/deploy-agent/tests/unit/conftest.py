@@ -177,3 +177,35 @@ def _derive_image_build_budget_from_this_checkout(
         )
 
     monkeypatch.setattr(executor_mod, "runtime_image_build_budget", _budget)
+
+
+@pytest.fixture(autouse=True)
+def _resolve_preflight_script_from_this_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18123: point the required-compose-env preflight at THIS checkout.
+
+    ``_preflight_required_compose_env`` now refuses with its own error class
+    when the script is not a file, because a preflight that could not RUN and a
+    preflight that RAN and found unset variables are different facts and were
+    reported as the same one. ``REPO_DIR`` is a deploy-HOST path absent from the
+    unit-test sandbox, so every test that drives compose generation would hit
+    the new refusal instead of the behaviour it is asserting.
+
+    This is a path repoint, not a stub -- the same one the compose-up and
+    image-build budget fixtures above take. The script really is on disk in the
+    repository under test, so deleting or renaming it moves what these tests
+    observe. The refusal's own behaviour is asserted directly in
+    ``test_preflight_script_missing_omn18123.py``, which repoints it the other
+    way.
+    """
+    from deploy_agent import executor as executor_mod
+
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "preflight_required_compose_env.py"
+    )
+    monkeypatch.setattr(
+        executor_mod, "preflight_required_compose_env_script", lambda: str(script)
+    )
