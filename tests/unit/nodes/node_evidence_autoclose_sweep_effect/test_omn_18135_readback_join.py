@@ -49,6 +49,7 @@ that RELEASES; so the vocabulary earns its way in, and the veto wins ties.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -579,3 +580,227 @@ def test_the_widened_vocabulary_did_not_drag_behaviour_along(criterion: str) -> 
     )
 
     assert _criterion_is_state_shaped(criterion) is False
+
+
+@pytest.mark.parametrize(
+    ("marker", "criterion"),
+    [
+        # Each added marker, in ISOLATION, on the shortest criterion that
+        # carries it and nothing else. The end-to-end assertion above cannot
+        # do this job: OMN-17771's five criteria each match, but a marker that
+        # never fires, or one whose semantics are wrong, is invisible there
+        # because a sibling marker carries the assertion. Raised by the
+        # hostile reviewer on this PR and fixed rather than rejected.
+        ("zero ... occurrences", "AC1 zero `client_id=x` occurrences in the guides"),
+        ("checkers green", "AC1 the `beta-layout` checkers green"),
+        ("exists on the", "AC1 a client that exists on the plane"),
+        ("merged to `x", "AC1 merged to `main`"),
+        # NOT "returns HTTP 200", which is how the criterion actually reads:
+        # `\breturns?\b` is a pre-existing marker, so that phrasing classifies
+        # whether or not the HTTP marker fires and asserts nothing about it.
+        # Measured, not assumed -- see the mutation control below.
+        ("HTTP <status>", "AC1 the URL gives HTTP 200"),
+        # And the markers the first cut shipped with, held to the same bar.
+        ("read back", "AC1 the value is read back from the running system"),
+        ("N rows", "AC1 the mirror holds 4 rows"),
+        ("N occurrences", "AC1 the file has 0 occurrences of the old id"),
+        ("is running", "AC1 the deployment is Running"),
+        ("N restarts", "AC1 the pod shows 0 restarts"),
+        ("digest", "AC1 the plane carries the new digest"),
+    ],
+)
+def test_each_state_marker_fires_on_its_own(marker: str, criterion: str) -> None:
+    """One marker, one criterion, no sibling to carry it."""
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _criterion_is_state_shaped,
+    )
+
+    assert _criterion_is_state_shaped(criterion) is True, marker
+
+
+def test_a_criterion_carrying_none_of_the_markers_does_not_fire() -> None:
+    """The control that makes the per-marker suite mean something.
+
+    Without it, a predicate that returned True unconditionally would pass
+    every case above.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _criterion_is_state_shaped,
+    )
+
+    assert _criterion_is_state_shaped("AC1 the thing is done properly") is False
+
+
+@pytest.mark.parametrize(
+    ("marker", "near_miss"),
+    [
+        # Semantics, not just presence. Each of these is the neighbouring
+        # string the marker must NOT accept, which is what catches a pattern
+        # that is too loose rather than one that never fires.
+        ("HTTP <status>", "AC1 the doc mentions HTTP and a status somewhere"),
+        ("merged to `x", "AC1 the branch was merged to"),
+        ("exists on the", "AC1 the file exists"),
+        ("checkers green", "AC1 the checkers ran"),
+        ("zero ... occurrences", "AC1 zero is an interesting number"),
+    ],
+)
+def test_each_marker_refuses_its_near_miss(marker: str, near_miss: str) -> None:
+    """A marker that accepts its near miss is too loose to be evidence."""
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _criterion_is_state_shaped,
+    )
+
+    assert _criterion_is_state_shaped(near_miss) is False, marker
+
+
+# --------------------------------------------------------------------------
+# Per-marker isolation. Review finding on #3413: the blob test above asserts
+# the whole OMN-17771 body classifies as state-shaped, so a marker that never
+# fires, or one whose semantics are wrong, is invisible because a neighbouring
+# marker carries the assertion. That is not hypothetical on this body: AC2
+# ("returns HTTP 200 ...") is already matched by the older `\breturns?\b`
+# marker, and AC5 ("Merged to `main` and read back ...") by `\bread back\b`,
+# so the two markers added for them contribute nothing to the aggregate and
+# could be deleted with every test above still green.
+#
+# The two tests below close that. Each new marker gets a criterion carrying
+# ONLY that marker, and a mutation control that deletes the marker's own
+# alternation line from the vocabulary and asserts the same criterion stops
+# classifying. A marker that never fires cannot pass its control.
+# --------------------------------------------------------------------------
+
+
+def _vocabulary_without(marker_source: str) -> re.Pattern[str]:
+    """`_STATE_MARKER_RE` with one alternation line deleted, nothing else.
+
+    Deleting the marker rather than rewriting the criterion is what makes
+    this a control: the criterion is held byte-identical across the pair, so
+    a difference in verdict is attributable to that one line and nothing
+    else.
+
+    Refuses anything it cannot do exactly: the fragment must identify exactly
+    one line, and that line must be an alternation (`| ...`) rather than the
+    pattern's first branch or its `(?xi)` header, either of which would leave
+    a regex that is broken or silently means something else. A mutation
+    control built on a mangled pattern proves nothing.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _STATE_MARKER_RE,
+    )
+
+    lines = _STATE_MARKER_RE.pattern.split("\n")
+    hits = [i for i, line in enumerate(lines) if marker_source in line]
+    assert len(hits) == 1, f"{marker_source!r} matched {len(hits)} lines, want 1"
+    assert lines[hits[0]].lstrip().startswith("|"), (
+        f"{marker_source!r} is not an alternation branch; deleting it would "
+        "change the pattern's meaning rather than remove one marker"
+    )
+    del lines[hits[0]]
+    return re.compile("\n".join(lines), _STATE_MARKER_RE.flags)
+
+
+#: One row per phrase OMN-18135 added: the marker's own source text, and a
+#: criterion lifted from the OMN-17771 criterion that phrase was taken from,
+#: reduced until that marker is the ONLY thing making it state-shaped.
+#:
+#: The HTTP row says "gives HTTP 200" where the ticket says "returns HTTP
+#: 200", and the merged row drops "and read back from `origin/main`". Those
+#: are not paraphrases for convenience — they are the isolation. `returns`
+#: and `read back` are pre-existing markers, and leaving either in place
+#: would mean the row passed whether or not the new marker fires, which is
+#: the exact defect these tests exist to detect.
+_ADDED_STATE_MARKERS: tuple[tuple[str, str, str], ...] = (
+    (
+        "zero-occurrences",
+        r"\bzero\b[^.]{0,80}\boccurrences?\b",
+        "AC1 Zero `client_id=omnidash-spa` occurrences in any customer-facing guide",
+    ),
+    (
+        "checkers-green",
+        r"\bcheckers?\b[^.]{0,24}\bgreen\b",
+        "AC4 `no-private-repo-links` and `beta-layout` checkers green",
+    ),
+    (
+        "exists-on-the",
+        r"\bexists\s+on\s+the\b",
+        "AC3 the Step 1b token command names a client that exists on the plane "
+        "the guide names",
+    ),
+    (
+        "merged-to",
+        r"\bmerged\s+to\s+`?\w",
+        "AC5 Merged to `main`",
+    ),
+    (
+        "http-status",
+        r"\bHTTP\s+\d{3}\b",
+        "AC2 the Step 1a registration URL, pasted verbatim, gives HTTP 200 with "
+        "a registration form",
+    ),
+)
+
+_ADDED_MARKER_PARAMS = [
+    pytest.param(marker, criterion, id=marker_id)
+    for marker_id, marker, criterion in _ADDED_STATE_MARKERS
+]
+
+
+@pytest.mark.parametrize(("marker", "criterion"), _ADDED_MARKER_PARAMS)
+def test_each_added_marker_recognises_its_own_criterion(
+    marker: str, criterion: str
+) -> None:
+    """Each added phrase carries a criterion on its own, with no neighbour."""
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _criterion_is_state_shaped,
+    )
+
+    assert _criterion_is_state_shaped(criterion) is True
+
+
+@pytest.mark.parametrize(("marker", "criterion"), _ADDED_MARKER_PARAMS)
+def test_each_added_marker_is_the_only_thing_carrying_its_criterion(
+    monkeypatch: pytest.MonkeyPatch, marker: str, criterion: str
+) -> None:
+    """Mutation control. Delete the marker; its criterion must stop matching.
+
+    This is the half the aggregate test cannot do. If the phrase were
+    misspelled, over-escaped, or shadowed by a marker that was already there,
+    the criterion would still classify with the line gone and this fails.
+
+    The second assertion holds the mutation to one marker: every OTHER added
+    marker's criterion must be unaffected. Without it, a helper that returned
+    an empty or inverted pattern would satisfy the first assertion for every
+    row at once.
+    """
+    import omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep as _module
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _criterion_is_state_shaped,
+    )
+
+    monkeypatch.setattr(_module, "_STATE_MARKER_RE", _vocabulary_without(marker))
+
+    assert _criterion_is_state_shaped(criterion) is False
+    for _id, other_marker, other_criterion in _ADDED_STATE_MARKERS:
+        if other_marker == marker:
+            continue
+        assert _criterion_is_state_shaped(other_criterion) is True, (
+            f"deleting {marker!r} also stopped {other_marker!r} from firing"
+        )
+
+
+@pytest.mark.parametrize(("marker", "criterion"), _ADDED_MARKER_PARAMS)
+def test_no_added_marker_overrides_the_behaviour_veto(
+    marker: str, criterion: str
+) -> None:
+    """The same criterion, plus behaviour language, holds.
+
+    Per-marker rather than per-phrase-sample: the veto has to win against
+    every added marker individually, not just against the four combinations
+    the earlier control happens to spell.
+    """
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _criterion_is_state_shaped,
+    )
+
+    assert _criterion_is_state_shaped(criterion) is True
+    assert _criterion_is_state_shaped(f"{criterion}, asserted by a unit test") is False
