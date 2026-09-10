@@ -53,6 +53,7 @@ from scripts.trigger_rebuild_on_merge import ModelCiBusOverlay
 
 pytestmark = pytest.mark.unit
 
+_LIVE_OVERLAY_ENV_VAR = "CI_BUS_OVERLAY_LIVE_PATH"
 _OVERLAY_RELATIVE = Path("config/ci_bus_lanes.yaml")
 
 
@@ -67,7 +68,13 @@ def _live_overlay_path() -> Path | None:
     ci_overlay = os.environ.get("CI_BUS_OVERLAY_LIVE_PATH")
     if ci_overlay:
         candidate = Path(ci_overlay)
-        return candidate if candidate.is_file() else None
+        if not candidate.is_file():
+            pytest.fail(
+                f"{_LIVE_OVERLAY_ENV_VAR}={ci_overlay!r} does not name a file. "
+                "The configured live-overlay guard proves nothing without the "
+                "producer-side config/ci_bus_lanes.yaml checkout."
+            )
+        return candidate
 
     omni_home = os.environ.get("OMNI_HOME")
     if omni_home:
