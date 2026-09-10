@@ -936,6 +936,22 @@ repos:
         pass_filenames: false
         files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|scripts/deploy-runtime\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$
         stages: [pre-commit]
+      # Lane restart-set / refresh build-scope agreement (OMN-18114, OMN-17448)
+      # A governed refresh always exports RUNTIME_BUILD_SERVICES_OVERRIDE, and
+      # resolve_lane_runtime_services returns early on an override without
+      # appending that lane's *_LANE_ONLY_RUNTIME_SERVICES array. So the refresh
+      # script's own REFRESH_BUILD_SERVICES is the entire restart set, and a
+      # service named in one array and not the other is never started by the
+      # governed path -- declared, censused, and absent. Runs on any edit to the
+      # arrays, the lane overlays, the base compose, or the gates themselves, so
+      # the two halves cannot drift apart in a single commit.
+      - id: lane-carrier-build-scope
+        name: Lane restart set matches refresh build scope (OMN-18114)
+        entry: uv run --frozen pytest tests/unit/scripts/test_omn18114_lane_carrier_build_scope.py tests/unit/scripts/test_omn17448_dev_lane_writer_build_scope.py -q --tb=short --timeout=120 --timeout-method=signal
+        language: system
+        pass_filenames: false
+        files: ^(scripts/deploy-runtime\.sh|scripts/runtime_build/refresh_(dev|stability)_lane\.sh|docker/docker-compose\.(infra|dev-lane|stability-test)\.yml|tests/unit/scripts/test_omn(18114_lane_carrier_build_scope|17448_dev_lane_writer_build_scope)\.py)$
+        stages: [pre-commit]
       # Markdown link validation (PR #172)
       # Ensures all internal markdown links point to existing files and anchors
       # External links are skipped by default (configurable in .markdown-link-check.json)

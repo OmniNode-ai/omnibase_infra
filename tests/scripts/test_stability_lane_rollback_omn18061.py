@@ -572,9 +572,17 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     build_set = set(arrays["REFRESH_BUILD_SERVICES"])
     core_set = set(arrays["CORE_SERVICES"])
 
-    # The build set is CORE_SERVICES plus the six projection writers; the
+    # The build set is CORE_SERVICES plus this lane's own services; the
     # rollback set must equal the whole thing, not its core prefix.
-    assert len(build_set) == 10, sorted(build_set)
+    #
+    # OMN-18114: this was pinned to a literal 10, which made a CORRECT widening
+    # of the build scope fail a test about rollback coverage. The count was
+    # never the property under test -- the three assertions below are -- and a
+    # literal here means every service legitimately added to the lane arrives
+    # with an unrelated red test and an invitation to "just bump the number".
+    # Shrink-only instead: 10 is the floor this ticket found, and losing a
+    # service from the build scope is the regression worth catching.
+    assert len(build_set) >= 10, sorted(build_set)
     assert core_set < build_set, "CORE_SERVICES must be a strict subset of the build"
     assert rollback_set == build_set, (
         f"rollback set {sorted(rollback_set)} != deployed set {sorted(build_set)}"
