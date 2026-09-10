@@ -533,3 +533,91 @@ class TestGateWiring:
         assert "--lane onex-lab" in deliver
         assert "lab_pass_receipt.py emit" in rebuild
         assert "--lane compose-dev" in rebuild
+
+
+class TestComposeDevProbeReachesTheLane:
+    """The compose-dev emitter must probe the lane at an address it can reach.
+
+    OMN-17530 shipped ``verify-lane-converged`` probing the dev lane at
+    ``http://localhost:8085`` / ``:8086``, on a comment asserting "this job
+    runs ON the lane's host". It does not. It runs on the ``omnibase-deploy``
+    self-hosted runner, which is a CONTAINER (``omninode-deploy-runner``,
+    ``NetworkMode=docker_default``) on the lane's host. The docker socket is
+    bind-mounted, which is why ``check_dev_lane_staleness.py``'s
+    ``docker inspect`` read works; the network namespace is the container's,
+    which is why an HTTP probe of ``localhost`` never reaches the lane.
+
+    Measured 2026-09-10, with a positive control on both halves:
+
+    * from the .201 host shell, ``curl http://localhost:8085/ready`` -> ``200``
+      and ``http://localhost:8086/ready`` -> ``200``;
+    * from inside ``omninode-deploy-runner``, the same two URLs ->
+      ``000`` (``Errno 111 Connection refused``), while
+      ``http://host.docker.internal:8085/ready`` and ``:8086/ready`` -> ``200``.
+
+    So all fourteen ``compose-dev`` receipts emitted between 2026-09-08T16:01Z
+    and 2026-09-10T09:36Z carried the identical three failures --
+    ``ready_main``, ``ready_effects`` and ``health_dimensions``, each with
+    evidence ``URLError: <urlopen error [Errno 111] Connection refused>`` --
+    and not one has ever been a ``PASS``. A receipt that cannot pass is the
+    fail-always shape this module's own docstring names, arriving a second time
+    on the other lane.
+
+    ``chain-canary.yml`` already records the correct fact in this repository's
+    own tree, and runs on the same runner label::
+
+        `omnibase-deploy` is the ONE runner carrying the host-gateway alias
+        (docker/docker-compose.runners.yml `extra_hosts`), which is what makes
+        `host.docker.internal` resolve to the lane's published ports. Inside
+        any runner container `localhost` is the container itself.
+
+    This test pins that so the wrong address cannot come back.
+    """
+
+    def _probe_env(self) -> dict[str, str]:
+        from pathlib import Path
+
+        import yaml
+
+        workflow = yaml.safe_load(
+            Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        step = next(
+            candidate
+            for candidate in workflow["jobs"]["verify-lane-converged"]["steps"]
+            if candidate.get("id") == "probe"
+        )
+        return dict(step["env"])
+
+    def test_the_probe_does_not_address_the_lane_as_localhost(self) -> None:
+        for name, url in self._probe_env().items():
+            assert "localhost" not in url, (
+                f"{name}={url!r}: the compose-dev probe runs inside the "
+                "omninode-deploy-runner container, where localhost is the "
+                "container itself. Measured Errno 111 on every one of the "
+                "fourteen receipts emitted 2026-09-08T16:01Z..2026-09-10T09:36Z."
+            )
+            assert "127.0.0.1" not in url, (
+                f"{name}={url!r}: a loopback literal has the same defect as "
+                "localhost, spelled differently."
+            )
+
+    def test_the_probe_uses_the_host_gateway_alias(self) -> None:
+        env = self._probe_env()
+        assert env["DEV_LANE_MAIN_URL"] == "http://host.docker.internal:8085"
+        assert env["DEV_LANE_EFFECTS_URL"] == "http://host.docker.internal:8086"
+
+    def test_the_workflow_no_longer_claims_the_job_runs_on_the_lane_host(
+        self,
+    ) -> None:
+        from pathlib import Path
+
+        text = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
+            encoding="utf-8"
+        )
+        assert "this job runs ON the lane's host" not in text, (
+            "the comment that justified the localhost probe is the false "
+            "premise itself; leaving it in place invites the revert."
+        )
