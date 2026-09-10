@@ -166,59 +166,12 @@ COMMENT ON COLUMN public.ledger_chain.verifier_verdict IS
 -- nothing else. This mirrors the link-2 grant, which is column-scoped on
 -- `delegation_workflow_state (correlation_id, state)` — verified live on the
 -- .201 dev lane 2026-09-10: `information_schema.column_privileges` returns
--- exactly two rows for this grantee and `has_table_privilege(...,'SELECT')`
--- is FALSE, which is the intended shape rather than a defect.
+-- exactly the column-scoped rows for this grantee and
+-- `has_table_privilege(...,'SELECT')` is FALSE, which is the intended shape
+-- rather than a defect.
 --
--- Guarded on role existence and issued through a DO block, following 103's
--- pattern (OMN-17301): a lane with no canary provisioned leaves the role
--- absent, this block skips with a NOTICE, and the canary reports
--- SKIPPED_NOT_CONFIGURED — red and honest, never a green from a check that
--- never ran. docker-compose.infra.yml's CHAIN_CANARY_READER_PASSWORD comment
--- already documents exactly this contract; that comment names 'migration 104',
--- which is now a burned ordinal, and is corrected in the same change.
---
--- NOTE ON WHERE THE SIBLING GRANT LIVES, since it is NOT a .sql file and an
--- earlier revision of this header wrongly concluded from that absence that it
--- did not exist. The link-2 grant is issued by
--- `scripts/run-forward-migrations.sh` in its login-only role grant seam
--- (OMN-18060, #3352): the runner reasserts chain_canary_reader's
--- column-scoped SELECT on `public.delegation_workflow_state
--- (correlation_id, state)` on every migration run, and
--- `tests/unit/infra/test_login_only_role_grants_omn18060.py` pins the entry.
--- Both grants are therefore reproducible from this repository; they simply
--- live in two different seams, because link 5's accompanies the CREATE TABLE
--- that needs it and link 2's does not have one to accompany.
-DO $$
-DECLARE
-    executing_role TEXT := current_user;
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'chain_canary_reader'
-    ) THEN
-        RAISE NOTICE
-            'role chain_canary_reader is absent on this lane; skipping the '
-            'ledger_chain grant. node_chain_canary_effect will report '
-            'OMN-16025 link 5 as skipped_not_configured, which is RED.';
-        RETURN;
-    END IF;
-
-    BEGIN
-        GRANT USAGE ON SCHEMA public TO chain_canary_reader;
-        GRANT SELECT (
-            correlation_id, hop, hop_index, replay_green, verifier_verdict
-        ) ON public.ledger_chain TO chain_canary_reader;
-        RAISE NOTICE
-            'granted column-scoped SELECT on ledger_chain to '
-            'chain_canary_reader as %', executing_role;
-    EXCEPTION
-        WHEN insufficient_privilege THEN
-            -- Same fall-through as 103: on a managed lane the migration
-            -- identity may hold no grant option. The readback in the canary
-            -- is what decides, and it fails closed.
-            RAISE NOTICE
-                'GRANT on ledger_chain was refused for %; the canary will '
-                'report link 5 as an ERROR on read, which is RED and '
-                'diagnosable rather than silently green.', executing_role;
-    END;
-END
-$$;
+-- Grant provenance lives in scripts/run-forward-migrations.sh
+-- LOGIN_ONLY_ROLE_GRANT_MAP. That seam reasserts both chain-canary readback
+-- grants, gates on relation existence, and reads the result back after GRANT.
+-- The flat SQL stream creates the relation; the deployment-owned runner seam
+-- owns the login-only role authorization.
