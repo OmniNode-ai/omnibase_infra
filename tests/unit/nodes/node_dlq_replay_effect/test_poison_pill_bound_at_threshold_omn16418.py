@@ -140,7 +140,7 @@ def _handler(
     producer = _FakeProducer()
     quarantine = _FakeQuarantineProducer()
     handler = HandlerDlqReplay(
-        consumer=consumer,  # type: ignore[arg-type]
+        consumers={consumer.config.dlq_topic: consumer},  # type: ignore[dict-item]
         producer=producer,  # type: ignore[arg-type]
         quarantine_producer=quarantine,  # type: ignore[arg-type]
         tracking=None,

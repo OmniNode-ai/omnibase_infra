@@ -174,7 +174,7 @@ class _NoopEffect:
 
 def _handler(consumer: object) -> HandlerDlqReplay:
     return HandlerDlqReplay(
-        consumer=consumer,  # type: ignore[arg-type]
+        consumers={consumer.config.dlq_topic: consumer},  # type: ignore[dict-item]
         producer=_NoopEffect(),  # type: ignore[arg-type]
         quarantine_producer=_NoopEffect(),  # type: ignore[arg-type]
         tracking=None,

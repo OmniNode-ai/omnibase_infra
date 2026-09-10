@@ -454,8 +454,13 @@ if [[ "$MODE" == "repair" ]]; then
       "no venv reconciler at $VENV_DELEGATE — the installed layers on this host are reconciled by nobody"
   else
     say "venv surface: delegating to $VENV_DELEGATE"
-    trace "bash $VENV_DELEGATE --omni-home $OMNI_HOME"
-    bash "$VENV_DELEGATE" --omni-home "$OMNI_HOME" >&2 || \
+    # --branch is passed through so the delegate's own clone->origin/<branch>
+    # observation (OMN-17295) names the same branch this run is reconciling
+    # onto. Both default to `dev`; they would only disagree when someone passes
+    # --branch here, which is precisely when a silent disagreement would be
+    # hardest to spot.
+    trace "bash $VENV_DELEGATE --omni-home $OMNI_HOME --branch $BRANCH"
+    bash "$VENV_DELEGATE" --omni-home "$OMNI_HOME" --branch "$BRANCH" >&2 || \
       say "venv delegate exited non-zero; the readback below is what decides."
     SP="$(site_packages "$CLI_VENV" || true)"
   fi

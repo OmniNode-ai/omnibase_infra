@@ -1126,6 +1126,52 @@ jobs:
           export GIT_ASKPASS="${RUNNER_TEMP}/git-askpass.sh"
           export GIT_TERMINAL_PROMPT=0
 
+          # OMN-18117. RECORD THE COMPARISON TARGET, once, here.
+          #
+          # `EvidenceCollector` decided freshness by fetching `origin/<branch>`
+          # again AT CHECK TIME and comparing the clone's HEAD against that
+          # fresh fetch's tip. This loop runs near the start of the job; the
+          # checks it is materialising for run for the next ~20 minutes. So any
+          # ordinary merge to a product repo's `dev` inside that window made an
+          # otherwise-correct clone read `behind N` and every behaviour check
+          # pinned there was refused UNEXECUTED as PRODUCT_CLONE_STALE — a
+          # "stale" verdict manufactured by the sweep's own elapsed wall-clock
+          # time. Run 34428131180 (2026-09-10T02:06:28Z) held EIGHT tickets
+          # that way, each with zero failed checks and nothing proven either
+          # direction.
+          #
+          # Re-materialising immediately before the check phase would close the
+          # window too, and is NOT taken: moving `${OMNI_HOME}/omnimarket`
+          # mid-run hard-fails the OMN-14060 drift guard against the dispatch
+          # venv, and moving `github.workspace` invalidates the gate venv the
+          # purity assertion measures. So the tree stays exactly where
+          # `--no-move` left it and the COMPARISON TARGET is frozen instead.
+          #
+          # What is recorded is the UPSTREAM TIP observed here, never the
+          # clone's own HEAD. Pinning to HEAD would make the comparison vacuous
+          # (HEAD always equals itself) and would launder a clone that was
+          # already behind when this loop picked it up — the OMN-16846 AC5
+          # refusal, which this must not weaken and which the fixture in
+          # omnimarket's tests/unit/nodes/node_dod_verify proves both ways.
+          #
+          # A tree with no recordable pin is WARNED and left unpinned, so it
+          # falls back to the live comparison — the behaviour that was already
+          # happening — rather than silently reading as fresh.
+          : > "${RUNNER_TEMP}/product-clone-pins.tsv"
+          record_clone_pin() {
+            local tree="$1" branch="$2"
+            local root tip
+            root="$(git -C "${tree}" rev-parse --show-toplevel 2>/dev/null || true)"
+            tip="$(git -C "${tree}" rev-parse "refs/remotes/origin/${branch}" 2>/dev/null || true)"
+            if [ -z "${root}" ] || [ -z "${tip}" ]; then
+              echo "::warning::OMN-18117 ${tree}: no comparison pin recorded (toplevel='${root}' tip='${tip}'); freshness there stays measured against the moving upstream tip."
+              return 0
+            fi
+            echo "    pin: ${root} -> ${tip} (origin/${branch})"
+            printf '%s\t%s\t%s\n' "${root}" "${tip}" "origin/${branch}" \
+              >> "${RUNNER_TEMP}/product-clone-pins.tsv"
+          }
+
           cache="${RUNNER_TEMP}/cwd-repo-cache"
           mkdir -p "${cache}"
           : > "${RUNNER_TEMP}/cwd-materialisation.tsv"
@@ -1157,6 +1203,7 @@ jobs:
               echo "    freshness: ${freshness_out}"
               printf '%s\t%s\t%s\n' "${dest}" "${freshness_rc}" "${freshness_out%%$'\n'*}" \
                 >> "${RUNNER_TEMP}/cwd-freshness.tsv"
+              record_clone_pin "${target}" dev
               continue
             fi
             # Containment, asserted before anything destructive runs.
@@ -1254,7 +1301,98 @@ jobs:
             fi
             printf '%s\t%s\t%s\n' "${dest}" "${freshness_rc}" "${freshness_out%%$'\n'*}" \
               >> "${RUNNER_TEMP}/cwd-freshness.tsv"
+            record_clone_pin "${target}" dev
           done < "${RUNNER_TEMP}/cwd-dests.tsv"
+
+          # OMN-18117. Render the recorded pins into the file the collector
+          # reads (DOD_VERIFY_PRODUCT_CLONE_PIN_FILE, exported on every
+          # check-bearing step below). Written UNCONDITIONALLY, even with zero
+          # pins: a present file declaring no pins says "this run pinned
+          # nothing", while an absent one is indistinguishable from a step that
+          # never ran, and the collector would warn about a path it cannot read
+          # on every candidate.
+          #
+          # The renderer is delimited so tests/ci/test_autoclose_clone_pin_omn18117.py
+          # extracts and EXECUTES this exact program rather than paraphrasing
+          # it — the OMN-16902 pattern in the classifier above, for the same
+          # reason: a renderer asserted by string match is one silent edit away
+          # from emitting a file the collector rejects, and a rejected pin file
+          # falls back to precisely the defect this closes.
+          python3 - "${RUNNER_TEMP}/product-clone-pins.tsv" \
+            "${RUNNER_TEMP}/product-clone-pins.json" <<'PYEOF'
+          # ---8<--- OMN-18117 BEGIN product-clone-pin-render
+          """Render the recorded (repo root, upstream tip, upstream ref) rows
+          into the pin file ``EvidenceCollector`` reads.
+
+          Shape is ``ModelProductClonePinSet`` (omnimarket,
+          node_dod_verify/models/model_dod_verify_state.py): a ``version`` this
+          collector understands plus a ``pins`` array. Both models declare
+          ``extra="forbid"``, so an unknown key here is a parse failure and a
+          silent fallback to the live comparison — emit exactly these fields.
+
+          A malformed row is DROPPED with a reason on stderr rather than
+          emitted: a pin whose SHA is not a full 40-char lowercase hex fails
+          the model's own pattern and would take the whole file down with it,
+          unpinning every repository including the well-formed ones.
+          """
+          import json
+          import re
+          import sys
+          from datetime import datetime, timezone
+
+          SCHEMA_VERSION = 1
+          SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+          src, dest = sys.argv[1], sys.argv[2]
+          recorded_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+          pins: list[dict[str, str]] = []
+          seen: set[str] = set()
+          try:
+              with open(src, encoding="utf-8") as fh:
+                  rows = fh.read().splitlines()
+          except OSError as exc:
+              print(f"PIN_SOURCE_UNREADABLE\t{src}\t{exc}", file=sys.stderr)
+              rows = []
+
+          for row in rows:
+              if not row.strip():
+                  continue
+              parts = row.split("\t")
+              if len(parts) != 3:
+                  print(f"PIN_ROW_MALFORMED\t{row}", file=sys.stderr)
+                  continue
+              repo_root, pinned_sha, upstream_ref = (p.strip() for p in parts)
+              if not repo_root.startswith("/"):
+                  print(f"PIN_ROOT_NOT_ABSOLUTE\t{row}", file=sys.stderr)
+                  continue
+              if not SHA_RE.match(pinned_sha):
+                  print(f"PIN_SHA_NOT_FULL_HEX\t{row}", file=sys.stderr)
+                  continue
+              if repo_root in seen:
+                  # One tree, one comparison target. A second row for the same
+                  # root would be two answers to one question.
+                  print(f"PIN_ROOT_DUPLICATE\t{row}", file=sys.stderr)
+                  continue
+              seen.add(repo_root)
+              pins.append(
+                  {
+                      "repo_root": repo_root,
+                      "pinned_sha": pinned_sha,
+                      "upstream_ref": upstream_ref,
+                      "recorded_at": recorded_at,
+                  }
+              )
+
+          with open(dest, "w", encoding="utf-8") as fh:
+              json.dump({"version": SCHEMA_VERSION, "pins": pins}, fh, indent=2)
+              fh.write("\n")
+          print(f"wrote {len(pins)} product-clone pin(s) to {dest}")
+          # ---8<--- OMN-18117 END product-clone-pin-render
+          PYEOF
+
+          echo "== OMN-18117 product-clone comparison pins =="
+          cat "${RUNNER_TEMP}/product-clone-pins.json"
 
           # One environment per repo, in that repo, built by that repo's own
           # lockfile. Nothing is cross-installed into any other venv — the
@@ -1551,6 +1689,13 @@ jobs:
           # failure rather than a hang.
           GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
           GIT_TERMINAL_PROMPT: "0"
+          # OMN-18117: the comparison targets this run materialised against,
+          # written by the materialise step above. With this set, the
+          # collector measures each clone's HEAD against the tip recorded when
+          # the run picked that tree up, instead of re-fetching a `dev` that
+          # has advanced since. Without it (every local invocation) the
+          # OMN-16846 live-fetch comparison is unchanged.
+          DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: ${{ runner.temp }}/product-clone-pins.json
           # OMN-17863: the JS half of the hermetic behaviour-check
           # environment. node_dod_verify stages a lock-exact tree per
           # (project, lockfile) and installs into it with
@@ -1892,6 +2037,13 @@ jobs:
           # failure rather than a hang.
           GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
           GIT_TERMINAL_PROMPT: "0"
+          # OMN-18117: the comparison targets this run materialised against,
+          # written by the materialise step above. With this set, the
+          # collector measures each clone's HEAD against the tip recorded when
+          # the run picked that tree up, instead of re-fetching a `dev` that
+          # has advanced since. Without it (every local invocation) the
+          # OMN-16846 live-fetch comparison is unchanged.
+          DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: ${{ runner.temp }}/product-clone-pins.json
           # OMN-17863: the JS half of the hermetic behaviour-check
           # environment. node_dod_verify stages a lock-exact tree per
           # (project, lockfile) and installs into it with

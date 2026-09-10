@@ -28,6 +28,7 @@ from deploy_agent.compose_budget import (
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
+    DEV_LANE_ONLY_BUILDABLE_SERVICES,
     BuildSource,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
@@ -38,6 +39,10 @@ from deploy_agent.events import (
     PhaseStatus,
     Scope,
     services_for_scope,
+)
+from deploy_agent.ref_fence import (
+    ModelRefLineageFacts,
+    assert_ref_not_stale_branch,
 )
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
@@ -420,7 +425,9 @@ def assert_prod_request_has_stability_digest(
         )
 
 
-def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
+def _requested_services_for_up(
+    scope: Scope, services: list[str], *, lane: EnumRuntimeLane | None = None
+) -> list[str]:
     """Return the explicit service list compose should recreate for this scope.
 
     Runtime scope must always target the runtime service list directly so a
@@ -435,11 +442,16 @@ def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
     collided with the live ``omnibase-infra-infisical`` container, breaking
     Redpanda/Postgres/Valkey/Phoenix. Forcing an explicit runtime service list
     combined with ``--no-deps`` in ``_compose_up`` prevents that regression.
+
+    OMN-18108: ``lane`` is threaded through so a DEV runtime deploy also
+    recreates the dev-lane-only services. It defaults to ``None`` (the
+    lane-agnostic base list) so a caller that names no lane cannot silently
+    acquire them, and prod/stability behaviour is unchanged.
     """
     if services:
         return services
     if scope == Scope.RUNTIME:
-        return services_for_scope(scope)
+        return services_for_scope(scope, lane=lane)
     return []
 
 
@@ -835,24 +847,62 @@ def runtime_compose_up_budget(
     )
 
 
-def runtime_image_build_budget(profile: str) -> ModelBuildBudget:
+def runtime_image_build_budget(
+    profile: str, compose_files: tuple[str, ...] = (COMPOSE_FILE,)
+) -> ModelBuildBudget:
     """Derive the ``docker compose --profile <profile> build`` ceiling (OMN-18072).
 
-    Reads the SAME compose file the build is about to invoke -- the tracked
-    base, which is the only ``-f`` argument ``_compose_build`` passes -- and the
-    Dockerfile that file names, so a new runtime service or a new Dockerfile
-    step moves the ceiling with it. See ``deploy_agent.build_budget`` for the
+    Reads the SAME compose files the build is about to invoke and the
+    Dockerfiles they name, so a new runtime service or a new Dockerfile step
+    moves the ceiling with it. See ``deploy_agent.build_budget`` for the
     measurements and for why a percentile over the recorded history is not
     derivable from a history whose two longest entries were killed at the flat
     constant rather than measured.
+
+    ``compose_files`` defaults to the tracked base alone, which is what the
+    lane-agnostic build passes. OMN-18108's DEV-lane addendum build passes the
+    base plus the lane overlay: the ceiling it derives is therefore an
+    over-estimate (it counts the base images too, which that command does not
+    rebuild). Over-estimating a ceiling only delays a kill; under-estimating it
+    kills a healthy build, which is the failure OMN-18072 existed to remove.
     """
     return derive_image_build_budget(
-        (COMPOSE_FILE,),
+        compose_files,
         profile,
         per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
         per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
         floor_seconds=RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
     )
+
+
+def preflight_required_compose_env_script() -> str:
+    """Path to the stdlib-only required-compose-env preflight in the deploy source.
+
+    A named seam rather than an inline f-string so a test can point it at a
+    checkout that has the script, or at one that does not, without reaching into
+    ``REPO_DIR`` -- the same visible path repoint the compose-up and image-build
+    budget fixtures already take (OMN-18057, OMN-18072).
+    """
+    return f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+
+
+class PreflightScriptUnavailableError(RuntimeError):
+    """Raised when the required-compose-env preflight could not be executed.
+
+    OMN-18123. Distinct from ``REQUIRED_COMPOSE_ENV_MISSING``, which means the
+    preflight RAN and found unset variables. This one means it never ran, so
+    nothing is known about the compose environment either way.
+
+    Every dev-lane rebuild between 2026-09-10T00:49:01Z and 03:31:59Z failed
+    under the wrong class: the deploy-source clone had been reset onto a commit
+    predating ``scripts/preflight_required_compose_env.py``, the interpreter
+    could not open the file, and the refusal announced a compose-environment
+    problem that did not exist. The real cause survived only as a trailing
+    CPython message inside a differently-named error.
+
+    Both classes refuse the deploy. The refusal posture OMN-17530 established --
+    no soft-fail, no "continue if the script is missing" -- is unchanged.
+    """
 
 
 class DeployExecutor:
@@ -1217,6 +1267,14 @@ class DeployExecutor:
             if result.returncode != 0:
                 raise RuntimeError(f"Git fetch failed: {result.stderr}")
 
+        # OMN-18122: refuse a branch alias that would move the clone BACKWARDS
+        # before anything touches the tree. The fetch above is what makes the
+        # comparison meaningful -- both refs are now current -- and the reset
+        # below is the mutation being fenced.
+        assert_ref_not_stale_branch(
+            self._ref_lineage_facts(git_ref, timeout=timeout),
+        )
+
         # Reset to ref
         result = _run(
             ["git", "-C", REPO_DIR, "reset", "--hard", git_ref],
@@ -1234,6 +1292,71 @@ class DeployExecutor:
 
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
+
+    def _ref_lineage_facts(self, git_ref: str, *, timeout: int) -> ModelRefLineageFacts:
+        """Ask git where ``git_ref`` sits relative to this lane's tracking branch.
+
+        Gathers the facts :func:`assert_ref_not_stale_branch` decides on. Kept
+        separate from that decision so the rule itself is a pure function with
+        no repository on disk (OMN-18122).
+
+        ``git rev-parse --symbolic-full-name`` is what distinguishes a branch
+        alias from a commit SHA: it prints a full ref name for a branch and
+        nothing at all for a SHA. That is a git-native answer rather than a
+        regex over the string, so a tag, a ``HEAD``, and an abbreviated SHA are
+        all classified by what they actually resolve to.
+        """
+        tracking_ref = load_tracking_remote_ref_from_env()
+
+        symbolic = _run(
+            ["git", "-C", REPO_DIR, "rev-parse", "--symbolic-full-name", git_ref],
+            timeout=timeout,
+        )
+        is_branch_reference = bool(symbolic.stdout.strip())
+
+        behind = 0
+        ahead = 0
+        if is_branch_reference and git_ref != tracking_ref:
+            counts = _run(
+                [
+                    "git",
+                    "-C",
+                    REPO_DIR,
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    f"{tracking_ref}...{git_ref}",
+                ],
+                timeout=timeout,
+            )
+            # Left column: commits on the tracking ref only (the requested ref
+            # is BEHIND by these). Right column: commits on the requested ref
+            # only (it is AHEAD by these).
+            fields = counts.stdout.split()
+            if counts.returncode == 0 and len(fields) == 2:
+                behind, ahead = int(fields[0]), int(fields[1])
+            else:
+                # A comparison that could not be made is not evidence that the
+                # ref is fine. Refusing here would block every deploy on a
+                # transient git failure, so the fence is skipped and the reason
+                # is logged loudly rather than swallowed.
+                logger.warning(
+                    "OMN-18122 ref fence could not compare %s against %s "
+                    "(rc=%s, stdout=%r); the fence did NOT run for this deploy",
+                    git_ref,
+                    tracking_ref,
+                    counts.returncode,
+                    counts.stdout.strip(),
+                )
+                is_branch_reference = False
+
+        return ModelRefLineageFacts(
+            requested_ref=git_ref,
+            tracking_ref=tracking_ref,
+            is_branch_reference=is_branch_reference,
+            commits_ahead_of_tracking=ahead,
+            commits_behind_tracking=behind,
+        )
 
     def _preflight_required_compose_env(
         self,
@@ -1257,7 +1380,24 @@ class DeployExecutor:
         under the interpreter running this agent, so a missing project venv
         cannot be the reason the list goes unseen.
         """
-        script = f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+        script = preflight_required_compose_env_script()
+        # OMN-18123: a script that could not be RUN is not a script that RAN and
+        # found unset variables. Both refuse the deploy -- there is still no
+        # soft-fail branch -- but they are different facts and the caller is told
+        # which one happened. Checked here rather than inferred from the
+        # interpreter's stderr, because that text is a CPython message a reader
+        # has to know to look past the error class for, and it is what hid the
+        # real cause (a deploy clone reset onto a commit predating this script)
+        # behind REQUIRED_COMPOSE_ENV_MISSING for three hours.
+        if not Path(script).is_file():
+            raise PreflightScriptUnavailableError(
+                f"PREFLIGHT_SCRIPT_UNAVAILABLE for lane {lane.value} -- the "
+                f"required-compose-env preflight could not be run: {script} is "
+                f"not a file. The deploy source directory is {REPO_DIR}; a clone "
+                "checked out at a commit that predates this script produces "
+                "exactly this. Compose validation was not attempted, and this "
+                "says nothing about whether the compose environment is complete."
+            )
         cmd = [
             sys.executable,
             script,
@@ -1588,11 +1728,18 @@ class DeployExecutor:
                 runtime_lane=lane,
                 git_ref=git_ref,
             )
+            self._build_dev_lane_only_services(
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                lane=lane,
+                git_ref=git_ref,
+            )
             self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
             self._compose_up(
                 Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
             )
-            return services_for_scope(Scope.FULL)
+            return services_for_scope(Scope.FULL, lane=lane)
 
         self._compose_build(
             scope,
@@ -1602,8 +1749,60 @@ class DeployExecutor:
             runtime_lane=lane,
             git_ref=git_ref,
         )
+        if scope == Scope.RUNTIME:
+            self._build_dev_lane_only_services(
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                lane=lane,
+                git_ref=git_ref,
+            )
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
-        return services if services else services_for_scope(scope)
+        return services if services else services_for_scope(scope, lane=lane)
+
+    def _build_dev_lane_only_services(
+        self,
+        git_sha: str,
+        on_phase_update: PhaseCallback,
+        *,
+        build_source: BuildSource | str,
+        lane: EnumRuntimeLane,
+        git_ref: str,
+    ) -> None:
+        """Build the DEV lane's own runtime services (OMN-18108). No-op elsewhere.
+
+        These are declared only in ``docker/docker-compose.dev-lane.yml``, which
+        the lane-agnostic build above never passes, so without this command the
+        up phase recreates them from whatever image they already carry and
+        reports success. That is exactly what left eight services ~35 commits
+        behind on the .201 dev lane while the deploy agent's own terminal event
+        said the deploy succeeded.
+
+        Additive and explicit: a SECOND build naming the services, rather than
+        widening the first one's compose files, so prod and stability-test issue
+        a byte-identical command to before. The tag-referenced services are
+        excluded by ``DEV_LANE_ONLY_BUILDABLE_SERVICES`` -- ``docker compose
+        build`` has nothing to do for a service that carries only an ``image:``.
+        """
+        if lane != EnumRuntimeLane.DEV or not DEV_LANE_ONLY_BUILDABLE_SERVICES:
+            return
+        logger.info(
+            "_build_dev_lane_only_services: building %d dev-lane-only services "
+            "the base compose file does not declare: %s",
+            len(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+            ", ".join(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+        )
+        self._compose_build(
+            Scope.RUNTIME,
+            git_sha,
+            on_phase_update,
+            build_source=build_source,
+            runtime_lane=lane,
+            git_ref=git_ref,
+            compose_files=lane_config_for(lane).compose_files,
+            services=DEV_LANE_ONLY_BUILDABLE_SERVICES,
+            stage_workspace=False,
+        )
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
         """Resolve the exact stability-proven image digest for a prod deploy.
@@ -2009,6 +2208,9 @@ class DeployExecutor:
         expected_build_source: BuildSource | str | None = None,
         runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
         git_ref: str = "",
+        compose_files: tuple[str, ...] = (COMPOSE_FILE,),
+        services: tuple[str, ...] = (),
+        stage_workspace: bool = True,
     ) -> None:
         """Build images with --build-arg GIT_SHA to bust the COPY src/ layer cache.
 
@@ -2023,6 +2225,16 @@ class DeployExecutor:
 
         For BUILD_SOURCE=workspace, stages sibling repos into the build context
         via stage_workspace.sh before invoking docker compose build (OMN-9470).
+
+        OMN-18108: ``compose_files`` / ``services`` / ``stage_workspace`` exist
+        so a DEV deploy can issue a SECOND, additive build for the dev-lane-only
+        services, which are declared in the lane overlay this command otherwise
+        never passes. The defaults reproduce the previous command exactly, so
+        the prod and stability-test build is byte-unchanged. ``stage_workspace``
+        is False on that second call: staging is the expensive, tree-mutating
+        half and it has already run for the same refs in the same deploy --
+        re-running it would re-vendor identical siblings and reset
+        ``sibling_source_refs`` the terminal event reports.
         """
         profile = "core" if scope == Scope.CORE else "runtime"
         # OMN-18072: derived from the build model, never a bare constant. The
@@ -2030,7 +2242,7 @@ class DeployExecutor:
         # consecutive sanctioned dev rebuilds at exactly 300s, the second with a
         # warm BuildKit cache. It still bounds the pinned-digest pull and the
         # migration preflight, which are not builds and are not affected.
-        budget = runtime_image_build_budget(profile)
+        budget = runtime_image_build_budget(profile, compose_files)
         timeout = budget.timeout_seconds
         logger.info("Phase %s image-build ceiling %s", profile, budget.describe())
 
@@ -2057,7 +2269,7 @@ class DeployExecutor:
         # that both integrate on `dev`.
         sibling_fallback = load_tracking_ref_from_env()
 
-        if selected_source == BuildSource.WORKSPACE:
+        if selected_source == BuildSource.WORKSPACE and stage_workspace:
             if not omni_home:
                 raise RuntimeError(
                     "BUILD_SOURCE=workspace requires OMNI_HOME before build"
@@ -2107,11 +2319,13 @@ class DeployExecutor:
         build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         runtime_version = _runtime_version_from_pyproject()
 
+        compose_file_args: list[str] = []
+        for compose_file in compose_files:
+            compose_file_args.extend(["-f", compose_file])
         cmd = [
             "docker",
             "compose",
-            "-f",
-            COMPOSE_FILE,
+            *compose_file_args,
             "-p",
             COMPOSE_PROJECT,
             "--profile",
@@ -2131,6 +2345,10 @@ class DeployExecutor:
             f"OMNIMARKET_REF={omnimarket_ref}",
         ]
         cmd.extend(validated_args)
+        # Service names are positional and go last (`docker compose build
+        # [OPTIONS] [SERVICE...]`). Empty by default, which is the lane-agnostic
+        # "every buildable service in the profile" command.
+        cmd.extend(services)
         # OMN-18072: a blown build ceiling is a build OUTCOME with a name, not
         # a raw TimeoutExpired carrying a forty-token argv dump into the
         # terminal record. Nothing has been recreated at this point -- the build
@@ -2165,14 +2383,16 @@ class DeployExecutor:
 
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
-        requested_services = _requested_services_for_up(scope, services)
+        requested_services = _requested_services_for_up(scope, services, lane=lane)
         # For runtime scope, verification MUST be bounded by the requested
         # runtime service list so the runtime-only rebuild never implicitly
         # waits on core infra containers (OMN-9455). The same list bounds the
         # ceiling derivation, so an unrelated long healthcheck elsewhere in the
         # compose file cannot inflate it.
         expected = (
-            requested_services if requested_services else services_for_scope(scope)
+            requested_services
+            if requested_services
+            else services_for_scope(scope, lane=lane)
         )
 
         if scope == Scope.RUNTIME:

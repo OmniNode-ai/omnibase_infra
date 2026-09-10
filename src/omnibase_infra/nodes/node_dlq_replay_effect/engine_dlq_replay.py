@@ -162,6 +162,15 @@ class ModelDlqReplayEngineConfig(BaseModel):
     max_records_per_run: int = Field(default=200, gt=0)
     max_run_duration_seconds: float = Field(default=10.0, gt=0.0)
     commit_every_n_records: int = Field(default=25, gt=0)
+    # OMN-18119: how long a topic is given to produce its FIRST record before
+    # the drain moves on to the next declared topic. The contract declares
+    # three subscribe topics and two of them are usually empty; without a short
+    # probe an empty topic would spend the run's whole remaining wall clock in
+    # aiokafka's ``getone()`` and starve the topic behind it in the order.
+    # Deliberately much smaller than ``max_run_duration_seconds``: this bounds
+    # a NEGATIVE answer ("nothing here"), and a topic that does produce a
+    # record continues under the run's shared remaining budget.
+    idle_probe_seconds: float = Field(default=0.5, gt=0.0)
 
     @field_validator("bootstrap_servers")
     @classmethod
