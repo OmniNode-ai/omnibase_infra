@@ -521,9 +521,17 @@ services:
       # the read-only instrument identity node_chain_canary_effect uses for its
       # OMN-16025 link-2 projection readback. Empty-means-skip, exactly as on
       # the two keys above: a lane with no canary provisioned leaves the role
-      # absent, migration 104 skips its grants with a NOTICE, and the canary
+      # absent, migration 105 skips its grants with a NOTICE, and the canary
       # reports skipped_not_configured -- red and honest, never a green from a
       # check that never ran.
+      #
+      # OMN-16964 correction: this comment used to name "migration 104" as the
+      # file granting this role. Ordinal 104 is BURNED (OMN-17923 retired
+      # 104_create_validator_ro_role.sql and the record forbids reuse), and no
+      # file ever issued the link-2 grant -- it is live on the .201 dev lane
+      # only because it was applied out of band, which is filed as OMN-18115.
+      # 105_create_ledger_chain.sql issues the LINK-5 grant reproducibly; the
+      # link-2 grant is still unissued by any migration in this repo.
       CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
