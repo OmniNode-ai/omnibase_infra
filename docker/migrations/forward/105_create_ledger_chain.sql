@@ -177,13 +177,17 @@ COMMENT ON COLUMN public.ledger_chain.verifier_verdict IS
 -- already documents exactly this contract; that comment names 'migration 104',
 -- which is now a burned ordinal, and is corrected in the same change.
 --
--- NOTE ON REPRODUCIBILITY, recorded because it is a live gap this file closes
--- by half: the link-2 column grant on the .201 dev lane is NOT reproducible
--- from this repository. `chain_canary_reader` holds it live, but no migration
--- in docker/migrations/forward/ issues it and `grep -rn chain_canary_reader
--- src/` returns nothing — it was applied out of band. This file makes the
--- link-5 grant reproducible; the link-2 grant remains hand-applied and is
--- filed separately.
+-- NOTE ON WHERE THE SIBLING GRANT LIVES, since it is NOT a .sql file and an
+-- earlier revision of this header wrongly concluded from that absence that it
+-- did not exist. The link-2 grant is issued by
+-- `scripts/run-forward-migrations.sh` in its login-only role grant seam
+-- (OMN-18060, #3352): the runner reasserts chain_canary_reader's
+-- column-scoped SELECT on `public.delegation_workflow_state
+-- (correlation_id, state)` on every migration run, and
+-- `tests/unit/infra/test_login_only_role_grants_omn18060.py` pins the entry.
+-- Both grants are therefore reproducible from this repository; they simply
+-- live in two different seams, because link 5's accompanies the CREATE TABLE
+-- that needs it and link 2's does not have one to accompany.
 DO $$
 DECLARE
     executing_role TEXT := current_user;
