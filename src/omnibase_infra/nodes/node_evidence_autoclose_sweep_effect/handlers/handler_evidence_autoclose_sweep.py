@@ -1053,20 +1053,27 @@ def _evidence_after_revert(
     return tuple(postdating), tuple(unreadable)
 
 
-def _has_verified_probative_check(verdict: dict[str, object]) -> bool:
-    """Whether any check on this verdict VERIFIED.
+def _has_verified_bound_check(verdict: dict[str, object]) -> bool:
+    """Whether any check on this verdict VERIFIED a criterion binding.
 
     ``verified`` is the only status that is both a verdict and a proof:
     ``non_probative`` ran and could not have gone the other way (OMN-15391),
     ``skipped`` never ran, ``superseded`` was replaced. So "verified probative
-    check" and "check whose status is verified" are the same set, and this is
-    the release's second conjunct — evidence that postdates the revert releases
-    nothing when the checks it feeds prove nothing.
+    check" starts with "check whose status is verified". OMN-18106's
+    post-revert release also requires that proof to be tied to at least one
+    acceptance criterion through ``binds_ac``. A green but unbound provenance
+    row is not enough to say the postdating evidence is the evidence the
+    ticket is judged on.
     """
-    return any(
-        _check_status(check) == _CHECK_STATUS_VERIFIED
-        for check in _check_records(verdict)
-    )
+    for check in _check_records(verdict):
+        if _check_status(check) != _CHECK_STATUS_VERIFIED:
+            continue
+        raw = check.get(_CHECK_BINDS_AC_KEY)
+        if not isinstance(raw, list):
+            continue
+        if any(_canonical_ac_label(str(declared)) for declared in raw):
+            return True
+    return False
 
 
 def _prior_flip_fingerprints(bodies: tuple[str, ...]) -> frozenset[str]:
@@ -4883,7 +4890,7 @@ class HandlerEvidenceAutocloseSweep:
                             + "\n\nAn ordering that cannot be resolved holds."
                         ),
                     )
-                if postdating and _has_verified_probative_check(verdict):
+                if postdating and _has_verified_bound_check(verdict):
                     post_revert_release = (
                         "released_post_revert_evidence: this ticket was moved "
                         f"back out of a completed state at {revert_at}, and "

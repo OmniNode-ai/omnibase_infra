@@ -35,6 +35,7 @@ import pytest
 
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
+    _has_verified_bound_check,
     _parse_iso_utc,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
@@ -402,3 +403,17 @@ def test_iso_parser_accepts_only_trailing_z_designator() -> None:
     assert _parse_iso_utc("2026-09-02T07:46:30Z") is not None
     assert _parse_iso_utc("2026-09-02T07:46:30+00:00") is not None
     assert _parse_iso_utc("2026-09-Z02T07:46:30Z") is None
+
+
+def test_post_revert_release_requires_a_verified_bound_check() -> None:
+    unbound = _skill_result([_check("dod-unbound", "verified", "behavior", ())])[
+        "result"
+    ]
+    assert isinstance(unbound, dict)
+    assert not _has_verified_bound_check(unbound)
+
+    bound = _skill_result([_check("dod-bound", "verified", "behavior", ("AC1",))])[
+        "result"
+    ]
+    assert isinstance(bound, dict)
+    assert _has_verified_bound_check(bound)
