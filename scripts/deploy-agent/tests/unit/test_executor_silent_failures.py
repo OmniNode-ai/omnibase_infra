@@ -11,7 +11,7 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch
 
-from deploy_agent.events import Phase, PhaseStatus
+from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus
 from deploy_agent.executor import DeployExecutor
 
 
@@ -92,7 +92,9 @@ def test_git_pull_reset_hard_fails() -> None:
 
         with pytest.raises(RuntimeError) as excinfo:
             executor.git_pull(
-                "refs/heads/nonexistent-xyz", on_phase_update=_noop_phase_update
+                "refs/heads/nonexistent-xyz",
+                lane=EnumRuntimeLane.DEV,
+                on_phase_update=_noop_phase_update,
             )
         assert "Git reset --hard" in str(excinfo.value)
         assert "fatal: ambiguous argument" in str(excinfo.value)
@@ -112,6 +114,13 @@ def test_happy_path() -> None:
 
     with patch("deploy_agent.executor._run", side_effect=fake_run):
         executor.preflight(on_phase_update=_noop_phase_update)
-        sha = executor.git_pull("origin/main", on_phase_update=_noop_phase_update)
+        # OMN-18122: the dev lane deploys the branch it declares it tracks. This
+        # read "origin/main" until the ref fence landed, which is the shape the
+        # incident was made of -- a dev deploy naming the release-synced branch.
+        sha = executor.git_pull(
+            "origin/dev",
+            lane=EnumRuntimeLane.DEV,
+            on_phase_update=_noop_phase_update,
+        )
 
     assert sha == sentinel_sha

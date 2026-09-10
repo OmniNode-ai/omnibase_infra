@@ -272,12 +272,62 @@ def manifest_ids() -> tuple[str, ...]:
     return tuple(entry["id"] for entry in _load_manifest())
 
 
-# The four OMN-14974/OMN-15313 delegation ids. Kept as their own tuple so a
-# failure says WHICH half of the fence moved.
+# The OMN-14974/OMN-15313 delegation hold. Kept as its own tuple so a failure
+# says WHICH half of the fence moved.
+#
+# It was the QUARTET 0023-0026 until OMN-15683 (2026-09-08), when the operator
+# ruling that a fence on a migration is a defect to close released the
+# delegation path. What survived, and why, because a future reader will
+# otherwise re-derive it from the quartet this tuple used to be:
+#
+#   0024 (drop routing_rule / routing_confidence / routing_candidates) and
+#   0025 (tenant_id on delegation_judge_verdict_events) LEFT THE BASELINE.
+#   Neither declares FORCE ROW LEVEL SECURITY, so neither is caught by the
+#   OMN-15336 item-4 guard on the way out. 0024 is read by no live code -- the
+#   only occurrences anywhere are hardcoded NULL literals in the dashboard
+#   views' jsonb_build_object, which never SELECT the columns -- and the
+#   columns do not exist at all on the .201 dev lane. 0025's table holds ZERO
+#   rows there, so its ADD COLUMN and correlation_id backfill lock nothing out
+#   of an existing dataset.
+#
+#   0026 STAYS FULLY FENCED, on a measurement rather than a hold-over. It was
+#   released on the dev arm in this change's first revision and applied on the
+#   .201 dev lane, and its ENABLE + FORCE RLS on delegation_judge_verdict_events
+#   refuses every write the lane's own ASYNC judge-verdict writer issues: that
+#   writer resolves tenant_id by correlation join (a UUID on that lane) and then
+#   INSERTs through AsyncpgAdapter.execute with no `tenant=` argument, so the
+#   adapter stamps the GUC from resolve_read_tenant(None) -- the house SLUG --
+#   and the WITH CHECK predicate is false for every row. That is the OMN-15919
+#   two-divergent-resolvers shape, and it is exactly the un-gate bar this fence
+#   has always stated ("prove the writer sets app.tenant_id per connection").
+#   It was reverted on the lane and taken back out of the release. Note also
+#   that a BASELINE removal of 0026 is independently FATAL: it enables FORCE ROW
+#   LEVEL SECURITY and is not grandfathered, so the item-4 guard refuses it --
+#   measured against a virgin Postgres through the real runner, "FATAL: ...
+#   enables FORCE ROW LEVEL SECURITY but is not in the operator fence manifest
+#   ... NOTHING was applied by this migration".
+#
+#   0023 STAYS FULLY FENCED, and as a SUPERSEDED id rather than a pending
+#   ruling. Its delegation_events half CREATEs tenant_isolation with a
+#   TEXT-to-TEXT comparison -- deliberately, per its own "SEAM DECISION" -- and
+#   the column is uuid once the conversion chain has run. `uuid = text` has no
+#   operator, so that CREATE POLICY raises `operator does not exist: uuid =
+#   text`; and because the runner is `psql -v ON_ERROR_STOP=1 -f` with NO
+#   --single-transaction, the ENABLE/FORCE and the DROP POLICY ahead of it have
+#   already COMMITTED, leaving the table FORCE-RLS with ZERO policies. 0034
+#   restates that policy with the ::uuid cast and restates the app_dashboard
+#   GRANT, so nothing is lost by holding it.
 FENCED_DELEGATION_IDS = (
     "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql",
-    "node:node_projection_delegation:0024_drop_unwired_routing_columns.sql",
-    "node:node_projection_delegation:0025_delegation_judge_verdict_events_tenant_id.sql",
+    "node:node_projection_delegation:"
+    "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
+)
+# The subset of the delegation hold that no lane may release today. Both are
+# here: 0023 aborts against the converted column, and 0026 locks the lane's own
+# async judge-verdict writer out of its table (measured 2026-09-08). 0026 is
+# releasable the moment that writer threads the row's tenant into the adapter.
+UNRELEASABLE_DELEGATION_IDS = (
+    "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql",
     "node:node_projection_delegation:"
     "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
 )
@@ -389,8 +439,29 @@ FENCED_HOOK_EVENT_CAPTURE_IDS = (
 # predicates before the switch and carries 0033's body verbatim otherwise;
 # proven by execution in
 # tests/integration/migrations/test_omn17316_role_set_membership_guard.py.
-# 0031, 0032 and 0033 all stay in this tuple permanently: they are RETIRED, not
-# released, and when the operator un-gates it is 0034 and only 0034.
+# OMN-15683 superseded 0034 in turn, making 0036 the FIFTH id here. 0034
+# resolves identity with a SINGLE predicate, m.tenant_slug = d.tenant_id, and
+# has NO branch for a tenant_id that is ALREADY the canonical UUID. Write-time
+# UUID stamping (OMN-16804) is live and writes canonical UUIDs into the
+# still-text column, so the column is MIXED: measured read-only on onex-dev
+# 2026-09-08, 26 of 229 rows across 3 values already hold canonical UUIDs that
+# ARE in tenant_registry_mirror -- under tenant_uuid, which 0034 never reads.
+# 0034 aborts on all of them, and its message blames the tenant-registry
+# projection for data the projection has. 0036 resolves on BOTH forms and stays
+# fail-closed on neither; proven by execution against the seeded onex-dev shape
+# on the .201 dev-lane Postgres. There is no 0035 in this chain -- 0035 is an
+# unrelated GRANT and 0036 is simply the next free ordinal.
+# 0036 JOINED THEM on 2026-09-08, later the same day, superseded by 0037: it
+# reads tenant_registry_mirror AFTER set_config('role', <delegation_events'
+# owner>, true), and on onex-dev that owner is absent from the mirror's ACL --
+# staging deploy run 34281092205 aborted with `permission denied for table
+# tenant_registry_mirror` at inline_code_block line 262 and rolled its whole
+# transaction back. 0037 snapshots the mirror into a session-local TEMP table
+# as the MIGRATE IDENTITY, before the role switch, and joins that snapshot
+# everywhere below.
+# 0031, 0032, 0033, 0034 and 0036 all stay in this tuple permanently: they are
+# RETIRED, not released, and when the operator un-gates it is 0037 and only
+# 0037.
 FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "node:node_projection_delegation:0031_delegation_events_tenant_id_to_uuid.sql",
     "node:node_projection_delegation:"
@@ -399,6 +470,10 @@ FENCED_DELEGATION_UUID_CONVERSION_IDS = (
     "0033_delegation_events_uuid_via_registry_single_transaction.sql",
     "node:node_projection_delegation:"
     "0034_delegation_events_uuid_via_registry_role_set_guard.sql",
+    "node:node_projection_delegation:"
+    "0036_delegation_events_uuid_mixed_representation.sql",
+    "node:node_projection_delegation:"
+    "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
 )
 # Pinned expectation for the manifest content (OMN-15349): the baseline fence,
 # exact and in order. A manifest edit that moves this must update the pin in
@@ -516,8 +591,26 @@ DEV_LANE_VALUE = "dev"
 # The dev lane's OUTCOME is unchanged — all three still apply there — but two of
 # them now apply because nothing fences them, not because this release un-gates
 # them.
+#
+# WIDENED by OMN-15683 (2026-09-08): the dev/lab arm now also releases the
+# operative uuid conversion. THE RELEASED ID IS 0036, NOT 0034 -- 0034 was
+# released here earlier the same day and lost the release when the onex-dev
+# read-only enumeration showed it cannot convert a mixed-representation column
+# (it resolves on m.tenant_slug alone; 26 of 229 rows already hold canonical
+# UUIDs). 0034 keeps its baseline entry and is retired in place. 0036 stays in
+# the BASELINE
+# manifest rather than leaving it, because it enables FORCE ROW LEVEL SECURITY
+# and is not grandfathered -- a baseline removal is FATAL under the OMN-15336
+# item-4 guard, whose own message prescribes exactly this remedy ("add a fence
+# entry citing the owning ticket ... with a lane release only if an operator
+# ruling authorizes one"). It is also the safer outcome: the .201
+# stability-test lane still holds delegation_events.tenant_id as TEXT with an
+# EMPTY tenant_registry_mirror, so a baseline release would abort there and
+# take every later node directory with it by lexical sort order.
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
+    "node:node_projection_delegation:"
+    "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
 )
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
@@ -956,25 +1049,36 @@ def test_unset_and_unknown_lane_are_fully_fenced() -> None:
     )
 
 
-def test_dev_lane_releases_exactly_the_registration_hold() -> None:
-    """Ruling 15 is scoped to node_service_registry and to nothing else.
+def test_dev_lane_releases_exactly_the_ruled_set() -> None:
+    """Two rulings, one arm, and nothing else in it.
 
-    Post-OMN-17150 that is 0002 alone, because 0000/0001 are no longer fenced
-    for any lane to release. Ruling 15 itself is untouched — the dev lane still
-    ends up with the whole trio applied.
+    Ruling 15 is scoped to node_service_registry; post-OMN-17150 that is 0002
+    alone, because 0000/0001 are no longer fenced for any lane to release, and
+    the dev lane still ends up with the whole trio applied. OMN-15683
+    (2026-09-08) added the operative delegation conversion on the same arm — it
+    stays in the baseline because a removal is FATAL under the item-4 FORCE-RLS
+    guard, so the lane release is the only mechanism that can un-gate it. The
+    id it names is 0036: 0034 held this slot for part of the same day and lost
+    it once the onex-dev enumeration showed it cannot convert a
+    mixed-representation column.
     """
     policies = parse_lane_release_policies(extract_fence_block())
     assert policies[DEV_LANE_VALUE] == LANE_RELEASED_IDS, (
-        "the dev/lab lane release set changed. Operator ruling 15 releases "
-        "exactly the still-fenced half of the registration trio:\n  "
+        "the dev/lab lane release set changed. It must be exactly the "
+        "still-fenced half of the registration trio (ruling 15) plus the "
+        "OMN-15683 delegation pair:\n  "
         + "\n  ".join(LANE_RELEASED_IDS)
         + "\nFound:\n  "
         + "\n  ".join(policies[DEV_LANE_VALUE])
     )
-    # The equality that the two constants are DEFINED separately to express.
-    assert LANE_RELEASED_IDS == FENCED_REGISTRATION_IDS, (
-        "the dev-lane release and the fenced registration hold have diverged"
+    # The composition the constants are DEFINED separately to express.
+    assert set(FENCED_REGISTRATION_IDS) < set(LANE_RELEASED_IDS), (
+        "the dev-lane release no longer covers the fenced registration hold"
     )
+    assert set(LANE_RELEASED_IDS) - set(FENCED_REGISTRATION_IDS) == {
+        "node:node_projection_delegation:"
+        "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
+    }, "the dev-lane release carries ids no operator ruling names"
 
 
 def test_no_lane_can_release_anything_outside_the_fence() -> None:
@@ -993,17 +1097,33 @@ def test_no_lane_can_release_anything_outside_the_fence() -> None:
         )
 
 
-def test_delegation_ids_are_not_releasable_on_any_lane() -> None:
-    """Ruling 15 did not touch the delegation tenant-RLS hold.
+def test_unreleasable_delegation_ids_are_not_releasable_on_any_lane() -> None:
+    """0023 and the retired conversions may not be un-gated by any lane.
 
-    Those four gate live, actively-written tables and their un-gate is a
-    separate, still-pending ruling. No lane may release them.
+    0023 is superseded in place: its CREATE POLICY compares TEXT to TEXT and
+    raises `operator does not exist: uuid = text` against the converted column,
+    after its ENABLE/FORCE and DROP POLICY have already committed. 0031, 0032
+    and 0033 are retired conversions, and neither runner has any supersession
+    awareness, so releasing one applies a superseded conversion on every lane
+    that has not already recorded it. 0026 is here too: releasing it was
+    measured on the .201 dev lane to refuse every write the lane's own async
+    judge-verdict writer issues. 0034 joined them on 2026-09-08, superseded by
+    0036 under OMN-15683 -- it resolves identity on m.tenant_slug alone and
+    aborts on the 26 already-canonical-UUID rows onex-dev holds. OMN-15683
+    released 0036 on the dev/lab lane; that one id is deliberately outside this
+    set.
     """
+    forbidden = set(UNRELEASABLE_DELEGATION_IDS) | set(
+        FENCED_DELEGATION_UUID_CONVERSION_IDS
+    ) - {
+        "node:node_projection_delegation:"
+        "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
+    }
     for label, released in parse_lane_release_policies(extract_fence_block()).items():
-        leaked = sorted(set(released or ()) & set(FENCED_DELEGATION_IDS))
+        leaked = sorted(set(released or ()) & forbidden)
         assert not leaked, (
-            f"lane '{label}' releases OMN-14974/OMN-15313 delegation migrations, "
-            f"which no operator ruling has un-gated: {leaked}"
+            f"lane '{label}' releases delegation migrations that no operator "
+            f"ruling has un-gated: {leaked}"
         )
 
 
@@ -1172,15 +1292,30 @@ def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
     """
     overlay_filename = Path(DEV_LANE_OVERLAY_RELPATH).name
 
+    # OMN-16729: resolve_compose_file_args() moved out of deploy-runtime.sh into
+    # scripts/runtime_build/compose_files.sh, which deploy-runtime.sh and both
+    # lane-refresh wrappers now source. Both halves are asserted: the resolver
+    # layers the overlay, AND deploy-runtime.sh actually loads the file that
+    # defines it -- a lib nobody sources brings the lane up with no indicator
+    # just as surely as a resolver that omits the overlay.
     deploy_runtime = (REPO_ROOT / "scripts" / "deploy-runtime.sh").read_text(
         encoding="utf-8"
     )
+    assert "runtime_build/compose_files.sh" in deploy_runtime, (
+        "deploy-runtime.sh does not source the shared compose-file resolver, so "
+        "it has no lane -> compose-file mapping at all"
+    )
+    compose_files = (
+        REPO_ROOT / "scripts" / "runtime_build" / "compose_files.sh"
+    ).read_text(encoding="utf-8")
     resolver = re.search(
         r"^resolve_compose_file_args\s*\(\)\s*\{.*?\n\}",
-        deploy_runtime,
+        compose_files,
         re.DOTALL | re.MULTILINE,
     )
-    assert resolver is not None, "resolve_compose_file_args() not found"
+    assert resolver is not None, (
+        "resolve_compose_file_args() not found in scripts/runtime_build/compose_files.sh"
+    )
     assert overlay_filename in resolver.group(0), (
         f"resolve_compose_file_args() does not layer {overlay_filename} for the "
         "dev lane, so `deploy-runtime.sh` brings the lab lane up with no lane "
@@ -2361,10 +2496,10 @@ def real_registration_tree(tmp_path: Path) -> Path:
         copied.append(filename)
     assert len(copied) == 3, copied
 
-    # One fenced DELEGATION id in the same run, as the negative control: ruling
-    # 15 released the registration trio and nothing else, so this must still be
-    # skipped even on the dev lane.
-    delegation_id = FENCED_DELEGATION_IDS[0]
+    # One UNRELEASABLE delegation id in the same run, as the negative control:
+    # the dev arm releases the registration hold plus the OMN-15683 pair and
+    # nothing else, so 0023 must still be skipped even on the dev lane.
+    delegation_id = UNRELEASABLE_DELEGATION_IDS[0]
     _, del_node, del_file = delegation_id.split(":", 2)
     del_dir = forward / "nodes" / del_node
     del_dir.mkdir(parents=True, exist_ok=True)
@@ -2420,7 +2555,13 @@ def test_dev_lane_applies_the_registration_trio_with_force_rls(
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    for released in LANE_RELEASED_IDS:
+    # Scoped to the registration half of the release set on purpose: this
+    # fixture vendors the registration trio and one delegation marker, so the
+    # OMN-15683 id (0034) is not in this tree at all. Its membership in the dev
+    # arm is pinned statically by test_dev_lane_releases_exactly_the_ruled_set,
+    # and proven by execution on the .201 dev lane; asserting it here would
+    # assert about a file this fixture never wrote.
+    for released in FENCED_REGISTRATION_IDS:
         assert (
             "RELEASED on lane 'dev'" in result.stdout and released in result.stdout
         ), f"{released} was not reported as released on the dev lane:\n{result.stdout}"
@@ -2472,9 +2613,10 @@ def test_dev_lane_applies_the_registration_trio_with_force_rls(
         f"0002's tenant_isolation policy is absent: {policies!r}"
     )
 
-    # NEGATIVE CONTROL: ruling 15 is registration-scoped. The delegation id in
-    # the same run must still be fenced ON the dev lane.
-    delegation_id = FENCED_DELEGATION_IDS[0]
+    # NEGATIVE CONTROL: the dev release is a strict subset of the fence, and
+    # 0023 is in neither ruling 15's scope nor OMN-15683's. It must still be
+    # fenced ON the dev lane.
+    delegation_id = UNRELEASABLE_DELEGATION_IDS[0]
     assert not _table_exists(pg_target, node_db, _marker_for(delegation_id)), (
         f"FENCE BREACH: the dev-lane release leaked to {delegation_id}, which "
         "no operator ruling has un-gated"

@@ -33,6 +33,13 @@ class _FakeExecutor:
     def __init__(self, *, stability_ready_digest: str | None) -> None:
         self.calls: list[str] = []
         self._stability_ready_digest = stability_ready_digest
+        # OMN-18057: the agent reads residue from the executor when it
+        # builds the terminal event.
+        self.container_residue: list[object] = []
+        # OMN-17135: the agent reads the sibling SHAs this deploy vendored
+        # when it builds the terminal event; a double of the executor
+        # carries the attribute too.
+        self.sibling_source_refs: dict[str, str] = {}
 
     def resolve_stability_ready_digest(
         self, service: str = "omninode-runtime"

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import signal
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -18,6 +19,7 @@ from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
     DeployInProgressError,
     EnumRuntimeLane,
+    EnumSelfUpdateBoundary,
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
@@ -120,6 +122,7 @@ class DeployAgent:
             kafka_config=self._kafka_config,
             job_store=self.job_store,
             allowed_lanes=self._allowed_lanes,
+            self_update_hook=self._self_update_pre_accept,
         )
 
         # Handle signals
@@ -148,6 +151,41 @@ class DeployAgent:
         logger.info("Shutdown signal received")
         self._shutdown = True
 
+    def _self_update_pre_accept(self, rewind_offset: Callable[[], None]) -> None:
+        """Self-update boundary before a polled command is marked started.
+
+        Passed to the consumer, which calls it once a command has cleared every
+        acceptance check and before ``job_store.accept``. ``rewind_offset``
+        re-points the committed offset at that command so the replacement
+        process re-reads it (OMN-16442).
+        """
+        self.executor.self_update(
+            boundary=EnumSelfUpdateBoundary.PRE_ACCEPT,
+            skip=self._skip_self_update,
+            on_before_reexec=rewind_offset,
+        )
+
+    def _self_update_post_terminal(self) -> None:
+        """Self-update boundary after a job reaches a terminal, published state.
+
+        This is the deferral half of OMN-16442: an agent that finds itself
+        behind while a deploy is in flight does NOT interrupt that deploy --
+        the deploy completes on the version it started on, and the update fires
+        here, at the next boundary.
+        """
+        try:
+            self.executor.self_update(
+                boundary=EnumSelfUpdateBoundary.POST_TERMINAL,
+                skip=self._skip_self_update,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(  # noqa: TRY400
+                "Self-update at the post-terminal boundary failed, "
+                "staying on the current image: %s "
+                "friction_type=self_update_boundary_failed",
+                e,
+            )
+
     async def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         try:
             with single_flight_lock():
@@ -158,11 +196,23 @@ class DeployAgent:
                 cmd.correlation_id,
             )
             self._publish_rejected(cmd, reason="in_progress")
+            return
+
+        # OMN-16442 job boundary: the job has a terminal status, its result has
+        # been published, and the single-flight lock is released. Deliberately
+        # outside the `with` block above — a re-exec must not happen while this
+        # process holds the deploy lock.
+        self._self_update_post_terminal()
 
     async def _run_deploy(self, cmd: ModelRebuildRequested) -> None:
         self._state = "deploying"
         cid = cmd.correlation_id
         health_checks = []
+        # OMN-18057: what the deploy ACTUALLY did, for the terminal event.
+        # rebuild_scope has always returned the services it brought up and this
+        # method has always discarded the return, which is why every terminal
+        # event reported services_restarted=[] for a scope-default deploy.
+        services_restarted: list[str] = []
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
             self.job_store.update_phase(cid, phase, status)
@@ -196,9 +246,14 @@ class DeployAgent:
             # Preflight
             self.executor.preflight(on_phase_update=on_phase_update)
 
-            # Git pull
+            # Git pull -- OMN-18124: under the lane's host lock, the same
+            # per-compose-project lock refresh_dev_lane.sh takes. The
+            # deploy-source clone is shared with that script, and this agent
+            # took nothing until now.
             self._current_git_sha = self.executor.git_pull(
-                cmd.git_ref, on_phase_update=on_phase_update
+                cmd.git_ref,
+                lane=cmd.runtime_lane,
+                on_phase_update=on_phase_update,
             )
 
             # Regenerate compose from catalog (non-fatal — logs warning on failure)
@@ -217,13 +272,15 @@ class DeployAgent:
 
             # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
             # cache. prod pulls the pinned digest instead of rebuilding from a ref.
-            self.executor.rebuild_scope(
+            services_restarted = self.executor.rebuild_scope(
                 cmd.scope,
                 cmd.services,
                 on_phase_update=on_phase_update,
                 git_sha=self._current_git_sha,
+                # OMN-16442/OMN-17291: the command's own pin, carried through to
+                # stage_workspace.sh as DEPLOY_REF for workspace-mode builds.
+                git_ref=cmd.git_ref,
                 build_source=cmd.build_source,
-                skip_self_update=self._skip_self_update,
                 lane=cmd.runtime_lane,
                 image_digest=cmd.image_digest,
             )
@@ -259,7 +316,14 @@ class DeployAgent:
             job.current_phase = Phase.PUBLISH
             self.job_store._save(job)
             payload = build_completion_payload(
-                job, self._current_git_sha, health_checks
+                job,
+                self._current_git_sha,
+                health_checks,
+                services_restarted=services_restarted,
+                container_residue=self.executor.container_residue,
+                # OMN-17135: which sibling commits this build actually vendored.
+                # The command's git_ref pins omnibase_infra alone.
+                sibling_refs=self.executor.sibling_source_refs,
             )
             if publish_result(payload, self._kafka_config):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS

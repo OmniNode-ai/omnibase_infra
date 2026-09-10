@@ -357,6 +357,7 @@ def _resolved_yaml_with_https(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_loader_resolves_the_ingest_url_from_the_operator_supplied_ref_map(
     tmp_path: Path,
+    lane_credential_map: Path,
 ) -> None:
     """No new mount and no new env var: the ingest URL resolves from the SAME
     operator-supplied ref map the cloud broker ref already resolves from."""
@@ -365,6 +366,7 @@ def test_loader_resolves_the_ingest_url_from_the_operator_supplied_ref_map(
         config_path,
         contract_path=CONTRACT_PATH,
         broker_ref_map_path=ref_map_path,
+        lane_credential_map_path=lane_credential_map,
     )
     assert config.forwarder.https_ingest is not None
     assert (
@@ -376,6 +378,7 @@ def test_loader_resolves_the_ingest_url_from_the_operator_supplied_ref_map(
 
 def test_loader_fails_closed_when_the_ingest_url_ref_is_unresolvable(
     tmp_path: Path,
+    lane_credential_map: Path,
 ) -> None:
     """An opted-in deployment whose ref map has no ingest entry must refuse to
     start, not silently fall back to the direct-MSK leg."""
@@ -391,10 +394,13 @@ def test_loader_fails_closed_when_the_ingest_url_ref_is_unresolvable(
             config_path,
             contract_path=CONTRACT_PATH,
             broker_ref_map_path=ref_map_path,
+            lane_credential_map_path=lane_credential_map,
         )
 
 
-def test_loader_refuses_an_inline_https_ingest_block(tmp_path: Path) -> None:
+def test_loader_refuses_an_inline_https_ingest_block(
+    tmp_path: Path, lane_credential_map: Path
+) -> None:
     """The resolved deployment may not redeclare the contract's ingest values."""
     resolved = yaml.safe_load(RESOLVED_DEPLOYMENT_PATH.read_text(encoding="utf-8"))
     resolved["forwarder"]["https_ingest"] = {"ingest_url_ref": INGEST_URL_REF}
@@ -405,11 +411,13 @@ def test_loader_refuses_an_inline_https_ingest_block(tmp_path: Path) -> None:
             config_path,
             contract_path=CONTRACT_PATH,
             broker_ref_map_path=ref_map_path,
+            lane_credential_map_path=lane_credential_map,
         )
 
 
 def test_a_round_tripped_null_https_ingest_is_not_treated_as_a_redeclaration(
     tmp_path: Path,
+    lane_credential_map: Path,
 ) -> None:
     """``https_ingest`` is optional, so any config round-tripped through
     ``model_dump()`` emits an explicit ``https_ingest: null``. Refusing on key
@@ -424,12 +432,14 @@ def test_a_round_tripped_null_https_ingest_is_not_treated_as_a_redeclaration(
         config_path,
         contract_path=CONTRACT_PATH,
         broker_ref_map_path=ref_map_path,
+        lane_credential_map_path=lane_credential_map,
     )
     assert config.forwarder.https_ingest is not None
 
 
 def test_loader_leaves_the_kafka_outbound_leg_alone_when_the_set_is_absent(
     tmp_path: Path,
+    lane_credential_map: Path,
 ) -> None:
     """Backwards path: a deployment that has not opted in resolves with no HTTPS
     leg and an unchanged cloud broker leg."""
@@ -442,6 +452,7 @@ def test_loader_leaves_the_kafka_outbound_leg_alone_when_the_set_is_absent(
         config_path,
         contract_path=CONTRACT_PATH,
         broker_ref_map_path=ref_map_path,
+        lane_credential_map_path=lane_credential_map,
     )
     assert config.forwarder.https_ingest is None
     assert config.cloud_bus.bootstrap_servers == "b-1.example.kafka.amazonaws.com:9098"

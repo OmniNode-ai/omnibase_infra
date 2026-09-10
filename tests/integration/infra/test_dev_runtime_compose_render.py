@@ -71,6 +71,13 @@ _SECRET_RESOLVER_CONFIG_JSON = (
 )
 _SECRET_RESOLVER_CONFIG_PATH = "/app/data/delegation/secret_resolver.yaml"
 
+# One shared synthetic value for every `${VAR:?}` name the tenant-path block
+# adds (OMN-17530). A named constant rather than eleven string literals: the
+# render only needs each name to be NON-EMPTY, and eleven distinct
+# credential-shaped literals in a test file are eleven things a future reader
+# has to confirm are not real.
+_RENDER_ONLY = "render-only"
+
 # Every :?-required var in docker-compose.infra.yml EXCEPT
 # DEV_REDPANDA_ADVERTISE_HOST, which each test sets (or omits) explicitly.
 BASE_REQUIRED_ENV: dict[str, str] = {
@@ -158,6 +165,30 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     # file. Supplied here so the overlay-layered renders below can run; harmless
     # to the base-only renders, which never read it.
     "ROLE_OMNIDASH_PASSWORD": "test",
+    # OMN-17530: the tenant-scoped control plane in the same overlay. Every one
+    # of these takes the fail-closed `${VAR:?}` form there, so the LAYERED
+    # render aborts without them -- which is the point of that form and is how
+    # this fixture learns about a new one. Render-only synthetic values; the
+    # lane's real lane-local sentinels are generated on the lane host by
+    # scripts/runtime_build/render_dev_lane_tenant_path_env.sh and never appear
+    # in this repo.
+    "ONEX_API_IMAGE": "onex-api:render-only",
+    # A path under the repo, not under the system temp directory: `docker
+    # compose config` only has to INTERPOLATE this, never open it, and a
+    # temp-directory literal here is a real lint finding rather than a false
+    # positive -- a world-writable path is the wrong shape for a variable whose
+    # production value holds a lane credential.
+    "ONEX_LAB_TENANT_STATE_DIR": str(REPO_ROOT / ".render-only-tenant-state"),
+    "ONEX_CLOUD_MIGRATE_IMAGE": "omninode-cloud-migrate:render-only",
+    "ROLE_OMNINODE_PASSWORD": _RENDER_ONLY,
+    "KEYCLOAK_ADMIN_CLIENT_SECRET": _RENDER_ONLY,
+    "TENANT_BOOTSTRAP_ADMIN_SECRET": _RENDER_ONLY,
+    "TENANT_TOPICS_ADMIN_SECRET": _RENDER_ONLY,
+    "TENANT_CLIENTS_ADMIN_SECRET": _RENDER_ONLY,
+    "TENANT_OFFBOARD_ADMIN_SECRET": _RENDER_ONLY,
+    "ALPHA_INVITE_ADMIN_SECRET": _RENDER_ONLY,
+    "STRIPE_API_KEY": _RENDER_ONLY,
+    "STRIPE_WEBHOOK_SECRET": _RENDER_ONLY,
 }
 
 # RFC 5737 TEST-NET-2 documentation address — never a real host, avoids
@@ -446,6 +477,58 @@ def test_dev_lane_renders_the_standalone_projection_writers() -> None:
             "subscribes this projection's topics, commits every offset, and "
             "writes nothing (OMN-17448)"
         )
+
+
+@pytest.mark.integration
+def test_dev_lane_renders_the_tenant_projection_carrier() -> None:
+    """OMN-18114: the dev lane STARTS a process for the `tenant-projection` profile.
+
+    Eight omnimarket contracts declare ``runtime_profiles: [tenant-projection]``
+    and are therefore dropped from ``main`` and ``effects`` by
+    ``filter_manifest_for_runtime_profile``. Before this service existed, no
+    process on any compose lane bound that profile, so all eight were discovered
+    and subscribed by nothing -- measured on the .201 dev lane 2026-09-10 as
+    eight Empty consumer groups, with
+    ``node_projection_delegation_inference_response`` at LAG 196 and rising.
+
+    Rendering under ``--profile runtime`` is the assertion that matters: the
+    service is declared in the base under a compose profile no lane requests, so
+    it appears here only because this lane's overlay opted it in.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    assert "tenant-projection-writer" in services, (
+        "the dev lane must START the tenant-projection carrier: without it the "
+        "eight contracts pinned to that profile are discovered and consumed by "
+        "nothing, with no error on any process (OMN-18114)"
+    )
+
+    carrier = services["tenant-projection-writer"]
+    assert carrier["environment"]["RUNTIME_PROFILE"] == "tenant-projection"
+
+    # It must be the KERNEL, not a runner. A `command:` override would start
+    # something else entirely and reproduce the defect while looking fixed.
+    assert "command" not in carrier or not carrier["command"], (
+        "the carrier is the runtime kernel under a different RUNTIME_PROFILE, "
+        "with no command override -- that is what gives it the real "
+        "topology-resolved projection arm a BaseProjectionRunner does not get"
+    )
+
+    # Distinct instance id, or its consumer groups collide with main's. The
+    # group name embeds KAFKA_INSTANCE_ID as `...__i.<instance>...`.
+    shared_instance_ids = {
+        services[name]["environment"]["KAFKA_INSTANCE_ID"]
+        for name in ("omninode-runtime", "runtime-effects", "runtime-worker")
+    }
+    assert carrier["environment"]["KAFKA_INSTANCE_ID"] not in shared_instance_ids, (
+        "the carrier must not share a KAFKA_INSTANCE_ID with a shared kernel; "
+        "the consumer group name embeds it, so a collision would put two "
+        "processes in one group"
+    )
 
 
 @pytest.mark.integration

@@ -54,7 +54,10 @@ from omnibase_infra.event_bus.models import (
     ModelEventHeaders,
     ModelEventMessage,
 )
-from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+from omnibase_infra.event_bus.topic_constants import (
+    get_dlq_topic_for_original,
+    is_dlq_topic,
+)
 from omnibase_infra.topics import SUFFIX_PLATFORM_DLQ_MESSAGE
 from omnibase_infra.utils import sanitize_error_message
 
@@ -581,7 +584,11 @@ class MixinKafkaDlq:
         # topic that was never provisioned on the broker. Fall back once to
         # the realm-agnostic, already-provisioned category topic derived
         # from original_topic instead of letting the record be lost.
-        if not success:
+        if not success and not is_dlq_topic(original_topic):
+            # OMN-18084: the fallback must not fire for a record consumed FROM a
+            # dead-letter sink -- ``get_dlq_topic_for_original`` resolves a
+            # ``onex.dlq.*`` name to itself, so the "already-provisioned category
+            # topic" it would fall back to IS the source topic.
             fallback_dlq_topic = get_dlq_topic_for_original(original_topic)
             if fallback_dlq_topic and fallback_dlq_topic != resolved_dlq_topic:
                 try:
@@ -1066,7 +1073,11 @@ class MixinKafkaDlq:
         # let that unroutable target eat the record, fall back once to the
         # realm-agnostic, already-provisioned category topic derived from
         # original_topic (e.g. "onex.dlq.omnibase-infra.commands.v1").
-        if not success:
+        if not success and not is_dlq_topic(original_topic):
+            # OMN-18084: the fallback must not fire for a record consumed FROM a
+            # dead-letter sink -- ``get_dlq_topic_for_original`` resolves a
+            # ``onex.dlq.*`` name to itself, so the "already-provisioned category
+            # topic" it would fall back to IS the source topic.
             fallback_dlq_topic = get_dlq_topic_for_original(original_topic)
             if fallback_dlq_topic and fallback_dlq_topic != resolved_dlq_topic:
                 try:

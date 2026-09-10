@@ -18,7 +18,15 @@
 #
 # Trigger conditions (evaluated by scripts/trigger_rebuild_on_merge.py):
 #   - PR had the "runtime_change" label, OR
-#   - omniclaude's canonical deploy-gate classifier identifies a runtime path
+#   - omniclaude's canonical deploy-gate classifier identifies a runtime path, OR
+#   - the merge touches a LANE-STATE path (OMN-18072): the forward-migration
+#     runner, the docker/migrations corpus it applies, the compose model or the
+#     runtime policy env. The canonical classifier answers "does this PR need
+#     deploy EVIDENCE" and is right to miss these; this trigger answers the
+#     wider "does this merge change what the lane RUNS". omnibase_infra#3352
+#     changed the migration runner and produced NO trigger (run 34330947198),
+#     so the seam never executed on the lane. The list is unioned with the
+#     canonical result, never replacing it — see LANE_STATE_PATH_PATTERNS.
 #
 # Control-bus routing is independent of the requested runtime lane. Both dev
 # and stability-test commands enter through the dev control bus where
@@ -212,7 +220,13 @@ jobs:
           install-args: --frozen
           shared-env-enabled: "true"
 
+      # OMN-17530 rule 24(a): the receipt carries the window it measured, so
+      # the start is recorded before the convergence wait, not after it.
+      - name: Record the lab-pass window start
+        run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Wait for the dev lane to report the merge SHA
+        id: converge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
@@ -222,3 +236,93 @@ jobs:
             --expect-revision "$MERGE_SHA" \
             --wait-timeout 25m \
             --poll-interval 60s
+
+      # OMN-17530 rule 24(a) -- the .201 compose dev lane's half of the
+      # automatic lab pass.
+      #
+      # The convergence guard above proves the lane is RUNNING the merge sha.
+      # That is the deployed-revision check and nothing more; it says nothing
+      # about whether what is running works. These probes add the readiness and
+      # health-dimension reads an integration pass makes by hand, and the
+      # receipt records both together, keyed by the sha, so the fact survives
+      # the run.
+      #
+      # WHAT THIS RECEIPT DOES NOT COVER, stated rather than left to be
+      # discovered: migrations applied, consumer-group lag, and a delegation
+      # golden chain all need database or broker access this job does not have,
+      # and are named in scripts/ci/lab_pass_receipt.py's PROBES_NOT_YET_WIRED.
+      # A compose-dev receipt is therefore narrower than a hand-run integration
+      # pass. Widening it means adding the probe AND the check name in one
+      # change -- never the name alone.
+      #
+      # Rule 24(d) also applies and is not worked around here: the compose dev
+      # lane has no onex-api and no RLS, so it cannot exercise tenant-scoped
+      # paths at all, and no check below claims otherwise.
+      - name: Probe the dev lane
+        id: probe
+        if: always()
+        env:
+          # `host.docker.internal`, NOT `localhost`. This job runs on the
+          # lane's host's docker DAEMON, not in the host's network namespace:
+          # the `omnibase-deploy` runner is a container
+          # (`omninode-deploy-runner`, `NetworkMode=docker_default`) with
+          # `/var/run/docker.sock` bind-mounted. The socket is why the
+          # `docker inspect` revision read above works; the bridge network is
+          # why an HTTP probe of `localhost` reaches the runner container and
+          # nothing else.
+          #
+          # Measured 2026-09-10 with a positive control on both halves: from
+          # the .201 host shell both `:8085/ready` and `:8086/ready` answer
+          # 200; from inside `omninode-deploy-runner` the same two URLs answer
+          # 000 (Errno 111, connection refused) while the
+          # `host.docker.internal` forms answer 200. Every compose-dev receipt
+          # emitted before this change carried three identical Errno 111
+          # failures and none was ever a PASS.
+          #
+          # `omnibase-deploy` is the one runner carrying the host-gateway
+          # alias (`docker/docker-compose.runners.yml` `extra_hosts`), which is
+          # the same reason `chain-canary.yml` — same runner label — probes the
+          # lane ingress at `http://host.docker.internal:8085`. Still no LAN
+          # address committed: the alias resolves to the docker bridge gateway,
+          # where the lane's ports are published.
+          DEV_LANE_MAIN_URL: http://host.docker.internal:8085
+          DEV_LANE_EFFECTS_URL: http://host.docker.internal:8086
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lab-pass-receipt
+          uv run python scripts/ci/lab_pass_receipt.py probe-lane \
+            --lane compose-dev \
+            --main-url "$DEV_LANE_MAIN_URL" \
+            --effects-url "$DEV_LANE_EFFECTS_URL" \
+            > /tmp/lab-pass-checks.json
+          cat /tmp/lab-pass-checks.json
+
+      # if: always() on emit and upload for the same reason the boot gate does
+      # it: a FAILED lab pass is the record the gate needs in order to tell
+      # "it failed" apart from "nobody ran it". The emit step exits non-zero on
+      # a FAIL receipt, so the failure stays visible on this run.
+      - name: Emit the compose-dev lab-pass receipt
+        if: always()
+        env:
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py emit \
+            --sha "$MERGE_SHA" \
+            --lane compose-dev \
+            --started-at "${LAB_PASS_STARTED_AT}" \
+            --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --check "deployed_revision:${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}:check_dev_lane_staleness.py --expect-revision $MERGE_SHA against the omnibase-infra compose project" \
+            --checks-json /tmp/lab-pass-checks.json \
+            --out /tmp/lab-pass-receipt/receipt.json
+
+      - name: Upload the compose-dev lab-pass receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries
+          # by; it must match artifact_name() exactly.
+          name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
+          path: /tmp/lab-pass-receipt
+          retention-days: 90
+          if-no-files-found: error

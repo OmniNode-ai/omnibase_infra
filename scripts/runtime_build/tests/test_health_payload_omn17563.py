@@ -289,6 +289,10 @@ def _all_green_runner(revision: str = "deadbeef1234") -> object:
         joined = " ".join(cmd)
         if "{{.Image}}" in joined:
             stdout = "sha256:new\n"
+        elif "{{.State.Status}}" in joined:
+            # OMN-18061: the gate now also reads .State.Status, and ANDs
+            # core_services_running into the overall verdict.
+            stdout = "running\n"
         elif _REVISION_LABEL_FMT in joined:
             stdout = f"{revision}\n"
         elif "cluster health" in joined:
@@ -297,6 +301,11 @@ def _all_green_runner(revision: str = "deadbeef1234") -> object:
             stdout = "1000\n"
         elif "topic list" in joined:
             stdout = "NAME    PARTITIONS   REPLICAS\ntopic-a  1            1\n"
+        elif "group list" in joined:
+            # OMN-15837: existence is decided from `rpk group list`, never from
+            # a describe. One live group satisfying the single subscribing
+            # contract the fixture manifest declares.
+            stdout = f"BROKER  GROUP  STATE\n0  {_LIVE_GROUP}  Stable\n"
         elif "group describe" in joined:
             stdout = "STATE        Stable\n"
         else:
@@ -313,12 +322,32 @@ _REVISION_LABEL_FMT = "org.opencontainers.image.revision"
 _DEGRADED_BODY = {"status": "degraded", "details": {"healthy": True, "degraded": True}}
 
 
+# OMN-15837: the gate derives its declared consumer-group set from the
+# introspection manifest, so this fixture manifest must declare at least one
+# subscribing contract -- a manifest of empty contracts now (correctly) fails
+# the gate closed with "derived zero consumer groups". One subscribing contract
+# keeps these tests about the HEALTH-PAYLOAD policy they exist to pin.
+_SUBSCRIBING_CONTRACT = {
+    "name": "node_health_payload_fixture",
+    "package_name": "omnibase_infra",
+    "contract_version": "1.0.0",
+    "event_bus": {"subscribe_topics": ["onex.evt.platform.fixture.v1"]},
+}
+_LIVE_GROUP = (
+    "stability-test.omnibase_infra.node_health_payload_fixture.consume.1.0.0"
+    ".__i.stability-test-main.__t.onex.evt.platform.fixture.v1"
+)
+# The SHIPPED declared-groups file: `non_contract_groups: []`, so nothing is
+# expected beyond what the manifest derives.
+_DECLARED_GROUPS_FILE = _SCRIPT_DIR / "consumer_groups_stability.yaml"
+
+
 def _stability_gate(health_body: dict) -> object:
     def _open(url: str, timeout: int = 10) -> _FakeResponse:
         if "manifest" in url:
-            return _FakeResponse(
-                json.dumps({"contracts": [{} for _ in range(10_000)]}).encode()
-            )
+            contracts: list[dict] = [{} for _ in range(9_999)]
+            contracts.append(_SUBSCRIBING_CONTRACT)
+            return _FakeResponse(json.dumps({"contracts": contracts}).encode())
         return _FakeResponse(json.dumps(health_body).encode())
 
     return _STABILITY.run_health_gate(
@@ -329,7 +358,9 @@ def _stability_gate(health_body: dict) -> object:
         health_url="http://x/health",
         broker_container="redpanda",
         min_contracts=1,
-        consumer_groups=["g1"],
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        effects_manifest_url=None,
+        compose_file=None,
         runner=_all_green_runner(),
         opener=_open,
         sleep_fn=lambda _s: None,

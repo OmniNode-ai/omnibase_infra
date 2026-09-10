@@ -140,7 +140,9 @@ def test_immutable_checkout_never_uses_destructive_git(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("invalid", ["duplicate", "unknown", "missing", "branch"])
+@pytest.mark.parametrize(
+    "invalid", ["duplicate", "unknown", "missing", "branch", "fallback"]
+)
 def test_immutable_selection_validation_precedes_git(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
 ) -> None:
@@ -158,7 +160,7 @@ def test_immutable_selection_validation_precedes_git(
         refs.append("other=" + "b" * 40)
     elif invalid == "missing":
         refs = []
-    else:
+    elif invalid == "branch":
         refs = ["repo=dev"]
     command = [
         "checkout",
@@ -170,6 +172,8 @@ def test_immutable_selection_validation_precedes_git(
     ]
     for ref in refs:
         command.extend(["--repo-ref", ref])
+    if invalid == "fallback":
+        command.extend(["--fallback-ref", "origin/dev"])
     assert mod.main(command) == mod.USAGE_ERROR
     assert calls == []
 

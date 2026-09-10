@@ -367,9 +367,60 @@ migration_declares_unclassified_force_rls() {
 # to corroborate against (compose does not inject the project name, and the
 # service's own container_name is not readable from inside it).
 #
-# Delegation 0023-0026 are NOT releasable on ANY lane. Ruling 15 is scoped to
-# node_service_registry; the delegation tenant-RLS hold is a separate ruling
-# still pending, and no case arm below names those ids.
+# Delegation 0023 is NOT releasable on ANY lane. Ruling 15 is scoped to
+# node_service_registry, and 0023 is a SUPERSEDED id (its CREATE POLICY
+# compares TEXT to TEXT and aborts against the converted uuid column), so no
+# case arm below names it. 0031, 0032, 0033 and 0034 are likewise not
+# releasable: they are retired conversions and neither runner has any
+# supersession awareness, so releasing one would apply a superseded conversion
+# on every lane that has not already recorded it.
+#
+# WIDENED 2026-09-08 (OMN-15683). The dev arm below ALSO releases the operative
+# uuid conversion, under the operator ruling of that date recorded in the
+# omni_home rolling work ledger.
+#
+# THE RELEASED ID IS NOW 0037, NOT 0036 (OMN-15683, later the same day again).
+# 0036 reads tenant_registry_mirror AFTER set_config('role', ...), as
+# delegation_events' owner, and on onex-dev that owner is absent from the
+# mirror's ACL -- measured on staging deploy run 34281092205, which aborted with
+# `permission denied for table tenant_registry_mirror` at inline_code_block line
+# 262 and rolled its whole transaction back. 0037 copies the mirror into a
+# session-local TEMP table as the MIGRATE IDENTITY, before the role switch, and
+# joins that snapshot everywhere below; it also refuses by name if the migrate
+# identity itself cannot read the mirror. 0036 is retired in place and keeps its
+# baseline entry for the same FORCE-RLS reason 0034 does; it simply no longer
+# appears here.
+#
+# THE RELEASED ID IS NOW 0036, NOT 0034 (OMN-15683, later the same day). 0034
+# resolves identity on m.tenant_slug alone and has no branch for a tenant_id
+# that is ALREADY the canonical UUID. Write-time UUID stamping (OMN-16804) is
+# live, so the column is now MIXED: measured read-only on onex-dev, 26 of 229
+# rows across 3 values already hold canonical UUIDs that ARE in
+# tenant_registry_mirror under tenant_uuid, and 0034 aborts on all of them with
+# a message blaming the projection for data that is present. 0036 resolves on
+# BOTH forms and is fail-closed on neither. 0034 is retired in place and keeps
+# its baseline entry; it simply no longer appears here. It stays in the
+# baseline manifest rather than leaving it, because it enables FORCE ROW LEVEL
+# SECURITY and is not grandfathered: a baseline removal hands it to the
+# OMN-15336 item-4 guard below, which is FATAL for exactly that shape (measured
+# on a virgin Postgres through this runner: "FATAL: ... enables FORCE ROW LEVEL
+# SECURITY but is not in the operator fence manifest ... NOTHING was applied by
+# this migration"). The guard's own message names this remedy: keep the fence
+# entry, add a lane release authorized by an operator ruling. It is also the
+# safer outcome — the .201 stability-test lane still holds
+# delegation_events.tenant_id as TEXT with an EMPTY tenant_registry_mirror, so
+# a baseline release would make 0034 abort there and, by lexical sort order,
+# take every later node directory with it. Delegation 0024 and 0025 left the
+# baseline entirely in the same change; they declare no FORCE, so nothing here
+# names them.
+#
+# 0026 IS NOT RELEASED, and that is a measurement, not a hold-over. It was
+# released here in the first revision of this change and applied on the .201
+# dev lane; the resulting ENABLE + FORCE RLS on delegation_judge_verdict_events
+# is a WRITE LOCKOUT for the lane's own writer, so it was reverted on the lane
+# and dropped from this arm. See fenced-node-migrations.yaml's 2026-09-08 block
+# for the two measured refusals and the writer-side condition that has to land
+# before it can be released.
 ONEX_MIGRATION_LANE="${ONEX_MIGRATION_LANE:-}"
 case "${ONEX_MIGRATION_LANE}" in
   dev)
@@ -383,7 +434,8 @@ case "${ONEX_MIGRATION_LANE}" in
     # is_lane_released_node_migration meaningful; naming an id the fence no
     # longer covers would be inert but would misdescribe the policy.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
-node:node_projection_registration:0002_node_service_registry_tenant_rls.sql"
+node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
+node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
     ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""
@@ -1370,6 +1422,7 @@ echo "[forward-migration] Re-asserting deployment-owned login credentials..."
 for login_role_entry in \
   "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
   "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
+  "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD" \
 ; do
   entry_role_name=${login_role_entry%%:*}
   entry_password_var=${login_role_entry#*:}
@@ -1578,6 +1631,240 @@ else
 fi
 
 echo "[forward-migration] Complete: ${APPLIED} infra applied, ${SKIPPED} infra skipped; ${NODE_APPLIED} node applied, ${NODE_SKIPPED} node skipped."
+
+# ---------------------------------------------------------------------------
+# 3b. Re-assert deployment-owned least-privilege GRANTS (OMN-18060)
+# ---------------------------------------------------------------------------
+# ---- BEGIN login-only role grant seam (OMN-18060) ----
+# Section 0 above mints LOGIN + PASSWORD for the LOGIN_ONLY_ROLE_MAP principals
+# and issues no authorization at all, deliberately: grant_role_to_database()
+# would hand them CREATE on schema public, and a role that can own a table is
+# exempt from that table's row-level security unconditionally. That invariant is
+# pinned by tests/unit/infra/test_warm_volume_login_credential_omn16993.py
+# ::test_runner_never_widens_the_principal_beyond_login, which asserts the
+# credential phase contains no GRANT at all. This phase is therefore a SEPARATE
+# seam with its own name, its own map and its own placement — it does not widen
+# the credential phase, and that test's slice deliberately ends before this one
+# begins.
+#
+# WHY IT LIVES IN THE RUNNER RATHER THAN A FLAT MIGRATION
+#
+#   The grant this map delivers is on `omnibase_infra.public.delegation_workflow_state`,
+#   which only a FLAT forward migration can reach: node-stream migrations run
+#   against NODE_POSTGRES_DB, which every compose lane sets to
+#   `omnidash_analytics`. The flat stream is FROZEN —
+#   tests/unit/db/test_migration_104_retired_omn17923.py
+#   ::test_surviving_stream_is_byte_identical_to_the_pre_3190_stream fingerprints
+#   it byte-identically against hardcoded pre-#3190 constants over exactly 88
+#   files, so ANY new flat migration fails it, at any ordinal, and only editing
+#   those constants would satisfy it — which would destroy the retirement proof
+#   they exist to be. Lifting that freeze is OMN-17923's to do.
+#
+#   The runner is the other sanctioned authority that touches this database on
+#   every compose up, and it is already the authority for these principals'
+#   credentials (OMN-16993). Delivering their authorization from the same seam
+#   keeps role and grant in one place and re-asserts both on every up, which is
+#   what makes a warm volume converge rather than drift.
+#
+# WHY IT RUNS HERE AND NOT IN SECTION 0
+#
+#   The relation is created by the flat stream, which is section 2. Asserting a
+#   grant on it in section 0 would skip on every fresh volume and only land on
+#   the SECOND compose up. Running after the apply loop and before the sentinel
+#   means one run provisions the role and its grants together, and a failure
+#   here leaves migrations_complete FALSE and the migration gate UNHEALTHY —
+#   the lane refuses to start the runtime rather than starting it blind.
+#
+# ENTRY FORMAT: "<role>:<schema>.<table>:<col>[,<col>...]"
+#
+#   Each entry declares exactly: CONNECT on the current database, USAGE on the
+#   named schema, and COLUMN-SCOPED SELECT on the named relation. Nothing else
+#   is expressible here on purpose — no relation-wide SELECT, no ALL TABLES, no
+#   write privilege of any kind, and no REVOKE. A map that could express a write
+#   would eventually carry one.
+#
+# GATE: the grants are issued only once the target relation exists. A lane whose
+#   flat stream has not created it yet logs a named skip and re-asserts on the
+#   next run; a lane where the ROLE is unprovisioned (its password variable is
+#   unset, so section 0 skipped it) logs a named skip too. Both are legitimate
+#   states. A MISDECLARED column, a grant that did not take, or a role that
+#   turns out to hold relation-wide SELECT are not: those FAIL the run.
+reassert_login_only_role_grants() {
+  grant_role="$1"
+  grant_relation="$2"
+  grant_columns="$3"
+
+  # Committed constants, but validated before either name reaches a SQL
+  # identifier or a string literal, exactly as the credential seam does.
+  case "$grant_role" in
+    ""|*[!a-z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed grant role name '${grant_role}'" >&2
+      return 1
+      ;;
+  esac
+  case "$grant_relation" in
+    *.*) ;;
+    *)
+      echo "[forward-migration]   FAIL: grant relation '${grant_relation}' is not schema-qualified" >&2
+      return 1
+      ;;
+  esac
+  grant_schema=${grant_relation%%.*}
+  grant_table=${grant_relation#*.}
+  case "$grant_schema" in
+    ""|*[!a-z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed grant schema '${grant_schema}'" >&2
+      return 1
+      ;;
+  esac
+  case "$grant_table" in
+    ""|*[!a-z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed grant table '${grant_table}'" >&2
+      return 1
+      ;;
+  esac
+  # Reject an empty element as well as a bad character: ",," and a leading or
+  # trailing comma would otherwise render as `SELECT (a,,b)` at the server.
+  case "$grant_columns" in
+    ""|*[!a-z0-9_,]*|,*|*,|*,,*)
+      echo "[forward-migration]   FAIL: malformed grant column list '${grant_columns}' for ${grant_role}" >&2
+      return 1
+      ;;
+  esac
+
+  # A role that section 0 skipped (its password variable is unset) is a lane
+  # that has not provisioned this principal. Absent is legitimate; the skip is
+  # named so the log says which of the two states the lane is in.
+  grant_role_present=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+    -X -qAt -v ON_ERROR_STOP=1 \
+    -c "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '${grant_role}'")
+  if [ "$grant_role_present" != "1" ]; then
+    echo "[forward-migration]   skip  ${grant_role} grants (role not provisioned on this lane)"
+    return 0
+  fi
+
+  # A column-scoped grant to a role that is exempt from row-level security is a
+  # grant whose narrowness is a lie: SUPERUSER and BYPASSRLS exempt a role from
+  # RLS unconditionally, and either one makes "this projection is readable by an
+  # identity nothing else has" unprovable. Section 0 creates these principals
+  # NOSUPERUSER NOBYPASSRLS, so this can only fire after a deliberate escalation
+  # — which is exactly when stopping is right. Detection and refusal, never a
+  # correcting ALTER ROLE: that would demand role-administration privileges this
+  # seam does not need and does not have (094's invariant), and it belongs to
+  # whoever escalated the role rather than to a migration runner.
+  #
+  # node_chain_canary_effect makes the same check at connect time on the live
+  # DSN and refuses the readback. Both ends of that contract are asserted.
+  grant_role_escalated=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+    -X -qAt -v ON_ERROR_STOP=1 \
+    -c "SELECT 1 FROM pg_catalog.pg_roles
+         WHERE rolname = '${grant_role}' AND (rolsuper OR rolbypassrls)")
+  if [ "$grant_role_escalated" = "1" ]; then
+    echo "[forward-migration]   FAIL: ${grant_role} holds SUPERUSER or BYPASSRLS; it is exempt from row-level security unconditionally, so a column-scoped grant on ${grant_relation} would not constrain it. A role administrator must remove those attributes." >&2
+    return 1
+  fi
+
+  # The relation gate. to_regclass() returns NULL rather than raising for an
+  # absent relation or an absent schema, so this is a probe and not a failure.
+  grant_relation_present=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+    -X -qAt -v ON_ERROR_STOP=1 \
+    -c "SELECT 1 WHERE to_regclass('${grant_schema}.${grant_table}') IS NOT NULL")
+  if [ "$grant_relation_present" != "1" ]; then
+    echo "[forward-migration]   skip  ${grant_role} grants (relation ${grant_schema}.${grant_table} does not exist yet — the flat migration stream owns it; re-asserted on the next run)"
+    return 0
+  fi
+
+  # A declared column that is not on the relation is a MISDECLARATION, not a
+  # timing gap: skipping it would leave the grant permanently half-applied while
+  # the log reads clean. Build the readback predicate in the same pass.
+  grant_privilege_predicate="has_database_privilege('${grant_role}', current_database(), 'CONNECT') AND has_schema_privilege('${grant_role}', '${grant_schema}', 'USAGE')"
+  grant_column_rest="$grant_columns"
+  while [ -n "$grant_column_rest" ]; do
+    grant_column=${grant_column_rest%%,*}
+    case "$grant_column_rest" in
+      *,*) grant_column_rest=${grant_column_rest#*,} ;;
+      *) grant_column_rest="" ;;
+    esac
+    grant_column_present=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+      -X -qAt -v ON_ERROR_STOP=1 \
+      -c "SELECT 1 FROM pg_catalog.pg_attribute
+           WHERE attrelid = to_regclass('${grant_schema}.${grant_table}')
+             AND attname = '${grant_column}'
+             AND attnum > 0
+             AND NOT attisdropped")
+    if [ "$grant_column_present" != "1" ]; then
+      echo "[forward-migration]   FAIL: ${grant_role} grant declares column '${grant_column}', which is not on ${grant_schema}.${grant_table}" >&2
+      return 1
+    fi
+    grant_privilege_predicate="${grant_privilege_predicate} AND has_column_privilege('${grant_role}', '${grant_schema}.${grant_table}', '${grant_column}', 'SELECT')"
+  done
+
+  # The grants themselves. GRANT is idempotent, so this is a re-assert on every
+  # up rather than a one-shot; the database name goes through format(%I) so the
+  # lane's POSTGRES_DB never reaches SQL as raw text.
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q <<EOSQL
+DO \$reassert_grants\$
+BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), '${grant_role}');
+END
+\$reassert_grants\$;
+GRANT USAGE ON SCHEMA "${grant_schema}" TO "${grant_role}";
+GRANT SELECT (${grant_columns}) ON "${grant_schema}"."${grant_table}" TO "${grant_role}";
+EOSQL
+
+  # Read the outcome back rather than assume it. PostgreSQL does NOT raise for a
+  # GRANT issued by a role without grant option on the object: it emits
+  # `WARNING: no privileges were granted` and returns success. This readback is
+  # the only thing that distinguishes a real grant from that silent no-op.
+  #
+  # has_table_privilege() answers on RELATION-level privilege only, so it is the
+  # exact probe for "the column scoping has been defeated by a table-wide
+  # SELECT" — which would hand this role every column the header excludes.
+  grant_readback=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+    -X -qAt -v ON_ERROR_STOP=1 \
+    -c "SELECT CASE
+                 WHEN has_table_privilege('${grant_role}', '${grant_schema}.${grant_table}', 'SELECT')
+                   THEN 'relation_wide_select'
+                 WHEN ${grant_privilege_predicate}
+                   THEN 'ok'
+                 ELSE 'not_granted'
+               END")
+
+  if [ "$grant_readback" = "relation_wide_select" ]; then
+    echo "[forward-migration]   FAIL: ${grant_role} holds RELATION-WIDE SELECT on ${grant_schema}.${grant_table}; the column scoping to (${grant_columns}) is defeated and every other column is readable" >&2
+    return 1
+  fi
+  if [ "$grant_readback" != "ok" ]; then
+    echo "[forward-migration]   FAIL: ${grant_role} does not hold CONNECT + USAGE on ${grant_schema} + SELECT (${grant_columns}) on ${grant_schema}.${grant_table} after the grants ran (readback: ${grant_readback}). A GRANT issued without grant option on the object warns and returns success; re-run as a role that owns the relation." >&2
+    return 1
+  fi
+
+  echo "[forward-migration]   ok    ${grant_role} CONNECT + USAGE on ${grant_schema} + SELECT (${grant_columns}) on ${grant_schema}.${grant_table} asserted"
+
+  unset grant_schema grant_table grant_role_present grant_relation_present
+  unset grant_role_escalated
+  unset grant_privilege_predicate grant_column_rest grant_column grant_column_present
+  unset grant_readback
+}
+
+echo "[forward-migration] Re-asserting deployment-owned least-privilege grants..."
+# LOGIN_ONLY_ROLE_GRANT_MAP — entries quoted individually so the loop needs no
+# word splitting to stay correct, matching the credential map above. Every role
+# named here MUST also be in that map: a grant on a principal whose credential
+# this deployment does not own is authorization without provenance, and
+# tests/unit/infra/test_login_only_role_grants_omn18060.py pins the subset.
+for grant_role_entry in \
+  "chain_canary_reader:public.delegation_workflow_state:correlation_id,state" \
+  "chain_canary_reader:public.ledger_chain:correlation_id,hop,hop_index,replay_green,verifier_verdict" \
+; do
+  entry_grant_role=${grant_role_entry%%:*}
+  entry_grant_rest=${grant_role_entry#*:}
+  entry_grant_relation=${entry_grant_rest%%:*}
+  entry_grant_columns=${entry_grant_rest#*:}
+  reassert_login_only_role_grants \
+    "$entry_grant_role" "$entry_grant_relation" "$entry_grant_columns"
+done
+# ---- END login-only role grant seam (OMN-18060) ----
 
 # ---------------------------------------------------------------------------
 # 4. Set the sentinel TRUE only after ALL migrations succeed (OMN-13062)

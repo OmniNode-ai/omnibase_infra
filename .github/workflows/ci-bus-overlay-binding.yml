@@ -1,0 +1,148 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# ci-bus-overlay-binding.yml — OMN-18060
+#
+# Validates the LIVE producer-side CI bus overlay against this repository's
+# consumer-side model.
+#
+# THE SPLIT CONTRACT. `config/ci_bus_lanes.yaml` is written and reviewed in
+# omnimarket. It is validated in omnibase_infra by `ModelCiBusOverlay` in
+# scripts/trigger_rebuild_on_merge.py, which is `extra="forbid"`. The
+# strictness is deliberate — an unknown key in that file is a typo that would
+# otherwise route a publisher to a lane it never declared — but it puts the two
+# halves of one contract in two repositories, and nothing compared them until
+# runtime-rebuild-trigger.yml tried to publish on some later, unrelated merge.
+#
+# Twice now that has meant a producer-side change failing on a consumer-side
+# merge hours later:
+#
+#   OMN-18012 (2026-09-07) — `security_protocol` / `sasl_mechanism` added to
+#     the dev lane; every runtime-touching PR red (run 34160709151).
+#   OMN-18060 (2026-09-09) — `projection_readback` added at 02:15Z by
+#     omnimarket#2420; ten consecutive rebuild-trigger runs red on
+#     `lanes.dev.projection_readback Extra inputs are not permitted`.
+#
+# This job is the surface that owns the coupling: it checks out the live
+# overlay from omnimarket@dev and loads it through the exact model the
+# publisher uses, so a third key addition reds HERE, named, rather than on
+# whichever pull request happens to touch runtime next.
+#
+# WHY A SCHEDULE AND NOT ONLY A PR GATE. A producer-side key lands in omnimarket
+# without creating a pull request in this repository at all. A PR-only gate
+# would still have caught OMN-18060 — but on this repository's next PR, which
+# is someone else's merge paying for it. The schedule is what makes the skew
+# window bounded by wall-clock rather than by whoever pushes next.
+#
+# WHY IT IS NOT A NETWORK CALL INSIDE A UNIT TEST. Unit tests here are
+# hermetic. The fetch is this sparse checkout; the test reads the resulting
+# path out of CI_BUS_OVERLAY_LIVE_PATH and skips when it is unset. That the
+# variable is actually exported, that the checkout targets omnimarket@dev, and
+# that this workflow exists at all are pinned by
+# tests/unit/scripts/test_ci_bus_overlay_live_binding.py — so the gate cannot
+# decay into a permanent green skip.
+#
+# NOT A PUBLISHER. This job resolves no lane, contacts no broker and produces
+# no command. It needs no Kafka credential and no LAN reachability, which is
+# why it rides the ordinary trusted-CI seam rather than the dedicated LAN-bound
+# runner runtime-rebuild-trigger.yml requires (OMN-17888).
+#
+# ENFORCEMENT. This context IS in `EXPECTED_EXTERNAL_CONTEXTS` in
+# scripts/ci/ci_summary_gate.py as of OMN-18096, which on this repository's
+# `dev` IS the whole external enforcement surface (OMN-4497 single umbrella) --
+# so a red run here now blocks a merge. It was deliberately NOT added in the
+# change that created it (OMN-18060, #3371): every other entry in that tuple
+# cites a MEASURED present-and-green window over real PRs, a gate with zero
+# runs has no such evidence, and a first-run failure added blind would have
+# wedged the umbrella for every concurrent PR in the repo. The promotion was
+# made once the job had a measured pass -- #3371's head ac679580 and its merge
+# cc897440 -- on the same admission-by-construction terms recorded there for
+# `exposure-reader-coverage`. Renaming this job or this workflow's `name:`
+# breaks that registration; tests/ci/test_omn18096_ci_bus_overlay_gate_wiring.py
+# pins the two equal.
+
+name: CI Bus Overlay Binding
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [dev]
+  merge_group:
+  schedule:
+    # Every two hours. The window this bounds is "how long a producer-side key
+    # can sit unmodelled", which was ~7h on 2026-09-09.
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci-bus-overlay-binding:
+    name: ci-bus-overlay-binding
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout the live omnimarket CI bus overlay
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          # dev, because dev is the ref runtime-rebuild-trigger.yml itself
+          # sparse-checks out at merge time. Binding against anything else
+          # would validate a file the publisher never reads.
+          ref: dev
+          path: .ci-bus-overlay
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Assert the overlay checkout produced the file
+        shell: bash
+        run: |
+          set -euo pipefail
+          OVERLAY=".ci-bus-overlay/config/ci_bus_lanes.yaml"
+          # A silently empty sparse checkout is the failure mode that would
+          # otherwise turn this whole job into a green no-op, so it is refused
+          # before pytest ever runs rather than surfacing as a skip.
+          if [[ ! -s "$OVERLAY" ]]; then
+            echo "ERROR: $OVERLAY is missing or empty after the sparse checkout." >&2
+            echo "This run proves nothing about the overlay contract." >&2
+            exit 1
+          fi
+          echo "Overlay checked out: $(wc -l < "$OVERLAY") lines"
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-ci-bus-overlay-binding
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      - name: Validate the live overlay against the publisher's model
+        env:
+          CI_BUS_OVERLAY_LIVE_PATH: .ci-bus-overlay/config/ci_bus_lanes.yaml
+        run: |
+          uv run pytest \
+            tests/unit/scripts/test_ci_bus_overlay_live_binding.py \
+            -v --no-header -p no:randomly

@@ -82,6 +82,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from uuid import uuid4
@@ -89,6 +90,9 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+    dsn_shaped_argv_flags,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_canary_verdict import (
     EnumChainCanaryVerdict,
 )
@@ -118,6 +122,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_res
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_link_verdict import (
     ModelChainLinkVerdict,
+)
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    ModelProjectionReadbackOutcome,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -156,13 +163,26 @@ TypeTerminalReadback = Callable[
     [str, tuple[str, ...], str, int, float],
     Awaitable[tuple[str | None, int, str]],
 ]
-# (dsn, correlation_id, timeout_s) -> (fsm_state, error)
-# fsm_state is "" for "read and no row" and None for "could not read" — the
-# same three-state convention as the two broker legs, for the same reason.
+# (dsn, correlation_id, timeout_s) -> ModelProjectionReadbackOutcome
+#
+# A typed outcome rather than the two-state tuple the broker legs use
+# (OMN-18060). The other legs only ever have two things to say -- found, or
+# could not read -- but this one now also declines: a DSN whose role carries
+# SUPERUSER / BYPASSRLS is REFUSED, not ERROR, because "the store did not
+# answer" and "I would not ask that question with that identity" send a reader
+# to two different places.
 TypeProjectionReadback = Callable[
     [str, str, float],
-    Awaitable[tuple[str | None, str]],
+    Awaitable[ModelProjectionReadbackOutcome],
 ]
+# (environment variable name) -> environment variable value.
+TypeProjectionDsnLookup = Callable[[str], str]
+
+# Same shape as the projection lookup, kept as its own alias rather than
+# shared: the two legs resolve two independent lane declarations, and a single
+# alias would quietly suggest one variable serves both by design rather than
+# by this lane's current topology (OMN-16964).
+TypeLedgerDsnLookup = Callable[[str], str]
 
 # (source, correlation_id, timeout_s) -> (hops, replay_green, verdict, error)
 # hops is None when the ledger could not be read at all. The transport returns
@@ -186,6 +206,15 @@ _VERIFIER_PASS = "pass"
 # terminal rather than by enumerating what is not, so a new intermediate state
 # is stranded by default instead of silently passing.
 _TERMINAL_FSM_STATES: frozenset[str] = frozenset({"COMPLETED", "FAILED"})
+
+# The role probe the projection readback runs BEFORE its first read
+# (OMN-18060). `current_user` is resolved by the server from the authenticated
+# connection, so this is a fact about the DSN that was actually used -- not a
+# claim the caller could supply. The two attributes are the ones that would
+# exempt the canary from the isolation the projection enforces.
+_CURRENT_ROLE_PRIVILEGE_QUERY = (
+    "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+)
 
 
 def _terminal_topics(request: ModelChainCanaryRequest) -> tuple[str, ...]:
@@ -456,22 +485,32 @@ async def _readback_projection_via_asyncpg(
     dsn: str,
     correlation_id: str,
     timeout_s: float,
-) -> tuple[str | None, str]:
+) -> ModelProjectionReadbackOutcome:
     """Link-2 leg (OMN-16963): what state does the PROJECTION hold for this run?
 
     Reads ``delegation_workflow_state`` scoped to the probe's own correlation
     id. This is the readback OMN-16025 link 2 asks for — from the projection,
     not from logs and not from the publish return.
 
-    Returns the FSM state, ``""`` when the projection carries no row for this
-    correlation id, and ``None`` when the read could not be completed at all.
-    The last case is deliberately distinct: a read that failed is not a read
-    that found nothing.
+    Before it reads anything it asks the connection who it is (OMN-18060). A
+    canary is a READER, and ``SELECT rolsuper, rolbypassrls FROM pg_roles
+    WHERE rolname = current_user`` is the only un-forgeable way to establish
+    that the DSN it was handed is one: a caller-supplied claim about the role
+    is worth nothing, and the attributes are exactly the two that would exempt
+    this probe from the row-level isolation the projection enforces. A DSN
+    that turns out to be privileged is REFUSED rather than used — the read
+    would have succeeded, and its green would have meant less than it looked.
+
+    The DSN is a parameter and never a module-level default: it is resolved
+    from the environment by the caller, under the NAME the lane declares.
     """
     try:
         import asyncpg
     except ImportError as exc:  # pragma: no cover - asyncpg is a hard dep
-        return None, f"asyncpg unavailable: {exc}"
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ERROR,
+            error=f"asyncpg unavailable: {exc}",
+        )
 
     # ONE deadline across connect AND query, not timeout_s applied to each.
     # Applied per-call, this leg could hold asyncio.gather() for ~2x the
@@ -485,10 +524,57 @@ async def _readback_projection_via_asyncpg(
     connection = None
     try:
         if _remaining() <= 0:
-            return None, "projection readback budget exhausted before connect"
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.ERROR,
+                error="projection readback budget exhausted before connect",
+            )
         connection = await asyncio.wait_for(asyncpg.connect(dsn), timeout=_remaining())
         if _remaining() <= 0:
-            return None, "projection readback budget exhausted after connect"
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.ERROR,
+                error="projection readback budget exhausted after connect",
+            )
+        # Identity first. A privileged DSN must not be allowed to run the
+        # query at all -- discovering the privilege after reading the row
+        # would still have exercised the read with the wrong identity.
+        identity = await asyncio.wait_for(
+            connection.fetchrow(_CURRENT_ROLE_PRIVILEGE_QUERY),
+            timeout=_remaining(),
+        )
+        if identity is None:
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.REFUSED,
+                error=(
+                    "pg_roles carries no row for current_user, so the "
+                    "connecting role's SUPERUSER / BYPASSRLS attributes could "
+                    "not be established. Refusing rather than assuming the "
+                    "identity is least-privilege"
+                ),
+            )
+        escalations = [
+            attribute
+            for attribute in ("rolsuper", "rolbypassrls")
+            if bool(identity[attribute])
+        ]
+        if escalations:
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.REFUSED,
+                error=(
+                    f"the projection DSN authenticates as role "
+                    f"{identity['rolname']!r}, which carries "
+                    f"{', '.join(escalations)}. The chain canary is a reader: "
+                    "a role with either attribute is exempt from the "
+                    "row-level isolation the projection enforces, so a green "
+                    "read through it is not evidence the projection is "
+                    "readable by anything else. Point the readback at a "
+                    "least-privilege reader"
+                ),
+            )
+        if _remaining() <= 0:
+            return ModelProjectionReadbackOutcome(
+                status=EnumProjectionReadbackStatus.ERROR,
+                error="projection readback budget exhausted after the role probe",
+            )
         row = await asyncio.wait_for(
             connection.fetchrow(
                 "SELECT state FROM delegation_workflow_state WHERE correlation_id = $1",
@@ -497,10 +583,13 @@ async def _readback_projection_via_asyncpg(
             timeout=_remaining(),
         )
     except Exception as exc:  # noqa: BLE001 - fails closed, never to a verdict
-        return None, sanitize_error_message(exc)
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ERROR,
+            error=sanitize_error_message(exc),
+        )
     finally:
         # cleanup-resilience-ok: a failure to close must not replace the
-        # unreadable-projection tuple this function returns, nor propagate
+        # unreadable-projection outcome this function returns, nor propagate
         # out of asyncio.gather() and abort the sibling legs. The connection
         # is discarded either way; the read outcome is the only fact worth
         # reporting.
@@ -514,8 +603,21 @@ async def _readback_projection_via_asyncpg(
                 )
 
     if row is None:
-        return "", ""
-    return str(row["state"] or ""), ""
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ROW_ABSENT
+        )
+    state = str(row["state"] or "")
+    if not state:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ROW_ABSENT
+        )
+    if state.strip().upper() in _TERMINAL_FSM_STATES:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.TERMINAL, state=state
+        )
+    return ModelProjectionReadbackOutcome(
+        status=EnumProjectionReadbackStatus.STRANDED, state=state
+    )
 
 
 async def _replay_ledger_chain_via_asyncpg(
@@ -623,6 +725,14 @@ def _kill_switch_engaged(raw: str) -> bool:
     return raw.strip().lower() in _KILL_SWITCH_TRUTHY_VALUES
 
 
+def _lookup_projection_dsn_env(name: str) -> str:
+    return os.environ.get(name, "")  # ONEX_EXCLUDE
+
+
+def _lookup_ledger_dsn_env(name: str) -> str:
+    return os.environ.get(name, "")  # ONEX_EXCLUDE
+
+
 class HandlerChainCanary:
     """Fire one live delegation and report whether the chain carried it."""
 
@@ -632,7 +742,9 @@ class HandlerChainCanary:
         quarantine_scan: TypeQuarantineScan | None = None,
         terminal_readback: TypeTerminalReadback | None = None,
         projection_readback: TypeProjectionReadback | None = None,
+        projection_dsn_lookup: TypeProjectionDsnLookup | None = None,
         ledger_replay: TypeLedgerReplay | None = None,
+        ledger_dsn_lookup: TypeLedgerDsnLookup | None = None,
         kill_switch_disabled: bool | None = None,
     ) -> None:
         self._ingress: TypeIngressPost = ingress or _post_skill_via_httpx
@@ -645,8 +757,14 @@ class HandlerChainCanary:
         self._projection_readback: TypeProjectionReadback = (
             projection_readback or _readback_projection_via_asyncpg
         )
+        self._projection_dsn_lookup: TypeProjectionDsnLookup = (
+            projection_dsn_lookup or _lookup_projection_dsn_env
+        )
         self._ledger_replay: TypeLedgerReplay = (
             ledger_replay or _replay_ledger_chain_via_asyncpg
+        )
+        self._ledger_dsn_lookup: TypeLedgerDsnLookup = (
+            ledger_dsn_lookup or _lookup_ledger_dsn_env
         )
         # Read at construction, overridable for tests, re-read in handle()
         # so a zero-arg contract-driven construction cannot miss it.
@@ -904,11 +1022,42 @@ class HandlerChainCanary:
         returned, so a chain that is short by a hop cannot look complete
         simply because every row present was well-formed.
         """
-        if not request.ledger_source.strip():
+        declared_name = request.ledger_source_env.strip()
+        if not declared_name:
             return EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED, ""
 
+        # A DSN on the command line is refused whatever flag carried it. The
+        # model validator already refuses one passed as this field's own
+        # value; this catches the DSN that arrived on some other flag, which
+        # is the same disclosure with a different spelling. Same refusal the
+        # projection leg makes, for the same reason (OMN-18060).
+        offending_flags = dsn_shaped_argv_flags(sys.argv)
+        if offending_flags:
+            return (
+                EnumLedgerReplayStatus.REFUSED,
+                (
+                    "a Postgres connection string was passed on the command "
+                    f"line ({', '.join(offending_flags)}). argv is readable "
+                    "from /proc by every process on this host and the "
+                    "dispatch step echoes what it ran into the run log. The "
+                    "DSN reaches this node through the environment, under the "
+                    "name the lane declares — never through a flag"
+                ),
+            )
+
+        source = self._ledger_dsn_lookup(declared_name)
+        if not source.strip():
+            return (
+                EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED,
+                (
+                    f"the lane declares its ledger DSN under {declared_name}, "
+                    "and that variable is unset or empty in this process. No "
+                    "claim is made about link 5"
+                ),
+            )
+
         hops, replay_green, verdict, error = await self._ledger_replay(
-            request.ledger_source,
+            source,
             probe_correlation_id,
             window_s,
         )
@@ -948,26 +1097,56 @@ class HandlerChainCanary:
 
         Scoped to the probe's own correlation id, never table-wide: a
         table-wide check would go green on somebody else's terminal row.
+
+        The DSN is resolved HERE, out of the environment, under the NAME the
+        lane declared (OMN-18060). Three properties fall out of that and none
+        of them is incidental: the value never enters the request model, so it
+        is never serialised onto the bus or into the event log; it never
+        enters argv, so it is not readable from ``/proc`` by every process on
+        the host; and the thing that IS committed and reviewed — the lane
+        declaration — is a name, which cannot leak anything.
         """
-        if not request.projection_dsn.strip():
+        declared_name = request.projection_dsn_env.strip()
+        if not declared_name:
             return EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED, "", ""
 
-        state, error = await self._projection_readback(
-            request.projection_dsn,
+        # A DSN on the command line is refused whatever flag carried it. The
+        # model validator already refuses one passed as this field's own
+        # value; this catches the DSN that arrived on some other flag, which
+        # is the same disclosure with a different spelling.
+        offending_flags = dsn_shaped_argv_flags(sys.argv)
+        if offending_flags:
+            return (
+                EnumProjectionReadbackStatus.REFUSED,
+                "",
+                (
+                    "a Postgres connection string was passed on the command "
+                    f"line ({', '.join(offending_flags)}). argv is readable "
+                    "from /proc by every process on this host and the "
+                    "dispatch step echoes what it ran into the run log. The "
+                    "DSN reaches this node through the environment, under the "
+                    "name the lane declares — never through a flag"
+                ),
+            )
+
+        dsn = self._projection_dsn_lookup(declared_name)
+        if not dsn.strip():
+            return (
+                EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED,
+                "",
+                (
+                    f"the lane declares its projection DSN under {declared_name}, "
+                    "and that variable is unset or empty in this process. No "
+                    "claim is made about link 2"
+                ),
+            )
+
+        outcome = await self._projection_readback(
+            dsn,
             probe_correlation_id,
             window_s,
         )
-        if state is None:
-            return (
-                EnumProjectionReadbackStatus.ERROR,
-                "",
-                error or "projection readback failed",
-            )
-        if not state:
-            return EnumProjectionReadbackStatus.ROW_ABSENT, "", ""
-        if state.strip().upper() in _TERMINAL_FSM_STATES:
-            return EnumProjectionReadbackStatus.TERMINAL, state, ""
-        return EnumProjectionReadbackStatus.STRANDED, state, ""
+        return outcome.status, outcome.state, outcome.error
 
     async def _readback_terminal(
         self,
@@ -1169,6 +1348,16 @@ class HandlerChainCanary:
                     "as stranded."
                 ),
             )
+        if projection_readback_status is EnumProjectionReadbackStatus.REFUSED:
+            return (
+                EnumChainCanaryVerdict.PROJECTION_READBACK_REFUSED,
+                (
+                    "the projection readback was configured and this node "
+                    f"declined to run it: {projection_error}. A refusal is "
+                    "not a result — reporting red rather than a green that "
+                    "would have been obtained the wrong way."
+                ),
+            )
         if projection_readback_status is EnumProjectionReadbackStatus.ERROR:
             return (
                 EnumChainCanaryVerdict.PROJECTION_READBACK_FAILED,
@@ -1185,11 +1374,13 @@ class HandlerChainCanary:
             return (
                 EnumChainCanaryVerdict.PROJECTION_READBACK_NOT_CONFIGURED,
                 (
-                    "no DSN was configured for the projection readback, so "
-                    "this run has NO evidence about link 2. Reporting red "
-                    "rather than green-with-a-caveat: link 2 is one of the "
-                    "five OMN-16025 chain links, and a run that cannot see it "
-                    "is the three-links-rendered-as-five defect itself."
+                    "no DSN reference resolved for the projection readback, "
+                    "so this run has NO evidence about link 2"
+                    f"{f' ({projection_error})' if projection_error else ''}. "
+                    "Reporting red rather than green-with-a-caveat: link 2 is "
+                    "one of the five OMN-16025 chain links, and a run that "
+                    "cannot see it is the three-links-rendered-as-five defect "
+                    "itself."
                 ),
             )
 
@@ -1224,6 +1415,15 @@ class HandlerChainCanary:
                     "this run and checked nothing. OMN-16025 counts that as "
                     "not proven, and reporting it as green is the SKIP-reads-"
                     "as-PASS defect this ticket exists to end."
+                ),
+            )
+        if ledger_status is EnumLedgerReplayStatus.REFUSED:
+            return (
+                EnumChainCanaryVerdict.LEDGER_REPLAY_REFUSED,
+                (
+                    "the ledger replay was refused rather than run: "
+                    f"{ledger_detail}. A refusal is not a pass, and it is not "
+                    "an error either — the store was never asked."
                 ),
             )
         if ledger_status is EnumLedgerReplayStatus.ERROR:
@@ -1400,6 +1600,12 @@ def _link_five(
             "the tier-2 verifier returned SKIP — it was pointed at this run "
             "and checked nothing, which OMN-16025 counts as not proven",
         )
+    if ledger_status is EnumLedgerReplayStatus.REFUSED:
+        return (
+            EnumChainLinkStatus.ERROR,
+            "the ledger replay was refused rather than run, so no claim is "
+            f"made about it: {ledger_detail}",
+        )
     if ledger_status is EnumLedgerReplayStatus.ERROR:
         return (
             EnumChainLinkStatus.ERROR,
@@ -1444,6 +1650,12 @@ def _link_two(
             "delegation_workflow_state carried no row at all for this "
             "correlation id, so no routing decision was projected",
         )
+    if projection_readback_status is EnumProjectionReadbackStatus.REFUSED:
+        return (
+            EnumChainLinkStatus.ERROR,
+            "the projection readback was refused before it ran, so no claim "
+            f"is made about the routing decision: {projection_error}",
+        )
     if projection_readback_status is EnumProjectionReadbackStatus.ERROR:
         return (
             EnumChainLinkStatus.ERROR,
@@ -1452,7 +1664,10 @@ def _link_two(
         )
     return (
         EnumChainLinkStatus.NOT_CONFIGURED,
-        "no projection store configured for the readback — SKIP is not PASS",
+        (
+            "no projection DSN reference resolved for the readback — SKIP is "
+            f"not PASS{f': {projection_error}' if projection_error else ''}"
+        ),
     )
 
 

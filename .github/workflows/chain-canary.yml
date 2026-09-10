@@ -81,6 +81,35 @@
 #   Run 33215999994's GREEN was read as "the five-link gate is met"; the
 #   summary now makes that reading impossible.
 #
+# WHAT OMN-17926 CHANGED — THE BROKER ADDRESS IS DECLARED, NOT LITERAL
+#   Both broker legs defaulted to the literal `host.docker.internal:19092`.
+#   From 2026-09-07T17:44Z that took 25 consecutive runs red with
+#   `quarantine_probe_failed`, every one of which had ALREADY fired its
+#   delegation successfully — a live chain reported unreadable.
+#
+#   The bracket is exact. Run 34139858442 (2026-09-07T15:44Z) still reached
+#   `projection_readback_not_configured`, so the bus was readable then; run
+#   34148855051 (17:44Z) is the first failure of the unbroken sequence. In
+#   between, at ~16:40Z, OMN-18012 Phase B enabled SASL/SCRAM-SHA-256 on the
+#   .201 dev-lane Redpanda EXTERNAL listener — SASL over PLAINTEXT, no TLS. A
+#   plaintext client is disconnected during that handshake, which aiokafka
+#   reports as `Unable to bootstrap from [('host.docker.internal', 19092, ...)]`.
+#
+#   An address literal was the wrong shape twice over. `host.docker.internal`
+#   resolves only through this runner's `extra_hosts: host-gateway` mapping,
+#   so two runners reading the same string reach different machines; and an
+#   address carries no TRANSPORT, so nothing told the client the listener had
+#   started requiring SASL. Both halves are declared together in omnimarket's
+#   `config/ci_bus_lanes.yaml`, which `runtime-rebuild-trigger.yml` in this
+#   same repo already reads for exactly this reason. This job now reads the
+#   same declaration, and the request model REFUSES a Docker-Desktop alias so
+#   the literal cannot come back as a default.
+#
+#   Credentials are not in that overlay and are not on any command line: the
+#   lane declares `security_protocol` / `sasl_mechanism`, and
+#   KAFKA_SASL_USERNAME / KAFKA_SASL_PASSWORD reach the client through the
+#   environment, the same way runtime-rebuild-trigger.yml supplies them.
+#
 # NO NEW scripts/** FILE
 #   scripts/** is DEFAULT-DENY for new files (OMN-14475 canonical-form
 #   guard). Every step below is a direct `uv run onex ...` invocation of
@@ -108,14 +137,18 @@ on:
         description: 'Ingress budget in ms. No terminal inside this window is RED.'
         required: false
         default: '120000'
+      bus_lane:
+        description: 'CI bus lane whose DECLARED broker + transport both readback legs use (omnimarket config/ci_bus_lanes.yaml).'
+        required: false
+        default: 'dev'
       quarantine_bootstrap_servers:
-        description: 'Broker for the correlation-scoped quarantine check. Empty disables the leg and the receipt says SKIPPED (never CLEAN).'
+        description: 'Override the declared broker for the quarantine check. Leave empty to use the lane declaration; a Docker-Desktop host alias is refused (OMN-17926).'
         required: false
-        default: 'host.docker.internal:19092'
+        default: ''
       terminal_bootstrap_servers:
-        description: 'Broker for the correlation-scoped TERMINAL readback (OMN-16025 link 4). Empty makes the run RED — it does NOT fall back to the ingress response.'
+        description: 'Override the declared broker for the TERMINAL readback (OMN-16025 link 4). Leave empty to use the lane declaration; a Docker-Desktop host alias is refused (OMN-17926).'
         required: false
-        default: 'host.docker.internal:19092'
+        default: ''
 
 concurrency:
   # A canary must never race itself: two overlapping probes make the
@@ -161,6 +194,133 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # The lane declaration is the SAME file runtime-rebuild-trigger.yml
+      # sparse-checks out in this repo. One declaration, read by every CI
+      # client of this bus, is the whole point: an address that lives in two
+      # places drifts in one of them silently (OMN-14800).
+      - name: Fetch the declared CI bus lanes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve the declared lane transport
+        id: transport
+        env:
+          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+        run: |
+          set -euo pipefail
+          # Fail-closed by construction: load_lane_transport RAISES on a
+          # missing lane, an in-memory lane, an undeclared protocol, or a
+          # broker that is itself a host alias. It never returns a default, so
+          # a broken overlay stops the run here instead of producing a probe
+          # that reads the wrong lane and reports it clean.
+          #
+          # Only the non-secret half is exported. The credentials are injected
+          # as secrets on the probe step below and never pass through an
+          # output, a log line, or a command line.
+          uv run python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              lane_transport_env, load_lane_transport,
+          )
+          lane = os.environ['BUS_LANE']
+          transport = load_lane_transport(
+              pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+          )
+          print(f'lane {lane!r} declares {transport.bootstrap_servers} '
+                f'({transport.security_protocol}/{transport.sasl_mechanism})')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in lane_transport_env(transport).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
+      # OMN-18060. Deliberately NOT fail-loud the way the transport step above
+      # is, and the asymmetry is the point. An unresolvable BROKER means the
+      # probe would read the wrong lane and report it clean, so the run must
+      # stop before it publishes anything. An unresolvable projection
+      # declaration means one leg has no instrument -- which the node already
+      # renders honestly, as SKIPPED_NOT_CONFIGURED against OMN-16025 link 2,
+      # and therefore RED. Killing the job here instead would throw away the
+      # three links the probe CAN prove and leave no receipt naming the one it
+      # cannot, which is a worse report of the same failure.
+      #
+      # Only the NAME is exported. The DSN itself is injected as a secret on
+      # the probe step under that same name and never passes through an
+      # output, a log line, or a command line.
+      - name: Resolve the declared projection-readback DSN reference
+        id: projection
+        env:
+          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+        run: |
+          set -euo pipefail
+          uv run python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              load_lane_projection_readback, projection_readback_env,
+          )
+          lane = os.environ['BUS_LANE']
+          try:
+              declaration = load_lane_projection_readback(
+                  pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+              )
+          except ValueError as exc:
+              print(f'::warning::no projection readback declared for lane {lane!r}: {exc}')
+              print('OMN-16025 link 2 will report SKIPPED_NOT_CONFIGURED, which is RED.')
+              raise SystemExit(0)
+          print(f'lane {lane!r} declares its projection DSN under '
+                f'{declaration.dsn_env} (a NAME; the value is a job secret)')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in projection_readback_env(declaration).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
+      # OMN-16964. Link 5's source, resolved the same way and with the same
+      # deliberate asymmetry as the step above: an unresolvable declaration
+      # WARNS and continues rather than killing the job, because the node
+      # already renders a missing instrument honestly (SKIPPED_NOT_CONFIGURED
+      # against OMN-16025 link 5, which is RED), and stopping here would throw
+      # away the four links the probe CAN prove.
+      #
+      # Only the NAME is exported. The DSN is injected as a secret on the probe
+      # step under that same name -- and for this leg no NEW secret exists:
+      # `ledger_chain` and `delegation_workflow_state` are both in the
+      # omnibase_infra database and both readable by `chain_canary_reader`, so
+      # the lane declares the SAME variable name for both legs today. The two
+      # declarations stay separate so either can be repointed without moving
+      # the other; only the value they currently resolve to is shared.
+      - name: Resolve the declared ledger-readback DSN reference
+        id: ledger
+        env:
+          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+        run: |
+          set -euo pipefail
+          uv run python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              load_lane_ledger_readback, ledger_readback_env,
+          )
+          lane = os.environ['BUS_LANE']
+          try:
+              declaration = load_lane_ledger_readback(
+                  pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+              )
+          except ValueError as exc:
+              print(f'::warning::no ledger readback declared for lane {lane!r}: {exc}')
+              print('OMN-16025 link 5 will report SKIPPED_NOT_CONFIGURED, which is RED.')
+              raise SystemExit(0)
+          print(f'lane {lane!r} declares its ledger DSN under '
+                f'{declaration.dsn_env} (a NAME; the value is a job secret)')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in ledger_readback_env(declaration).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
       - name: Fire one live delegation through the dev-lane ingress
         env:
           # Inside the deploy-runner container `localhost` is the container
@@ -172,7 +332,11 @@ jobs:
           PROBE_URL: ${{ github.event.inputs.probe_url || 'http://host.docker.internal:8085' }}
           TASK_TYPE: ${{ github.event.inputs.task_type || 'test' }}
           BUDGET_MS: ${{ github.event.inputs.budget_ms || '120000' }}
-          QUARANTINE_BOOTSTRAP: ${{ github.event.inputs.quarantine_bootstrap_servers || 'host.docker.internal:19092' }}
+          # Empty means "use the lane declaration", resolved into
+          # KAFKA_BOOTSTRAP_SERVERS by the step above. An explicit override is
+          # still honoured, and the request model refuses it if it names a
+          # Docker-Desktop alias.
+          QUARANTINE_BOOTSTRAP_OVERRIDE: ${{ github.event.inputs.quarantine_bootstrap_servers }}
           # OMN-16931: the terminal verdict is read off the BROKER, not off
           # the /skill HTTP response. Run 33251822642 reported
           # `terminal_missing` at 4,369 ms of a 120,000 ms budget while the
@@ -181,7 +345,42 @@ jobs:
           # not restore the old behaviour — it reports
           # TERMINAL_READBACK_NOT_CONFIGURED, because a run with no broker
           # has no evidence about the terminal.
-          TERMINAL_BOOTSTRAP: ${{ github.event.inputs.terminal_bootstrap_servers || 'host.docker.internal:19092' }}
+          TERMINAL_BOOTSTRAP_OVERRIDE: ${{ github.event.inputs.terminal_bootstrap_servers }}
+          # OMN-17926: the lane declares SASL_PLAINTEXT / SCRAM-SHA-256 since
+          # OMN-18012 Phase B. These are the org-wide dev-lane SCRAM secrets
+          # runtime-rebuild-trigger.yml already uses, injected as ENVIRONMENT
+          # so that no credential reaches argv, the process list, or this log.
+          # build_aiokafka_auth_kwargs_from_env reads them together with the
+          # KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM the resolve step
+          # exported.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          # OMN-18060: link 2's Postgres DSN, injected as ENVIRONMENT under the
+          # literal name the dev lane declares in omnimarket
+          # config/ci_bus_lanes.yaml (`projection_readback.dsn_env`). GitHub
+          # requires a literal key here, so the declaration and this line are
+          # two halves that must agree; if they ever diverge the node reports
+          # SKIPPED_NOT_CONFIGURED naming the variable it looked for, which is
+          # red and diagnosable rather than silently green.
+          #
+          # The DSN authenticates as `chain_canary_reader` -- SELECT on
+          # delegation_workflow_state and nothing else, NOSUPERUSER
+          # NOBYPASSRLS -- and the node probes pg_roles on connect and REFUSES
+          # a role carrying either attribute. It is never passed as a flag:
+          # argv is world-readable through /proc, and the dispatch step echoes
+          # its own broker values into this log.
+          CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
+          # OMN-16964: what a COMPLETE chain must carry, end to end. Declared
+          # here rather than inferred from whatever the ledger returned,
+          # because the scope's own wording is "no gaps tolerated silently" --
+          # a chain short by a hop must not look complete simply because every
+          # row present was well-formed. These are the ordered topics one
+          # delegation traverses, per the node contracts that publish them.
+          EXPECTED_LEDGER_HOPS: >-
+            onex.cmd.omnimarket.delegate-skill.v1,
+            onex.cmd.omnibase-infra.delegation-routing-request.v1,
+            onex.evt.omnibase-infra.routing-decision.v1,
+            onex.evt.omnimarket.delegate-skill-completed.v1
           # The omnimarket drift guard (OMN-14060) refuses `onex skill`
           # whenever $OMNI_HOME/omnimarket exists and the venv's omnimarket
           # is not a git co-install. The deploy runner sets OMNI_HOME to its
@@ -200,12 +399,28 @@ jobs:
           # NOT `set -e`: a non-zero dispatch is itself a finding and must
           # still produce a receipt. The verdict step below is what decides
           # the job's exit status.
+          #
+          # No literal address here and no `||` default: an unresolved
+          # KAFKA_BOOTSTRAP_SERVERS means the declaration step did not run, and
+          # an empty broker makes both legs report NOT_CONFIGURED rather than
+          # silently probing a guess.
+          QUARANTINE_BOOTSTRAP="${QUARANTINE_BOOTSTRAP_OVERRIDE:-${KAFKA_BOOTSTRAP_SERVERS:-}}"
+          TERMINAL_BOOTSTRAP="${TERMINAL_BOOTSTRAP_OVERRIDE:-${KAFKA_BOOTSTRAP_SERVERS:-}}"
+          echo "quarantine broker: ${QUARANTINE_BOOTSTRAP:-<unset>}"
+          echo "terminal broker:   ${TERMINAL_BOOTSTRAP:-<unset>}"
+          # The NAME is safe to print and is the one thing worth printing: it
+          # is what a reader needs to check the declaration against the secret.
+          echo "projection dsn var: ${CHAIN_CANARY_PROJECTION_DSN_ENV:-<undeclared>}"
+          echo "ledger dsn var:     ${CHAIN_CANARY_LEDGER_DSN_ENV:-<undeclared>}"
           uv run onex skill chain_canary \
             --probe-url "${PROBE_URL}" \
             --task-type "${TASK_TYPE}" \
             --budget-ms "${BUDGET_MS}" \
             --terminal-bootstrap-servers "${TERMINAL_BOOTSTRAP}" \
             --quarantine-bootstrap-servers "${QUARANTINE_BOOTSTRAP}" \
+            --projection-dsn-env "${CHAIN_CANARY_PROJECTION_DSN_ENV:-}" \
+            --ledger-dsn-env "${CHAIN_CANARY_LEDGER_DSN_ENV:-}" \
+            --expected-ledger-hops "${EXPECTED_LEDGER_HOPS}" \
             > chain-canary-receipt.json
 
       - name: Publish receipt and set the verdict

@@ -439,6 +439,9 @@ class HandlerDlqDepthMonitor:
                 evaluated_at=evaluated_at,
                 window_seconds=request.window_seconds,
             ),
+            # Echoed even here: a disabled run is a green run, and the reader
+            # should be able to see it never had a gating decision to make.
+            suppress_alert_exit=request.suppress_alert_exit,
         )
 
     async def _sweep(
@@ -485,23 +488,42 @@ class HandlerDlqDepthMonitor:
             window_seconds=request.window_seconds,
             topics_matched=len(dlq_topics),
             evaluation=evaluation,
+            suppress_alert_exit=request.suppress_alert_exit,
+            alert_exit_requested=(
+                evaluation.alert_triggered and not request.suppress_alert_exit
+            ),
         )
 
-        if evaluation.alert_triggered and not request.suppress_alert_exit:
+        # OMN-18088 -- THE ALERT RETURNS, IT DOES NOT RAISE.
+        #
+        # This block used to raise RuntimeHostError with the offender list
+        # formatted into its message, and `result` above -- already holding the
+        # full histogram -- was discarded unreturned. RuntimeLocal catches that
+        # exception, records `result=failed`, and does NOT re-raise, so receipt
+        # mode's `except Exception` never fires and `runtime_error` stays "".
+        # Receipt mode's typed-result branch is gated on success, so the failed
+        # run took the runtime-summary branch instead: scheduled run
+        # 34399417506 went red with handler_result=null, terminal_payload=null
+        # and error="", naming none of the 67 topics it had just measured.
+        #
+        # The offender list existed only inside the exception and nothing
+        # between those two layers wrote it down. So the decision is carried in
+        # `alert_exit_requested` above, both paths return the identical shape,
+        # and the workflow takes its non-zero exit by reading that field.
+        if result.alert_exit_requested:
             offenders = ", ".join(
                 f"{verdict.topic} (+{verdict.arrivals_in_window} in "
                 f"{request.window_seconds}s, bound {verdict.max_arrivals_per_window}, "
                 f"retained {verdict.retained_depth})"
                 for verdict in evaluation.alerting_verdicts
             )
-            raise RuntimeHostError(
-                f"DLQ arrival alert: {evaluation.topics_alerting} topic(s) "
-                f"exceeded their declared bound — {offenders}",
-                context=ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="dlq_depth_monitor",
-                    correlation_id=request.correlation_id,
-                ),
+            # WARNING, not an exception: the run's capture log should name the
+            # offenders too, so the log and the payload agree rather than the
+            # log being the only place the information ever existed.
+            logger.warning(
+                "DLQ arrival alert: %d topic(s) exceeded their declared bound — %s",
+                evaluation.topics_alerting,
+                offenders,
             )
 
         return result

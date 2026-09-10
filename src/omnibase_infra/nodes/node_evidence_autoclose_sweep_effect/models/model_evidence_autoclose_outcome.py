@@ -12,6 +12,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_binding_row import (
+    ModelAcBindingRow,
+)
 
 
 class ModelEvidenceAutocloseOutcome(BaseModel):
@@ -66,6 +69,24 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
             "dod_verify's checks do not cover (GAP_AC_COVERAGE only). Recorded "
             "on the outcome as well as in the comment so a DRY-RUN, which posts "
             "no comment, still names exactly what blocked the flip."
+        ),
+    )
+    # OMN-18056. THE AC-BINDING TABLE. One row per (acceptance criterion,
+    # declaring check), plus exactly one row for each criterion no check
+    # declares. Recorded on the outcome as well as rendered into the comment
+    # for the same reason `uncovered_acceptance_criteria` is: a DRY-RUN posts
+    # nothing, and a preview that cannot say WHICH criterion is unbound is not
+    # a preview of the decision — it is a restatement of the counters, which
+    # is the thing this ticket exists to stop reading as proof.
+    #
+    # Empty on every path that reached no verdict, and on a FLIP it carries
+    # the bindings that RELEASED it: a closed ticket then states which check
+    # discharged which criterion instead of stating an arithmetic identity.
+    ac_binding_rows: tuple[ModelAcBindingRow, ...] = Field(
+        default=(),
+        description=(
+            "Acceptance criterion -> declaring check rows for this verdict. "
+            "A row with an empty `check_id` is a criterion nothing declares."
         ),
     )
     # ------------------------------------------------------------------
@@ -173,6 +194,20 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
             "withheld this decision (total/verified/failed/non-probative/"
             "behaviour-proving). Lets two receipts be compared for 'same "
             "verdict' without re-parsing free text."
+        ),
+    )
+    # OMN-18106. Non-empty ONLY when the positive prior-revert fence stopped
+    # applying because this ticket's evidence landed after the reversal. It
+    # names the reversal's timestamp and each piece of evidence that postdates
+    # it, so a close taken over a prior human disagreement carries, in the
+    # receipt itself, the ordering that authorised it. Empty is the ordinary
+    # case — either no reversal, or a fence that held.
+    post_revert_evidence_release: str = Field(
+        default="",
+        description=(
+            "Why the prior-revert fence did not apply: the reversal timestamp "
+            "and the evidence landings that postdate it. Empty when the fence "
+            "was not reached or held."
         ),
     )
     linear_comment_posted: bool = Field(

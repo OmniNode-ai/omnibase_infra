@@ -104,6 +104,13 @@ def test_validate_llm_endpoint_env_contract_fails_on_stale_env_file(
 class _FakeExecutor:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        # OMN-18057: the agent reads residue from the executor when it
+        # builds the terminal event.
+        self.container_residue: list[object] = []
+        # OMN-17135: the agent reads the sibling SHAs this deploy vendored
+        # when it builds the terminal event; a double of the executor
+        # carries the attribute too.
+        self.sibling_source_refs: dict[str, str] = {}
 
     def preflight(self, **kwargs: object) -> None:
         self.calls.append("preflight")

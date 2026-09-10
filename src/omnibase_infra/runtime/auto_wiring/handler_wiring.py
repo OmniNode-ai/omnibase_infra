@@ -5768,29 +5768,34 @@ def _validate_initial_subscription_contract_identities(
         )
 
 
-def _validate_not_ready_contract_identities(
+def _validate_unattached_contract_identities(
     manifest: ModelAutoWiringManifest,
-    not_ready_results: Sequence[ModelContractAttachResult],
+    attach_results: Sequence[ModelContractAttachResult],
 ) -> tuple[ModelContractAttachResult, ...]:
-    """Return uniquely named NOT_READY rows forming a valid manifest subset."""
+    """Return uniquely named UNATTACHED rows forming a valid manifest subset.
+
+    OMN-18110. Admission is ``ModelContractAttachResult.needs_reattach`` — the
+    single shared definition the kernel's selector reads too — so NOT_READY
+    (readiness never converged) and FAILED (readiness passed, the consumer
+    attach itself raised) are both re-attempted. Filtering on ``NOT_READY``
+    alone left a group-join timeout permanently unretried.
+    """
     manifest_names = _require_unique_canonical_contract_names(
         tuple(contract.name for contract in manifest.contracts),
         identity_source="manifest",
     )
     pending_results = tuple(
-        result
-        for result in not_ready_results
-        if result.status is EnumContractAttachStatus.NOT_READY
+        result for result in attach_results if result.needs_reattach
     )
-    not_ready_names = _require_unique_canonical_contract_names(
+    unattached_names = _require_unique_canonical_contract_names(
         tuple(result.contract_name for result in pending_results),
-        identity_source="NOT_READY",
+        identity_source="UNATTACHED",
     )
-    unexpected_names = not_ready_names.difference(manifest_names)
+    unexpected_names = unattached_names.difference(manifest_names)
     if unexpected_names:
         raise ModelOnexError(
             message=(
-                "handler_wiring: NOT_READY and manifest contract-name mismatch; "
+                "handler_wiring: UNATTACHED and manifest contract-name mismatch; "
                 "reattach identities must be a manifest subset "
                 f"(unexpected={sorted(unexpected_names)})"
             ),
@@ -5967,6 +5972,23 @@ async def _route_apply_publish_failure(
     normally, safe to ACK) or the offset must not advance (raises).
     """
     from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+
+    if _is_dead_letter_source_topic(topic):
+        # OMN-18084: same circular route as the NO_DISPATCHER and handler-error
+        # legs. Note this one must LOG AND RETURN rather than raise: raising
+        # withholds the offset so the record is redelivered, and a record whose
+        # apply-publish fails deterministically on a dead-letter topic would be
+        # redelivered forever. It is already durably captured on a dead-letter
+        # sink, so committing over it loses nothing.
+        logger.error(
+            "metric_name=boundary_dead_letter_apply_publish_failed dlq_routed=false "
+            "reason=already_on_dead_letter_topic topic=%s error_type=%s "
+            "correlation_id=%s",
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
 
     publish_dlq_fn = (
         getattr(event_bus, "_publish_raw_to_dlq", None)
@@ -6490,6 +6512,33 @@ def _make_event_bus_callback(
             sanitized,
             correlation_id,
         )
+        if _is_dead_letter_source_topic(topic):
+            # OMN-18084: the third and last unguarded leg. The NO_DISPATCHER
+            # leg (`_raise_if_no_dispatcher_drop`) and the no-result-applier
+            # leg have taken this branch since OMN-16798; this one had not, and
+            # OMN-18013 moved DLQ traffic onto it by making the replay handler
+            # dispatch successfully and then fail. `get_dlq_topic_for_original`
+            # is a FIXED POINT on dead-letter names, so the write below would
+            # land the record back on the topic it was just read from —
+            # measured on the .201 dev lane 2026-09-09 at 193.8 records/s,
+            # ~151 GB/day, on a mount with 590 GB free shared with prod,
+            # stability-test and judge.
+            #
+            # No terminal is emitted either. A terminal is an answer, and the
+            # caller behind a record sitting on a dead-letter sink was already
+            # answered when it was first dead-lettered (the OMN-17432
+            # rationale); a second one would answer nobody and would be written
+            # to the quarantine sink this same handler consumes.
+            logger.error(
+                "metric_name=boundary_dead_letter_handler_error dlq_routed=false "
+                "reason=already_on_dead_letter_topic topic=%s error_type=%s "
+                "error=%s correlation_id=%s",
+                topic,
+                type(exc).__name__,
+                sanitized,
+                correlation_id,
+            )
+            return
         dlq_enabled = _boundary_dlq_enabled()
         publish_dlq_fn = (
             getattr(event_bus, "_publish_raw_to_dlq", None)
@@ -7048,6 +7097,22 @@ async def _route_sync_publisher_failure(
     from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
 
     correlation_id = uuid4()
+    if _is_dead_letter_source_topic(topic):
+        # OMN-18084: this helper's target is a PUBLISH topic, and
+        # node_dlq_replay_effect declares the quarantine dead-letter sink as
+        # one — so it genuinely can be handed a DLQ topic, and answering with
+        # `get_dlq_topic_for_original` would resolve that sink to itself.
+        logger.error(
+            "metric_name=boundary_dead_letter_sync_publish_failed dlq_routed=false "
+            "reason=already_on_dead_letter_topic handler=%s topic=%s "
+            "error_type=%s correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
+
     publish_dlq_fn = getattr(event_bus, "_publish_raw_to_dlq", None)
     if publish_dlq_fn is None or not callable(publish_dlq_fn):
         logger.error(
@@ -8930,7 +8995,7 @@ DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = 5
 
 async def reattach_not_ready_contracts(
     manifest: ModelAutoWiringManifest,
-    not_ready_results: Sequence[ModelContractAttachResult],
+    attach_results: Sequence[ModelContractAttachResult],
     dispatch_engine: ProtocolDispatchEngine,
     event_bus: object | None,
     environment: str = "dev",
@@ -8942,7 +9007,7 @@ async def reattach_not_ready_contracts(
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]]:
-    """Re-attempt provision -> confirm-ready -> attach for contracts still NOT_READY.
+    """Re-attempt provision -> confirm-ready -> attach for UNATTACHED contracts.
 
     OMN-15215 (CONFIRMED root cause): ``subscribe_wired_contract_topics`` makes
     exactly ONE provision->confirm->attach attempt per contract via
@@ -8976,23 +9041,37 @@ async def reattach_not_ready_contracts(
     ``VALID_ROUTING_STRATEGIES`` alone would NOT have unblocked OMN-15169 —
     only closing this NOT_READY-has-no-retry gap does.
 
+    OMN-18110 widened the input from NOT_READY to every contract that did not
+    attach. ``_interleave_contract`` records a second non-attached outcome —
+    FAILED, meaning readiness PASSED and the consumer attach itself raised —
+    and nothing retried it, so one transient Kafka group-join timeout stranded
+    a contract for the rest of the process. Live on the ``.201`` dev lane,
+    boot 2026-09-10T00:03:45Z: four contracts (``node_omnigate_projection``
+    among them) each recorded ``status=failed detail=InfraTimeoutError`` over a
+    ``readiness.status=ready`` with an empty failure set, while the eleven
+    preceding boots of the same image attached all 215. The runtime then held
+    ``projection_attachment`` DEGRADED with no path back short of a restart.
+    Both outcomes are re-attemptable by this same idempotent interleave, and
+    the admission predicate is now the shared
+    ``ModelContractAttachResult.needs_reattach``.
+
     Re-runs the SAME provision->confirm->attach interleave
-    (``_interleave_contract``) for each contract still in NOT_READY status,
-    returning newly-attached topics and updated per-contract results. Callers
-    invoke this repeatedly (bounded, with backoff — see
+    (``_interleave_contract``) for each contract still unattached, returning
+    newly-attached topics and updated per-contract results. Callers invoke
+    this repeatedly (bounded, with backoff — see
     ``run_not_ready_reconciliation_loop``) until every contract attaches or a
     bounded retry budget is exhausted.
     """
-    pending_results = _validate_not_ready_contract_identities(
+    pending_results = _validate_unattached_contract_identities(
         manifest,
-        not_ready_results,
+        attach_results,
     )
     if event_bus is None:
         return {}, ()
 
     contract_by_name = {contract.name: contract for contract in manifest.contracts}
-    still_not_ready_names = tuple(result.contract_name for result in pending_results)
-    if not still_not_ready_names:
+    still_unattached_names = tuple(result.contract_name for result in pending_results)
+    if not still_unattached_names:
         return {}, ()
 
     _validate_contract_dispatcher_ownership(
@@ -9005,11 +9084,11 @@ async def reattach_not_ready_contracts(
     knobs = readiness_config or ModelTopicReadinessConfig()
     semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
 
-    not_ready_by_name = {result.contract_name: result for result in pending_results}
+    pending_by_name = {result.contract_name: result for result in pending_results}
 
     async def _retry_one(name: str) -> ModelContractAttachResult | None:
         contract = contract_by_name.get(name)
-        previous_result = not_ready_by_name.get(name)
+        previous_result = pending_by_name.get(name)
         if contract is None or previous_result is None:
             return None
         async with semaphore:
@@ -9028,7 +9107,7 @@ async def reattach_not_ready_contracts(
             )
 
     retried = await asyncio.gather(
-        *(_retry_one(name) for name in still_not_ready_names)
+        *(_retry_one(name) for name in still_unattached_names)
     )
     results = tuple(r for r in retried if r is not None)
 
@@ -9042,7 +9121,7 @@ async def reattach_not_ready_contracts(
 
 async def run_not_ready_reconciliation_loop(
     manifest: ModelAutoWiringManifest,
-    initial_not_ready: Sequence[ModelContractAttachResult],
+    initial_unattached: Sequence[ModelContractAttachResult],
     dispatch_engine: ProtocolDispatchEngine,
     event_bus: object | None,
     environment: str = "dev",
@@ -9062,33 +9141,37 @@ async def run_not_ready_reconciliation_loop(
     | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> tuple[ModelContractAttachResult, ...]:
-    """Bounded background retry of NOT_READY contracts (OMN-15215).
+    """Bounded background retry of UNATTACHED contracts (OMN-15215, OMN-18110).
 
-    Sleeps ``initial_delay_seconds``, then re-attempts every still-NOT_READY
-    contract via ``reattach_not_ready_contracts``, up to ``max_attempts`` times
-    with ``backoff_seconds`` between attempts. Stops early once every contract
-    has attached. Never raises on a still-NOT_READY outcome — this preserves
-    the OMN-13237 fail-open boot contract (a contract that never converges
-    stays degraded, not crash-looping); this loop makes "runtime stays live"
-    actually recoverable instead of a permanent skip. ``on_attempt`` is an
-    optional caller hook (e.g. to fold newly-subscribed topics into shared
-    boot-time bookkeeping such as topic-collision detection) invoked after
-    each attempt with ``(newly_subscribed, results)``. ``sleep`` is injectable
-    so tests can drive the loop without real wall-clock delay.
+    Sleeps ``initial_delay_seconds``, then re-attempts every contract that is
+    still unattached via ``reattach_not_ready_contracts``, up to
+    ``max_attempts`` times with ``backoff_seconds`` between attempts. Stops
+    early once every contract has attached. Never raises on a still-unattached
+    outcome — this preserves the OMN-13237 fail-open boot contract (a contract
+    that never converges stays degraded, not crash-looping); this loop makes
+    "runtime stays live" actually recoverable instead of a permanent skip.
+    ``on_attempt`` is an optional caller hook (e.g. to fold newly-subscribed
+    topics into shared boot-time bookkeeping such as topic-collision detection)
+    invoked after each attempt with ``(newly_subscribed, results)``. ``sleep``
+    is injectable so tests can drive the loop without real wall-clock delay.
+
+    OMN-18110: the input is every non-attached result, FAILED as well as
+    NOT_READY. The budget is unchanged — widening WHICH contracts are retried
+    does not widen HOW MANY times any of them is.
     """
-    validated_not_ready = _validate_not_ready_contract_identities(
+    validated_unattached = _validate_unattached_contract_identities(
         manifest,
-        initial_not_ready,
+        initial_unattached,
     )
     _validate_contract_dispatcher_ownership(
         dispatch_engine,
         tuple(
             (result.contract_name, result.dispatcher_ids)
-            for result in validated_not_ready
+            for result in validated_unattached
         ),
     )
     pending: dict[str, ModelContractAttachResult] = {
-        r.contract_name: r for r in validated_not_ready
+        r.contract_name: r for r in validated_unattached
     }
     if not pending:
         return ()
@@ -9119,8 +9202,8 @@ async def run_not_ready_reconciliation_loop(
         if on_attempt is not None:
             on_attempt(newly_subscribed, results)
         logger.info(
-            "NOT_READY reconciliation attempt %d/%d: resolved=%d remaining=%d "
-            "(OMN-15215)",
+            "Unattached-contract reconciliation attempt %d/%d: resolved=%d "
+            "remaining=%d (OMN-15215/OMN-18110)",
             attempt,
             max_attempts,
             len(newly_subscribed),
@@ -9131,9 +9214,9 @@ async def run_not_ready_reconciliation_loop(
 
     if pending:
         # OMN-15578: same discipline as the NOT-READY warning above — carry
-        # per-contract reason+detail (from each still-pending result's
-        # readiness.failures), not just the bare contract name, so a
+        # per-contract reason+detail, not just the bare contract name, so a
         # reconciliation-exhaustion outcome is root-causable from logs alone.
+        #
         failure_details = {
             contract_name: [
                 {
@@ -9145,15 +9228,31 @@ async def run_not_ready_reconciliation_loop(
             ]
             for contract_name, result in pending.items()
         }
+        # OMN-18110: the attach STATUS and its detail are carried alongside the
+        # readiness failures, not instead of them. A FAILED attach has an EMPTY
+        # ``readiness.failures`` by construction — readiness is the part that
+        # passed — so for the exact class of exhaustion this widening admits, a
+        # readiness-only rendering printed ``[]`` and the warning named the
+        # contract while saying nothing at all about why it never attached.
+        attach_details = {
+            contract_name: {
+                "status": result.status.value,
+                "detail": result.detail,
+            }
+            for contract_name, result in pending.items()
+        }
         logger.warning(
-            "NOT_READY reconciliation exhausted after %d attempts, still "
-            "not-ready: %s (OMN-15215/OMN-13237, runtime stays live degraded)",
+            "Unattached-contract reconciliation exhausted after %d attempts, "
+            "still unattached: %s readiness=%s (OMN-15215/OMN-18110/OMN-13237, "
+            "runtime stays live degraded)",
             max_attempts,
+            attach_details,
             failure_details,
             extra={
                 "max_attempts": max_attempts,
                 "pending_contracts": sorted(pending),
                 "readiness_failures": failure_details,
+                "attach_failures": attach_details,
             },
         )
     return tuple(latest.values())

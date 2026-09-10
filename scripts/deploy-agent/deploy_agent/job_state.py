@@ -14,7 +14,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from deploy_agent.events import Phase, PhaseStatus
+from deploy_agent.events import DEPLOY_PHASE_ORDER, Phase, PhaseStatus
 
 
 class JobState(BaseModel):
@@ -27,6 +27,36 @@ class JobState(BaseModel):
     errors: list[str] = Field(default_factory=list)
     result_publish_pending: bool = False
     completed_at: datetime | None = None
+
+
+def reconcile_terminal_phase_results(
+    phase_results: dict[Phase, PhaseStatus],
+) -> dict[Phase, PhaseStatus]:
+    """Settle every deploy phase verdict at the moment a job goes terminal.
+
+    OMN-18057. Command 23edaf62 raised out of ``Phase.RUNTIME`` and its job
+    record -- and therefore its terminal event -- kept ``runtime: in_progress``
+    beside a ``completed_at`` and a duration, with ``seed``/``verification``
+    simply absent. The event asserted the deploy was over while refusing to say
+    how it ended, and an absent phase is indistinguishable from a phase whose
+    result was lost.
+
+    Two rules, applied to the deploy phases only (``Phase.PUBLISH`` is the act
+    of emitting the event and is settled by the caller afterwards):
+
+    * a phase still marked IN_PROGRESS or PENDING when the job goes terminal
+      FAILED -- it is the phase that raised;
+    * a phase never reached is SKIPPED -- explicitly, so "not run" is a fact on
+      the record rather than a gap in it.
+    """
+    settled = dict(phase_results)
+    for phase in DEPLOY_PHASE_ORDER:
+        current = settled.get(phase)
+        if current is None:
+            settled[phase] = PhaseStatus.SKIPPED
+        elif current in (PhaseStatus.IN_PROGRESS, PhaseStatus.PENDING):
+            settled[phase] = PhaseStatus.FAILED
+    return settled
 
 
 class JobStore:
@@ -121,6 +151,7 @@ class JobStore:
             raise ValueError(f"Job {correlation_id} not found")
         job.status = status
         job.completed_at = datetime.now(UTC)
+        job.phase_results = reconcile_terminal_phase_results(job.phase_results)
         if errors:
             job.errors.extend(errors)
         self._save(job)
@@ -134,12 +165,10 @@ class JobStore:
             except Exception:  # noqa: BLE001
                 continue
             if job.status in ("accepted", "in_progress"):
-                # Mark the current in-progress phase as failed
-                if (
-                    job.current_phase in job.phase_results
-                    and job.phase_results[job.current_phase] == PhaseStatus.IN_PROGRESS
-                ):
-                    job.phase_results[job.current_phase] = PhaseStatus.FAILED
+                # Settle every deploy phase, not only the current one: a phase
+                # the crashed process never reached is SKIPPED on the record
+                # rather than absent from it (OMN-18057).
+                job.phase_results = reconcile_terminal_phase_results(job.phase_results)
                 job.status = "failed"
                 job.completed_at = datetime.now(UTC)
                 job.errors.append(f"interrupted during phase {job.current_phase}")

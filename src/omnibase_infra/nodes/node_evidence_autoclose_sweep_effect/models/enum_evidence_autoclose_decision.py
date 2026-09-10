@@ -36,6 +36,50 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # nothing says the system does the thing, so the flip is withheld
     # (OMN-15911).
     GAP_NO_BEHAVIOR_PROOF = "gap_no_behavior_proof"
+    # OMN-18056. THE BINDING HOLD. dod_verify was green, its checks covered
+    # the counting bounds above, and at least one acceptance criterion in the
+    # ticket body is DECLARED BY NO CHECK — no evidence item in the OCC
+    # contract names it in `binds_ac`, so no verified probative check claims
+    # to prove it.
+    #
+    # This is a different fact from GAP_AC_COVERAGE, which is three COUNTING
+    # rules: an unchecked box, more items than verified checks, or a
+    # non-probative majority. A count can refute "every criterion is covered";
+    # it can never identify WHICH criterion is not, and on the nine tickets
+    # adjudicated in closeout sweep run 2 (2026-09-08) eight satisfied every
+    # counting bound while the criterion that decides the ticket was bound to
+    # nothing at all. Measured on OMN-15660: 6 verified + 2 non-probative = 8,
+    # 1 behaviour-proving, three parsed criteria, every counting rule
+    # releasing, and its AC3 ("both call sites are covered") unmet in the
+    # product tree with no check in the contract mentioning it.
+    #
+    # Reached in two shapes, both HOLDS and both naming what is missing:
+    #   * at least one parsed criterion binds to no verified probative check;
+    #   * the body parses to NO criteria at all, which the counting rules
+    #     RELEASE today via an `if not items` early exit — "nothing written
+    #     down" is not "nothing to prove".
+    GAP_AC_UNBOUND = "gap_ac_unbound"
+    # OMN-18056. THE RE-DRAW. A verdict that clears every conjunct is not
+    # flipped in the run that FIRST observed it; the same fingerprint has to
+    # come back on a later tick.
+    #
+    # Measured, closeout sweep run 2: fast-forwarding two stale product clones
+    # moved OMN-16025's predicate from FAIL to PASS with no acceptance
+    # criterion having moved. The verdict is a function of the ticket AND of
+    # the trees the checks execute in, and the second input changes for
+    # reasons that have nothing to do with the ticket — a clone repair, a
+    # transient tool, a fetch. A pass manufactured by such a change inside one
+    # run is indistinguishable, from the counters alone, from a pass the work
+    # earned.
+    #
+    # So the first eligible observation ARMS a re-draw (a marker comment
+    # carrying the fingerprint, on the ticket, where the sweep's memory
+    # already lives) and this run writes no Done. A later run that recomputes
+    # the SAME fingerprint flips. Cost: one tick. It does not make the
+    # predicate staleness-INVARIANT — an input change that persists across two
+    # ticks passes it, and the steady state of a repaired clone is exactly
+    # that — it makes a pass non-instantaneous, which is the whole claim.
+    SKIPPED_REDRAW_PENDING = "skipped_redraw_pending"
     # The caller named this ticket in `exclude_tickets` on the request, so the
     # sweep refused it BEFORE its first Linear read -- no issue fetch, no
     # dod_verify subprocess, no verdict (OMN-17891). Ordering is the property:
@@ -132,6 +176,21 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # transition on the ticket. Same verdict + a reversal = refuse. A CHANGED
     # verdict has a different fingerprint and is free to close, so the hold is
     # on re-asserting an overruled statement, not on the ticket forever.
+    #
+    # OMN-18106. "Not on the ticket forever" was, for one population, false.
+    # The OMN-18056 positive form recorded its baseline from the FIRST verdict
+    # observed after the reversal, which on any ticket whose remediation landed
+    # before that first look is the already-repaired verdict — and, dod_verify
+    # being deterministic, one no later tick could ever differ from. OMN-15542
+    # was held permanently that way. The fence now asks the ORDERING first,
+    # from timestamps rather than from recall: the reversal's own `createdAt`
+    # against the landing times of the evidence the verdict is resolved from
+    # (the merged OCC companion, each cited product PR). Evidence that
+    # postdates the reversal RELEASES to the ordinary flip predicate, and the
+    # outcome carries `post_revert_evidence_release` naming the reversal time
+    # and every landing that beat it. Evidence that entirely predates the
+    # reversal still holds — that is the OMN-17298 case the fence exists for —
+    # and an ordering that cannot be read holds too, naming the timestamp.
     SKIPPED_PRIOR_REVERT = "skipped_prior_revert"
     # OMN-16106, D1. The ticket's own description (or a Linear-linked
     # attachment) CITES a product PR that is not merged. This is the OMN-13856

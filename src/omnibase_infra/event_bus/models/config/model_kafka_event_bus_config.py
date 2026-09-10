@@ -71,6 +71,13 @@ Environment Variables:
             False values: "false", "0", "no", "off" (case-insensitive)
             Warning: Logs warning if unexpected value, treats as False
 
+        KAFKA_MAX_PARTITION_FETCH_BYTES: Per-partition fetch ceiling in bytes
+            (integer, 16384-52428800)
+            Default: 262144 (256 KiB)
+            Example: "524288"
+            Note: multiplied by the wired consumer count against the container
+            memory limit -- see the field docstring before raising it (OMN-15837)
+
     Producer Settings:
         KAFKA_ACKS: Producer acknowledgment policy
             Default: "all"
@@ -201,6 +208,8 @@ class ModelKafkaEventBusConfig(BaseModel):
         enable_idempotence: Enable producer idempotence for exactly-once semantics
         auto_offset_reset: Consumer offset reset policy ("earliest", "latest")
         enable_auto_commit: Enable auto-commit for consumer offsets
+        max_partition_fetch_bytes: Per-partition consumer fetch ceiling in bytes
+            (OMN-15837; 256 KiB default, sized against the wired consumer count)
         dead_letter_topic: Dead letter queue topic for failed messages (optional)
         reconnect_backoff_ms: Initial reconnect backoff in milliseconds (OMN-2916)
         reconnect_backoff_max_ms: Maximum reconnect backoff in milliseconds (OMN-2916)
@@ -382,6 +391,61 @@ class ModelKafkaEventBusConfig(BaseModel):
             "considered failed. Default 300s (5 min). Set high enough to "
             "accommodate slow batch processing without triggering rebalances."
         ),
+    )
+    max_partition_fetch_bytes: int = Field(
+        default=262_144,  # 256 KiB — OMN-15837
+        description=(
+            "Maximum bytes the broker returns per partition per fetch request. "
+            "Passed to AIOKafkaConsumer(max_partition_fetch_bytes=...). "
+            "Override via KAFKA_MAX_PARTITION_FETCH_BYTES.\n"
+            "\n"
+            "WHY THIS IS A SEPARATE FIELD AND NOT max_request_size "
+            "(OMN-15837, superseding the OMN-16267 coupling): this bound is a "
+            "per-consumer buffer ceiling, and an auto-wired runtime holds one "
+            "consumer per wired topic. On the stability lane that is 382 "
+            "consumers, so a 1 MiB bound reserves up to ~382 MiB of fetch "
+            "buffer against a 1.5 GiB container limit. That runtime OOM-looped "
+            "-- 224 memcg kills of task=onex-runtime measured on the .201 lab "
+            "host, anon-rss 1,529,044-1,557,120 kB against a MemLimit of "
+            "1,572,864 kB, an overshoot of only ~30-50 MB. Dropping the bound "
+            "to 256 KiB frees 382 * (1,048,588 - 262,144) = ~286 MiB, roughly "
+            "6x the overshoot, without touching the memory limit.\n"
+            "\n"
+            "WHY DECOUPLING IS SAFE. The OMN-16267 rationale held that this "
+            "value must be >= the producer's max_request_size, because "
+            "aiokafka's fetcher raises RecordTooLargeError and then ADVANCES "
+            "the offset past the record (consumer/fetcher.py: "
+            "``tp_state.consumed_to(tp_state.position + 1)``) when the broker "
+            "returns a non-empty buffer from which zero records decode -- a "
+            "silent skip-and-advance, i.e. data loss. That branch is "
+            "unreachable against a KIP-74 broker, which returns the first "
+            "record of a partition in full regardless of the fetch bound, so "
+            "at least one record always decodes. Measured on the lab broker "
+            "(Redpanda v24.2.7) rather than assumed: the 240,027-byte record "
+            "at onex.snapshot.projection.live-events.v1[0]@96426 is delivered "
+            "intact at a bound of 65,536 and at 262,144, against a positive "
+            "control at 1,048,588 that delivers the same record. No error, no "
+            "skip, at any of the three bounds.\n"
+            "\n"
+            "WHY 256 KiB SPECIFICALLY. It is above the largest payload the "
+            "bus actually carries, so the ordinary case still batches "
+            "normally instead of degrading to one record per fetch. Sampled "
+            "live on the lab dev broker: 1,657 topics / 93 non-empty "
+            "partitions / 1,476 records gave a max of 234,539 bytes; a deep "
+            "pass over the 45 snapshot topics (30,859 records) gave a max of "
+            "240,027 bytes, on onex.snapshot.projection.live-events.v1. Every "
+            "other topic sampled peaked at 84,884 bytes or less. The producer "
+            "ceiling (max_request_size, 1,048,588) still bounds the worst "
+            "case, and by the KIP-74 result above a record between 256 KiB "
+            "and that ceiling is delivered rather than dropped -- it costs a "
+            "fetch round trip, not correctness.\n"
+            "\n"
+            "Raise this only with a measurement showing the ordinary payload "
+            "has outgrown it; raising it costs memory linearly in the wired "
+            "consumer count."
+        ),
+        ge=16_384,  # 16 KiB floor — below this, ordinary envelopes fetch one at a time
+        le=52_428_800,  # 50 MB ceiling, matching max_request_size
     )
 
     # Dead letter queue configuration
@@ -1025,6 +1089,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_RECONNECT_BACKOFF_MS": "reconnect_backoff_ms",
             "KAFKA_RECONNECT_BACKOFF_MAX_MS": "reconnect_backoff_max_ms",
             "KAFKA_MAX_REQUEST_SIZE": "max_request_size",
+            "KAFKA_MAX_PARTITION_FETCH_BYTES": "max_partition_fetch_bytes",
         }
 
         # Integer fields for type conversion
@@ -1038,6 +1103,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "heartbeat_interval_ms",
             "max_poll_interval_ms",
             "max_request_size",
+            "max_partition_fetch_bytes",
         }
 
         # Float fields for type conversion

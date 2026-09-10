@@ -210,16 +210,31 @@ def test_generated_runtime_effects_requires_deploy_agent_hmac_secret() -> None:
     )
 
 
+_CLAUDE_CREDS_VOLUME = (
+    "${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-"
+    "/var/lib/omninode/optional-bind-source-absent}:/home/omniinfra/.claude:ro"
+)
+
+
 @pytest.mark.unit
-def test_runtime_effects_omits_unset_optional_claude_credentials() -> None:
-    """An unset optional directory must not become a file-to-directory mount."""
+def test_runtime_effects_defaults_unset_optional_claude_credentials_to_a_directory() -> (
+    None
+):
+    """An unset optional directory must not become a file-to-directory mount.
+
+    The compose default is a directory, so Docker binds an empty read-only
+    directory rather than being handed ``/dev/null`` (a file) for a directory
+    target -- the OMN-13248 defect. The entry is still emitted, because dropping
+    it made the render a property of the render host (OMN-17291).
+    """
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     compose = generate_compose(
         resolver.resolve(bundles=["runtime-core"]), environment={}
     )
 
     volumes = compose["services"]["runtime-effects"]["volumes"]
-    assert all("/home/omniinfra/.claude" not in volume for volume in volumes)
+    assert _CLAUDE_CREDS_VOLUME in volumes
+    assert not any("/dev/null:/home/omniinfra/.claude" in volume for volume in volumes)
     assert (
         "${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:"
         "/home/omniinfra/.codex/auth.json:ro" in volumes
@@ -238,10 +253,34 @@ def test_runtime_effects_renders_configured_optional_claude_directory(
     )
 
     volumes = compose["services"]["runtime-effects"]["volumes"]
+    assert _CLAUDE_CREDS_VOLUME in volumes
+
+
+@pytest.mark.unit
+def test_optional_bind_mount_render_does_not_depend_on_the_render_host(
+    tmp_path: Path,
+) -> None:
+    """Set and unset sources render a byte-identical volume list.
+
+    This is the property the committed required-env declaration relies on.
+    Before OMN-17291 the two renders differed by one entry carrying a
+    ``${VAR:?}`` name, so one commit produced two required-var name sets and the
+    parity test's verdict was a property of the machine that ran it -- it passed
+    on a workstation with ambient coding-agent credentials and failed on a lab
+    host without them.
+    """
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime-core"])
+
+    without_source = generate_compose(resolved, environment={})
+    with_source = generate_compose(
+        resolved,
+        environment={"CODING_AGENT_CLAUDE_CREDS_HOST_DIR": str(tmp_path)},
+    )
+
     assert (
-        "${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:?"
-        "CODING_AGENT_CLAUDE_CREDS_HOST_DIR must point to an existing absolute directory}:"
-        "/home/omniinfra/.claude:ro" in volumes
+        without_source["services"]["runtime-effects"]["volumes"]
+        == with_source["services"]["runtime-effects"]["volumes"]
     )
 
 

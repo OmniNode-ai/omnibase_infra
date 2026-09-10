@@ -77,6 +77,7 @@ def load_gateway_forwarder_runtime_config(
     *,
     contract_path: Path = _DEFAULT_GATEWAY_CONTRACT_PATH,
     broker_ref_map_path: Path,
+    lane_credential_map_path: Path | None = None,
 ) -> ModelGatewayForwarderRuntimeConfig:
     """Load and validate one explicit two-leg forwarder configuration.
 
@@ -84,6 +85,12 @@ def load_gateway_forwarder_runtime_config(
     endpoint is resolved from the node contract's ``cloud_broker_ref`` at
     this effect boundary, never hardcoded into compose or tenant config. See
     ``_materialize_cloud_broker_ref`` for the fail-closed resolution rules.
+
+    ``lane_credential_map_path`` is the same idea for the one class of value
+    that must never be committed -- a lane broker's SASL credential. It is
+    optional only so a deployment whose legs are all unauthenticated needs no
+    mount; a config that NAMES a credential ref and gets no map raises. See
+    ``_materialize_lane_broker_credentials``.
     """
     raw_object: object = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(raw_object, dict):
@@ -94,6 +101,7 @@ def load_gateway_forwarder_runtime_config(
     _materialize_contract_lane_mirror(raw, contract_path)
     _materialize_cloud_broker_ref(raw, contract_path, broker_ref_map_path)
     _materialize_contract_https_ingest(raw, contract_path, broker_ref_map_path)
+    _materialize_lane_broker_credentials(raw, lane_credential_map_path)
     return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
 
 
@@ -263,6 +271,189 @@ def _materialize_contract_lane_mirror(
     forwarder["lane_mirror"] = {
         str(key): value for key, value in lane_mirror_object.items()
     }
+
+
+_SASL_CREDENTIAL_REF_KEY = "sasl_credential_ref"
+_SASL_LITERAL_KEYS = ("sasl_plain_username", "sasl_plain_password")
+_SASL_PROTOCOLS = frozenset({"SASL_PLAINTEXT", "SASL_SSL"})
+
+
+def _materialize_lane_broker_credentials(
+    raw: dict[str, object],
+    lane_credential_map_path: Path | None,
+) -> None:
+    """Resolve each bus leg's SASL credential from an operator-supplied map.
+
+    Same authority split -- and the same mounted-file mechanism --
+    ``_materialize_cloud_broker_ref`` uses for the cloud leg's endpoint,
+    applied to the one class of value that must never be committed. A leg
+    declares only a REF (``sasl_credential_ref: "lane.dev.kafka.scram"``) and
+    this boundary resolves it against a map the operator mounts, which is
+    outside this repository.
+
+    Why a mounted file and not an environment variable: an env var is visible
+    in ``docker inspect`` for the life of the container, and this repo already
+    has a gate (``check-env-reads``) refusing new ``os.environ`` reads outside
+    the overlay/config-discovery surfaces. The broker-ref map established the
+    pattern for exactly this shape of operator-supplied, deployment-specific,
+    not-in-git value, so the credential rides the same mount rather than
+    inventing a second mechanism.
+
+    Why this exists (OMN-18120). OMN-18012 flipped the dev lane's broker to
+    SASL and credentialed "all 15 clients" through the shared
+    ``x-dev-lane-broker-auth-env`` anchor in ``docker-compose.dev-lane.yml``.
+    The gateway forwarder is in a different compose project and configures its
+    legs per-leg in mounted YAML, so it was outside that enumeration and kept
+    dialing the dev broker as a plaintext client. It could not connect, so the
+    stability->dev hook mirror moved zero records for four days while still
+    logging a delivery per attempted republish.
+
+    A single ambient ``KAFKA_SASL_*`` is deliberately NOT the mechanism: this
+    process holds three legs on three brokers with three postures (cloud MSK
+    ``SASL_SSL``/``AWS_MSK_IAM``, the stability source leg still ``PLAINTEXT``,
+    the dev legs ``SASL_PLAINTEXT``/SCRAM). One value cannot be right for all
+    three, and applying it would break the leg that works.
+
+    Fails closed, in every direction:
+
+    * a leg naming a ref with no map mounted, an unreadable or non-mapping
+      map, a missing entry, or an entry missing either field, raises -- naming
+      the ref, never the value. There is no plaintext fallback, because a leg
+      that starts unauthenticated is exactly the silent, still-logging-success
+      inertness this ticket removes;
+    * a leg naming a ref without a SASL ``security_protocol`` raises, since the
+      credential would be resolved and never sent;
+    * a leg naming a ref AND carrying a credential literal raises as ambiguous.
+      A literal ALONE is left alone on purpose: a config round-tripped through
+      ``model_dump()`` carries the resolved values, and refusing those would
+      make the loader unable to re-read its own output -- the same trap
+      ``_materialize_contract_https_ingest`` records for its null round trip.
+      That the SHIPPED file carries no literal is asserted statically over the
+      tracked YAML in ``test_lane_mirror_omn18120_dev_lane_sasl.py``.
+
+    NOT A ROTATION (Operating Rule 22): this binds an already-provisioned
+    principal. Nothing is rotated, re-issued or revoked, and no value is logged
+    or included in any error message.
+    """
+    credential_map: dict[str, object] | None = None
+
+    for leg_name, leg in _iter_bus_legs(raw):
+        ref_object = leg.pop(_SASL_CREDENTIAL_REF_KEY, None)
+        if ref_object is None:
+            continue
+        if not isinstance(ref_object, str) or not ref_object.strip():
+            raise ValueError(
+                f"gateway bus leg {leg_name!r} must declare "
+                f"{_SASL_CREDENTIAL_REF_KEY!r} as a non-empty string"
+            )
+        ref = ref_object.strip()
+
+        for literal_key in _SASL_LITERAL_KEYS:
+            if literal_key in leg:
+                raise ValueError(
+                    f"gateway bus leg {leg_name!r} names "
+                    f"{_SASL_CREDENTIAL_REF_KEY!r}={ref!r} AND declares "
+                    f"{literal_key!r}; two sources for one credential is "
+                    "ambiguous, and the literal is the one that would be "
+                    "committed to this repo"
+                )
+
+        protocol = leg.get("security_protocol")
+        if protocol not in _SASL_PROTOCOLS:
+            raise ValueError(
+                f"gateway bus leg {leg_name!r} names "
+                f"{_SASL_CREDENTIAL_REF_KEY!r}={ref!r} but declares "
+                f"security_protocol={protocol!r}; the credential would be "
+                "resolved and never sent"
+            )
+
+        if credential_map is None:
+            credential_map = _load_lane_credential_map(
+                lane_credential_map_path, ref, leg_name
+            )
+
+        entry = credential_map.get(ref)
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"the lane-credential map has no resolvable entry for "
+                f"{_SASL_CREDENTIAL_REF_KEY}={ref!r}, required by gateway bus "
+                f"leg {leg_name!r}"
+            )
+        for field_name, source_key in (
+            ("sasl_plain_username", "username"),
+            ("sasl_plain_password", "password"),
+        ):
+            value = entry.get(source_key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    f"the lane-credential map entry for {ref!r} is missing a "
+                    f"non-empty {source_key!r}, required by gateway bus leg "
+                    f"{leg_name!r} (fail-closed -- there is no plaintext "
+                    "fallback)"
+                )
+            leg[field_name] = value
+
+
+def _load_lane_credential_map(
+    lane_credential_map_path: Path | None,
+    ref: str,
+    leg_name: str,
+) -> dict[str, object]:
+    """Read the operator-supplied lane-credential map, or refuse.
+
+    Split out so the map is read at most once per load and only when a leg
+    actually names a ref -- a deployment with no authenticated lane leg needs
+    no mount at all.
+    """
+    if lane_credential_map_path is None:
+        raise ValueError(
+            f"gateway bus leg {leg_name!r} names "
+            f"{_SASL_CREDENTIAL_REF_KEY}={ref!r} but no lane-credential map "
+            "was supplied; the gateway refuses to start rather than open a "
+            "client that cannot authenticate"
+        )
+    if not lane_credential_map_path.is_file():
+        raise ValueError(
+            f"no lane-credential map was found at {lane_credential_map_path!s}, "
+            f"required by gateway bus leg {leg_name!r} for "
+            f"{_SASL_CREDENTIAL_REF_KEY}={ref!r}"
+        )
+    map_object: object = yaml.safe_load(
+        lane_credential_map_path.read_text(encoding="utf-8")
+    )
+    if not isinstance(map_object, dict):
+        raise ValueError(
+            f"lane-credential map at {lane_credential_map_path!s} must be a "
+            "YAML mapping"
+        )
+    return {str(key): value for key, value in map_object.items()}
+
+
+def _iter_bus_legs(
+    raw: dict[str, object],
+) -> list[tuple[str, dict[str, object]]]:
+    """Every bus-config mapping in a resolved gateway config, named for errors.
+
+    Kept separate so a leg added later is credential-checked by construction
+    rather than by someone remembering to extend a literal tuple.
+    """
+    legs: list[tuple[str, dict[str, object]]] = []
+    for key in ("local_bus", "cloud_bus", "lane_mirror_source_bus"):
+        candidate = raw.get(key)
+        if isinstance(candidate, dict):
+            normalized = {str(k): v for k, v in candidate.items()}
+            raw[key] = normalized
+            legs.append((key, normalized))
+    mirror_buses = raw.get("lane_mirror_buses")
+    if isinstance(mirror_buses, dict):
+        normalized_buses = {str(k): v for k, v in mirror_buses.items()}
+        raw["lane_mirror_buses"] = normalized_buses
+        for lane, candidate in normalized_buses.items():
+            if isinstance(candidate, dict):
+                normalized_leg = {str(k): v for k, v in candidate.items()}
+                normalized_buses[lane] = normalized_leg
+                legs.append((f"lane_mirror_buses.{lane}", normalized_leg))
+    return legs
 
 
 def _materialize_cloud_broker_ref(
@@ -1187,6 +1378,19 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--lane-credential-map",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the operator-supplied lane-credential map (YAML mapping "
+            "of sasl_credential_ref names to {username, password} entries). "
+            "Rides the same not-in-git, operator-mounted mechanism as "
+            "--broker-ref-map. Optional only so a deployment whose lane legs "
+            "are all unauthenticated needs no mount; a config that NAMES a "
+            "credential ref and gets no map fails closed"
+        ),
+    )
+    parser.add_argument(
         "--egress-health-file",
         type=Path,
         default=Path(DEFAULT_EGRESS_HEALTH_PATH),
@@ -1215,6 +1419,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     config = load_gateway_forwarder_runtime_config(
         args.config,
         broker_ref_map_path=args.broker_ref_map,
+        lane_credential_map_path=args.lane_credential_map,
     )
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()

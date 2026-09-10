@@ -57,6 +57,10 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+    bound_ac_checks,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -83,7 +87,9 @@ def _receipt() -> dict[str, object]:
         "ticket_id": "OMN-17658",
         "status": "verified",
         "dry_run": False,
-        "checks": [],
+        # OMN-18056: the corpus DECLARES which criterion it proves; `_issue`
+        # below writes the matching labelled criterion into the body.
+        "checks": bound_ac_checks(),
         "total_checks": 8,
         "verified_count": 6,
         "failed_count": 0,
@@ -113,7 +119,10 @@ def _issue() -> dict[str, object]:
         "state": {"id": "s1", "name": "In Progress", "type": "started"},
         "labels": {"nodes": []},
         "team": {"id": "team-1"},
-        "description": None,
+        # OMN-18056: one labelled, parseable criterion. `None` is a body the
+        # closer cannot read criteria from, which the AC-binding gate holds --
+        # and the readback race this file exists for lives past that gate.
+        "description": BOUND_AC_DESCRIPTION,
         "children": {"nodes": []},
     }
 
@@ -232,7 +241,11 @@ class TestReadbackSurvivesAConnectionThatLags:
     async def test_the_measured_race_now_confirms_instead_of_erroring(self) -> None:
         """Two stale reads then the entry — the shape run 33958237006 hit."""
         linear = LaggingLinear(lag_reads=2)
-        result = await _handler(linear).handle(_request(readback_max_attempts=4))
+        handler = _handler(linear)
+        # OMN-18056: the first eligible observation arms the re-draw and writes
+        # nothing, so the counters this file measures are untouched by it.
+        await handler.handle(_request(readback_max_attempts=4))
+        result = await handler.handle(_request(readback_max_attempts=4))
 
         outcome = result.outcomes[0]
         assert outcome.decision is EnumEvidenceAutocloseDecision.FLIPPED
@@ -245,7 +258,9 @@ class TestReadbackSurvivesAConnectionThatLags:
     async def test_an_already_consistent_connection_needs_no_extra_read(self) -> None:
         """The retry must not become a mandatory delay on the common path."""
         linear = LaggingLinear(lag_reads=0)
-        result = await _handler(linear).handle(_request(readback_max_attempts=4))
+        handler = _handler(linear)
+        await handler.handle(_request(readback_max_attempts=4))  # arms the re-draw
+        result = await handler.handle(_request(readback_max_attempts=4))
         assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
         assert linear._reads_since_write == 1
 
@@ -260,7 +275,9 @@ class TestReadbackSurvivesAConnectionThatLags:
         board in the direction nobody checks.
         """
         linear = LaggingLinear(lag_reads=99, ever_consistent=False)
-        result = await _handler(linear).handle(_request(readback_max_attempts=2))
+        handler = _handler(linear)
+        await handler.handle(_request(readback_max_attempts=2))  # arms the re-draw
+        result = await handler.handle(_request(readback_max_attempts=2))
 
         outcome = result.outcomes[0]
         assert (
@@ -291,10 +308,14 @@ class TestReadbackSurvivesAConnectionThatLags:
         the same ticket.
         """
         linear = LaggingLinear(lag_reads=99, ever_consistent=False)
-        await _handler(linear).handle(_request(readback_max_attempts=2))
+        handler = _handler(linear)
+        await handler.handle(_request(readback_max_attempts=2))  # arms the re-draw
+        await handler.handle(_request(readback_max_attempts=2))
 
-        assert len(linear.comments) == 1
-        body = linear.comments[0][1]
+        # Two comments across the two ticks: the re-draw arming, then this
+        # refusal. The refusal is the last one.
+        assert len(linear.comments) == 2
+        body = linear.comments[-1][1]
         assert "class=flipped" not in body
         assert "class=readback_unconfirmed" in body
         assert "UNCONFIRMED" in body
@@ -307,5 +328,7 @@ class TestReadbackSurvivesAConnectionThatLags:
 
     async def test_the_retry_is_bounded_by_the_contract(self) -> None:
         linear = LaggingLinear(lag_reads=99, ever_consistent=False)
-        await _handler(linear).handle(_request(readback_max_attempts=3))
+        handler = _handler(linear)
+        await handler.handle(_request(readback_max_attempts=3))  # arms the re-draw
+        await handler.handle(_request(readback_max_attempts=3))
         assert linear._reads_since_write == 3

@@ -12,7 +12,10 @@ Proves, against a REAL behind clone (exists-but-WRONG, not absent):
     ambient-tree build is reachable only behind the named opt-in;
   * the exact assertion command stage_workspace.sh runs goes RED on a poisoned
     (real stale) vendored SHA;
-  * an unresolvable DEPLOY_REF fails the build closed (exit 4).
+  * an unresolvable DEPLOY_REF fails the build closed (exit 4);
+  * the expected-refs manifest is written OUTSIDE the build context (OMN-16442),
+    so a deploy can no longer leave an untracked byproduct in the git clone it
+    ran from -- the byproduct that jammed the deploy agent's self-update gate.
 """
 
 from __future__ import annotations
@@ -100,6 +103,16 @@ def _make_omni_home(tmp_path: Path) -> Path:
     return omni_home
 
 
+def _refs_out(build_ctx: Path) -> Path:
+    """Where these tests park the expected-refs manifest (OMN-16442).
+
+    Deliberately a sibling of the build context, never inside it: the manifest
+    is a host-side intermediate, and writing it into the build context is the
+    defect this path exists to prove fixed.
+    """
+    return build_ctx.parent / "refs-state" / f"{build_ctx.name}.json"
+
+
 def _run_stage(
     omni_home: Path,
     build_ctx: Path,
@@ -108,6 +121,9 @@ def _run_stage(
     hotpatch: bool = False,
     allow_unpinned: bool = False,
     repo_refs: list[str] | None = None,
+    refs_out: Path | None = None,
+    use_default_refs_out: bool = False,
+    home: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     (build_ctx / "workspace").mkdir(parents=True, exist_ok=True)
     env = {
@@ -115,6 +131,11 @@ def _run_stage(
         "OMNI_HOME": str(omni_home),
         "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
     }
+    env.pop("DEPLOY_SOURCE_REFS_OUT", None)
+    if home is not None:
+        env["HOME"] = str(home)
+    if not use_default_refs_out:
+        env["DEPLOY_SOURCE_REFS_OUT"] = str(refs_out or _refs_out(build_ctx))
     env.pop("DEPLOY_REF", None)
     env.pop("DEPLOY_HOTPATCH", None)
     env.pop("ALLOW_UNPINNED_DEPLOY_SOURCE", None)
@@ -172,8 +193,10 @@ def test_deploy_ref_checks_out_behind_clone_and_asserts_green(tmp_path: Path) ->
     assert vcs["siblings"]["omnibase_core"]["vcs_ref"] != old_sha
 
     # The expected-refs manifest exists and the in-script assertion passed.
-    expected_refs = build_ctx / "workspace" / "deploy-source-refs.json"
+    expected_refs = _refs_out(build_ctx)
     assert expected_refs.exists()
+    # ...and it did NOT land in the build context (OMN-16442).
+    assert not (build_ctx / "workspace" / "deploy-source-refs.json").exists()
     exp = json.loads(expected_refs.read_text(encoding="utf-8"))
     assert exp["ref_pinned"] is True
     assert exp["repos"]["omnibase_core"]["expected_sha"] == new_sha
@@ -194,7 +217,7 @@ def test_without_deploy_ref_the_build_is_refused(tmp_path: Path) -> None:
 
     # Refused before staging: no provenance, no expected-refs, nothing vendored.
     assert not (build_ctx / "workspace" / "sibling-vcs-provenance.json").exists()
-    assert not (build_ctx / "workspace" / "deploy-source-refs.json").exists()
+    assert not _refs_out(build_ctx).exists()
 
 
 @pytest.mark.unit
@@ -216,7 +239,7 @@ def test_unpinned_ambient_build_behind_explicit_opt_in(tmp_path: Path) -> None:
     )
     assert vcs["siblings"]["omnibase_core"]["vcs_ref"] == old_sha
     # No expected-refs manifest, and the opt-in is named in the log.
-    assert not (build_ctx / "workspace" / "deploy-source-refs.json").exists()
+    assert not _refs_out(build_ctx).exists()
     assert "ALLOW_UNPINNED_DEPLOY_SOURCE=1" in result.stderr
     assert "NOT asserted" in result.stderr
 
@@ -233,7 +256,7 @@ def test_stage_assert_command_goes_red_on_poisoned_provenance(tmp_path: Path) ->
 
     workspace = build_ctx / "workspace"
     provenance = workspace / "sibling-vcs-provenance.json"
-    expected_refs = workspace / "deploy-source-refs.json"
+    expected_refs = _refs_out(build_ctx)
 
     # Poison the vendored provenance with the REAL old (behind) SHA -- the clone
     # exists and old_sha is a valid commit in it, it is simply the WRONG one.
@@ -309,9 +332,7 @@ def test_per_repo_pins_stage_distinct_immutable_commits(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert target_core != old_core
-    expected = json.loads(
-        (tmp_path / "ctx/workspace/deploy-source-refs.json").read_text()
-    )
+    expected = json.loads(_refs_out(tmp_path / "ctx").read_text())
     vcs = json.loads(
         (tmp_path / "ctx/workspace/sibling-vcs-provenance.json").read_text()
     )
@@ -355,7 +376,7 @@ def test_per_repo_pin_errors_preserve_every_clone(tmp_path: Path, invalid: str) 
     )
     assert result.returncode != 0
     assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
-    assert not (tmp_path / "ctx/workspace/deploy-source-refs.json").exists()
+    assert not _refs_out(tmp_path / "ctx").exists()
 
 
 @pytest.mark.unit
@@ -368,7 +389,7 @@ def test_per_repo_late_missing_commit_preserves_earlier_clone(tmp_path: Path) ->
     result = _run_stage(omni_home, tmp_path / "ctx", repo_refs=refs)
     assert result.returncode == 4, result.stderr
     assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
-    assert not (tmp_path / "ctx/workspace/deploy-source-refs.json").exists()
+    assert not _refs_out(tmp_path / "ctx").exists()
 
 
 @pytest.mark.unit
@@ -392,3 +413,85 @@ def test_per_repo_dirty_target_is_refused_without_deleting_work(
     assert "dirty" in result.stderr.lower()
     assert sentinel.read_text() == "must survive\n"
     assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
+
+
+# ---------------------------------------------------------------------------
+# OMN-16442: the expected-refs manifest never lands in the build context.
+#
+# stage_workspace.sh used to write `workspace/deploy-source-refs.json` RELATIVE
+# to its cwd, which is always a git clone's root. The file is untracked, so
+# every clone a deploy ran from was left permanently dirty -- and the deploy
+# agent's self-update gate reads `git status` on its own code clone, so that one
+# leftover stopped the agent from ever pulling its own merged fixes.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_default_manifest_path_is_outside_the_build_context(tmp_path: Path) -> None:
+    """With no override, the manifest goes to the state dir, not the clone."""
+    omni_home = _make_omni_home(tmp_path)
+    _behind_core(omni_home)
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(
+        omni_home,
+        build_ctx,
+        deploy_ref="dev",
+        use_default_refs_out=True,
+        home=fake_home,
+    )
+    assert result.returncode == 0, result.stderr
+
+    # Nothing was written into the build context...
+    assert not (build_ctx / "workspace" / "deploy-source-refs.json").exists()
+    assert not list(build_ctx.rglob("deploy-source-refs.json"))
+
+    # ...and exactly one manifest exists under the state dir, keyed on the
+    # build context so concurrent lanes cannot clobber each other.
+    state_dir = fake_home / ".omnibase" / "state" / "deploy_source_refs"
+    written = sorted(state_dir.glob("*.json"))
+    assert len(written) == 1, written
+    assert str(build_ctx.resolve()).replace("/", "_").lstrip("_") in written[0].name
+    exp = json.loads(written[0].read_text(encoding="utf-8"))
+    assert exp["ref_pinned"] is True
+    assert "manifest assertion passed" in result.stderr
+
+
+@pytest.mark.unit
+def test_build_context_git_clone_stays_untracked_clean(tmp_path: Path) -> None:
+    """A pinned staging run leaves no untracked byproduct in the build clone.
+
+    This is the defect in its original shape: the build context IS a git clone
+    (on the deploy host it is the omnibase_infra clone itself), and the agent's
+    dirty check reads `git status --porcelain` on it.
+    """
+    omni_home = _make_omni_home(tmp_path)
+    _behind_core(omni_home)
+
+    build_ctx = tmp_path / "ctx"
+    build_ctx.mkdir()
+    # A bare git repo root, deliberately WITHOUT a pyproject.toml: the staging
+    # script resolves check_sibling_lock_pins.py's interpreter through `uv`, and
+    # a pyproject in the build context would make uv treat it as a project root
+    # and try to build a venv there. The real .201 build context does have one,
+    # but this test is about `git status`, not interpreter resolution.
+    _git(build_ctx, "init", "-q", "-b", "dev")
+    _git(build_ctx, "config", "user.email", "t@t.t")
+    _git(build_ctx, "config", "user.name", "t")
+    # The real clone gitignores its staging outputs; only the RT-1 manifest was
+    # ever the uncovered one.
+    (build_ctx / ".gitignore").write_text(
+        "workspace/sibling-repos/\nworkspace/sibling-vcs-provenance.json\n"
+        "workspace/sibling-pin-comparison.json\n",
+        encoding="utf-8",
+    )
+    _git(build_ctx, "add", ".gitignore")
+    _git(build_ctx, "commit", "-q", "-m", "ignore staging outputs")
+
+    assert _run_stage(omni_home, build_ctx, deploy_ref="dev").returncode == 0
+
+    porcelain = _git(build_ctx, "status", "--porcelain")
+    assert "deploy-source-refs.json" not in porcelain, porcelain
+    assert porcelain == "", porcelain

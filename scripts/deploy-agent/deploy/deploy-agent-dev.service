@@ -58,7 +58,7 @@
 #
 # KAFKA_SASL_ENV_PREFIX exists because systemd cannot expand one Environment=
 # value into another. The lane's SCRAM principal lives in the operator env
-# file (EnvironmentFile below) as DEV_KAFKA_SASL_USERNAME /
+# file (DEPLOY_AGENT_ENV_FILE below) as DEV_KAFKA_SASL_USERNAME /
 # DEV_KAFKA_SASL_PASSWORD — the same names docker-compose.dev-lane.yml
 # resolves — and compose can write `${DEV_KAFKA_SASL_USERNAME}` into
 # KAFKA_SASL_USERNAME while a unit file cannot. Declaring the PREFIX keeps the
@@ -97,6 +97,39 @@
 # ref -- and prod image promotion is governed by the OMN-13418 grant path, not
 # by which branch this agent's own code tracks.
 #
+# ENV TRANSPORT: NO EnvironmentFile= ON THIS UNIT (OMN-18073)
+#
+# This unit deliberately declares NO EnvironmentFile=. ExecStart runs
+# deploy/deploy-agent-launch.sh, which bash-`source`s the operator env store
+# and then execs the interpreter -- exactly what scripts/deploy-runtime.sh has
+# always done.
+#
+# Why: systemd's env-file parser does not implement bash ANSI-C $'...' quoting.
+# It keeps the literal $' / ' wrapper and drops every backslash escape, so each
+# \n collapses to the bare letter n. The store carries ONEXBOT_OCC_PRIVATE_KEY
+# in that form. Measured on the lab host 2026-09-09, by length and sha256-12
+# only: bash `source` yields 1679 bytes that parse as a PEM; EnvironmentFile=
+# yields 1682 bytes still wrapped, with zero backslashes. The agent hands
+# dict(os.environ) to `docker compose`, whose interpolation wrote the mangled
+# key into every dev-lane container it created -- a 100% OCC-mint outage that
+# ran for eight hours, while the sanctioned script path produced correct
+# containers from the same file on the same host.
+#
+# DEPLOY_AGENT_ENV_PROTECTED is what keeps this faithful rather than merely
+# different. systemd applies directives in file order, so the Environment=
+# lines that followed EnvironmentFile= used to WIN over the store; a plain
+# `set -a; source` inverts that. The store defines KAFKA_BOOTSTRAP_SERVERS and
+# KAFKA_ENVIRONMENT, and its KAFKA_ENVIRONMENT is `local` while this unit
+# declares `dev` -- so without the protected list this launcher would silently
+# relabel the dev agent's lane. Every name this unit declares must appear in
+# that list; tests/unit/test_deploy_agent_launcher_omn18073.py derives the
+# expected set from this file and fails when a new Environment= line is added
+# without extending it.
+#
+# executor._compose_env()'s UndecodedAnsiCQuotingError guard is NOT replaced by
+# this. It stays as the fail-closed backstop for any path that still arrives
+# mangled -- including this unit installed without a matching daemon-reload.
+#
 # PORT PREFLIGHT (fail-fast, never destructive)
 #
 # ExecStartPre runs deploy/preflight_port_free.sh, which refuses to start
@@ -125,7 +158,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent
-EnvironmentFile=/home/jonah/.omnibase/.env
+Environment=DEPLOY_AGENT_ENV_FILE=/home/jonah/.omnibase/.env
+Environment=DEPLOY_AGENT_PYTHON=/data/omninode/omnibase_infra/scripts/deploy-agent/.venv/bin/python
+Environment="DEPLOY_AGENT_ENV_PROTECTED=DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX"
 Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev
 Environment=DEPLOY_AGENT_PORT=8098
@@ -137,7 +172,7 @@ Environment=KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
 Environment=KAFKA_SASL_MECHANISM=SCRAM-SHA-256
 Environment=KAFKA_SASL_ENV_PREFIX=DEV_
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
-ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/.venv/bin/python -m deploy_agent
+ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/deploy-agent-launch.sh
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

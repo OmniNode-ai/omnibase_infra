@@ -1,0 +1,46 @@
+{
+  "details": {
+    "degraded": false,
+    "healthy": true,
+    "runtime_health": {
+      "age_seconds": 2.408,
+      "contract_count": 301,
+      "dimensions": [
+        {
+          "detail": "301 contracts loaded cleanly",
+          "name": "discovery_errors",
+          "status": "HEALTHY"
+        },
+        {
+          "detail": "All 776 consumer groups active",
+          "name": "empty_consumer_groups",
+          "status": "HEALTHY"
+        },
+        {
+          "detail": "All 323 expected consumer group(s) covered",
+          "name": "topic_coverage",
+          "status": "HEALTHY"
+        },
+        {
+          "detail": "All 22 declared projection(s) attached",
+          "name": "projection_attachment",
+          "status": "HEALTHY"
+        },
+        {
+          "detail": "No projection is fully DLQ-routed over 10 flow window(s) [1 consumer group(s) carried flow on a declared projection topic and were excluded from projection attribution \u2014 not a declared projection (declares no db_io.db_tables projection target), so its flow is not a projection's to account for: node_registration_orchestrator]",
+          "name": "projection_dlq_saturation",
+          "status": "HEALTHY"
+        },
+        {
+          "detail": "4 declared projection(s) have no in-process dispatcher here and are deliberately not subscribed (OMN-17562), so their events stay replayable; their rows depend entirely on a dedicated writer this process cannot see, whose presence is asserted by the static lane writer-coverage gate rather than by this runtime: node_projection_cost_by_repo, node_projection_instruction_eval, node_projection_skill_executions, projection_llm_cost",
+          "name": "projection_write_path",
+          "status": "HEALTHY"
+        }
+      ],
+      "observed_at": "2026-09-10T11:35:59.498589+00:00",
+      "status": "HEALTHY"
+    }
+  },
+  "status": "healthy",
+  "version": "0.38.22"
+}

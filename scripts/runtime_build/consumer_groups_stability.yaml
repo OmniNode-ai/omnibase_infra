@@ -1,70 +1,86 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# OMN-14873: declared consumer-group health check list for the stability-test
-# lane refresh health-gate (verify_stability_refresh.py). Contract-as-data
-# (matching this repo's topic/service-catalog convention) instead of a
-# hardcoded Python list.
+# Stability-lane health-gate declared consumer groups [OMN-15837].
 #
-# Each entry MUST be the FULL rpk consumer-group name (including the
-# `.__i.<instance>.__t.<topic>` per-topic suffix), exactly as printed by:
-#   docker exec <stability-test-redpanda-container> rpk group list \
-#     -X brokers=redpanda:9092
+# THIS FILE NO LONGER CARRIES CONSUMER-GROUP NAMES.
 #
-# The BARE group-name prefix (e.g. `stability-test.omnibase_infra.
-# node_registration_orchestrator.consume.1.1.1` with no `.__i....__t....v1`
-# suffix) is NOT itself a real group -- `rpk group describe` on that bare
-# prefix resolves to a distinct, nonexistent group (STATE=Dead, 0 members).
-# This is a real bug an earlier revision of this file shipped with (caught by
-# the OMN-14873 canary run) -- always copy the FULL name from `rpk group
-# list`, never hand-truncate it.
+# It used to: a hand-copied list of FULL, version-pinned group ids
+# (`...consume.<contract_version>.__i.<instance>.__t.<topic>`). Consumer group
+# ids are minted from the contract identity, so every contract version bump and
+# every re-home silently invalidated an entry -- and an invalid entry does not
+# read as "unknown": `rpk group describe` answers `STATE Dead / MEMBERS 0 /
+# TOTAL-LAG 0` for a name that is not a real group, which the gate scored as a
+# hard failure.
 #
-# The health-gate treats `state in {"Stable", "Empty"}` as healthy (via
-# `rpk group describe <group> -X brokers=redpanda:9092`, plain-text output --
-# `-f json` is NOT supported by this rpk version, verified live). "Empty"
-# (group registered with the broker, topic subscription known, zero
-# currently-connected members) is the NORMAL idle state for a demand-driven
-# consumer that only joins its group when there is work to process -- treating
-# it as a failure produced false-negative rollbacks in the OMN-14873 canary
-# even though the refresh itself was healthy (digest changed, revision
-# matched, manifest floor met, /health healthy). Only "Dead" or an absent/
-# errored describe is the real "silent wiring death" signal
-# (reference_silent_wiring_death_mechanisms: a consumer that never registered
-# a group at all).
+# That cost two refreshes:
+#   * OMN-15838 / commit fd4a84b1c -- "repin stale consumer-group version",
+#     done by hand, which is the same defect being paid for a second time.
+#   * OMN-16753, 2026-09-08 -- a HEALTHY refresh rolled back on exactly two
+#     stale names: `node_delegation_routing_reducer.consume.0.3.0` (the live
+#     contract had moved to 0.4.0) and `projection_delegation.consume.1.0.0`
+#     (re-homed to the standalone `omnimarket-projections.delegation-writer`
+#     container in OMN-17562). Both retired identities read Dead/0/0. Every
+#     other gate criterion passed: digest changed, manifest 301 >= 288, health
+#     healthy, cluster healthy, revisions matched, partition headroom 47.9%.
+#     The post-rollback gate, run against the OLD image, reported the SAME two
+#     groups Dead -- proof the finding was a stale pin, not a regression.
 #
-# Chosen to span all 4 core services this refresh targets
-# (omninode-runtime / runtime-effects / runtime-worker / projection-api):
-# registration (kernel-owned, continuously-active via the platform-wide
-# node-heartbeat.v1 topic -- these two stay Stable, never Empty, so they are
-# the strongest signal), delegation pipeline (routing/inference/projection,
-# demand-driven), and ticket-classify (the def-B canary this OMN-14873
-# refresh is also proving live, demand-driven). Extend this list as new
-# load-bearing consumer groups come online; never silently drop an entry
-# without a reason recorded in the PR that removes it.
+# WHERE THE DECLARED SET COMES FROM NOW
+# -------------------------------------
+# `verify_stability_refresh.py` derives it at gate time from two live sources,
+# and refuses to run if either cannot be read (fail closed, never a fallback to
+# a static list):
 #
-# OMN-15838: node_ledger_projection_compute's `.consume.<version>.` segment
-# had drifted to a stale `1.0.2` (its contract's version at file-authoring
-# time, OMN-14823) while the live contract
-# (src/omnibase_infra/nodes/node_ledger_projection_compute/contract.yaml
-# `contract_version`) had moved on to 1.1.0 (OMN-15006) then 1.2.0
-# (OMN-15168) -- this file was never updated in step. `rpk group describe`
-# against a bare-truncated OR version-stale group name resolves to a
-# DISTINCT, nonexistent group (STATE=Dead, per the warning above), so a stale
-# pin here silently turns this entry into a false Dead-group health-gate
-# failure on the very next refresh once the runtime image carries the newer
-# contract version. Re-pinned to the live 1.2.0. This is exactly the
-# recurring class the warning above already names -- no mechanized check
-# exists yet to catch this drift automatically (filed OMN-15844).
-consumer_groups:
-  - name: stability-test.omnibase_infra.node_registration_orchestrator.consume.1.1.1.__i.stability-test-main.__t.onex.evt.platform.node-heartbeat.v1
-    description: kernel-owned node-registration orchestrator, node-heartbeat fan-in (continuously active, always Stable)
-  - name: stability-test.omnibase_infra.node_ledger_projection_compute.consume.1.2.0.__i.stability-test-main.__t.onex.evt.platform.node-heartbeat.v1
-    description: node-registration ledger projection, node-heartbeat fan-in (continuously active, always Stable)
-  - name: stability-test.omnimarket.projection_delegation.consume.1.0.0.__i.stability-test-main.__t.onex.evt.omnibase-infra.delegation-completed.v1
-    description: delegation projection consumer (carries the OMN-14855 judge-verdict DLQ fix this refresh lands; demand-driven, may show Empty when idle)
-  - name: stability-test.omnimarket.node_llm_delegation_call_effect.consume.0.1.0.__i.stability-test-effects.__t.onex.cmd.omnibase-infra.delegation-inference-request.v1
-    description: delegation LLM-call effect, inference dispatch (demand-driven, may show Empty when idle)
-  - name: stability-test.omnimarket.node_delegation_routing_reducer.consume.0.3.0.__i.stability-test-main.__t.onex.cmd.omnibase-infra.delegation-routing-request.v1
-    description: delegation routing reducer, FSM routing decisions (demand-driven, may show Empty when idle)
-  - name: stability-test.omnimarket.node_ticket_classify_compute.consume.1.0.0.__i.stability-test-main.__t.onex.cmd.omnimarket.ticket-classify.v1
-    description: ticket-classify def-B compute (OMN-14799 Tier-1 fan-out canary; demand-driven, may show Empty when idle)
+#   1. CONTRACT-DERIVED -- the auto-wiring manifest the refreshed image serves
+#      on `/v1/introspection/manifest`, from the main runtime and the effects
+#      runtime. Each contract that declares `event_bus.subscribe_topics` and is
+#      not `plugin_managed` yields one expected identity per subscribe topic:
+#        {lane}.{package_name}.{node_name}.consume.{contract_version}
+#      matched instance-agnostically against `rpk group list` (the `.__i.` value
+#      is a per-container property -- `stability-test-main` / `-effects` /
+#      `-worker` -- not a contract property, and only two of the three runtimes
+#      expose an HTTP manifest). Measured live on 2026-09-08: 611 identities,
+#      604 of them live.
+#
+#   2. COMPOSE-DERIVED -- every `KAFKA_CONSUMER_GROUP` literal in
+#      `docker/docker-compose.stability-test.yml` that carries the lane prefix.
+#      That is the minting authority for the six standalone projection writers
+#      (OMN-17562), which do not go through contract auto-wiring:
+#      delegation-writer, live-events-writer, registration-writer,
+#      savings-writer, tenant-credentials-writer, tenant-registry-writer. They
+#      are read from the compose file rather than copied here so a writer that
+#      is renamed or re-homed changes one file, not two.
+#
+# HOW A GROUP IS SCORED
+# ---------------------
+#   * `Stable` or `Empty` -> healthy. `Empty` (registered, subscription known,
+#     zero connected members) is the normal idle state of a demand-driven
+#     consumer; treating it as a failure produced false rollbacks in the
+#     OMN-14873 canary. Unchanged by OMN-15837 on live evidence: 55 of the 611
+#     contract-derived groups are Empty and 21 of those carry non-zero lag, all
+#     in-runtime projections superseded by the OMN-17562 writers.
+#   * `Dead` with MEMBERS 0 and TOTAL-LAG 0 -> RETIRED IDENTITY. Logged, not a
+#     failure. This is what a version bump and a re-home both look like.
+#   * `Dead`/other with members lost but TOTAL-LAG > 0 -> FAILURE. The group did
+#     not retire, it stalled holding a backlog.
+#   * A contract-derived identity with no live group at all is reported as
+#     absent and counted against the COVERAGE FLOOR (`--min-derived-coverage`,
+#     default 0.90; live value 604/611 = 0.989). A handful are expected --
+#     contracts wired through the core-runtime single-owner path, or whose
+#     topics are owned elsewhere -- so the floor, not the individual entry, is
+#     what turns a real wiring collapse into a failure.
+#   * A compose-derived writer group MUST be live and healthy. Nothing derives
+#     those from a contract, so their absence IS the silent-wiring-death signal.
+#
+# WHAT THIS FILE STILL HOLDS
+# --------------------------
+# `non_contract_groups` is an escape hatch for a load-bearing group that
+# neither derivation source can see. It is EMPTY, and adding an entry is a
+# decision to hand-maintain a name again -- so each entry must name its minting
+# source, and the gate refuses an entry that does not.
+#
+# Deliberately NOT listed: `stability-test.omnimarket-projection-api.
+# snapshot-cache.consume.v1.__i.<uuid>` -- its instance discriminator is a
+# per-process UUID, so no stable name exists to declare.
+non_contract_groups: []

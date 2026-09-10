@@ -30,6 +30,11 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+    bound_ac_checks,
+    redraw_marker_comment,
+)
 
 _OCC_REPO = "OmniNode-ai/onex_change_control"
 
@@ -67,6 +72,7 @@ def _dod_verify_ok(
     skipped: int = 0,
     behavior_proving: int = 1,
     verdict_status: str | None = None,
+    checks: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """A ModelSkillResult shaped like the one `onex skill dod_verify` prints.
 
@@ -96,6 +102,13 @@ def _dod_verify_ok(
     payload — a verdict that omits the key entirely models a pre-OMN-15911
     verifier and is deliberately an ERROR, covered in
     test_omn_15911_behavior_proof_gate.py.
+
+    OMN-18056 added ``checks``, and it defaults to ONE verified probative
+    check declaring ``AC1`` — the criterion ``_issue`` now writes into every
+    body by default. The counters above are read from the verdict's own count
+    fields and never from this list, so the default binds the AC-binding gate
+    without moving any arithmetic the other conjuncts read. A fixture that
+    means to exercise an UNBOUND or a partially-bound corpus passes its own.
     """
     status = verdict_status or ("verified" if failed == 0 else "failed")
     verdict: dict[str, object] = {
@@ -103,7 +116,7 @@ def _dod_verify_ok(
         "ticket_id": "OMN-9999",
         "status": status,
         "dry_run": False,
-        "checks": [],
+        "checks": bound_ac_checks() if checks is None else checks,
         "total_checks": total,
         "verified_count": verified,
         "failed_count": failed,
@@ -213,8 +226,17 @@ def _issue(
     issue_id: str = "issue-uuid-1",
     state_type: str = "started",
     labels: tuple[str, ...] = (),
-    description: str | None = None,
+    description: str | None = BOUND_AC_DESCRIPTION,
 ) -> dict[str, object]:
+    """A Linear issue payload.
+
+    OMN-18056: ``description`` defaults to a body carrying ONE labelled,
+    parseable acceptance criterion. It used to default to ``None``, and every
+    fixture that inherited that default now describes a ticket whose criteria
+    the closer cannot read — which the AC-binding gate holds, deliberately.
+    A fixture that means to exercise an unreadable body passes ``None``
+    explicitly and asserts the hold.
+    """
     return {
         "id": issue_id,
         "identifier": "OMN-9999",
@@ -619,6 +641,20 @@ class TestFlipPath:
             files_by_pr={1: ["contracts/OMN-9999.yaml"]},
         )
         linear = FakeLinearClient(issues={"OMN-9999": _issue()})
+        # OMN-18056: a DRY-RUN writes nothing, so it can never arm its own
+        # re-draw — a two-tick dry run would report SKIPPED_REDRAW_PENDING
+        # forever and the flip preview would become untestable. The marker an
+        # earlier APPLY tick would have left is seeded instead, so this run is
+        # the SECOND observation of the verdict and previews the flip honestly.
+        linear.comments.append(
+            (
+                "issue-uuid-1",
+                redraw_marker_comment(
+                    total_checks=3, verified_count=3, behavior_proving_count=1
+                ),
+            )
+        )
+        seeded = list(linear.comments)
         dod_fake = _make_dod_verify_fake(
             {"OMN-9999": (_dod_verify_ok(total=3, verified=3, failed=0), 0, "")}
         )
@@ -633,7 +669,7 @@ class TestFlipPath:
         assert outcome.applied is False
         assert result.dry_run is True
         assert linear.state_updates == []
-        assert linear.comments == []
+        assert linear.comments == seeded
 
     async def test_apply_flips_and_posts_audit_comment(self):
         gh_fake = _make_gh_fake(
@@ -649,14 +685,24 @@ class TestFlipPath:
             run_gh_command=gh_fake,
             run_dod_verify_command=dod_fake,
         )
+        # OMN-18056: the FIRST eligible observation of a verdict arms the
+        # re-draw and writes no Done. The flip is the SECOND tick, on the same
+        # fingerprint.
+        armed = await handler.handle(_request(apply=True))
+        assert (
+            armed.outcomes[0].decision
+            == EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+        )
+        assert linear.state_updates == []
+
         result = await handler.handle(_request(apply=True))
         outcome = result.outcomes[0]
         assert outcome.decision == EnumEvidenceAutocloseDecision.FLIPPED
         assert outcome.applied is True
         assert result.tickets_flipped == 1
         assert linear.state_updates == [("issue-abc", "state-done-id")]
-        assert len(linear.comments) == 1
-        comment_issue_id, comment_body = linear.comments[0]
+        assert len(linear.comments) == 2
+        comment_issue_id, comment_body = linear.comments[1]
         assert comment_issue_id == "issue-abc"
         assert "pull/42" in comment_body
         assert "3/3 ACs verified" in comment_body
@@ -675,6 +721,10 @@ class TestFlipPath:
             run_gh_command=gh_fake,
             run_dod_verify_command=dod_fake,
         )
+        # First tick arms the re-draw (it precedes the Done-state lookup);
+        # the missing Done state is only reachable on the tick that would
+        # actually write.
+        await handler.handle(_request(apply=True))
         result = await handler.handle(_request(apply=True))
         assert (
             result.outcomes[0].decision
@@ -924,12 +974,13 @@ class TestAcCoverageGapFunction:
     """The guard predicate itself: conservative, and silent when it should be."""
 
     def test_empty_description_is_never_a_gap(self):
-        assert _ac_coverage_gap("", 3, 0) == ("", ())
-        assert _ac_coverage_gap("   \n\n  ", 3, 0) == ("", ())
+        assert _ac_coverage_gap("", 3, 3, 0) == ("", ())
+        assert _ac_coverage_gap("   \n\n  ", 3, 3, 0) == ("", ())
 
     def test_unchecked_checkbox_is_a_gap_and_is_named(self):
         reason, uncovered = _ac_coverage_gap(
             "## Acceptance Criteria\n- [x] wired\n- [ ] proven on the live lane\n",
+            2,
             2,
             0,
         )
@@ -938,27 +989,32 @@ class TestAcCoverageGapFunction:
 
     def test_unchecked_checkbox_outside_an_ac_section_still_holds(self):
         """A criterion does not have to live under a heading to be a criterion."""
-        reason, uncovered = _ac_coverage_gap("Notes\n\n- [ ] follow-up gate\n", 5, 0)
+        reason, uncovered = _ac_coverage_gap("Notes\n\n- [ ] follow-up gate\n", 5, 5, 0)
         assert reason
         assert uncovered == ("follow-up gate",)
 
     def test_ac_section_longer_than_verified_probative_checks_is_a_gap(self):
         reason, uncovered = _ac_coverage_gap(
-            "## Acceptance Criteria\n- alpha\n- beta\n- gamma\n", 2, 0
+            "## Acceptance Criteria\n- alpha\n- beta\n- gamma\n", 2, 2, 0
         )
         assert reason
         assert "3" in reason and "2" in reason
         assert uncovered == ("alpha", "beta", "gamma")
 
     def test_fully_covered_ac_section_is_not_a_gap(self):
-        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n- beta\n", 2, 0) == (
+        assert _ac_coverage_gap(
+            "## Acceptance Criteria\n- alpha\n- beta\n", 2, 2, 0
+        ) == (
             "",
             (),
         )
 
     def test_more_checks_than_listed_acs_is_not_a_gap(self):
         """dod_verify covering MORE than the description lists is fine."""
-        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n", 4, 0) == ("", ())
+        assert _ac_coverage_gap("## Acceptance Criteria\n- alpha\n", 4, 4, 0) == (
+            "",
+            (),
+        )
 
     # -- OMN-16106 D3 -----------------------------------------------------
 
@@ -971,6 +1027,7 @@ class TestAcCoverageGapFunction:
         """
         reason, uncovered = _ac_coverage_gap(
             "## Acceptance\n- alpha\n- beta\n- gamma\n- delta\n- epsilon\n",
+            4,
             4,
             18,
         )
@@ -986,7 +1043,7 @@ class TestAcCoverageGapFunction:
         one that actually holds OMN-17556.
         """
         reason, uncovered = _ac_coverage_gap(
-            "## Acceptance\n- alpha\n- beta\n- gamma\n- delta\n", 4, 18
+            "## Acceptance\n- alpha\n- beta\n- gamma\n- delta\n", 4, 4, 18
         )
         assert reason
         assert "18" in reason and "4" in reason
@@ -999,7 +1056,7 @@ class TestAcCoverageGapFunction:
         non-probative. Both bounds hold, so the guard is silent.
         """
         assert _ac_coverage_gap(
-            "## Acceptance criteria\n1. alpha\n2. beta\n3. gamma\n4. delta\n", 4, 2
+            "## Acceptance criteria\n1. alpha\n2. beta\n3. gamma\n4. delta\n", 4, 4, 2
         ) == ("", ())
 
     def test_non_probative_majority_with_no_criteria_section_is_not_a_gap(self):
@@ -1009,12 +1066,12 @@ class TestAcCoverageGapFunction:
         never covered by this guard, and the new conjunct must not quietly turn
         it into a blanket hold on every such ticket.
         """
-        assert _ac_coverage_gap("Just a paragraph of context.\n", 1, 9) == ("", ())
+        assert _ac_coverage_gap("Just a paragraph of context.\n", 1, 1, 9) == ("", ())
 
     def test_definition_of_done_is_read_as_an_acceptance_heading(self):
         """The same section under its other standing name (OMN-16106 D3)."""
         reason, uncovered = _ac_coverage_gap(
-            "## Definition of Done\n- alpha\n- beta\n- gamma\n", 1, 0
+            "## Definition of Done\n- alpha\n- beta\n- gamma\n", 1, 1, 0
         )
         assert reason
         assert uncovered == ("alpha", "beta", "gamma")
@@ -1026,15 +1083,35 @@ class TestAcCoverageGuard:
     to dod_verify, so a clean 0-failed run is not evidence about it. The flip
     must be withheld and the uncovered criteria named."""
 
-    def _handler(self, linear, *, total=3, verified=3, failed=0):
+    def _handler(self, linear, *, total=3, verified=3, failed=0, binds=("AC1",)):
         gh_fake = _make_gh_fake(
             companions=[_merged_pr(77, "evidence(OMN-9999): x", "OMN-9999")],
             files_by_pr={77: ["contracts/OMN-9999.yaml"]},
         )
+        # OMN-18056: the binding gate runs BEFORE these counting rules, so a
+        # fixture whose criteria bind to nothing never reaches the rule it is
+        # written to exercise. Every criterion in each body below is bound to
+        # ONE verified probative check — which is exactly the shape the
+        # counting rules still have to refute, and the reason they are not
+        # made redundant by the binding gate: `verified_count` is a count of
+        # checks, not of criteria, so several criteria can honestly bind to
+        # one check and the arithmetic still be wrong.
         dod_fake = _make_dod_verify_fake(
             {
                 "OMN-9999": (
-                    _dod_verify_ok(total=total, verified=verified, failed=failed),
+                    _dod_verify_ok(
+                        total=total,
+                        verified=verified,
+                        failed=failed,
+                        checks=[
+                            {
+                                "evidence_id": "omn18056-bound-check",
+                                "status": "verified",
+                                "proof_class": "behavior",
+                                "binds_ac": list(binds),
+                            }
+                        ],
+                    ),
                     0,
                     "",
                 )
@@ -1059,7 +1136,7 @@ class TestAcCoverageGuard:
                 )
             }
         )
-        handler = self._handler(linear)
+        handler = self._handler(linear, binds=("AC1", "AC2"))
         result = await handler.handle(_request(apply=True))
         outcome = result.outcomes[0]
 
@@ -1089,7 +1166,13 @@ class TestAcCoverageGuard:
                 )
             }
         )
-        handler = self._handler(linear, total=2, verified=2, failed=0)
+        handler = self._handler(
+            linear,
+            total=2,
+            verified=2,
+            failed=0,
+            binds=("AC1", "AC2", "AC3", "AC4"),
+        )
         result = await handler.handle(_request(apply=True))
         outcome = result.outcomes[0]
 
@@ -1113,24 +1196,41 @@ class TestAcCoverageGuard:
                 )
             }
         )
-        handler = self._handler(linear)
+        handler = self._handler(linear, binds=("AC1", "AC2", "AC3"))
+        await handler.handle(_request(apply=True))  # arms the OMN-18056 re-draw
         result = await handler.handle(_request(apply=True))
 
         assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.FLIPPED
         assert result.tickets_flipped == 1
         assert linear.state_updates == [("issue-ok", "state-done-id")]
 
-    async def test_null_description_still_flips(self):
-        """Linear returns null for an empty description; that is genuinely no
-        criteria, not an unreadable one, so it must not become a blanket hold."""
+    async def test_null_description_is_now_a_hold_not_a_flip(self):
+        """OMN-18056 INVERTED this case, deliberately.
+
+        It used to flip: a null body was read as "genuinely no criteria", and
+        both counting rules sit behind an ``if not items`` early exit that
+        released it. But "no criterion is written down" and "no criterion can
+        be read" are the same observation from here, and a closer that cannot
+        read a ticket's criteria has nothing to say about whether they are
+        met. A green tally over criteria that do not exist is an arithmetic
+        identity, not evidence.
+
+        So it holds, and the hold names the repair: write the criteria under a
+        heading, label them, and bind each one in the contract. This is the
+        halt the fail-closed landing was chosen for — every candidate whose
+        contract declares no binding is held until it does.
+        """
         linear = FakeLinearClient(
             issues={"OMN-9999": _issue(issue_id="issue-null", description=None)}
         )
         handler = self._handler(linear)
         result = await handler.handle(_request(apply=True))
+        outcome = result.outcomes[0]
 
-        assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.FLIPPED
-        assert linear.state_updates == [("issue-null", "state-done-id")]
+        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND
+        assert linear.state_updates == []
+        assert "No acceptance criterion could be parsed" in outcome.reason
+        assert "binds_ac" in outcome.reason
 
     async def test_dry_run_ac_gap_never_comments(self):
         linear = FakeLinearClient(

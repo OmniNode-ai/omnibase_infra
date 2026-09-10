@@ -130,7 +130,7 @@ class _NoopEffect:
 def _handler() -> HandlerDlqReplay:
     config = _config()
     return HandlerDlqReplay(
-        consumer=_EmptyConsumer(config),
+        consumers={config.dlq_topic: _EmptyConsumer(config)},
         producer=_NoopEffect(),
         quarantine_producer=_NoopEffect(),
         tracking=None,

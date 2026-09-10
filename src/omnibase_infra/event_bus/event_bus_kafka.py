@@ -1972,14 +1972,14 @@ class EventBusKafka(
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             max_poll_interval_ms=self._config.max_poll_interval_ms,
             retry_backoff_ms=self._config.reconnect_backoff_ms,
-            # OMN-16267: must be >= producer max_request_size. aiokafka's own
-            # default (1_048_576) is smaller than this repo's producer default
-            # (1_048_588), so a record at the producer's ceiling would trip
-            # RecordTooLargeError / silent skip-and-advance on the consumer
-            # side otherwise. Keep aligned to the same config field the
-            # producer reads (self._config.max_request_size) rather than a
-            # second independently-tunable value.
-            max_partition_fetch_bytes=self._config.max_request_size,
+            # OMN-15837: a per-consumer buffer ceiling, deliberately decoupled
+            # from the producer's max_request_size. An auto-wired runtime holds
+            # one consumer per wired topic, so this value is multiplied by the
+            # consumer count against a fixed container memory limit -- see the
+            # field docstring on ModelKafkaEventBusConfig for the measurements
+            # and for why the OMN-16267 ">= max_request_size" coupling is not
+            # required against a KIP-74 broker.
+            max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
             **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
@@ -2107,8 +2107,8 @@ class EventBusKafka(
                     heartbeat_interval_ms=self._config.heartbeat_interval_ms,
                     max_poll_interval_ms=self._config.max_poll_interval_ms,
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
-                    # OMN-16267: see rationale on the initial construction above.
-                    max_partition_fetch_bytes=self._config.max_request_size,
+                    # OMN-15837: see rationale on the initial construction above.
+                    max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
                     **self._build_client_version_kwargs(AIOKafkaConsumer),
                     **self._build_auth_kwargs(),
                 )
@@ -3145,6 +3145,13 @@ class EventBusKafka(
             kafka_headers.append(
                 ("parent_span_id", headers.parent_span_id.encode("utf-8"))
             )
+        # OMN-18116: the causal edge. Conditional like every other optional
+        # header, so a chain HEAD emits no key at all rather than an empty
+        # string -- an absent edge and a blank one must not read alike.
+        if headers.parent_message_id is not None:
+            kafka_headers.append(
+                ("parent_message_id", str(headers.parent_message_id).encode("utf-8"))
+            )
         if headers.operation_name:
             kafka_headers.append(
                 ("operation_name", headers.operation_name.encode("utf-8"))
@@ -3175,6 +3182,28 @@ class EventBusKafka(
             except (ValueError, AttributeError):
                 pass
         return uuid4()
+
+    @staticmethod
+    def _parse_optional_uuid_header(value: str | None) -> UUID | None:
+        """Parse an optional UUID header, returning None rather than minting one.
+
+        OMN-18116: this is the causal-edge counterpart to
+        ``_parse_uuid_header``. That method mints a fresh UUID when the header
+        is absent or malformed, which is correct for an identity every message
+        must have. For an EDGE it would be a fabrication: a chain head would
+        acquire an invented parent, and a verifier's re-derivation would then
+        be comparing against a number nothing produced. Absent means absent.
+        """
+        if not value:
+            return None
+        try:
+            return UUID(value)
+        except (ValueError, AttributeError):
+            logger.warning(
+                "Malformed parent_message_id header %r, recording no causal edge",
+                value,
+            )
+            return None
 
     @staticmethod
     def _parse_int_header(value: str | None, default: int, field_name: str) -> int:
@@ -3216,6 +3245,16 @@ class EventBusKafka(
 
         correlation_id = self._parse_uuid_header(headers_dict.get("correlation_id"))
         message_id = self._parse_uuid_header(headers_dict.get("message_id"))
+        # OMN-18116: the causal edge, parsed WITHOUT the mint-on-absence
+        # fallback the two above use. `_parse_uuid_header` invents a UUID when
+        # a header is missing or malformed, which is right for an identity that
+        # must always exist and catastrophic for an edge: it would fabricate a
+        # parent for a chain head and turn a broken chain into a verifiable-
+        # looking one. Absent or unparseable means None, which is a chain head
+        # or a refusal, never an invention.
+        parent_message_id = self._parse_optional_uuid_header(
+            headers_dict.get("parent_message_id")
+        )
 
         # Parse timestamp from ISO format string to datetime (with fallback to now)
         timestamp_str = headers_dict.get("timestamp")
@@ -3301,6 +3340,7 @@ class EventBusKafka(
             trace_id=headers_dict.get("trace_id"),
             span_id=headers_dict.get("span_id"),
             parent_span_id=headers_dict.get("parent_span_id"),
+            parent_message_id=parent_message_id,
             operation_name=headers_dict.get("operation_name"),
             priority=priority,
             routing_key=headers_dict.get("routing_key"),

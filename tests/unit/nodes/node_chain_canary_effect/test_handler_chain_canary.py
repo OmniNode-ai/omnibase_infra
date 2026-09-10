@@ -24,6 +24,7 @@ layer that can actually carry evidence. See
 
 from __future__ import annotations
 
+import sys
 from uuid import UUID, uuid4
 
 import pytest
@@ -35,18 +36,71 @@ from omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_canary_verdict import (
     EnumChainCanaryVerdict,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readback_status import (
+    EnumProjectionReadbackStatus,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_quarantine_check_status import (
     EnumQuarantineCheckStatus,
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_request import (
     ModelChainCanaryRequest,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    ModelProjectionReadbackOutcome,
+)
 
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
-_LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
+# OMN-18060: the request now carries the NAME of the environment variable the
+# DSN arrives in, never the DSN, and the readback transport returns a typed
+# outcome rather than a two-state tuple. The fixture below puts the value where
+# the handler reads it, so these cases exercise the real resolution path.
+_PROJECTION_DSN_ENV = "CHAIN_CANARY_PROJECTION_DSN"
+
+
+def _outcome(state: str | None, error: str = "") -> ModelProjectionReadbackOutcome:
+    """Map the old three-way (state | "" | None) convention onto the outcome."""
+    if state is None:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ERROR,
+            error=error or "projection readback failed",
+        )
+    if not state:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ROW_ABSENT
+        )
+    if state.strip().upper() in ("COMPLETED", "FAILED"):
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.TERMINAL, state=state
+        )
+    return ModelProjectionReadbackOutcome(
+        status=EnumProjectionReadbackStatus.STRANDED, state=state
+    )
+
+
+@pytest.fixture(autouse=True)
+def _projection_dsn_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the DSN where the handler reads it, under the declared NAME."""
+    monkeypatch.setenv(_PROJECTION_DSN_ENV, _PROJECTION_DSN)
+    monkeypatch.setattr(sys, "argv", ["pytest"])
+
+
+_LEDGER_SOURCE_ENV = "CHAIN_CANARY_LEDGER_DSN_FOR_TESTS"
+# The DSN the fake lookup resolves that NAME to. Never passed as a field.
+_LEDGER_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+
+
+def _ledger_dsn_lookup(name: str) -> str:
+    """Resolve the declared NAME the way the job environment would.
+
+    The DSN never reaches the request model, so a test that passed one
+    as a field value would no longer be exercising the real path.
+    """
+    return _LEDGER_DSN if name == _LEDGER_SOURCE_ENV else ""
+
+
 _FULL_CHAIN = ("received", "routed", "inference_completed", "terminal")
 
 
@@ -75,9 +129,9 @@ class _RecordingProjectionReadback:
 
     async def __call__(
         self, dsn: str, correlation_id: str, timeout_s: float
-    ) -> tuple[str | None, str]:
+    ) -> ModelProjectionReadbackOutcome:
         self.calls.append((dsn, correlation_id, timeout_s))
-        return self.state, self.error
+        return _outcome(self.state, self.error)
 
 
 def _request(**overrides: object) -> ModelChainCanaryRequest:
@@ -91,9 +145,9 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "terminal_bootstrap_servers": _BOOTSTRAP,
         # OMN-16963: link 2 is now a claim on exactly the same terms, so it is
         # configured throughout for the same reason, and stubbed terminal.
-        "projection_dsn": _PROJECTION_DSN,
+        "projection_dsn_env": _PROJECTION_DSN_ENV,
         # OMN-16964: and link 5 on identical terms, stubbed verified.
-        "ledger_source": _LEDGER_SOURCE,
+        "ledger_source_env": _LEDGER_SOURCE_ENV,
         "expected_ledger_hops": _FULL_CHAIN,
     }
     fields.update(overrides)
@@ -192,6 +246,7 @@ async def test_mints_a_fresh_correlation_id_per_run() -> None:
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -220,6 +275,7 @@ async def test_posts_the_recorded_delegation_recipe() -> None:
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -253,6 +309,7 @@ async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -295,6 +352,7 @@ async def test_reproduces_omn_16767_signature() -> None:
         quarantine_scan=_RecordingQuarantine(found=True),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -328,6 +386,7 @@ async def test_terminal_missing_when_ingress_times_out_and_the_bus_is_empty() ->
         terminal_readback=_RecordingTerminalReadback(found=""),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -352,6 +411,7 @@ async def test_terminal_missing_when_ok_true_but_the_bus_carried_nothing() -> No
         terminal_readback=_RecordingTerminalReadback(found=""),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -370,6 +430,7 @@ async def test_ingress_unreachable_is_its_own_verdict() -> None:
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -392,6 +453,7 @@ async def test_unconfigured_quarantine_reports_skipped_not_clean() -> None:
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -415,6 +477,7 @@ async def test_quarantine_probe_failure_fails_closed() -> None:
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -461,6 +524,7 @@ async def test_kill_switch_read_from_env_at_handle_time(
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
     monkeypatch.setenv("ONEX_CHAIN_CANARY_DISABLED", "1")
@@ -487,6 +551,7 @@ async def test_kill_switch_env_falsey_values_do_not_disable_canary(
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
         ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
     )
 
     result = await handler.handle(_request(quarantine_bootstrap_servers=_BOOTSTRAP))

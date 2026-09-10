@@ -3,21 +3,81 @@
 # SPDX-License-Identifier: MIT
 #
 # deploy-agent-trigger.sh — publish a signed rebuild-requested command to the
-# deploy-agent Kafka topic (onex.cmd.deploy.rebuild-requested.v1).
+# deploy-agent control bus (onex.cmd.deploy.rebuild-requested.v1).
+#
+# This file is a THIN WRAPPER. It resolves an interpreter that can import the
+# deploy_agent package and hands every argument to `python -m deploy_agent.trigger`.
+# It builds no JSON, computes no signature, and knows nothing about the bus.
+#
+# WHY (OMN-16442). This script used to do all three of those things in embedded
+# snippets, and every one of them had drifted from the agent it drives:
+#
+#   * it hand-wrote the command JSON with a `reason` field and no
+#     `runtime_lane`, while the agent's ModelRebuildRequested forbids the first
+#     and requires the second — measured on the .201 dev lane, verbatim:
+#     "2 validation errors for ModelRebuildRequested / runtime_lane / Field
+#     required / reason / Extra inputs are not permitted";
+#   * it read unprefixed KAFKA_SASL_USERNAME/PASSWORD while the lane env file
+#     carries DEV_-prefixed names, then hardcoded SASL_SSL + PLAIN against a
+#     broker running SASL_PLAINTEXT + SCRAM-SHA-256;
+#   * with neither kcat nor rpk on PATH it fell through to a `docker exec ...
+#     rpk --brokers localhost:9092` branch carrying no authentication at all,
+#     which also defaults to snappy compression — a codec the agent's client
+#     cannot decode, which crash-looped it until systemd gave up.
+#
+# The first of those three was closed by #3323, which corrected the hand-written
+# envelope in place. This change removes the hand-writing instead: the envelope
+# is built FROM ModelRebuildRequested and serialised, so the shape cannot drift
+# again in the first place, and the same module resolves the transport through
+# the loader the agent itself starts from. There is no unauthenticated fallback:
+# a missing prerequisite is a refusal naming what is missing.
+#
+# THE OPERATOR-FACING CONTRACT OF #3323 IS PRESERVED — same flags, same
+# refusals, same refusal wording — and is pinned by that PR's own end-to-end
+# binding test (tests/unit/test_trigger_payload_matches_model_omn16442.py),
+# which drives THIS script and validates its real --dry-run output against the
+# real model.
 #
 # USAGE:
 #   DEPLOY_AGENT_HMAC_SECRET=<secret> \
 #   KAFKA_BOOTSTRAP_SERVERS=<host:port> \
 #     ./deploy-agent-trigger.sh \
+#       --runtime-lane dev \
 #       --git-ref origin/dev \
-#       --reason "manual trigger by operator" \
+#       [--scope runtime|core|full] \
+#       [--build-source release|workspace] \
+#       [--image-digest sha256:...] \
+#       [--service <name>]... \
+#       [--reason "manual trigger by operator"] \
 #       [--requested-by claude] \
 #       [--correlation-id <uuid>] \
 #       [--dry-run]
 #
+# REQUIRED ARGS:
+#   --runtime-lane   dev | stability-test | prod. The lane selects the compose
+#                    overlay, compose project and health ports the agent will
+#                    act on, so guessing it is the one mistake this script must
+#                    never make. It resolves only from an explicit declaration:
+#                    the flag, else a single-lane DEPLOY_AGENT_ALLOWED_LANES,
+#                    else DEPLOY_AGENT_TRACKING_REF when that branch name is
+#                    also a lane name. Nothing else resolves it and there is no
+#                    literal default — an undeclared lane refuses, naming the
+#                    flag.
+#
+# NOTE ON --reason (OMN-16442): `reason` is printed in this script's own audit
+# output and is deliberately NOT part of the signed envelope.
+# `ModelRebuildRequested` is declared `extra="forbid"`, so an envelope carrying
+# `reason` is rejected wholesale at `consumer.poll_and_accept` — before
+# `self_update`, before the env-contract validator, before anything runs.
+#
 # REQUIRED ENV VARS:
-#   DEPLOY_AGENT_HMAC_SECRET   HMAC-SHA256 key — from ~/.omnibase/.env on .201
+#   DEPLOY_AGENT_HMAC_SECRET   HMAC-SHA256 key — from the operator env file on
+#                              .201. An unsigned command is silently dropped.
 #   KAFKA_BOOTSTRAP_SERVERS    e.g. 192.168.86.201:19092 (local) or localhost:29092 (tunnel)  # onex-allow-internal-ip # cloud-bus-ok OMN-9411
+#   KAFKA_SECURITY_PROTOCOL    PLAINTEXT | SSL | SASL_PLAINTEXT | SASL_SSL —
+#                              declared, never inferred from whether credentials
+#                              happen to be present (OMN-18012)
+#   KAFKA_SASL_MECHANISM       required when the protocol is SASL_*
 #   DEPLOY_AGENT_TRACKING_REF  branch this lane deploys, e.g. `dev`. REQUIRED
 #                              only when --git-ref is omitted; it supplies the
 #                              default as origin/<branch>. There is no built-in
@@ -27,188 +87,58 @@
 #                              release-synced branch the lane was never on.
 #
 # OPTIONAL ENV VARS:
-#   KAFKA_SASL_USERNAME        SASL username (omit for PLAINTEXT connections)
-#   KAFKA_SASL_PASSWORD        SASL password
-#
-# WARNING: Unsigned triggers are silently dropped by auth.py.
-# NEVER construct the command JSON manually — always use this script so the
-# HMAC-SHA256 _signature field is computed correctly.
-#
-# The signature is HMAC-SHA256 over the JSON-serialised envelope (sort_keys,
-# no spaces) with the _signature field itself excluded — matching
-# deploy_agent/auth.py::verify_command() byte-for-byte.
+#   KAFKA_SASL_ENV_PREFIX      prefix the SASL principal is declared under on
+#                              this host, e.g. DEV_ — the same variable the
+#                              systemd unit sets, read by the same loader, so a
+#                              lane whose credentials are prefixed resolves here
+#                              exactly as it does in the agent
+#   DEPLOY_AGENT_ALLOWED_LANES when it names exactly one lane, that lane is the
+#                              default --runtime-lane
+#   DEPLOY_AGENT_PYTHON        explicit interpreter; otherwise the agent venv
+#                              beside this script, then $VIRTUAL_ENV, then python3
 
 set -euo pipefail
 
-TOPIC="onex.cmd.deploy.rebuild-requested.v1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── defaults ─────────────────────────────────────────────────────────────────
-# No default here: resolved from DEPLOY_AGENT_TRACKING_REF after arg parsing,
-# and only when --git-ref was not supplied (OMN-16442).
-GIT_REF=""
-REASON=""
-REQUESTED_BY="operator-manual"
-CORRELATION_ID=""
-DRY_RUN=0
+# ── resolve an interpreter that can import deploy_agent ──────────────────────
+# Fail closed naming the missing prerequisite. The old script's third publish
+# branch is exactly what "carry on with whatever is available" produced.
+#
+# The probe requires only `deploy_agent.trigger`, NOT `kafka`: building and
+# signing a command is useful without a client (--dry-run), and a missing
+# kafka-python is reported at publish time by the module, naming the package.
+_candidates=()
+if [[ -n "${DEPLOY_AGENT_PYTHON:-}" ]]; then
+    _candidates+=("${DEPLOY_AGENT_PYTHON}")
+fi
+_candidates+=("${SCRIPT_DIR}/.venv/bin/python")
+if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    _candidates+=("${VIRTUAL_ENV}/bin/python")
+fi
+if command -v python3 &>/dev/null; then
+    _candidates+=("$(command -v python3)")
+fi
 
-usage() {
-    grep '^# ' "$0" | sed 's/^# //'
-    exit 1
-}
-
-# ── arg parsing ──────────────────────────────────────────────────────────────
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --git-ref)         GIT_REF="$2";         shift 2 ;;
-        --reason)          REASON="$2";           shift 2 ;;
-        --requested-by)    REQUESTED_BY="$2";     shift 2 ;;
-        --correlation-id)  CORRELATION_ID="$2";   shift 2 ;;
-        --dry-run)         DRY_RUN=1;             shift   ;;
-        -h|--help)         usage ;;
-        *) echo "Unknown arg: $1" >&2; usage ;;
-    esac
+PYTHON=""
+for _candidate in "${_candidates[@]}"; do
+    [[ -x "$_candidate" ]] || continue
+    if PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}" \
+        "$_candidate" -c 'import deploy_agent.trigger' &>/dev/null; then
+        PYTHON="$_candidate"
+        break
+    fi
 done
 
-# ── resolve the deploy ref ───────────────────────────────────────────────────
-# Fail-fast rather than defaulting: an undeclared tracking ref is exactly the
-# defect this removes (operator ruling 2026-09-08 — track the lane deploy
-# branch, never `main`).
-if [[ -z "$GIT_REF" ]]; then
-    if [[ -z "${DEPLOY_AGENT_TRACKING_REF:-}" ]]; then
-        echo "ERROR: no --git-ref given and DEPLOY_AGENT_TRACKING_REF is not set." >&2
-        echo "       Pass --git-ref origin/<branch>, or export" >&2
-        echo "       DEPLOY_AGENT_TRACKING_REF=<branch> (e.g. dev) to supply the default." >&2
-        exit 1
-    fi
-    GIT_REF="origin/${DEPLOY_AGENT_TRACKING_REF}"
-fi
-
-# ── pre-flight ───────────────────────────────────────────────────────────────
-if [[ -z "${DEPLOY_AGENT_HMAC_SECRET:-}" ]]; then
-    echo "ERROR: DEPLOY_AGENT_HMAC_SECRET is not set." >&2
-    echo "       Source it with: source ~/.omnibase/.env" >&2
+if [[ -z "$PYTHON" ]]; then
+    echo "ERROR: no interpreter found that can import 'deploy_agent.trigger'." >&2
+    echo "       Tried: ${_candidates[*]}" >&2
+    echo "       Create the agent venv beside this script" >&2
+    echo "       (${SCRIPT_DIR}/.venv), or point DEPLOY_AGENT_PYTHON at an" >&2
+    echo "       interpreter that has this package and its dependencies." >&2
+    echo "       Refusing to publish through an unauthenticated fallback." >&2
     exit 1
 fi
 
-if [[ $DRY_RUN -eq 0 && -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
-    echo "ERROR: KAFKA_BOOTSTRAP_SERVERS is not set." >&2
-    exit 1
-fi
-
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 is required to compute the HMAC signature." >&2
-    exit 1
-fi
-
-# kcat is used for publish; rpk is accepted as fallback on .201
-_publish_tool=""
-if command -v kcat &>/dev/null; then
-    _publish_tool="kcat"
-elif command -v rpk &>/dev/null; then
-    _publish_tool="rpk"
-elif command -v docker &>/dev/null && docker exec omnibase-infra-redpanda rpk version &>/dev/null; then
-    _publish_tool="docker-rpk"
-elif [[ $DRY_RUN -eq 0 ]]; then
-    echo "ERROR: kcat, rpk, or dockerized redpanda rpk not found." >&2
-    exit 1
-fi
-
-# ── build envelope + compute signature ───────────────────────────────────────
-if [[ -z "$CORRELATION_ID" ]]; then
-    CORRELATION_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
-fi
-
-# All user-supplied values are passed via environment variables — never
-# interpolated into Python source — so special characters cannot break
-# JSON structure or inject code.
-SIGNED_JSON="$(
-    _TRIGGER_GIT_REF="$GIT_REF" \
-    _TRIGGER_REASON="$REASON" \
-    _TRIGGER_REQUESTED_BY="$REQUESTED_BY" \
-    _TRIGGER_CORRELATION_ID="$CORRELATION_ID" \
-    python3 - <<'PYEOF'
-import hashlib
-import hmac
-import json
-import os
-secret         = os.environ["DEPLOY_AGENT_HMAC_SECRET"]
-correlation_id = os.environ["_TRIGGER_CORRELATION_ID"]
-git_ref        = os.environ["_TRIGGER_GIT_REF"]
-reason         = os.environ["_TRIGGER_REASON"]
-requested_by   = os.environ["_TRIGGER_REQUESTED_BY"]
-
-envelope = {
-    "correlation_id": correlation_id,
-    "git_ref":        git_ref,
-    "reason":         reason,
-    "requested_by":   requested_by,
-    "scope":          "runtime",
-    "services":       [],
-}
-body = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
-sig  = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-signed = {**envelope, "_signature": sig}
-print(json.dumps(signed, separators=(",", ":")))
-PYEOF
-)"
-
-# ── audit log (signature masked) ─────────────────────────────────────────────
-# SIGNED_JSON is passed via environment variable — never interpolated into
-# Python source — so embedded quotes or special characters cannot break syntax.
-MASKED_JSON="$(
-    _TRIGGER_SIGNED_JSON="${SIGNED_JSON}" python3 - <<'PYEOF'
-import json, os
-d = json.loads(os.environ["_TRIGGER_SIGNED_JSON"])
-d["_signature"] = d["_signature"][:8] + "...<masked>"
-print(json.dumps(d, indent=2))
-PYEOF
-)"
-
-echo "=== deploy-agent-trigger ==="
-echo "topic:          ${TOPIC}"
-echo "git_ref:        ${GIT_REF}"
-echo "correlation_id: ${CORRELATION_ID}"
-echo "requested_by:   ${REQUESTED_BY}"
-echo "payload (sig masked):"
-echo "${MASKED_JSON}"
-
-if [[ $DRY_RUN -eq 1 ]]; then
-    echo ""
-    echo "(dry-run: skipping Kafka publish)"
-    exit 0
-fi
-
-# ── publish ──────────────────────────────────────────────────────────────────
-echo ""
-echo "Publishing to ${KAFKA_BOOTSTRAP_SERVERS} ..."
-
-if [[ "$_publish_tool" == "kcat" ]]; then
-    KCAT_ARGS=(-P -b "${KAFKA_BOOTSTRAP_SERVERS}" -t "${TOPIC}" -K /)
-    if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
-        KCAT_ARGS+=(
-            -X security.protocol=SASL_SSL
-            -X sasl.mechanisms=PLAIN
-            -X "sasl.username=${KAFKA_SASL_USERNAME}"
-            -X "sasl.password=${KAFKA_SASL_PASSWORD}"
-        )
-    fi
-    # SIGNED_JSON piped via stdin — not passed as a shell argument
-    echo "manual-${CORRELATION_ID}/${SIGNED_JSON}" | kcat "${KCAT_ARGS[@]}"
-elif [[ "$_publish_tool" == "rpk" ]]; then
-    RPK_ARGS=(--brokers "${KAFKA_BOOTSTRAP_SERVERS}" --key "manual-${CORRELATION_ID}")
-    if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
-        RPK_ARGS+=(
-            --tls-enabled
-            --sasl-mechanism PLAIN
-            --sasl-username "${KAFKA_SASL_USERNAME}"
-            --sasl-password "${KAFKA_SASL_PASSWORD}"
-        )
-    fi
-    rpk topic produce "${TOPIC}" "${RPK_ARGS[@]}" <<< "${SIGNED_JSON}"
-else
-    docker exec -i omnibase-infra-redpanda \
-        rpk topic produce "${TOPIC}" --brokers localhost:9092 \
-        --key "manual-${CORRELATION_ID}" <<< "${SIGNED_JSON}"
-fi
-
-echo "Published. correlation_id=${CORRELATION_ID}"
+exec env PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}" \
+    "$PYTHON" -m deploy_agent.trigger "$@"

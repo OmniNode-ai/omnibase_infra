@@ -1178,6 +1178,15 @@ COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
     "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
     "BIFROST_VERIFY_ENDPOINTS": "1",
     "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
+    # OMN-18114: the TENANT-domain projection carrier's policy values. Render-only
+    # dummies; the real ones come from docker/runtime-policy.env.
+    "DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES": (
+        "projection.writer,tenant.projection,runtime.tenant-projection"
+    ),
+    "DEV_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH": (
+        "/app/config/secret_resolver.yaml"
+    ),
+    "DEV_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON": "{}",
     "DEV_RUNTIME_EFFECTS_PORT": "8086",
     "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON": _SECRET_RESOLVER_CONFIG_JSON,
     "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH": _SECRET_RESOLVER_CONFIG_PATH,

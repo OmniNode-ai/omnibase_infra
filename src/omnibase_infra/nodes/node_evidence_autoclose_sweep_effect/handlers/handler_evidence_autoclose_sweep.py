@@ -41,7 +41,10 @@ Pipeline
    record GAP_AC_COVERAGE naming the criteria: an unchecked markdown
    checkbox; an acceptance-criteria section listing more items than
    dod_verify returned VERIFIED PROBATIVE checks; and non-probative checks
-   outnumbering the verified probative ones. The last two are OMN-16106 D3,
+   outnumbering the verified probative ones AMONG THE CHECKS THAT DECLARE
+   THEY COVER ONE OF THIS TICKET'S CRITERIA (OMN-18125 — that last rule read
+   the verdict's totals until 2026-09-10, so a ticket's own accumulated
+   provenance items voted against it). The last two are OMN-16106 D3,
    and they exist because the denominator used to be ``total_checks`` —
    which made the guard depend on whether an author wrote criteria as
    checkboxes or as prose bullets rather than on the evidence. Criteria are
@@ -166,6 +169,9 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_ac_binding_check_status import (
+    EnumAcBindingCheckStatus,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_arm import (
     EnumEvidenceAutocloseArm,
 )
@@ -177,6 +183,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
     EnumEvidenceAutocloseTrigger,
+)
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_binding_row import (
+    ModelAcBindingRow,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_outcome import (
     ModelEvidenceAutocloseOutcome,
@@ -476,6 +485,11 @@ _READBACK_UNCONFIRMED_CLASS_MARKER = (
 # with the run that wrote it.
 _FLIP_FINGERPRINT_RE = re.compile(r"Verdict fingerprint ([0-9a-f]{16})\b")
 
+# OMN-18056 item 7. The class stamp a post-revert baseline comment carries.
+# Spelled as a literal rather than derived from the enum so this constant can
+# sit with the other markers, above the enum-consuming code.
+_POST_REVERT_BASELINE_CLASS_MARKER = "class=skipped_prior_revert"
+
 # OMN-16106 D1. The three cited-PR spellings, and the evidence-companion repo
 # that is filtered out of the set. See `_cited_product_pr_refs`.
 _CITED_PR_URL_RE = re.compile(
@@ -555,18 +569,34 @@ _CHECK_UNVERIFIABLE_CAUSE_KEY = "unverifiable_cause"
 #: OMN-17323. A verifier-derived `::pr-live-state` overlay whose binder derived
 #: no (repo, pr) pair: synthetic, never executed, and incapable of passing.
 _CHECK_UNBINDABLE_OVERLAY_KEY = "unbindable_derived_overlay"
+#: OMN-15911. What a passing check BOUND: behaviour, merge state, surrogate.
+_CHECK_PROOF_CLASS_KEY = "proof_class"
+#: OMN-18056. The acceptance criteria this evidence item DECLARES it covers,
+#: as `binds_ac` on the contract's `dod_evidence` item, carried through
+#: dod_verify onto the per-check record. An ABSENT key and an EMPTY list are
+#: different facts and the gap reason distinguishes them: absent means the
+#: verifier predates OMN-18056 and cannot report a binding at all, empty means
+#: the contract was read and declares none. Both hold; only one of them is a
+#: contract-authoring gap.
+_CHECK_BINDS_AC_KEY = "binds_ac"
 
 #: Per-check statuses, as `EnumEvidenceCheckStatus` spells them.
 _CHECK_STATUS_VERIFIED = "verified"
 _CHECK_STATUS_FAILED = "failed"
 _CHECK_STATUS_SKIPPED = "skipped"
 _CHECK_STATUS_SUPERSEDED = "superseded"
+#: OMN-15391. Executed, exited 0, and its exit status could not have been
+#: otherwise for any product reason. Read by `_coverage_corpus_counts`, which
+#: needs the denominator term by name rather than as "everything that is not
+#: verified" — `skipped` and `superseded` are also not verified and are not
+#: this fact.
+_CHECK_STATUS_NON_PROBATIVE = "non_probative"
 
 #: This node's own `contract.yaml` `node_version`, part of the gap-comment
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.9.0"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.11.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -938,6 +968,123 @@ def _newest_revert_entry_id(history: list[dict[str, object]]) -> str:
     return ""
 
 
+def _newest_revert_entry_created_at(history: list[dict[str, object]]) -> str:
+    """``createdAt`` of the newest ``completed -> non-completed`` entry, or "".
+
+    OMN-18106. The mirror of ``_newest_revert_entry_id``, walking the same
+    entries in the same order and returning the OTHER field of the same node,
+    so the id and the timestamp can never be resolved from different reversals.
+
+    An empty return means "no reversal, or a reversal whose timestamp Linear
+    did not carry". The caller must not read that as "the reversal is old" —
+    see ``_evidence_after_revert``, which holds on it.
+    """
+    for entry in _newest_first(history):
+        from_state = entry.get("fromState")
+        to_state = entry.get("toState")
+        if not isinstance(from_state, dict) or not isinstance(to_state, dict):
+            continue
+        if str(from_state.get("type")) != "completed":
+            continue
+        if str(to_state.get("type")) == "completed":
+            continue
+        return str(entry.get("createdAt") or "")
+    return ""
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    """One ISO-8601 instant as an aware UTC ``datetime``, or None.
+
+    Linear's ``createdAt`` is ``2026-09-02T07:46:30.123Z`` and GitHub's
+    ``merged_at`` is ``2026-09-02T07:46:30Z``. Both are parsed here, and a
+    naive value is refused rather than assumed to be UTC — an assumed timezone
+    is exactly the kind of silent default that turns an ordering question into
+    a coin flip.
+    """
+    text = value.strip()
+    if not text:
+        return None
+    if "Z" in text[:-1]:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _evidence_after_revert(
+    revert_at: str,
+    evidence: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Which pieces of this ticket's evidence POSTDATE the reversal.
+
+    OMN-18106. Returns ``(postdating, unreadable)`` as human-readable rows.
+
+    ``evidence`` is ``(label, iso timestamp)`` for every durable, un-forgeable
+    landing time this candidate has: the merged OCC evidence companion that
+    nominated it, and each product PR the ticket cites. Those are the two
+    surfaces the verified probative checks are resolved FROM — dod_verify's
+    per-check records carry no timestamp of their own, so this is the finest
+    grain the ordering can honestly be asked at, and the reason rows say which
+    artifact they are quoting rather than implying a per-check reading.
+
+    FAIL-CLOSED in both unknown directions. An unreadable revert timestamp
+    returns everything as unreadable — with no T0 there is no ordering at all,
+    not an ordering that happens to favour release. An unreadable evidence
+    timestamp is reported in ``unreadable`` rather than skipped, because a
+    piece of evidence silently dropped from the comparison is a piece of
+    evidence that cannot hold anything.
+    """
+    revert_moment = _parse_iso_utc(revert_at)
+    if revert_moment is None:
+        return (), tuple(
+            f"{label} (revert timestamp {revert_at or '<absent>'} could not be read)"
+            for label, _ in evidence
+        )
+    postdating: list[str] = []
+    unreadable: list[str] = []
+    for label, raw in evidence:
+        moment = _parse_iso_utc(raw)
+        if moment is None:
+            unreadable.append(
+                f"{label} (timestamp {raw or '<absent>'} could not be read)"
+            )
+            continue
+        if moment >= revert_moment:
+            postdating.append(
+                f"{label} landed {raw}, at or after the revert at {revert_at}"
+            )
+    return tuple(postdating), tuple(unreadable)
+
+
+def _has_verified_bound_check(verdict: dict[str, object]) -> bool:
+    """Whether any check on this verdict VERIFIED a criterion binding.
+
+    ``verified`` is the only status that is both a verdict and a proof:
+    ``non_probative`` ran and could not have gone the other way (OMN-15391),
+    ``skipped`` never ran, ``superseded`` was replaced. So "verified probative
+    check" starts with "check whose status is verified". OMN-18106's
+    post-revert release also requires that proof to be tied to at least one
+    acceptance criterion through ``binds_ac``. A green but unbound provenance
+    row is not enough to say the postdating evidence is the evidence the
+    ticket is judged on.
+    """
+    for check in _check_records(verdict):
+        if _check_status(check) != _CHECK_STATUS_VERIFIED:
+            continue
+        raw = check.get(_CHECK_BINDS_AC_KEY)
+        if not isinstance(raw, list):
+            continue
+        if any(_canonical_ac_label(str(declared)) for declared in raw):
+            return True
+    return False
+
+
 def _prior_flip_fingerprints(bodies: tuple[str, ...]) -> frozenset[str]:
     """Verdict fingerprints this closer has already flipped this ticket on.
 
@@ -950,6 +1097,61 @@ def _prior_flip_fingerprints(bodies: tuple[str, ...]) -> frozenset[str]:
         if _FLIP_COMMENT_CLASS_MARKER not in body:
             continue
         found.update(match.group(1) for match in _FLIP_FINGERPRINT_RE.finditer(body))
+    return frozenset(found)
+
+
+# OMN-18056 item 7. The POST-REVERT BASELINE line, written by this sweep on
+# the hold it takes the first time it looks at a reverted ticket, and read back
+# on every later tick. Anchored on the sweep's own prior-revert class marker so
+# a human quoting the line in a comment is not the sweep having measured it —
+# the same rule `_prior_flip_fingerprints` applies one class over.
+_POST_REVERT_BASELINE_RE = re.compile(
+    r"Post-revert baseline fingerprint ([0-9a-f]{16})\b"
+)
+
+
+def _post_revert_baseline_fingerprints(bodies: tuple[str, ...]) -> frozenset[str]:
+    """Verdicts this sweep has already recorded as post-revert baselines.
+
+    OMN-18056 item 7. The prior-revert fence used to be a NEGATIVE one: it held
+    only when the current fingerprint MATCHED a verdict this closer had itself
+    flipped on. A ticket reverted for any other reason — a hand flip somebody
+    took back, an audit lane's correction — matched nothing and was released on
+    the next tick.
+
+    Measured: OMN-17298 was flipped at 2026-09-08T21:21:29Z on a hand probe
+    whose search term `tenant-projection` exists in no spelling anywhere, and
+    reverted at 22:03:49Z once live state showed the projection node running
+    with topic traffic. Nothing in that sequence is a fingerprint this closer
+    wrote, so the fence could not see it, and the identical evidence would have
+    re-cleared the predicate on the next run.
+
+    The gate is therefore POSITIVE: a reverted ticket holds until a check
+    outcome has demonstrably CHANGED since the revert. The baseline recorded
+    here is what "changed" is measured against — the first verdict observed
+    after the reversal.
+
+    OMN-18106 demoted this to the SECOND of two release conditions, because
+    "the first verdict observed after the reversal" is not "the verdict as it
+    stood at the reversal", and the gap between them is where remediation
+    lands. Measured on OMN-15542: reverted 2026-09-02T07:46:30Z, bindings
+    repaired over the following week, first post-revert look 2026-09-09T23:16Z
+    — which minted the already-repaired verdict as the baseline it would
+    forever be compared against. dod_verify being deterministic, no later tick
+    could ever differ from it and the ticket was held permanently.
+
+    The ordering test in ``_evidence_after_revert`` now runs FIRST and releases
+    on evidence that postdates the reversal. This function remains the answer
+    for the case that test cannot see: a ticket whose evidence all predates the
+    reversal but whose CHECKS move anyway (a live probe that starts passing, a
+    contract read that resolves differently). It still bootstraps, so a
+    reverted ticket with no new evidence is not deadlocked either.
+    """
+    found: set[str] = set()
+    for body in bodies:
+        if _POST_REVERT_BASELINE_CLASS_MARKER not in body:
+            continue
+        found.update(m.group(1) for m in _POST_REVERT_BASELINE_RE.finditer(body))
     return frozenset(found)
 
 
@@ -1187,7 +1389,24 @@ _UNCHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[ \t]\][ \t]*(.*)$", re.MU
 _LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(.*)$")
 # An `AC1: ...` / `AC-2 ...` line with no bullet at all -- a common shape in
 # these tickets that a list-item-only parser would silently count as zero.
-_AC_ITEM_RE = re.compile(r"^[ \t]*(AC[-_ ]?\d+\b.*)$", re.IGNORECASE)
+# OMN-18048: leading emphasis markers must not hide the item. Criteria written
+# `**AC1** - ...` matched NEITHER regex -- not _LIST_ITEM_RE (no bullet, no
+# number) and not this one (the line starts with `*`, not `AC`). Measured on
+# OMN-18035: four criteria in that shape, zero parsed. The optional `[*_]*`
+# prefix is stripped from the captured text below so the item reads the same
+# however it was written.
+_AC_ITEM_RE = re.compile(
+    r"^[ \t]*([*_]*)[ \t]*(AC[-_ ]?\d+)(?!\d)[*_]*(.*?)[ \t]*$", re.IGNORECASE
+)
+# The closing half of a wrapped emphasis run, dropped ONLY when the item opened
+# with one. Unconditional stripping would eat a legitimate trailing `_` from
+# item text that never used emphasis at all.
+_TRAILING_EMPHASIS_RE = re.compile(r"[*_]+$")
+
+# OMN-18048: a trailing parenthetical qualifier on an otherwise-recognised
+# heading -- `Acceptance criteria (falsifiable)`, `DoD (per repo)`. Stripped
+# before the closed-set membership test in _is_ac_heading.
+_TRAILING_QUALIFIER_RE = re.compile(r"\s*\([^)]*\)\s*$")
 # A leading `[ ]` / `[x]` task marker, stripped from item text for readability.
 _TASK_MARKER_RE = re.compile(r"^\[[ \t xX]\][ \t]*")
 # Leading enumeration on a heading line: `3. Acceptance criteria`.
@@ -1218,9 +1437,34 @@ _AC_HEADING_TEXTS = frozenset(
 # the point, and an unbounded splice is how a comment body hits an API limit.
 _MAX_UNCOVERED_LISTED = 20
 
+# OMN-18056. The label a `binds_ac` entry can point AT. Matched against the
+# item text `_acceptance_criteria_items` returns, which has already had its
+# bullet and any `[ ]`/`[x]` marker stripped -- so `**AC1** ...`, `AC-2: ...`,
+# `DoD3 -- ...` and `ac 4)` all reach here with the label leading.
+#
+# A criterion with NO label is not a parse failure and is not skipped: it is
+# an UNBINDABLE criterion, because `binds_ac: ["AC3"]` needs something stable
+# to point at and an ordinal derived from parse position renumbers every
+# binding below it the moment a bullet is inserted. Those tickets hold until
+# their criteria are labelled, which is a ticket-authoring change, and saying
+# so in the hold reason is the only honest way to report it.
+_AC_LABEL_RE = re.compile(
+    r"^[\s>*_+-]*(?:\*\*)?\s*(AC|DOD)[-_ .]?(\d+)\b", re.IGNORECASE
+)
+
+# Ceiling on the criterion text carried into a binding row, so a ticket whose
+# criteria are paragraphs cannot blow the comment body or the receipt.
+_MAX_AC_TEXT_CHARS = 200
+
 
 def _is_markdown_heading(line: str) -> bool:
     return line.lstrip().startswith("#")
+
+
+# Multi-word members of _AC_HEADING_TEXTS. Only these are eligible for the
+# leading-qualifier match, so a heading that merely ends in "ac" or "dod" is
+# not mistaken for one that names the section (OMN-18048 review).
+_AC_HEADING_PHRASES = frozenset(t for t in _AC_HEADING_TEXTS if " " in t)
 
 
 def _is_ac_heading(line: str) -> bool:
@@ -1228,16 +1472,72 @@ def _is_ac_heading(line: str) -> bool:
 
     Tolerates ``## Acceptance Criteria``, ``**Acceptance criteria:**``,
     ``### 3. Acceptance criteria`` and bare ``AC``.
+
+    OMN-18048 -- A QUALIFIER MUST NOT HIDE THE HEADING.
+    ------------------------------------------------------
+    ``_AC_HEADING_TEXTS`` is a closed set of nine spellings, and the
+    normalisation below did not remove qualifiers. So ``## Acceptance criteria
+    (falsifiable)`` -- the house style on operator-authored tickets -- was NOT
+    recognised, ``_saw_ac_heading`` was False, and the OMN-16106 whole-body
+    fallback fired: the scan ran over the entire description and counted
+    whatever unrelated bullets it found. On OMN-18035 that reported **2**
+    acceptance criteria for a ticket declaring **four**, and the two were
+    bullets from a ``## Fence`` section.
+
+    That is not the over-count the fallback's docstring reasons about. It is a
+    count of DIFFERENT ITEMS, so the "over-counting holds a flip" safety
+    argument does not apply and both failure directions are reachable.
+
+    Measured (OMN-18048 AC3, 110 ticket descriptions read at full text):
+    **14.5%** carry an AC-looking heading this set does not recognise, across
+    **12 distinct spellings**. Every one is a recognised base spelling plus a
+    qualifier, which is why this strips the qualifier instead of adding twelve
+    more strings -- that set would never close.
+
+    Two qualifier positions, both measured in that corpus:
+
+    * TRAILING, usually parenthesised -- ``Acceptance criteria (falsifiable)``,
+      ``DoD (per repo)``, ``Definition of Done (dod_evidence)``.
+    * LEADING -- ``Falsifiable acceptance criteria`` (5 occurrences). A fix
+      that only stripped the trailing form would leave every one of these
+      invisible.
+
+    The leading form is gated on the line actually looking like a heading (a
+    markdown ``#`` rule, or bold-wrapped). Without that gate an ordinary prose
+    sentence ending in the phrase would open the section mid-paragraph, which
+    is a real false positive -- it was hit while measuring the corpus.
     """
-    text = line.strip()
-    if not text:
+    raw = line.strip()
+    if not raw:
         return False
-    text = text.lstrip("#").strip()
+    looks_like_heading = raw.startswith("#") or (
+        raw.startswith("**") and raw.endswith("**")
+    )
+    text = raw.lstrip("#").strip()
     text = text.strip("*_").strip()
     text = _HEADING_ENUM_RE.sub("", text)
     text = text.rstrip(":").strip()
     text = text.strip("*_").strip()
-    return text.casefold() in _AC_HEADING_TEXTS
+    folded = text.casefold()
+    if folded in _AC_HEADING_TEXTS:
+        return True
+    # Trailing qualifier: "acceptance criteria (falsifiable)" -> "acceptance criteria".
+    trimmed = _TRAILING_QUALIFIER_RE.sub("", folded).strip().rstrip(":").strip()
+    if trimmed in _AC_HEADING_TEXTS:
+        return True
+    # Leading qualifier: "falsifiable acceptance criteria". Heading-shaped only,
+    # and only against MULTI-WORD spellings.
+    #
+    # OMN-18048 review [MINOR]: matching this way against the single-token
+    # spellings ("ac", "acs", "dod") accepts any heading merely ENDING in one --
+    # measured, "## Notes on AC", "## Why we need DoD" and "## Dropping the AC"
+    # were all recognised, opening a criteria section over unrelated content.
+    # A one-word suffix carries no evidence that the heading NAMES the section
+    # rather than mentions it; a multi-word phrase does. "## Acceptance criteria"
+    # itself is unaffected -- it matches the exact-membership test above.
+    return looks_like_heading and any(
+        trimmed.endswith(f" {known}") for known in _AC_HEADING_PHRASES
+    )
 
 
 def _acceptance_criteria_items(description: str) -> list[str]:
@@ -1291,7 +1591,15 @@ def _acceptance_criteria_items(description: str) -> list[str]:
             continue
         ac_match = _AC_ITEM_RE.match(line)
         if ac_match:
-            text = ac_match.group(1).strip()
+            # OMN-18048 review: the emphasis run is captured separately from the
+            # AC token and its remainder, so `**AC1** - text` yields the SAME
+            # string as the bulleted `- AC1 - text`. Capturing `.*` after the
+            # token embedded the closing `**` mid-string, and the two spellings
+            # of one criterion then compared and deduped as different items.
+            lead, token, rest = ac_match.groups()
+            text = f"{token}{rest}".strip()
+            if lead:
+                text = _TRAILING_EMPHASIS_RE.sub("", text).strip()
             if text:
                 items.append(text)
     return items
@@ -1355,7 +1663,8 @@ def _gate_probe_declaration(description: str) -> tuple[str, str, str]:
 def _ac_coverage_gap(
     description: str,
     verified_count: int,
-    non_probative_count: int,
+    coverage_verified_count: int,
+    coverage_non_probative_count: int,
 ) -> tuple[str, tuple[str, ...]]:
     """Decide whether ``description`` carries criteria dod_verify did not cover.
 
@@ -1423,6 +1732,32 @@ def _ac_coverage_gap(
     An empty/absent description is NOT a gap: Linear returns null for a ticket
     with no body, and treating "no criteria written down" as "criteria we
     cannot read" would turn the guard into a blanket hold on every such ticket.
+
+    OMN-18125 -- WHICH CHECKS RULE 3 IS OVER, and why rule 2 is not.
+    -----------------------------------------------------------------
+    Rule 3's arithmetic is unchanged; the POPULATION it counts is not. Its two
+    terms now arrive from :func:`_coverage_corpus_counts`, restricted to the
+    checks whose ``binds_ac`` names one of THIS ticket's criteria. They used
+    to be the verdict's TOTALS, which include every auto-minted provenance
+    item a ticket's companion history ever accumulated. Measured on OMN-17478
+    (closer run 34431989659): 22 of 34 were exactly that, and they held a
+    ticket whose six criteria were each already bound to a verified probative
+    check. Rule 3's own sentence names "the corpus that was supposed to prove
+    this ticket's criteria" -- items declaring they prove nothing were never
+    that corpus, and a count over them can neither support the coverage claim
+    nor refute it.
+
+    **Rule 2 deliberately keeps the verdict-wide** ``verified_count``. Its
+    question is different -- "do enough verified probative checks exist AT ALL
+    to cover this many criteria" -- and narrowing it too would convert a
+    legitimate contract whose single integration proof declares three criteria
+    into a hold, which is authorial over-claim, a separate question, and not
+    what was measured. Restricting one rule and not the other is the whole
+    change; widening it further needs its own evidence.
+
+    Why the OMN-18075 padding loophole cannot reopen through the narrower
+    population is argued where the population is computed:
+    :func:`_coverage_corpus_counts`.
     """
     if not description.strip():
         return "", ()
@@ -1458,20 +1793,373 @@ def _ac_coverage_gap(
             "product reason covers no criterion.)",
             items,
         )
-    if non_probative_count >= verified_count:
+    if coverage_non_probative_count >= coverage_verified_count:
         return (
-            f"dod_verify returned {non_probative_count} non-probative check(s) "
-            f"against {verified_count} verified probative one(s), so at least "
+            f"dod_verify returned {coverage_non_probative_count} non-probative check(s) "
+            f"against {coverage_verified_count} verified probative one(s), so at least "
             "half of the corpus that was supposed to prove this ticket's "
             f"{len(items)} acceptance criterion(s) proved nothing. A "
             "non-probative check executed and exited 0 in a way it could not "
             "have avoided, so it carries no product verdict; without a strict "
             "majority of probative ones, 'every criterion is covered by a "
-            "verified probative check' is not supportable from these counts.",
+            "verified probative check' is not supportable from these counts. "
+            "Both terms count only the checks whose `binds_ac` names one of "
+            "the criteria listed below (OMN-18125), so a provenance item that "
+            "declares no coverage is in neither -- the verdict's own totals "
+            "beside this reason are the wider corpus.",
             items,
         )
 
     return "", ()
+
+
+# -- OMN-18056: the AC <-> check BINDING, which no counter can express ------
+#
+# `_ac_coverage_gap` above is three COUNTING rules and every one of them is a
+# bound on the same claim: "every acceptance criterion is covered by at least
+# one verified probative check". A count can REFUTE that claim; it can never
+# identify WHICH criterion is uncovered, and it cannot refute it at all once
+# the numbers happen to line up.
+#
+# Measured, closeout sweep run 2 (2026-09-08): 8 of 9 adjudicated tickets
+# satisfied every counting bound and 7 of those 8 were not done, because in
+# each case the criterion that DECIDES the ticket was bound to no check in its
+# OCC contract. OMN-15660 is the worked example -- 6 verified + 2
+# non-probative = 8, 1 behaviour-proving, three parsed criteria, all three
+# counting rules releasing, and its AC3 ("both call sites are covered")
+# demonstrably unmet in the product tree with the words "handler group"
+# appearing nowhere in the contract.
+#
+# The join below is the missing question. It is asked of the CONTRACT, through
+# the verifier: `binds_ac` on a `dod_evidence` item is the contract author
+# declaring which criterion that item covers, and dod_verify carries it onto
+# the per-check record. The closer never parses a contract itself -- a second
+# parser would be a second truth, and the two would drift.
+#
+# WHAT THIS DOES NOT DO, stated rather than implied: `binds_ac` is the
+# author's CLAIM. This can verify that a declared check ran and was probative;
+# it cannot verify that the check proves the criterion. What it removes is the
+# SILENT case -- a criterion nothing even claims to cover -- not authorial
+# error. The same honest limit the staging-namespace gate records.
+
+
+def _canonical_ac_label(text: str) -> str:
+    """`AC3` / `DOD2` parsed from a criterion or a `binds_ac` entry, or ``""``.
+
+    Both sides of the join go through this one function, so a contract writing
+    ``binds_ac: ["ac-3"]`` and a ticket writing ``**AC3**`` bind, and neither
+    side can normalise differently from the other.
+    """
+    match = _AC_LABEL_RE.match(text.strip())
+    if not match:
+        return ""
+    return f"{match.group(1).upper()}{int(match.group(2))}"
+
+
+def _declared_ac_bindings(
+    verdict: dict[str, object],
+) -> tuple[bool, dict[str, tuple[tuple[str, str, str], ...]]]:
+    """Bindings the verdict's checks DECLARE, keyed by canonical AC label.
+
+    Returns ``(field_present, bindings)`` where each binding value is a tuple
+    of ``(check_id, status, proof_class)`` for every check naming that label --
+    including the ones that did NOT verify, so a declared-but-unproven binding
+    is visible in the table rather than silently absent.
+
+    ``field_present`` is True as soon as ANY check carries the key at all,
+    even as an empty list. That distinction is the whole reason it is
+    returned: an ABSENT key means the verifier cannot report bindings (it
+    predates this change), an EMPTY one means the contract was read and
+    declares none. Both hold the flip; only the second is a gap the ticket's
+    author can close.
+    """
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return False, {}
+    field_present = False
+    collected: dict[str, list[tuple[str, str, str]]] = {}
+    for entry in checks:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get(_CHECK_BINDS_AC_KEY)
+        if raw is None:
+            continue
+        field_present = True
+        if not isinstance(raw, list):
+            continue
+        check_id = str(entry.get(_CHECK_ID_KEY) or "")
+        status = str(entry.get(_CHECK_STATUS_KEY) or "")
+        proof_class = str(entry.get(_CHECK_PROOF_CLASS_KEY) or "")
+        for declared in raw:
+            label = _canonical_ac_label(str(declared))
+            if not label:
+                continue
+            collected.setdefault(label, []).append((check_id, status, proof_class))
+    return field_present, {label: tuple(rows) for label, rows in collected.items()}
+
+
+def _coverage_corpus_counts(
+    verdict: dict[str, object], description: str
+) -> tuple[int, int]:
+    """``(verified, non_probative)`` over the checks that CLAIM to cover this ticket.
+
+    OMN-18125. The counting rules in :func:`_ac_coverage_gap` are refutations
+    of one claim -- "every acceptance criterion is covered by at least one
+    verified probative check". This is the population that claim is ABOUT: the
+    check records whose ``binds_ac`` names a criterion parsed from this
+    ticket's own body. A check the contract does not say covers anything is
+    evidence neither for the claim nor against it, so it belongs in neither
+    term.
+
+    WHY THIS EXISTS -- measured on OMN-17478, closer run 34431989659, comment
+    ``e1cb7e79`` at 2026-09-10T03:10:44Z. Its contract at ``70ae3b98`` binds
+    all six criteria to VERIFIED probative checks, so the OMN-18056 binding
+    leg released and the class moved from ``gap_ac_unbound`` to
+    ``gap_ac_coverage``. Rule 3 then held it anyway, on 22 non-probative
+    against 12 verified. **The 22 were auto-minted Evidence-Source provenance
+    items from four earlier companion PRs** -- the ``-ci`` product-diff-scope
+    items, the ``occ-self-bind-pr-<n>`` items, the bare PR-state items, each
+    with its derived ``::pr-live-state`` overlay. Every one is a bare ``gh pr
+    view --json ...``, which is exactly why omnimarket demotes them, and not
+    one declares ``binds_ac``. So the rule refuted a claim about coverage with
+    a population that was 22/34 outside coverage.
+
+    That population grows with every companion a ticket ever attracts and
+    never shrinks, so the defect is fleet-wide and monotone: the longer a
+    ticket's autobind history, the larger the majority its own evidence has to
+    out-vote. The two ways to clear it by hand -- superseding the shared
+    provenance items, or splitting six evidence items into seventeen -- both
+    move a counter and prove nothing further, which is why neither is the fix.
+
+    THE PADDING LOOPHOLE STAYS CLOSED, and by construction rather than by a
+    named exclusion:
+
+    * a ``non_probative`` check can never enter the NUMERATOR, because
+      :func:`_ac_binding_gap` binds only on ``verified`` and omnimarket's
+      ``_demote_non_probative`` demotes exactly the greens. A bare
+      ``occ-self-bind-pr-<n>`` cannot raise coverage whether it declares a
+      binding or not;
+    * one that DOES declare a binding lands in the DENOMINATOR, so declaring
+      it costs the contract that declared it;
+    * an unbound check moves neither term, so minting more companions cannot
+      release a hold either.
+
+    Nothing here matches on a check id, a command shape or the word
+    "self-bind". That distinction is deliberate: OMN-18075 owns removing the
+    self-bind AT THE MINT, on the 2026-09-09 ruling that the read is the wrong
+    place to filter it, and its Out of scope names this change as the separate
+    question it is. This narrows a population by what the contract itself
+    declares; it does not exempt anything.
+
+    Records, not items: the returned counts are check RECORDS, the same unit
+    the verdict's own ``verified_count``/``non_probative_count`` use, so the
+    reason a hold states can be checked against the counters beside it. A
+    record binding several criteria still counts ONCE.
+
+    An unlabelled criterion cannot join the corpus -- the join is on the
+    canonical ``AC<n>``/``DoD<n>`` label, and a criterion with no label is one
+    nothing in a contract can point at. That case returns ``(0, 0)``, which
+    HOLDS both rules. It is unreachable in production (the binding leg refuses
+    an unlabelled criterion first), and holding is the safe direction for the
+    day it is not.
+    """
+    labels = {
+        label
+        for label in (
+            _canonical_ac_label(item)
+            for item in _acceptance_criteria_items(description)
+        )
+        if label
+    }
+    if not labels:
+        return 0, 0
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return 0, 0
+
+    verified = 0
+    non_probative = 0
+    for entry in checks:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get(_CHECK_BINDS_AC_KEY)
+        if not isinstance(raw, list):
+            continue
+        declared = {_canonical_ac_label(str(item)) for item in raw}
+        if not declared & labels:
+            continue
+        status = str(entry.get(_CHECK_STATUS_KEY) or "").strip().lower()
+        if status == _CHECK_STATUS_VERIFIED:
+            verified += 1
+        elif status == _CHECK_STATUS_NON_PROBATIVE:
+            non_probative += 1
+    return verified, non_probative
+
+
+def _has_ac_heading(description: str) -> bool:
+    """Whether the body carries a recognised acceptance-criteria heading."""
+    return any(_is_ac_heading(line) for line in description.splitlines())
+
+
+def _ac_binding_gap(
+    description: str,
+    verdict: dict[str, object],
+    ticket_id: str,
+) -> tuple[str, tuple[str, ...], tuple[ModelAcBindingRow, ...]]:
+    """Decide whether every parsed criterion binds to a VERIFIED check.
+
+    Returns ``(reason, unbound, rows)``. An empty ``reason`` releases the
+    flip and ``rows`` then carry the bindings that released it.
+
+    Two shapes hold, and they are reported differently because they tell the
+    author to do different things:
+
+    1. At least one parsed criterion is declared by no VERIFIED check. Named
+       individually -- this is the fact the counters could not produce.
+    2. NO criterion parses at all. Today's counting rules RELEASE that case
+       through an ``if not items: return "", ()`` early exit, which reads
+       "nothing written down" as "nothing to prove". A ticket the closer
+       cannot read criteria from is a ticket it cannot say anything about, so
+       it holds.
+
+    ``verified`` is the only status that binds. ``non_probative`` is a
+    verdict but not a proof (OMN-15391), ``skipped`` never ran, ``failed``
+    would have been refused upstream -- none of them discharges a criterion,
+    and each appears in the table with its status so the near-miss is legible.
+    """
+    contract = f"contracts/{ticket_id}.yaml"
+    field_present, bindings = _declared_ac_bindings(verdict)
+    items = tuple(_acceptance_criteria_items(description))
+
+    if not items:
+        return (
+            "No acceptance criterion could be parsed from this ticket's Linear "
+            "description, so there is nothing for the OCC contract's checks to "
+            "be bound TO and no statement this sweep can make about coverage. "
+            "A green tally over unbindable criteria is an arithmetic identity, "
+            "not evidence. Write the criteria under an `Acceptance criteria` "
+            "(or `Definition of done`) heading, label them `AC1`, `AC2`, ..., "
+            f"and declare each one in `{contract}` via `binds_ac` on the "
+            "evidence item that proves it.",
+            (),
+            (),
+        )
+
+    rows: list[ModelAcBindingRow] = []
+    unbound: list[str] = []
+    for item in items:
+        text = item[:_MAX_AC_TEXT_CHARS]
+        label = _canonical_ac_label(item)
+        declared = bindings.get(label, ()) if label else ()
+        proving = tuple(row for row in declared if row[1] == _CHECK_STATUS_VERIFIED)
+        if proving:
+            rows.extend(
+                ModelAcBindingRow(
+                    acceptance_criterion=text,
+                    label=label,
+                    evidence_check=check_id,
+                    status=EnumAcBindingCheckStatus.from_verdict(status),
+                    proof_class=proof_class,
+                    bound=True,
+                )
+                for check_id, status, proof_class in proving
+            )
+            continue
+        # Unbound. Every non-verifying declaration is still recorded, because
+        # "declared by a check that did not verify" and "declared by nothing"
+        # are different repairs.
+        rows.extend(
+            ModelAcBindingRow(
+                acceptance_criterion=text,
+                label=label,
+                evidence_check=check_id,
+                status=EnumAcBindingCheckStatus.from_verdict(status),
+                proof_class=proof_class,
+                bound=False,
+            )
+            for check_id, status, proof_class in declared
+        )
+        if not declared:
+            rows.append(
+                ModelAcBindingRow(acceptance_criterion=text, label=label, bound=False)
+            )
+        unbound.append(text)
+
+    if not unbound:
+        return "", (), tuple(rows)
+
+    if not field_present:
+        why = (
+            "dod_verify's verdict carries no `binds_ac` on any check, so this "
+            "verifier cannot report which criterion any check covers. Refusing "
+            "to infer it: a count that happens to line up is not a mapping."
+        )
+    else:
+        why = (
+            f"`{contract}` declares no verified probative check for them. A "
+            "check is bound to a criterion only when the contract's evidence "
+            "item names it in `binds_ac` AND that check verified -- a "
+            "non-probative or skipped declaration is a claim, not a proof."
+        )
+    unlabelled = sum(1 for text in unbound if not _canonical_ac_label(text))
+    labelling = (
+        f" {unlabelled} of them carry no `AC<n>`/`DoD<n>` label at all, so "
+        "nothing in the contract can point at them until the ticket body "
+        "labels them."
+        if unlabelled
+        else ""
+    )
+    fallback = (
+        " NOTE: this description carries no acceptance-criteria heading, so "
+        "the whole body was read as the criteria section (OMN-16106) and this "
+        "list may over-count. Over-counting holds a flip; under-counting "
+        "releases one."
+        if not _has_ac_heading(description)
+        else ""
+    )
+    # NAME them. A hold whose reason states only a ratio is the same
+    # unreadable arithmetic this leg exists to replace: the whole finding is
+    # WHICH criterion nothing proves. Labelled criteria are named by label;
+    # unlabelled ones by a bounded prefix of their own text, because that is
+    # the only handle they have.
+    named = ", ".join(
+        _canonical_ac_label(text) or f"'{text[:60]}'"
+        for text in unbound[:_MAX_UNCOVERED_LISTED]
+    )
+    return (
+        f"{len(unbound)} of {len(items)} acceptance criterion(s) in this "
+        f"ticket's description are bound to NO verified probative check in "
+        f"`{contract}`: {named}. {why}{labelling}{fallback}",
+        tuple(unbound),
+        tuple(rows),
+    )
+
+
+def _format_ac_binding_table(rows: tuple[ModelAcBindingRow, ...]) -> str:
+    """Render the binding rows as a markdown table for the Linear comment.
+
+    A HOLD then names the criterion nothing proves, and a FLIP states which
+    check discharged which criterion -- instead of either restating the
+    arithmetic, which is what this ticket exists to stop treating as proof.
+    """
+    if not rows:
+        return "_(no acceptance criteria parsed)_"
+    lines = [
+        "| Acceptance criterion | Bound check | Status | Proof class |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in rows[:_MAX_UNCOVERED_LISTED]:
+        criterion = row.acceptance_criterion.replace("|", "\\|")
+        label = f"**{row.label}** " if row.label else ""
+        check = row.evidence_check or "— none —"
+        lines.append(
+            f"| {label}{criterion} | {check} | {row.status.value} | "
+            f"{row.proof_class or '—'} |"
+        )
+    remaining = len(rows) - min(len(rows), _MAX_UNCOVERED_LISTED)
+    if remaining > 0:
+        lines.append(f"| ... and {remaining} more (truncated) | | | |")
+    return "\n".join(lines)
 
 
 # -- comment idempotency marker (OMN-16808) --------------------------------
@@ -2880,6 +3568,11 @@ class HandlerEvidenceAutocloseSweep:
                 apply_writes=effective_apply,
                 disarmed_by=disarm_ticket,
                 flip_budget_remaining=flip_budget,
+                # OMN-18106: the landing time of the evidence this candidate is
+                # nominated by, taken from the payload the enumeration already
+                # sorted on. The prior-revert fence compares it against the
+                # reversal's own timestamp.
+                companion_merged_at=str(pr.get("merged_at") or ""),
                 # The state short-circuit above already read this ticket from
                 # Linear. Handing that read down rather than repeating it keeps
                 # the reordering a pure saving: one Linear read and one file
@@ -2950,6 +3643,12 @@ class HandlerEvidenceAutocloseSweep:
                 # bucket for the same reason -- the mechanism worked, the
                 # evidence was not strong enough to close on.
                 EnumEvidenceAutocloseDecision.GAP_NO_BEHAVIOR_PROOF,
+                # OMN-18056: the run DID form an opinion about the ticket's
+                # evidence -- it read the criteria and the contract's bindings
+                # and found a criterion nothing proves. That is a gap in the
+                # evidence base, exactly like GAP_AC_COVERAGE beside it, and
+                # not a statement about whether the mechanism may act.
+                EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND,
             )
         )
         skipped = sum(
@@ -3007,6 +3706,13 @@ class HandlerEvidenceAutocloseSweep:
                 # evidence, it read the surface the ticket named and found it
                 # not green.
                 EnumEvidenceAutocloseDecision.SKIPPED_GATE_PROBE_RED,
+                # OMN-18056. The re-draw. Every conjunct cleared and the run
+                # still wrote no Done, because this is the FIRST observation of
+                # the verdict. A skip and never a gap: nothing about the
+                # ticket's evidence is disputed and nobody has anything to do
+                # -- reporting it as a gap would put a clean ticket on somebody's
+                # repair list once per tick until it closed.
+                EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING,
             )
         )
         errored = sum(
@@ -3415,6 +4121,81 @@ class HandlerEvidenceAutocloseSweep:
             ),
         )
 
+    async def _ac_binding_outcome(
+        self,
+        *,
+        ticket_id: str,
+        companion_pr_number: int,
+        companion_pr_url: str,
+        apply: bool,
+        issue_id: str,
+        gap_reason: str,
+        unbound: tuple[str, ...],
+        rows: tuple[ModelAcBindingRow, ...],
+        total_checks: int,
+        verified_count: int,
+        failed_count: int,
+        non_probative_count: int,
+        behavior_proving_count: int,
+    ) -> ModelEvidenceAutocloseOutcome:
+        """Withhold the flip and record/post the AC-binding gap (OMN-18056).
+
+        Never mutates ticket state on any path — the only write it can make is
+        a comment, and only under ``apply``.
+        """
+        base = ModelEvidenceAutocloseOutcome(
+            ticket_id=ticket_id,
+            companion_pr_number=companion_pr_number,
+            companion_pr_url=companion_pr_url,
+            decision=EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND,
+            reason=gap_reason,
+            dod_verify_total_checks=total_checks,
+            dod_verify_verified_count=verified_count,
+            dod_verify_failed_count=failed_count,
+            dod_verify_non_probative_count=non_probative_count,
+            dod_verify_behavior_proving_count=behavior_proving_count,
+            uncovered_acceptance_criteria=unbound,
+            ac_binding_rows=rows,
+        )
+        # The UNBOUND criteria are the statement, so they are the fingerprint:
+        # a ticket whose author labels one of them, or a contract that grows a
+        # `binds_ac` covering it, is a different gap and does get a fresh
+        # comment. A repeat of the identical gap does not.
+        marker = _sweep_comment_marker(
+            EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND,
+            (
+                str(total_checks),
+                str(verified_count),
+                str(failed_count),
+                f"behavior={behavior_proving_count}",
+                *unbound,
+            ),
+        )
+        return await self._emit_gap_comment(
+            base=base,
+            apply=apply,
+            issue_id=issue_id,
+            marker=marker,
+            comment_body=(
+                "AC-binding gap (OMN-18056 evidence autoclose sweep) — NOT "
+                "flipped.\n\n"
+                f"Merged evidence companion: {companion_pr_url}\n"
+                f"dod_verify: {verified_count}/{total_checks} verified "
+                f"({non_probative_count} non-probative), {failed_count} failed, "
+                f"{behavior_proving_count} behaviour-proving — clean. The "
+                "counters are not the question this hold asks.\n\n"
+                f"{gap_reason}\n\n"
+                "**Acceptance criterion → evidence check**\n\n"
+                f"{_format_ac_binding_table(rows)}\n\n"
+                "To make this ticket auto-closable, label each criterion "
+                '(`AC1`, `AC2`, ...) and add `binds_ac: ["AC1"]` to the '
+                f"`dod_evidence` item in `contracts/{ticket_id}.yaml` that "
+                "actually proves it. A count of green checks cannot say which "
+                "criterion any of them covered, which is why this sweep no "
+                "longer closes a ticket on one."
+            ),
+        )
+
     async def _process_ticket(
         self,
         *,
@@ -3426,6 +4207,14 @@ class HandlerEvidenceAutocloseSweep:
         apply_writes: bool,
         disarmed_by: str,
         flip_budget_remaining: int,
+        # OMN-18106. WHEN the evidence companion landed, carried down from the
+        # enumeration payload that already had it rather than re-fetched. The
+        # prior-revert fence reads it to answer the only question it was ever
+        # really asking: did this ticket's evidence move AFTER somebody
+        # disagreed with its close? The value is required at the call boundary;
+        # if the upstream read cannot provide it, the caller must pass that
+        # unreadable fact explicitly and the fence holds on it.
+        companion_merged_at: str,
         prefetched_issue: dict[str, object] | None = None,
     ) -> ModelEvidenceAutocloseOutcome:
         # OMN-17891. The caller-asserted fence, and it is FIRST -- ahead of the
@@ -3809,8 +4598,69 @@ class HandlerEvidenceAutocloseSweep:
             # an honest preview of what --apply would do).
             description_raw = issue.get("description")
             description = description_raw if isinstance(description_raw, str) else ""
+
+            # OMN-18056. THE BINDING LEG, and it is FIRST of the two AC guards
+            # deliberately: the counting rules below can only refute coverage
+            # by arithmetic, and when the arithmetic happens to line up they
+            # release a ticket whose deciding criterion is bound to nothing at
+            # all. That is not a hypothetical — it is 7 of the 8 tickets
+            # closeout sweep run 2 adjudicated as predicate-satisfied and not
+            # done. Asking the binding question first means the hold that gets
+            # reported is the one that names a criterion, not the one that
+            # names a ratio.
+            #
+            # It runs on the scheduled path and the dispatch path identically,
+            # inside the single `if all_verified:` block every trigger
+            # traverses, so no request field, workflow input or CLI argument
+            # can route around it. In DRY-RUN it previews honestly.
+            (
+                ac_binding_reason,
+                ac_binding_unbound,
+                ac_binding_rows,
+            ) = _ac_binding_gap(description, verdict, ticket_id)
+            if ac_binding_reason:
+                return await self._ac_binding_outcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    apply=apply_writes,
+                    issue_id=issue_id,
+                    gap_reason=ac_binding_reason,
+                    unbound=ac_binding_unbound,
+                    rows=ac_binding_rows,
+                    total_checks=total_checks,
+                    verified_count=verified_count,
+                    failed_count=failed_count,
+                    non_probative_count=non_probative_count,
+                    behavior_proving_count=behavior_proving_count,
+                )
+            # OMN-18125. THE POPULATION RULE 3 JUDGES. Its arithmetic is
+            # unchanged; what changed is which numbers reach it. It used to
+            # read the verdict's TOTALS, which count every check in the
+            # contract including the auto-minted provenance items that declare
+            # coverage of nothing. Measured on OMN-17478 (closer run
+            # 34431989659): 22 of 34 were exactly that, and they held a ticket
+            # whose six criteria were each bound to a verified probative
+            # check. `_coverage_corpus_counts` restricts both of rule 3's
+            # terms to the checks the contract itself declares as covering one
+            # of THIS ticket's criteria; its docstring carries the measurement
+            # and the reason the padding loophole cannot reopen through it.
+            #
+            # `verified_count` is still passed for RULE 2, which asks a
+            # different question and is deliberately not narrowed — see
+            # `_ac_coverage_gap`.
+            #
+            # The verdict's own totals are also still what the outcome row and
+            # the comment render, below and in `_ac_coverage_outcome` — a
+            # receipt that hid the 22 would be less honest, not more.
+            coverage_verified, coverage_non_probative = _coverage_corpus_counts(
+                verdict, description
+            )
             ac_gap_reason, uncovered = _ac_coverage_gap(
-                description, verified_count, non_probative_count
+                description,
+                verified_count,
+                coverage_verified,
+                coverage_non_probative,
             )
             if ac_gap_reason:
                 return await self._ac_coverage_outcome(
@@ -3882,6 +4732,12 @@ class HandlerEvidenceAutocloseSweep:
                 non_probative_count=non_probative_count,
                 behavior_proving_count=behavior_proving_count,
             )
+            # OMN-18106. Empty unless the prior-revert fence below RELEASES on
+            # evidence that postdates the reversal. Non-empty, it is the
+            # sentence that says so — carried onto the outcome and into the
+            # flip's Linear comment, because a fence that stopped applying is
+            # a fact somebody auditing this close has to be able to read.
+            post_revert_release = ""
 
             # OMN-16106 D1. THE CITED-PR MERGE CONJUNCT — the OMN-13856
             # done-flip guard's `pr_not_merged` refusal, replicated.
@@ -3901,6 +4757,12 @@ class HandlerEvidenceAutocloseSweep:
             # ticket body. Fails CLOSED on a read failure, for the reason every
             # other fence here does — "I could not check" must never resolve to
             # "so I will flip it".
+            # OMN-18106. Every cited PR is read here anyway, and its
+            # `merged_at` is the landing time of a piece of this ticket's
+            # evidence. Collected as it goes past rather than re-fetched below,
+            # so the prior-revert fence and this conjunct can never disagree
+            # about when the same PR merged.
+            cited_pr_merge_times: list[tuple[str, str]] = []
             cited_refs = _cited_product_pr_refs(description, _attachment_urls(issue))
             if len(cited_refs) > _MAX_CITED_PR_REFS:
                 return ModelEvidenceAutocloseOutcome(
@@ -3957,11 +4819,16 @@ class HandlerEvidenceAutocloseSweep:
                         verdict_fingerprint=fingerprint,
                         pre_write_head_entry_id=pre_write_head_entry_id,
                     )
-                if not cited_payload.get("merged_at"):
+                cited_merged_at = str(cited_payload.get("merged_at") or "")
+                if not cited_merged_at:
                     state = str(cited_payload.get("state") or "unknown").upper()
                     unmerged_citations.append(
                         f"{cited_repo}#{cited_number}: state={state}, merged_at=null"
                     )
+                    continue
+                cited_pr_merge_times.append(
+                    (f"cited product PR {cited_repo}#{cited_number}", cited_merged_at)
+                )
             if unmerged_citations:
                 return ModelEvidenceAutocloseOutcome(
                     ticket_id=ticket_id,
@@ -4056,6 +4923,220 @@ class HandlerEvidenceAutocloseSweep:
                         pre_write_head_entry_id=pre_write_head_entry_id,
                     )
 
+                # OMN-18056 item 7. THE SAME FENCE, MADE POSITIVE.
+                #
+                # Everything above this line is a NEGATIVE test: it holds only
+                # when the current fingerprint MATCHES a verdict this closer
+                # itself wrote and somebody undid. A ticket reverted for any
+                # other reason matches nothing, and the fence releases it.
+                #
+                # Measured: OMN-17298 was flipped at 2026-09-08T21:21:29Z on a
+                # hand probe whose search term exists in no spelling anywhere,
+                # and reverted at 22:03:49Z once live state showed the
+                # projection node running with topic traffic. No fingerprint of
+                # this closer's is anywhere in that sequence, so the negative
+                # fence was blind to it and the identical evidence would have
+                # re-cleared the predicate on the next tick.
+                #
+                # A reversal is a statement that the evidence was not
+                # sufficient. So the burden inverts: a reverted ticket holds
+                # until a check outcome has demonstrably CHANGED since the
+                # reversal, and "I cannot tell whether anything changed" is a
+                # hold, not a release. The first post-revert look records the
+                # verdict it saw as the BASELINE and holds; a later tick whose
+                # fingerprint differs from every recorded baseline is the
+                # positive evidence of change, and closes.
+                #
+                # It bootstraps, so nothing is deadlocked: the hold that
+                # records the baseline is the same hold a later, different
+                # verdict is released against.
+                #
+                # HOLD in both directions that are not positive evidence of
+                # change: with NO baseline recorded there is nothing to have
+                # changed FROM, and with this exact fingerprint already
+                # recorded the checks have produced the same outcome since the
+                # reversal. Only a fingerprint that differs from every recorded
+                # baseline is the change, and only that releases.
+                # OMN-18106. THE ORDERING QUESTION, ASKED BEFORE THE BASELINE.
+                #
+                # The recorded-baseline mechanism below measures change against
+                # the FIRST verdict this sweep happened to observe after the
+                # reversal — not against the verdict as it stood AT the
+                # reversal. Those are the same thing only when the closer's
+                # first post-revert look beats every piece of remediation to
+                # the ticket, and it usually does not: work continues after a
+                # revert and this sweep ticks every half hour.
+                #
+                # Measured on OMN-15542. Reverted Done -> In Progress at
+                # 2026-09-02T07:46:30Z. Its bindings were then repaired —
+                # AC1/AC2/AC4/AC5 bound to verified checks, AC6 demoted out of
+                # the criterion set at 2026-09-09T22:05Z. The first post-revert
+                # look landed at 2026-09-09T23:16:09Z (run 34415223971) and
+                # recorded the ALREADY-REPAIRED verdict, ca128f676aa74a44, as
+                # the baseline. dod_verify is deterministic over the same
+                # ticket state, so every later tick reproduces that identical
+                # fingerprint, `fingerprint not in baselines` can never fire,
+                # and the ticket is held for good. "Hold until something
+                # changed since the revert" had become "hold forever".
+                #
+                # So the ordering is asked FIRST, from timestamps rather than
+                # from what this sweep remembers having seen: the reversal's
+                # own `createdAt`, against the landing times of the evidence
+                # the verdict is resolved from — the merged OCC companion that
+                # nominated this candidate, and every product PR the ticket
+                # cites. Evidence that landed AFTER the disagreement is
+                # positive proof that the thing disagreed with is not what is
+                # being re-asserted now.
+                #
+                # It is a RELEASE TO THE ORDINARY PREDICATE, not a flip. The
+                # AC-binding gate, the cited-PR conjunct, the re-draw and the
+                # flip budget all still stand between here and a Done, and the
+                # OMN-17934 recurrence fence has already refused the case where
+                # the "new" post-revert evidence is a standing bot emission
+                # rather than anybody's work.
+                #
+                # FAIL-CLOSED both ways: an unreadable reversal timestamp or an
+                # unreadable evidence timestamp leaves the ordering
+                # unresolvable, and an unresolvable ordering HOLDS, naming
+                # which timestamp could not be read.
+                revert_at = _newest_revert_entry_created_at(history)
+                evidence_landings: tuple[tuple[str, str], ...] = (
+                    (
+                        f"evidence companion {request.occ_repo}#{companion_pr_number}",
+                        companion_merged_at,
+                    ),
+                    *cited_pr_merge_times,
+                )
+                postdating, unreadable = _evidence_after_revert(
+                    revert_at, evidence_landings
+                )
+                if unreadable:
+                    return await self._emit_gap_comment(
+                        base=ModelEvidenceAutocloseOutcome(
+                            ticket_id=ticket_id,
+                            companion_pr_number=companion_pr_number,
+                            companion_pr_url=companion_pr_url,
+                            decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            reason=(
+                                "this ticket has been moved back out of a "
+                                "completed state, and whether its evidence "
+                                "landed before or after that reversal could "
+                                "not be read: "
+                                + "; ".join(unreadable)
+                                + ". An unresolvable ordering holds — "
+                                "'I cannot tell when this landed' is not 'it "
+                                "landed after the disagreement'."
+                            ),
+                            dod_verify_total_checks=total_checks,
+                            dod_verify_verified_count=verified_count,
+                            dod_verify_failed_count=failed_count,
+                            dod_verify_non_probative_count=non_probative_count,
+                            dod_verify_behavior_proving_count=behavior_proving_count,
+                            verdict_fingerprint=fingerprint,
+                            pre_write_head_entry_id=pre_write_head_entry_id,
+                            ac_binding_rows=ac_binding_rows,
+                        ),
+                        apply=apply_writes,
+                        issue_id=issue_id,
+                        marker=_sweep_comment_marker(
+                            EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            ("post-revert-ordering-unreadable", fingerprint),
+                        ),
+                        comment_body=(
+                            "Prior-revert hold (OMN-18106 evidence autoclose "
+                            "sweep) — NOT flipped.\n\n"
+                            f"Merged evidence companion: {companion_pr_url}\n\n"
+                            "This ticket was moved back out of a completed "
+                            "state, and this run could not read when its "
+                            "evidence landed relative to that reversal:\n"
+                            + "\n".join(f"- {row}" for row in unreadable)
+                            + "\n\nAn ordering that cannot be resolved holds."
+                        ),
+                    )
+                if postdating and _has_verified_bound_check(verdict):
+                    post_revert_release = (
+                        "released_post_revert_evidence: this ticket was moved "
+                        f"back out of a completed state at {revert_at}, and "
+                        "evidence it is judged on landed AFTER that reversal — "
+                        + "; ".join(postdating)
+                        + ". The reversal disagreed with a verdict resolved "
+                        "from evidence that has since moved, so re-judging it "
+                        "now is not re-asserting the overruled statement. The "
+                        "ordinary flip predicate decides from here."
+                    )
+                    reason = f"{reason} {post_revert_release}"
+                    logger.info(
+                        "POST-REVERT RELEASE ticket=%s revert_at=%s evidence=%s",
+                        ticket_id,
+                        revert_at,
+                        "; ".join(postdating),
+                    )
+
+                baselines = _post_revert_baseline_fingerprints(prior_bodies)
+                if not post_revert_release and (
+                    not baselines or fingerprint in baselines
+                ):
+                    baseline_base = ModelEvidenceAutocloseOutcome(
+                        ticket_id=ticket_id,
+                        companion_pr_number=companion_pr_number,
+                        companion_pr_url=companion_pr_url,
+                        decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                        reason=(
+                            "this ticket has been moved back out of a completed "
+                            "state, and no verdict this sweep has recorded since "
+                            "that reversal differs from the one measured now "
+                            f"(fingerprint {fingerprint}). A reversal is a "
+                            "statement that the evidence was not sufficient; "
+                            "re-closing on evidence that has not been shown to "
+                            "have moved would overrule it with a cron tick. "
+                            "This run records the verdict as the post-revert "
+                            "baseline. A later run whose checks produce a "
+                            "DIFFERENT verdict is the positive evidence of "
+                            "change, and closes."
+                        )
+                        if not baselines
+                        else (
+                            "this ticket has been moved back out of a completed "
+                            f"state, and verdict fingerprint {fingerprint} is "
+                            "already recorded as its post-revert baseline — the "
+                            "checks have produced the same outcome since the "
+                            "reversal. Nothing has changed to overrule it with."
+                        ),
+                        dod_verify_total_checks=total_checks,
+                        dod_verify_verified_count=verified_count,
+                        dod_verify_failed_count=failed_count,
+                        dod_verify_non_probative_count=non_probative_count,
+                        dod_verify_behavior_proving_count=behavior_proving_count,
+                        verdict_fingerprint=fingerprint,
+                        pre_write_head_entry_id=pre_write_head_entry_id,
+                        ac_binding_rows=ac_binding_rows,
+                    )
+                    return await self._emit_gap_comment(
+                        base=baseline_base,
+                        apply=apply_writes,
+                        issue_id=issue_id,
+                        marker=_sweep_comment_marker(
+                            EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            ("post-revert-baseline", fingerprint),
+                        ),
+                        comment_body=(
+                            "Prior-revert hold (OMN-18056 evidence autoclose "
+                            "sweep) — NOT flipped.\n\n"
+                            f"Merged evidence companion: {companion_pr_url}\n"
+                            f"dod_verify: {verified_count}/{total_checks} "
+                            f"verified ({non_probative_count} non-probative), "
+                            f"{failed_count} failed, {behavior_proving_count} "
+                            "behaviour-proving.\n\n"
+                            "This ticket was moved back out of a completed "
+                            "state. Until a check produces a different outcome "
+                            "than it does now, closing it again would overrule "
+                            "that reversal with a cron tick.\n\n"
+                            f"Post-revert baseline fingerprint {fingerprint}\n\n"
+                            "**Acceptance criterion \u2192 evidence check**\n\n"
+                            f"{_format_ac_binding_table(ac_binding_rows)}"
+                        ),
+                    )
+
             # OMN-17658. THE PER-RUN FLIP BUDGET, checked here and not earlier:
             # a candidate that would only have gapped still gets its gap
             # comment, so the budget bounds WRITES OF DONE and nothing else.
@@ -4083,6 +5164,104 @@ class HandlerEvidenceAutocloseSweep:
                     pre_write_head_entry_id=pre_write_head_entry_id,
                 )
 
+            # OMN-18056. THE RE-DRAW, and it is the LAST conjunct: a candidate
+            # that would have been refused for any other reason is refused for
+            # that reason, so the record never says "pending re-draw" about a
+            # ticket that was never eligible.
+            #
+            # The verdict is a function of the ticket AND of the trees its
+            # checks execute in. The second input moves for reasons that have
+            # nothing to do with the ticket: measured in closeout sweep run 2,
+            # fast-forwarding two stale product clones moved OMN-16025 from
+            # predicate-FAIL to predicate-PASS with no acceptance criterion
+            # having changed. From the counters alone, a pass manufactured that
+            # way is indistinguishable from one the work earned.
+            #
+            # So the first eligible observation ARMS a re-draw and writes no
+            # Done; a later run that recomputes the SAME fingerprint flips. The
+            # marker lives on the ticket, like every other piece of this
+            # sweep's memory, because the runner shares no state between runs.
+            #
+            # Honest limit: this defeats a SINGLE-RUN perturbation. An input
+            # change that persists across two ticks — a repaired clone, which
+            # is the steady state of a repair — passes it. It does not make the
+            # predicate staleness-invariant; it makes a pass non-instantaneous,
+            # which is the only claim made for it. Cost: one tick.
+            redraw_marker = _sweep_comment_marker(
+                EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING,
+                (fingerprint,),
+            )
+            redraw_bodies = await self._linear.fetch_comment_bodies(issue_id)
+            if redraw_bodies is None:
+                return ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                    reason=(
+                        "This candidate cleared every conjunct, and its comment "
+                        "history — where the re-draw marker for this verdict "
+                        "lives — could not be read, so the sweep cannot tell a "
+                        "first observation of this verdict from a second."
+                        + _linear_error_detail(self._linear)
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                    verdict_fingerprint=fingerprint,
+                    pre_write_head_entry_id=pre_write_head_entry_id,
+                    ac_binding_rows=ac_binding_rows,
+                )
+            if not any(redraw_marker in body for body in redraw_bodies):
+                redraw_base = ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING,
+                    reason=(
+                        "Every conjunct cleared on verdict fingerprint "
+                        f"{fingerprint}, and this is the FIRST run to observe "
+                        "it. Held for one re-draw: the same fingerprint has to "
+                        "come back on a later tick before it closes a ticket, "
+                        "so a pass produced by a one-run change in the trees "
+                        "the checks execute in cannot close anything in the "
+                        "run that produced it. No evidence is disputed and "
+                        "nothing needs doing — the next tick decides."
+                    ),
+                    dod_verify_total_checks=total_checks,
+                    dod_verify_verified_count=verified_count,
+                    dod_verify_failed_count=failed_count,
+                    dod_verify_non_probative_count=non_probative_count,
+                    dod_verify_behavior_proving_count=behavior_proving_count,
+                    verdict_fingerprint=fingerprint,
+                    pre_write_head_entry_id=pre_write_head_entry_id,
+                    ac_binding_rows=ac_binding_rows,
+                )
+                return await self._emit_gap_comment(
+                    base=redraw_base,
+                    apply=apply_writes,
+                    issue_id=issue_id,
+                    marker=redraw_marker,
+                    comment_body=(
+                        "Re-draw armed (OMN-18056 evidence autoclose sweep) — "
+                        "not flipped in this run.\n\n"
+                        f"Merged evidence companion: {companion_pr_url}\n"
+                        f"dod_verify: {verified_count}/{total_checks} verified "
+                        f"({non_probative_count} non-probative), "
+                        f"{failed_count} failed, {behavior_proving_count} "
+                        "behaviour-proving. Verdict fingerprint "
+                        f"{fingerprint}.\n\n"
+                        "**Acceptance criterion → evidence check**\n\n"
+                        f"{_format_ac_binding_table(ac_binding_rows)}\n\n"
+                        "Every conjunct cleared, and this is the first run to "
+                        "observe this verdict. The next run that recomputes the "
+                        "same fingerprint will flip the ticket. Nothing is "
+                        "required from anybody."
+                    ),
+                )
+
             if not apply_writes:
                 logger.info("[DRY-RUN] Would flip %s to Done (%s)", ticket_id, reason)
                 return ModelEvidenceAutocloseOutcome(
@@ -4091,6 +5270,7 @@ class HandlerEvidenceAutocloseSweep:
                     companion_pr_url=companion_pr_url,
                     decision=EnumEvidenceAutocloseDecision.FLIPPED,
                     reason=f"[DRY-RUN] {reason}",
+                    ac_binding_rows=ac_binding_rows,
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
                     dod_verify_failed_count=failed_count,
@@ -4365,7 +5545,13 @@ class HandlerEvidenceAutocloseSweep:
                     f"Readback (OMN-17658): state-history entry {readback_entry_id} "
                     "is the completed segment this flip produced; the pre-write "
                     f"head was {pre_write_head_entry_id or '<empty history>'}. "
-                    f"Verdict fingerprint {fingerprint}."
+                    f"Verdict fingerprint {fingerprint}.\n"
+                    + (f"\n{post_revert_release}\n" if post_revert_release else "")
+                    + "\n"
+                    "Acceptance criterion \u2192 evidence check (OMN-18056) — "
+                    "which check discharged which criterion, rather than the "
+                    "arithmetic that used to stand in for it:\n\n"
+                    f"{_format_ac_binding_table(ac_binding_rows)}"
                 ),
             )
             # THE BOUND READBACK LINE — one per flip, carrying the four ids that
@@ -4388,6 +5574,7 @@ class HandlerEvidenceAutocloseSweep:
                 companion_pr_url=companion_pr_url,
                 decision=EnumEvidenceAutocloseDecision.FLIPPED,
                 reason=reason,
+                post_revert_evidence_release=post_revert_release,
                 dod_verify_total_checks=total_checks,
                 dod_verify_verified_count=verified_count,
                 dod_verify_failed_count=failed_count,
@@ -4397,6 +5584,7 @@ class HandlerEvidenceAutocloseSweep:
                 pre_write_head_entry_id=pre_write_head_entry_id,
                 readback_entry_id=readback_entry_id,
                 flip_reverted_during_run=reverted_during_run,
+                ac_binding_rows=ac_binding_rows,
                 linear_comment_posted=commented,
                 applied=True,
             )

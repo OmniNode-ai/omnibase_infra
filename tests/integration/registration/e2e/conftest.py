@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -62,6 +62,9 @@ from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
 from tests.conftest import check_service_registry_available
+from tests.integration.registration.e2e.logging_fixture import (
+    configured_e2e_logging,
+)
 
 # Load environment configuration with layered priority:
 # 1. .env in project root (base configuration - credentials, shared settings)
@@ -1070,11 +1073,11 @@ async def cleanup_node_ids(
 # =============================================================================
 
 
-@pytest.fixture(scope="session", autouse=True)
-def configure_e2e_logging() -> None:
+@pytest.fixture(autouse=True)
+def configure_e2e_logging() -> Generator[None, None, None]:
     """Configure logging for E2E test observability.
 
-    This session-scoped fixture ensures that:
+    This function-scoped fixture ensures that:
     - All E2E pipeline logs are visible during test runs (with -v flag)
     - Log output uses a clear, structured format
 
@@ -1086,24 +1089,8 @@ def configure_e2e_logging() -> None:
         Run tests with pytest -v to see pipeline stage logs
         Run tests with pytest -v --log-cli-level=DEBUG for verbose output
     """
-    # Configure E2E test logger: DEBUG level for verbose test diagnostics
-    e2e_logger = logging.getLogger("tests.integration.registration.e2e")
-    e2e_logger.setLevel(logging.DEBUG)
-
-    # Configure omnibase_infra logger: INFO level to reduce verbosity
-    # (DEBUG would emit too much internal infrastructure noise)
-    infra_logger = logging.getLogger("omnibase_infra")
-    infra_logger.setLevel(logging.INFO)
-
-    # Add console handler if not already present
-    if not any(isinstance(h, logging.StreamHandler) for h in e2e_logger.handlers):
-        handler = logging.StreamHandler()
-        handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(
-            "%(asctime)s | %(name)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S"
-        )
-        handler.setFormatter(formatter)
-        e2e_logger.addHandler(handler)
+    with configured_e2e_logging():
+        yield
 
 
 # =============================================================================

@@ -20,9 +20,21 @@ required (fail-closed AND-of-all-checks, not best-effort):
      probe called unhealthy ten minutes later -- see ``health_payload.py``.
   4. **Cluster health** -- ``rpk cluster health`` inside the broker container
      reports healthy.
-  5. **Consumer groups Stable** -- every group declared in
-     ``consumer_groups_stability.yaml`` reports ``state == "Stable"`` via
-     ``rpk group describe``.
+  5. **Consumer groups** [derivation fixed in OMN-15837] -- the declared set
+     is DERIVED at gate time, never hand-pinned: contract identities from the
+     ``/v1/introspection/manifest`` payload the refreshed image itself serves
+     (main + effects runtimes), plus the lane compose file's literal
+     ``KAFKA_CONSUMER_GROUP`` values for the standalone projection writers.
+     Reconciled against ONE ``rpk group list`` call, which is the only honest
+     answer to "does this group exist" -- ``rpk group describe`` reports
+     ``Dead`` for a name that was never a group at all. ``Stable``/``Empty``
+     are healthy; a ``Dead`` group with no members and no lag is a RETIRED
+     identity (logged, not a failure -- that is what a version bump or a
+     re-home leaves behind); a group that lost its members while still holding
+     lag FAILS; and the fraction of derived identities that are live must meet
+     ``--min-derived-coverage``. Until OMN-15837 this list was a hand-copied,
+     version-pinned YAML that went stale twice (fd4a84b1c, then OMN-16753) and
+     rolled back a healthy refresh both times.
   6. **Revision readback** -- the ``org.opencontainers.image.revision`` label
      on each core container equals the intended new ref (or a prefix thereof,
      tolerating short/full SHA differences).
@@ -43,8 +55,9 @@ actually restored health.
 Exit codes:
     0 - PASS (all requested checks succeeded)
     1 - FAIL (a genuine check failure -- digest not changed, manifest floor
-        not met, unhealthy, cluster unhealthy, a group not Stable, a revision
-        mismatch, or partition usage at/over the cap)
+        not met, unhealthy, cluster unhealthy, a consumer group stalled with
+        lag or a declared writer group missing, derived-group coverage below
+        the floor, a revision mismatch, or partition usage at/over the cap)
     2 - INFRA_ERROR (could not run a check at all -- docker/curl/rpk
         unavailable, container missing, etc.) -- distinguished from a
         genuine FAIL so the caller does not conflate "couldn't check" with
@@ -61,20 +74,33 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-
-import yaml
 
 # Sibling module in this same directory. These verifiers are executed as
 # scripts (``python scripts/runtime_build/verify_*.py`` or ``uv run python
 # <path>``), so ``sys.path[0]`` is this directory and the plain import
 # resolves. Sharing the verdict rather than re-copying it is the point:
 # OMN-17563 was one defect that had already been duplicated into both files.
+from declared_consumer_groups import (
+    ConsumerGroupAudit,
+    DerivationError,
+    DerivedGroupKey,
+    GroupDescription,
+    NonContractGroup,
+    derive_compose_declared_groups,
+    derive_expected_keys,
+    load_non_contract_groups,
+    parse_group_describe,
+    parse_group_list,
+    reconcile,
+)
 from health_payload import (
     DEFAULT_MAX_VERDICT_AGE,
     HEALTH_POLICY_STATUS_ONLY_STRICT,
+    HealthDimension,
     HealthVerdict,
     default_max_verdict_age,
     derive_verdict_wait_bound,
@@ -82,15 +108,54 @@ from health_payload import (
     unreachable_verdict,
     wait_for_verdict,
 )
+from manifest_fetch import (
+    MANIFEST_FETCH_HISTORY_LIMIT,
+    MANIFEST_FETCH_INTERVAL_SECONDS,
+    MANIFEST_FETCH_WINDOW_SECONDS,
+    RetryBudget,
+    count_manifest_contracts,
+    fetch_manifest_with_budget,
+)
 
 # OCI label stamped from VCS_REF/GIT_SHA at build time (Dockerfile.runtime).
 _REVISION_LABEL = "org.opencontainers.image.revision"
 
 DEFAULT_MIN_CONTRACTS = 288
+# OMN-15837: fraction of contract-derived consumer-group identities that must be
+# live on the broker. A floor, never silently lowered -- the same discipline as
+# ``DEFAULT_MIN_CONTRACTS``. Measured on the live stability lane 2026-09-08:
+# 604/611 = 0.989. The seven absentees are contracts wired through the
+# core-runtime single-owner path or whose topics are owned elsewhere; the floor
+# exists to catch a wiring COLLAPSE (a runtime that subscribed to nothing),
+# which is the failure mode the old hand-pinned list was reaching for and kept
+# mis-reporting.
+DEFAULT_MIN_DERIVED_COVERAGE = 0.90
+# Bounded re-read window after a --force-recreate: a consumer's Kafka client
+# needs a few seconds to rejoin its group, so an immediately-observed absence is
+# not yet a finding. Same shape as ``assert_broker_reachable()`` in
+# deploy-runtime.sh -- bounded attempts at a fixed interval, never a poll.
+DEFAULT_GROUP_AUDIT_ATTEMPTS = 10
+DEFAULT_GROUP_AUDIT_INTERVAL_SECONDS = 3.0
 # OMN-14013: fraction of topic_partitions_per_shard in use that triggers a
 # visible (non-blocking) WARN. `rpk cluster health` never surfaces this on its
 # own -- see the module docstring's check #7.
 DEFAULT_PARTITION_WARN_THRESHOLD = 0.8
+
+# OMN-16753: boot tolerance for the introspection-manifest fetch, sized to the
+# SAME window ``check_health_with_retry`` waits for a first monitor verdict
+# (360 s). Anything shorter fails while the health leg beside it is still
+# legitimately waiting for the very runtime this fetch is talking to -- which
+# is exactly what happened on 2026-09-08 when both the refresh gate and the
+# post-rollback gate hit `[Errno 104] Connection reset by peer` on the effects
+# port and forced overall=INFRA_ERROR.
+#
+# The window is spent ONCE per gate run, not once per URL: ``run_health_gate``
+# fetches the main manifest and then the effects manifest serially, so a
+# per-URL window would have made the worst case ~720 s of manifest retrying
+# BEFORE the health leg started its own 360 s wait. The shared
+# ``RetryBudget`` means the effects fetch inherits whatever the main fetch
+# left, and the total is bounded by MANIFEST_FETCH_WINDOW_SECONDS. Fail-closed
+# on expiry, as before.
 
 
 # ─── Data structures ────────────────────────────────────────────────────────
@@ -108,16 +173,15 @@ class ServiceDigestCheck:
     revision_label: str | None
     expected_revision: str
     revision_match: bool
-    error: str | None = None
-
-
-@dataclass
-class ConsumerGroupCheck:
-    """Stable-state result for one declared consumer group."""
-
-    group: str
-    state: str | None
-    stable: bool
+    # OMN-18061 (porting OMN-16753's dev-lane split): the container's live
+    # ``.State.Status``, and whether that status is ``running``. A service whose
+    # container sits in ``created`` behind an unmet ``depends_on`` produces ZERO
+    # log lines, so it is invisible to every log-grep triage. This is a LANE
+    # HEALTH fact -- it is what tells ``lane_rollback_decision`` that a recreate
+    # would actually repair something. ``None`` means compose has no container
+    # for the service at all.
+    container_state: str | None = None
+    running: bool = False
     error: str | None = None
 
 
@@ -179,9 +243,21 @@ class HealthGateReport:
     # OMN-17624 AC-3: the bound that was waited, with the arithmetic behind it.
     # A PASS after a 60s wait and a PASS after 360s are different claims.
     verdict_wait: str | None = None
+    # OMN-16753: every non-HEALTHY runtime_health dimension the probe saw, as
+    # {name, status, detail}. The gate decides on this block and the rollback
+    # destroys the container that held it, so it has to survive into the log
+    # and the receipt or the failing criterion is unrecoverable.
+    #: OMN-18061 widened the value type: a dimension now also carries
+    #: ``consumer_groups`` (a list), joined from the live broker enumeration.
+    health_dimensions: list[dict[str, object]] = field(default_factory=list)
+    # OMN-16753: the last few manifest-fetch failures, oldest first. A retry
+    # loop that keeps only its final error cannot tell a persistent failure
+    # from an intermittent one, which is the distinction a reader of this
+    # receipt is actually trying to make.
+    manifest_fetch_attempts: list[str] = field(default_factory=list)
     cluster_healthy: bool = False
     cluster_detail: str | None = None
-    consumer_groups: list[ConsumerGroupCheck] = field(default_factory=list)
+    group_audit: ConsumerGroupAudit | None = None
     partition_headroom: PartitionHeadroomCheck | None = None
     errors: list[str] = field(default_factory=list)
     require_digest_change: bool = True
@@ -195,10 +271,38 @@ class HealthGateReport:
         return bool(self.services) and all(s.revision_match for s in self.services)
 
     @property
+    def core_services_running(self) -> bool:
+        """Every core service has a container and that container is running.
+
+        A lane-HEALTH dimension, not a provenance one (OMN-18061): the caller
+        hands it to ``lane_rollback_decision`` to decide whether a DESTRUCTIVE
+        rollback is warranted. A lane missing a core container SHOULD be
+        repaired by a recreate; a lane whose containers are all up and serving
+        should never be.
+        """
+        return bool(self.services) and all(s.running for s in self.services)
+
+    @property
+    def core_services_not_running(self) -> list[str]:
+        """Name every core service that is not running, with the state it is in.
+
+        Named rather than merely counted so the failure reads as
+        ``runtime-effects=created`` instead of a bare False.
+        """
+        return [
+            f"{s.service}={s.container_state or 'absent'}"
+            for s in self.services
+            if not s.running
+        ]
+
+    @property
     def groups_stable(self) -> bool:
-        return bool(self.consumer_groups) and all(
-            g.stable for g in self.consumer_groups
-        )
+        """True when the derived declared set reconciled cleanly.
+
+        ``None`` (the audit never ran) is deliberately NOT healthy: a gate that
+        could not derive its own expectation has not passed.
+        """
+        return self.group_audit is not None and self.group_audit.ok
 
     @property
     def partition_headroom_ok(self) -> bool:
@@ -207,7 +311,7 @@ class HealthGateReport:
         A crossed-warn-threshold-but-below-cap state is still "ok" here by
         design (visibility only, see ``PartitionHeadroomCheck`` docstring); a
         probe failure (``error is not None``) is surfaced via ``errors`` ->
-        ``INFRA_ERROR`` instead, mirroring ``check_manifest_count``.
+        ``INFRA_ERROR`` instead, mirroring the manifest fetch.
         """
         return (
             self.partition_headroom is None
@@ -224,6 +328,7 @@ class HealthGateReport:
             and self.manifest_ok
             and self.health_ok
             and self.cluster_healthy
+            and self.core_services_running
             and self.groups_stable
             and self.revisions_match
             and self.partition_headroom_ok
@@ -244,9 +349,15 @@ class HealthGateReport:
             "health_status": self.health_status,
             "health_policy": self.health_policy,
             "verdict_wait": self.verdict_wait,
+            "health_dimensions": self.health_dimensions,
+            "manifest_fetch_attempts": self.manifest_fetch_attempts,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
-            "consumer_groups": {g.group: g.state for g in self.consumer_groups},
+            "core_services_running": self.core_services_running,
+            "core_services_not_running": self.core_services_not_running,
+            "consumer_groups": (
+                self.group_audit.to_dict() if self.group_audit is not None else None
+            ),
             "consumer_groups_stable": self.groups_stable,
             "revision_readback_ok": self.revisions_match,
             "partition_headroom": (
@@ -335,6 +446,39 @@ def _revisions_match(actual: str, expected: str) -> bool:
     return a == b or a.startswith(b) or b.startswith(a)
 
 
+def get_container_state(
+    container: str, *, runner: object | None = None
+) -> tuple[str | None, str | None]:
+    """Return ``(state, error)`` for a container's live ``.State.Status``.
+
+    OMN-18061, porting OMN-16753's dev-lane probe. ``docker compose ps -q``
+    returns nothing for a container that is not running, so a service stranded
+    in ``created`` behind an unmet ``depends_on`` looked identical to a service
+    compose had never created. The caller resolves ids with ``ps -aq`` and this
+    reads the real state, so the gate can say ``runtime-effects=created``
+    instead of "no container".
+    """
+    try:
+        result = _run(
+            ["docker", "inspect", container, "--format", "{{.State.Status}}"],
+            runner=runner,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"timed out inspecting state of {container}"
+    except FileNotFoundError:
+        return None, "docker command not found"
+    if result.returncode != 0:
+        return (
+            None,
+            f"docker inspect (state) failed (exit {result.returncode}): "
+            f"{(result.stderr or '').strip()}",
+        )
+    state = (result.stdout or "").strip()
+    if not state:
+        return None, f"empty container state for {container}"
+    return state, None
+
+
 def check_service_digest(
     service: str,
     container: str,
@@ -343,9 +487,30 @@ def check_service_digest(
     *,
     runner: object | None = None,
 ) -> ServiceDigestCheck:
+    if not container:
+        # OMN-18061: an absent container is a NAMED not-running finding, not a
+        # silent pass through the digest/revision probes below.
+        return ServiceDigestCheck(
+            service=service,
+            container=container,
+            pre_image_id=pre_image_id,
+            post_image_id=None,
+            digest_changed=False,
+            revision_label=None,
+            expected_revision=expected_revision,
+            revision_match=False,
+            container_state=None,
+            running=False,
+            error="no container resolved for this service (compose has none)",
+        )
     post_image_id, image_err = get_image_id(container, runner=runner)
     revision, rev_err = get_revision_label(container, runner=runner)
-    error = image_err or rev_err
+    state, state_err = get_container_state(container, runner=runner)
+    running = state == "running"
+    error = image_err or rev_err or state_err
+    if error is None and not running:
+        # Named, so the receipt carries the state rather than a bare False.
+        error = f"container is {state!r}, not running"
     digest_changed = bool(
         pre_image_id and post_image_id and pre_image_id != post_image_id
     )
@@ -361,31 +526,10 @@ def check_service_digest(
         revision_label=revision,
         expected_revision=expected_revision,
         revision_match=revision_match,
+        container_state=state,
+        running=running,
         error=error,
     )
-
-
-def check_manifest_count(
-    manifest_url: str, min_contracts: int, *, opener: object | None = None
-) -> tuple[int | None, str | None]:
-    """Fetch the introspection manifest and count contracts."""
-    open_fn = opener or urllib.request.urlopen
-    try:
-        with open_fn(manifest_url, timeout=10) as resp:  # type: ignore[operator]
-            raw = resp.read()
-    except (urllib.error.URLError, OSError) as exc:
-        return None, f"manifest fetch failed: {exc}"
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        return None, f"manifest not valid JSON: {exc}"
-    if isinstance(payload, list):
-        contracts = payload
-    elif isinstance(payload, dict):
-        contracts = payload.get("contracts", [])
-    else:
-        return None, "manifest payload has unexpected shape"
-    return len(contracts), None
 
 
 def check_health(
@@ -428,7 +572,7 @@ def check_health_with_retry(
     max_verdict_age_seconds: float | None | object = DEFAULT_MAX_VERDICT_AGE,
     check_interval_seconds: float = 300.0,
     boot_grace_seconds: float = 120.0,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> tuple[HealthVerdict, str]:
     """Probe until a monitor verdict exists, for a bounded window (OMN-17624).
 
@@ -650,25 +794,10 @@ def check_partition_headroom(
     )
 
 
-def check_consumer_group(
-    broker_container: str, group: str, *, runner: object | None = None
-) -> ConsumerGroupCheck:
-    """Describe one consumer group and report its ``STATE``.
-
-    ``rpk group describe`` has NO ``-f json`` output mode (unlike most other
-    ``rpk`` subcommands) -- verified live against the .201 broker's rpk
-    version, which rejects ``-f`` as an unknown flag. Output is a fixed-width
-    plain-text key/value block:
-
-        GROUP        <name>
-        COORDINATOR  0
-        STATE        Stable
-        BALANCER
-        MEMBERS      1
-        TOTAL-LAG    0
-
-    Parsed by matching the ``STATE`` line, not by JSON decoding.
-    """
+def _rpk(
+    broker_container: str, args: list[str], *, runner: object | None = None
+) -> tuple[str | None, str | None]:
+    """Run one ``rpk`` subcommand inside the broker container."""
     try:
         result = _run(
             [
@@ -676,89 +805,139 @@ def check_consumer_group(
                 "exec",
                 broker_container,
                 "rpk",
-                "group",
-                "describe",
-                group,
+                *args,
                 "-X",
                 "brokers=redpanda:9092",
             ],
             runner=runner,
         )
     except subprocess.TimeoutExpired:
-        return ConsumerGroupCheck(
-            group=group, state=None, stable=False, error="timed out"
-        )
+        return None, f"timed out running rpk {' '.join(args)}"
     except FileNotFoundError:
-        return ConsumerGroupCheck(
-            group=group, state=None, stable=False, error="docker not found"
-        )
+        return None, "docker command not found"
     if result.returncode != 0:
-        return ConsumerGroupCheck(
-            group=group,
-            state=None,
-            stable=False,
-            error=f"rpk group describe failed (exit {result.returncode}): {(result.stderr or '').strip()}",
+        return None, (
+            f"rpk {' '.join(args)} failed (exit {result.returncode}): "
+            f"{(result.stderr or '').strip()}"
         )
-    state: str | None = None
-    for line in (result.stdout or "").splitlines():
-        match = re.match(r"^STATE\s+(\S+)", line)
-        if match:
-            state = match.group(1)
-            break
-    if state is None:
-        return ConsumerGroupCheck(
-            group=group,
-            state=None,
-            stable=False,
-            error="no STATE line found in rpk group describe output",
-        )
-    # "Stable" (actively balanced, member(s) connected) and "Empty" (group is
-    # REGISTERED with the broker -- the topic subscription is known -- but has
-    # zero currently-connected members) are both healthy for a demand-driven
-    # consumer that only joins when there is work to process. "Dead" (or any
-    # other/absent state) means the group coordinator does not know this
-    # group at all -- the actual "silent wiring death" signal
-    # (reference_silent_wiring_death_mechanisms: a consumer that never
-    # registered a group) -- and stays a hard failure.
-    return ConsumerGroupCheck(
-        group=group, state=state, stable=(state in ("Stable", "Empty"))
-    )
+    return result.stdout or "", None
 
 
-def check_consumer_group_with_retry(
-    broker_container: str,
-    group: str,
+def list_consumer_groups(
+    broker_container: str, *, runner: object | None = None
+) -> tuple[dict[str, str] | None, str | None]:
+    """``rpk group list`` -> ``{group: state}``.
+
+    This is the ONLY honest existence probe. ``rpk group describe`` answers
+    ``STATE Dead / MEMBERS 0 / TOTAL-LAG 0`` for a name that was never a group,
+    which is byte-identical to a real group that died -- the ambiguity that made
+    a stale hand-pinned name read as a hard failure twice (fd4a84b1c, OMN-16753).
+    One list call also removes the per-group describe fan-out: 611 derived
+    identities are reconciled from a single command.
+    """
+    stdout, err = _rpk(broker_container, ["group", "list"], runner=runner)
+    if err is not None or stdout is None:
+        return None, err
+    return parse_group_list(stdout), None
+
+
+def describe_consumer_group(
+    broker_container: str, group: str, *, runner: object | None = None
+) -> GroupDescription:
+    """``rpk group describe`` -> ``STATE`` / ``MEMBERS`` / ``TOTAL-LAG``.
+
+    ``rpk group describe`` has NO ``-f json`` output mode (unlike most other
+    ``rpk`` subcommands) -- verified live against the .201 broker's rpk version,
+    which rejects ``-f`` as an unknown flag. Output is a fixed-width plain-text
+    key/value block followed by per-partition rows:
+
+        GROUP        <name>
+        COORDINATOR  0
+        STATE        Stable
+        BALANCER     roundrobin
+        MEMBERS      1
+        TOTAL-LAG    0
+
+    Called only for a group the list already reported as NOT healthy, to decide
+    retired (no members, no lag) vs stalled (members lost, lag retained).
+    """
+    stdout, err = _rpk(broker_container, ["group", "describe", group], runner=runner)
+    if err is not None or stdout is None:
+        return GroupDescription(state=None, members=None, total_lag=None, error=err)
+    return parse_group_describe(stdout)
+
+
+def build_declared_group_inputs(
     *,
-    runner: object | None = None,
-    attempts: int = 10,
-    interval_seconds: float = 3.0,
-    sleep_fn: object | None = None,
-) -> ConsumerGroupCheck:
-    """Retry ``check_consumer_group`` for a bounded window.
+    lane: str,
+    manifest_payloads: Sequence[dict[str, object]],
+    declared_groups_file: Path,
+    compose_file: Path | None,
+) -> tuple[tuple[DerivedGroupKey, ...], tuple[NonContractGroup, ...]]:
+    """Derive ``(contract_keys, non_contract_groups)`` or raise ``DerivationError``.
 
-    Right after a `--force-recreate`, a consumer's Kafka client needs a few
-    seconds to reconnect and rejoin its group -- querying immediately can
-    observe a transient ``Empty``/``Dead`` state on an otherwise-healthy
-    refresh. Mirrors the retry shape of `assert_broker_reachable()` in
-    deploy-runtime.sh (bounded attempts + fixed interval, not an unbounded
-    poll). Returns the LAST observed result; a group that never reaches
-    Stable within the window is a genuine, accurately-reported finding.
+    Fail-closed by construction: there is no fallback to a static list. If the
+    manifests are unusable, the declared-groups file is malformed, or the lane
+    compose file cannot be read, the caller turns the raised cause into an
+    INFRA_ERROR naming it. A gate that cannot derive its own expectation has not
+    passed -- it has not run.
+    """
+    if not manifest_payloads:
+        raise DerivationError(
+            "no introspection manifest could be fetched from the lane, so the "
+            "declared consumer-group set cannot be derived from the running image"
+        )
+    contract_keys = derive_expected_keys(manifest_payloads, env=lane)
+    non_contract = list(load_non_contract_groups(declared_groups_file))
+    if compose_file is not None:
+        non_contract.extend(derive_compose_declared_groups(compose_file, env=lane))
+    deduped = {group.name: group for group in non_contract}
+    return contract_keys, tuple(deduped[name] for name in sorted(deduped))
+
+
+def run_consumer_group_audit(
+    broker_container: str,
+    *,
+    lane: str,
+    contract_keys: Sequence[DerivedGroupKey],
+    non_contract: Sequence[NonContractGroup],
+    min_coverage: float,
+    runner: object | None = None,
+    attempts: int = DEFAULT_GROUP_AUDIT_ATTEMPTS,
+    interval_seconds: float = DEFAULT_GROUP_AUDIT_INTERVAL_SECONDS,
+    sleep_fn: Callable[[float], None] | None = None,
+) -> ConsumerGroupAudit:
+    """Reconcile the derived declared set against the live broker, with retry.
+
+    Retries the WHOLE reconciliation rather than a single group: right after a
+    ``--force-recreate`` every consumer is mid-rejoin, so a first pass can see a
+    dozen identities transiently absent on an otherwise-healthy refresh.
+    Returns the LAST observed audit; an audit that never reconciles inside the
+    window is a genuine, accurately-reported finding.
     """
     sleep = sleep_fn or time.sleep
-    result = ConsumerGroupCheck(group=group, state=None, stable=False)
+    audit = ConsumerGroupAudit(env=lane, min_coverage=min_coverage)
     for attempt in range(1, attempts + 1):
-        result = check_consumer_group(broker_container, group, runner=runner)
-        if result.stable:
-            return result
+        live, err = list_consumer_groups(broker_container, runner=runner)
+        if err is not None or live is None:
+            audit = ConsumerGroupAudit(env=lane, min_coverage=min_coverage)
+            audit.errors.append(err or "rpk group list produced no output")
+        else:
+            audit = reconcile(
+                env=lane,
+                derived=contract_keys,
+                non_contract=non_contract,
+                live=live,
+                describe=lambda group: describe_consumer_group(
+                    broker_container, group, runner=runner
+                ),
+                min_coverage=min_coverage,
+            )
+        if audit.ok:
+            return audit
         if attempt < attempts:
-            sleep(interval_seconds)  # type: ignore[operator]
-    return result
-
-
-def load_declared_consumer_groups(path: Path) -> list[str]:
-    with path.open() as fh:
-        data = yaml.safe_load(fh) or {}
-    return [entry["name"] for entry in data.get("consumer_groups", [])]
+            sleep(interval_seconds)
+    return audit
 
 
 # ─── Orchestration ───────────────────────────────────────────────────────────
@@ -772,6 +951,85 @@ CORE_SERVICES: dict[str, str] = {
 }
 
 
+def _render_dimensions(
+    dimensions: tuple[HealthDimension, ...],
+) -> list[dict[str, object]]:
+    """Render the probe's non-HEALTHY dimensions for the log and the receipt."""
+    return [
+        {"name": d.name, "status": d.status, "detail": d.detail} for d in dimensions
+    ]
+
+
+#: How a derived consumer-group identity encodes the topic it consumes:
+#: ``<lane>.<repo>.<node>.consume.<ver>.__t.<topic>``. Declared here rather
+#: than re-spelled at the match site so a change to the identity shape is one
+#: edit, and a group that does not carry the marker is simply not attributed
+#: instead of being sliced at a guessed offset.
+CONSUMER_GROUP_TOPIC_MARKER = ".__t."
+
+#: Cap on how many groups are spelled into one dimension detail. The detail is
+#: printed to the refresh log and stored in the receipt; a lane can carry 600+
+#: groups and a saturation finding that names all of them is unreadable.
+MAX_NAMED_CONSUMER_GROUPS = 8
+
+
+def consumer_group_topic(group: str) -> str | None:
+    """The topic a derived consumer-group identity consumes, or ``None``."""
+    marker_at = group.rfind(CONSUMER_GROUP_TOPIC_MARKER)
+    if marker_at < 0:
+        return None
+    topic = group[marker_at + len(CONSUMER_GROUP_TOPIC_MARKER) :]
+    return topic or None
+
+
+def annotate_dimension_consumer_groups(
+    dimension: dict[str, object],
+    live_groups: Sequence[str],
+) -> dict[str, object]:
+    """Name the CONSUMER GROUP behind a dimension, not only the topic [OMN-18061].
+
+    ``projection_dlq_saturation`` reports the topics whose flow no declaring
+    projection could be attributed. The topic says WHAT moved; the consumer
+    group says WHO was reading it, which is the fact that identifies the cause.
+    On 2026-09-09 the group had to be recovered by hand from broker enumeration
+    AFTER the rollback destroyed the runtime that knew it -- the gate had the
+    live group list in the same report and did not connect the two.
+
+    Deliberately implemented HERE and not in the runtime's dimension producer
+    (``runtime/health/projection_liveness.py``): that module derives the
+    attribution itself and is being changed concurrently under OMN-16753. The
+    gate is the surface that has both the dimension and the live broker
+    enumeration in hand at the same moment, so the join costs nothing and
+    crosses no ownership boundary.
+
+    Attribution is by exact topic match against the identity's own ``.__t.``
+    suffix, so an unrelated group is never swept in. A dimension whose detail
+    names no topic this lane has a group for is annotated as SUCH -- "no
+    consumer group named" and "no consumer group exists" are different facts,
+    and the second one is the finding.
+    """
+    detail = str(dimension.get("detail", ""))
+    matched = [
+        group
+        for group in live_groups
+        if (topic := consumer_group_topic(group)) is not None and topic in detail
+    ]
+    annotated = dict(dimension)
+    annotated["consumer_groups"] = matched
+    if not matched:
+        annotated["detail"] = (
+            f"{detail} [no consumer group on this lane declares a topic named in "
+            "this finding -- the reader is enumerating a broker for a group that "
+            "may not exist]"
+        )
+        return annotated
+    shown = matched[:MAX_NAMED_CONSUMER_GROUPS]
+    elided = len(matched) - len(shown)
+    suffix = f" (+{elided} more)" if elided else ""
+    annotated["detail"] = f"{detail} [consumer group(s): {', '.join(shown)}{suffix}]"
+    return annotated
+
+
 def run_health_gate(
     *,
     lane: str,
@@ -781,16 +1039,21 @@ def run_health_gate(
     health_url: str,
     broker_container: str,
     min_contracts: int,
-    consumer_groups: list[str],
+    declared_groups_file: Path,
+    effects_manifest_url: str | None = None,
+    compose_file: Path | None = None,
+    min_derived_coverage: float = DEFAULT_MIN_DERIVED_COVERAGE,
     runner: object | None = None,
     opener: object | None = None,
     require_digest_change: bool = True,
-    sleep_fn: object | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
     partition_warn_threshold: float = DEFAULT_PARTITION_WARN_THRESHOLD,
     require_verdict: bool = True,
     max_verdict_age_seconds: float | None = None,
     health_check_interval_seconds: float = 300.0,
     health_boot_grace_seconds: float = 120.0,
+    manifest_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
+    manifest_clock_fn: Callable[[], float] = time.monotonic,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -809,12 +1072,51 @@ def run_health_gate(
             )
         )
 
-    count, err = check_manifest_count(manifest_url, min_contracts, opener=opener)
-    report.manifest_count = count
-    if err is not None:
-        report.errors.append(err)
+    manifest_payloads: list[dict[str, object]] = []
+    # OMN-16753: ONE budget for every manifest fetch in this run. The effects
+    # fetch below inherits whatever the main fetch leaves, so the combined
+    # worst case is MANIFEST_FETCH_WINDOW_SECONDS -- the health leg's own
+    # window -- rather than one window per URL.
+    manifest_budget = RetryBudget(
+        total_seconds=manifest_window_seconds,
+        interval_seconds=MANIFEST_FETCH_INTERVAL_SECONDS,
+        sleep_fn=sleep_fn or time.sleep,
+        monotonic_fn=manifest_clock_fn,
+    )
+    fetch_history: list[str] = []
+
+    main_fetch = fetch_manifest_with_budget(
+        manifest_url, opener=opener, budget=manifest_budget
+    )
+    fetch_history.extend(main_fetch.recent_history())
+    main_manifest = main_fetch.payload
+    if main_fetch.error is not None or main_manifest is None:
+        report.errors.append(main_fetch.error or "manifest fetch returned no payload")
     else:
-        report.manifest_ok = count is not None and count >= min_contracts
+        manifest_payloads.append(main_manifest)
+        count = count_manifest_contracts(main_manifest)
+        report.manifest_count = count
+        report.manifest_ok = count >= min_contracts
+
+    # OMN-15837: the effects runtime serves its OWN profile-filtered manifest.
+    # Its contracts mint real consumer groups (273 live on the stability lane)
+    # that the main runtime's manifest does not describe at all, so deriving the
+    # declared set from the main manifest alone would under-declare the effects
+    # half of the lane. Not fetched -> fail closed, never silently narrowed.
+    if effects_manifest_url:
+        effects_fetch = fetch_manifest_with_budget(
+            effects_manifest_url, opener=opener, budget=manifest_budget
+        )
+        fetch_history.extend(effects_fetch.recent_history())
+        effects_manifest = effects_fetch.payload
+        if effects_fetch.error is not None or effects_manifest is None:
+            report.errors.append(
+                effects_fetch.error or "effects manifest fetch returned no payload"
+            )
+        else:
+            manifest_payloads.append(effects_manifest)
+
+    report.manifest_fetch_attempts = fetch_history[-MANIFEST_FETCH_HISTORY_LIMIT:]
 
     health_verdict, verdict_wait = check_health_with_retry(
         health_url,
@@ -830,6 +1132,7 @@ def run_health_gate(
     report.health_status = health_verdict.status
     report.health_policy = health_verdict.policy
     report.verdict_wait = verdict_wait
+    report.health_dimensions = _render_dimensions(health_verdict.dimensions)
 
     cluster_healthy, cluster_detail = check_cluster_health(
         broker_container, runner=runner
@@ -844,12 +1147,38 @@ def run_health_gate(
     if partition_headroom.error is not None:
         report.errors.append(partition_headroom.error)
 
-    for group in consumer_groups:
-        report.consumer_groups.append(
-            check_consumer_group_with_retry(
-                broker_container, group, runner=runner, sleep_fn=sleep_fn
-            )
+    try:
+        contract_keys, non_contract = build_declared_group_inputs(
+            lane=lane,
+            manifest_payloads=manifest_payloads,
+            declared_groups_file=declared_groups_file,
+            compose_file=compose_file,
         )
+    except DerivationError as exc:
+        # Fail CLOSED and name the cause. Falling back to the retired static
+        # list is exactly the behaviour OMN-15837 removes.
+        report.errors.append(f"declared consumer-group derivation failed: {exc}")
+        return report
+
+    report.group_audit = run_consumer_group_audit(
+        broker_container,
+        lane=lane,
+        contract_keys=contract_keys,
+        non_contract=non_contract,
+        min_coverage=min_derived_coverage,
+        runner=runner,
+        sleep_fn=sleep_fn,
+    )
+
+    # OMN-18061: join the health dimensions to the live broker enumeration the
+    # audit just performed. Done LAST, once both halves exist, so a dimension
+    # recorded before the audit ran is never annotated with an empty list and
+    # read later as "no group exists".
+    live_group_names = [f.group for f in report.group_audit.findings]
+    report.health_dimensions = [
+        annotate_dimension_consumer_groups(dimension, live_group_names)
+        for dimension in report.health_dimensions
+    ]
 
     return report
 
@@ -918,8 +1247,20 @@ def main(argv: list[str] | None = None) -> int:
     # ops script; the lane's port is a fixed, documented convention.
     manifest_url_default = "http://localhost:18085/v1/introspection/manifest"  # fallback-ok  # url-authority-ok: fixed lane port, no routing authority applies
     health_url_default = "http://localhost:18085/health"  # fallback-ok  # url-authority-ok: fixed lane port, no routing authority applies
+    effects_manifest_url_default = "http://localhost:18086/v1/introspection/manifest"  # fallback-ok  # url-authority-ok: fixed lane port, no routing authority applies
     parser.add_argument("--manifest-url", default=manifest_url_default)
     parser.add_argument("--health-url", default=health_url_default)
+    parser.add_argument(
+        "--effects-manifest-url",
+        default=effects_manifest_url_default,
+        help=(
+            "Introspection manifest of the EFFECTS runtime [OMN-15837]. Its "
+            "profile-filtered contracts mint consumer groups the main "
+            "runtime's manifest never describes; without it the derived "
+            "declared set silently omits the effects half of the lane. Pass an "
+            "empty string only for a lane that runs no effects runtime."
+        ),
+    )
     parser.add_argument(
         "--broker-container", default="omnibase-infra-stability-test-redpanda"
     )
@@ -927,6 +1268,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--consumer-groups-file",
         default=str(Path(__file__).resolve().parent / "consumer_groups_stability.yaml"),
+        help=(
+            "Declared-groups file [OMN-15837]. No longer a list of group names: "
+            "it carries only `non_contract_groups`, the escape hatch for a "
+            "load-bearing group neither derivation source can see."
+        ),
+    )
+    parser.add_argument(
+        "--lane-compose-file",
+        default=str(
+            Path(__file__).resolve().parents[2]
+            / "docker"
+            / "docker-compose.stability-test.yml"
+        ),
+        help=(
+            "Lane compose file whose literal KAFKA_CONSUMER_GROUP values mint "
+            "the standalone projection writers' groups [OMN-15837/OMN-17562]. "
+            "Read as a derivation source so a re-homed writer changes one file, "
+            "not two."
+        ),
+    )
+    parser.add_argument(
+        "--min-derived-coverage",
+        type=float,
+        default=DEFAULT_MIN_DERIVED_COVERAGE,
+        help=(
+            "Minimum fraction of contract-derived consumer-group identities "
+            "that must be live on the broker. A floor, never silently lowered. "
+            f"Default {DEFAULT_MIN_DERIVED_COVERAGE}."
+        ),
     )
     parser.add_argument(
         "--partition-warn-threshold",
@@ -963,7 +1333,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: --pre-image-ids is not valid JSON: {exc}", file=sys.stderr)
         return 2
 
-    consumer_groups = load_declared_consumer_groups(Path(args.consumer_groups_file))
+    compose_file = Path(args.lane_compose_file) if args.lane_compose_file else None
 
     report = run_health_gate(
         lane=args.lane,
@@ -973,7 +1343,10 @@ def main(argv: list[str] | None = None) -> int:
         health_url=args.health_url,
         broker_container=args.broker_container,
         min_contracts=args.min_contracts,
-        consumer_groups=consumer_groups,
+        declared_groups_file=Path(args.consumer_groups_file),
+        effects_manifest_url=args.effects_manifest_url or None,
+        compose_file=compose_file,
+        min_derived_coverage=args.min_derived_coverage,
         require_digest_change=args.require_digest_change,
         partition_warn_threshold=args.partition_warn_threshold,
     )
@@ -986,7 +1359,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"  manifest_count={report.manifest_count} (floor={report.manifest_floor}) ok={report.manifest_ok}"
         )
+        for attempt in report.manifest_fetch_attempts:
+            print(f"  manifest fetch attempt: {attempt}")
         print(f"  health_ok={report.health_ok} ({report.health_detail})")
+        for dimension in report.health_dimensions:
+            print(
+                f"  health dimension {dimension['name']}: {dimension['status']}"
+                f" — {dimension['detail']}"
+            )
         print(f"  cluster_healthy={report.cluster_healthy} ({report.cluster_detail})")
         if report.partition_headroom is not None:
             ph = report.partition_headroom
@@ -994,11 +1374,32 @@ def main(argv: list[str] | None = None) -> int:
                 f"  partition_headroom: {ph.detail}"
                 + (f" error={ph.error}" if ph.error else "")
             )
-        for g in report.consumer_groups:
+        audit = report.group_audit
+        if audit is None:
+            print("  consumer_groups: NOT AUDITED (derivation failed, see errors)")
+        else:
             print(
-                f"  group {g.group}: state={g.state} stable={g.stable}"
-                + (f" error={g.error}" if g.error else "")
+                f"  consumer_groups: derived={audit.derived_total} "
+                f"live={audit.derived_live} coverage={audit.coverage:.3f} "
+                f"(floor={audit.min_coverage}) ok={audit.ok}"
             )
+            if audit.retired_identities:
+                print(
+                    f"    retired identities (logged, not failures): "
+                    f"{len(audit.retired_identities)}"
+                )
+                for group in audit.retired_identities:
+                    print(f"      retired {group}")
+            if audit.absent_identities:
+                print(
+                    f"    contract identities with no live group: "
+                    f"{len(audit.absent_identities)}"
+                )
+            for finding in audit.failures:
+                print(
+                    f"    FAIL {finding.group}: {finding.classification} "
+                    f"({finding.detail})"
+                )
         for s in report.services:
             print(
                 f"  service {s.service}: digest_changed={s.digest_changed} "

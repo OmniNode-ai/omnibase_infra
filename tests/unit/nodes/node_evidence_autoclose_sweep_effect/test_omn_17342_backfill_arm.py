@@ -43,6 +43,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -90,6 +93,9 @@ def _verdict(
                 "status": "verified",
                 "message": "OK (1ms)",
                 "proof_class": "behavior",
+                # OMN-18056: the behaviour proof declares WHICH criterion it
+                # covers -- the one `_FakeLinear` writes into every body.
+                "binds_ac": ["AC1"],
             }
         )
     return {
@@ -143,7 +149,11 @@ class _FakeLinear:
             # drifted, so the double must speak the real payload.
             "children": {"nodes": []},
             "team": {"id": "team-1"},
-            "description": None,
+            # OMN-18056: one labelled, parseable criterion. `None` here is a
+            # body the closer cannot read criteria from, which the AC-binding
+            # gate holds -- every case in this file would then be
+            # GAP_AC_UNBOUND and the backfill arm would go untested.
+            "description": BOUND_AC_DESCRIPTION,
         }
 
     async def fetch_done_state_id(self, team_id: str) -> str:
@@ -494,6 +504,13 @@ async def test_a_backfilled_candidate_with_a_behaviour_proof_does_flip() -> None
     calls = _Calls()
     handler = _handler([stale], linear, calls, behavior_proving_count=1)
 
+    # OMN-18056: the first eligible observation arms the re-draw and writes no
+    # Done; the flip is the second tick on the same fingerprint.
+    armed = await handler.handle(_request(apply=True, backfill_lookback_hours=168))
+    assert (
+        armed.outcomes[0].decision
+        is EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+    )
     result = await handler.handle(_request(apply=True, backfill_lookback_hours=168))
 
     assert result.tickets_flipped == 1

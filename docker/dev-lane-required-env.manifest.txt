@@ -1,0 +1,85 @@
+# Declared manifest of required env var NAMES referenced via ${VAR:?...} in
+# docker/docker-compose.dev-lane.yml (OMN-17530).
+#
+# WHY A THIRD MANIFEST
+# --------------------
+# The dev lane brings up TWO compose files, not one. Both
+# scripts/deploy-runtime.sh resolve_compose_file_args() and the deploy agent's
+# _LANE_CONFIGS[DEV] resolve the bare `omnibase-infra` project to
+#   docker/docker-compose.infra.yml  +  docker/docker-compose.dev-lane.yml
+# and every ${VAR:?} in EITHER file is a hard requirement of the deploy.
+#
+# Only the first of those two had a declaration:
+#   - docker/required-env-vars.manifest.txt          -> docker-compose.infra.yml (OMN-15537)
+#   - docker/generated-compose-required-env.manifest.txt -> the CATALOG RENDER,
+#     docker/docker-compose.generated.yml, which is a different file with a
+#     different service set and is brought up by no deploy path (OMN-17291)
+# The dev-lane overlay is hand-written, not generator-owned -- the catalog CLI's
+# only declared output is docker/docker-compose.generated.yml -- so it needs its
+# own exact declaration. Merging these names into either existing manifest would
+# make that manifest inexact, which is the property those files exist to
+# guarantee.
+#
+# WHAT WENT WRONG WITHOUT IT
+# --------------------------
+# Two dev-lane deploy commands died at compose validation on 2026-09-08, each on
+# a DIFFERENT undeclared required variable added by the same PR, ~14 minutes
+# apart: the first on ONEX_API_IMAGE, the second -- after that one was supplied
+# -- on ONEX_CLOUD_MIGRATE_IMAGE. compose reports the FIRST unset variable and
+# stops, so a set of N missing variables surfaces as N failed deploys. A later
+# mechanical enumeration found the real count was TEN, not two. Nothing in the
+# repo declared any of them, so nothing could have been red before the deploy.
+#
+# The two halves of the fix:
+#   1. THIS FILE + scripts/check_required_env_vars.py (pre-commit hook
+#      check-dev-lane-required-env-vars) hold the overlay and this manifest in
+#      exact agreement, so a PR that adds a ${VAR:?} without declaring it here
+#      is red at commit time and in CI.
+#   2. scripts/preflight_required_compose_env.py reports ALL missing required
+#      variables in ONE message, before compose validation, naming the store
+#      file that should carry each one. Wired into
+#      scripts/runtime_build/refresh_dev_lane.sh and the deploy agent's
+#      compose_gen. An operator sees the whole list at once instead of one wall
+#      per deploy.
+#
+# NAMES ONLY -- never values, never secrets. Add a name here in the SAME commit
+# that adds its ${VAR:?} to the overlay; remove it in the same commit that
+# removes the reference. Alphabetical order.
+#
+# Where each name resolves from at deploy time:
+#   - docker/runtime-policy.env   (contract-rendered activation policy)
+#   - the operator env store      (${OMNIBASE_OPERATOR_ENV_FILE:-$HOME/.omnibase/.env})
+# The preflight derives which of the two it should be, per name, from the
+# runtime-policy key set -- it is not annotated here, so it cannot go stale.
+
+ALPHA_INVITE_ADMIN_SECRET
+DEV_KAFKA_SASL_PASSWORD
+DEV_KAFKA_SASL_USERNAME
+KEYCLOAK_ADMIN_CLIENT_SECRET
+# OMN-17530 provenance: the onex-api service image tag. An image tag, never a
+# credential; resolved from the operator env store, which is why it has no
+# compose default -- a stale silent default would run last week's API image.
+ONEX_API_IMAGE
+# OMN-17530 provenance: the cloud-migration-files service image tag. Resolved
+# from the operator env store by migration-corpus hash (the image's
+# /migrations/MANIFEST must match omninode_infra db/migrations at the deployed
+# ref), never by tag recency -- docker/migrations/cloud/run-cloud-migrations.sh
+# refuses a MANIFEST-less image by name and has no lexicographic fallback.
+ONEX_CLOUD_MIGRATE_IMAGE
+# OMN-18109 provenance: the password half of the omninode_runtime DSN the
+# three single-domain standalone projection writers connect with. Already
+# required by docker/docker-compose.infra.yml's own ${VAR:?} render of
+# OMNINODE_INTERNAL_DB_URL, so this declares a name the dev lane already
+# needed -- it adds no new operator-supplied value on any host.
+OMNINODE_RUNTIME_PASSWORD
+ONEX_LAB_TENANT_STATE_DIR
+POSTGRES_PASSWORD
+ROLE_OMNIDASH_PASSWORD
+ROLE_OMNINODE_PASSWORD
+STRIPE_API_KEY
+STRIPE_WEBHOOK_SECRET
+TENANT_BOOTSTRAP_ADMIN_SECRET
+TENANT_CLIENTS_ADMIN_SECRET
+TENANT_OFFBOARD_ADMIN_SECRET
+TENANT_TOPICS_ADMIN_SECRET
+VALKEY_PASSWORD

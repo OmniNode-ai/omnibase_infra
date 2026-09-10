@@ -20,6 +20,9 @@
 #   workspace/sibling-repos/<repo-name>/  (staged working tree copy)
 #   workspace/sibling-pin-comparison.json (expected-vs-actual pin proof)
 #
+# The RT-1 expected-refs manifest is deliberately NOT one of these: it is written
+# outside the build context (see EXPECTED_REFS_OUT below, OMN-16442).
+#
 # Sibling-pin preflight (OMN-12977, OMN-13403):
 #   Before staging, the consuming repo's uv.lock is the pin authority. The
 #   build vendors the canonical OMNI_HOME clones of omnibase_infra / omnibase_core
@@ -50,6 +53,18 @@
 #   stale lane image with nothing failing. Set DEPLOY_REF, or opt in explicitly
 #   with ALLOW_UNPINNED_DEPLOY_SOURCE=1 (loud, named, never the default).
 #   DEPLOY_HOTPATCH=1 deploys the dirty tree deliberately (labelled, not laundered).
+#
+# Per-sibling ref (OMN-17135):
+#   DEPLOY_REF pins ONE repository. The CI rebuild path publishes an
+#   omnibase_infra commit SHA there, and that commit exists in no sibling, so
+#   RT-1 used to abort on the first one (`ERROR: omnibase_core: cannot resolve
+#   ref '<infra sha>'`, exit 4) and every CI-triggered agent rebuild failed by
+#   construction. Each sibling now falls back to a ref of its own --
+#   DEPLOY_SIBLING_FALLBACK_REF, default `origin/dev` -- resolved at staging
+#   time, with the primary it stood in for recorded per repo as `fallback_from`
+#   in the expected-refs manifest. The fallback engages ONLY where the primary
+#   names no commit in that repository; a DEPLOY_REF that resolves everywhere is
+#   unaffected. A fallback that does not resolve either still exits 4.
 #
 # Exit codes:
 #   0  all sibling repos staged successfully
@@ -129,7 +144,45 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # still reachable, never silent, and recorded in the log by name.
 # ---------------------------------------------------------------------------
 DEPLOY_SOURCE_REF_SCRIPT="${SCRIPT_DIR}/deploy_source_ref.py"
-EXPECTED_REFS_OUT="workspace/deploy-source-refs.json"
+
+# OMN-16442: the expected-refs manifest lives OUTSIDE the build context.
+#
+# It used to be written to `workspace/deploy-source-refs.json`, i.e. RELATIVE to
+# this script's cwd -- which is always a git clone's root (the build context).
+# The file is untracked and not gitignored, so every clone a deploy ever ran
+# from was left permanently dirty. That is not cosmetic: the deploy agent's
+# self-update gate reads `git status --porcelain` on its own code clone, and one
+# such leftover made the agent skip every self-update, so a merged fix to the
+# agent could never reach it.
+#
+# Nothing needs this file inside the build context. It is a purely intra-run
+# intermediate between the `checkout` step above and the `assert` step at the
+# end of staging; the Dockerfile COPYs `sibling-vcs-provenance.json` and
+# `sibling-pin-comparison.json`, never this. So it goes to a state directory,
+# following the `${HOME}/.omnibase/state/...` convention refresh_dev_lane.sh and
+# refresh_stability_lane.sh already use in this same directory. Overridable by
+# DEPLOY_SOURCE_REFS_OUT for tests and for callers with their own run directory;
+# fail-closed on an unset HOME rather than writing to `/.omnibase`.
+#
+# The default path is keyed on the build context so two lanes staging
+# concurrently from different repo roots cannot clobber each other's manifest --
+# the same isolation the in-context path had for free, kept deterministic and
+# inspectable rather than swapped for a per-run temp dir that vanishes on the
+# failure you most want to read. Resolved lazily inside the RT-1 branch below:
+# the explicitly-unpinned path never writes or reads this manifest, and must not
+# fail on an unset HOME it does not need.
+resolve_expected_refs_out() {
+    if [[ -n "${DEPLOY_SOURCE_REFS_OUT:-}" ]]; then
+        printf '%s\n' "${DEPLOY_SOURCE_REFS_OUT}"
+        return 0
+    fi
+    local home build_ctx ctx_slug
+    home="${HOME:?HOME must be set to resolve the default expected-refs manifest path; set DEPLOY_SOURCE_REFS_OUT to choose one explicitly}"
+    build_ctx="$(pwd -P)"
+    ctx_slug="${build_ctx//[!A-Za-z0-9._-]/_}"
+    printf '%s\n' "${home}/.omnibase/state/deploy_source_refs/${ctx_slug}.json"
+}
+EXPECTED_REFS_OUT=""
 DEPLOY_REF="${DEPLOY_REF:-}"
 DEPLOY_HOTPATCH="${DEPLOY_HOTPATCH:-0}"
 # Explicit "did RT-1 run THIS invocation" flag so the end-of-staging assertion
@@ -138,6 +191,8 @@ RT1_ENGAGED=false
 
 if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     RT1_ENGAGED=true
+    EXPECTED_REFS_OUT="$(resolve_expected_refs_out)"
+    echo "RT-1: expected-refs manifest -> ${EXPECTED_REFS_OUT} (outside the build context, OMN-16442)" >&2
     mkdir -p "$(dirname "${EXPECTED_REFS_OUT}")"
     checkout_args=(checkout --output "${EXPECTED_REFS_OUT}")
     for repo in "${SIBLING_REPOS[@]}"; do
@@ -148,6 +203,17 @@ if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" =
     fi
     if [[ -n "${DEPLOY_REF}" ]]; then
         checkout_args+=(--ref "${DEPLOY_REF}")
+        # OMN-17135: DEPLOY_REF is a pin on ONE repository, and the CI rebuild
+        # path makes that literal -- the producer model constrains the published
+        # git_ref to a lowercase hex commit SHA of omnibase_infra. A commit of
+        # omnibase_infra is not a ref of omnibase_core, so RT-1 checking every
+        # sibling out at it fails for every sibling, every time. Give each
+        # sibling a ref of its OWN to fall back to: its declared tracking head,
+        # resolved here at staging time and recorded per repo in the manifest
+        # the end-of-staging assertion is resolved against. The fallback only
+        # engages where the primary names no commit, so a DEPLOY_REF that
+        # resolves everywhere (origin/dev) behaves exactly as before.
+        checkout_args+=(--fallback-ref "${DEPLOY_SIBLING_FALLBACK_REF:-origin/dev}")
     fi
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)

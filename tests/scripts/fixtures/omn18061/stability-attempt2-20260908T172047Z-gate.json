@@ -1,0 +1,98 @@
+{
+  "lane": "stability-test",
+  "require_digest_change": true,
+  "digest_changed": true,
+  "manifest_count": 301,
+  "manifest_floor": 288,
+  "manifest_ok": true,
+  "health_ok": false,
+  "health_detail": "status='degraded' details.healthy=true (verdict gate: runtime_degraded)",
+  "health_status": "degraded",
+  "health_policy": "verdict_required.v1",
+  "verdict_wait": "verdict_wait: 24 attempts x 15s = 360s sleep, worst case 600s wall clock (each probe may spend up to 10s before its sleep); first visible verdict ~300s from check_interval=300s, boot_grace=120s not waited: failure is terminal (reason='runtime_degraded') on attempt 17",
+  "cluster_healthy": true,
+  "cluster_detail": "CLUSTER HEALTH OVERVIEW",
+  "consumer_groups": {
+    "env": "stability-test",
+    "derived_total": 315,
+    "derived_live": 310,
+    "coverage": 0.9841,
+    "min_coverage": 0.9,
+    "coverage_ok": true,
+    "absent_identities": [
+      "stability-test.omnibase_infra.node_context_audit_dlq_effect.consume.1.0.0.__t.onex.evt.omniclaude.context-audit-dlq.v1",
+      "stability-test.omnibase_infra.node_contract_registry_reducer.consume.1.0.0.__t.onex.evt.platform.contract-deregistered.v1",
+      "stability-test.omnibase_infra.node_contract_registry_reducer.consume.1.0.0.__t.onex.evt.platform.contract-registered.v1",
+      "stability-test.omnibase_infra.node_contract_registry_reducer.consume.1.0.0.__t.onex.evt.platform.node-heartbeat.v1",
+      "stability-test.omnibase_infra.node_contract_registry_reducer.consume.1.0.0.__t.onex.intent.platform.runtime-tick.v1"
+    ],
+    "retired_identities": [],
+    "failures": [],
+    "findings_count": 316,
+    "errors": [],
+    "ok": true
+  },
+  "consumer_groups_stable": true,
+  "revision_readback_ok": true,
+  "partition_headroom": {
+    "cap": 15000,
+    "total_partitions": 7185,
+    "usage_ratio": 0.479,
+    "warn_threshold": 0.8,
+    "at_or_over_cap": false,
+    "crossed_warn_threshold": false,
+    "detail": "7185/15000 partitions (47.9%)",
+    "error": null
+  },
+  "partition_headroom_ok": true,
+  "services": [
+    {
+      "service": "omninode-runtime",
+      "container": "omninode-stability-test-runtime",
+      "pre_image_id": "sha256:515419b743fc18fbe98cc935d0b8af4a9b1400ae9e364019f447ff2aa68bece0",
+      "post_image_id": "sha256:5d218d997240c0e6fccff4b832d70250f5dc03b849f63411e9d9462a24e6c7e5",
+      "digest_changed": true,
+      "revision_label": "1853daafd64b",
+      "expected_revision": "1853daafd64b",
+      "revision_match": true,
+      "error": null
+    },
+    {
+      "service": "runtime-effects",
+      "container": "omninode-stability-test-runtime-effects",
+      "pre_image_id": "sha256:44c5ee23c2b02ce280d586d2d05577d49712acf22420e1ebc77658fe534e60a0",
+      "post_image_id": "sha256:3a1b1a07ae3e5629cd8d3295ed98fd50f9a99016a9508b0f01f33e1240b7e258",
+      "digest_changed": true,
+      "revision_label": "1853daafd64b",
+      "expected_revision": "1853daafd64b",
+      "revision_match": true,
+      "error": null
+    },
+    {
+      "service": "runtime-worker",
+      "container": "omninode-stability-test-runtime-worker",
+      "pre_image_id": "sha256:5be45f76bb97bc4a306c0564d670fa8bcd6889b9d19df84fcdc13222b49003c3",
+      "post_image_id": "sha256:8787eb37cda6b21cc131054b310992e0dfa951b6eee89023fd4200222f996870",
+      "digest_changed": true,
+      "revision_label": "1853daafd64b",
+      "expected_revision": "1853daafd64b",
+      "revision_match": true,
+      "error": null
+    },
+    {
+      "service": "projection-api",
+      "container": "omnimarket-stability-test-projection-api",
+      "pre_image_id": "sha256:947fdafe4241983abf585f93fbc21080c828b3dce78cc06b29b5a5ee6c0da33e",
+      "post_image_id": "sha256:a8399a7be3ab3b8609634598283fc63df51b4503fc61d8fdcdfc5c759bf22d70",
+      "digest_changed": true,
+      "revision_label": "1853daafd64b",
+      "expected_revision": "1853daafd64b",
+      "revision_match": true,
+      "error": null
+    }
+  ],
+  "errors": [
+    "manifest fetch failed (http://localhost:18086/v1/introspection/manifest): [Errno 104] Connection reset by peer"
+  ],
+  "overall": "INFRA_ERROR"
+}

@@ -48,6 +48,10 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+    bound_ac_checks,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -87,15 +91,27 @@ def _merged_companion(
     }
 
 
-def _flip_clearing_receipt() -> dict[str, object]:
+def _flip_clearing_receipt(
+    *, total_checks: int = 2, verified_count: int = 2
+) -> dict[str, object]:
+    """A receipt that clears every counting conjunct.
+
+    OMN-18056 made the counters parameters: the positive prior-revert fence
+    releases only on a verdict whose FINGERPRINT differs from every baseline
+    recorded since the reversal, so a fixture that has to demonstrate change
+    needs a second, genuinely different verdict to present.
+    """
     verdict: dict[str, object] = {
         "correlation_id": str(uuid4()),
         "ticket_id": "OMN-0000",
         "status": "verified",
         "dry_run": False,
-        "checks": [],
-        "total_checks": 2,
-        "verified_count": 2,
+        # OMN-18056: the corpus DECLARES which criterion it proves. Without
+        # this the binding gate holds every fixture in this file before the
+        # conjunct under test runs.
+        "checks": bound_ac_checks(),
+        "total_checks": total_checks,
+        "verified_count": verified_count,
         "failed_count": 0,
         "skipped_count": 0,
         "superseded_count": 0,
@@ -123,13 +139,29 @@ def _issue(
     description: str | None = None,
     attachment_urls: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
+    """A Linear issue payload for the D1/D2 conjunct fixtures.
+
+    OMN-18056: every body gets a labelled acceptance criterion APPENDED under
+    a heading. The AC-binding gate sits ahead of both conjuncts exercised in
+    this file, so a body it cannot read criteria from is held there and the
+    conjunct under test is never reached -- the test would then assert
+    GAP_AC_UNBOUND on every case and prove nothing about the cited-PR check or
+    the revert fence.
+
+    Appending under a heading (rather than replacing the body) keeps each
+    fixture's own text -- the PR citation the D1 conjunct reads, the
+    ``AC-5`` prose the OMN-17957 shape carries -- byte-for-byte intact. The
+    heading also closes the no-heading fallback, so only the one criterion
+    below is counted and no test's prose accidentally becomes a criterion.
+    """
+    body = None if description is None else f"{description}\n\n{BOUND_AC_DESCRIPTION}"
     payload: dict[str, object] = {
         "id": issue_id,
         "identifier": identifier,
         "state": {"id": "s1", "name": "In Progress", "type": "started"},
         "labels": {"nodes": []},
         "team": {"id": "team-1"},
-        "description": description,
+        "description": body,
         "children": {"nodes": []},
     }
     if attachment_urls is not None:
@@ -138,14 +170,25 @@ def _issue(
 
 
 def _history(*entries: tuple[str, str | None, str | None, str | None]):
-    """``(entry_id, from_type, to_type, actor_id)`` tuples -> history nodes."""
+    """``(entry_id, from_type, to_type, actor_id)`` tuples -> history nodes.
+
+    OMN-18106: the base was ``now - 10 days``, which put every transition —
+    including the audit revert — a week and a half BEFORE the companion these
+    fixtures merge at ``now - 1h`` and before the cited PR they merge on
+    2026-09-05. The prior-revert fence now reads that ordering, and a fixture
+    describing "reverted, then the evidence landed" is the OMN-15542 shape,
+    not the OMN-17957 one these tests are about. The base is therefore inside
+    the last few minutes, so the transitions follow the evidence rather than
+    preceding it; nothing else about the fixtures changes, and no consumer of
+    this helper reads the timestamps for anything but ordering.
+    """
     nodes: list[dict[str, object]] = []
-    base = datetime.now(tz=UTC) - timedelta(days=10)
+    base = datetime.now(tz=UTC) - timedelta(minutes=5)
     for index, (entry_id, from_type, to_type, actor_id) in enumerate(entries):
         nodes.append(
             {
                 "id": entry_id,
-                "createdAt": (base + timedelta(hours=index)).isoformat(),
+                "createdAt": (base + timedelta(seconds=index)).isoformat(),
                 "actorId": actor_id,
                 "fromState": None if from_type is None else {"type": from_type},
                 "toState": None if to_type is None else {"type": to_type},
@@ -222,7 +265,17 @@ class FakeLinear:
         self, issue_id: str, page_size: int, max_pages: int
     ) -> tuple[list[dict[str, object]] | None, str]:
         self.history_calls.append(issue_id)
-        if self.history_calls.count(issue_id) > 1 and issue_id in self._post_flip:
+        # OMN-18056: the history moves when the WRITE happens, not on the
+        # second read. The re-draw makes every flip a two-tick sequence, so a
+        # read-counting double would serve the post-flip history to tick two's
+        # PRE-write read and the bound readback would then find no segment the
+        # pre-write read did not already have -- turning every legitimate flip
+        # in this file into ERROR_READBACK_UNCONFIRMED. Keying on the recorded
+        # write is what the real connection does anyway.
+        if (
+            any(target == issue_id for target, _state in self.state_updates)
+            and issue_id in self._post_flip
+        ):
             return self._post_flip[issue_id], ""
         history = self._histories.get(issue_id, [])
         if history is None:
@@ -259,6 +312,24 @@ def _gh_fake(
 def _dod_fake(receipt: dict[str, object]):
     async def run_dod(ticket_id: str, cwd: str, timeout: int):
         return receipt, 0, ""
+
+    return run_dod
+
+
+def _dod_sequence_fake(*receipts: dict[str, object]):
+    """Serve one receipt per tick, holding the last one for later ticks.
+
+    OMN-18056: the re-draw and the positive prior-revert fence both need a
+    MULTI-TICK sequence, and the fence needs the ticks to disagree. A single
+    constant receipt cannot express "the checks produced a different outcome
+    on the next run", which is the only thing that releases a reverted ticket.
+    """
+    calls = {"n": 0}
+
+    async def run_dod(ticket_id: str, cwd: str, timeout: int):
+        index = min(calls["n"], len(receipts) - 1)
+        calls["n"] += 1
+        return receipts[index], 0, ""
 
     return run_dod
 
@@ -371,6 +442,12 @@ class TestCitedProductPrMustBeMerged:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done; the flip is the second tick on the same fingerprint.
+        armed = await handler.handle(_request())
+        assert [o.decision for o in armed.outcomes] == [
+            EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+        ]
         result = await handler.handle(_request())
 
         assert [o.decision for o in result.outcomes] == [
@@ -405,6 +482,12 @@ class TestCitedProductPrMustBeMerged:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done; the flip is the second tick on the same fingerprint.
+        armed = await handler.handle(_request())
+        assert [o.decision for o in armed.outcomes] == [
+            EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+        ]
         result = await handler.handle(_request())
 
         assert [o.decision for o in result.outcomes] == [
@@ -525,6 +608,12 @@ class TestCitedProductPrMustBeMerged:
             _dod_fake(_flip_clearing_receipt()),
         )
 
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done; the flip is the second tick on the same fingerprint.
+        armed = await handler.handle(_request())
+        assert [o.decision for o in armed.outcomes] == [
+            EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+        ]
         result = await handler.handle(_request())
 
         assert [o.decision for o in result.outcomes] == [
@@ -595,10 +684,28 @@ class TestPriorRevertFenceReadsTheMarkerNotTheActorId:
         # one held ticket stopped the whole fleet from 2026-09-06T03:36Z on.
         assert result.disarm_triggered_by == ""
 
-    async def test_a_revert_with_no_closer_flip_comment_is_not_this_fences_business(
+    async def test_a_revert_this_closer_did_not_write_still_holds_and_baselines(
         self,
     ) -> None:
-        """A human Done a human reopened is an ordinary ticket back in flight."""
+        """OMN-18056 item 7 INVERTED this case, deliberately.
+
+        It used to flip: a reverted ticket carrying no audit comment of this
+        closer's matched no fingerprint, the negative fence found nothing, and
+        the sweep read that as "an ordinary ticket back in flight".
+
+        Measured against that reading -- OMN-17298 was flipped on a hand probe
+        whose search term exists in no spelling anywhere and reverted 42
+        minutes later once live state showed the projection node running.
+        No fingerprint of this closer's appears anywhere in that sequence, so
+        the negative fence was blind to it and the identical evidence would
+        have re-cleared the predicate on the next tick.
+
+        A reversal is a statement that the evidence was not sufficient, so the
+        burden inverts: the first post-revert look RECORDS the verdict it saw
+        as a baseline and holds. It bootstraps rather than deadlocks -- the
+        very hold that records the baseline is what a later, different verdict
+        is released against, which the next test executes.
+        """
         linear = FakeLinear(
             issues={"OMN-17957": _issue(identifier="OMN-17957", description="Body.")},
             histories={"issue-1": _reverted_closer_flip_history()},
@@ -617,14 +724,39 @@ class TestPriorRevertFenceReadsTheMarkerNotTheActorId:
             _dod_fake(_flip_clearing_receipt()),
         )
 
-        result = await handler.handle(_request())
-
-        assert [o.decision for o in result.outcomes] == [
-            EnumEvidenceAutocloseDecision.FLIPPED
+        first = await handler.handle(_request())
+        assert [o.decision for o in first.outcomes] == [
+            EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
         ]
+        assert linear.state_updates == []
+        assert "post-revert baseline" in first.outcomes[0].reason
+
+        # And the SAME verdict again is still a hold: the checks have produced
+        # the same outcome since the reversal, so nothing has changed to
+        # overrule it with. It reports as SKIPPED_DUPLICATE_COMMENT because
+        # the OMN-16808 dedup gate recognises the baseline comment this run
+        # would have written as one already on the ticket -- the hold itself
+        # is unchanged and its reason is carried through verbatim.
+        second = await handler.handle(_request())
+        assert [o.decision for o in second.outcomes] == [
+            EnumEvidenceAutocloseDecision.SKIPPED_DUPLICATE_COMMENT
+        ]
+        assert "already recorded as its post-revert baseline" in (
+            second.outcomes[0].reason
+        )
+        assert linear.state_updates == []
+        assert len(linear.comments) == 1
 
     async def test_a_changed_verdict_after_a_revert_may_close_again(self) -> None:
-        """The hold is on RE-ASSERTING a verdict, not on the ticket forever."""
+        """The hold is on RE-ASSERTING a verdict, not on the ticket forever.
+
+        Three ticks, and each one is a distinct step of the rule: tick 1
+        records the post-revert baseline, tick 2 measures a DIFFERENT verdict
+        (3/3 rather than 2/2 -- a different fingerprint) which is the positive
+        evidence of change and releases the fence, and tick 3 is the re-draw
+        that turns that released verdict into a Done.
+        """
+        changed = _flip_clearing_receipt(total_checks=3, verified_count=3)
         linear = FakeLinear(
             issues={"OMN-17957": _issue(identifier="OMN-17957", description="Body.")},
             histories={"issue-1": _reverted_closer_flip_history()},
@@ -640,11 +772,20 @@ class TestPriorRevertFenceReadsTheMarkerNotTheActorId:
                 {8281: ["contracts/OMN-17957.yaml"]},
                 _bound_product_pr(),
             ),
-            _dod_fake(_flip_clearing_receipt()),
+            _dod_sequence_fake(_flip_clearing_receipt(), changed),
         )
 
-        result = await handler.handle(_request())
+        baseline = await handler.handle(_request())
+        assert [o.decision for o in baseline.outcomes] == [
+            EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT
+        ]
 
+        armed = await handler.handle(_request())
+        assert [o.decision for o in armed.outcomes] == [
+            EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+        ]
+
+        result = await handler.handle(_request())
         assert [o.decision for o in result.outcomes] == [
             EnumEvidenceAutocloseDecision.FLIPPED
         ]
@@ -672,36 +813,57 @@ class TestPriorRevertFenceReadsTheMarkerNotTheActorId:
         ]
         assert linear.state_updates == []
 
-    async def test_a_ticket_with_no_revert_at_all_never_reads_its_comments(
+    async def test_the_prior_revert_read_is_scoped_to_reverted_candidates(
         self,
     ) -> None:
-        """The extra read is scoped to candidates that HAVE been reverted."""
-        linear = FakeLinear(
-            issues={"OMN-17957": _issue(identifier="OMN-17957", description="Body.")},
-            histories={
-                "issue-1": _history(
-                    ("e-start", "backlog", "started", _HUMAN_ACTOR),
-                )
-            },
-            preexisting_comments={"issue-1": None},
-            post_flip_histories={
-                "issue-1": _history(("e-flip", "started", "completed", _HUMAN_ACTOR))
-            },
-        )
-        handler = _handler(
-            linear,
-            _gh_fake(
-                [_merged_companion(8281, "OMN-17957")],
-                {8281: ["contracts/OMN-17957.yaml"]},
-                _bound_product_pr(),
-            ),
-            _dod_fake(_flip_clearing_receipt()),
-        )
+        """The extra read is scoped to candidates that HAVE been reverted.
 
-        result = await handler.handle(_request())
+        OMN-18056 RETIRED the proxy this test used to assert that with. It
+        used to set an unreadable comment history and read a FLIP as proof the
+        prior-revert branch never called it -- but the re-draw now reads the
+        same connection on every eligible candidate, so an unreadable history
+        fails the run closed whether or not the fence looked. A flip is no
+        longer available as the signal, and asserting one would only have been
+        recoverable by loosening a leg.
 
-        # An unreadable comment history did NOT fail this candidate closed,
-        # which is only possible if the read never happened.
-        assert [o.decision for o in result.outcomes] == [
-            EnumEvidenceAutocloseDecision.FLIPPED
-        ]
+        So the invariant is asserted where it is still observable: on the
+        REASON. Two runs, identical but for the history. The unreverted one
+        fails closed naming the RE-DRAW; the reverted one fails closed naming
+        the prior-revert fence. Different legs, different sentences -- which
+        is only possible if the fence did not run on the first.
+        """
+        unreverted_history = _history(("e-start", "backlog", "started", _HUMAN_ACTOR))
+
+        async def _run(history):
+            linear = FakeLinear(
+                issues={
+                    "OMN-17957": _issue(identifier="OMN-17957", description="Body.")
+                },
+                histories={"issue-1": history},
+                preexisting_comments={"issue-1": None},
+            )
+            handler = _handler(
+                linear,
+                _gh_fake(
+                    [_merged_companion(8281, "OMN-17957")],
+                    {8281: ["contracts/OMN-17957.yaml"]},
+                    _bound_product_pr(),
+                ),
+                _dod_fake(_flip_clearing_receipt()),
+            )
+            result = await handler.handle(_request())
+            return result.outcomes[0], linear
+
+        unreverted, unreverted_linear = await _run(unreverted_history)
+        reverted, _ = await _run(_reverted_closer_flip_history())
+
+        # Both fail closed on the unreadable connection -- neither invents a
+        # verdict from a read it could not make.
+        assert unreverted.decision is EnumEvidenceAutocloseDecision.ERROR_LINEAR_API
+        assert reverted.decision is EnumEvidenceAutocloseDecision.ERROR_LINEAR_API
+        assert unreverted_linear.state_updates == []
+
+        # But for DIFFERENT reasons, and that is the scoping proof.
+        assert "first observation of this verdict from a second" in unreverted.reason
+        assert "prior-revert fence cannot be resolved" not in unreverted.reason
+        assert "prior-revert fence cannot be resolved" in reverted.reason

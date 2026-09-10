@@ -301,6 +301,11 @@ def _run_monitor(
         "AUTO_BOUNCE_PER_CONTAINER_BUDGET_SECONDS": "5",
         "AUTO_BOUNCE_HARD_LIMIT_SECONDS": "5",
         "AUTO_BOUNCE_LOCKFILE": str(tmp_path / "bounce.lock"),
+        # OMN-14833: the bounce log is the OTHER hardcoded /tmp path. Left at its
+        # default it lands on a shared-host file owned by another user, and the
+        # very first redirect inside the per-target loop dies "Permission denied"
+        # before compose is ever invoked - which reads exactly like a timeout.
+        "AUTO_BOUNCE_BOUNCE_LOG": str(tmp_path / "bounce.log"),
     }
     if extra_env:
         env.update(extra_env)
@@ -444,6 +449,7 @@ def test_concurrent_bounce_is_skipped_not_raced(tmp_path: Path) -> None:
             extra_env={
                 "MONITOR_AUTO_BOUNCE": "1",
                 "AUTO_BOUNCE_LOCKFILE": str(lockfile),
+                "AUTO_BOUNCE_BOUNCE_LOG": str(tmp_path / "bounce.log"),
             },
         )
         assert state["stuck_created_count"] == TEST_FLEET_COUNT, state

@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
-from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+from omnibase_infra.event_bus.topic_constants import (
+    get_dlq_topic_for_original,
+    is_dlq_topic,
+)
 from omnibase_infra.idempotency import ProtocolIdempotencyStore
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayEgressHealth,
@@ -495,7 +498,10 @@ class NodeGatewayDelivery:
             ),
         )
         sender = getattr(source, "send", None)
-        if callable(sender):
+        if callable(sender) and not is_dlq_topic(message.topic):
+            # OMN-18084: a record consumed FROM a dead-letter sink resolves back
+            # to its own topic, so quarantining it here would republish it onto
+            # the topic it came from. The structured log above is the evidence.
             dlq_topic = get_dlq_topic_for_original(message.topic)
             if dlq_topic is not None:
                 try:

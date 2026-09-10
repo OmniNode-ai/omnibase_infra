@@ -35,6 +35,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -61,14 +64,29 @@ def _merged_pr(number: int) -> dict[str, object]:
     }
 
 
-def _check(evidence_id: str, status: str, proof_class: str) -> dict[str, object]:
-    return {
+def _check(
+    evidence_id: str,
+    status: str,
+    proof_class: str,
+    *,
+    binds_ac: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """One `ModelEvidenceCheckResult` on the terminal payload.
+
+    OMN-18056: ``binds_ac`` is written only when a caller names it. Absent and
+    empty are different facts to the binding gate, so a default that always
+    wrote the key would erase the distinction from every fixture here.
+    """
+    check: dict[str, object] = {
         "evidence_id": evidence_id,
         "description": evidence_id,
         "status": status,
         "message": "OK (1ms)",
         "proof_class": proof_class,
     }
+    if binds_ac is not None:
+        check["binds_ac"] = list(binds_ac)
+    return check
 
 
 def _skill_result(
@@ -149,9 +167,16 @@ class _FakeLinear:
             # drifted, so the double must speak the real payload.
             "children": {"nodes": []},
             "team": {"id": "team-1"},
-            # No acceptance-criteria section: the OMN-16736 AC-coverage guard
-            # must not be what withholds the flip in these cases.
-            "description": None,
+            # OMN-16736: one criterion only, so the AC-COVERAGE guard (which
+            # compares the item count against the verified count) is never
+            # what withholds a flip in these cases.
+            #
+            # OMN-18056: it is a labelled criterion rather than the previous
+            # `None`, because the binding gate now holds a body it cannot read
+            # criteria from. `None` here would make every case in this file
+            # GAP_AC_UNBOUND and the behaviour-proof gate would go untested
+            # behind a guard that fires first.
+            "description": BOUND_AC_DESCRIPTION,
         }
 
     async def fetch_done_state_id(self, team_id: str) -> str:
@@ -259,12 +284,18 @@ async def test_one_verified_behavior_check_releases_the_flip() -> None:
         _skill_result(
             checks=[
                 _check("dod-pr-1559-state", "verified", "merge-state"),
-                _check("dod-tests", "verified", "behavior"),
+                # OMN-18056: the behaviour proof also has to say WHICH
+                # criterion it proves. A behaviour check binding nothing is
+                # the shape the binding gate exists to hold.
+                _check("dod-tests", "verified", "behavior", binds_ac=("AC1",)),
             ],
             behavior_proving_count=1,
         ),
         linear,
     )
+    # OMN-18056: the first eligible observation arms the re-draw, the second
+    # flips.
+    await handler.handle(_request(apply=True))
     result = await handler.handle(_request(apply=True))
 
     assert result.tickets_flipped == 1

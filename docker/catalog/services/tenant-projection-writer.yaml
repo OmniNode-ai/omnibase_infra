@@ -1,0 +1,88 @@
+name: tenant-projection-writer
+description: >-
+  TENANT-domain projection carrier (OMN-18114). The ONEX runtime kernel booted under RUNTIME_PROFILE=tenant-projection, which is the ONLY process that owns the eight omnimarket contracts declaring runtime_profiles: [tenant-projection]. filter_manifest_for_runtime_profile drops all eight from `main` and `effects`, so without this process they are discovered and consumed by nothing.
+image: runtime:latest
+layer: runtime
+# The lane overlays give this a lane-scoped name; the bare name here matches the
+# base compose declaration for the dev lane.
+container_name: omnimarket-tenant-projection-writer
+required_env:
+  - POSTGRES_PASSWORD
+  - VALKEY_PASSWORD
+  - KEYCLOAK_ADMIN_CLIENT_SECRET
+  - ONEX_SERVICE_CLIENT_SECRET
+  # The binding this whole process exists for. Its principal is
+  # tenant_projection_writer and one process holds it, which is why the eight
+  # contracts name one profile (OMN-15425 / OMN-17556).
+  - ONEX_TENANT_DB_URL
+hardcoded_env:
+  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:***REDACTED***@postgres:5432/omnibase_infra'
+  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:***REDACTED***@postgres:5432/omniintelligence'
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  KAFKA_BROKER_ALLOWLIST: 'redpanda:'
+  BUS_ID: local
+  ONEX_CONTRACTS_DIR: /app/contracts
+  ONEX_STATE_ROOT: /app/data/.onex_state
+  ONEX_STATE_DIR: /app/data/.onex_state
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+  VALKEY_HOST: valkey
+  VALKEY_PORT: '6379'
+  ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
+  USE_EVENT_ROUTING: 'true'
+  KEYCLOAK_ADMIN_URL: http://keycloak:8080
+  OTEL_SERVICE_NAME: omnimarket-tenant-projection-writer
+  RUNTIME_PROFILE: tenant-projection
+  # Its own role identity, not main's. A second kernel reusing main's
+  # capabilities would put a second claimant on main-owned topics.
+  ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+  POSTGRES_HOST: postgres
+operational_defaults:
+  POSTGRES_USER: postgres
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+  ONEX_DATABASE_TOPOLOGY_PROFILE: local
+  KEYCLOAK_REALM: omninode
+  KEYCLOAK_ADMIN_CLIENT_ID: onex-admin
+  KEYCLOAK_ISSUER: http://localhost:28080/realms/omninode
+  ONEX_SERVICE_CLIENT_ID: onex-service
+  # A distinct group id keeps this process off the shared kernels' partitions.
+  ONEX_GROUP_ID: onex-runtime-tenant-projection
+ports: null
+healthcheck:
+  # OMN-17883: the SEMANTIC probe. `curl -sf` asserts only "status < 400", and
+  # /health returns 200 for a running-but-DEGRADED runtime by design, so the
+  # shallow check cannot fail on the condition it exists to catch.
+  test:
+    - python
+    - /usr/local/bin/onex-container-healthcheck
+    - --url
+    - http://localhost:8085/health
+    - --degraded-policy
+    - fail
+  interval_s: 30
+  timeout_s: 10
+  retries: 5
+  start_period_s: 1200
+volumes:
+  - tenant_projection_logs:/app/logs
+  - ../contracts:/app/contracts:ro
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+  - service: postgres
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 1024M
+  cpus_reservation: '0.1'
+  memory_reservation: 256M
+stop_grace_period: 90s
+labels:
+  com.omninode.service: tenant-projection-writer
+  com.omninode.layer: runtime
+  com.omninode.ticket: OMN-18114
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'false'

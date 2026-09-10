@@ -41,6 +41,14 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+# OMN-16729: the lane -> compose-file resolvers live in a shared lib now, so the
+# refresh wrappers' rollback recreate derives the same file list.
+COMPOSE_FILES_SH = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "runtime_build"
+    / "compose_files.sh"
+)
 
 GIT_SHA = "abc123def456"
 STALE_SHA = "111111111111"
@@ -182,8 +190,7 @@ def _run_readback(
             "log_warn() { printf 'WARN: %s\\n' \"$*\" >&2; }",
             "log_error() { printf 'ERR: %s\\n' \"$*\" >&2; }",
             "log_cmd() { printf 'CMD: %s\\n' \"$*\" >&2; }",
-            _extract_function("resolve_lane_overlay_filename"),
-            _extract_function("resolve_compose_file_args"),
+            f'source "{COMPOSE_FILES_SH}"',
             _extract_function("resolve_lane_runtime_container_name"),
             _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),
@@ -281,6 +288,22 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         # in-scope service has no running container, so a new member must appear
         # here or the readback fixture no longer describes the real lane.
         "infra-routing-decisions-consumer",
+        # OMN-17530: the eighth. onex-api is the surface a lab proof is taken
+        # THROUGH, so a stale one makes the proof itself stale -- it is in the
+        # recreate scope for that reason and therefore in the readback's scope
+        # too. Its two omninode_cloud one-shot siblings are deliberately NOT,
+        # because RT-6 resolves a RUNNING container and a one-shot has already
+        # exited 0 by the time the readback runs.
+        "onex-api",
+        # OMN-18114: the ninth. The TENANT-domain projection CARRIER is the only
+        # process that owns the eight contracts pinned to
+        # `runtime_profiles: [tenant-projection]`, so a deploy that left it
+        # behind would certify a lane on which those eight are subscribed by
+        # nothing. Unlike the writers above it IS declared in the base compose,
+        # which is precisely why it must be in the lane-only recreate scope
+        # rather than in RUNTIME_SERVICES: a prod `up -d --no-deps` naming it
+        # would start it on a lane that never opted in.
+        "tenant-projection-writer",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -297,6 +320,8 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-tenant-credentials-writer": "projection-tenant-credentials-writer",
         "projection-live-events-writer": "projection-live-events-writer",
         "infra-routing-decisions-consumer": "omninode-infra-routing-decisions-consumer",
+        "onex-api": "onex-api",
+        "tenant-projection-writer": "omnimarket-tenant-projection-writer",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not
@@ -342,6 +367,12 @@ def test_stability_lane_readback_covers_its_own_writer_services(
         "projection-savings-writer",
         "projection-tenant-credentials-writer",
         "projection-live-events-writer",
+        # OMN-18114: the profile carrier joins the proof lane's readback scope
+        # for the same reason the six writers did. It follows the same
+        # `omnimarket-stability-test-<service>` naming, so it needs no ps_map
+        # special case -- which is itself the check that the lane-scoped
+        # container_name in the overlay matches the convention.
+        "tenant-projection-writer",
     ]
     ps_map = {
         "omninode-runtime": "omninode-stability-test-runtime",

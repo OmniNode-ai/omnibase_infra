@@ -56,6 +56,12 @@ _EXPECTED_COVERED = {
     "runtime-canary",
     "runtime-effects",
     "runtime-worker",
+    # OMN-18114: the TENANT-domain projection carrier. It is the same runtime
+    # kernel as omninode-runtime under a different RUNTIME_PROFILE, so it must
+    # carry the same semantic probe -- `curl -sf /health` returns 200 on a
+    # DEGRADED runtime, which is exactly how a lane lies about a carrier that
+    # wired nothing.
+    "tenant-projection-writer",
 }
 
 

@@ -99,3 +99,119 @@ def _declare_tracking_ref(monkeypatch: pytest.MonkeyPatch) -> None:
     this one.
     """
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
+
+
+@pytest.fixture(autouse=True)
+def _derive_runtime_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-18057: derive the runtime compose-up ceiling from THIS checkout.
+
+    ``_compose_up`` now reads the lane's compose files to derive its ceiling
+    (``deploy_agent.compose_budget``) and refuses fail-closed when it cannot --
+    a ceiling that silently reverts to its floor because the model was
+    unreadable is the same undetectable wrongness as the bare ``300`` this
+    replaced. ``REPO_DIR`` is a deploy-HOST path that does not exist in the
+    unit-test sandbox, so the files are repointed at the repository under test.
+
+    This is a path repoint, not a stub: the real derivation runs, against the
+    real ``docker/docker-compose.infra.yml`` + dev-lane overlay, so a compose
+    change that moves ``start_period`` moves what these tests observe. The
+    derivation's own behaviour -- including the fail-closed read and the
+    ``service_healthy`` gating rule -- is asserted directly in
+    ``test_compose_budget_omn18057.py``.
+    """
+    from deploy_agent import compose_budget
+    from deploy_agent import executor as executor_mod
+
+    docker_dir = Path(__file__).resolve().parents[4] / "docker"
+    compose_files = (
+        str(docker_dir / "docker-compose.infra.yml"),
+        str(docker_dir / "docker-compose.dev-lane.yml"),
+    )
+
+    def _budget(
+        lane: object, expected_services: list[str]
+    ) -> compose_budget.ModelPhaseBudget:
+        return compose_budget.derive_runtime_phase_budget(
+            compose_files,
+            expected_services,
+            margin_seconds=executor_mod.RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
+            floor_seconds=executor_mod.RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+        )
+
+    monkeypatch.setattr(executor_mod, "runtime_compose_up_budget", _budget)
+
+
+@pytest.fixture(autouse=True)
+def _derive_image_build_budget_from_this_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18072: derive the runtime image-build ceiling from THIS checkout.
+
+    ``_compose_build`` now reads the compose file it is about to invoke, and the
+    Dockerfile that file names, to derive its ceiling
+    (``deploy_agent.build_budget``) and refuses fail-closed when it cannot.
+    ``REPO_DIR`` is a deploy-HOST path absent from the unit-test sandbox, so the
+    compose file is repointed at the repository under test -- the same visible
+    path repoint the compose-up budget already takes above.
+
+    This is a repoint, not a stub: the real derivation runs against the real
+    ``docker/docker-compose.infra.yml`` and ``docker/Dockerfile.runtime``, so
+    adding a runtime service or a Dockerfile step moves what these tests
+    observe. The derivation's own behaviour is asserted directly in
+    ``test_build_budget_omn18072.py``.
+    """
+    from deploy_agent import build_budget
+    from deploy_agent import executor as executor_mod
+
+    docker_dir = Path(__file__).resolve().parents[4] / "docker"
+    compose_file = str(docker_dir / "docker-compose.infra.yml")
+
+    def _budget(
+        profile: str, compose_files: tuple[str, ...] = (compose_file,)
+    ) -> build_budget.ModelBuildBudget:
+        # OMN-18108: the DEV addendum build passes the lane overlay as well, so
+        # the repoint is per-file by basename rather than one fixed path.
+        repointed = tuple(
+            str(docker_dir / Path(candidate).name) for candidate in compose_files
+        )
+        return build_budget.derive_image_build_budget(
+            repointed,
+            profile,
+            per_step_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
+            per_image_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
+            floor_seconds=executor_mod.RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
+        )
+
+    monkeypatch.setattr(executor_mod, "runtime_image_build_budget", _budget)
+
+
+@pytest.fixture(autouse=True)
+def _resolve_preflight_script_from_this_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18123: point the required-compose-env preflight at THIS checkout.
+
+    ``_preflight_required_compose_env`` now refuses with its own error class
+    when the script is not a file, because a preflight that could not RUN and a
+    preflight that RAN and found unset variables are different facts and were
+    reported as the same one. ``REPO_DIR`` is a deploy-HOST path absent from the
+    unit-test sandbox, so every test that drives compose generation would hit
+    the new refusal instead of the behaviour it is asserting.
+
+    This is a path repoint, not a stub -- the same one the compose-up and
+    image-build budget fixtures above take. The script really is on disk in the
+    repository under test, so deleting or renaming it moves what these tests
+    observe. The refusal's own behaviour is asserted directly in
+    ``test_preflight_script_missing_omn18123.py``, which repoints it the other
+    way.
+    """
+    from deploy_agent import executor as executor_mod
+
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "preflight_required_compose_env.py"
+    )
+    monkeypatch.setattr(
+        executor_mod, "preflight_required_compose_env_script", lambda: str(script)
+    )

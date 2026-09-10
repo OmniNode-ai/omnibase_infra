@@ -185,10 +185,18 @@ def test_dev_runtime_anchor_pins_the_overlay_it_mounts() -> None:
 def test_stability_lane_mounts_the_dev_overlay_at_the_pinned_path() -> None:
     """stability-test layers infra.yml, inheriting the dev pin — sharing the
     dev binding is a deliberate, legible decision, so the mount must provide
-    the file at exactly the pinned path for all three runtime services."""
+    the file at exactly the pinned path for every runtime-kernel service.
+
+    FOUR since OMN-18114: the three shared kernels plus the tenant-projection
+    carrier, which overrides its `volumes:` wholesale (it needs a lane-scoped
+    state root) and would therefore LOSE this mount silently if the override
+    omitted it. An exact count rather than a `>=` is the point — a service
+    dropping out of the pin is the regression this asserts against, and an
+    inequality would not see it.
+    """
     text = COMPOSE_STABILITY.read_text(encoding="utf-8")
     mount = f"./lane-overlays/dev.bifrost.yaml:{_DEV_OVERLAY_PIN}:ro"
-    assert text.count(mount) == 3
+    assert text.count(mount) == 4
 
 
 def test_standalone_lane_files_pin_and_mount_their_own_overlay() -> None:

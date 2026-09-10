@@ -16,6 +16,12 @@ from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 TOPIC_REBUILD_REQUESTED = "onex.cmd.deploy.rebuild-requested.v1"
 TOPIC_REBUILD_COMPLETED = "onex.evt.deploy.rebuild-completed.v1"
 TOPIC_REBUILD_REJECTED = "onex.evt.deploy.rebuild-rejected.v1"
+# Dead-letter target for a command record the agent cannot decode or validate
+# (OMN-16442). Shape follows the org convention onex.dlq.<producer>.<category>.<version>.
+# A record that lands here is one the agent has committed past: it can never be
+# decoded by redelivery, and withholding the offset stalls every command behind
+# it -- see deploy_agent.consumer for the full argument.
+TOPIC_DEPLOY_COMMAND_DLQ = "onex.dlq.omnibase-infra.deploy-command.v1"
 
 
 class DeployInProgressError(RuntimeError):
@@ -39,6 +45,33 @@ class EnumRuntimeLane(StrEnum):
     DEV = "dev"
     STABILITY_TEST = "stability-test"
     PROD = "prod"
+
+
+class EnumSelfUpdateBoundary(StrEnum):
+    """The job boundary a self-update is allowed to fire at (OMN-16442).
+
+    Self-update pulls the agent's own clone and replaces the process image, so
+    it may only run where no job is in flight. Between deploy phases is not
+    such a place: on 2026-09-08 command
+    ``8d0c861a-f91e-4ca2-954e-a073759dd39d`` re-execed after the seed phase and
+    the replacement process published that same command as ``failed`` after
+    logging ``Recovered 1 crashed job(s)``.
+
+    ``PRE_ACCEPT``
+        In the consumer, after a command has passed the signature, payload,
+        lane-fence, busy and dedup checks and BEFORE ``job_store.accept``
+        marks it started. Nothing is in flight, and the command's offset is
+        rewound rather than committed, so the replacement process re-reads it
+        and processes it once.
+
+    ``POST_TERMINAL``
+        In the agent, after the single-flight lock is released and the job's
+        terminal status has been published. Deferring to here is what lets a
+        deploy that starts on version X complete on version X.
+    """
+
+    PRE_ACCEPT = "pre_accept"
+    POST_TERMINAL = "post_terminal"
 
 
 class BuildSource(StrEnum):
@@ -65,6 +98,21 @@ class PhaseStatus(StrEnum):
     PENDING = "pending"
 
 
+# The phases a deploy actually executes, in pipeline order. PUBLISH is
+# deliberately absent: it is the act of emitting the terminal event, so an event
+# can never carry a settled verdict for it (OMN-18057). Used by the terminal
+# reconciliation to decide which phases a raised deploy never reached.
+DEPLOY_PHASE_ORDER: tuple[Phase, ...] = (
+    Phase.PREFLIGHT,
+    Phase.GIT,
+    Phase.COMPOSE_GEN,
+    Phase.SEED,
+    Phase.CORE,
+    Phase.RUNTIME,
+    Phase.VERIFICATION,
+)
+
+
 SCOPE_SERVICES: dict[Scope, list[str]] = {
     Scope.CORE: ["postgres", "redpanda", "valkey"],
     Scope.RUNTIME: [
@@ -83,10 +131,100 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 }
 
 
-def services_for_scope(scope: Scope) -> list[str]:
+# OMN-18108: the runtime services the DEV lane declares and no other lane does.
+#
+# These live only in ``docker/docker-compose.dev-lane.yml``. Membership in
+# ``SCOPE_SERVICES[Scope.RUNTIME]`` above would be FATAL, not merely wrong: the
+# service name does not exist in the prod, stability-test or judge merged
+# compose, so every deploy to those lanes would abort on `no such service`.
+# They are a DEV-lane addendum, resolved by ``services_for_scope`` only when the
+# caller names that lane.
+#
+# WHY THIS IS DECLARED HERE AND NOT PARSED FROM THE SHELL SCRIPT
+# --------------------------------------------------------------
+# ``scripts/deploy-runtime.sh`` carries the same eight names in its
+# ``DEV_LANE_ONLY_RUNTIME_SERVICES`` array, and three existing tests parse that
+# hand-written literal out of the script by regex. Reshaping the array into a
+# file both sides read would break those tests and edit the sanctioned deploy
+# path for a refactor's sake. The two declarations are instead bound
+# MECHANICALLY and bidirectionally by
+# ``tests/unit/test_dev_lane_only_scope_omn18108.py``, which parses the array
+# and asserts set equality both ways -- an edit to either side alone is a red
+# test, which is the property "single source of truth" was wanted for.
+#
+# The defect this closes, measured on the .201 dev lane 2026-09-10T00:45Z: the
+# runtime family carried the deploy agent's own build
+# ``4598a4358bd9f59528875b8b320b6cde54383fb1`` while all eight of these carried
+# ``3461e4b0aeae`` from the previous day, ~35 infra commits behind. Not an
+# intermittent miss -- the agent's scope could not reach them at all, and
+# ``restart: unless-stopped`` keeps a stale image running and healthy, so
+# nothing reported it.
+DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
+    "projection-tenant-registry-writer",
+    "projection-delegation-writer",
+    "projection-registration-writer",
+    "projection-savings-writer",
+    "projection-tenant-credentials-writer",
+    "projection-live-events-writer",
+    "infra-routing-decisions-consumer",
+    "onex-api",
+    # OMN-18114: the TENANT-domain projection carrier, for a reason that is the
+    # OPPOSITE of the writers' reason above and is stated separately so the two
+    # do not merge. That service IS declared in docker-compose.infra.yml, so
+    # every lane resolves the name -- which is exactly why it cannot be
+    # lane-agnostic: a prod or judge `up -d --no-deps tenant-projection-writer`
+    # would SUCCEED and start the carrier on a lane that never opted into it,
+    # defeating the compose profile that keeps it inert there. Membership here
+    # scopes it to the lane whose overlay puts it in the `runtime` profile.
+    #
+    # It is the only process that owns the eight omnimarket contracts declaring
+    # `runtime_profiles: [tenant-projection]`, so an agent scope that could not
+    # reach it would leave those eight running an image the rest of the lane had
+    # moved past -- the exact defect measured above, on the one service where
+    # nothing else would ever notice.
+    "tenant-projection-writer",
+)
+
+# OMN-18108: the members of the array above that carry an ``image:`` and no
+# ``build:`` -- tag-referenced, not lane-built.
+#
+# ``onex-api`` resolves ``${ONEX_API_IMAGE}`` from the operator env file on the
+# host; the image is built out of a different repository. So a governed deploy
+# can RECREATE it, which is what it actually needs (a container that is never
+# recreated never reads a new environment, and this one carries the lane's
+# broker credentials and eleven fail-closed variables), but it CANNOT advance
+# the tag. Stating the boundary here, and asserting it in the test, rather than
+# leaving an operator to discover that a "successful" deploy left the tag where
+# it was. Advancing it needs an image build plus an env repoint, and no
+# sanctioned script does either.
+DEV_LANE_ONLY_TAG_REFERENCED_SERVICES: frozenset[str] = frozenset({"onex-api"})
+
+# The subset ``docker compose build`` can be handed. Derived, never a second
+# hand-written list.
+DEV_LANE_ONLY_BUILDABLE_SERVICES: tuple[str, ...] = tuple(
+    service
+    for service in DEV_LANE_ONLY_RUNTIME_SERVICES
+    if service not in DEV_LANE_ONLY_TAG_REFERENCED_SERVICES
+)
+
+
+def services_for_scope(
+    scope: Scope, *, lane: EnumRuntimeLane | None = None
+) -> list[str]:
+    """Return the services a deploy of ``scope`` targets on ``lane``.
+
+    ``lane`` defaults to ``None``, which resolves the lane-agnostic base list
+    exactly as before. A caller that does not name a lane therefore never
+    silently acquires dev-lane services, and prod/stability-test scope is
+    byte-unchanged whether the lane is passed or not (OMN-18108 AC3).
+    """
     if scope == Scope.FULL:
-        return SCOPE_SERVICES[Scope.CORE] + SCOPE_SERVICES[Scope.RUNTIME]
-    return SCOPE_SERVICES[scope]
+        base = SCOPE_SERVICES[Scope.CORE] + SCOPE_SERVICES[Scope.RUNTIME]
+    else:
+        base = list(SCOPE_SERVICES[scope])
+    if lane == EnumRuntimeLane.DEV and scope in (Scope.RUNTIME, Scope.FULL):
+        return base + list(DEV_LANE_ONLY_RUNTIME_SERVICES)
+    return base
 
 
 class ModelHealthCheck(BaseModel):
@@ -95,6 +233,24 @@ class ModelHealthCheck(BaseModel):
     endpoint: str
     status: Literal["pass", "fail"]
     latency_ms: int = 0
+
+
+class ModelContainerResidue(BaseModel):
+    """One service left in a non-running state by a deploy phase (OMN-18057).
+
+    The 2026-09-08 runtime-phase kill left ``runtime-effects``,
+    ``runtime-worker`` and ``omninode-contract-resolver`` in ``Created`` with
+    :8086 down, and the terminal event said nothing about any of them. Residue
+    is recorded whether or not per-container recovery then succeeded, because
+    "recovered after the ceiling blew" and "came up first time" are different
+    facts about the lane.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    service: str
+    state: str
+    exit_code: int | None = None
+    recovered: bool = False
 
 
 class ModelRebuildRequested(BaseModel):
@@ -122,7 +278,9 @@ class ModelRebuildRequested(BaseModel):
     @model_validator(mode="after")
     def validate_services_subset(self) -> ModelRebuildRequested:
         if self.services:
-            allowed = services_for_scope(self.scope)
+            # OMN-18108: lane-aware, so a dev command may name one of the
+            # dev-lane-only services and a prod/stability command may not.
+            allowed = services_for_scope(self.scope, lane=self.runtime_lane)
             invalid = [s for s in self.services if s not in allowed]
             if invalid:
                 msg = f"Services {invalid} not in scope '{self.scope}'. Allowed: {allowed}"
@@ -153,9 +311,52 @@ class ModelRebuildCompleted(BaseModel):
     image_ref: str | None = None
     image_digest: str | None = None
     services_restarted: list[str] = Field(default_factory=list)
+    # OMN-17135: repo -> the commit SHA RT-1 resolved and vendored for that
+    # sibling in a workspace-mode build. ``requested_git_ref`` above pins ONE
+    # repository (omnibase_infra), so on its own it said nothing about which
+    # omnibase_core / omnibase_compat / omnimarket commit the image carries.
+    # This is EVIDENCE beside the infra pin, never a key: the rule-24 lab-pass
+    # receipt is keyed by the infra sha and stays that way. Empty for a
+    # release-mode or prod digest deploy, which vendors no sibling trees.
+    sibling_refs: dict[str, str] = Field(default_factory=dict)
     phase_results: dict[Phase, PhaseStatus]
     errors: list[str] = Field(default_factory=list)
     health_checks: list[ModelHealthCheck] = Field(default_factory=list)
+    container_residue: list[ModelContainerResidue] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:
+        """A terminal event may only carry settled phase verdicts (OMN-18057).
+
+        Two shapes are refused here rather than merely discouraged upstream:
+
+        * ``PhaseStatus.IN_PROGRESS`` -- the live defect. Command 23edaf62's
+          terminal event carried ``runtime: in_progress`` alongside a
+          ``completed_at`` and a duration, so the event asserted the deploy was
+          over and simultaneously refused to say how it ended. An unreached
+          phase is SKIPPED and a phase that raised is FAILED.
+        * ``Phase.PUBLISH`` -- this event IS the publish. Its outcome is not
+          knowable at the moment the payload is built, and reporting it as
+          ``in_progress`` made ``status`` derive "failed" for every deploy the
+          agent ever completed, successful ones included.
+        """
+        if Phase.PUBLISH in self.phase_results:
+            raise ValueError(
+                "phase_results must not carry Phase.PUBLISH: the completion "
+                "event is the publish and cannot report its own outcome"
+            )
+        unsettled = sorted(
+            phase.value
+            for phase, status in self.phase_results.items()
+            if status in (PhaseStatus.IN_PROGRESS, PhaseStatus.PENDING)
+        )
+        if unsettled:
+            raise ValueError(
+                f"phase_results carries unsettled verdicts for {unsettled}: a "
+                "terminal event must report failed/skipped for a phase that "
+                "raised or was never reached"
+            )
+        return self
 
     @computed_field
     @property

@@ -19,9 +19,20 @@ from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict
 
+from deploy_agent.build_budget import (
+    ModelBuildBudget,
+    derive_image_build_budget,
+)
+from deploy_agent.compose_budget import (
+    ModelPhaseBudget,
+    derive_runtime_phase_budget,
+)
 from deploy_agent.events import (
+    DEV_LANE_ONLY_BUILDABLE_SERVICES,
     BuildSource,
     EnumRuntimeLane,
+    EnumSelfUpdateBoundary,
+    ModelContainerResidue,
     ModelHealthCheck,
     ModelRebuildRequested,
     Phase,
@@ -29,7 +40,18 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
-from deploy_agent.tracking_ref import load_tracking_ref_from_env
+from deploy_agent.lane_lock_client import (
+    DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+    lane_lock,
+)
+from deploy_agent.ref_fence import (
+    ModelRefLineageFacts,
+    assert_ref_not_stale_branch,
+)
+from deploy_agent.tracking_ref import (
+    load_tracking_ref_from_env,
+    load_tracking_remote_ref_from_env,
+)
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
 # Scope.FULL regenerates both core and runtime bundles.
@@ -63,9 +85,58 @@ PHASE_TIMEOUTS = {
     Phase.GIT: 60,
     Phase.COMPOSE_GEN: 120,
     Phase.CORE: 300,
+    # OMN-18057: this entry no longer bounds the runtime compose-up. It bounds
+    # the runtime IMAGE operations (build, pinned-digest pull) and the migration
+    # preflight, which are not gated on any healthcheck. The compose-up ceiling
+    # is derived from the compose model -- see runtime_compose_up_budget below,
+    # and deploy_agent.compose_budget for why a constant cannot express it.
     Phase.RUNTIME: 300,
     Phase.VERIFICATION: 120,
 }
+
+# OMN-18057: the two windows _compose_up gives the lane to settle after the
+# compose command returns -- named rather than inline so the recovery path reads
+# as a policy and can be exercised without a three-minute unit test.
+CONTAINER_VERIFY_TIMEOUT_SECONDS = 120
+CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS = 60
+
+# OMN-18057: added to the largest gating start_period to form the runtime
+# compose-up ceiling. It must cover the unhealthy-detection tail the compose
+# file states for the runtime family -- interval 30s x retries 5 = 150s beyond
+# start_period -- plus the stop/create/start of the rest of the selected set.
+RUNTIME_COMPOSE_UP_MARGIN_SECONDS = 300
+
+# OMN-18057: the floor the derived ceiling can never fall below. MEASURED
+# 2026-09-08 (ledger :5076): the minimum viable budget for the ten-service dev
+# force-recreate was 336s (bootstrap 249.6s, :8085 bound at t+321s). The floor
+# sits above it with room, and applies when the compose model declares no
+# health-gated start_period at all.
+RUNTIME_COMPOSE_UP_FLOOR_SECONDS = 600
+
+# OMN-18072: the runtime IMAGE-BUILD ceiling's two derived terms. `docker
+# compose --profile runtime build` runs ONE BuildKit solve over the Dockerfile
+# every buildable service in the profile shares, then exports one image per
+# service -- so the cost scales with the Dockerfile's work-step count and with
+# the service count, and both are read from the model in build_budget.
+#
+# MEASURED on the dev lane, 2026-09-09, from this agent's own job history:
+#   6c323639  build start 01:44:30.717Z -> first core container Created
+#             01:48:24.652Z  =>  <= 233.9s over 60 steps / 9 images, SUCCEEDED
+#             (~3.9s per step)
+#   79171e79  images exported at t+209.3s, killed at t+300.0s
+#   2788af33  killed at t+300.3s with a WARM BuildKit cache
+# The per-step budget is ~4x the measured per-step cost and the per-image
+# budget ~7x the measured export cost, because this ceiling exists to catch a
+# HUNG build, not to be tight around a healthy one: two of the three
+# observations above are right-censored (killed, not measured), and a genuinely
+# cold cache after a prune is longer than any of them.
+RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS = 15
+RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS = 20
+
+# OMN-18072: twice the flat constant that killed two consecutive live rebuilds.
+# A model that read as unexpectedly small must never re-derive a ceiling at or
+# below the one already proven insufficient.
+RUNTIME_IMAGE_BUILD_FLOOR_SECONDS = 600
 
 PhaseCallback = Callable[[Phase, PhaseStatus], None]
 
@@ -120,7 +191,10 @@ def _load_promotion_guard() -> ModuleType:
 
 
 def assert_release_build_promoted(
-    build_source: BuildSource, *, repo_dir: str = REPO_DIR
+    build_source: BuildSource,
+    *,
+    repo_dir: str = REPO_DIR,
+    runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
 ) -> None:
     """Enforce clean + promoted source for prod-bound (release-mode) builds.
 
@@ -129,10 +203,35 @@ def assert_release_build_promoted(
     ancestor-of/equal-to origin/main. Workspace builds (local dev iteration) are
     exempt by design — they never reach prod.
 
+    OMN-16442: the assertion is also scoped to the lanes whose artifacts can
+    reach prod. It used to be applied lane-blind, which made it unsatisfiable
+    on the dev lane rather than merely strict: a dev head is by construction
+    NOT an ancestor of a release-synced ``origin/main``, so the ancestry half
+    refused every dev release-mode build on every day, and the clean-tree half
+    refused on any stray file in the deploy-source clone. Measured live
+    2026-09-08 on command c73cc38a: DIRTY_TREE first, then NOT_PROMOTED for
+    HEAD e42519c5b against origin/main 276d69383.
+
+    The exemption is the DEV lane and only the DEV lane, named rather than
+    derived from a negation, because the stability lane is where the
+    ``stability-proven`` digest of a prod promotion grant comes from
+    (CLAUDE.md rule 12, OMN-15243) and must keep the same lineage requirement
+    prod has. The default is ``PROD`` so an undeclared lane fails CLOSED —
+    the gate applies unless a caller says which exempt lane it is on.
+
     Raises the guard's ``ProdLineageError`` when the source is dirty or
     not promoted. Fails the build CLOSED before any docker build side effects.
     """
     if build_source != BuildSource.RELEASE:
+        return
+    if runtime_lane == EnumRuntimeLane.DEV:
+        logger.info(
+            "assert_release_build_promoted: lane %s is exempt from the prod "
+            "promotion-lineage assertion (a dev head is never an ancestor of "
+            "the release-synced origin/main); build source %s not checked",
+            runtime_lane.value,
+            repo_dir,
+        )
         return
     guard = _load_promotion_guard()
     sha = guard.assert_prod_build_promoted(Path(repo_dir))
@@ -330,7 +429,9 @@ def assert_prod_request_has_stability_digest(
         )
 
 
-def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
+def _requested_services_for_up(
+    scope: Scope, services: list[str], *, lane: EnumRuntimeLane | None = None
+) -> list[str]:
     """Return the explicit service list compose should recreate for this scope.
 
     Runtime scope must always target the runtime service list directly so a
@@ -345,11 +446,16 @@ def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
     collided with the live ``omnibase-infra-infisical`` container, breaking
     Redpanda/Postgres/Valkey/Phoenix. Forcing an explicit runtime service list
     combined with ``--no-deps`` in ``_compose_up`` prevents that regression.
+
+    OMN-18108: ``lane`` is threaded through so a DEV runtime deploy also
+    recreates the dev-lane-only services. It defaults to ``None`` (the
+    lane-agnostic base list) so a caller that names no lane cannot silently
+    acquire them, and prod/stability behaviour is unchanged.
     """
     if services:
         return services
     if scope == Scope.RUNTIME:
-        return services_for_scope(scope)
+        return services_for_scope(scope, lane=lane)
     return []
 
 
@@ -448,10 +554,82 @@ def _parse_runtime_policy_env_value(value: str) -> str:
     return tokens[0].split("=", 1)[1]
 
 
+class UndecodedAnsiCQuotingError(RuntimeError):
+    """Raised when an inherited env value is still in un-decoded ANSI-C form.
+
+    See :func:`_undecoded_ansi_c_quoted_names` for why this is fatal rather
+    than repairable.
+    """
+
+
+def _undecoded_ansi_c_quoted_names(env: Mapping[str, str]) -> list[str]:
+    """Return the NAMES of values still wrapped in bash ANSI-C ``$'...'`` quoting.
+
+    OMN-18073. This agent inherits its environment from systemd, whose unit
+    files declare ``EnvironmentFile=<the operator env store>``. **systemd's
+    env-file parser does not implement bash ANSI-C ``$'...'`` quoting.** Given
+    a line written in that form it keeps the literal ``$'`` and ``'`` wrapper
+    and drops every backslash escape, so each ``\\n`` collapses to the bare
+    letter ``n``. ``deploy-runtime.sh`` bash-``source``s the very same file and
+    decodes it correctly, which is why only the agent path is affected.
+
+    Measured on the lab host 2026-09-09 with a synthetic, non-secret value of
+    the same shape: bash ``source`` yielded a 60-byte value with 4 real
+    newlines; systemd's ``EnvironmentFile`` yielded the same bytes still
+    wrapped in ``$'``/``'`` with those 4 newlines rendered as the letter ``n``.
+
+    **The damage is irreversible in transit, so this guard refuses rather than
+    repairs.** Once the backslashes are gone, nothing downstream can tell a
+    newline's ``n`` from an ``n`` that belongs to the payload -- a base64 PEM
+    body legitimately contains the letter. Any "normalizer" that guesses is
+    reconstructing a different value and calling it the original.
+
+    Refusing is the whole point. :func:`_compose_env` hands this mapping
+    straight to ``docker compose``, whose ``${VAR:-}`` interpolation writes it
+    into every container the deploy creates. Passing a provably-mangled
+    credential through silently is what produced a 100% OCC-mint outage that
+    ran for eight hours before anyone noticed: the runtime's own secret
+    resolver logged only a ``no_mapping`` warning, the call site's
+    ``env_var_fallback`` handed the mangled bytes to pyjwt, and the resulting
+    ``InvalidKeyError`` surfaced nowhere near the transport that caused it.
+
+    Names only -- a value is never returned, logged, or included in the error.
+    """
+    return sorted(
+        name
+        for name, value in env.items()
+        if value.startswith("$'") and value.endswith("'") and len(value) >= 3
+    )
+
+
+def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
+    """Fail loud if any inherited value is still ANSI-C quoted (OMN-18073)."""
+    offenders = _undecoded_ansi_c_quoted_names(env)
+    if not offenders:
+        return
+    raise UndecodedAnsiCQuotingError(
+        "Refusing to hand docker compose an environment carrying un-decoded "
+        f"bash ANSI-C quoting. Variable name(s): {', '.join(offenders)}. "
+        "These values reached this process through systemd's "
+        "EnvironmentFile=, which does not implement $'...' quoting: it keeps "
+        "the literal wrapper and drops every backslash escape, so each \\n "
+        "became the bare letter n. The original bytes cannot be recovered "
+        "from what is left, so this is refused rather than repaired. Repair "
+        "the operator env store: write the value as a real multi-line "
+        'double-quoted entry (VAR="<line>\\n<line>\\n") -- the one shape both '
+        "bash `source` and systemd's EnvironmentFile decode identically -- "
+        "then restart this unit so it re-reads the file. No value is printed "
+        "by this guard."
+    )
+
+
 def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
+    # OMN-18073: refuse before compose interpolation writes a provably-mangled
+    # value into every container this deploy creates.
+    _assert_no_undecoded_ansi_c_quoting(env)
     postgres_host = env.get("POSTGRES_HOST", "127.0.0.1")
     postgres_port = env.get("POSTGRES_PORT", "5436")
     postgres_dsn = env.get("OMNIDASH_ANALYTICS_DB_URL") or (
@@ -655,7 +833,129 @@ def verify_containers_up(
     return False, missing
 
 
+def runtime_compose_up_budget(
+    lane: EnumRuntimeLane, expected_services: list[str]
+) -> ModelPhaseBudget:
+    """Derive the runtime compose-up ceiling from the lane's own compose files.
+
+    Reads the SAME files the deploy is about to invoke (``lane_config_for``), so
+    a compose change that lengthens a gating healthcheck moves the ceiling with
+    it. See ``deploy_agent.compose_budget`` for the derivation and for why the
+    previous bare ``300`` could not express this.
+    """
+    return derive_runtime_phase_budget(
+        lane_config_for(lane).compose_files,
+        expected_services,
+        margin_seconds=RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
+        floor_seconds=RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+    )
+
+
+def runtime_image_build_budget(
+    profile: str, compose_files: tuple[str, ...] = (COMPOSE_FILE,)
+) -> ModelBuildBudget:
+    """Derive the ``docker compose --profile <profile> build`` ceiling (OMN-18072).
+
+    Reads the SAME compose files the build is about to invoke and the
+    Dockerfiles they name, so a new runtime service or a new Dockerfile step
+    moves the ceiling with it. See ``deploy_agent.build_budget`` for the
+    measurements and for why a percentile over the recorded history is not
+    derivable from a history whose two longest entries were killed at the flat
+    constant rather than measured.
+
+    ``compose_files`` defaults to the tracked base alone, which is what the
+    lane-agnostic build passes. OMN-18108's DEV-lane addendum build passes the
+    base plus the lane overlay: the ceiling it derives is therefore an
+    over-estimate (it counts the base images too, which that command does not
+    rebuild). Over-estimating a ceiling only delays a kill; under-estimating it
+    kills a healthy build, which is the failure OMN-18072 existed to remove.
+    """
+    return derive_image_build_budget(
+        compose_files,
+        profile,
+        per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
+        per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
+        floor_seconds=RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
+    )
+
+
+def preflight_required_compose_env_script() -> str:
+    """Path to the stdlib-only required-compose-env preflight in the deploy source.
+
+    A named seam rather than an inline f-string so a test can point it at a
+    checkout that has the script, or at one that does not, without reaching into
+    ``REPO_DIR`` -- the same visible path repoint the compose-up and image-build
+    budget fixtures already take (OMN-18057, OMN-18072).
+    """
+    return f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+
+
+class PreflightScriptUnavailableError(RuntimeError):
+    """Raised when the required-compose-env preflight could not be executed.
+
+    OMN-18123. Distinct from ``REQUIRED_COMPOSE_ENV_MISSING``, which means the
+    preflight RAN and found unset variables. This one means it never ran, so
+    nothing is known about the compose environment either way.
+
+    Every dev-lane rebuild between 2026-09-10T00:49:01Z and 03:31:59Z failed
+    under the wrong class: the deploy-source clone had been reset onto a commit
+    predating ``scripts/preflight_required_compose_env.py``, the interpreter
+    could not open the file, and the refusal announced a compose-environment
+    problem that did not exist. The real cause survived only as a trailing
+    CPython message inside a differently-named error.
+
+    Both classes refuse the deploy. The refusal posture OMN-17530 established --
+    no soft-fail, no "continue if the script is missing" -- is unchanged.
+    """
+
+
 class DeployExecutor:
+    def __init__(self) -> None:
+        # OMN-18057: services a phase left in a non-running state, and whether
+        # per-container recovery then got them up. Read by the agent when it
+        # builds the terminal event so residue is a recorded fact rather than
+        # something an operator has to go and find on the host.
+        self.container_residue: list[ModelContainerResidue] = []
+        # OMN-17135: repo -> the commit SHA RT-1 actually resolved and vendored
+        # for that sibling. The requested ref pins omnibase_infra only, so
+        # without this the terminal event named one repository's commit and left
+        # the other three to be inferred from the image.
+        self.sibling_source_refs: dict[str, str] = {}
+
+    def reset_deploy_observations(self) -> None:
+        """Clear per-job observations at the start of a rebuild."""
+        self.container_residue = []
+        self.sibling_source_refs = {}
+
+    def _record_container_residue(
+        self, stuck: list[str], *, lane: EnumRuntimeLane
+    ) -> None:
+        """Record the live state of every service that did not reach running."""
+        try:
+            states = _compose_service_states(lane)
+        except RuntimeError as exc:
+            logger.warning(
+                "could not read compose state for residue recording: %s", exc
+            )
+            states = {}
+        known = {item.service for item in self.container_residue}
+        for service in stuck:
+            if service in known:
+                continue
+            state, exit_code = states.get(service, ("unknown", None))
+            self.container_residue.append(
+                ModelContainerResidue(service=service, state=state, exit_code=exit_code)
+            )
+
+    def _mark_residue_recovered(self, recovered: set[str]) -> None:
+        """Flip residue entries whose service came up under recovery."""
+        self.container_residue = [
+            item.model_copy(update={"recovered": True})
+            if item.service in recovered
+            else item
+            for item in self.container_residue
+        ]
+
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
         script = f"{REPO_DIR}/scripts/check_llm_endpoint_env_contract.py"
@@ -700,12 +1000,43 @@ class DeployExecutor:
                     f"{source}: {result.stderr.strip() or result.stdout.strip()}"
                 )
 
-    def self_update(self, *, skip: bool = False) -> None:
+    def self_update(
+        self,
+        *,
+        boundary: EnumSelfUpdateBoundary,
+        skip: bool = False,
+        on_before_reexec: Callable[[], None] | None = None,
+    ) -> None:
         """Pull and re-exec deploy-agent itself if behind its tracking ref.
 
-        Called as the first step of every rebuild_scope() invocation so that
-        a bug-fix merged to the lane's deploy branch is picked up before the
-        next deploy runs.
+        Called ONLY at a job boundary, never between the phases of a deploy
+        (OMN-16442). ``boundary`` is required and has no default: every call
+        site names where it fired, the journal line carries that name, and a
+        future mid-deploy caller cannot quietly omit it.
+
+        Why the boundary is the whole contract. This method replaces the
+        process image. Until 2026-09-08 it was invoked as the first statement
+        of ``rebuild_scope`` -- that is, after preflight, git, compose_gen and
+        seed had already run for an accepted command. Command
+        ``8d0c861a-f91e-4ca2-954e-a073759dd39d`` on the .201 dev lane is the
+        live proof of what that costs: those four phases succeeded, this method
+        logged ``behind origin/dev ... pulling and re-execing``, and the
+        replacement process logged ``Recovered 1 crashed job(s)`` and published
+        the command as ``status=failed``. A process that re-execs mid-deploy
+        cannot finish the deploy it is executing, so a deploy that starts on
+        version X must be allowed to complete on version X.
+
+        The two legal boundaries are declared in
+        ``EnumSelfUpdateBoundary``: ``PRE_ACCEPT`` (before a polled command is
+        marked started) and ``POST_TERMINAL`` (after a job's terminal status is
+        published and the single-flight lock is released).
+
+        ``on_before_reexec`` is invoked once the decision to update has been
+        made and immediately before the pull, and only then. The ``PRE_ACCEPT``
+        caller passes a callback that rewinds its committed consumer offset to
+        the un-accepted command, so the replacement process re-reads that
+        command instead of skipping it -- update-then-process, not
+        process-then-die. Callers with nothing to hand off pass nothing.
 
         The branch is DECLARED, never hardcoded: ``DEPLOY_AGENT_TRACKING_REF``
         is required and has no default (OMN-16442, see
@@ -716,10 +1047,28 @@ class DeployExecutor:
 
         Safety rails:
         - Skipped entirely when DEPLOY_AGENT_NO_SELF_UPDATE=1 is set.
-        - Skipped when the working tree is dirty (would discard uncommitted work).
+        - Skipped when the working tree carries TRACKED modifications (a pull
+          would discard uncommitted work). UNTRACKED files do not block
+          (OMN-16442): ``git status --porcelain`` reports the whole repository
+          regardless of the ``-C`` subdirectory, and the deploy path drops
+          untracked build byproducts (historically
+          ``workspace/deploy-source-refs.json``) into whatever repo root it runs
+          from. One such file made the unfiltered check read dirty forever, so
+          the agent skipped every self-update and could not pick up its own
+          fixes -- the exact failure this method exists to prevent. A pull can
+          only lose work that git is tracking; ``--untracked-files=no`` is the
+          narrowest gate that still protects it.
         - skip=True (--skip-self-update CLI flag) bypasses the check.
         - Container mode (DEPLOY_AGENT_MODE=container) exits with code 42
           instead of os.execv so the supervisor can respawn from the new binary.
+        - Host mode re-execs ``DEPLOY_AGENT_LAUNCHER`` when the launcher
+          exported it, and the bare interpreter otherwise (OMN-18073). os.execv
+          inherits the caller's environment, so an interpreter re-exec can only
+          ever carry forward the environment this process started with -- which
+          is how a mangled credential survived four self-updates on 2026-09-09
+          while the code advanced normally. The launcher re-``source``s the
+          operator env store, so code-on-disk and env-on-disk both become
+          code-and-env-in-process.
 
         Raises:
             RuntimeError: when ``DEPLOY_AGENT_TRACKING_REF`` is unset. The
@@ -727,7 +1076,9 @@ class DeployExecutor:
                 deliberately disabled self-update never needs the variable.
         """
         if skip or os.environ.get("DEPLOY_AGENT_NO_SELF_UPDATE") == "1":
-            logger.info("self_update: skipped (kill-switch active)")
+            logger.info(
+                "self_update[boundary=%s]: skipped (kill-switch active)", boundary.value
+            )
             return
 
         branch = load_tracking_ref_from_env()
@@ -735,20 +1086,27 @@ class DeployExecutor:
         agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         timeout = 60
 
-        # Abort if working tree is dirty — never silently discard changes.
+        # Abort only on TRACKED modifications — a pull cannot lose an untracked
+        # file, and untracked deploy byproducts in the clone are exactly what
+        # made this gate never open (OMN-16442).
         status_result = _run(
-            ["git", "-C", agent_dir, "status", "--porcelain"],
+            ["git", "-C", agent_dir, "status", "--porcelain", "--untracked-files=no"],
             timeout=timeout,
         )
         if status_result.returncode != 0:
             logger.warning(
-                "self_update: git status failed (exit=%d), skipping update",
+                "self_update[boundary=%s]: git status failed (exit=%d), skipping update",
+                boundary.value,
                 status_result.returncode,
             )
             return
-        if status_result.stdout.strip():
+        tracked_changes = status_result.stdout.strip()
+        if tracked_changes:
             logger.warning(
-                "self_update: working tree is dirty, skipping update to avoid data loss"
+                "self_update[boundary=%s]: working tree has tracked modifications, "
+                "skipping update to avoid data loss: %s",
+                boundary.value,
+                tracked_changes.replace("\n", "; "),
             )
             return
 
@@ -759,7 +1117,8 @@ class DeployExecutor:
         )
         if fetch_result.returncode != 0:
             logger.warning(
-                "self_update: git fetch failed (exit=%d), skipping update: %s",
+                "self_update[boundary=%s]: git fetch failed (exit=%d), skipping update: %s",
+                boundary.value,
                 fetch_result.returncode,
                 fetch_result.stderr[:200],
             )
@@ -774,7 +1133,10 @@ class DeployExecutor:
             timeout=timeout,
         )
         if head_result.returncode != 0 or remote_result.returncode != 0:
-            logger.warning("self_update: rev-parse failed, skipping update")
+            logger.warning(
+                "self_update[boundary=%s]: rev-parse failed, skipping update",
+                boundary.value,
+            )
             return
 
         local_sha = head_result.stdout.strip()
@@ -782,18 +1144,28 @@ class DeployExecutor:
 
         if local_sha == remote_sha:
             logger.info(
-                "self_update: already at %s (%s), nothing to do",
+                "self_update[boundary=%s]: already at %s (%s), nothing to do",
+                boundary.value,
                 remote_ref,
                 local_sha[:12],
             )
             return
 
         logger.info(
-            "self_update: behind %s (local=%s remote=%s), pulling and re-execing",
+            "self_update[boundary=%s]: behind %s (local=%s remote=%s), pulling and "
+            "re-execing",
+            boundary.value,
             remote_ref,
             local_sha[:12],
             remote_sha[:12],
         )
+
+        # Hand off before the process image is replaced. The PRE_ACCEPT caller
+        # rewinds its committed consumer offset here so the replacement process
+        # re-reads the command that triggered this update rather than skipping
+        # past it.
+        if on_before_reexec is not None:
+            on_before_reexec()
 
         pull_result = _run(
             ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
@@ -801,7 +1173,8 @@ class DeployExecutor:
         )
         if pull_result.returncode != 0:
             logger.warning(
-                "self_update: git pull failed (exit=%d), skipping re-exec: %s",
+                "self_update[boundary=%s]: git pull failed (exit=%d), skipping re-exec: %s",
+                boundary.value,
                 pull_result.returncode,
                 pull_result.stderr[:200],
             )
@@ -814,7 +1187,9 @@ class DeployExecutor:
         )
         if uv_result.returncode != 0:
             logger.warning(
-                "self_update: uv sync failed (exit=%d), proceeding with re-exec anyway: %s",
+                "self_update[boundary=%s]: uv sync failed (exit=%d), proceeding with "
+                "re-exec anyway: %s",
+                boundary.value,
                 uv_result.returncode,
                 uv_result.stderr[:200],
             )
@@ -823,12 +1198,40 @@ class DeployExecutor:
         if mode == "container":
             # Let systemd/compose restart us from the freshly-pulled source.
             logger.info(
-                "self_update: container mode — exiting with code 42 for supervisor respawn"
+                "self_update[boundary=%s]: container mode — exiting with code 42 for "
+                "supervisor respawn",
+                boundary.value,
             )
             sys.exit(42)
         else:
-            logger.info("self_update: host mode — re-execing process image")
-            os.execv(sys.executable, [sys.executable] + sys.argv)  # noqa: S606
+            launcher = os.environ.get("DEPLOY_AGENT_LAUNCHER")
+            if launcher:
+                # OMN-18073: re-exec THROUGH the launcher, not the bare
+                # interpreter. os.execv replaces the process image but inherits
+                # the caller's environment verbatim, so an interpreter re-exec
+                # carries the environment this process started with forward
+                # forever. On 2026-09-09 that is exactly what happened: the
+                # agent re-execed four times across the day, advancing its code
+                # from b0b46c18 to c65d8a8b normally, while the mangled
+                # ONEXBOT_OCC_PRIVATE_KEY it had inherited from systemd's
+                # EnvironmentFile= at 01:38:54Z survived every one of them.
+                # Only a systemd restart re-read the file. Going through
+                # deploy/deploy-agent-launch.sh re-`source`s the operator env
+                # store, so a repaired or rotated value is picked up at the next
+                # job boundary instead of needing an operator restart.
+                logger.info(
+                    "self_update[boundary=%s]: host mode — re-execing through "
+                    "launcher %s (re-reads the operator env store)",
+                    boundary.value,
+                    launcher,
+                )
+                os.execv(launcher, [launcher, *sys.argv[1:]])  # noqa: S606
+            else:
+                logger.info(
+                    "self_update[boundary=%s]: host mode — re-execing process image",
+                    boundary.value,
+                )
+                os.execv(sys.executable, [sys.executable] + sys.argv)  # noqa: S606
 
     def preflight(self, on_phase_update: PhaseCallback) -> None:
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.IN_PROGRESS)
@@ -849,7 +1252,47 @@ class DeployExecutor:
 
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.SUCCESS)
 
-    def git_pull(self, git_ref: str, on_phase_update: PhaseCallback) -> str:
+    def git_pull(
+        self,
+        git_ref: str,
+        *,
+        lane: EnumRuntimeLane,
+        on_phase_update: PhaseCallback,
+        lock_timeout: float = DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+    ) -> str:
+        """Fetch and reset the SHARED deploy-source clone to ``git_ref``.
+
+        OMN-18124: under the lane's per-compose-project host lock, the SAME lock
+        ``scripts/runtime_build/refresh_dev_lane.sh`` has held over its own
+        critical section since OMN-16729. ``REPO_DIR`` is shared with that
+        script and this method took nothing, so the two rewrote the same tree
+        concurrently -- recorded in the clone's reflog at 21:26:37 / 23:06:50 /
+        23:31:49 local on 2026-09-09.
+
+        ``lane`` is REQUIRED and has no default: it decides WHICH lane's lock is
+        taken, and a lock on the wrong lane excludes nobody while looking like
+        protection. Guessing ``dev`` here is the same class of defect as the
+        branch literal OMN-16442 removed from this package (rule 8).
+
+        The lock wraps the whole method rather than the reset alone, so a
+        contended lane is refused with the tree untouched -- not after a fetch
+        has already run.
+        """
+        with lane_lock(
+            lane_config_for(lane).compose_project,
+            lane=lane.value,
+            ref=git_ref,
+            timeout=lock_timeout,
+        ):
+            return self._git_pull_locked(git_ref, on_phase_update=on_phase_update)
+
+    def _git_pull_locked(self, git_ref: str, on_phase_update: PhaseCallback) -> str:
+        """The fetch/fence/reset body. Only :meth:`git_pull` may call this.
+
+        Split out so the lock is structurally impossible to skip: there is no
+        public entry point to the mutation that does not go through the
+        context manager above.
+        """
         on_phase_update(Phase.GIT, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS[Phase.GIT]
 
@@ -868,6 +1311,14 @@ class DeployExecutor:
             if result.returncode != 0:
                 raise RuntimeError(f"Git fetch failed: {result.stderr}")
 
+        # OMN-18122: refuse a branch alias that would move the clone BACKWARDS
+        # before anything touches the tree. The fetch above is what makes the
+        # comparison meaningful -- both refs are now current -- and the reset
+        # below is the mutation being fenced.
+        assert_ref_not_stale_branch(
+            self._ref_lineage_facts(git_ref, timeout=timeout),
+        )
+
         # Reset to ref
         result = _run(
             ["git", "-C", REPO_DIR, "reset", "--hard", git_ref],
@@ -885,6 +1336,130 @@ class DeployExecutor:
 
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
+
+    def _ref_lineage_facts(self, git_ref: str, *, timeout: int) -> ModelRefLineageFacts:
+        """Ask git where ``git_ref`` sits relative to this lane's tracking branch.
+
+        Gathers the facts :func:`assert_ref_not_stale_branch` decides on. Kept
+        separate from that decision so the rule itself is a pure function with
+        no repository on disk (OMN-18122).
+
+        ``git rev-parse --symbolic-full-name`` is what distinguishes a branch
+        alias from a commit SHA: it prints a full ref name for a branch and
+        nothing at all for a SHA. That is a git-native answer rather than a
+        regex over the string, so a tag, a ``HEAD``, and an abbreviated SHA are
+        all classified by what they actually resolve to.
+        """
+        tracking_ref = load_tracking_remote_ref_from_env()
+
+        symbolic = _run(
+            ["git", "-C", REPO_DIR, "rev-parse", "--symbolic-full-name", git_ref],
+            timeout=timeout,
+        )
+        is_branch_reference = bool(symbolic.stdout.strip())
+
+        behind = 0
+        ahead = 0
+        if is_branch_reference and git_ref != tracking_ref:
+            counts = _run(
+                [
+                    "git",
+                    "-C",
+                    REPO_DIR,
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    f"{tracking_ref}...{git_ref}",
+                ],
+                timeout=timeout,
+            )
+            # Left column: commits on the tracking ref only (the requested ref
+            # is BEHIND by these). Right column: commits on the requested ref
+            # only (it is AHEAD by these).
+            fields = counts.stdout.split()
+            if counts.returncode == 0 and len(fields) == 2:
+                behind, ahead = int(fields[0]), int(fields[1])
+            else:
+                # A comparison that could not be made is not evidence that the
+                # ref is fine. Refusing here would block every deploy on a
+                # transient git failure, so the fence is skipped and the reason
+                # is logged loudly rather than swallowed.
+                logger.warning(
+                    "OMN-18122 ref fence could not compare %s against %s "
+                    "(rc=%s, stdout=%r); the fence did NOT run for this deploy",
+                    git_ref,
+                    tracking_ref,
+                    counts.returncode,
+                    counts.stdout.strip(),
+                )
+                is_branch_reference = False
+
+        return ModelRefLineageFacts(
+            requested_ref=git_ref,
+            tracking_ref=tracking_ref,
+            is_branch_reference=is_branch_reference,
+            commits_ahead_of_tracking=ahead,
+            commits_behind_tracking=behind,
+        )
+
+    def _preflight_required_compose_env(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        compose_files: list[str],
+        timeout: int,
+    ) -> None:
+        """Fail with EVERY unset required compose variable named, not just the first.
+
+        OMN-17530. ``docker compose config`` stops at the first unset
+        ``${VAR:?}``, so a host missing N of them produces N failed deploys that
+        each name one variable. This runs the repo's stdlib-only preflight over
+        the same compose files and the same environment the validation is about
+        to use, and raises once with the complete list.
+
+        There is no soft-fail branch and no "continue if the script is
+        missing": a preflight that can be skipped is the failure mode this
+        closes, so a missing or unrunnable script surfaces as a non-zero exit
+        and raises like any other refusal. The script is stdlib-only and runs
+        under the interpreter running this agent, so a missing project venv
+        cannot be the reason the list goes unseen.
+        """
+        script = preflight_required_compose_env_script()
+        # OMN-18123: a script that could not be RUN is not a script that RAN and
+        # found unset variables. Both refuse the deploy -- there is still no
+        # soft-fail branch -- but they are different facts and the caller is told
+        # which one happened. Checked here rather than inferred from the
+        # interpreter's stderr, because that text is a CPython message a reader
+        # has to know to look past the error class for, and it is what hid the
+        # real cause (a deploy clone reset onto a commit predating this script)
+        # behind REQUIRED_COMPOSE_ENV_MISSING for three hours.
+        if not Path(script).is_file():
+            raise PreflightScriptUnavailableError(
+                f"PREFLIGHT_SCRIPT_UNAVAILABLE for lane {lane.value} -- the "
+                f"required-compose-env preflight could not be run: {script} is "
+                f"not a file. The deploy source directory is {REPO_DIR}; a clone "
+                "checked out at a commit that predates this script produces "
+                "exactly this. Compose validation was not attempted, and this "
+                "says nothing about whether the compose environment is complete."
+            )
+        cmd = [
+            sys.executable,
+            script,
+            "--lane",
+            lane.value,
+            "--runtime-policy-env",
+            f"{REPO_DIR}/docker/runtime-policy.env",
+        ]
+        for compose_file in compose_files:
+            cmd.extend(["--compose-file", compose_file])
+        result = _run(cmd, timeout=timeout, cwd=REPO_DIR, env=_compose_env())
+        if result.returncode != 0:
+            raise RuntimeError(
+                "REQUIRED_COMPOSE_ENV_MISSING for lane "
+                f"{lane.value} -- compose validation was not attempted. "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        logger.info("required-compose-env preflight: %s", result.stdout.strip())
 
     def compose_gen(
         self,
@@ -1011,6 +1586,26 @@ class DeployExecutor:
             # Validate the stack this deploy will actually bring up: the tracked
             # base plus the lane overlay (OMN-12865).
             config = lane_config_for(lane)
+
+            # OMN-17530 -- report the WHOLE missing-variable set first.
+            #
+            # The validation below is `docker compose config`, which reports the
+            # FIRST unset ${VAR:?} it reaches and stops. On 2026-09-08 two deploy
+            # commands died here ~14 minutes apart on two DIFFERENT variables
+            # added by the same PR (ONEX_API_IMAGE, then ONEX_CLOUD_MIGRATE_IMAGE);
+            # a mechanical enumeration afterwards put the real count at ten. Each
+            # one cost a whole command and a whole lane window to learn one name.
+            #
+            # This preflight parses every ${VAR:?} out of the same compose files
+            # this validation will load, checks them against the same env this
+            # validation will run under, and fails with all of them named at
+            # once. It reads names only, never values.
+            self._preflight_required_compose_env(
+                lane=lane,
+                compose_files=list(config.compose_files),
+                timeout=timeout,
+            )
+
             validate_cmd = [
                 "docker",
                 "compose",
@@ -1107,13 +1702,22 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         git_sha: str = "",
+        git_ref: str = "",
         build_source: BuildSource | str = BuildSource.RELEASE,
-        skip_self_update: bool = False,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
     ) -> list[str]:
-        self.self_update(skip=skip_self_update)
+        # OMN-16442: no self-update here. This method runs inside an accepted
+        # job, after preflight/git/compose_gen/seed; a re-exec from this point
+        # aborts the deploy in flight and the replacement process publishes the
+        # command as failed after recovering it as a crashed job (live: command
+        # 8d0c861a-f91e-4ca2-954e-a073759dd39d, 2026-09-08T16:01Z). Self-update
+        # is a job-boundary concern and lives at the two boundaries declared in
+        # EnumSelfUpdateBoundary. The parameter is removed rather than defaulted
+        # off so this path cannot reach self_update at all.
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
+        # OMN-18057: residue is per-rebuild, not per-process.
+        self.reset_deploy_observations()
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -1153,20 +1757,96 @@ class DeployExecutor:
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
             # the COPY src/ layer even when the file-system mtime is cached.
             self._compose_build(
-                Scope.CORE, git_sha, on_phase_update, build_source=build_source
+                Scope.CORE,
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                runtime_lane=lane,
+                git_ref=git_ref,
             )
             self._compose_build(
-                Scope.RUNTIME, git_sha, on_phase_update, build_source=build_source
+                Scope.RUNTIME,
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                runtime_lane=lane,
+                git_ref=git_ref,
+            )
+            self._build_dev_lane_only_services(
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                lane=lane,
+                git_ref=git_ref,
             )
             self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
             self._compose_up(
                 Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
             )
-            return services_for_scope(Scope.FULL)
+            return services_for_scope(Scope.FULL, lane=lane)
 
-        self._compose_build(scope, git_sha, on_phase_update, build_source=build_source)
+        self._compose_build(
+            scope,
+            git_sha,
+            on_phase_update,
+            build_source=build_source,
+            runtime_lane=lane,
+            git_ref=git_ref,
+        )
+        if scope == Scope.RUNTIME:
+            self._build_dev_lane_only_services(
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                lane=lane,
+                git_ref=git_ref,
+            )
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
-        return services if services else services_for_scope(scope)
+        return services if services else services_for_scope(scope, lane=lane)
+
+    def _build_dev_lane_only_services(
+        self,
+        git_sha: str,
+        on_phase_update: PhaseCallback,
+        *,
+        build_source: BuildSource | str,
+        lane: EnumRuntimeLane,
+        git_ref: str,
+    ) -> None:
+        """Build the DEV lane's own runtime services (OMN-18108). No-op elsewhere.
+
+        These are declared only in ``docker/docker-compose.dev-lane.yml``, which
+        the lane-agnostic build above never passes, so without this command the
+        up phase recreates them from whatever image they already carry and
+        reports success. That is exactly what left eight services ~35 commits
+        behind on the .201 dev lane while the deploy agent's own terminal event
+        said the deploy succeeded.
+
+        Additive and explicit: a SECOND build naming the services, rather than
+        widening the first one's compose files, so prod and stability-test issue
+        a byte-identical command to before. The tag-referenced services are
+        excluded by ``DEV_LANE_ONLY_BUILDABLE_SERVICES`` -- ``docker compose
+        build`` has nothing to do for a service that carries only an ``image:``.
+        """
+        if lane != EnumRuntimeLane.DEV or not DEV_LANE_ONLY_BUILDABLE_SERVICES:
+            return
+        logger.info(
+            "_build_dev_lane_only_services: building %d dev-lane-only services "
+            "the base compose file does not declare: %s",
+            len(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+            ", ".join(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+        )
+        self._compose_build(
+            Scope.RUNTIME,
+            git_sha,
+            on_phase_update,
+            build_source=build_source,
+            runtime_lane=lane,
+            git_ref=git_ref,
+            compose_files=lane_config_for(lane).compose_files,
+            services=DEV_LANE_ONLY_BUILDABLE_SERVICES,
+            stage_workspace=False,
+        )
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
         """Resolve the exact stability-proven image digest for a prod deploy.
@@ -1441,12 +2121,53 @@ class DeployExecutor:
         return fallback
 
     @staticmethod
-    def _stage_workspace(repo_dir: str, omni_home: str) -> None:
+    def _stage_workspace(
+        repo_dir: str,
+        omni_home: str,
+        deploy_ref: str = "",
+        sibling_fallback_ref: str = "",
+    ) -> dict[str, str]:
         """Stage sibling repos into the Docker build context for workspace mode.
 
         Runs docker/runtime_build/stage_workspace.sh from the repo root so that
         workspace/sibling-repos/ is populated before `docker compose build`.
         Raises RuntimeError on failure.
+
+        OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
+        is exported as ``DEPLOY_REF`` for the staging script. The script's
+        OMN-17291 guard refuses to stage the AMBIENT host tree when
+        ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
+        wrong. The command envelope carries the pin (``git_ref=origin/dev``,
+        resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
+        already used it one step earlier, but it was dropped between the
+        consumer and the staging step, so the sibling build was asserted
+        against nothing. Measured live 2026-09-08 on command a5635af0:
+        ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
+
+        The guard STAYS. This passes the pin the operator supplied; it does not
+        weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
+        deliberately NOT substituted with a fallback ref — nothing is exported
+        and the script refuses in its own words, which is the correct outcome
+        for a caller that has no pin to offer.
+
+        OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
+        (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
+        constrains the published ``git_ref`` to a lowercase hex commit SHA of
+        **omnibase_infra**, and that commit exists in no sibling — so RT-1
+        aborted on the first one it tried (``ERROR: omnibase_core: cannot
+        resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
+        rebuild failed by construction, 13 seconds after acceptance (job
+        ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
+        each sibling resolves for itself instead: the declared tracking head.
+        Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
+        the fallback engages only where the primary names no commit.
+
+        Returns repo → the commit SHA RT-1 actually resolved for that sibling,
+        read back from the expected-refs manifest this call pins the location of.
+        The path is named explicitly, under the same ``~/.omnibase/state``
+        convention the script's own default uses but with a distinct
+        agent-and-pid basename, so two concurrent callers cannot read each
+        other's manifest and neither can collide with the script's default.
         """
         script = Path(repo_dir) / "scripts" / "runtime_build" / "stage_workspace.sh"
         if not script.exists():
@@ -1454,13 +2175,38 @@ class DeployExecutor:
                 f"workspace staging script not found: {script}. "
                 "Cannot proceed with BUILD_SOURCE=workspace."
             )
+        staging_env = {**os.environ, "OMNI_HOME": omni_home}
+        refs_out = (
+            Path.home()
+            / ".omnibase"
+            / "state"
+            / "deploy_source_refs"
+            / f"deploy-agent-{os.getpid()}.json"
+        )
+        refs_out.parent.mkdir(parents=True, exist_ok=True)
+        refs_out.unlink(missing_ok=True)
+        staging_env["DEPLOY_SOURCE_REFS_OUT"] = str(refs_out)
+        if deploy_ref:
+            staging_env["DEPLOY_REF"] = deploy_ref
+            logger.info(
+                "_stage_workspace: staging siblings against DEPLOY_REF=%s "
+                "(the accepted command's git_ref)",
+                deploy_ref,
+            )
+        if sibling_fallback_ref:
+            staging_env["DEPLOY_SIBLING_FALLBACK_REF"] = sibling_fallback_ref
+            logger.info(
+                "_stage_workspace: siblings fall back to %s where the requested "
+                "ref names no commit in them (OMN-17135)",
+                sibling_fallback_ref,
+            )
         result = subprocess.run(
             ["bash", str(script)],
             capture_output=True,
             text=True,
             check=False,
             cwd=repo_dir,
-            env={**os.environ, "OMNI_HOME": omni_home},
+            env=staging_env,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -1468,6 +2214,33 @@ class DeployExecutor:
                 f"{result.stderr.strip() or result.stdout.strip()}"
             )
         logger.info("_stage_workspace: %s", result.stdout.strip())
+        return DeployExecutor._read_resolved_sibling_refs(refs_out)
+
+    @staticmethod
+    def _read_resolved_sibling_refs(refs_out: Path) -> dict[str, str]:
+        """Read repo → resolved SHA out of the RT-1 expected-refs manifest.
+
+        Evidence, not a gate: the build already succeeded and its own assertion
+        already compared every vendored SHA against this same manifest. An
+        unreadable manifest is logged and yields an empty map rather than
+        failing a deploy that passed — the fail-closed decision belongs to RT-1,
+        which has already made it (OMN-14438).
+        """
+        try:
+            manifest = json.loads(refs_out.read_text(encoding="utf-8"))
+            repos = manifest["repos"]
+            return {
+                str(repo): str(row["expected_sha"])
+                for repo, row in repos.items()
+                if row.get("expected_sha")
+            }
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            logger.warning(
+                "_stage_workspace: could not read resolved sibling refs from %s: %s",
+                refs_out,
+                exc,
+            )
+            return {}
 
     def _compose_build(
         self,
@@ -1477,6 +2250,11 @@ class DeployExecutor:
         *,
         build_source: BuildSource | str = BuildSource.RELEASE,
         expected_build_source: BuildSource | str | None = None,
+        runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
+        git_ref: str = "",
+        compose_files: tuple[str, ...] = (COMPOSE_FILE,),
+        services: tuple[str, ...] = (),
+        stage_workspace: bool = True,
     ) -> None:
         """Build images with --build-arg GIT_SHA to bust the COPY src/ layer cache.
 
@@ -1491,11 +2269,26 @@ class DeployExecutor:
 
         For BUILD_SOURCE=workspace, stages sibling repos into the build context
         via stage_workspace.sh before invoking docker compose build (OMN-9470).
+
+        OMN-18108: ``compose_files`` / ``services`` / ``stage_workspace`` exist
+        so a DEV deploy can issue a SECOND, additive build for the dev-lane-only
+        services, which are declared in the lane overlay this command otherwise
+        never passes. The defaults reproduce the previous command exactly, so
+        the prod and stability-test build is byte-unchanged. ``stage_workspace``
+        is False on that second call: staging is the expensive, tree-mutating
+        half and it has already run for the same refs in the same deploy --
+        re-running it would re-vendor identical siblings and reset
+        ``sibling_source_refs`` the terminal event reports.
         """
-        timeout = PHASE_TIMEOUTS.get(
-            Phase.CORE if scope == Scope.CORE else Phase.RUNTIME, 300
-        )
         profile = "core" if scope == Scope.CORE else "runtime"
+        # OMN-18072: derived from the build model, never a bare constant. The
+        # flat PHASE_TIMEOUTS entry that used to bound this killed two
+        # consecutive sanctioned dev rebuilds at exactly 300s, the second with a
+        # warm BuildKit cache. It still bounds the pinned-digest pull and the
+        # migration preflight, which are not builds and are not affected.
+        budget = runtime_image_build_budget(profile, compose_files)
+        timeout = budget.timeout_seconds
+        logger.info("Phase %s image-build ceiling %s", profile, budget.describe())
 
         # Validate build-source selector agreement before any side effects.
         # This surfaces selector mismatch and missing OMNI_HOME before staging.
@@ -1510,20 +2303,40 @@ class DeployExecutor:
         # OMN-12626 (R1): release-mode builds produce the digest that is later
         # pinned/promoted to prod. Refuse to build one from a dirty or
         # non-promoted (dev-only) source tree before any docker side effects.
-        assert_release_build_promoted(selected_source)
-
-        if selected_source == BuildSource.WORKSPACE:
-            if not omni_home:
-                raise RuntimeError(
-                    "BUILD_SOURCE=workspace requires OMNI_HOME before build"
-                )
-            self._stage_workspace(REPO_DIR, omni_home)
+        # OMN-16442: scoped to the lanes whose artifacts can reach prod. The
+        # default is PROD, so an undeclared lane still runs the gate.
+        assert_release_build_promoted(selected_source, runtime_lane=runtime_lane)
 
         # OMN-16442: the sibling-repo fallback branch is the declared tracking
         # ref, not a literal. It used to be "dev" for omnimarket and "main" for
         # omnibase_compat — an asymmetry with no stated reason, on two repos
         # that both integrate on `dev`.
         sibling_fallback = load_tracking_ref_from_env()
+
+        if selected_source == BuildSource.WORKSPACE and stage_workspace:
+            if not omni_home:
+                raise RuntimeError(
+                    "BUILD_SOURCE=workspace requires OMNI_HOME before build"
+                )
+            # OMN-16442/OMN-17291: the accepted command's git_ref is the pin the
+            # staging script asserts the INFRA clone against.
+            # OMN-17135: it is a pin on that ONE repository. The CI path
+            # publishes an omnibase_infra commit SHA, which names no commit in
+            # omnibase_core / omnibase_compat / omnimarket, so passing it as
+            # every sibling's ref made RT-1 abort on the first one and took
+            # every CI-triggered rebuild red. Each sibling resolves the declared
+            # tracking head instead, and the SHA it lands on is recorded.
+            self.sibling_source_refs = self._stage_workspace(
+                REPO_DIR,
+                omni_home,
+                git_ref,
+                load_tracking_remote_ref_from_env(),
+            )
+            if self.sibling_source_refs:
+                logger.info(
+                    "_compose_build: sibling source refs %s",
+                    {repo: sha[:12] for repo, sha in self.sibling_source_refs.items()},
+                )
         omnimarket_ref = (
             self._resolve_plugin_ref(
                 f"{omni_home}/omnimarket", fallback=sibling_fallback
@@ -1550,11 +2363,13 @@ class DeployExecutor:
         build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         runtime_version = _runtime_version_from_pyproject()
 
+        compose_file_args: list[str] = []
+        for compose_file in compose_files:
+            compose_file_args.extend(["-f", compose_file])
         cmd = [
             "docker",
             "compose",
-            "-f",
-            COMPOSE_FILE,
+            *compose_file_args,
             "-p",
             COMPOSE_PROJECT,
             "--profile",
@@ -1574,7 +2389,27 @@ class DeployExecutor:
             f"OMNIMARKET_REF={omnimarket_ref}",
         ]
         cmd.extend(validated_args)
-        result = _run(cmd, timeout=timeout, env=_compose_env())
+        # Service names are positional and go last (`docker compose build
+        # [OPTIONS] [SERVICE...]`). Empty by default, which is the lane-agnostic
+        # "every buildable service in the profile" command.
+        cmd.extend(services)
+        # OMN-18072: a blown build ceiling is a build OUTCOME with a name, not
+        # a raw TimeoutExpired carrying a forty-token argv dump into the
+        # terminal record. Nothing has been recreated at this point -- the build
+        # precedes every compose up -- so unlike the OMN-18057 compose-up path
+        # there is no residue to recover; the verdict states that explicitly so
+        # the terminal event settles instead of leaving an operator to go and
+        # check whether the lane is half-recreated.
+        try:
+            result = _run(cmd, timeout=timeout, env=_compose_env())
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"runtime image build for profile {profile!r} exceeded its "
+                f"{timeout}s ceiling and was killed. Ceiling derivation: "
+                f"{budget.describe()}. The lane was NOT mutated: the build runs "
+                f"before any compose up, so no container was stopped, created "
+                f"or recreated by this command."
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose build failed: {result.stderr}")
 
@@ -1589,13 +2424,35 @@ class DeployExecutor:
         extra_env: Mapping[str, str] | None = None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
-        timeout = PHASE_TIMEOUTS.get(phase, 300)
 
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
-        requested_services = _requested_services_for_up(scope, services)
+        requested_services = _requested_services_for_up(scope, services, lane=lane)
+        # For runtime scope, verification MUST be bounded by the requested
+        # runtime service list so the runtime-only rebuild never implicitly
+        # waits on core infra containers (OMN-9455). The same list bounds the
+        # ceiling derivation, so an unrelated long healthcheck elsewhere in the
+        # compose file cannot inflate it.
+        expected = (
+            requested_services
+            if requested_services
+            else services_for_scope(scope, lane=lane)
+        )
+
         if scope == Scope.RUNTIME:
-            self._ensure_runtime_migrations_ready(lane=lane, timeout=timeout)
+            # OMN-18057: derived from the compose model, never a bare constant.
+            budget = runtime_compose_up_budget(lane, expected)
+            timeout = budget.timeout_seconds
+            logger.info(
+                "Phase %s compose-up ceiling %s", phase.value, budget.describe()
+            )
+            # The migration one-shots are not gated on any healthcheck, so they
+            # keep the flat phase bound.
+            self._ensure_runtime_migrations_ready(
+                lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
+            )
+        else:
+            timeout = PHASE_TIMEOUTS.get(phase, 300)
         cmd = [
             "docker",
             "compose",
@@ -1618,29 +2475,42 @@ class DeployExecutor:
         if requested_services:
             cmd.extend(requested_services)
 
-        result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
-        compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
-        if compose_up_error:
-            logger.warning(
-                "Docker compose up returned non-zero; verifying live service state before failing: %s",
-                compose_up_error[:500],
+        # OMN-18057: a blown ceiling is a compose-up OUTCOME, not a reason to
+        # skip the outcome check. Before this, TimeoutExpired propagated out of
+        # here and the verify + per-container recovery below -- the recovery a
+        # non-zero exit already gets -- never ran at all, which is how command
+        # 23edaf62 left three services in Created with :8086 down.
+        try:
+            result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
+        except subprocess.TimeoutExpired:
+            compose_up_error = (
+                f"docker compose up exceeded its {timeout}s ceiling for phase "
+                f"{phase.value} and was killed with the lane mid-recreate"
             )
+            logger.warning(
+                "%s; verifying live service state before deciding the phase verdict",
+                compose_up_error,
+            )
+        else:
+            compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
+            if compose_up_error:
+                logger.warning(
+                    "Docker compose up returned non-zero; verifying live service state before failing: %s",
+                    compose_up_error[:500],
+                )
 
         # Verify containers actually reached running state — docker compose up exits 0
         # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
-        # For runtime scope, verification MUST be bounded by the requested runtime
-        # service list so the runtime-only rebuild never implicitly waits on core
-        # infra containers (OMN-9455).
-        expected = (
-            requested_services if requested_services else services_for_scope(scope)
-        )
         logger.info(
             "Verifying %d container(s) reached running state: %s",
             len(expected),
             expected,
         )
-        ok, stuck = verify_containers_up(expected, timeout_s=120, lane=lane)
+        ok, stuck = verify_containers_up(
+            expected, timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
+        )
         if not ok:
+            self._record_container_residue(stuck, lane=lane)
             logger.warning(
                 "Containers stuck after compose up — attempting docker start recovery: %s",
                 stuck,
@@ -1669,15 +2539,28 @@ class DeployExecutor:
                     logger.warning(
                         "docker start %s failed: %s", name, start_result.stderr[:200]
                     )
-            ok, stuck = verify_containers_up(expected, timeout_s=60, lane=lane)
+            ok, still_stuck = verify_containers_up(
+                expected,
+                timeout_s=CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS,
+                lane=lane,
+            )
+            self._mark_residue_recovered(set(stuck) - set(still_stuck))
             if not ok:
-                detail = (
-                    f"Containers still not running after docker start recovery: {stuck}"
-                )
+                detail = f"Containers still not running after docker start recovery: {still_stuck}"
                 if compose_up_error:
                     detail = f"Docker compose up failed: {compose_up_error}; {detail}"
                 raise RuntimeError(detail)
             logger.info("Recovery succeeded — all containers now running")
+        elif compose_up_error:
+            # The command was killed or exited non-zero, yet every expected
+            # service is running. Stated rather than swallowed: the phase
+            # passes on live state, and VERIFICATION still has to prove health.
+            logger.warning(
+                "compose up did not exit cleanly (%s) but every expected "
+                "service is running; phase %s passes on live state",
+                compose_up_error,
+                phase.value,
+            )
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
 

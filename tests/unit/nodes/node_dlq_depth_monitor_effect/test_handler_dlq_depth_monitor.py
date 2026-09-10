@@ -234,19 +234,27 @@ class TestMultiPartitionFolding:
 class TestAlertGating:
     """The red-run alert surface."""
 
-    async def test_alert_raises_by_default_so_the_workflow_goes_red(self) -> None:
+    async def test_alert_gates_by_default_so_the_workflow_goes_red(self) -> None:
+        """OMN-18088: the gate is a returned field, no longer a raise.
+
+        It used to assert ``pytest.raises(RuntimeHostError)`` and read the
+        offender list out of the exception message. That message was the only
+        copy of the offender list, and two layers of runtime discarded it
+        between the handler and the receipt -- see the OMN-18088 test module
+        beside this one for the null-payload shape it produced.
+        """
         transport = FakeDlqAdminTransport(
             topics={_QUARANTINE: {0: (6, 8_878_948, 8_878_932)}}
         )
 
-        with pytest.raises(RuntimeHostError) as excinfo:
-            await HandlerDlqDepthMonitor(transport).handle(
-                _request(suppress_alert_exit=False)
-            )
+        result = await HandlerDlqDepthMonitor(transport).handle(
+            _request(suppress_alert_exit=False)
+        )
 
-        message = str(excinfo.value)
-        assert _QUARANTINE in message
-        assert "+16" in message
+        assert result.alert_exit_requested is True
+        offender = result.evaluation.alerting_verdicts[0]
+        assert offender.topic == _QUARANTINE
+        assert offender.arrivals_in_window == 16
 
     async def test_suppress_alert_exit_returns_the_histogram_instead(self) -> None:
         transport = FakeDlqAdminTransport(
@@ -280,10 +288,12 @@ class TestAlertGating:
             topics={_QUARANTINE: {0: (6, 8_878_932, None)}}
         )
 
-        with pytest.raises(RuntimeHostError):
-            await HandlerDlqDepthMonitor(transport).handle(
-                _request(suppress_alert_exit=False, max_retained_depth=1_000_000)
-            )
+        result = await HandlerDlqDepthMonitor(transport).handle(
+            _request(suppress_alert_exit=False, max_retained_depth=1_000_000)
+        )
+
+        assert result.alert_exit_requested is True
+        assert result.evaluation.alerting_verdicts[0].topic == _QUARANTINE
 
 
 class TestKillSwitch:
@@ -364,6 +374,68 @@ class TestKillSwitchAndConfiguration:
     ) -> None:
         """A monitor that silently probes the wrong lane is worse than none."""
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.delenv("ONEX_DLQ_MONITOR_DISABLED", raising=False)
+
+        with pytest.raises(RuntimeHostError, match="KAFKA_BOOTSTRAP_SERVERS"):
+            await HandlerDlqDepthMonitor().handle(_request())
+
+    async def test_missing_bootstrap_builds_no_client_at_all_omn17163(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The refusal must happen BEFORE a client is constructed, not during connect.
+
+        The sibling assertion above proves the typed error is raised. It does
+        not prove nothing was contacted, and that distinction is the whole of
+        OMN-17163: ``dlq-depth-monitor.yml`` supplied
+        ``KAFKA_BOOTSTRAP_SERVERS=localhost:19092`` as a workflow default, the
+        guard passed on it, and every one of 545 runs then went to the wire
+        against an address no CI runner can reach. A guard that only fires
+        after a client exists is one default away from probing a lane nobody
+        asked about and reporting it clean.
+
+        So this pins the ORDER: with no broker declared, the aiokafka reader is
+        never even instantiated.
+        """
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.delenv("ONEX_DLQ_MONITOR_DISABLED", raising=False)
+
+        constructed: list[str] = []
+
+        def _explode(bootstrap_servers: str, **_kwargs: object) -> None:
+            constructed.append(bootstrap_servers)
+            raise AssertionError(
+                "a broker client was constructed for an undeclared broker"
+            )
+
+        monkeypatch.setattr(
+            "omnibase_infra.nodes.node_dlq_depth_monitor_effect.handlers."
+            "handler_dlq_depth_monitor._AiokafkaDlqOffsetReader",
+            _explode,
+        )
+
+        with pytest.raises(RuntimeHostError, match="KAFKA_BOOTSTRAP_SERVERS"):
+            await HandlerDlqDepthMonitor().handle(_request())
+
+        assert constructed == []
+
+        # Positive control: the patch is live and the assertion above is not
+        # passing because the monkeypatch silently missed its target. With a
+        # broker declared, the same run DOES reach client construction.
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "declared.example:19092")
+        with pytest.raises(AssertionError, match="undeclared broker"):
+            await HandlerDlqDepthMonitor().handle(_request())
+        assert constructed == ["declared.example:19092"]
+
+    async def test_whitespace_only_bootstrap_is_not_a_broker_omn17163(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A blank-but-present value must fail closed like an absent one.
+
+        ``baselines-scheduler.yml``'s old "dry run" mode set the variable to
+        the empty string and expected a skip; a probe that treated whitespace
+        as a declaration would instead try to connect to nothing.
+        """
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "   ")
         monkeypatch.delenv("ONEX_DLQ_MONITOR_DISABLED", raising=False)
 
         with pytest.raises(RuntimeHostError, match="KAFKA_BOOTSTRAP_SERVERS"):

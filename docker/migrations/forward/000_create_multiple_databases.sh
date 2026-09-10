@@ -90,9 +90,42 @@ INFRA_DATABASES=("infisical_db" "omniweb")
 # role the OMN-14894 tenant_isolation policies are enforced against, so CREATE
 # on schema public — and the table ownership it enables — would exempt every
 # tenant projection write from the isolation P5 exists to establish.
+# chain_canary_reader (OMN-18060) is the third and narrowest member: a READ-ONLY
+# instrument identity for node_chain_canary_effect's OMN-16025 link-2 readback.
+# It belongs here for the same reason as the two above -- grant_role_to_database()
+# would hand it CREATE on schema public, and a role that can own a table is
+# exempt from that table's RLS unconditionally, which is precisely what the
+# canary probes pg_roles to refuse.
+#
+# Its GRANTS are issued by a DIFFERENT seam and deliberately not by this one:
+# scripts/run-forward-migrations.sh's LOGIN_ONLY_ROLE_GRANT_MAP (OMN-18060)
+# re-asserts CONNECT, USAGE on schema public, and column-scoped SELECT
+# (correlation_id, state) on delegation_workflow_state on every compose up --
+# nothing else, and nothing writable -- and reads the outcome back, because a
+# GRANT issued without grant option on the object warns and returns success
+# rather than raising. This map mints the LOGIN credential and issues no
+# grants at all; keeping credential and authorization in separate seams is the
+# invariant, not an accident of where the code landed.
+#
+# OMN-18115: this comment previously credited a numbered migration for those
+# grants. None issues them, and the ordinal it named is BURNED -- OMN-17923
+# retired 104_create_validator_ro_role.sql and its record forbids reuse. A
+# reader who follows a comment to a file that does not exist concludes the
+# authorization was applied by hand; that is what OMN-18115 was filed against.
+#
+# TWO LANES, AND THE MANAGED ONE HAS NEITHER SEAM. chain_canary_reader is a
+# compose-lane instrument: this script mints it on a fresh volume and
+# run-forward-migrations.sh's credential seam re-asserts it on a warm one, both
+# compose-only. The k8s migrate Job applies the flat SQL corpus and never runs
+# that script, so on the managed (RDS) lane the role has no pg_roles row, holds
+# nothing, and needs nothing. That asymmetry is why its GRANTS live in the
+# runner rather than in the flat stream -- a flat file would deliver only on the
+# lanes that already run the runner, and skip on the one lane that would
+# otherwise apply it.
 LOGIN_ONLY_ROLE_MAP=(
     "omninode_runtime:OMNINODE_RUNTIME_PASSWORD"
     "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD"
+    "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD"
 )
 
 # =============================================================================

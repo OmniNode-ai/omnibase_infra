@@ -3,13 +3,42 @@
 #
 # baselines-scheduler.yml — Daily Baselines & ROI computation
 #
-# Invokes NodeBaselinesBatchCompute once per day on the trusted runner selector.
+# Publishes one ModelBaselinesBatchComputeCommand onto the dev lane. The
+# runtime-owned NodeBaselinesBatchCompute consumes it and does the database
+# work; this job is a thin bus publisher and touches no database itself.
 #
-# Requirements (self-hosted runner environment):
-#   OMNIBASE_INFRA_DB_URL  — set in ~/.omnibase/.env (runner picks up via env)
-#   KAFKA_BOOTSTRAP_SERVERS — defaults to localhost:19092 in the script
+# WHAT OMN-17163 CHANGED — SAME DEFECT CLASS AS dlq-depth-monitor.yml
+#   This job read the trusted-CI routing variable for `runs-on` and defaulted
+#   KAFKA_BOOTSTRAP_SERVERS to the literal `localhost:19092`. Both halves were
+#   wrong for the same reason, and its last eight scheduled runs were all red:
 #
-# Ticket: OMN-3335
+#   * `localhost:19092` is the .201 HOST-LOCAL Redpanda external listener
+#     (docker/docker-compose.infra.yml: "Containers use redpanda:9092; host
+#     scripts use localhost:19092"). A GitHub-hosted runner cannot reach it,
+#     and neither can an `omnibase-ci` runner — those are containers with no
+#     host networking, where `localhost` is the container's own loopback.
+#     `omnibase-deploy` is the ONE runner with the
+#     `extra_hosts: host.docker.internal:host-gateway` mapping that puts it in
+#     the lane's reachability domain, so the label is pinned literally here
+#     rather than read from a routing variable a flip can move underneath it.
+#   * `source ~/.omnibase/.env` never supplied the address either: it is a
+#     no-op on a hosted runner, and on the deploy runner the operator env is
+#     mounted at /home/runner/.runner-creds/operator.env instead. No
+#     KAFKA_BOOTSTRAP_SERVERS secret exists at repo or org scope, so the
+#     literal fired unconditionally.
+#   * OMN-18012 Phase B enabled SASL/SCRAM-SHA-256 on that listener at
+#     ~2026-09-07T16:40Z, so an address alone is no longer enough to speak to
+#     it at all.
+#
+#   The address and the transport are now read together from the ONE
+#   declaration every other CI client of this bus already reads — omnimarket's
+#   config/ci_bus_lanes.yaml — and `load_lane_transport` raises rather than
+#   returning a default, so an unresolvable lane stops the run before the
+#   publish instead of publishing at a guess. Credentials are not in that
+#   overlay: only the protocol NAMES are config, and the SCRAM principal
+#   arrives as job environment from the org secrets.
+#
+# Ticket: OMN-3335 (original), OMN-17163 (runner + lane-declared transport)
 
 name: Baselines Scheduler
 
@@ -20,9 +49,13 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Skip Kafka emission (set KAFKA_BOOTSTRAP_SERVERS to empty)'
+        description: 'Validate and print the command envelope without publishing it.'
         required: false
         default: 'false'
+      bus_lane:
+        description: 'CI bus lane whose DECLARED broker + transport the publish uses (omnimarket config/ci_bus_lanes.yaml).'
+        required: false
+        default: 'dev'
 
 env:
   UV_VERSION: "0.8.3"
@@ -31,20 +64,21 @@ env:
 jobs:
   baselines-compute:
     name: Baselines Batch Compute
-    # Trusted runner required: needs PostgreSQL and Kafka access.
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # See "WHAT OMN-17163 CHANGED" above before changing this. The constraint
+    # is network namespace, not trust: this job must sit where the .201 lane's
+    # published broker port is reachable.
+    runs-on: [self-hosted, omnibase-deploy]
     timeout-minutes: 15
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # No git operations after checkout — do not leave the Actions
+          # token in local git config (zizmor artipacked).
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -61,27 +95,88 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # The SAME declaration chain-canary.yml, dlq-depth-monitor.yml and
+      # runtime-rebuild-trigger.yml already read. One declaration, read by
+      # every CI client of this bus, is the whole point: an address that lives
+      # in two places drifts in one of them silently (OMN-14800).
+      - name: Fetch the declared CI bus lanes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve the declared lane transport
+        id: transport
+        env:
+          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+        run: |
+          set -euo pipefail
+          # Fail-closed by construction: load_lane_transport RAISES on a
+          # missing lane, an in-memory lane, an undeclared protocol, or a
+          # broker that is itself a host alias. It never returns a default.
+          #
+          # Only the non-secret half is exported. The SCRAM credentials are
+          # injected as secrets on the publish step below and never pass
+          # through an output, a log line, or a command line.
+          uv run python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              lane_transport_env, load_lane_transport,
+          )
+          lane = os.environ['BUS_LANE']
+          transport = load_lane_transport(
+              pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+          )
+          print(f'lane {lane!r} declares {transport.bootstrap_servers} '
+                f'({transport.security_protocol}/{transport.sasl_mechanism})')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in lane_transport_env(transport).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
       - name: Run baselines batch compute
         env:
-          # Trusted runner: OMNIBASE_INFRA_DB_URL comes from ~/.omnibase/.env.
-          OMNIBASE_INFRA_DB_URL: ${{ secrets.OMNIBASE_INFRA_DB_URL }}
-          KAFKA_BOOTSTRAP_SERVERS: >-
-            ${{
-              github.event.inputs.dry_run == 'true'
-              && ''
-              || 'localhost:19092'
-            }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          # No KAFKA_BOOTSTRAP_SERVERS line and no `|| '<host:port>'` default:
+          # the address arrives from the resolve step through $GITHUB_ENV.
+          #
+          # OMN-17163: the lane declares SASL_PLAINTEXT / SCRAM-SHA-256 since
+          # OMN-18012 Phase B. Injected as ENVIRONMENT so that no credential
+          # reaches argv, the process list, or this log;
+          # build_confluent_auth_config_from_env reads them together with the
+          # KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM the resolve step
+          # exported.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
         run: |
-          # On self-hosted runner, shell env from ~/.omnibase/.env overrides the secret.
-          source ~/.omnibase/.env 2>/dev/null || true
-          uv run python scripts/run_baselines_batch_compute.py
+          set -euo pipefail
+          dry_run_flag=()
+          if [ "$DRY_RUN" = "true" ]; then
+            # A dry run is `--dry-run`, which validates and prints the envelope
+            # and exits 0. It is NOT "blank the broker": that used to make the
+            # publisher exit 1 on an empty bootstrap, so the dry-run path was
+            # itself red.
+            dry_run_flag=(--dry-run)
+          elif [ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]; then
+            echo "::error::KAFKA_BOOTSTRAP_SERVERS is unset — the lane-transport resolve step did not export it. Refusing to publish to an unspecified broker."
+            exit 1
+          fi
+          echo "declared broker: ${KAFKA_BOOTSTRAP_SERVERS:-<dry-run>}"
+          echo "declared transport: ${KAFKA_SECURITY_PROTOCOL:-<unset>}/${KAFKA_SASL_MECHANISM:-<none>}"
+          uv run python scripts/run_baselines_batch_compute.py "${dry_run_flag[@]}"
 
       - name: Post summary
         if: always()
         run: |
           echo "## Baselines Batch Compute (OMN-3335)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Ran NodeBaselinesBatchCompute to populate Baselines & ROI dashboard." >> $GITHUB_STEP_SUMMARY
+          echo "Published the command that drives NodeBaselinesBatchCompute to populate the Baselines & ROI dashboard." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Broker + transport: resolved from omnimarket \`config/ci_bus_lanes.yaml\` (OMN-17163)" >> $GITHUB_STEP_SUMMARY
           echo "- Topic: \`onex.evt.omnibase-infra.baselines-computed.v1\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Tables populated: \`baselines_snapshots\`, \`baselines_comparisons\`, \`baselines_trend\`, \`baselines_breakdown\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Tables populated by the runtime node: \`baselines_snapshots\`, \`baselines_comparisons\`, \`baselines_trend\`, \`baselines_breakdown\`" >> $GITHUB_STEP_SUMMARY

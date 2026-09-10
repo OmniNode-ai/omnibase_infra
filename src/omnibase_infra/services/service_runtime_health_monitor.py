@@ -52,9 +52,12 @@ from omnibase_infra.runtime.health.projection_liveness import (
     describe_dlq_saturation,
     describe_projection_attachment,
     describe_projection_write_path,
+    dlq_saturation_status,
     evaluate_projection_liveness,
     select_kernel_nonwriting_projections,
+    select_nonprojection_group_infixes,
     select_projection_contracts,
+    select_projection_group_suffixes,
 )
 from omnibase_infra.runtime.observability import get_consumer_flow_counters
 from omnibase_infra.runtime.projection_dispatch_ledger import (
@@ -532,6 +535,20 @@ class ServiceRuntimeHealthMonitor:
         # failure.
         nonwriting_projections: tuple[ModelProjectionContractRef, ...] = ()
         attached_topics: frozenset[str] = frozenset()
+        # OMN-16753. Group-suffix -> projection name, so a flow delta on a
+        # topic several projections declare is attributed to the subscription
+        # that produced it instead of to the alphabetically last declarer.
+        # Empty is the honest value when discovery raised: with no manifest
+        # nothing can be attributed, and the saturation half then reports only
+        # what a sole-declarer topic proves.
+        projection_group_suffixes: dict[str, str] = {}
+        # OMN-16753 round 3. The complement: group infixes belonging to
+        # consumers that are NOT projections (a reducer, an effect, a
+        # forwarder). Their flow on a topic a projection also declares is
+        # dropped from the arithmetic rather than counted as unattributable,
+        # which is what failed the stability refresh at 915a10446. Empty is the
+        # conservative value: nothing excluded, so nothing is silenced.
+        nonprojection_group_infixes: dict[str, str] = {}
         try:
             manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
             contract_count = manifest.total_discovered
@@ -555,6 +572,12 @@ class ServiceRuntimeHealthMonitor:
             )
             nonwriting_projections = select_kernel_nonwriting_projections(
                 manifest, kernel_nonwriting
+            )
+            projection_group_suffixes = select_projection_group_suffixes(
+                manifest, projections
+            )
+            nonprojection_group_infixes = select_nonprojection_group_infixes(
+                manifest, projection_group_suffixes
             )
             live_expected_groups = _expected_consumer_groups_from_event_bus(
                 self._event_bus
@@ -755,6 +778,8 @@ class ServiceRuntimeHealthMonitor:
             attached_topics=attached_topics,
             flow_windows=get_consumer_flow_counters().retained_windows.snapshot(),
             kernel_nonwriting=nonwriting_projections,
+            projection_group_suffixes=projection_group_suffixes,
+            nonprojection_group_infixes=nonprojection_group_infixes,
         )
         dimensions.append(
             ModelRuntimeHealthDimension(
@@ -763,10 +788,18 @@ class ServiceRuntimeHealthMonitor:
                 detail=describe_projection_attachment(liveness),
             )
         )
+        # OMN-16753. The status comes from ``dlq_saturation_status`` rather than
+        # being recomputed here, so it cannot disagree with the prose beside it.
+        # It is produced in this dimension's own vocabulary, so there is no
+        # narrowing step between the two that could regrade a value silently.
+        # It is DEGRADED on an unattributable topic as well as on a measured
+        # saturation: flow this process cannot attribute is excluded from every
+        # ratio, and publishing HEALTHY over that exclusion is a false all-clear
+        # on the one dimension that exists to catch a silent total loss.
         dimensions.append(
             ModelRuntimeHealthDimension(
                 name="projection_dlq_saturation",
-                status="DEGRADED" if liveness.dlq_saturated_projections else "HEALTHY",
+                status=dlq_saturation_status(liveness),
                 detail=describe_dlq_saturation(liveness),
             )
         )

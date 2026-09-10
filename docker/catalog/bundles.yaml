@@ -59,6 +59,13 @@ runtime-observability-projections:
     - consumer-health-projection
     - decision-store-consumer
     - omnimarket-projection-delegation
+    # OMN-18114: the TENANT-domain projection CARRIER. Not a BaseProjectionRunner
+    # like the entry above -- it is the runtime kernel under
+    # RUNTIME_PROFILE=tenant-projection, the only process that owns the eight
+    # contracts pinned to that profile. Listed here so the catalog render carries
+    # the same service the base compose declares; the lane overlays decide which
+    # lanes actually START it.
+    - tenant-projection-writer
     - infra-routing-decisions-consumer
     - projection-api
   includes: []
@@ -190,3 +197,15 @@ fault-injection:
     - core
   inject_env: {}
   inject_required_env: []
+tenant-path:
+  description: >-
+    The tenant-scoped control plane on the dev/lab lane (OMN-17530) — onex-api plus the omninode_cloud corpus one-shots it depends on. Deliberately its own bundle and NOT a member of `runtime`: every other lane merges docker-compose.infra.yml and would inherit anything added there, and this plane carries eleven fail-closed secrets that only the dev lane provisions. The dev lane is the lab of record (operator ruling 2026-09-08), and this is the plane that makes a tenant-scoped request resolvable on it — without it the lane can prove the runtime family boots and the projection writers are deployed, and nothing at all about the seam OMN-15583 and OMN-17519 sit in.
+  services:
+    - cloud-migration-files
+    - cloud-migration
+    - onex-api
+  includes:
+    - core
+  inject_env: {}
+  inject_required_env:
+    - ROLE_OMNINODE_PASSWORD

@@ -231,13 +231,82 @@
 #     list, it did not empty it. Measured 2026-09-06: 13 ids remain, each
 #     backed by a ledger CLAIM row. A residual that stops shrinking is the
 #     failure mode to look for.
+#
+#   - OMN-18048 (node_version 1.10.1): AC HEADING QUALIFIERS ARE PART OF THE
+#     TICKET'S HOUSE STYLE, NOT A DIFFERENT SECTION. The AC-coverage guard
+#     previously matched acceptance-criteria headings through a closed exact
+#     set after stripping markdown, leading enumeration and trailing colons.
+#     A real heading with a trailing qualifier such as
+#     "Acceptance criteria (falsifiable)" or a prefix qualifier such as
+#     "Falsifiable acceptance criteria" was therefore invisible. If no known
+#     heading remained, the documented whole-body fallback scanned unrelated
+#     bullets elsewhere in the ticket while bold criteria written as
+#     "**AC1** - ..." were also skipped because the item parser required the
+#     line to start at AC. The sweep could then compare dod_verify against a
+#     criterion count from the wrong section. The parser now normalizes
+#     trailing parenthetical qualifiers, accepts a known AC phrase at the end
+#     of the normalized heading, and tolerates leading emphasis markers before
+#     AC-numbered items. Prose that merely begins with "Acceptance" and
+#     unrelated headings remain rejected. This changes what the sweep is
+#     willing to say in a gap comment, so the gap-comment fingerprint version
+#     moves with the node_version.
+#   THE CAPTURED ITEM TEXT IS PART OF THE CONTRACT (OMN-18048 review,
+#     node_version 1.10.2). The 1.10.x parser widening was correct about WHICH
+#     lines are criteria and wrong about WHAT TEXT they carry, in two ways an
+#     adversarial review caught and a count-only assertion could not:
+#
+#       (a) The item regex consumed a LEADING emphasis run and captured the
+#           rest, so the CLOSING marker survived embedded mid-string:
+#           `**AC1** - text` -> `AC1** - text`. The count was right and the
+#           string was wrong. Item text is used downstream for evidence strings
+#           and de-duplication, so ONE criterion written two ways compared as
+#           TWO. Measuring it also found `__AC8__ bolded` matching NOTHING: a
+#           word boundary does not fire between a digit and an underscore.
+#           Token, emphasis run and remainder are now captured separately, and
+#           the trailing run is dropped ONLY when the item opened with one --
+#           stripping unconditionally truncates text that legitimately ends in
+#           an underscore, trading a capture bug for a truncation bug.
+#
+#       (b) The leading-qualifier heading path matched `endswith(" <spelling>")`
+#           against the SINGLE-TOKEN spellings, so `## Notes on AC`,
+#           `## Why we need DoD` and `## Dropping the AC` all opened a criteria
+#           section over unrelated content -- the same whole-body over-count
+#           1.10.0 exists to stop, re-entering through its own fix. The path is
+#           now eligible only against MULTI-WORD phrases: a one-word suffix is
+#           no evidence that a heading NAMES the section rather than mentioning
+#           it. Exact membership is untouched, so bare `## AC` and `## DoD`
+#           still open a section.
+#
+#   - OMN-18125 (node_version 1.11.0): THE COUNTING RULE JUDGES THE CHECKS
+#     THAT CLAIM COVERAGE, NOT EVERY CHECK IN THE CONTRACT. The bounded-
+#     minority rule ("the non-probative checks must not outnumber the verified
+#     probative ones") read the verdict's TOTALS, which count every auto-minted
+#     Evidence-Source provenance item a ticket's companion history ever
+#     accumulated -- the `-ci` product-diff-scope items, the
+#     `occ-self-bind-pr-<n>` items, the bare PR-state items, each with its
+#     derived `::pr-live-state` overlay. None of them declares `binds_ac`, so
+#     none claims to cover any acceptance criterion, and every one is a bare
+#     `gh pr view --json ...` that the verifier demotes for exactly that
+#     reason. Measured on OMN-17478 (closer run 34431989659, 2026-09-10):
+#     22 of 34 checks were that provenance, and they held a ticket whose six
+#     criteria were EACH bound to a verified probative check -- the OMN-18056
+#     binding leg had already released it. The population grows with every
+#     companion and never shrinks, so the hold was fleet-wide and got worse
+#     with a ticket's age. Both of that rule's terms are now restricted to the
+#     checks whose `binds_ac` names one of this ticket's own criteria. The
+#     more-criteria-than-checks rule is deliberately NOT narrowed: it asks a
+#     different question and narrowing it would hold a contract whose single
+#     integration proof legitimately declares several criteria. This changes
+#     which verdicts the sweep is willing to release, so the gap-comment
+#     fingerprint version moves with the node_version.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 7
   patch: 0
-node_version: "1.9.0"
+node_version: "1.11.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -370,7 +439,7 @@ error_handling:
       retry_strategy: "none"
     - name: "PRIOR_CLOSER_FLIP_REVERTED"
       description: >
-        The ticket's Linear state history shows a completed segment opened by an integration (actorId null — the shape this sweep's own issueUpdate has) and closed by a real actor (OMN-17934). Somebody has already disagreed with an automated close, and re-closing from the same mechanism would overrule that disagreement with a cron tick. Recorded as SKIPPED_PRIOR_REVERT, and it also DISARMS the rest of the run (see AUTOCLOSE_DISARMED).
+        The ticket's Linear state history shows a completed segment opened by an integration (actorId null — the shape this sweep's own issueUpdate has) and closed by a real actor (OMN-17934). Somebody has already disagreed with an automated close, and re-closing from the same mechanism would overrule that disagreement with a cron tick. Recorded as SKIPPED_PRIOR_REVERT, and it also DISARMS the rest of the run (see AUTOCLOSE_DISARMED). OMN-18106 adds the positive sibling for the case where the first post-revert sweep observation happens after new probative evidence already landed: before comparing the current verdict against recorded post-revert baselines, the node compares the newest reversal createdAt against the merged OCC companion timestamp and cited product-PR merged_at timestamps that the verdict is resolved from. Evidence landing at or after the reversal releases the candidate only to the ordinary flip predicate when the verdict also carries at least one verified check with a canonical binds_ac criterion; verified but unbound provenance is not enough to say the postdating artifact is the evidence the ticket is judged on. Evidence entirely before the reversal still holds under the recorded-baseline mechanism. An unreadable reversal timestamp or evidence timestamp holds and names the unreadable value, because an unresolved ordering is not evidence that the work moved after the disagreement.
 
       recoverable: true
       retry_strategy: "none"
@@ -389,6 +458,18 @@ error_handling:
     - name: "FLIP_READBACK_UNCONFIRMED"
       description: >
         issueUpdate(stateId) reported success but no completed state-history segment newer than the pre-write head appeared within readback_max_attempts reads (OMN-17658). Recorded as ERROR_READBACK_UNCONFIRMED and counted under tickets_errored, never as a flip: the API agreeing to a request is not evidence the board moved. The outcome still carries applied=true, because the state change WAS written -- measured on run 33958237006, where recording applied=false on a ticket the run had just moved to Done left a receipt that disagreed with the board in the direction nobody checks. OMN-16106, node_version 1.9.0: an unconfirmed readback is now a REFUSAL and the write is ROLLED BACK to the pre-write state, reported as flip_rolled_back. The label and the flip cannot coexist -- run 34061364537 left OMN-16025 reading Done on the board under a comment saying the readback did not confirm, and every downstream sweep and rollup reads the board while almost nobody opens the comment. A rollback target (the pre-write state id) is therefore a PRECONDITION of the write: a Done this run could not take back is a Done it may not write. The audit comment is still posted, now under the class=readback_unconfirmed marker rather than class=flipped -- stamping the flip marker on a write that was taken back would teach the prior-revert fence that this mechanism had closed a ticket it did not close, and the fence would then refuse a later, legitimate flip. If the rollback write ALSO fails, flip_rolled_back is false and both the reason and the comment say the ticket may be sitting in Done unverified.
+
+      recoverable: true
+      retry_strategy: "none"
+    - name: "AC_BINDING_UNBOUND"
+      description: >
+        dod_verify was fully green and every counting rule released, but at least one acceptance criterion parsed from the ticket's Linear description is DECLARED BY NO verified probative check (OMN-18056, node_version 1.10.0). A check is bound to a criterion only when the OCC contract's `dod_evidence` item names it in `binds_ac` AND that check verified -- a non-probative or skipped declaration is a claim, not a proof, and appears in the binding table with its status so the near-miss is legible. Recorded as GAP_AC_UNBOUND, counted under tickets_gap_posted beside AC_COVERAGE_GAP for the same reason: the run DID form an opinion about the evidence and found a criterion nothing proves. The hold NAMES the criterion by its `AC<n>`/`DoD<n>` label rather than restating a ratio, because which criterion is unproven is the whole finding. A body from which NO criterion parses holds here too, inverting the counting rules' `if not items` early exit: "nothing is written down" and "nothing can be read" are the same observation from here, and a green tally over criteria that do not exist is an arithmetic identity rather than evidence. Measured, DoD closeout sweep run 2 on 2026-09-08: 7 of the 9 tickets satisfying the full predicate were NOT done, and in every held case the criterion that decides the ticket was bound to no check. STATED HALT: 0 of 8714 OCC contracts declare `binds_ac` today, so the first armed tick after this lands holds EVERY candidate here and flips none. That is the intended fail-closed behaviour and it is the measurement; the remedy is contract authorship (the PR-authoring lane declares `binds_ac` per evidence item), never inference -- the OMN-16434 autobinder binds a DIFF and cannot know which criterion a diff proves. HONEST LIMIT: `binds_ac` is the author's CLAIM. This node can verify a named check ran and was probative; it cannot verify the check proves the criterion. What the conjunct removes is the silent case.
+
+      recoverable: false
+      retry_strategy: "none"
+    - name: "REDRAW_PENDING"
+      description: >
+        Every conjunct cleared and this is the FIRST run to observe this verdict fingerprint, so the run ARMS a re-draw and writes no Done (OMN-18056, node_version 1.10.0). A later tick that recomputes the SAME fingerprint flips. Recorded as SKIPPED_REDRAW_PENDING and counted under tickets_skipped, never as a gap: nothing about the ticket's evidence is disputed and nobody has anything to do, so reporting it as a gap would put a clean ticket on somebody's repair list once per tick until it closed. The marker lives on the ticket, like every other piece of this sweep's memory, because the runner shares no state between runs. WHY: the verdict is a function of the ticket AND of the trees its checks execute in, and the second input moves for reasons that have nothing to do with the ticket -- measured in closeout sweep run 2, fast-forwarding two stale product clones moved OMN-16025 from predicate-FAIL to predicate-PASS with no acceptance criterion having changed, and from the counters alone a pass manufactured that way is indistinguishable from one the work earned. HONEST LIMIT: this defeats a SINGLE-run perturbation. An input change that persists across two ticks -- a repaired clone, which is the steady state of a repair -- passes it. It does not make the predicate staleness-invariant; it makes a pass non-instantaneous, which is the only claim made for it. Cost: one tick.
 
       recoverable: true
       retry_strategy: "none"
@@ -507,7 +588,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-17"
-  updated: "2026-09-05"
+  updated: "2026-09-09"
   tags:
     - "effect"
     - "linear"

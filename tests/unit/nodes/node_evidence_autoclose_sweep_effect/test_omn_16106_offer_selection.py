@@ -58,6 +58,10 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+    redraw_marker_comment,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -139,6 +143,10 @@ def _all_green(ticket: str) -> dict[str, Any]:
                 "status": "verified",
                 "message": "OK (1ms)",
                 "proof_class": "behavior",
+                # OMN-18056: the behaviour proof declares WHICH criterion it
+                # covers. `_RecordingLinear` writes the matching labelled
+                # criterion into every body below.
+                "binds_ac": ["AC1"],
             },
         ],
         "total_checks": 2,
@@ -187,7 +195,7 @@ class _RecordingLinear:
         self,
         *,
         children: tuple[dict[str, Any], ...] = (),
-        description: str | None = None,
+        description: str | None = BOUND_AC_DESCRIPTION,
     ) -> None:
         self.reads: list[str] = []
         self.state_updates: list[tuple[str, str]] = []
@@ -347,6 +355,14 @@ async def test_an_aged_nominated_ticket_is_resolved_outside_every_window() -> No
     gh = _GhRecorder()
     handler, verified = _handler(linear, gh)
 
+    # OMN-18056: the first eligible observation of a verdict arms the re-draw
+    # and writes no Done; the flip is the second tick on the same fingerprint.
+    armed = await handler.handle(_request(offer_tickets=(_AGED,)))
+    assert (
+        armed.outcomes[0].decision
+        is EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+    )
+
     result = await handler.handle(_request(offer_tickets=(_AGED,)))
 
     assert result.tickets_flipped == 1
@@ -357,7 +373,8 @@ async def test_an_aged_nominated_ticket_is_resolved_outside_every_window() -> No
     # The DISTINCT ARM. A run that reported this as FORWARD or BACKFILL would
     # make the receipt claim a coverage window the run never enumerated.
     assert outcome.enumeration_arm is EnumEvidenceAutocloseArm.OFFER
-    assert verified == [_AGED]
+    # One verifier call per tick, and exactly one write across the two.
+    assert verified == [_AGED, _AGED]
     assert linear.state_updates == [(f"issue-{_AGED}", "state-done-id")]
     # Resolution went through the SEARCH endpoint, not a window enumeration.
     assert any(path.startswith("search/issues") for path in gh.paths)
@@ -467,6 +484,14 @@ async def test_a_search_hit_binding_a_second_ticket_is_discarded_and_the_right_o
     )
     handler, _verified = _handler(linear, gh)
 
+    # OMN-18056: the first eligible observation of a verdict arms the re-draw
+    # and writes no Done; the flip is the second tick on the same fingerprint.
+    armed = await handler.handle(_request(offer_tickets=(_AGED,)))
+    assert (
+        armed.outcomes[0].decision
+        is EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+    )
+
     result = await handler.handle(_request(offer_tickets=(_AGED,)))
 
     assert [o.ticket_id for o in result.outcomes] == [_AGED]
@@ -538,14 +563,26 @@ async def test_an_eligible_unlisted_ticket_gets_zero_reads_and_zero_writes() -> 
     gh = _GhRecorder()
     handler, verified = _handler(linear, gh)
 
+    # OMN-18056: the first eligible observation of a verdict arms the re-draw
+    # and writes no Done; the flip is the second tick on the same fingerprint.
+    armed = await handler.handle(_request(offer_tickets=(_AGED,)))
+    assert (
+        armed.outcomes[0].decision
+        is EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+    )
+
     result = await handler.handle(_request(offer_tickets=(_AGED,)))
 
     assert [o.ticket_id for o in result.outcomes] == [_AGED]
     assert _UNLISTED not in linear.reads
-    assert verified == [_AGED]
+    assert verified == [_AGED, _AGED]
     # Scoped to the unlisted ticket, not to "no comments at all": the OFFERED
-    # ticket flipping does post its audit comment, and that is the run working.
-    assert [issue for issue, _body in linear.comments] == [f"issue-{_AGED}"]
+    # ticket posts its re-draw comment and then its audit comment, and that is
+    # the run working.
+    assert [issue for issue, _body in linear.comments] == [
+        f"issue-{_AGED}",
+        f"issue-{_AGED}",
+    ]
     assert [issue for issue, _state in linear.state_updates] == [f"issue-{_AGED}"]
     # No window enumeration ran at all, so the unlisted ticket was never even
     # a candidate. This is the assertion that separates "restrictive" from
@@ -627,8 +664,14 @@ async def test_a_selected_offer_still_refuses_on_a_failed_dod_check() -> None:
 
 async def test_a_selected_offer_still_refuses_on_an_unmerged_cited_pr() -> None:
     """OMN-16106 D1's cited-PR merge conjunct is not bypassed by nomination."""
+    # OMN-18056: the AC-binding gate sits ahead of the cited-PR conjunct, so
+    # the body carries a BOUND criterion appended under a heading. Without it
+    # this fixture is held for an unbound `AC-5` and the conjunct under test
+    # is never reached.
     linear = _RecordingLinear(
-        description="AC-5 is proved by OmniNode-ai/omnimarket#4242."
+        description=(
+            f"AC-5 is proved by OmniNode-ai/omnimarket#4242.\n\n{BOUND_AC_DESCRIPTION}"
+        )
     )
     gh = _GhRecorder(cited_pr_merged=False)
     handler, _verified = _handler(linear, gh)
@@ -700,6 +743,13 @@ async def test_the_all_green_positive_case_still_flips() -> None:
     gh = _GhRecorder()
     handler, _verified = _handler(linear, gh)
 
+    # OMN-18056: the first eligible observation arms the re-draw, the second
+    # flips.
+    armed = await handler.handle(_request(offer_tickets=(_AGED,)))
+    assert (
+        armed.outcomes[0].decision
+        is EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
+    )
     result = await handler.handle(_request(offer_tickets=(_AGED,)))
 
     assert result.tickets_flipped == 1
@@ -740,6 +790,20 @@ async def test_an_all_green_offered_ticket_in_dry_run_writes_nothing() -> None:
     gh = _GhRecorder()
     handler, verified = _handler(linear, gh)
 
+    # OMN-18056: a DRY-RUN writes nothing, so it can never arm its own
+    # re-draw. The marker an earlier APPLY tick would have left is seeded, so
+    # this rehearsal is the SECOND observation and previews the flip honestly
+    # rather than previewing a hold forever.
+    linear.comments.append(
+        (
+            f"issue-{_AGED}",
+            redraw_marker_comment(
+                total_checks=2, verified_count=2, behavior_proving_count=1
+            ),
+        )
+    )
+    seeded = list(linear.comments)
+
     result = await handler.handle(_request(offer_tickets=(_AGED,), apply=False))
 
     assert result.dry_run is True
@@ -749,7 +813,7 @@ async def test_an_all_green_offered_ticket_in_dry_run_writes_nothing() -> None:
     assert outcome.linear_comment_posted is False
     assert verified == [_AGED]
     assert linear.state_updates == []
-    assert linear.comments == []
+    assert linear.comments == seeded
 
 
 def test_the_request_model_declares_offer_tickets_empty_by_default() -> None:
@@ -774,6 +838,8 @@ async def test_a_lowercase_offer_still_resolves() -> None:
     gh = _GhRecorder()
     handler, _verified = _handler(linear, gh)
 
+    # OMN-18056: two ticks, the second is the flip.
+    await handler.handle(_request(offer_tickets=("  omn-16831 ",)))
     result = await handler.handle(_request(offer_tickets=("  omn-16831 ",)))
 
     assert result.outcomes[0].ticket_id == _AGED

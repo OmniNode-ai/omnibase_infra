@@ -104,10 +104,103 @@ def test_no_pull_request_trigger(workflow: dict[str, object]) -> None:
 @pytest.mark.unit
 def test_probes_the_lane_through_the_host_gateway(workflow_text: str) -> None:
     assert "http://host.docker.internal:8085" in workflow_text
-    assert "host.docker.internal:19092" in workflow_text
     # A localhost probe from inside the runner container hits the container
     # itself and reports a false RED (OMN-14958).
     assert "http://localhost:8085" not in workflow_text
+
+
+def _dispatch_inputs(workflow: dict[str, object]) -> dict[str, object]:
+    triggers = workflow.get("on", workflow.get(True))
+    assert isinstance(triggers, dict)
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert isinstance(inputs, dict)
+    return inputs
+
+
+def _step(job: dict[str, object], name_fragment: str) -> dict[str, object]:
+    for step in job["steps"]:
+        if name_fragment.lower() in str(step.get("name", "")).lower():
+            assert isinstance(step, dict)
+            return step
+    message = f"no step matching {name_fragment!r}"
+    raise AssertionError(message)
+
+
+@pytest.mark.unit
+def test_no_broker_leg_carries_a_host_alias_default(
+    workflow: dict[str, object], canary_job: dict[str, object]
+) -> None:
+    """OMN-17926 — asserted STRUCTURALLY, on values, never on file text.
+
+    The predecessor of this test grepped the whole file for the literal, and
+    that is exactly why it could not catch the fix landing wrong: a sentence
+    in the header explaining the literal satisfies a text grep just as well as
+    a live default does. Rule 15's failure mode, one level down. So this reads
+    the dispatch input defaults and the probe step's env VALUES — the only
+    places a broker address can actually reach the client.
+    """
+    from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+        host_aliases_in,
+    )
+
+    inputs = _dispatch_inputs(workflow)
+    for name in ("quarantine_bootstrap_servers", "terminal_bootstrap_servers"):
+        default = str(inputs[name].get("default", ""))
+        assert host_aliases_in(default) == (), (
+            f"dispatch input {name} defaults to a Docker-Desktop host alias; "
+            "that literal is what took 25 consecutive runs red"
+        )
+        assert default == "", (
+            f"{name} must default to empty so the LANE DECLARATION supplies "
+            "the broker; any literal default re-creates the defect"
+        )
+
+    probe_env = _step(canary_job, "Fire one live delegation")["env"]
+    assert isinstance(probe_env, dict)
+    for key, value in probe_env.items():
+        assert host_aliases_in(str(value)) == () or "PROBE_URL" in key, (
+            f"probe step env {key} carries a Docker-Desktop host alias"
+        )
+
+
+@pytest.mark.unit
+def test_the_broker_comes_from_the_declared_lane_overlay(
+    canary_job: dict[str, object],
+) -> None:
+    """The address and its transport are read from one declaration."""
+    checkout = _step(canary_job, "Fetch the declared CI bus lanes")
+    assert checkout["with"]["repository"] == "OmniNode-ai/omnimarket"
+    assert "config/ci_bus_lanes.yaml" in str(checkout["with"]["sparse-checkout"])
+
+    resolve = _step(canary_job, "Resolve the declared lane transport")
+    body = str(resolve["run"])
+    assert "load_lane_transport" in body
+    assert "lane_transport_env" in body
+    assert "ci_bus_lanes.yaml" in body
+
+
+@pytest.mark.unit
+def test_sasl_credentials_reach_the_client_as_env_never_argv(
+    canary_job: dict[str, object],
+) -> None:
+    """A credential on a command line lands in the process list and the log."""
+    probe = _step(canary_job, "Fire one live delegation")
+    env = probe["env"]
+    assert isinstance(env, dict)
+    assert "KAFKA_SASL_USERNAME" in env
+    assert "KAFKA_SASL_PASSWORD" in env
+
+    body = str(probe["run"])
+    for flag in ("--sasl-username", "--sasl-password", "--kafka-password"):
+        assert flag not in body
+    assert "KAFKA_SASL_PASSWORD" not in body, (
+        "the credential must be read by the client from the environment, not "
+        "interpolated into the command it runs"
+    )
+
+    resolve_body = str(_step(canary_job, "Resolve the declared lane transport")["run"])
+    assert "KAFKA_SASL_USERNAME" not in resolve_body
+    assert "KAFKA_SASL_PASSWORD" not in resolve_body
 
 
 @pytest.mark.unit
@@ -196,3 +289,76 @@ def test_red_verdict_fails_the_run(workflow_text: str) -> None:
     assert "sys.exit(1)" in workflow_text
     assert "::error::chain canary RED" in workflow_text
     assert "if: always()" in workflow_text
+
+
+@pytest.mark.unit
+def test_the_projection_dsn_is_declared_by_name_and_injected_as_env(
+    canary_job: dict[str, object], workflow_text: str
+) -> None:
+    """OMN-18060: the link-2 DSN reaches the node through the environment.
+
+    Run 34281968883 failed closed on ``projection_readback_not_configured``
+    because no DSN was declared anywhere. The fix declares its NAME in the same
+    lane overlay the broker comes from and injects the VALUE as a job secret.
+    Both halves are asserted, because either one alone is the bug: a name with
+    no secret makes a readback that silently never runs, and a secret with no
+    name makes one nobody can review.
+    """
+    resolve = _step(canary_job, "Resolve the declared projection-readback DSN")
+    body = str(resolve["run"])
+    assert "load_lane_projection_readback" in body
+    assert "projection_readback_env" in body
+    assert "ci_bus_lanes.yaml" in body
+
+    probe = _step(canary_job, "Fire one live delegation")
+    env = probe["env"]
+    assert isinstance(env, dict)
+    assert "CHAIN_CANARY_PROJECTION_DSN" in env, (
+        "the DSN must be injected as a job secret under the literal name the "
+        "lane declares"
+    )
+    assert str(env["CHAIN_CANARY_PROJECTION_DSN"]).startswith("${{ secrets."), (
+        "the DSN must come from a secret, never from a literal in the workflow"
+    )
+
+
+@pytest.mark.unit
+def test_no_dsn_ever_reaches_a_command_line(
+    canary_job: dict[str, object], workflow_text: str
+) -> None:
+    """argv is world-readable through /proc and this step echoes its config.
+
+    The flag the workflow passes carries the variable's NAME. There is
+    deliberately no ``--projection-dsn`` flag anywhere -- not in the workflow,
+    and not in the skill mapping, which is what builds argv.
+    """
+    probe = _step(canary_job, "Fire one live delegation")
+    body = str(probe["run"])
+
+    assert "--projection-dsn-env" in body
+    assert "--projection-dsn " not in body
+    assert "--projection-dsn=" not in body
+    assert "CHAIN_CANARY_PROJECTION_DSN}" not in body, (
+        "the run block must interpolate the NAME variable "
+        "(CHAIN_CANARY_PROJECTION_DSN_ENV), never the DSN one"
+    )
+
+    registry = yaml.safe_load(_SKILL_MAPPING.read_text(encoding="utf-8"))
+    mapping = next(
+        (s for s in registry["skills"] if s["skill_name"] == _SKILL_NAME), None
+    )
+    assert mapping is not None
+    declared = {f"--{arg['name']}" for arg in mapping["args"]}
+    assert "--projection-dsn-env" in declared
+    assert "--projection-dsn" not in declared, (
+        "a --projection-dsn flag would put the credential in argv, in this "
+        "run's log, and -- because `onex skill` serialises every arg into the "
+        "node payload -- durably into the event log"
+    )
+
+    # And no connection string is spelled anywhere in the workflow itself.
+    for marker in ("postgres://", "postgresql://", "password="):
+        assert marker not in workflow_text, (
+            f"the workflow spells {marker!r}; the DSN is a secret and belongs "
+            "in the lab store under the declared name"
+        )

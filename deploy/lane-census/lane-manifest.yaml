@@ -182,6 +182,16 @@ lanes:
       - name: omnimarket-stability-test-projection-live-events-writer
         kind: service
         replicas: 1
+      # OMN-18114: the TENANT-domain projection CARRIER. Not one of the writers
+      # above -- it is the runtime kernel under RUNTIME_PROFILE=tenant-projection,
+      # the only process that owns the eight omnimarket contracts declaring
+      # `runtime_profiles: [tenant-projection]`. Those eight are dropped from
+      # `main` and `effects` by filter_manifest_for_runtime_profile, so before
+      # this container existed they were discovered on this lane and subscribed
+      # by nothing.
+      - name: omnimarket-stability-test-tenant-projection-writer
+        kind: service
+        replicas: 1
       # OMN-16803: these four are `profile_gated` — EXPECTED ABSENT on this lane.
       #
       # docker-compose.stability-test.yml sets `profiles: !override
@@ -354,6 +364,16 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-projection-live-events-writer
+        kind: service
+        replicas: 1
+      # OMN-18114: the TENANT-domain projection CARRIER. Not one of the writers
+      # above -- it is the runtime kernel under RUNTIME_PROFILE=tenant-projection,
+      # the only process that owns the eight omnimarket contracts declaring
+      # `runtime_profiles: [tenant-projection]`. Those eight are dropped from
+      # `main` and `effects` by filter_manifest_for_runtime_profile, so before
+      # this container existed they were discovered on this lane and subscribed
+      # by nothing.
+      - name: omnimarket-tenant-projection-writer
         kind: service
         replicas: 1
   # OMN-17143: COLLABORATOR lane for Lakshman Patel (operator decision

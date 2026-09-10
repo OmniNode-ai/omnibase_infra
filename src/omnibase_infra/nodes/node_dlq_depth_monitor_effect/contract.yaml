@@ -30,10 +30,10 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
-  Read-only dead-letter-queue depth and arrival-rate probe (OMN-16769). Enumerates every onex.dlq.* topic on the configured broker, measures retained depth and arrivals-in-window from broker offsets, evaluates them against contract-declared bounds, and raises when a sink exceeds its bound so the scheduled workflow goes RED. Performs no writes of any kind.
+  Read-only dead-letter-queue depth and arrival-rate probe (OMN-16769). Enumerates every onex.dlq.* topic on the configured broker, measures retained depth and arrivals-in-window from broker offsets, evaluates them against contract-declared bounds, and returns a typed result stating both the full per-topic histogram and the run-gating decision. Performs no writes of any kind. OMN-18088: the alert is a VALUE (result.alert_exit_requested), not a raise — the scheduled workflow reads that field and exits non-zero on it, so the run that goes RED is the same run that wrote down which sinks breached and by how much.
 
 input_model:
   name: "ModelDlqDepthMonitorRequest"
@@ -42,7 +42,7 @@ input_model:
 output_model:
   name: "ModelDlqDepthMonitorResult"
   module: "omnibase_infra.nodes.node_dlq_depth_monitor_effect.models.model_dlq_depth_monitor_result"
-  description: "Topics matched plus the full per-topic evaluation histogram."
+  description: "Topics matched, the full per-topic evaluation histogram, and the derived alert_exit_requested gating decision."
 # Top-level handler block: RuntimeLocal's single-shot compute execution path
 # resolves the handler + its input model from THIS block (same shape as
 # node_sync_revert_watchdog_effect / node_evidence_autoclose_sweep_effect).
@@ -57,12 +57,14 @@ handler_routing:
       handler:
         name: "HandlerDlqDepthMonitor"
         module: "omnibase_infra.nodes.node_dlq_depth_monitor_effect.handlers.handler_dlq_depth_monitor"
-      description: "enumerate DLQ topics -> read offsets -> evaluate -> raise on alert"
+      description: "enumerate DLQ topics -> read offsets -> evaluate -> return the histogram and the gating decision"
       output_fields:
         - topics_matched
         - evaluation
         - evaluated_at
         - window_seconds
+        - suppress_alert_exit
+        - alert_exit_requested
 alert_policy:
   window_seconds: 1800
   # Matches the 30-minute scheduled cadence exactly so consecutive runs tile
@@ -93,12 +95,13 @@ error_handling:
     exponential_base: 1
     retry_on: []
   error_types:
-    - name: "DLQ_ARRIVAL_ALERT"
-      description: >
-        One or more DLQ topics took more arrivals in the window than their declared bound allows. This is the ALERT SURFACE, not a malfunction — the raise is what turns the scheduled run RED, and red is what an operator sees. Suppressed by suppress_alert_exit=true for characterization runs that want the histogram without gating.
-
-      recoverable: true
-      retry_strategy: "none"
+    # OMN-18088 removed DLQ_ARRIVAL_ALERT from this list. A breaching sink is
+    # not an error condition of this node: it is the measurement the node
+    # exists to take, and modelling it as a raise is what lost it. The raise
+    # was caught by RuntimeLocal, never re-raised, and receipt mode's
+    # typed-result branch is gated on success — so the alerting run emitted a
+    # null payload naming no topic (run 34399417506). The alert is now
+    # result.alert_exit_requested, a derived field the workflow reads.
     - name: "BOOTSTRAP_NOT_CONFIGURED"
       description: >
         KAFKA_BOOTSTRAP_SERVERS is unset and no transport was injected. Fails closed rather than defaulting to a broker address: a monitor that silently probes the wrong lane reports a false clean bill of health, which is strictly worse than not running.
@@ -121,12 +124,14 @@ io_operations:
       - evaluated_at
       - window_seconds
       - correlation_id
+      - suppress_alert_exit
+      - alert_exit_requested
 dependencies:
   - name: "kafka_bootstrap_servers"
     type: "environment"
     env_var: "KAFKA_BOOTSTRAP_SERVERS"
     description: >
-      Broker to probe. On the .201 trusted runner the dev lane is localhost:19092 (compose project omnibase-infra), the same address the baselines-scheduler workflow uses. No default is applied in code.
+      Broker to probe. No default is applied in code, and the caller must not supply one either (OMN-17163): the dev lane's address AND its transport are declared together in omnimarket config/ci_bus_lanes.yaml, which the scheduled workflow resolves through load_lane_transport before dispatching this node. An address without a transport is what let a plaintext client open against the SASL_PLAINTEXT/SCRAM-SHA-256 listener OMN-18012 Phase B enabled on that lane.
 
     required: true
   - name: "dlq_monitor_kill_switch"

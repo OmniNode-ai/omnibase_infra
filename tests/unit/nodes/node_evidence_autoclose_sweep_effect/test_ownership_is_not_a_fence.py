@@ -67,7 +67,14 @@ _TICKET_LITERAL = re.compile(r"OMN-\d+")
 def _met_dod() -> dict[str, object]:
     return _receipt(
         checks=[
-            _check("dod-behaviour", "verified", proof_class="behavior"),
+            # OMN-18056: the behaviour proof declares WHICH criterion it
+            # covers -- the one the shared `_issue` body labels `AC1`.
+            _check(
+                "dod-behaviour",
+                "verified",
+                proof_class="behavior",
+                binds_ac=("AC1",),
+            ),
             _check("dod-merge", "verified", proof_class="merge-state"),
         ],
         verdict_status="verified",
@@ -76,8 +83,14 @@ def _met_dod() -> dict[str, object]:
 
 
 async def _sweep(
-    *, ticket: str, exclude: tuple[str, ...]
+    *, ticket: str, exclude: tuple[str, ...], ticks: int = 1
 ) -> tuple[object, FakeLinearClient]:
+    """Run the sweep ``ticks`` times against one fake board, returning the last.
+
+    OMN-18056: a flip takes two ticks -- the first eligible observation of a
+    verdict arms a re-draw and writes no Done, and the second one on the same
+    fingerprint closes. A refusal that precedes the re-draw needs only one.
+    """
     linear = FakeLinearClient(issues={ticket: _issue()})
     handler = HandlerEvidenceAutocloseSweep(
         linear_client=linear,
@@ -87,13 +100,16 @@ async def _sweep(
         ),
         run_dod_verify_command=_make_dod_verify_fake({ticket: (_met_dod(), 0, "")}),
     )
-    result = await handler.handle(_request(apply=True, exclude_tickets=exclude))
+    result = None
+    for _tick in range(ticks):
+        result = await handler.handle(_request(apply=True, exclude_tickets=exclude))
+    assert result is not None
     return result.outcomes[0], linear
 
 
 async def test_a_formerly_fenced_ticket_with_met_dod_flips() -> None:
     """The ruling, executable. Ownership is not a reason to withhold a close."""
-    outcome, linear = await _sweep(ticket=_FORMERLY_FENCED, exclude=())
+    outcome, linear = await _sweep(ticket=_FORMERLY_FENCED, exclude=(), ticks=2)
 
     assert outcome.decision == EnumEvidenceAutocloseDecision.FLIPPED
     assert len(linear.state_updates) == 1

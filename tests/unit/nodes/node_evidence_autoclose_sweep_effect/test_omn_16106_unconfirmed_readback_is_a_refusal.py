@@ -61,6 +61,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
+from tests.unit.nodes.node_evidence_autoclose_sweep_effect._ac_binding_support import (
+    BOUND_AC_DESCRIPTION,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -105,14 +108,29 @@ def _receipt(
     failed: int = 0,
     non_probative: int = 6,
     behavior: int = 1,
+    binds_ac: tuple[str, ...] = ("AC1", "AC2"),
 ) -> dict[str, object]:
-    """The OMN-16025 counters by default — 6 verified, 6 non-probative, 12."""
+    """The OMN-16025 counters by default — 6 verified, 6 non-probative, 12.
+
+    OMN-18056: one verified probative check DECLARES the criteria the bodies
+    below label. The counters are read from the count fields and never from
+    the checks list, so this binds the AC-binding gate without moving any
+    arithmetic the gate-probe and readback conjuncts depend on. A fixture that
+    means to model a corpus declaring NOTHING passes ``binds_ac=()``.
+    """
     verdict: dict[str, object] = {
         "correlation_id": str(uuid4()),
         "ticket_id": _TICKET,
         "status": "verified",
         "dry_run": False,
-        "checks": [],
+        "checks": [
+            {
+                "evidence_id": "omn18056-bound-check",
+                "status": "verified",
+                "proof_class": "behavior",
+                "binds_ac": list(binds_ac),
+            }
+        ],
         "total_checks": total,
         "verified_count": verified,
         "failed_count": failed,
@@ -141,7 +159,7 @@ class FakeLinear:
     def __init__(
         self,
         *,
-        description: str = "",
+        description: str = BOUND_AC_DESCRIPTION,
         state_id: str = "state-backlog",
         confirms_readback: bool = True,
         rollback_succeeds: bool = True,
@@ -293,6 +311,10 @@ class TestAnUnconfirmedReadbackIsARefusal:
         handler, _ = _handler(
             linear, receipt=_receipt(total=7, verified=6, non_probative=1)
         )
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done. Everything this class asserts lives on the WRITE
+        # path, which is the second tick.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         outcome = result.outcomes[0]
@@ -319,10 +341,16 @@ class TestAnUnconfirmedReadbackIsARefusal:
         handler, _ = _handler(
             linear, receipt=_receipt(total=7, verified=6, non_probative=1)
         )
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done. Everything this class asserts lives on the WRITE
+        # path, which is the second tick.
+        await handler.handle(_request())
         await handler.handle(_request())
 
-        assert len(linear.comments) == 1
-        body = linear.comments[0][1]
+        # Two comments across the two ticks: the re-draw arming, then this
+        # refusal. The refusal is the last one.
+        assert len(linear.comments) == 2
+        body = linear.comments[-1][1]
         assert "class=flipped" not in body
         assert "class=readback_unconfirmed" in body
         assert "REFUSED" in body
@@ -338,6 +366,10 @@ class TestAnUnconfirmedReadbackIsARefusal:
         handler, _ = _handler(
             linear, receipt=_receipt(total=7, verified=6, non_probative=1)
         )
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done. Everything this class asserts lives on the WRITE
+        # path, which is the second tick.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         outcome = result.outcomes[0]
@@ -347,7 +379,7 @@ class TestAnUnconfirmedReadbackIsARefusal:
             "worse than one that overstates it (OMN-17658)"
         )
         assert "human read" in outcome.reason.lower()
-        assert "human read" in linear.comments[0][1].lower()
+        assert "human read" in linear.comments[-1][1].lower()
 
     async def test_no_rollback_target_refuses_before_writing_anything(self) -> None:
         """A write this run cannot undo is a write it may not make.
@@ -360,6 +392,10 @@ class TestAnUnconfirmedReadbackIsARefusal:
         handler, _ = _handler(
             linear, receipt=_receipt(total=7, verified=6, non_probative=1)
         )
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done. Everything this class asserts lives on the WRITE
+        # path, which is the second tick.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         outcome = result.outcomes[0]
@@ -375,6 +411,10 @@ class TestAnUnconfirmedReadbackIsARefusal:
         handler, _ = _handler(
             linear, receipt=_receipt(total=7, verified=6, non_probative=1)
         )
+        # OMN-18056: the first eligible observation arms the re-draw and
+        # writes no Done. Everything this class asserts lives on the WRITE
+        # path, which is the second tick.
+        await handler.handle(_request())
         result = await handler.handle(_request())
 
         outcome = result.outcomes[0]
@@ -408,7 +448,7 @@ class TestAcceptanceCriteriaAreReadWithoutAHeading:
 
     def test_an_empty_body_is_not_a_gap(self) -> None:
         """Linear returns null for a bodyless ticket; that is not a criterion."""
-        assert _ac_coverage_gap("", 6, 6) == ("", ())
+        assert _ac_coverage_gap("", 6, 6, 6) == ("", ())
 
 
 class TestNonProbativeCoverageDoesNotProveACriterion:
@@ -419,14 +459,14 @@ class TestNonProbativeCoverageDoesNotProveACriterion:
         verified probative check". A tie is the absence of a majority either
         way, and a refutation bound must not read that as support.
         """
-        reason, uncovered = _ac_coverage_gap(_OMN_16025_DESCRIPTION, 6, 6)
+        reason, uncovered = _ac_coverage_gap(_OMN_16025_DESCRIPTION, 6, 6, 6)
         assert reason, "6 verified against 6 non-probative must hold"
         assert "at least half" in reason
         assert len(uncovered) == 5
 
     def test_a_single_criterion_with_only_non_probative_company_holds(self) -> None:
         description = "## Acceptance\n\n- the one thing this ticket claims\n"
-        reason, uncovered = _ac_coverage_gap(description, 1, 1)
+        reason, uncovered = _ac_coverage_gap(description, 1, 1, 1)
         assert reason
         assert uncovered == ("the one thing this ticket claims",)
 
@@ -437,7 +477,7 @@ class TestNonProbativeCoverageDoesNotProveACriterion:
         minority of provenance entries is exactly what it is meant to tolerate.
         """
         description = "## Acceptance criteria\n\n- one\n- two\n- three\n- four\n"
-        assert _ac_coverage_gap(description, 4, 2) == ("", ())
+        assert _ac_coverage_gap(description, 4, 4, 2) == ("", ())
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +505,7 @@ class TestGateProbeDeclarationParsing:
 @pytest.mark.asyncio
 class TestARedGateProbeHolds:
     _WITH_GATE = (
-        "## Acceptance criteria\n\n- one\n- two\n\n"
+        "## Acceptance criteria\n\n- AC1: one\n- AC2: two\n\n"
         "Gate: OmniNode-ai/omnibase_infra chain-canary.yml\n"
     )
 
@@ -494,6 +534,8 @@ class TestARedGateProbeHolds:
             receipt=_receipt(total=6, verified=4, non_probative=2),
             workflow_runs=[{"id": 1, "conclusion": "success"}],
         )
+        # OMN-18056: the first tick arms the re-draw, the second flips.
+        await handler.handle(_request())
         result = await handler.handle(_request())
         assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
 
@@ -526,7 +568,10 @@ class TestARedGateProbeHolds:
 
     async def test_an_unresolvable_declaration_holds_without_calling_gh(self) -> None:
         linear = FakeLinear(
-            description="## Acceptance criteria\n\n- one\n- two\n\nGate: chain-canary.yml\n"
+            description=(
+                "## Acceptance criteria\n\n- AC1: one\n- AC2: two\n\n"
+                "Gate: chain-canary.yml\n"
+            )
         )
         handler, gh = _handler(
             linear,
@@ -543,10 +588,14 @@ class TestARedGateProbeHolds:
     async def test_a_ticket_declaring_no_probe_is_unaffected(self) -> None:
         """Positive control: the hold must not fire on the 99% of tickets that
         name no gate at all."""
-        linear = FakeLinear(description="## Acceptance criteria\n\n- one\n- two\n")
+        linear = FakeLinear(
+            description="## Acceptance criteria\n\n- AC1: one\n- AC2: two\n"
+        )
         handler, gh = _handler(
             linear, receipt=_receipt(total=6, verified=4, non_probative=2)
         )
+        # OMN-18056: the first tick arms the re-draw, the second flips.
+        await handler.handle(_request())
         result = await handler.handle(_request())
         assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
         assert not any("/actions/workflows/" in path for path in gh.calls)
@@ -564,13 +613,23 @@ class TestOmn16025RegressionFixture:
 
         This is run 34061364537's input reproduced exactly. It produced a Done
         on the board. It must now produce a hold that writes nothing.
+
+        OMN-18056 changed WHICH conjunct holds it, and the change is the
+        measurement. The body's five links carry no `AC<n>` label, and the
+        contract behind this verdict declares no `binds_ac` on any check --
+        which is true of all 8709 contracts in the corpus. So the binding gate
+        reaches it first and names the criteria nothing proves, instead of the
+        counting rule reporting a ratio. The counting rule is still correct
+        about this body and is asserted directly below, as the control: what
+        moved is the order the two refusals are reported in, not whether the
+        board moves.
         """
         linear = FakeLinear(description=_OMN_16025_DESCRIPTION)
-        handler, _ = _handler(linear, receipt=_receipt())
+        handler, _ = _handler(linear, receipt=_receipt(binds_ac=()))
         result = await handler.handle(_request())
 
         outcome = result.outcomes[0]
-        assert outcome.decision is EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+        assert outcome.decision is EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND
         assert outcome.dod_verify_verified_count == 6
         assert outcome.dod_verify_non_probative_count == 6
         assert outcome.dod_verify_total_checks == 12
@@ -580,16 +639,29 @@ class TestOmn16025RegressionFixture:
             "the board must not move: this is the write run 34061364537 made "
             "and a person had to undo twelve minutes later"
         )
-        # The five links the old parser could not see are named in the receipt.
+        # The five links the old parser could not see are named in the receipt,
+        # now as the criteria that bind to nothing.
         assert len(outcome.uncovered_acceptance_criteria) == 5
+
+        # CONTROL: the counting rule that used to hold this body still refutes
+        # it on its own terms, so the binding gate has replaced no coverage.
+        coverage_reason, uncovered = _ac_coverage_gap(_OMN_16025_DESCRIPTION, 6, 6, 6)
+        assert coverage_reason
+        assert len(uncovered) == 5
 
     async def test_the_same_shape_with_a_declared_red_probe_also_holds(self) -> None:
         """Belt and braces: had OMN-16025 carried a `Gate:` line, the probe's
         own colour would have held it too — chain-canary run 34059601163,
         `conclusion=failure` at 3 of 5 links proven."""
+        # OMN-18056: this case is already a counterfactual -- OMN-16025 never
+        # carried a `Gate:` line. It gains a labelled, bound criterion for the
+        # same reason: the binding gate sits ahead of the probe, so without one
+        # the probe would never be reached and the assertion below would be
+        # about the wrong conjunct.
         linear = FakeLinear(
             description=_OMN_16025_DESCRIPTION
             + "\n\nGate: OmniNode-ai/omnibase_infra chain-canary.yml\n"
+            + f"\n{BOUND_AC_DESCRIPTION}"
         )
         handler, _ = _handler(
             linear,

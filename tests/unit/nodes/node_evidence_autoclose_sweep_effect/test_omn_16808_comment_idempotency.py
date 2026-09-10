@@ -76,8 +76,14 @@ def _skill_result(
     verified: int,
     failed: int,
     behavior_proving: int = 1,
+    binds_ac: tuple[str, ...] = ("AC1",),
 ) -> dict[str, object]:
     """A ModelSkillResult shaped like ``onex skill dod_verify`` prints.
+
+    OMN-18056: one verified probative check DECLARES the criterion the bodies
+    in this file label ``AC1``, so the AC-binding gate -- which runs ahead of
+    every conjunct exercised here -- is not what withholds a flip. The
+    counters are read from the count fields and never from this list.
 
     OMN-16961: the CLI prints two arms and picks between them on the run's own
     outcome — a verified verdict lands FLAT on ``result`` with
@@ -90,7 +96,14 @@ def _skill_result(
         "ticket_id": _TICKET,
         "status": "verified" if failed == 0 else "failed",
         "dry_run": False,
-        "checks": [],
+        "checks": [
+            {
+                "evidence_id": "omn18056-bound-check",
+                "status": "verified",
+                "proof_class": "behavior",
+                "binds_ac": list(binds_ac),
+            }
+        ],
         "total_checks": total,
         "verified_count": verified,
         "failed_count": failed,

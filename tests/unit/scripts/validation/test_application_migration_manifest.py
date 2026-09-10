@@ -505,7 +505,54 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # non-owner) could never read truthfully, so the OMN-16770 seam refused
     # the batch on every 60s tick. Net-new file, no parent edited, ownership
     # declared first in omnimarket's application-relation-ownership.yaml.
-    assert len(result.declarations) == 172
+    #
+    # 172 -> 173 for OMN-15683's
+    # nodes/node_projection_delegation/
+    # 0036_delegation_events_uuid_mixed_representation.sql, the successor that
+    # supersedes 0034. 0034 resolves tenant identity on m.tenant_slug alone and
+    # has no branch for a tenant_id that is already the canonical UUID, so it
+    # cannot convert the mixed-representation column that live write-time UUID
+    # stamping (OMN-16804) produces -- measured read-only on onex-dev, 26 of 229
+    # rows across 3 values, every one of them present in tenant_registry_mirror
+    # under tenant_uuid. 0036 resolves on both forms and is fail-closed on
+    # neither. Net-new file; 0034's bytes are NOT edited, it is retired in place
+    # by a row in _ledger/migration-supersessions.tsv, exactly as 0034 retired
+    # 0033.
+    #
+    # 173 -> 174 for OMN-15683's
+    # nodes/node_projection_delegation/
+    # 0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql,
+    # the successor that supersedes 0036. 0036 reads tenant_registry_mirror
+    # AFTER set_config('role', <delegation_events' owner>, true), and the mirror
+    # is owned by a DIFFERENT role: on onex-dev its ACL is
+    # {role_omnidash=arwdDxt, app_dashboard=r, omninode_runtime=arw, jake_ro=r}
+    # with role_omninode_owner absent, so
+    # has_table_privilege('role_omninode_owner','tenant_registry_mirror',
+    # 'SELECT') is false. Staging deploy run 34281092205 ran 0036's blindness
+    # reconciliation and debris DELETE correctly and then aborted with
+    # `permission denied for table tenant_registry_mirror` at inline_code_block
+    # line 262, rolling the whole transaction back. 0037 copies the mirror into
+    # a session-local TEMP table as the MIGRATE IDENTITY, before the role
+    # switch, and joins that snapshot in every guard below. Net-new file;
+    # 0036's bytes are NOT edited, it is retired in place by a row in
+    # _ledger/migration-supersessions.tsv, exactly as 0036 retired 0034.
+    #
+    # 174 -> 175 for OMN-18140's
+    # nodes/node_projection_delegation/
+    # 0038_delegation_events_writer_identity.sql, which adds a durable WRITER
+    # ATTESTATION to delegation_events: `writer_identity TEXT DEFAULT
+    # CURRENT_USER` and `written_at TIMESTAMPTZ DEFAULT NOW()`. Neither exists
+    # today, and `delegated_by` -- the closest existing column -- answers a
+    # different question: it names the DELEGATOR carried on the inbound event,
+    # a value the writing process chooses, not the database principal that
+    # performed the write. Both new columns are NULLABLE and unbackfilled on
+    # purpose: `NOT NULL DEFAULT CURRENT_USER` would rewrite the table and
+    # stamp every historical row with the MIGRATION runner's identity, which is
+    # a fabricated attestation for rows it did not write. Net-new file, no
+    # parent edited and nothing superseded -- it neither reads nor rewrites
+    # tenant_id, so it is independent of the 0031->0037 conversion chain above
+    # and does not participate in its supersession ledger.
+    assert len(result.declarations) == 175
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

@@ -80,6 +80,13 @@ SYNC_NOT_CONVERGED = 5
 # script, two of which are TRACKED committed placeholders the build overwrites
 # by design. A reconciler that refuses on those refuses forever on the one clone
 # it most needs to cover. Everything OUTSIDE this prefix still blocks.
+#
+# OMN-16442: `deploy-source-refs.json` is no longer among them -- stage_workspace.sh
+# now writes the expected-refs manifest OUTSIDE the build context entirely, because
+# an untracked byproduct in a git clone is not only noise for this reconciler, it
+# also read as "dirty" to the deploy agent's own self-update gate and stopped the
+# agent from ever picking up its merged fixes. The two TRACKED placeholders above
+# still need this carve-out; the third file no longer exists here on a post-fix run.
 BUILD_SCRATCH_PREFIXES: tuple[str, ...] = ("workspace/",)
 
 
@@ -104,6 +111,12 @@ class RepoRefResult:
     dirty: bool  # working tree dirty after the operation
     hotpatch: bool  # deliberately-dirty deploy, labelled not laundered
     before_sha: str = ""  # HEAD before the operation (OMN-17291: old -> new receipt)
+    # OMN-17135: the primary ref this repo could NOT resolve, when ``ref`` above
+    # is the fallback that was used instead. Empty when the primary resolved.
+    # The substitution is recorded rather than inferred: a manifest that only
+    # showed the ref finally used could not distinguish "asked for its own dev
+    # head" from "asked for a foreign repo's commit and quietly got something".
+    fallback_from: str = ""
 
 
 @dataclass(frozen=True)
@@ -311,6 +324,7 @@ def clean_checkout(
     *,
     hotpatch: bool = False,
     fetch: bool = True,
+    fallback_ref: str | None = None,
 ) -> RepoRefResult:
     """Bring a sibling clone to a clean checkout of ``ref`` (or snapshot it, when
     ``hotpatch``).
@@ -323,6 +337,21 @@ def clean_checkout(
     Hotpatch: the tree is deployed AS-IS -- no reset/clean (which would destroy the
     deliberate patch). The recorded base is the current HEAD; ``dirty`` is expected
     and labelled ``hotpatch: true``.
+
+    ``fallback_ref`` (OMN-17135) names a SECOND ref to resolve when ``ref`` names
+    no commit in THIS repository. The caller's ref is a pin on one repository --
+    the CI rebuild path publishes an omnibase_infra merge SHA -- and a commit of
+    one repository is not a ref of another. Every sibling therefore resolves a
+    ref of its own: the declared tracking head, resolved here at staging time,
+    with the primary it stood in for recorded in ``fallback_from``.
+
+    This does NOT loosen the fail-closed posture (OMN-14438/OMN-17291). The
+    fallback must itself resolve to a commit; when neither ref does, the
+    checkout fails and NAMES BOTH, because a build whose source ref is asserted
+    against nothing must not be able to produce a "deployed" claim. Nor is it a
+    silent rescue: a substitution appears in the expected-refs manifest the
+    end-of-staging assertion is resolved against, so what was vendored and what
+    was asked for are both readable afterwards.
     """
     repo_path = Path(repo_path)
     _assert_git_repo(repo_path)
@@ -356,7 +385,37 @@ def clean_checkout(
         # the local-clone-with-no-remote case; let it raise.
         _git(repo_path, "fetch", "--prune", "--tags", "origin")
 
-    sha = _resolve_commit(repo_path, ref)
+    # OMN-17135: resolve a ref that exists in THIS repository. The primary is
+    # tried first so a ref that resolves everywhere (``origin/dev``) behaves
+    # exactly as before and the fallback never engages.
+    fallback_from = ""
+    effective_ref = ref
+    try:
+        sha = _resolve_commit(repo_path, ref)
+    except DeploySourceRefError as primary_error:
+        if not fallback_ref or fallback_ref == ref:
+            raise
+        try:
+            sha = _resolve_commit(repo_path, fallback_ref)
+        except DeploySourceRefError as fallback_error:
+            raise DeploySourceRefError(
+                f"{repo_path.name}: neither the requested ref {ref!r} nor the "
+                f"fallback ref {fallback_ref!r} names a commit in this "
+                f"repository -- refusing an unpinned build (OMN-17135).\n"
+                f"  requested: {primary_error}\n"
+                f"  fallback:  {fallback_error}",
+                CHECKOUT_FAILED,
+            ) from fallback_error
+        fallback_from = ref
+        effective_ref = fallback_ref
+        print(
+            f"RT-1: {repo_path.name} cannot resolve {ref!r} (a ref of another "
+            f"repository); using its own {fallback_ref!r} -> {sha[:12]} "
+            f"(recorded as fallback_from, OMN-17135)",
+            file=sys.stderr,
+        )
+
+    ref = effective_ref
     _git(repo_path, "checkout", "--force", sha)
     _git(repo_path, "reset", "--hard", sha)
     _git(repo_path, "clean", "-ffdx")
@@ -384,6 +443,7 @@ def clean_checkout(
         dirty=False,
         hotpatch=False,
         before_sha=before_sha,
+        fallback_from=fallback_from,
     )
 
 
@@ -776,9 +836,10 @@ def _cmd_checkout(args: argparse.Namespace) -> int:
     results: list[RepoRefResult]
 
     if args.require_immutable_refs:
-        if args.ref is not None or args.hotpatch:
+        if args.ref is not None or args.fallback_ref is not None or args.hotpatch:
             raise DeploySourceRefError(
-                "immutable per-repo pins cannot be combined with --ref or --hotpatch",
+                "immutable per-repo pins cannot be combined with --ref, --fallback-ref, "
+                "or --hotpatch",
                 USAGE_ERROR,
             )
         selections = validate_immutable_selections(repos, repo_refs)
@@ -795,10 +856,19 @@ def _cmd_checkout(args: argparse.Namespace) -> int:
                 USAGE_ERROR,
             )
         result = clean_checkout(
-            Path(path), ref, hotpatch=args.hotpatch, fetch=not args.no_fetch
+            Path(path),
+            ref,
+            hotpatch=args.hotpatch,
+            fetch=not args.no_fetch,
+            fallback_ref=args.fallback_ref,
         )
         print(
             f"RT-1 checkout: {name} -> {result.ref} @ {result.expected_sha[:12]}"
+            + (
+                f" [fallback from {result.fallback_from}]"
+                if result.fallback_from
+                else ""
+            )
             + (" [HOTPATCH/dirty]" if result.hotpatch and result.dirty else ""),
             file=sys.stderr,
         )
@@ -889,6 +959,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=REF",
         help="per-repo ref override (repeatable); wins over --ref",
+    )
+    p_checkout.add_argument(
+        "--fallback-ref",
+        default=None,
+        help="ref to resolve in a repo where --ref names no commit (OMN-17135). "
+        "The CI rebuild path pins one repository by commit SHA, and a commit of "
+        "one repository is not a ref of another; each sibling resolves its own "
+        "tracking head instead. Recorded as 'fallback_from' in the manifest. "
+        "A fallback that does not resolve either still fails closed.",
     )
     p_checkout.add_argument(
         "--require-immutable-refs",

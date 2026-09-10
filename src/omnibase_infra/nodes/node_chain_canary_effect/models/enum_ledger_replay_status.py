@@ -44,6 +44,13 @@ class EnumLedgerReplayStatus(StrEnum):
     # The chain could not be read, the replay could not be driven, or the
     # verifier could not be invoked. Fails closed.
     ERROR = "error"
+    # The leg COULD have run and this node declined to run it — a connection
+    # string arrived on the command line, where argv is world-readable through
+    # /proc and the dispatch step echoes what it ran into the run log
+    # (OMN-16964, mirroring the OMN-18060 refusal on the projection leg).
+    # Distinct from ERROR on purpose: an error sends you to look at the
+    # database, a refusal sends you to look at how the canary was wired.
+    REFUSED = "refused"
     # No ledger source configured for this run. No claim is made about the
     # chain, and therefore no green is available.
     SKIPPED_NOT_CONFIGURED = "skipped_not_configured"

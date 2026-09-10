@@ -37,6 +37,7 @@ Every test drives the real handler with injected transport. No network.
 
 from __future__ import annotations
 
+import sys
 from uuid import uuid4
 
 import pytest
@@ -54,6 +55,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link import
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link_status import (
     EnumChainLinkStatus,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readback_status import (
+    EnumProjectionReadbackStatus,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_terminal_readback_status import (
     EnumTerminalReadbackStatus,
 )
@@ -62,6 +66,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_req
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result import (
     ModelChainCanaryResult,
+)
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    ModelProjectionReadbackOutcome,
 )
 
 _PROBE_URL = "http://runtime.invalid:8085"
@@ -72,7 +79,54 @@ _BOOTSTRAP = "broker.invalid:19092"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _FAILURE_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
-_LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
+# OMN-18060: the request now carries the NAME of the environment variable the
+# DSN arrives in, never the DSN, and the readback transport returns a typed
+# outcome rather than a two-state tuple. The fixture below puts the value where
+# the handler reads it, so these cases exercise the real resolution path.
+_PROJECTION_DSN_ENV = "CHAIN_CANARY_PROJECTION_DSN"
+
+
+def _outcome(state: str | None, error: str = "") -> ModelProjectionReadbackOutcome:
+    """Map the old three-way (state | "" | None) convention onto the outcome."""
+    if state is None:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ERROR,
+            error=error or "projection readback failed",
+        )
+    if not state:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ROW_ABSENT
+        )
+    if state.strip().upper() in ("COMPLETED", "FAILED"):
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.TERMINAL, state=state
+        )
+    return ModelProjectionReadbackOutcome(
+        status=EnumProjectionReadbackStatus.STRANDED, state=state
+    )
+
+
+@pytest.fixture(autouse=True)
+def _projection_dsn_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the DSN where the handler reads it, under the declared NAME."""
+    monkeypatch.setenv(_PROJECTION_DSN_ENV, _PROJECTION_DSN)
+    monkeypatch.setattr(sys, "argv", ["pytest"])
+
+
+_LEDGER_SOURCE_ENV = "CHAIN_CANARY_LEDGER_DSN_FOR_TESTS"
+# The DSN the fake lookup resolves that NAME to. Never passed as a field.
+_LEDGER_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+
+
+def _ledger_dsn_lookup(name: str) -> str:
+    """Resolve the declared NAME the way the job environment would.
+
+    The DSN never reaches the request model, so a test that passed one
+    as a field value would no longer be exercising the real path.
+    """
+    return _LEDGER_DSN if name == _LEDGER_SOURCE_ENV else ""
+
+
 _FULL_CHAIN = ("received", "routed", "inference_completed", "terminal")
 
 
@@ -86,8 +140,8 @@ class _ProjectionReadback:
 
     async def __call__(
         self, dsn: str, correlation_id: str, timeout_s: float
-    ) -> tuple[str | None, str]:
-        return self.state, self.error
+    ) -> ModelProjectionReadbackOutcome:
+        return _outcome(self.state, self.error)
 
 
 class _LedgerReplay:
@@ -111,9 +165,9 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         # rule OMN-16931 established for link 4 one link over. These fixtures
         # are about the OTHER legs, so the projection is configured
         # throughout and stubbed terminal by default.
-        "projection_dsn": _PROJECTION_DSN,
+        "projection_dsn_env": _PROJECTION_DSN_ENV,
         # OMN-16964: and link 5 on identical terms, stubbed verified.
-        "ledger_source": _LEDGER_SOURCE,
+        "ledger_source_env": _LEDGER_SOURCE_ENV,
         "expected_ledger_hops": _FULL_CHAIN,
         "settle_seconds": 0,
     }
@@ -196,6 +250,7 @@ def _handler(
         terminal_readback=terminal_readback or _TerminalReadback(found=_SUCCESS_TOPIC),
         projection_readback=_ProjectionReadback(),
         ledger_replay=_LedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -476,7 +531,7 @@ async def test_a_fully_configured_run_is_now_a_five_link_proof() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "unset",
-    ["projection_dsn", "ledger_source", "terminal_bootstrap_servers"],
+    ["projection_dsn_env", "ledger_source_env", "terminal_bootstrap_servers"],
 )
 async def test_a_partially_configured_run_is_never_a_proof(unset: str) -> None:
     """Unset ANY chain-link leg and the run stops being a proof.
@@ -516,7 +571,7 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
     ``test_handler_chain_canary_projection.py`` and
     ``test_handler_chain_canary_ledger.py`` for their own coverage.
 
-    ``projection_dsn`` and ``ledger_source`` are cleared explicitly rather
+    ``projection_dsn_env`` and ``ledger_source_env`` are cleared explicitly rather
     than relying on the shared fixture's defaults. Those defaults configure
     both, precisely because a run that cannot see links 2 and 5 can no longer
     be green; this test is the one case that wants the unpointed instruments,
@@ -527,7 +582,7 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
-    result = await handler.handle(_request(projection_dsn="", ledger_source=""))
+    result = await handler.handle(_request(projection_dsn_env="", ledger_source_env=""))
 
     assert all(
         verdict.status is not EnumChainLinkStatus.NO_LEG

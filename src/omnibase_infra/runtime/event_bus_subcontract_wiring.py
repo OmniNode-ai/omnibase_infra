@@ -112,7 +112,10 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+from omnibase_infra.event_bus.topic_constants import (
+    get_dlq_topic_for_original,
+    is_dlq_topic,
+)
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import (
     ModelConsumerRetryConfig,
@@ -591,6 +594,29 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 topic,
                 str(correlation_id),
                 error_category,
+            )
+            return True
+
+        if is_dlq_topic(topic):
+            # OMN-18084: a failure on a record consumed FROM a dead-letter sink
+            # cannot be answered with another dead-letter write --
+            # ``get_dlq_topic_for_original`` resolves a ``onex.dlq.*`` name to
+            # itself, so the answer is the topic it was just read from. Contracts
+            # DO subscribe DLQ topics (``node_dlq_replay_effect`` subscribes
+            # three), so this is reachable, not theoretical: it is the shape that
+            # put 193.8 self-referential records/s on the .201 dev lane.
+            #
+            # ``True`` because the record is already durably captured on a
+            # dead-letter sink, which is exactly the condition this return value
+            # asks about -- committing the offset loses nothing.
+            self._logger.error(
+                "metric_name=dlq_dead_letter_source_not_republished dlq_routed=false "
+                "reason=already_on_dead_letter_topic topic=%s correlation_id=%s "
+                "error_category=%s error_type=%s",
+                topic,
+                str(correlation_id),
+                error_category,
+                type(error).__name__,
             )
             return True
 

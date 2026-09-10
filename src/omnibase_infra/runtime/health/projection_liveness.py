@@ -46,8 +46,14 @@ Related Tickets:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+from omnibase_infra.enums.enum_consumer_group_purpose import (
+    EnumConsumerGroupPurpose,
+)
+from omnibase_infra.models.health.model_flow_attribution import (
+    ModelFlowAttribution,
+)
 from omnibase_infra.models.health.model_projection_contract_ref import (
     ModelProjectionContractRef,
 )
@@ -56,7 +62,7 @@ from omnibase_infra.models.health.model_projection_liveness_verdict import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
     from omnibase_infra.models.observability import ModelNodeFlowWindow
     from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
@@ -270,12 +276,311 @@ def select_kernel_nonwriting_projections(
     )
 
 
+def _contract_group_infix(contract: object) -> str | None:
+    """The ``.{package}.{node_name}.consume.`` infix of a contract's group id.
+
+    The wiring seam's consumer identity is
+    ``{env}.{service}.{node_name}.consume.{version}``; this is the middle of
+    it, delimited by ``.`` at both ends so a component boundary is always
+    matched. ``env`` and ``version`` are dropped for the reasons
+    :func:`select_projection_group_suffixes` documents.
+
+    Shared by the projection map and the non-projection map (OMN-16753) so the
+    two can never derive an infix differently for the same contract -- a
+    disagreement between them would decide whether a group is attributed or
+    excluded, which is exactly the class of silent divergence this module keeps
+    closing.
+
+    Returns ``None`` for a contract no group id could have been minted from,
+    which is dropped rather than guessed at.
+    """
+    from omnibase_infra.utils import normalize_kafka_identifier
+
+    package = str(getattr(contract, "package_name", "") or "")
+    name = str(getattr(contract, "name", "") or "")
+    if not package or not name:
+        return None
+    try:
+        parts = [
+            normalize_kafka_identifier(package),
+            normalize_kafka_identifier(name),
+            normalize_kafka_identifier(EnumConsumerGroupPurpose.CONSUME.value),
+        ]
+    except ValueError:
+        # A component that normalizes to nothing cannot be part of a group id
+        # the wiring seam could have minted either, so there is nothing to
+        # attribute. Skipped, never guessed at.
+        return None
+    return "." + ".".join(parts) + "."
+
+
+def _unambiguous_group_infixes(
+    manifest: ProtocolAutoWiringManifestLike,
+    *,
+    admit: Callable[[object, str], bool],
+) -> dict[str, str]:
+    """``{group_infix: contract_name}`` over the admitted contracts.
+
+    Two guards, both of which drop rather than guess:
+
+    * an infix two admitted contracts derive is dropped from BOTH;
+    * an infix contained in another admitted infix is dropped, so a group
+      matching the longer one cannot also match the shorter.
+    """
+    owners: dict[str, set[str]] = {}
+    for contract in getattr(manifest, "contracts", ()):
+        name = str(getattr(contract, "name", "") or "")
+        if not admit(contract, name):
+            continue
+        infix = _contract_group_infix(contract)
+        if infix is None:
+            continue
+        owners.setdefault(infix, set()).add(name)
+    unique = {
+        infix: next(iter(names)) for infix, names in owners.items() if len(names) == 1
+    }
+    return {
+        infix: name
+        for infix, name in unique.items()
+        if not any(infix in other for other in unique if other != infix)
+    }
+
+
+def select_projection_group_suffixes(
+    manifest: ProtocolAutoWiringManifestLike,
+    projections: tuple[ModelProjectionContractRef, ...],
+) -> dict[str, str]:
+    """Map each in-scope projection's consumer-group INFIX to its contract name.
+
+    OMN-16753. The saturation half reads OMN-16777 flow deltas, which are keyed
+    by ``(consumer_group, topic)``. A topic is not an attribution -- three
+    projections declare the same four ``onex.evt.omniclaude.*`` topics on the
+    ``.201`` lanes -- but a consumer group is: the wiring seam binds the
+    counters with ``compute_consumer_group_id(identity, CONSUME)`` for exactly
+    one contract. This map is what turns the group back into the contract.
+
+    **An infix of the group id, not the whole thing.** The wiring seam's
+    identity is ``{env}.{service}.{node_name}.consume.{version}``, and the key
+    kept here is ``.{service}.{node_name}.consume.`` -- the two ends are
+    dropped deliberately:
+
+    * ``env`` is a process-wide variable no contract declares. Binding it in
+      would make attribution depend on this process and the wiring seam
+      agreeing about ``ONEX_ENVIRONMENT``, and a disagreement fails SILENTLY
+      back to "nobody is saturated" -- a false all-clear on the one dimension
+      that exists to catch a total loss.
+    * ``version`` is the one component that changes under a contract bump, and
+      it buys no discrimination: ``(service, node_name)`` is already unique
+      within a manifest. Measured 2026-09-08 against the live lab: the
+      ``.201`` stability lane's ``projection_session_replay`` group carries
+      ``consume.1.1.0`` while the dev-lane manifest declares a different
+      version, so a version-bound key silently matched nothing.
+
+    The bus appends ``.__i.<instance>`` and ``.__t.<topic>`` when it joins, but
+    ``handler_wiring`` registers the flow counters BEFORE that, so a delta may
+    carry either the bare base id or the full live name. A containment test
+    accepts both.
+
+    Two guards, both of which drop rather than guess -- the same posture as
+    ``attributable_subscribe_topics``, because an arbitrary attribution here is
+    the defect this function exists to remove:
+
+    * a key two contracts derive is dropped from BOTH;
+    * a key that is itself contained in another key is dropped, so a group
+      matching the longer one cannot also match the shorter.
+
+    Args:
+        manifest: The profile-filtered discovery manifest.
+        projections: The in-scope refs from :func:`select_projection_contracts`.
+            Only these are mapped -- a name no dimension can report must not
+            reach the totals.
+
+    Returns:
+        ``{group_infix: projection_name}``, each key delimited by ``.`` at both
+        ends so a component boundary is always matched.
+    """
+    in_scope = {ref.name for ref in projections}
+    return _unambiguous_group_infixes(
+        manifest, admit=lambda contract, name: name in in_scope
+    )
+
+
+def select_nonprojection_group_infixes(
+    manifest: ProtocolAutoWiringManifestLike,
+    projection_group_suffixes: Mapping[str, str],
+) -> dict[str, str]:
+    """Map each NON-projection consumer's group INFIX to its contract name.
+
+    OMN-16753, round 3. The saturation half reads flow deltas keyed by
+    ``(consumer_group, topic)``, and a topic a projection declares is not a
+    topic only projections consume. On the ``.201`` stability lane twelve
+    consumer groups carry ``onex.evt.omniclaude.session-{started,ended}.v1``:
+    eleven are the three co-declaring projections' subscriptions, and the
+    twelfth pair belongs to ``node_session_phase_reducer`` -- a REDUCER.
+
+    Its flow reached :func:`_attribute_delta`, matched no projection infix
+    (there is none to derive: it is not a projection), and could not take the
+    sole-declarer fallback either (three in-scope projections declare the
+    topic), so it was recorded as UNATTRIBUTABLE. Round 2 had just made
+    unattributable flow degrade the dimension, so the refresh gate refused a
+    lane whose every other leg passed and rolled it back onto the old image
+    (attempt 3 of 3, receipt ``20260908T235241Z-915a10446a8d.json``).
+
+    **The discriminator is the contract, never a name list.** A contract is
+    admitted here when it subscribes to at least one topic and declares NO
+    ``db_io.db_tables`` -- the exact absence of the single positive signal
+    :func:`select_projection_contracts` admits on, which is itself the signal
+    the wiring seam uses to choose the projection dispatch arm. So a reducer,
+    an effect and a forwarder are all recognised by what their contract
+    declares, and a node added tomorrow needs no edit here.
+
+    **Exclusion requires positive proof, and its absence fails closed.** A
+    group that matches nothing in this map is NOT excluded: it falls through to
+    the unchanged attribution path, where an unnameable group on a
+    multi-declarer topic is still UNATTRIBUTABLE and still degrades the
+    dimension. Only a group provably owned by a non-projection consumer is
+    dropped from the arithmetic.
+
+    Three guards, one more than the projection map has:
+
+    * an infix two admitted contracts derive is dropped from both;
+    * an infix contained in another admitted infix is dropped;
+    * an infix that collides with, contains, or is contained in ANY projection
+      infix is dropped. That direction matters most: excluding a group the
+      projection map could have matched would silence a real projection's flow,
+      which is strictly worse than the DEGRADED it would replace.
+
+    Args:
+        manifest: The profile-filtered discovery manifest.
+        projection_group_suffixes: The in-scope projection map from
+            :func:`select_projection_group_suffixes`, so the two maps cannot
+            claim the same group.
+
+    Returns:
+        ``{group_infix: contract_name}`` for the non-projection consumers.
+    """
+
+    def _admit(contract: object, name: str) -> bool:
+        event_bus = getattr(contract, "event_bus", None)
+        if event_bus is None:
+            return False
+        if not (getattr(event_bus, "subscribe_topics", ()) or ()):
+            return False
+        db_io = getattr(contract, "db_io", None)
+        return not (db_io is not None and getattr(db_io, "db_tables", None))
+
+    candidates = _unambiguous_group_infixes(manifest, admit=_admit)
+    return {
+        infix: name
+        for infix, name in candidates.items()
+        if not any(
+            infix in projection_infix or projection_infix in infix
+            for projection_infix in projection_group_suffixes
+        )
+    }
+
+
+#: The reason rendered on an EXCLUDED reading, and on the health detail beside
+#: the group it excused. One string, so the prose an operator reads and the
+#: rule the fold applied cannot describe different things.
+NONPROJECTION_EXCLUSION_REASON: str = (
+    "not a declared projection (declares no db_io.db_tables projection "
+    "target), so its flow is not a projection's to account for"
+)
+
+
+def _attribute_delta(
+    consumer_group: str,
+    topic: str,
+    *,
+    group_suffixes: Mapping[str, str],
+    topic_declarers: Mapping[str, frozenset[str]],
+    nonprojection_infixes: Mapping[str, str],
+) -> ModelFlowAttribution:
+    """Read one flow delta as ATTRIBUTED, EXCLUDED, or UNATTRIBUTABLE.
+
+    Three readings, in this order, and the order is the fix:
+
+    1. **Group first.** A consumer group provably one in-scope projection's
+       subscription attributes to it.
+    2. **Non-projection owner second** (OMN-16753 round 3). A group provably
+       owned by a contract that declares no projection target table is
+       EXCLUDED: its flow was never a projection's to take, so it belongs in
+       neither a ratio nor the unattributable set.
+    3. **Sole-declarer topic last.** The fallback fires only for a topic
+       exactly ONE in-scope projection declares, where it carries a real
+       attribution; on a shared topic it carries none, and the pre-OMN-16753
+       behaviour of handing it to the alphabetically last declarer is precisely
+       the misattribution this function exists to remove.
+
+    Step 2 must precede step 3, not follow it. On a topic exactly one
+    projection declares, a reducer's delta would otherwise take the fallback
+    and be folded into that projection's ratio -- the same misattribution class
+    in its most damaging form, since a reducer DLQing everything would name a
+    healthy projection as 100% DLQ-routed.
+
+    Anything not positively resolved by one of the three is UNATTRIBUTABLE,
+    which degrades the dimension. Exclusion is never the default.
+    """
+    declarers = topic_declarers.get(topic)
+    if not declarers:
+        return ModelFlowAttribution(
+            consumer_group=consumer_group, outcome="UNATTRIBUTABLE"
+        )
+    # EVERY match, not the first. Iterating a dict and returning on the first
+    # containment made the answer depend on manifest insertion order: the
+    # guards in ``select_projection_group_suffixes`` remove infixes that are
+    # ambiguous or nested WITHIN the map, but they cannot prove a real group id
+    # contains no two of them -- a service name that embeds another
+    # projection's normalised name would do it. Two matches is exactly the
+    # "cannot tell" case, so it drops to unattributable, which now degrades the
+    # dimension rather than vanishing.
+    matched = {
+        name
+        for infix, name in group_suffixes.items()
+        if infix in consumer_group and name in declarers
+    }
+    if len(matched) == 1:
+        return ModelFlowAttribution(
+            consumer_group=consumer_group,
+            outcome="ATTRIBUTED",
+            projection=next(iter(matched)),
+        )
+    if matched:
+        return ModelFlowAttribution(
+            consumer_group=consumer_group, outcome="UNATTRIBUTABLE"
+        )
+    # An exclusion has to NAME its owner: one nobody can look up is invisible
+    # on the health detail, and an invisible exclusion is the same false
+    # all-clear this ticket removes. Two owners is therefore not "doubly
+    # excluded" but unnameable, and fails closed to UNATTRIBUTABLE.
+    owners = {
+        name for infix, name in nonprojection_infixes.items() if infix in consumer_group
+    }
+    if len(owners) == 1:
+        return ModelFlowAttribution(
+            consumer_group=consumer_group,
+            outcome="EXCLUDED",
+            owner_contract=next(iter(owners)),
+            reason=NONPROJECTION_EXCLUSION_REASON,
+        )
+    if not owners and len(declarers) == 1:
+        return ModelFlowAttribution(
+            consumer_group=consumer_group,
+            outcome="ATTRIBUTED",
+            projection=next(iter(declarers)),
+        )
+    return ModelFlowAttribution(consumer_group=consumer_group, outcome="UNATTRIBUTABLE")
+
+
 def evaluate_projection_liveness(
     *,
     projections: tuple[ModelProjectionContractRef, ...],
     attached_topics: frozenset[str],
     flow_windows: Iterable[ModelNodeFlowWindow],
     kernel_nonwriting: tuple[ModelProjectionContractRef, ...] = (),
+    projection_group_suffixes: Mapping[str, str] | None = None,
+    nonprojection_group_infixes: Mapping[str, str] | None = None,
 ) -> ModelProjectionLivenessVerdict:
     """Compute the projection liveness verdict from injected observations.
 
@@ -300,6 +605,16 @@ def evaluate_projection_liveness(
             than bare names so a name that is not a declared projection of this
             runtime cannot reach a health detail, and so the subset that is
             STILL attached — the actual silent-loss state — can be computed.
+        projection_group_suffixes: OMN-16753. ``{group_infix: projection}``
+            from :func:`select_projection_group_suffixes`.
+        nonprojection_group_infixes: OMN-16753. ``{group_infix: contract}``
+            from :func:`select_nonprojection_group_infixes` — the consumers on
+            this manifest that are NOT projections. Their deltas are dropped
+            from the arithmetic entirely and recorded on
+            ``excluded_nonprojection_flow`` instead. ``None`` and empty are the
+            same conservative reading: nothing is excluded, so a reducer's flow
+            falls through to UNATTRIBUTABLE exactly as it did before this
+            argument existed.
 
     Returns:
         The verdict. Names, counts, and two UNKNOWN flags; no status word.
@@ -317,23 +632,77 @@ def evaluate_projection_liveness(
 
     saturation_evaluated = bool(windows)
     saturated: list[str] = []
+    unattributable: set[str] = set()
+    excluded: dict[str, ModelFlowAttribution] = {}
     if saturation_evaluated:
-        topic_to_projection = {
-            topic: ref.name for ref in projections for topic in ref.subscribe_topics
+        # OMN-16753. Attribution is per SUBSCRIPTION, never per topic. The
+        # previous fold was
+        #
+        #     {topic: ref.name for ref in projections
+        #             for topic in ref.subscribe_topics}
+        #
+        # which collapses a topic to ONE projection while the deltas it reads
+        # are keyed by (consumer_group, topic). ``projections`` is name-ordered,
+        # so on a topic with several declarers the alphabetically LAST one
+        # absorbed every sibling's counters. Both directions were live on the
+        # .201 stability lane on 2026-09-08: a healthy projection named for a
+        # peer's total loss, and -- where the peers also consume -- the failing
+        # projection's own ratio diluted below the threshold so nothing is
+        # reported at all.
+        declarers: dict[str, set[str]] = {}
+        for ref in projections:
+            for declared_topic in ref.subscribe_topics:
+                declarers.setdefault(declared_topic, set()).add(ref.name)
+        topic_declarers = {
+            topic: frozenset(names) for topic, names in declarers.items()
         }
+        group_suffixes = dict(projection_group_suffixes or {})
+        nonprojection_infixes = dict(nonprojection_group_infixes or {})
+
         totals_in: dict[str, int] = {}
         totals_dlq: dict[str, int] = {}
         for window in windows:
             for delta in window.consumer_deltas:
-                projection_name = topic_to_projection.get(delta.topic)
-                if projection_name is None:
+                attribution = _attribute_delta(
+                    delta.consumer_group,
+                    delta.topic,
+                    group_suffixes=group_suffixes,
+                    topic_declarers=topic_declarers,
+                    nonprojection_infixes=nonprojection_infixes,
+                )
+                projection_name = attribution.projection
+                if projection_name is not None:
+                    totals_in[projection_name] = (
+                        totals_in.get(projection_name, 0) + delta.messages_in
+                    )
+                    totals_dlq[projection_name] = (
+                        totals_dlq.get(projection_name, 0) + delta.messages_dlq
+                    )
                     continue
-                totals_in[projection_name] = (
-                    totals_in.get(projection_name, 0) + delta.messages_in
-                )
-                totals_dlq[projection_name] = (
-                    totals_dlq.get(projection_name, 0) + delta.messages_dlq
-                )
+                if not (
+                    delta.topic in topic_declarers
+                    and (delta.messages_in or delta.messages_dlq)
+                ):
+                    # Either no in-scope projection declares the topic at all,
+                    # or the window recorded no movement on it. Neither is a
+                    # fact about projection liveness.
+                    continue
+                if attribution.outcome == "EXCLUDED":
+                    # OMN-16753 round 3. Flow a NON-projection consumer took on
+                    # a topic some projection also declares. It is not this
+                    # dimension's to account for -- but it IS recorded, keyed
+                    # by consumer group so the same group across topics and
+                    # windows collapses to one entry, and it is rendered on the
+                    # detail. An exclusion nobody can see would be the same
+                    # false all-clear as a misattribution, in a third costume.
+                    excluded.setdefault(delta.consumer_group, attribution)
+                    continue
+                # Traffic on a declared projection topic that no single
+                # projection can be shown to have taken. Recorded rather than
+                # dropped: silently skipping it would turn a case the gate
+                # cannot answer into a clean bill of health, which is the same
+                # failure class in a new costume.
+                unattributable.add(delta.topic)
         saturated = sorted(
             name
             for name, taken in totals_in.items()
@@ -388,6 +757,10 @@ def evaluate_projection_liveness(
         saturation_evaluated=saturation_evaluated,
         dlq_saturated_projections=tuple(saturated),
         observed_window_count=len(windows),
+        unattributable_flow_topics=tuple(sorted(unattributable)),
+        excluded_nonprojection_flow=tuple(
+            excluded[group] for group in sorted(excluded)
+        ),
         nonwriting_projections=nonwriting,
         nonwriting_attached_projections=nonwriting_attached,
     )
@@ -418,6 +791,58 @@ def describe_projection_attachment(verdict: ModelProjectionLivenessVerdict) -> s
     )
 
 
+#: The runtime health-dimension vocabulary, declared here so the saturation
+#: status is produced IN it rather than as a free string a call site has to
+#: narrow. The narrowing step it replaces mapped every unrecognised value to
+#: DEGRADED, which is fail-closed but silently regrades a typo; a Literal makes
+#: the same mistake a type error at the point it is written.
+EnumDlqSaturationStatus = Literal["HEALTHY", "DEGRADED", "CRITICAL"]
+
+
+def dlq_saturation_status(
+    verdict: ModelProjectionLivenessVerdict,
+) -> EnumDlqSaturationStatus:
+    """The ``projection_dlq_saturation`` dimension status for a verdict.
+
+    OMN-16753. Lives beside :func:`describe_dlq_saturation` and is the sole
+    source of the dimension's status, so the fact the prose reports and the
+    fact the verdict is taken from cannot drift apart -- the first revision of
+    this fix annotated the prose with the unattributable topics while the
+    status was still computed from ``dlq_saturated_projections`` alone at the
+    call site, which published a **HEALTHY** saturation dimension for a lane
+    whose flow could not be attributed at all.
+
+    ``DEGRADED`` when EITHER holds:
+
+    * a projection is fully DLQ-routed -- the measured failure; or
+    * a declared projection topic carried flow that no single projection can be
+      shown to have taken. That is not a clean lane, it is an unanswered
+      question, and this dimension exists precisely because a total loss reads
+      green on every other signal. Excluding those topics from the ratios (the
+      only honest arithmetic available) while still publishing HEALTHY would
+      convert "the gate could not tell" into "nothing is wrong", which is the
+      same false all-clear this ticket removes, in a new costume.
+
+    There is no third status here: the runtime health vocabulary is
+    HEALTHY/DEGRADED/CRITICAL, so an indeterminate saturation reading fails
+    closed to DEGRADED rather than being rendered as an UNKNOWN nobody gates
+    on.
+
+    ``excluded_nonprojection_flow`` is deliberately NOT read here (OMN-16753
+    round 3). An excluded group is a question that was answered -- the flow was
+    a reducer's, an effect's or a forwarder's, and was never a projection's to
+    account for -- so degrading on it would report a runtime defect over a lane
+    doing exactly what its contracts declare. That is what failed stability
+    refresh attempt 3 of 3 at ``915a10446``: two ``session-{started,ended}``
+    topics went DEGRADED because ``node_session_phase_reducer`` also consumes
+    them. The exclusion is still rendered by :func:`describe_dlq_saturation`,
+    because unreported is not the same as ungated.
+    """
+    if verdict.dlq_saturated_projections or verdict.unattributable_flow_topics:
+        return "DEGRADED"
+    return "HEALTHY"
+
+
 def describe_dlq_saturation(verdict: ModelProjectionLivenessVerdict) -> str:
     """Build the ``projection_dlq_saturation`` dimension detail."""
     if not verdict.saturation_evaluated:
@@ -425,16 +850,52 @@ def describe_dlq_saturation(verdict: ModelProjectionLivenessVerdict) -> str:
             "no closed flow window observed yet — projection DLQ ratio UNKNOWN "
             "(not asserted healthy)"
         )
+    # OMN-16753. Carried on BOTH the clean and the degraded rendering: a reader
+    # who sees only "no projection is fully DLQ-routed" cannot tell a measured
+    # zero from a topic the gate could not attribute, and those are different
+    # facts.
+    unattributed = ""
+    if verdict.unattributable_flow_topics:
+        unattributed = (
+            f" ({len(verdict.unattributable_flow_topics)} topic(s) carried flow "
+            "no single declaring projection could be attributed, and are "
+            f"excluded from every ratio: "
+            f"{_name_list(verdict.unattributable_flow_topics)})"
+        )
+    # OMN-16753 round 3. Rendered on BOTH the clean and the degraded case, and
+    # kept SEPARATE from the clause above: an excluded group is a question that
+    # was answered ("that flow is not a projection's"), while an unattributable
+    # topic is one that was not. Collapsing the two prose clauses would hide
+    # which of those an operator is looking at, and the whole cost of this
+    # ticket was a lane rolled back over that exact confusion.
+    excluded = ""
+    if verdict.excluded_nonprojection_flow:
+        owners = tuple(
+            sorted(
+                {
+                    entry.owner_contract
+                    for entry in verdict.excluded_nonprojection_flow
+                    if entry.owner_contract is not None
+                }
+            )
+        )
+        excluded = (
+            f" [{len(verdict.excluded_nonprojection_flow)} consumer group(s) "
+            f"carried flow on a declared projection topic and were excluded "
+            f"from projection attribution — {NONPROJECTION_EXCLUSION_REASON}: "
+            f"{_name_list(owners)}]"
+        )
     if not verdict.dlq_saturated_projections:
         return (
             f"No projection is fully DLQ-routed over {verdict.observed_window_count} "
-            "flow window(s)"
+            f"flow window(s){unattributed}{excluded}"
         )
     return (
         f"{len(verdict.dlq_saturated_projections)} projection(s) routed 100% of "
         f"consumed events to a DLQ/quarantine sink over "
         f"{verdict.observed_window_count} flow window(s) — offsets commit, so lag "
         f"reads 0 over a total loss: {_name_list(verdict.dlq_saturated_projections)}"
+        f"{unattributed}{excluded}"
     )
 
 
@@ -467,10 +928,12 @@ __all__: list[str] = [
     "DLQ_SATURATION_MIN_MESSAGES",
     "DLQ_SATURATION_RATIO",
     "MAX_NAMED_PROJECTIONS",
+    "NONPROJECTION_EXCLUSION_REASON",
     "describe_dlq_saturation",
     "describe_projection_attachment",
     "describe_projection_write_path",
     "evaluate_projection_liveness",
     "select_kernel_nonwriting_projections",
+    "select_nonprojection_group_infixes",
     "select_projection_contracts",
 ]

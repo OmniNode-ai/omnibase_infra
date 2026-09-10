@@ -341,11 +341,29 @@ def get_dlq_topic_for_original(
     topic. If it follows ONEX naming conventions, the category is extracted
     automatically. DLQ topics are realm-agnostic (always ``onex.dlq.*``).
 
+    A DLQ topic is REFUSED as input (OMN-18084). This function reads the
+    category out of the topic's own segments, so a ``onex.dlq.*`` name resolves
+    to ITSELF: ``onex.dlq.omnibase-infra.events.v1`` carries the segment
+    ``events``, classifies as EVENT, and rebuilds the identical string. That
+    fixed point is not a curiosity — it is what turned one broken consumer on
+    the .201 dev lane into 193.8 records/s of self-referential dead letters,
+    ~151 GB/day against a mount with 590 GB free shared by the prod,
+    stability-test and judge lanes.
+
+    Callers must therefore decide what a failure ON a dead-letter sink means
+    BEFORE asking where to route it. Such a record is already durably captured;
+    the answer is structured evidence and a stop, never another dead-letter
+    write. ``is_dlq_topic`` is the guard to take that branch on.
+
     Args:
         original_topic: The original topic where the message was consumed from.
+            Must not itself be a DLQ topic.
 
     Returns:
         The DLQ topic name, or None if the category cannot be determined.
+
+    Raises:
+        DlqTopicFixedPointError: ``original_topic`` is itself a DLQ topic.
 
     Example:
         >>> get_dlq_topic_for_original("onex.evt.platform.node-registered.v1")
@@ -359,6 +377,17 @@ def get_dlq_topic_for_original(
     """
     # Import here to avoid circular imports
     from omnibase_infra.enums import EnumMessageCategory
+    from omnibase_infra.errors import DlqTopicFixedPointError
+
+    if is_dlq_topic(original_topic):
+        raise DlqTopicFixedPointError(
+            "cannot resolve a DLQ topic for a topic that is already a DLQ "
+            f"topic: {original_topic} — this resolver is a fixed point on "
+            "dead-letter names, so answering would republish the record onto "
+            "the topic it was consumed from (OMN-18084). Guard the call with "
+            "is_dlq_topic() and record the failure instead.",
+            original_topic=original_topic,
+        )
 
     # Try to infer category from topic
     category = EnumMessageCategory.from_topic(original_topic)
@@ -447,6 +476,12 @@ def derive_dlq_topic_for_event_type(
     Returns:
         The DLQ topic name (e.g., ``onex.dlq.omnibase-infra.intelligence.v1``), or None if
         neither event_type nor topic-based DLQ routing can determine a target.
+
+    Raises:
+        DlqTopicFixedPointError: The legacy no-``event_type`` path delegates to
+            ``get_dlq_topic_for_original``, which refuses a DLQ topic. Leaving
+            this path unrefused would keep one laundering route into the fixed
+            point open (OMN-18084).
 
     Example:
         >>> derive_dlq_topic_for_event_type(
