@@ -17,6 +17,10 @@
 #   - OMN-18084: the replay path never publishes onto a dead-letter topic --
 #     nested dead letters are unwrapped to their innermost real original
 #     topic and replayed once there, or terminalised to quarantine.
+#   - OMN-18111: the node recorded ZERO terminal outcomes in dlq_replay_history
+#     because the runtime never supplied the `tracking` dependency this
+#     contract declares, and the unparseable-record path never called the
+#     recorder at all.
 #   - OMN-17896: the drain refuses a DLQ record whose original body cannot be
 #     established rather than inventing an empty one (which was published back
 #     to the original topic as a zero-byte record), classifies a JSON decode
@@ -33,10 +37,10 @@ contract_version:
 node_version:
   major: 1
   minor: 1
-  patch: 2
+  patch: 3
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history. OMN-17896: a record whose original body cannot be established is refused at parse and quarantined with its RAW BYTES intact rather than replayed as a fabricated empty body; a record that cannot be JSON-decoded is quarantined rather than skipped; and the offset advances only on a CONFIRMED quarantine or replay publish, via an explicit per-partition offset map of the records that completed, never the consumer's bare position. OMN-18084: runs over ONE shared consumer are SERIALISED by a run mutex keyed on the consumer instance. The three per-topic dispatcher entries below all resolve to the same dependencies["HandlerDlqReplay"] mapping because the kernel keys dependencies by handler NAME, so a peer's teardown could stop a DLQConsumer another dispatcher was mid-drain on; every message then failed with 'Consumer not started' and the auto-wiring boundary answered each failure by writing the record back onto the DLQ topic it came from, at 193.8 records/s on the .201 dev lane. A dispatcher whose consumer nobody else holds never waits, and a run holds the mutex for at most max_run_duration_seconds. OMN-18084 (second pass): the drain UNWRAPS a nested dead letter before it decides anything about it. A record whose own original_topic is itself a dead-letter topic has another DLQ envelope for a body, so replaying it stripped exactly one layer and wrote the rest back onto the topic it was consumed from -- the fourth fixed point, left open by the first pass, measured at 34.4 records/s across ~1.67M retained records nested 8-9 deep on the .201 dev lane. unwrap_nested_dlq_record resolves such a record to the innermost envelope whose original_topic is a real source topic, bounded by MAX_DLQ_UNWRAP_DEPTH, carrying the OUTER dlq_offset/dlq_partition through so the committed offset still describes the topic being drained. Eligibility is then decided on that innermost record, so a nest that cannot be read to a real original topic is quarantined with a typed refusal rather than replayed, and should_replay plus DLQProducer.replay_message both refuse a dead-letter original_topic independently -- the predicate so a non-unwrapping caller takes the durable quarantine exit, the producer as a last-resort raise so no future caller can publish onto a dead-letter sink silently.
+  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history. OMN-17896: a record whose original body cannot be established is refused at parse and quarantined with its RAW BYTES intact rather than replayed as a fabricated empty body; a record that cannot be JSON-decoded is quarantined rather than skipped; and the offset advances only on a CONFIRMED quarantine or replay publish, via an explicit per-partition offset map of the records that completed, never the consumer's bare position. OMN-18084: runs over ONE shared consumer are SERIALISED by a run mutex keyed on the consumer instance. The three per-topic dispatcher entries below all resolve to the same dependencies["HandlerDlqReplay"] mapping because the kernel keys dependencies by handler NAME, so a peer's teardown could stop a DLQConsumer another dispatcher was mid-drain on; every message then failed with 'Consumer not started' and the auto-wiring boundary answered each failure by writing the record back onto the DLQ topic it came from, at 193.8 records/s on the .201 dev lane. A dispatcher whose consumer nobody else holds never waits, and a run holds the mutex for at most max_run_duration_seconds. OMN-18084 (second pass): the drain UNWRAPS a nested dead letter before it decides anything about it. A record whose own original_topic is itself a dead-letter topic has another DLQ envelope for a body, so replaying it stripped exactly one layer and wrote the rest back onto the topic it was consumed from -- the fourth fixed point, left open by the first pass, measured at 34.4 records/s across ~1.67M retained records nested 8-9 deep on the .201 dev lane. unwrap_nested_dlq_record resolves such a record to the innermost envelope whose original_topic is a real source topic, bounded by MAX_DLQ_UNWRAP_DEPTH, carrying the OUTER dlq_offset/dlq_partition through so the committed offset still describes the topic being drained. Eligibility is then decided on that innermost record, so a nest that cannot be read to a real original topic is quarantined with a typed refusal rather than replayed, and should_replay plus DLQProducer.replay_message both refuse a dead-letter original_topic independently -- the predicate so a non-unwrapping caller takes the durable quarantine exit, the producer as a last-resort raise so no future caller can publish onto a dead-letter sink silently. OMN-18111: 'records every terminal outcome in dlq_replay_history' was false in two independent ways and had been since the node shipped -- the runtime's _build_runtime_handler_dependencies supplied consumer/producer/quarantine_producer and never the declared tracking service, so _record() returned at its first line on every call, and _quarantine_unparseable never called the recorder at all, so the OMN-17896 records whose original body could not be established were the ones the audit ledger was guaranteed to be silent about. Both are closed. An unparseable record's audit row is keyed by a UUIDv5 over its DLQ coordinate (topic/partition/offset) because it carries no correlation id, and names the DLQ topic it was read from as original_topic and the quarantine topic as target_topic rather than a replay target that never existed. The audit write is isolated from the outcome it describes: every caller reaches it only after the publish is CONFIRMED, so a tracking failure is logged at ERROR and the durable verdict and its committable offset both stand -- letting it propagate would turn a confirmed quarantine into a FAILED result, block the partition, and have the record redelivered and re-quarantined, reintroducing the amplification above with a database outage as its trigger.
 
 # Event bus subscription/publication
 event_bus:
@@ -151,7 +155,9 @@ dependencies:
     required: true
   - name: "tracking"
     type: "service"
-    description: "ServiceDlqTracking for dlq_replay_history persistence"
+    description: >
+      ServiceDlqTracking for dlq_replay_history persistence. Supplied by the runtime from OMNIBASE_INFRA_DB_URL (service_kernel._build_dlq_replay_tracking). Stays required: false because a runtime with no database must still drain, but an absent entry now means the runtime genuinely had none rather than that nobody wired it: tests/integration/test_omn18111_dlq_tracking_dependency_wired.py discovers the names in this block and fails when the kernel omits one (OMN-18111).
+
     required: false
 # Error handling
 error_handling:
@@ -209,7 +215,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-06-02"
-  updated: "2026-09-09"
+  updated: "2026-09-10"
   tags:
     - effect
     - dlq

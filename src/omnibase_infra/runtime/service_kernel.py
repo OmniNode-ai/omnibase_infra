@@ -85,6 +85,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.core.model_deployment_topology import (
         ModelDeploymentTopology,
     )
+    from omnibase_infra.dlq.service_dlq_tracking import ServiceDlqTracking
     from omnibase_infra.event_bus.model_runtime_attach_readiness import (
         ModelRuntimeAttachReadiness as ModelRuntimeAttachReadinessType,
     )
@@ -475,6 +476,77 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
     )
 
 
+async def _build_dlq_replay_tracking(
+    correlation_id: UUID,
+) -> ServiceDlqTracking | None:
+    """Build and initialize the ``dlq_replay_history`` writer (OMN-18111).
+
+    ``node_dlq_replay_effect``'s contract has declared a ``tracking``
+    dependency since OMN-12619 and this kernel never supplied one, so
+    ``HandlerDlqReplay._record()`` returned at its first line on every terminal
+    outcome the node ever reached. Only ``scripts/dlq_replay.py
+    --enable-tracking`` ever constructed the service, and nobody runs the CLI
+    on the lane. The table has been empty since the node shipped.
+
+    Reads the SAME ``OMNIBASE_INFRA_DB_URL`` the registration pool and the §3.8
+    baselines pool read; ``dlq_replay_history`` is provisioned there by the
+    canonical forward migration runner (``086_create_dlq_replay_history.sql``,
+    OMN-12633), so this function never issues DDL.
+
+    Absence is DEGRADED, not fatal, and the two absences are distinguished
+    because they are different facts:
+
+    * no DSN — a configuration statement about this lane, logged at WARNING,
+      the same shape §3.8 uses;
+    * a DSN that will not initialize — a fault, logged at ERROR with the
+      traceback.
+
+    Neither raises. ``tracking`` is ``required: false`` in the contract, and
+    taking a whole runtime down because an AUDIT ledger could not open a pool
+    inverts the severity of the two things. What keeps the original defect from
+    recurring is not this branch but
+    ``tests/integration/test_omn18111_dlq_tracking_dependency_wired.py``, which
+    discovers the declared dependency names from ``contract.yaml`` and fails
+    when the kernel does not supply one — enforcement rather than detection.
+
+    Residual, stated rather than implied: nothing ALERTS on a runtime that
+    drains a DLQ with no audit writer attached. That observation gap is
+    OMN-16769's, one layer out, and is not closed here.
+    """
+    dsn = os.environ.get(  # url-authority-ok: Postgres DSN is an operator-supplied secret (required_env), not a service routing URL — same established pattern as the §3.8 baselines pool read below.
+        "OMNIBASE_INFRA_DB_URL", ""
+    ).strip()
+    if not dsn:
+        logger.warning(
+            "OMNIBASE_INFRA_DB_URL is not set — node_dlq_replay_effect will "
+            "drain WITHOUT recording terminal outcomes in dlq_replay_history "
+            "(OMN-18111) (correlation_id=%s)",
+            correlation_id,
+        )
+        return None
+
+    from omnibase_infra.dlq import ModelDlqTrackingConfig, ServiceDlqTracking
+
+    service = ServiceDlqTracking(ModelDlqTrackingConfig(dsn=dsn))
+    try:
+        await service.initialize()
+    except Exception:  # boundary: an audit ledger may not fail a runtime boot
+        logger.exception(
+            "FAILED to initialize the dlq_replay_history tracking service — "
+            "node_dlq_replay_effect will drain WITHOUT an audit trail "
+            "(OMN-18111) (correlation_id=%s)",
+            correlation_id,
+        )
+        return None
+
+    logger.info(
+        "dlq_replay_history tracking wired for HandlerDlqReplay (OMN-18111) "
+        "(correlation_id=%s)",
+        correlation_id,
+    )
+    return service
+
+
 def _build_runtime_handler_dependencies(
     postgres_pool: object | None,
     kafka_bootstrap_servers: str | None = None,
@@ -482,6 +554,7 @@ def _build_runtime_handler_dependencies(
     *,
     savings_correlation_pool: object | None = None,
     savings_correlation_publisher: object | None = None,
+    dlq_tracking: object | None = None,
 ) -> dict[str, dict[str, object]] | None:
     """Build constructor dependencies for runtime-owned handlers.
 
@@ -517,6 +590,19 @@ def _build_runtime_handler_dependencies(
         savings_correlation_publisher: The §3.9 publisher callback, so a
             bus-triggered batch emits ``savings-estimated.v1`` exactly as the
             periodic tick does instead of computing an estimate and dropping it.
+        dlq_tracking: The initialized ``ServiceDlqTracking`` for
+            ``HandlerDlqReplay``. OMN-18111: ``node_dlq_replay_effect``'s
+            contract declares FOUR dependencies and this function supplied
+            three. ``tracking`` is ``required: false`` and the handler defaults
+            it to ``None``, so the omission failed nothing and reported
+            nothing — it just made ``_record()`` return at its first line
+            forever, leaving ``dlq_replay_history`` empty against ~62,000
+            terminal outcomes in one 18-minute window on the .201 dev lane
+            while three separate docstrings asserted every one of them was
+            recorded. A declared dependency that the runtime never supplies is
+            a silent no-op, not a wiring error; the gate for that class is
+            ``tests/integration/test_omn18111_dlq_tracking_dependency_wired.py``,
+            which discovers the required names from ``contract.yaml``.
     """
     dependencies: dict[str, dict[str, object]] = {}
     if postgres_pool is not None:
@@ -553,11 +639,19 @@ def _build_runtime_handler_dependencies(
             bootstrap_servers=kafka_bootstrap_servers,
             dlq_topic=build_dlq_topic("events"),
         )
-        dependencies["HandlerDlqReplay"] = {
+        dlq_replay_dependencies: dict[str, object] = {
             "consumer": DLQConsumer(dlq_replay_config),
             "producer": DLQProducer(dlq_replay_config),
             "quarantine_producer": DLQQuarantineProducer(dlq_replay_config),
         }
+        # OMN-18111: only when the runtime actually HAS one. An explicit
+        # ``"tracking": None`` and an absent key behave identically for the
+        # handler, but the absent key is the honest statement that a runtime
+        # without a database had nothing to give, rather than a wiring that
+        # looks complete and writes nothing.
+        if dlq_tracking is not None:
+            dlq_replay_dependencies["tracking"] = dlq_tracking
+        dependencies["HandlerDlqReplay"] = dlq_replay_dependencies
 
     if gateway_secret_resolver_config_path:
         from omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_attach_config import (
@@ -1266,6 +1360,10 @@ async def bootstrap() -> int:
     # instance of the SAME handler resolves through ServiceHandlerResolver
     # Step 2 instead of exhausting the precedence chain.
     _savings_correlation_publisher: Callable[..., Awaitable[bool]] | None = None
+    # OMN-18111: the dlq_replay_history writer for HandlerDlqReplay. Declared
+    # in node_dlq_replay_effect's contract since OMN-12619 and never supplied
+    # by this kernel until now, which is why that table has no rows.
+    _dlq_replay_tracking: ServiceDlqTracking | None = None
     runtime_health_monitor = None  # ServiceRuntimeHealthMonitor | None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
@@ -3342,6 +3440,14 @@ async def bootstrap() -> int:
                             correlation_id,
                         )
 
+                # OMN-18111: build the dlq_replay_history writer BEFORE the
+                # dependency map that has to carry it. Only when Kafka is in
+                # play — with no broker there is no DLQ drain to audit.
+                if use_kafka:
+                    _dlq_replay_tracking = await _build_dlq_replay_tracking(
+                        correlation_id
+                    )
+
                 gateway_secret_resolver_config_path_raw = (
                     resolve_secret_resolver_config_path()
                 )
@@ -3361,6 +3467,7 @@ async def bootstrap() -> int:
                     # at Step 2 instead of exhausting the chain and raising.
                     savings_correlation_pool=_savings_correlation_pool,
                     savings_correlation_publisher=_savings_correlation_publisher,
+                    dlq_tracking=_dlq_replay_tracking,
                 )
 
                 # 5. Wire handlers into dispatch engine
@@ -4852,6 +4959,14 @@ async def bootstrap() -> int:
                 pass
             _savings_correlation_pool = None
 
+        # Close the dlq_replay_history writer's pool (OMN-18111)
+        if _dlq_replay_tracking is not None:
+            try:
+                await _dlq_replay_tracking.shutdown()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+            _dlq_replay_tracking = None
+
         # Stop ServiceLlmEndpointHealth (OMN-6135)
         if llm_health_service is not None:
             try:
@@ -5108,6 +5223,13 @@ async def bootstrap() -> int:
         if _savings_correlation_pool is not None:
             try:
                 await _savings_correlation_pool.close()
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+        # Cleanup the dlq_replay_history writer's pool (OMN-18111)
+        if _dlq_replay_tracking is not None:
+            try:
+                await _dlq_replay_tracking.shutdown()
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
