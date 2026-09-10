@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -208,6 +209,53 @@ DEV_LANE_ONLY_BUILDABLE_SERVICES: tuple[str, ...] = tuple(
 )
 
 
+# OMN-18134: the DEV lane's gateway compose project, and the services in it.
+#
+# THIS LIST IS NOT A SECOND DEV_LANE_ONLY_RUNTIME_SERVICES. The two are kept
+# apart because their compose semantics are OPPOSITE, and merging them would be
+# fatal in the same way membership in the base runtime list would be fatal for
+# the eight above.
+#
+# The eight above live in ``docker/docker-compose.dev-lane.yml``, which IS one
+# of the DEV lane's ``compose_files``: they are handed to
+# ``docker compose -p omnibase-infra`` and that project resolves them. These
+# live in ``docker/docker-compose.gateway.yml`` under the compose project
+# ``omninode-gateway``, which appears in NO lane's ``compose_files``. Handing
+# ``gateway-forwarder`` to the omnibase-infra project aborts the runtime phase
+# on `no such service`.
+#
+# So membership here means exactly one thing: a DEV deploy is RESPONSIBLE for
+# this service. Which command deploys it is a separate question, answered by
+# ``DeployExecutor._deploy_gateway_lane`` -- it calls the sanctioned
+# ``scripts/deploy-gateway.sh``, which owns the gateway project's build, digest
+# pin, host-file sync, rollback record and systemd reload. Every call site that
+# builds a compose ARGUMENT list subtracts these via
+# ``without_gateway_services``.
+#
+# Only the forwarder is listed. ``gateway-dns-bastion`` is a sidecar of the
+# same project that ``deploy-gateway.sh`` builds and that compose starts via
+# the forwarder's ``depends_on``; it is not independently addressable as a
+# deploy target, and listing it would let a command name it alone and get the
+# whole gateway lane deployed anyway.
+GATEWAY_COMPOSE_PROJECT = "omninode-gateway"
+DEV_LANE_GATEWAY_SERVICES: tuple[str, ...] = ("gateway-forwarder",)
+
+
+def without_gateway_services(services: Iterable[str]) -> list[str]:
+    """Return ``services`` minus anything the gateway compose project owns.
+
+    Used at every site that builds an argument list for the ``omnibase-infra``
+    compose project, so a service that is legitimately in DEV *scope* can never
+    become a compose *argument* for a project that does not declare it.
+    """
+    return [s for s in services if s not in DEV_LANE_GATEWAY_SERVICES]
+
+
+def gateway_services_in(services: Iterable[str]) -> list[str]:
+    """Return the subset of ``services`` the gateway compose project owns."""
+    return [s for s in services if s in DEV_LANE_GATEWAY_SERVICES]
+
+
 def services_for_scope(
     scope: Scope, *, lane: EnumRuntimeLane | None = None
 ) -> list[str]:
@@ -216,14 +264,22 @@ def services_for_scope(
     ``lane`` defaults to ``None``, which resolves the lane-agnostic base list
     exactly as before. A caller that does not name a lane therefore never
     silently acquires dev-lane services, and prod/stability-test scope is
-    byte-unchanged whether the lane is passed or not (OMN-18108 AC3).
+    byte-unchanged whether the lane is passed or not (OMN-18108 AC3, OMN-18134
+    AC2).
+
+    This is the list of what a deploy is RESPONSIBLE for, not the list of what
+    is handed to any one compose project -- see ``DEV_LANE_GATEWAY_SERVICES``.
     """
     if scope == Scope.FULL:
         base = SCOPE_SERVICES[Scope.CORE] + SCOPE_SERVICES[Scope.RUNTIME]
     else:
         base = list(SCOPE_SERVICES[scope])
     if lane == EnumRuntimeLane.DEV and scope in (Scope.RUNTIME, Scope.FULL):
-        return base + list(DEV_LANE_ONLY_RUNTIME_SERVICES)
+        return (
+            base
+            + list(DEV_LANE_ONLY_RUNTIME_SERVICES)
+            + list(DEV_LANE_GATEWAY_SERVICES)
+        )
     return base
 
 

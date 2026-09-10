@@ -23,6 +23,7 @@ testpaths = ["tests"]
 markers = [
     "unit: unit tests in isolation",
     "promotion_guard: test controls the prod promotion-lineage guard stub itself (OMN-12626)",
+    "gateway_lane: test controls the gateway-lane deploy stub itself (OMN-18134)",
 ]
 
 [tool.setuptools.packages.find]

@@ -29,6 +29,7 @@ from deploy_agent.compose_budget import (
 )
 from deploy_agent.events import (
     DEV_LANE_ONLY_BUILDABLE_SERVICES,
+    GATEWAY_COMPOSE_PROJECT,
     BuildSource,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
@@ -38,7 +39,9 @@ from deploy_agent.events import (
     Phase,
     PhaseStatus,
     Scope,
+    gateway_services_in,
     services_for_scope,
+    without_gateway_services,
 )
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
@@ -451,11 +454,19 @@ def _requested_services_for_up(
     recreates the dev-lane-only services. It defaults to ``None`` (the
     lane-agnostic base list) so a caller that names no lane cannot silently
     acquire them, and prod/stability behaviour is unchanged.
+
+    OMN-18134: the gateway services are subtracted here, on BOTH branches. They
+    are in the DEV lane's scope -- a DEV deploy is responsible for them -- but
+    they belong to the ``omninode-gateway`` compose project, which is in no
+    lane's ``compose_files``. Passing one to ``docker compose -p omnibase-infra
+    up`` aborts the runtime phase on `no such service`, so scope membership is
+    deliberately not the same thing as being a compose argument. The subtraction
+    is a no-op on every non-DEV lane, since no other lane's scope carries them.
     """
     if services:
-        return services
+        return without_gateway_services(services)
     if scope == Scope.RUNTIME:
-        return services_for_scope(scope, lane=lane)
+        return without_gateway_services(services_for_scope(scope, lane=lane))
     return []
 
 
@@ -888,6 +899,120 @@ def preflight_required_compose_env_script() -> str:
     budget fixtures already take (OMN-18057, OMN-18072).
     """
     return f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+
+
+# =============================================================================
+# Gateway lane (OMN-18134)
+# =============================================================================
+
+# The gateway lane is a SEPARATE compose project with its own host state:
+# a root-owned config directory, an env file carrying an image DIGEST pin, a
+# rollback record, and a systemd unit. ``scripts/deploy-gateway.sh`` (OMN-15521)
+# already owns all of that, and this agent CALLS it rather than reimplementing
+# it. Stated here because "why not just add it to the compose scope" is the
+# first question a reader will have:
+#
+#   * A gateway deploy is build -> resolve digest -> retain the previous image
+#     as a durable rollback tag -> sync two root-owned host files -> rewrite
+#     ``GATEWAY_IMAGE=`` in the env file -> write ``registry.json`` -> reload
+#     the systemd unit -> verify the running container carries the new digest.
+#     Six of those eight steps have no analogue anywhere in ``_compose_build`` /
+#     ``_compose_up``. Reimplementing them here is a second copy that drifts,
+#     and the half that drifts silently is the rollback record.
+#   * The script resolves its own repo root from ``$0``. Invoking the copy
+#     inside this agent's deploy-source clone -- the clone the GIT phase has
+#     just reset onto the requested ref -- is what binds the gateway image to
+#     the deployed sha. Nothing is passed and nothing can disagree.
+#   * It sources the gateway env file itself, so the two operator-supplied maps
+#     stay host files referenced by path and their CONTENTS never enter any
+#     process environment.
+#
+# What this agent adds is scope, sequencing, a fail-closed precondition, and an
+# environment strip -- not compose handling.
+
+
+def deploy_gateway_script() -> str:
+    """Path to the sanctioned gateway deploy script in the deploy source.
+
+    A named seam, like ``preflight_required_compose_env_script`` above, so a
+    test can point it at a checkout that has the script or at one that does not
+    without reaching into ``REPO_DIR``.
+    """
+    return f"{REPO_DIR}/scripts/deploy-gateway.sh"
+
+
+def gateway_env_file() -> str:
+    """Path to the gateway lane's host env file.
+
+    Honours ``GATEWAY_ENV_FILE`` -- the SAME override the script itself reads --
+    so the agent and the script can never resolve two different files.
+    """
+    return os.environ.get("GATEWAY_ENV_FILE", "/etc/omninode/gateway/gateway.env")
+
+
+# The operator-supplied maps the forwarder mounts. Both are deliberately NOT in
+# git and NOT environment values: ``GATEWAY_BROKER_REF_MAP_FILE`` (OMN-15743)
+# maps contract ``cloud_broker_ref`` names to resolved bootstrap servers, and
+# ``GATEWAY_LANE_CREDENTIAL_MAP_FILE`` (OMN-18120) carries the SCRAM principal
+# the forwarder authenticates to the dev-lane broker as.
+#
+# The compose file declares both with ``:?`` rather than ``:-``, so a forwarder
+# that starts without one does not start at all. Asserting them HERE, before the
+# build, turns that into a refusal that names the missing variable instead of a
+# compose interpolation error partway through a deploy.
+GATEWAY_REQUIRED_MAP_VARS: frozenset[str] = frozenset(
+    {
+        "GATEWAY_BROKER_REF_MAP_FILE",
+        "GATEWAY_LANE_CREDENTIAL_MAP_FILE",
+    }
+)
+
+# The only ``GATEWAY_``-prefixed variables allowed to reach the script from this
+# agent's own environment. They select WHERE the lane's files live; they are not
+# lane config. Everything else with that prefix is stripped, because the gateway
+# env file is the single source for gateway configuration and an ambient value
+# that merely looks plausible is exactly the silent disagreement AC1's "never
+# from env" exists to remove.
+GATEWAY_ENV_PASSTHROUGH_VARS: frozenset[str] = frozenset(
+    {
+        "GATEWAY_ENV_FILE",
+        "GATEWAY_HOST_DIR",
+        "GATEWAY_REGISTRY_DIR",
+    }
+)
+
+# The gateway deploy runs ONE BuildKit solve over the same
+# ``docker/Dockerfile.runtime`` the runtime family builds -- a strict subset of
+# that work, two images rather than nine -- so the runtime image-build FLOOR
+# bounds the build half with room. The remaining margin covers the sync, the
+# digest pin, the registry write, the systemd reload (whose own unit bounds
+# compose at ``--wait-timeout 120``) and the post-reload digest verification.
+GATEWAY_DEPLOY_TIMEOUT_SECONDS = RUNTIME_IMAGE_BUILD_FLOOR_SECONDS + 300
+
+
+class GatewayDeployScriptUnavailableError(RuntimeError):
+    """Raised when the sanctioned gateway deploy script could not be executed.
+
+    OMN-18134. The deploy-source clone is reset onto the requested ref, so a ref
+    predating ``scripts/deploy-gateway.sh`` leaves nothing to call. That is a
+    different fact from "the gateway deploy ran and failed", and the OMN-18123
+    lesson is that collapsing those two into one class costs hours: every
+    dev-lane rebuild in a two-and-a-half-hour window on 2026-09-10 was reported
+    under a name that described a problem which did not exist.
+
+    Refuses the deploy. No soft-fail, no "continue if the script is missing" --
+    a runtime family advanced without its gateway is the OMN-18108 defect again.
+    """
+
+
+class GatewayLaneConfigError(RuntimeError):
+    """Raised when the gateway lane's host configuration cannot be proven good.
+
+    OMN-18134. Covers a missing env file, an undeclared required map variable,
+    and a declared map path that is not a readable file. Each refusal names the
+    variable, because the compose interpolation error these pre-empt names only
+    the service.
+    """
 
 
 class PreflightScriptUnavailableError(RuntimeError):
@@ -1752,6 +1877,24 @@ class DeployExecutor:
             )
             return target_services
 
+        # OMN-18134: split the request into the part the omnibase-infra compose
+        # project can act on and the part the gateway project owns. A command
+        # naming ONLY gateway services leaves the infra half empty, and an empty
+        # service list means "the whole scope" everywhere below -- so it is
+        # branched explicitly rather than allowed to widen into a full runtime
+        # rebuild nobody asked for.
+        gateway_targets = gateway_services_in(
+            services if services else services_for_scope(scope, lane=lane)
+        )
+        if services and not without_gateway_services(services):
+            self._deploy_gateway_lane(
+                on_phase_update,
+                lane=lane,
+                build_source=build_source,
+                targets=gateway_targets,
+            )
+            return services
+
         if scope == Scope.FULL:
             # Build images first (both scopes), then bring them up.
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
@@ -1783,6 +1926,12 @@ class DeployExecutor:
             self._compose_up(
                 Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
             )
+            self._deploy_gateway_lane(
+                on_phase_update,
+                lane=lane,
+                build_source=build_source,
+                targets=gateway_targets,
+            )
             return services_for_scope(Scope.FULL, lane=lane)
 
         self._compose_build(
@@ -1802,7 +1951,125 @@ class DeployExecutor:
                 git_ref=git_ref,
             )
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
+        # After the infra family, never before it: the forwarder mirrors off
+        # this lane's broker, so deploying it against a lane that is still
+        # recreating is a self-inflicted delivery gap.
+        self._deploy_gateway_lane(
+            on_phase_update,
+            lane=lane,
+            build_source=build_source,
+            targets=gateway_targets,
+        )
         return services if services else services_for_scope(scope, lane=lane)
+
+    def _gateway_child_env(self, build_source: BuildSource | str) -> dict[str, str]:
+        """Return the environment the gateway deploy script runs under.
+
+        Every ``GATEWAY_``-prefixed variable except the three location overrides
+        is REMOVED. The script sources the gateway env file itself with
+        ``set -a``, so this cannot deprive it of anything it needs -- what it
+        removes is the possibility that a value the agent happens to be carrying
+        (from its own operator env file, or inherited from a peer lane) is the
+        one a map path resolves to. That is AC1's "never from env", enforced
+        rather than assumed.
+        """
+        env = _compose_env()
+        for key in [
+            k
+            for k in env
+            if k.startswith("GATEWAY_") and k not in GATEWAY_ENV_PASSTHROUGH_VARS
+        ]:
+            del env[key]
+        # The script's own build-arg resolution reads these; they are not
+        # gateway config and must match the runtime family's build exactly, or
+        # the gateway image drifts from the lane it forwards for.
+        env["BUILD_SOURCE"] = _coerce_build_source(build_source, layer="gateway").value
+        return env
+
+    def _assert_gateway_lane_config(self) -> str:
+        """Prove the gateway lane's host configuration before any build effect.
+
+        Returns the env file path. Raises ``GatewayLaneConfigError`` naming the
+        offending variable when a required map is undeclared or its declared
+        path is not a readable file. Reads only PATHS -- the contents of these
+        files are never opened, logged, or carried anywhere by this agent.
+        """
+        env_file = gateway_env_file()
+        if not Path(env_file).is_file():
+            raise GatewayLaneConfigError(
+                f"GATEWAY_LANE_CONFIG_MISSING: {env_file} is not a file. It "
+                "supplies the AWS/TPM/UID variables and the two operator map "
+                "paths the gateway compose file requires with `:?`."
+            )
+        declared = _load_dotenv_file(Path(env_file))
+        for name in sorted(GATEWAY_REQUIRED_MAP_VARS):
+            value = declared.get(name, "").strip()
+            if not value:
+                raise GatewayLaneConfigError(
+                    f"GATEWAY_LANE_CONFIG_MISSING: {name} is not declared in "
+                    f"{env_file}. It is operator-supplied and has no default; "
+                    "the forwarder cannot start without it."
+                )
+            if not Path(value).is_file():
+                raise GatewayLaneConfigError(
+                    f"GATEWAY_LANE_CONFIG_MISSING: {name} is declared in "
+                    f"{env_file} but its path is not a readable file. The "
+                    "deploy is refused before the build rather than after the "
+                    "reload."
+                )
+        return env_file
+
+    def _deploy_gateway_lane(
+        self,
+        on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane,
+        build_source: BuildSource | str,
+        targets: list[str],
+    ) -> None:
+        """Deploy the gateway compose project via its sanctioned script.
+
+        No-op on any lane whose scope does not carry a gateway service, which
+        today is every lane but DEV. The guard is written against the resolved
+        target list rather than against ``lane != DEV`` so that adding the
+        gateway to another lane's scope is a one-line change in ``events.py``
+        and not a second place to remember.
+        """
+        if lane != EnumRuntimeLane.DEV or not targets:
+            return
+
+        script = deploy_gateway_script()
+        if not Path(script).is_file():
+            raise GatewayDeployScriptUnavailableError(
+                f"GATEWAY_DEPLOY_SCRIPT_UNAVAILABLE: {script} is not a file. "
+                "The deploy-source clone is on a ref that predates it, so the "
+                "gateway cannot be deployed from this ref. Advancing the "
+                "runtime family without it would leave the forwarder on a "
+                "stale image with nothing reporting it."
+            )
+        env_file = self._assert_gateway_lane_config()
+
+        on_phase_update(Phase.RUNTIME, PhaseStatus.IN_PROGRESS)
+        logger.info(
+            "_deploy_gateway_lane: deploying %s via %s (env file %s, targets: %s)",
+            GATEWAY_COMPOSE_PROJECT,
+            script,
+            env_file,
+            ", ".join(targets),
+        )
+        cmd = ["bash", script, "--execute"]
+        result = _run(
+            cmd,
+            timeout=GATEWAY_DEPLOY_TIMEOUT_SECONDS,
+            cwd=REPO_DIR,
+            env=self._gateway_child_env(build_source),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"GATEWAY_DEPLOY_FAILED: {' '.join(cmd)} exited "
+                f"{result.returncode}. stderr: {result.stderr[-2000:]}"
+            )
+        logger.info("_deploy_gateway_lane: %s deployed", GATEWAY_COMPOSE_PROJECT)
 
     def _build_dev_lane_only_services(
         self,

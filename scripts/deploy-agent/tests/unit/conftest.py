@@ -215,3 +215,58 @@ def _resolve_preflight_script_from_this_checkout(
     monkeypatch.setattr(
         executor_mod, "preflight_required_compose_env_script", lambda: str(script)
     )
+
+
+@pytest.fixture(autouse=True)
+def _resolve_gateway_lane_from_this_checkout(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """OMN-18134: make the gateway lane inert for tests that are not testing it.
+
+    A DEV runtime rebuild now also deploys the gateway compose project. That
+    step SHELLS OUT TO A MUTATING SCRIPT (``scripts/deploy-gateway.sh
+    --execute`` builds images, rewrites root-owned host files and reloads a
+    systemd unit), and several existing tests drive ``rebuild_scope`` while
+    stubbing only ``_compose_build`` / ``_compose_up`` / ``_pull_pinned_image``
+    by hand. Leaving the new step live for those would let a unit test run a
+    real deploy on whatever machine the suite happens to be on.
+
+    So ``_deploy_gateway_lane`` is stubbed by default here, and the two seams
+    are repointed at resolvable paths for the tests that DO exercise it. This
+    is the same visible arrangement ``_stub_promotion_guard`` already uses
+    above: tests that verify the behaviour opt out with the ``gateway_lane``
+    marker and control the seams themselves.
+
+    The script seam is a path repoint, not a stub -- it points at the real
+    ``scripts/deploy-gateway.sh`` in the repository under test, so deleting or
+    renaming it moves what the opted-out tests observe. The env file is a
+    genuine fixture, because the real one is operator-supplied and is not in git
+    by design; it declares both required maps against files that exist. Both
+    refusals' own behaviour is asserted directly in
+    ``test_gateway_lane_scope_omn18134.py``, which repoints them the other way.
+    """
+    from deploy_agent import executor as executor_mod
+
+    repo_root = Path(__file__).resolve().parents[4]
+    script = repo_root / "scripts" / "deploy-gateway.sh"
+    monkeypatch.setattr(executor_mod, "deploy_gateway_script", lambda: str(script))
+
+    lane_dir = tmp_path_factory.mktemp("gateway-lane")
+    lines: list[str] = []
+    for name in sorted(executor_mod.GATEWAY_REQUIRED_MAP_VARS):
+        target = lane_dir / f"{name.lower()}.yaml"
+        target.write_text("{}\n", encoding="utf-8")
+        lines.append(f"{name}={target}")
+    env_file = lane_dir / "gateway.env"
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(executor_mod, "gateway_env_file", lambda: str(env_file))
+
+    if request.node.get_closest_marker("gateway_lane") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.DeployExecutor,
+        "_deploy_gateway_lane",
+        lambda self, *args, **kwargs: None,
+    )
