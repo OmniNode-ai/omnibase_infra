@@ -29,8 +29,11 @@ All tests:
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -47,19 +50,37 @@ _SCRIPT = _REPO_ROOT / "scripts" / "generate_topic_enums.py"
 _OUTPUT_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "enums" / "generated"
 
 
-def _run_script(*args: str) -> subprocess.CompletedProcess[str]:
+def _run_script(
+    *args: str, output_dir: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run generate_topic_enums.py with the given arguments via uv run.
 
     Returns the completed process (never raises CalledProcessError — callers
     assert on returncode themselves so failures are clearly attributed).
     """
+    command = [sys.executable, str(_SCRIPT), *args]
+    if output_dir is not None:
+        command.extend(("--output-dir", str(output_dir)))
+
     return subprocess.run(
-        [sys.executable, str(_SCRIPT), *args],
+        command,
         capture_output=True,
         text=True,
         cwd=str(_REPO_ROOT),
         check=False,
     )
+
+
+@pytest.fixture
+def isolated_output_dir() -> Iterator[Path]:
+    """Copy generated artifacts into a task-owned output below the repository."""
+    with tempfile.TemporaryDirectory(
+        dir=_REPO_ROOT,
+        prefix=".topic-enums-",
+    ) as temporary_root:
+        output_dir = Path(temporary_root) / "generated"
+        shutil.copytree(_OUTPUT_DIR, output_dir)
+        yield output_dir
 
 
 class TestTopicPipelineE2E:
@@ -73,28 +94,27 @@ class TestTopicPipelineE2E:
         not _SCRIPT.is_file(),
         reason="generate_topic_enums.py script not found",
     )
-    def test_check_passes_on_clean_state(self) -> None:
+    def test_check_passes_on_clean_state(self, isolated_output_dir: Path) -> None:
         """--check exits 0 on a clean (up-to-date) repository.
 
-        Pre-condition: The generated enum files match the current contracts.
-        This test first calls --generate to guarantee the pre-condition, then
-        asserts --check agrees.
+        The source output is checked read-only. Generation runs only against a
+        task-owned copy so this test never mutates tracked generated artifacts.
 
         This mirrors PR #493 happy-path verification: "check exits 0 when
         generated files are current."
         """
-        # Ensure clean baseline via --generate (idempotent).
-        generate_result = _run_script("--generate")
+        # Exercise generation against task-owned output only.
+        generate_result = _run_script("--generate", output_dir=isolated_output_dir)
         assert generate_result.returncode == 0, (
             f"--generate setup failed (rc={generate_result.returncode}).\n"
             f"stdout: {generate_result.stdout}\n"
             f"stderr: {generate_result.stderr}"
         )
 
-        # Now --check must agree that files are up to date.
+        # The tracked source output must independently be current.
         check_result = _run_script("--check")
         assert check_result.returncode == 0, (
-            f"--check reported drift on a freshly-generated tree (rc={check_result.returncode}).\n"
+            f"--check reported drift on the tracked source output (rc={check_result.returncode}).\n"
             f"stdout: {check_result.stdout}\n"
             f"stderr: {check_result.stderr}"
         )
@@ -106,7 +126,7 @@ class TestTopicPipelineE2E:
         not _SCRIPT.is_file(),
         reason="generate_topic_enums.py script not found",
     )
-    def test_generate_is_idempotent(self) -> None:
+    def test_generate_is_idempotent(self, isolated_output_dir: Path) -> None:
         """Two consecutive --generate runs produce byte-identical output files.
 
         Idempotency is a correctness invariant of the pipeline: re-running
@@ -116,7 +136,7 @@ class TestTopicPipelineE2E:
         This mirrors PR #493 idempotency verification.
         """
         # First run — establish baseline.
-        result1 = _run_script("--generate")
+        result1 = _run_script("--generate", output_dir=isolated_output_dir)
         assert result1.returncode == 0, (
             f"First --generate failed (rc={result1.returncode}).\n"
             f"stdout: {result1.stdout}\nstderr: {result1.stderr}"
@@ -124,25 +144,25 @@ class TestTopicPipelineE2E:
 
         # Capture file contents after first run.
         snapshot_after_first: dict[str, str] = {}
-        if _OUTPUT_DIR.exists():
-            for f in sorted(_OUTPUT_DIR.iterdir()):
+        if isolated_output_dir.exists():
+            for f in sorted(isolated_output_dir.iterdir()):
                 if f.is_file() and f.suffix == ".py":
                     snapshot_after_first[f.name] = f.read_text(encoding="utf-8")
 
         assert snapshot_after_first, (
-            f"No .py files found in output dir after first --generate: {_OUTPUT_DIR}"
+            f"No .py files found in output dir after first --generate: {isolated_output_dir}"
         )
 
         # Second run — must produce the same result.
-        result2 = _run_script("--generate")
+        result2 = _run_script("--generate", output_dir=isolated_output_dir)
         assert result2.returncode == 0, (
             f"Second --generate failed (rc={result2.returncode}).\n"
             f"stdout: {result2.stdout}\nstderr: {result2.stderr}"
         )
 
         snapshot_after_second: dict[str, str] = {}
-        if _OUTPUT_DIR.exists():
-            for f in sorted(_OUTPUT_DIR.iterdir()):
+        if isolated_output_dir.exists():
+            for f in sorted(isolated_output_dir.iterdir()):
                 if f.is_file() and f.suffix == ".py":
                     snapshot_after_second[f.name] = f.read_text(encoding="utf-8")
 
@@ -162,7 +182,7 @@ class TestTopicPipelineE2E:
         not _SCRIPT.is_file(),
         reason="generate_topic_enums.py script not found",
     )
-    def test_check_detects_stale_enum(self) -> None:
+    def test_check_detects_stale_enum(self, isolated_output_dir: Path) -> None:
         """--check exits 1 (not 0) when a generated file is corrupted/stale.
 
         CRITICAL: If this test fails (--check exits 0 on a corrupted file),
@@ -173,7 +193,7 @@ class TestTopicPipelineE2E:
         generated files are stale."
         """
         # Ensure clean baseline.
-        generate_result = _run_script("--generate")
+        generate_result = _run_script("--generate", output_dir=isolated_output_dir)
         assert generate_result.returncode == 0, (
             f"--generate setup failed (rc={generate_result.returncode}).\n"
             f"stderr: {generate_result.stderr}"
@@ -182,7 +202,7 @@ class TestTopicPipelineE2E:
         # Find a generated enum_*_topic.py to corrupt.
         target: Path | None = None
         original_content: str = ""
-        for f in sorted(_OUTPUT_DIR.iterdir()):
+        for f in sorted(isolated_output_dir.iterdir()):
             if (
                 f.is_file()
                 and f.name.startswith("enum_")
@@ -193,7 +213,7 @@ class TestTopicPipelineE2E:
                 break
 
         assert target is not None, (
-            f"No enum_*_topic.py files found in {_OUTPUT_DIR} to corrupt for this test."
+            f"No enum_*_topic.py files found in {isolated_output_dir} to corrupt for this test."
         )
 
         # Corrupt the file, then verify --check detects it.
@@ -203,13 +223,13 @@ class TestTopicPipelineE2E:
                 encoding="utf-8",
             )
 
-            check_result = _run_script("--check")
+            check_result = _run_script("--check", output_dir=isolated_output_dir)
 
             # CRITICAL assertion: --check MUST exit 1 on stale content.
             assert check_result.returncode == 1, (
                 f"CRITICAL P0 BUG: --check returned {check_result.returncode} "
                 f"instead of 1 on a corrupted generated file.\n"
-                f"Corrupted file: {target.relative_to(_REPO_ROOT)}\n"
+                f"Corrupted file: {target}\n"
                 f"stdout: {check_result.stdout}\n"
                 f"stderr: {check_result.stderr}\n"
                 "The drift detector in generate_topic_enums.py is broken. "
@@ -229,7 +249,7 @@ class TestTopicPipelineE2E:
         not _SCRIPT.is_file(),
         reason="generate_topic_enums.py script not found",
     )
-    def test_generate_restores_from_stale(self) -> None:
+    def test_generate_restores_from_stale(self, isolated_output_dir: Path) -> None:
         """--generate fixes a stale enum file; --check then exits 0.
 
         This verifies the full repair cycle: corrupt a generated file, run
@@ -238,7 +258,7 @@ class TestTopicPipelineE2E:
         This mirrors PR #493 repair-path verification.
         """
         # Ensure clean baseline.
-        generate_result = _run_script("--generate")
+        generate_result = _run_script("--generate", output_dir=isolated_output_dir)
         assert generate_result.returncode == 0, (
             f"--generate setup failed (rc={generate_result.returncode}).\n"
             f"stderr: {generate_result.stderr}"
@@ -247,7 +267,7 @@ class TestTopicPipelineE2E:
         # Find a generated enum_*_topic.py to corrupt.
         target: Path | None = None
         original_content: str = ""
-        for f in sorted(_OUTPUT_DIR.iterdir()):
+        for f in sorted(isolated_output_dir.iterdir()):
             if (
                 f.is_file()
                 and f.name.startswith("enum_")
@@ -258,7 +278,7 @@ class TestTopicPipelineE2E:
                 break
 
         assert target is not None, (
-            f"No enum_*_topic.py files found in {_OUTPUT_DIR} to corrupt for this test."
+            f"No enum_*_topic.py files found in {isolated_output_dir} to corrupt for this test."
         )
 
         try:
@@ -269,7 +289,7 @@ class TestTopicPipelineE2E:
             )
 
             # Confirm it is now stale (pre-condition).
-            pre_check = _run_script("--check")
+            pre_check = _run_script("--check", output_dir=isolated_output_dir)
             assert pre_check.returncode == 1, (
                 f"Pre-condition failed: --check returned {pre_check.returncode} "
                 f"instead of 1 on a corrupted file.\n"
@@ -277,14 +297,14 @@ class TestTopicPipelineE2E:
             )
 
             # Run --generate to repair.
-            repair_result = _run_script("--generate")
+            repair_result = _run_script("--generate", output_dir=isolated_output_dir)
             assert repair_result.returncode == 0, (
                 f"--generate failed to repair stale file (rc={repair_result.returncode}).\n"
                 f"stdout: {repair_result.stdout}\nstderr: {repair_result.stderr}"
             )
 
             # --check must now pass.
-            post_check = _run_script("--check")
+            post_check = _run_script("--check", output_dir=isolated_output_dir)
             assert post_check.returncode == 0, (
                 f"--check still reports drift after --generate repair "
                 f"(rc={post_check.returncode}).\n"
