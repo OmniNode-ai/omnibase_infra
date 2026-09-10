@@ -337,18 +337,25 @@ async def test_omn_16260_shape_reaches_the_flip_path() -> None:
     must reach the flip path instead of being refused as a shortfall
     (GAP_POSTED, the refusal this ticket fixed).
 
-    It used to end in FLIPPED, but only because the fixture's body was `None`:
-    `_ac_coverage_gap` returns early on an empty description, so its rule 3
-    (`non_probative >= verified`, and 6 >= 6) never ran. A body is no longer
-    optional -- the binding gate holds a ticket whose criteria cannot be read
-    -- so the moment this fixture has one, rule 3 refuses it, correctly and
-    for a reason that has nothing to do with the denominator.
+    OMN-18056 briefly narrowed what this case could assert, and OMN-18125 has
+    restored it. The history is worth keeping because it is the same defect
+    seen twice.
 
-    So the assertion is placement, which is what the denominator change is
-    about: the run reaches a conjunct INSIDE the `all_verified` block and
-    carries the measured counters. `test_no_non_probative_entries_still_flips`
-    below is the positive control that the flip path itself still terminates
-    in a flip.
+    This fixture used to end in FLIPPED only because its body was `None`:
+    `_ac_coverage_gap` returns early on an empty description, so rule 3
+    (`non_probative >= verified`, 6 >= 6) never ran. A body is no longer
+    optional -- the binding gate holds a ticket whose criteria cannot be read
+    -- and the moment this fixture had one, rule 3 refused it. That refusal
+    was never about this ticket's evidence: the six non-probative entries are
+    `dod-pr-<n>-state` provenance that declare coverage of nothing, and the
+    one criterion here is bound to a verified behaviour check. OMN-18125
+    restricts rule 3 to the checks that DECLARE coverage of a criterion, so
+    the provenance six leave both terms and the case flips again, as the
+    OMN-16260 measurement this suite is named for always said it should.
+
+    The assertion is therefore both halves: it reaches a conjunct INSIDE the
+    `all_verified` block carrying the measured counters, AND it terminates in
+    a flip.
     """
     linear = _FakeLinear()
     payload = _skill_result(checks=_omn_16260_shape())
@@ -380,21 +387,18 @@ async def test_omn_16260_shape_reaches_the_flip_path() -> None:
     result = await _handler(payload, linear).handle(_request())
     outcome = result.outcomes[0]
 
-    # INSIDE the all_verified block: the coverage rule can only be reached by
-    # a verdict the denominator accepted.
-    assert outcome.decision is EnumEvidenceAutocloseDecision.GAP_AC_COVERAGE
+    # INSIDE the all_verified block: the flip path can only be reached by a
+    # verdict the denominator accepted.
+    assert outcome.decision is EnumEvidenceAutocloseDecision.FLIPPED
     assert outcome.decision is not EnumEvidenceAutocloseDecision.GAP_POSTED
-    assert result.tickets_flipped == 0
     assert outcome.dod_verify_total_checks == 12
     assert outcome.dod_verify_verified_count == 6
     assert outcome.dod_verify_behavior_proving_count == 1
-    # The structured record and the stated reason must BOTH show the term that
-    # released the flip, or "6/12 ACs verified" reads as an unexplained
-    # shortfall to whoever audits the first automatic close-out.
+    # The structured record still carries the term that released the flip, or
+    # "6/12 ACs verified" reads as an unexplained shortfall to whoever audits
+    # the first automatic close-out. OMN-18125 narrowed which checks a RULE
+    # counts; it did not hide any of them from the receipt.
     assert outcome.dod_verify_non_probative_count == 6
-    assert "6 non-probative check(s) against 6 verified probative one(s)" in (
-        outcome.reason
-    )
     # DRY-RUN: the decision is reached, nothing is written.
     assert outcome.applied is False
     assert linear.state_updates == []

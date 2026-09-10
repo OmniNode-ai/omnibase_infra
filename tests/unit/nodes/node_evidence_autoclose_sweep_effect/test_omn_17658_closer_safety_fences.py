@@ -861,7 +861,7 @@ class TestTheMeasuredVerdictShapes:
         # CONTROL: the counting rule that used to hold this body still refutes
         # it on its own terms, and still states the arithmetic. The binding
         # gate has replaced no coverage; it runs ahead of it.
-        coverage_reason, uncovered = _ac_coverage_gap(_OMN_17556_DESCRIPTION, 4, 18)
+        coverage_reason, uncovered = _ac_coverage_gap(_OMN_17556_DESCRIPTION, 4, 4, 18)
         assert "18" in coverage_reason
         assert len(uncovered) == 4
 

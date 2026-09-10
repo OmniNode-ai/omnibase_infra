@@ -277,13 +277,36 @@
 #           it. Exact membership is untouched, so bare `## AC` and `## DoD`
 #           still open a section.
 #
+#   - OMN-18125 (node_version 1.11.0): THE COUNTING RULE JUDGES THE CHECKS
+#     THAT CLAIM COVERAGE, NOT EVERY CHECK IN THE CONTRACT. The bounded-
+#     minority rule ("the non-probative checks must not outnumber the verified
+#     probative ones") read the verdict's TOTALS, which count every auto-minted
+#     Evidence-Source provenance item a ticket's companion history ever
+#     accumulated -- the `-ci` product-diff-scope items, the
+#     `occ-self-bind-pr-<n>` items, the bare PR-state items, each with its
+#     derived `::pr-live-state` overlay. None of them declares `binds_ac`, so
+#     none claims to cover any acceptance criterion, and every one is a bare
+#     `gh pr view --json ...` that the verifier demotes for exactly that
+#     reason. Measured on OMN-17478 (closer run 34431989659, 2026-09-10):
+#     22 of 34 checks were that provenance, and they held a ticket whose six
+#     criteria were EACH bound to a verified probative check -- the OMN-18056
+#     binding leg had already released it. The population grows with every
+#     companion and never shrinks, so the hold was fleet-wide and got worse
+#     with a ticket's age. Both of that rule's terms are now restricted to the
+#     checks whose `binds_ac` names one of this ticket's own criteria. The
+#     more-criteria-than-checks rule is deliberately NOT narrowed: it asks a
+#     different question and narrowing it would hold a contract whose single
+#     integration proof legitimately declares several criteria. This changes
+#     which verdicts the sweep is willing to release, so the gap-comment
+#     fingerprint version moves with the node_version.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 7
   patch: 0
-node_version: "1.10.2"
+node_version: "1.11.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
