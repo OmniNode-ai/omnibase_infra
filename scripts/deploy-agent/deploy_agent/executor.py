@@ -875,6 +875,36 @@ def runtime_image_build_budget(
     )
 
 
+def preflight_required_compose_env_script() -> str:
+    """Path to the stdlib-only required-compose-env preflight in the deploy source.
+
+    A named seam rather than an inline f-string so a test can point it at a
+    checkout that has the script, or at one that does not, without reaching into
+    ``REPO_DIR`` -- the same visible path repoint the compose-up and image-build
+    budget fixtures already take (OMN-18057, OMN-18072).
+    """
+    return f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+
+
+class PreflightScriptUnavailableError(RuntimeError):
+    """Raised when the required-compose-env preflight could not be executed.
+
+    OMN-18123. Distinct from ``REQUIRED_COMPOSE_ENV_MISSING``, which means the
+    preflight RAN and found unset variables. This one means it never ran, so
+    nothing is known about the compose environment either way.
+
+    Every dev-lane rebuild between 2026-09-10T00:49:01Z and 03:31:59Z failed
+    under the wrong class: the deploy-source clone had been reset onto a commit
+    predating ``scripts/preflight_required_compose_env.py``, the interpreter
+    could not open the file, and the refusal announced a compose-environment
+    problem that did not exist. The real cause survived only as a trailing
+    CPython message inside a differently-named error.
+
+    Both classes refuse the deploy. The refusal posture OMN-17530 established --
+    no soft-fail, no "continue if the script is missing" -- is unchanged.
+    """
+
+
 class DeployExecutor:
     def __init__(self) -> None:
         # OMN-18057: services a phase left in a non-running state, and whether
@@ -1350,7 +1380,24 @@ class DeployExecutor:
         under the interpreter running this agent, so a missing project venv
         cannot be the reason the list goes unseen.
         """
-        script = f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+        script = preflight_required_compose_env_script()
+        # OMN-18123: a script that could not be RUN is not a script that RAN and
+        # found unset variables. Both refuse the deploy -- there is still no
+        # soft-fail branch -- but they are different facts and the caller is told
+        # which one happened. Checked here rather than inferred from the
+        # interpreter's stderr, because that text is a CPython message a reader
+        # has to know to look past the error class for, and it is what hid the
+        # real cause (a deploy clone reset onto a commit predating this script)
+        # behind REQUIRED_COMPOSE_ENV_MISSING for three hours.
+        if not Path(script).is_file():
+            raise PreflightScriptUnavailableError(
+                f"PREFLIGHT_SCRIPT_UNAVAILABLE for lane {lane.value} -- the "
+                f"required-compose-env preflight could not be run: {script} is "
+                f"not a file. The deploy source directory is {REPO_DIR}; a clone "
+                "checked out at a commit that predates this script produces "
+                "exactly this. Compose validation was not attempted, and this "
+                "says nothing about whether the compose environment is complete."
+            )
         cmd = [
             sys.executable,
             script,
