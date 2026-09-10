@@ -46,6 +46,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     should_replay,
     unwrap_nested_dlq_record,
 )
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_commit_ledger import (
+    ModelDlqCommitLedger,
+)
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
     ModelDlqMessage,
 )
@@ -104,7 +107,10 @@ class HandlerDlqReplay:
     """EFFECT handler that replays or quarantines DLQ messages.
 
     Dependencies (constructor-injected):
-        consumer: DLQ topic consumer (persistent group).
+        consumers: One DLQ consumer per DECLARED subscribe topic, keyed by
+            topic, all on the same persistent group. OMN-18119: this was a
+            single ``consumer`` and the contract declares THREE subscribe
+            topics, so two of the three were drained by nothing at all.
         producer: Replays eligible messages to the original topic.
         quarantine_producer: Publishes non-replayable messages to quarantine.
         tracking: Optional ``ServiceDlqTracking`` for dlq_replay_history.
@@ -113,16 +119,27 @@ class HandlerDlqReplay:
     def __init__(
         self,
         *,
-        consumer: DLQConsumer,
+        consumers: Mapping[str, DLQConsumer],
         producer: DLQProducer,
         quarantine_producer: DLQQuarantineProducer,
         tracking: ServiceDlqTracking | None = None,
     ) -> None:
-        self._consumer = consumer
+        if not consumers:
+            raise ValueError(
+                "HandlerDlqReplay requires at least one DLQ consumer; an empty "
+                "mapping would drain nothing while reporting clean runs"
+            )
+        self._consumers: dict[str, DLQConsumer] = dict(consumers)
         self._producer = producer
         self._quarantine_producer = quarantine_producer
         self._tracking = tracking
-        self._config: ModelDlqReplayEngineConfig = consumer.config
+        # Bounds, filters and the quarantine topic are identical across the
+        # per-topic configs -- only ``dlq_topic`` differs, and every use of it
+        # takes the DRAINED consumer's own config rather than this one.
+        self._config: ModelDlqReplayEngineConfig = next(
+            iter(self._consumers.values())
+        ).config
+        self._start_index = 0
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -188,61 +205,94 @@ class HandlerDlqReplay:
         )
 
     async def run(self) -> ModelDlqReplayRunResult:
-        """Consume the DLQ topic for one BOUNDED batch (OMN-16422).
+        """Drain EVERY declared DLQ topic for one BOUNDED batch.
 
-        This handler is auto-wired as a PER-MESSAGE trigger on the DLQ topic
-        (``event_bus.subscribe_topics`` in ``contract.yaml``), but drains via
-        a persistent, whole-topic-shaped consumer group. Every invocation is
-        bounded two ways -- record count (``max_records_per_run``,
-        additionally clamped by an explicit ``limit`` when one is set) and
-        wall-clock (``max_run_duration_seconds``) -- and commits incrementally
-        every ``commit_every_n_records`` processed records. A bounded
-        invocation always returns quickly (keeping the OUTER trigger
-        consumer's poll loop alive) and always makes committed progress, so
-        the persistent group's committed offset advances even while the topic
-        is continuously self-feeding (OMN-16422 / OMN-16418).
+        This handler is auto-wired as a PER-MESSAGE trigger on the DLQ topics
+        (``event_bus.subscribe_topics`` in ``contract.yaml``) but drains via a
+        persistent, whole-topic-shaped consumer group.
+
+        OMN-16422 bounded every invocation two ways -- record count
+        (``max_records_per_run``, additionally clamped by an explicit ``limit``)
+        and wall-clock (``max_run_duration_seconds``) -- and commits
+        incrementally every ``commit_every_n_records`` records, so a bounded
+        invocation always returns quickly (keeping the OUTER trigger consumer's
+        poll loop alive) and always makes committed progress even while the
+        topic is self-feeding.
 
         OMN-17137: the wall-clock bound MUST be enforced on the WAIT for the
         next record, not only between records. ``DLQConsumer.consume_messages()``
-        iterates an ``AIOKafkaConsumer`` whose ``__anext__`` is
-        ``while True: return await self.getone()`` -- it blocks indefinitely
-        until a record arrives. The ``consumer_timeout_ms=5000`` passed at
-        construction does NOT end that iteration: in aiokafka that parameter
-        is the *background fetching routine's* max wait (default 200ms), not
-        kafka-python's idle-iteration timeout. So a deadline checked only
-        inside the loop body is never re-evaluated once the topic goes idle
-        mid-drain -- ``run()`` parked in ``getone()`` forever, holding the
-        outer trigger consumer's serial ``_consume_loop`` until aiokafka
-        evicted it at ``max_poll_interval_ms`` (live: 30 min on the stability
-        lane, ``OffsetCommit ... UnknownMemberIdError``, group left at zero
-        members = ``Empty``, generation 338 by the time it was measured). The
-        acquisition below is therefore driven through ``asyncio.wait_for``
-        with the run's REMAINING budget, and both bounds are checked BEFORE
-        the next record is requested.
+        iterates an ``AIOKafkaConsumer`` whose ``__anext__`` blocks until a
+        record arrives; ``consumer_timeout_ms`` is aiokafka's background
+        fetching wait, not an idle-iteration timeout. A deadline checked only
+        inside the loop body is never re-evaluated once the topic goes idle, so
+        ``run()`` parked in ``getone()`` forever and held the outer trigger
+        consumer until aiokafka evicted it. Every acquisition below is driven
+        through ``asyncio.wait_for``.
 
-        OMN-18084: runs over ONE shared consumer are SERIALISED. OMN-18013 split
-        this node's routing into three per-topic dispatcher entries, and
-        ``service_kernel`` keys dependencies by handler name, so all three
-        resolve to a single ``DLQConsumer``. Concurrently, that object was
-        started and stopped by peers -- one dispatcher's ``finally`` tore down a
-        consumer another was mid-drain on, and the victim raised
-        ``RuntimeError("Consumer not started")`` on every message. Cost of the
-        mutex: a peer waits at most ``max_run_duration_seconds`` (10 s by
-        default, so at most ~30 s across three dispatchers), well inside
-        ``max_poll_interval_ms``. Two runs iterating one ``AIOKafkaConsumer``
-        was never safe anyway, so the serialisation is the correct semantics
-        for a shared consumer, not only a lifecycle repair.
+        OMN-18084: runs over ONE shared consumer are SERIALISED, because
+        ``service_kernel`` keys dependencies by handler name and the three
+        per-topic dispatcher entries all resolve to one dependency mapping.
+
+        OMN-18119 -- what changed, and the three bounds that make it safe.
+        The contract declares THREE subscribe topics and this handler took one
+        consumer, so ``config.dlq_topic`` decided the whole drain and the other
+        two topics were consumed by nothing. Live on the .201 dev lane the
+        replay group held a committed offset for exactly ONE topic-partition
+        while 1,661 records sat in the commands DLQ. The handler now holds one
+        consumer per declared topic and drains each in turn:
+
+        * **The wall clock is SHARED across topics**, not multiplied by them. A
+          run still returns inside ``max_run_duration_seconds`` regardless of
+          how many topics are declared, which is what keeps OMN-17137 closed.
+        * **The record budget is PER TOPIC.** A shared record budget would be
+          spent entirely by the first topic in the order, and on this lane the
+          first topic is a 700,000-record backlog -- the other two would never
+          see a single record.
+        * **An idle topic costs one short probe.** The FIRST record on a topic
+          is awaited for at most ``idle_probe_seconds``; an empty topic breaks
+          there instead of burning the run's remaining budget. Once a record
+          arrives the topic continues under the shared remaining budget.
+
+        The start of the order ROTATES by one each run. Without that, a topic
+        whose predecessor can always fill its own budget never gets reached at
+        all while a backlog is hot -- the starvation is not hypothetical, it is
+        the steady state of this lane today.
         """
-        # OMN-18084: the whole start -> drain -> stop sequence is one critical
-        # section per shared consumer. Acquiring INSIDE run() rather than around
-        # the dispatch keeps the scope exactly the lifecycle that is shared; a
-        # dispatcher whose consumer nobody else holds never waits.
-        async with _run_lock_for(self._consumer):
-            return await self._run_locked()
+        results: list[ModelDlqReplayResult] = []
+        topics = list(self._consumers)
+        start = self._start_index % len(topics)
+        self._start_index = (start + 1) % len(topics)
+        order = topics[start:] + topics[:start]
 
-    async def _run_locked(self) -> ModelDlqReplayRunResult:
-        """One bounded drain, holding this consumer's run mutex."""
-        started_dependencies = await self._ensure_runtime_dependencies_started()
+        deadline = time.monotonic() + self._config.max_run_duration_seconds
+        for topic in order:
+            if time.monotonic() >= deadline:
+                logger.debug(
+                    "DLQ replay run exhausted its wall-clock budget before "
+                    "reaching %s; it leads the order next run (OMN-18119).",
+                    topic,
+                )
+                break
+            consumer = self._consumers[topic]
+            # OMN-18084: the whole start -> drain -> stop sequence is one
+            # critical section per shared consumer. Acquiring per consumer
+            # rather than around the dispatch keeps the scope exactly the
+            # lifecycle that is shared; a dispatcher whose consumer nobody
+            # else holds never waits.
+            async with _run_lock_for(consumer):
+                results.extend(await self._run_locked(consumer, deadline))
+
+        return self._summarize(results, tuple(order))
+
+    async def _run_locked(
+        self, consumer: DLQConsumer, deadline: float
+    ) -> list[ModelDlqReplayResult]:
+        """Drain ONE topic, holding that consumer's run mutex.
+
+        ``deadline`` is the RUN's shared wall clock, not this topic's own.
+        """
+        config = consumer.config
+        started_dependencies = await self._ensure_runtime_dependencies_started(consumer)
         try:
             results: list[ModelDlqReplayResult] = []
             count = 0
@@ -255,25 +305,24 @@ class HandlerDlqReplay:
             # every record the iterator has already handed out, including one
             # whose handling never finished — so any early exit advanced past
             # the in-flight record.
-            completed: dict[tuple[str, int], int] = {}
-            blocked: set[tuple[str, int]] = set()
-            limit = self._config.limit
-            max_records = self._config.max_records_per_run
+            ledger = ModelDlqCommitLedger()
+            limit = config.limit
+            max_records = config.max_records_per_run
             effective_limit = max_records if limit is None else min(limit, max_records)
-            commit_every = self._config.commit_every_n_records
-            deadline = time.monotonic() + self._config.max_run_duration_seconds
+            commit_every = config.commit_every_n_records
 
-            messages = self._consumer.consume_messages()
+            messages = consumer.consume_messages()
             try:
                 while count < effective_limit:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0.0:
                         logger.warning(
                             "DLQ replay run hit its wall-clock bound (%.1fs) after "
-                            "%d records -- returning this bounded batch instead of "
-                            "continuing to drain (OMN-16422).",
-                            self._config.max_run_duration_seconds,
+                            "%d records on %s -- returning this bounded batch "
+                            "instead of continuing to drain (OMN-16422).",
+                            config.max_run_duration_seconds,
                             count,
+                            config.dlq_topic,
                         )
                         break
 
@@ -281,39 +330,57 @@ class HandlerDlqReplay:
                     # records. Without this timeout an idle topic parks the
                     # run in aiokafka's unbounded ``getone()`` and the
                     # deadline above is never reached again.
+                    #
+                    # OMN-18119: the FIRST record of a topic gets the short
+                    # idle probe rather than the whole remaining budget, so a
+                    # declared-but-empty topic costs ``idle_probe_seconds``
+                    # and the topics behind it in the order still get drained.
+                    wait = (
+                        remaining
+                        if count
+                        else min(config.idle_probe_seconds, remaining)
+                    )
                     try:
-                        message = await asyncio.wait_for(
-                            anext(messages), timeout=remaining
-                        )
+                        message = await asyncio.wait_for(anext(messages), timeout=wait)
                     except StopAsyncIteration:
                         break
                     except TimeoutError:
-                        logger.warning(
-                            "DLQ replay run hit its wall-clock bound (%.1fs) after "
-                            "%d records while WAITING for the next record -- the "
-                            "topic went idle mid-drain. Returning this bounded "
-                            "batch rather than parking the outer trigger consumer "
-                            "(OMN-17137).",
-                            self._config.max_run_duration_seconds,
-                            count,
-                        )
+                        if count:
+                            logger.warning(
+                                "DLQ replay run hit its wall-clock bound (%.1fs) "
+                                "after %d records on %s while WAITING for the "
+                                "next record -- the topic went idle mid-drain. "
+                                "Returning this bounded batch rather than parking "
+                                "the outer trigger consumer (OMN-17137).",
+                                config.max_run_duration_seconds,
+                                count,
+                                config.dlq_topic,
+                            )
+                        else:
+                            logger.debug(
+                                "DLQ topic %s produced no record within the "
+                                "%.2fs idle probe; moving to the next declared "
+                                "topic (OMN-18119).",
+                                config.dlq_topic,
+                                wait,
+                            )
                         break
 
                     if isinstance(message, ModelUnparseableDlqRecord):
                         result = await self._quarantine_unparseable(message)
                     else:
-                        result = await self._process_message(message)
+                        result = await self._process_message(message, config)
                     results.append(result)
-                    self._mark_offset(message, result, completed, blocked)
+                    self._mark_offset(message, result, ledger, config.dlq_topic)
                     count += 1
                     uncommitted += 1
 
                     if (
-                        not self._config.dry_run
+                        not config.dry_run
                         and uncommitted >= commit_every
-                        and completed
+                        and ledger.has_committable_offsets
                     ):
-                        await self._consumer.commit_offsets(completed)
+                        await consumer.commit_offsets(ledger.completed)
                         uncommitted = 0
             finally:
                 # Release the iterator deterministically. After a timeout the
@@ -324,19 +391,27 @@ class HandlerDlqReplay:
                 if aclose is not None:
                     await aclose()
 
-            if uncommitted and not self._config.dry_run and completed:
-                await self._consumer.commit_offsets(completed)
+            if uncommitted and not config.dry_run and ledger.has_committable_offsets:
+                await consumer.commit_offsets(ledger.completed)
 
-            return self._summarize(results)
+            return results
         finally:
             await self._stop_runtime_dependencies(started_dependencies)
 
-    async def _ensure_runtime_dependencies_started(self) -> list[object]:
-        """Start owned Kafka dependencies lazily when a replay run executes."""
+    async def _ensure_runtime_dependencies_started(
+        self, consumer: DLQConsumer
+    ) -> list[object]:
+        """Start owned Kafka dependencies lazily when a replay run executes.
+
+        Only the consumer for the topic being drained is started; the peers for
+        the other declared topics stay closed until their own turn, so a run
+        holds one Kafka consumer at a time rather than one per declared topic
+        (OMN-18119).
+        """
         started: list[object] = []
         try:
             for dependency in (
-                self._consumer,
+                consumer,
                 self._producer,
                 self._quarantine_producer,
             ):
@@ -362,8 +437,8 @@ class HandlerDlqReplay:
         self,
         message: DlqDrainRecord,
         result: ModelDlqReplayResult,
-        completed: dict[tuple[str, int], int],
-        blocked: set[tuple[str, int]],
+        ledger: ModelDlqCommitLedger,
+        dlq_topic: str,
     ) -> None:
         """Record whether this record's offset may be committed (OMN-17896).
 
@@ -376,21 +451,21 @@ class HandlerDlqReplay:
         Its partition is blocked for the rest of the batch so no later success
         can commit over it.
         """
-        # ``ModelDlqMessage`` carries no DLQ topic of its own — this consumer
-        # drains exactly one, named by the config — while the unparseable
-        # record carries its own so the two shapes key identically.
+        # ``ModelDlqMessage`` carries no DLQ topic of its own — a consumer
+        # drains exactly one, named by ITS OWN config, which is why the caller
+        # passes it rather than reading a handler-wide primary (OMN-18119) —
+        # while the unparseable record carries its own so the two shapes key
+        # identically.
         topic = (
             message.dlq_topic
             if isinstance(message, ModelUnparseableDlqRecord)
-            else self._config.dlq_topic
+            else dlq_topic
         )
         key = (topic, message.dlq_partition)
-        if key in blocked:
-            return
         if result.status == EnumReplayStatus.FAILED:
-            blocked.add(key)
+            ledger.block(key)
             return
-        completed[key] = message.dlq_offset + 1
+        ledger.mark_completed(key, message.dlq_offset + 1)
 
     async def _quarantine_unparseable(
         self, record: ModelUnparseableDlqRecord
@@ -492,7 +567,9 @@ class HandlerDlqReplay:
             replay_correlation_id=quarantine_correlation_id,
         )
 
-    async def _process_message(self, message: ModelDlqMessage) -> ModelDlqReplayResult:
+    async def _process_message(
+        self, message: ModelDlqMessage, config: ModelDlqReplayEngineConfig
+    ) -> ModelDlqReplayResult:
         # OMN-18084: resolve a nested dead letter to the record it actually
         # wraps BEFORE deciding anything about it. A record whose original_topic
         # is itself a DLQ topic has a dead-letter envelope for a body; replaying
@@ -505,7 +582,7 @@ class HandlerDlqReplay:
         except DlqTopicFixedPointError as exc:
             return await self._quarantine(message, str(exc))
 
-        eligible, reason = should_replay(message, self._config)
+        eligible, reason = should_replay(message, config)
 
         if unwrap_depth:
             # The note goes on the reason (and so into the quarantine record and
@@ -519,7 +596,7 @@ class HandlerDlqReplay:
                 "UNWRAPPED %d dead-letter envelope layer(s) on %s/%s to %s "
                 "(eligible=%s)",
                 unwrap_depth,
-                self._config.dlq_topic,
+                config.dlq_topic,
                 message.dlq_offset,
                 message.original_topic,
                 eligible,
@@ -756,13 +833,22 @@ class HandlerDlqReplay:
             )
 
     def _summarize(
-        self, results: list[ModelDlqReplayResult]
+        self, results: list[ModelDlqReplayResult], topics_drained: tuple[str, ...]
     ) -> ModelDlqReplayRunResult:
+        """Aggregate one run across every topic it visited (OMN-18119).
+
+        ``dlq_topic`` names the topic the run STARTED on, which rotates; the
+        full visit order is in ``topics_drained``. Counts and ``results`` span
+        every topic, so a caller reading only the counts is not told a
+        single-topic story about a multi-topic run.
+        """
+
         def _count(status: EnumReplayStatus) -> int:
             return sum(1 for r in results if r.status == status)
 
         return ModelDlqReplayRunResult(
-            dlq_topic=self._config.dlq_topic,
+            dlq_topic=topics_drained[0],
+            topics_drained=topics_drained,
             total_processed=len(results),
             completed=_count(EnumReplayStatus.COMPLETED),
             quarantined=_count(EnumReplayStatus.QUARANTINED),
