@@ -113,7 +113,20 @@ def _projection_dsn_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["pytest"])
 
 
-_LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
+_LEDGER_SOURCE_ENV = "CHAIN_CANARY_LEDGER_DSN_FOR_TESTS"
+# The DSN the fake lookup resolves that NAME to. Never passed as a field.
+_LEDGER_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+
+
+def _ledger_dsn_lookup(name: str) -> str:
+    """Resolve the declared NAME the way the job environment would.
+
+    The DSN never reaches the request model, so a test that passed one
+    as a field value would no longer be exercising the real path.
+    """
+    return _LEDGER_DSN if name == _LEDGER_SOURCE_ENV else ""
+
+
 _FULL_CHAIN = ("received", "routed", "inference_completed", "terminal")
 
 
@@ -154,7 +167,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         # throughout and stubbed terminal by default.
         "projection_dsn_env": _PROJECTION_DSN_ENV,
         # OMN-16964: and link 5 on identical terms, stubbed verified.
-        "ledger_source": _LEDGER_SOURCE,
+        "ledger_source_env": _LEDGER_SOURCE_ENV,
         "expected_ledger_hops": _FULL_CHAIN,
         "settle_seconds": 0,
     }
@@ -237,6 +250,7 @@ def _handler(
         terminal_readback=terminal_readback or _TerminalReadback(found=_SUCCESS_TOPIC),
         projection_readback=_ProjectionReadback(),
         ledger_replay=_LedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -517,7 +531,7 @@ async def test_a_fully_configured_run_is_now_a_five_link_proof() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "unset",
-    ["projection_dsn_env", "ledger_source", "terminal_bootstrap_servers"],
+    ["projection_dsn_env", "ledger_source_env", "terminal_bootstrap_servers"],
 )
 async def test_a_partially_configured_run_is_never_a_proof(unset: str) -> None:
     """Unset ANY chain-link leg and the run stops being a proof.
@@ -557,7 +571,7 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
     ``test_handler_chain_canary_projection.py`` and
     ``test_handler_chain_canary_ledger.py`` for their own coverage.
 
-    ``projection_dsn_env`` and ``ledger_source`` are cleared explicitly rather
+    ``projection_dsn_env`` and ``ledger_source_env`` are cleared explicitly rather
     than relying on the shared fixture's defaults. Those defaults configure
     both, precisely because a run that cannot see links 2 and 5 can no longer
     be green; this test is the one case that wants the unpointed instruments,
@@ -568,7 +582,7 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
-    result = await handler.handle(_request(projection_dsn_env="", ledger_source=""))
+    result = await handler.handle(_request(projection_dsn_env="", ledger_source_env=""))
 
     assert all(
         verdict.status is not EnumChainLinkStatus.NO_LEG

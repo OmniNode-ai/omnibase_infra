@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
@@ -144,12 +144,24 @@ class ModelChainCanaryRequest(BaseModel):
             "so a green terminal is not evidence about this layer."
         ),
     )
-    ledger_source: str = Field(
+    ledger_source_env: str = Field(
         default="",
         description=(
-            "Source for the LEDGER CHAIN assembly and replay — the leg that "
-            "discharges OMN-16025 link 5 ('complete ledger chain + replay "
-            "green through an HONEST tier-2 verifier, SKIP != PASS'). EMPTY "
+            "NAME of the environment variable carrying the Postgres DSN for "
+            "the LEDGER CHAIN assembly, replay and tier-2 verify — the leg "
+            "that discharges OMN-16025 link 5 ('complete ledger chain + "
+            "replay green through an HONEST tier-2 verifier, SKIP != PASS'). "
+            "A NAME, never a DSN, for the same reason as its "
+            "`projection_dsn_env` sibling: this field is serialised into the "
+            "node payload, onto the bus and into the event log, and it is "
+            "built from a CLI flag that lands in argv, so a DSN here would be "
+            "durably persisted and readable from /proc by every process on "
+            "the host. This field REPLACES the raw-DSN `ledger_source` that "
+            "#3072 shipped; there is no shim, because no CLI row ever set it "
+            "and so no caller can be broken by the replacement. The NAME is "
+            "resolved from the lane's declared `ledger_readback.dsn_env` "
+            "(omnimarket config/ci_bus_lanes.yaml); the value is injected "
+            "into the job environment under that name and read there. EMPTY "
             "means the run has no evidence about the chain and reports "
             "NOT_CONFIGURED. It deliberately does NOT fall back to the bus "
             "terminal or the projection: a link with no instrument pointed at "
@@ -260,7 +272,15 @@ class ModelChainCanaryRequest(BaseModel):
     )
 
     @field_validator(
-        "terminal_success_topics", "terminal_failure_topics", mode="before"
+        "terminal_success_topics",
+        "terminal_failure_topics",
+        # OMN-16964: expected_ledger_hops is now set from a CLI flag too, and
+        # skill_mapping.yaml arg types are scalar, so it needs the same
+        # comma-splitting. Without this it would arrive as one string that
+        # matches no hop, and link 5 would report CHAIN_INCOMPLETE against a
+        # chain that was in fact complete.
+        "expected_ledger_hops",
+        mode="before",
     )
     @classmethod
     def _split_topics(cls, value: object) -> object:
@@ -317,9 +337,11 @@ class ModelChainCanaryRequest(BaseModel):
             )
         return value
 
-    @field_validator("projection_dsn_env")
+    @field_validator("projection_dsn_env", "ledger_source_env")
     @classmethod
-    def _refuse_a_dsn_where_a_name_belongs(cls, value: str) -> str:
+    def _refuse_a_dsn_where_a_name_belongs(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
         """This field takes a variable NAME. A DSN here is refused (OMN-18060).
 
         The refusal is at the model boundary because that is the boundary the
@@ -333,12 +355,18 @@ class ModelChainCanaryRequest(BaseModel):
         The message deliberately does not echo the offending value.
         """
         if looks_like_a_dsn(value):
+            field_name = info.field_name or "this field"
+            declaration = (
+                "ledger_readback.dsn_env"
+                if info.field_name == "ledger_source_env"
+                else "projection_readback.dsn_env"
+            )
             raise ValueError(
-                "projection_dsn_env takes the NAME of the environment "
+                f"{field_name} takes the NAME of the environment "
                 "variable carrying the DSN, and the value supplied parses as "
                 "a connection string. A DSN passed here would land in argv, "
                 "in this run's log and in the event log. Pass the name "
-                "declared by the lane's projection_readback.dsn_env "
+                f"declared by the lane's {declaration} "
                 "(omnimarket config/ci_bus_lanes.yaml) and inject the value "
                 "into the environment under that name."
             )

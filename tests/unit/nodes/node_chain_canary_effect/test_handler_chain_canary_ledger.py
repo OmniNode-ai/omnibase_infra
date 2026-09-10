@@ -72,7 +72,20 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readb
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
-_LEDGER_SOURCE = "postgresql://probe@db.invalid:5436/omnibase_infra"
+_LEDGER_SOURCE_ENV = "CHAIN_CANARY_LEDGER_DSN_FOR_TESTS"
+# The DSN the fake lookup resolves that NAME to. Never passed as a field.
+_LEDGER_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
+
+
+def _ledger_dsn_lookup(name: str) -> str:
+    """Resolve the declared NAME the way the job environment would.
+
+    The DSN never reaches the request model, so a test that passed one
+    as a field value would no longer be exercising the real path.
+    """
+    return _LEDGER_DSN if name == _LEDGER_SOURCE_ENV else ""
+
+
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
 # OMN-18060: the request now carries the NAME of the environment variable the
 # DSN arrives in, never the DSN, and the readback transport returns a typed
@@ -121,7 +134,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "budget_ms": 5_000,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
-        "ledger_source": _LEDGER_SOURCE,
+        "ledger_source_env": _LEDGER_SOURCE_ENV,
         "expected_ledger_hops": _FULL_CHAIN,
         # OMN-16963: link 2 must be configured here too. A non-passing link 2
         # outranks every ledger verdict in `_decide`, so without this these
@@ -211,6 +224,7 @@ def _handler(ledger: _LedgerReplay | None = None) -> HandlerChainCanary:
         terminal_readback=_TerminalReadback(),
         projection_readback=_ProjectionReadback(),
         ledger_replay=ledger or _LedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
         kill_switch_disabled=False,
     )
 
@@ -315,7 +329,7 @@ async def test_unavailable_verifier_fails_closed_to_error() -> None:
 @pytest.mark.asyncio
 async def test_unconfigured_ledger_is_not_configured_never_pass() -> None:
     """No ledger source configured reports NOT_CONFIGURED, and never falls back."""
-    result = await _handler(_LedgerReplay()).handle(_request(ledger_source=""))
+    result = await _handler(_LedgerReplay()).handle(_request(ledger_source_env=""))
 
     assert (
         _link(result, EnumChainLink.LEDGER_REPLAY) is EnumChainLinkStatus.NOT_CONFIGURED
@@ -381,22 +395,22 @@ async def test_link_five_no_longer_reports_no_leg() -> None:
     [
         (
             _LedgerReplay(hops=("received", "terminal")),
-            _LEDGER_SOURCE,
+            _LEDGER_SOURCE_ENV,
             EnumChainCanaryVerdict.LEDGER_CHAIN_INCOMPLETE,
         ),
         (
             _LedgerReplay(replay_green=False),
-            _LEDGER_SOURCE,
+            _LEDGER_SOURCE_ENV,
             EnumChainCanaryVerdict.LEDGER_REPLAY_FAILED,
         ),
         (
             _LedgerReplay(verifier_verdict="skip"),
-            _LEDGER_SOURCE,
+            _LEDGER_SOURCE_ENV,
             EnumChainCanaryVerdict.LEDGER_VERIFIER_SKIPPED,
         ),
         (
             _LedgerReplay(hops=None, error="connection refused"),
-            _LEDGER_SOURCE,
+            _LEDGER_SOURCE_ENV,
             EnumChainCanaryVerdict.LEDGER_REPLAY_UNREADABLE,
         ),
         (
@@ -419,7 +433,7 @@ async def test_non_passing_link_five_is_never_green(
     the only thing left that can disprove the run. That is exactly the shape
     that used to return GREEN.
     """
-    result = await _handler(ledger).handle(_request(ledger_source=source))
+    result = await _handler(ledger).handle(_request(ledger_source_env=source))
 
     assert result.verdict is expected
     assert result.success is False
@@ -448,11 +462,11 @@ async def test_verifier_skip_reaches_the_scalar_verdict_not_just_the_link() -> N
 @pytest.mark.parametrize(
     ("ledger", "source"),
     [
-        (_LedgerReplay(hops=("received",)), _LEDGER_SOURCE),
-        (_LedgerReplay(replay_green=False), _LEDGER_SOURCE),
-        (_LedgerReplay(verifier_verdict="skip"), _LEDGER_SOURCE),
-        (_LedgerReplay(verifier_verdict="fail"), _LEDGER_SOURCE),
-        (_LedgerReplay(hops=None, error="boom"), _LEDGER_SOURCE),
+        (_LedgerReplay(hops=("received",)), _LEDGER_SOURCE_ENV),
+        (_LedgerReplay(replay_green=False), _LEDGER_SOURCE_ENV),
+        (_LedgerReplay(verifier_verdict="skip"), _LEDGER_SOURCE_ENV),
+        (_LedgerReplay(verifier_verdict="fail"), _LEDGER_SOURCE_ENV),
+        (_LedgerReplay(hops=None, error="boom"), _LEDGER_SOURCE_ENV),
         (_LedgerReplay(), ""),
     ],
 )
@@ -465,7 +479,7 @@ async def test_success_and_link_five_can_never_disagree(
     the direction the per-case tests cannot: a new ledger status, or a new
     branch in ``_decide``, that quietly reintroduces the defect.
     """
-    result = await _handler(ledger).handle(_request(ledger_source=source))
+    result = await _handler(ledger).handle(_request(ledger_source_env=source))
 
     link_five_passed = (
         _link(result, EnumChainLink.LEDGER_REPLAY) is EnumChainLinkStatus.PASS
@@ -537,7 +551,7 @@ async def test_close_failure_does_not_replace_the_replay_result(
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
 
     hops, replay_green, verdict, error = await _replay_ledger_chain_via_asyncpg(
-        _LEDGER_SOURCE, str(uuid4()), 5.0
+        _LEDGER_SOURCE_ENV, str(uuid4()), 5.0
     )
 
     assert hops == _FULL_CHAIN
@@ -564,7 +578,7 @@ async def test_connect_and_query_share_one_deadline(
 
     started = time.monotonic()
     hops, _replay_green, _verdict, error = await _replay_ledger_chain_via_asyncpg(
-        _LEDGER_SOURCE, str(uuid4()), 0.3
+        _LEDGER_SOURCE_ENV, str(uuid4()), 0.3
     )
     elapsed = time.monotonic() - started
 

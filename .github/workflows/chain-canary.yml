@@ -280,6 +280,47 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
+      # OMN-16964. Link 5's source, resolved the same way and with the same
+      # deliberate asymmetry as the step above: an unresolvable declaration
+      # WARNS and continues rather than killing the job, because the node
+      # already renders a missing instrument honestly (SKIPPED_NOT_CONFIGURED
+      # against OMN-16025 link 5, which is RED), and stopping here would throw
+      # away the four links the probe CAN prove.
+      #
+      # Only the NAME is exported. The DSN is injected as a secret on the probe
+      # step under that same name -- and for this leg no NEW secret exists:
+      # `ledger_chain` and `delegation_workflow_state` are both in the
+      # omnibase_infra database and both readable by `chain_canary_reader`, so
+      # the lane declares the SAME variable name for both legs today. The two
+      # declarations stay separate so either can be repointed without moving
+      # the other; only the value they currently resolve to is shared.
+      - name: Resolve the declared ledger-readback DSN reference
+        id: ledger
+        env:
+          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+        run: |
+          set -euo pipefail
+          uv run python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              load_lane_ledger_readback, ledger_readback_env,
+          )
+          lane = os.environ['BUS_LANE']
+          try:
+              declaration = load_lane_ledger_readback(
+                  pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+              )
+          except ValueError as exc:
+              print(f'::warning::no ledger readback declared for lane {lane!r}: {exc}')
+              print('OMN-16025 link 5 will report SKIPPED_NOT_CONFIGURED, which is RED.')
+              raise SystemExit(0)
+          print(f'lane {lane!r} declares its ledger DSN under '
+                f'{declaration.dsn_env} (a NAME; the value is a job secret)')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in ledger_readback_env(declaration).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
       - name: Fire one live delegation through the dev-lane ingress
         env:
           # Inside the deploy-runner container `localhost` is the container
@@ -329,6 +370,17 @@ jobs:
           # argv is world-readable through /proc, and the dispatch step echoes
           # its own broker values into this log.
           CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
+          # OMN-16964: what a COMPLETE chain must carry, end to end. Declared
+          # here rather than inferred from whatever the ledger returned,
+          # because the scope's own wording is "no gaps tolerated silently" --
+          # a chain short by a hop must not look complete simply because every
+          # row present was well-formed. These are the ordered topics one
+          # delegation traverses, per the node contracts that publish them.
+          EXPECTED_LEDGER_HOPS: >-
+            onex.cmd.omnimarket.delegate-skill.v1,
+            onex.cmd.omnibase-infra.delegation-routing-request.v1,
+            onex.evt.omnibase-infra.routing-decision.v1,
+            onex.evt.omnimarket.delegate-skill-completed.v1
           # The omnimarket drift guard (OMN-14060) refuses `onex skill`
           # whenever $OMNI_HOME/omnimarket exists and the venv's omnimarket
           # is not a git co-install. The deploy runner sets OMNI_HOME to its
@@ -359,6 +411,7 @@ jobs:
           # The NAME is safe to print and is the one thing worth printing: it
           # is what a reader needs to check the declaration against the secret.
           echo "projection dsn var: ${CHAIN_CANARY_PROJECTION_DSN_ENV:-<undeclared>}"
+          echo "ledger dsn var:     ${CHAIN_CANARY_LEDGER_DSN_ENV:-<undeclared>}"
           uv run onex skill chain_canary \
             --probe-url "${PROBE_URL}" \
             --task-type "${TASK_TYPE}" \
@@ -366,6 +419,8 @@ jobs:
             --terminal-bootstrap-servers "${TERMINAL_BOOTSTRAP}" \
             --quarantine-bootstrap-servers "${QUARANTINE_BOOTSTRAP}" \
             --projection-dsn-env "${CHAIN_CANARY_PROJECTION_DSN_ENV:-}" \
+            --ledger-dsn-env "${CHAIN_CANARY_LEDGER_DSN_ENV:-}" \
+            --expected-ledger-hops "${EXPECTED_LEDGER_HOPS}" \
             > chain-canary-receipt.json
 
       - name: Publish receipt and set the verdict

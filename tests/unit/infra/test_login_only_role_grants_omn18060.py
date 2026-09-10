@@ -34,6 +34,14 @@ END_MARKER = "# ---- END login-only role grant seam (OMN-18060) ----"
 CANARY_ROLE = "chain_canary_reader"
 CANARY_RELATION = "public.delegation_workflow_state"
 CANARY_COLUMNS = ("correlation_id", "state")
+CANARY_LEDGER_RELATION = "public.ledger_chain"
+CANARY_LEDGER_COLUMNS = (
+    "correlation_id",
+    "hop",
+    "hop_index",
+    "replay_green",
+    "verifier_verdict",
+)
 # Present on the same relation and deliberately outside the grant: the
 # delegation's own request/response material, and the tenant discriminator.
 WITHHELD_COLUMNS = ("payload", "tenant_id")
@@ -86,10 +94,13 @@ def test_grant_map_declares_the_canary_reader_column_scoped() -> None:
     entries = _grant_map_entries()
     assert entries, "LOGIN_ONLY_ROLE_GRANT_MAP parsed empty"
 
-    expected = f"{CANARY_ROLE}:{CANARY_RELATION}:{','.join(CANARY_COLUMNS)}"
-    assert expected in entries, (
-        f"the grant map must declare {expected!r}; without it the chain "
-        "canary's OMN-16025 link-2 readback has an identity and no authorization"
+    expected_entries = {
+        f"{CANARY_ROLE}:{CANARY_RELATION}:{','.join(CANARY_COLUMNS)}",
+        f"{CANARY_ROLE}:{CANARY_LEDGER_RELATION}:{','.join(CANARY_LEDGER_COLUMNS)}",
+    }
+    assert expected_entries <= set(entries), (
+        "the grant map must declare both chain-canary readback grants; without "
+        "them the canary has an identity and no authorization"
     )
 
 

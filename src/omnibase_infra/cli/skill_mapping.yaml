@@ -354,6 +354,15 @@ skills:
       # string, and the handler refuses one that reached the process on any
       # other flag.
       - {name: projection-dsn-env, payload_field: projection_dsn_env, arg_type: string}
+      # OMN-16964: the same shape for link 5's ledger source, and the same
+      # reasoning. #3072 shipped this leg with a raw-DSN `ledger_source`
+      # field; there was never a CLI row for it, so nothing is broken by
+      # replacing it with a NAME here rather than adding a second flag
+      # beside it. The value is injected into the job environment under
+      # the name the lane declares (`ledger_readback.dsn_env`) and read
+      # there.
+      - {name: ledger-dsn-env, payload_field: ledger_source_env, arg_type: string}
+      - {name: expected-ledger-hops, payload_field: expected_ledger_hops, arg_type: string}
       - {name: quarantine-bootstrap-servers, payload_field: quarantine_bootstrap_servers, arg_type: string}
       - {name: quarantine-topic, payload_field: quarantine_topic, arg_type: string}
       - {name: quarantine-scan-records, payload_field: quarantine_scan_records, arg_type: integer}
