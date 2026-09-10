@@ -235,6 +235,21 @@ readonly REFRESH_BUILD_SERVICES=(
     cloud-migration-files
     cloud-migration
     onex-api
+    # OMN-18114 -- the tenant-projection profile CARRIER. Here for a DIFFERENT
+    # reason than the six writers above, stated separately so the two do not
+    # merge. Those exist only in this lane's overlay; this one is declared in
+    # docker/docker-compose.infra.yml behind the inert `profile-carrier-optin`
+    # compose profile, and what makes it a real service HERE is this lane's
+    # `profiles: !override` promoting it into `runtime`.
+    #
+    # Membership is mandatory, not tidiness. deploy-runtime.sh keeps the same
+    # name in DEV_LANE_ONLY_RUNTIME_SERVICES, but resolve_lane_runtime_services
+    # returns early whenever RUNTIME_BUILD_SERVICES_OVERRIDE is set -- and this
+    # script ALWAYS sets it. So that array is unreachable on the governed path
+    # and THIS array is the whole restart set. OMN-18114 landed the carrier
+    # everywhere except here, which left it declared, censused as critical
+    # drift, and never running on either lab lane.
+    tenant-projection-writer
 )
 readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
 
