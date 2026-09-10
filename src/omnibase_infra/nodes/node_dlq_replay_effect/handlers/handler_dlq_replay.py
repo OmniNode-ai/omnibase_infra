@@ -12,7 +12,12 @@ Truthfulness invariants:
     - A replay attempt that raises is recorded as FAILED (never COMPLETED).
     - A QUARANTINED outcome is recorded only after the quarantine publish
       succeeds; a failed quarantine publish is recorded as FAILED.
-    - Tracking (``dlq_replay_history``) records every terminal outcome.
+    - Tracking (``dlq_replay_history``) records every terminal outcome --
+      including the OMN-17896 unparseable-record path, which reached its own
+      durable quarantine without ever calling the recorder until OMN-18111.
+    - An audit write is a side effect of an ALREADY-DURABLE outcome and can
+      therefore never change one: a tracking failure costs an audit row, never
+      a verdict and never a committable offset (OMN-18111).
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from weakref import WeakKeyDictionary
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
@@ -397,6 +402,12 @@ class HandlerDlqReplay:
         failed publish yields ``FAILED``, which blocks the partition, so the
         record is redelivered rather than acked on a quarantine that never
         happened.
+
+        OMN-18111: every exit below that published (or tried to) also writes an
+        audit row. Before that ticket this method wrote none at all, so the
+        records whose original body could not be established — exactly the ones
+        a reclassification owner needs an audit trail for — were the ones
+        ``dlq_replay_history`` was guaranteed to be silent about.
         """
         quarantine_correlation_id = generate_replay_correlation_id()
 
@@ -423,6 +434,12 @@ class HandlerDlqReplay:
                 record.dlq_partition,
                 record.dlq_offset,
             )
+            await self._record_unparseable(
+                record,
+                EnumReplayStatus.FAILED,
+                quarantine_correlation_id,
+                error_message=f"Quarantine of unparseable record failed: {exc}",
+            )
             return ModelDlqReplayResult(
                 correlation_id=quarantine_correlation_id,
                 original_topic=record.dlq_topic,
@@ -440,6 +457,12 @@ class HandlerDlqReplay:
                 record.dlq_partition,
                 record.dlq_offset,
             )
+            await self._record_unparseable(
+                record,
+                EnumReplayStatus.FAILED,
+                quarantine_correlation_id,
+                error_message="Quarantine publish returned no confirmation",
+            )
             return ModelDlqReplayResult(
                 correlation_id=quarantine_correlation_id,
                 original_topic=record.dlq_topic,
@@ -448,6 +471,12 @@ class HandlerDlqReplay:
                 replay_correlation_id=quarantine_correlation_id,
             )
 
+        await self._record_unparseable(
+            record,
+            EnumReplayStatus.QUARANTINED,
+            quarantine_correlation_id,
+            error_message=record.reason,
+        )
         logger.info(
             "QUARANTINED unparseable DLQ record at %s/%s/%s (%s)",
             record.dlq_topic,
@@ -642,7 +671,89 @@ class HandlerDlqReplay:
             dlq_partition=message.dlq_partition,
             retry_count=message.retry_count,
         )
-        await self._tracking.record_replay_attempt(record)
+        await self._write_audit_row(record)
+
+    async def _record_unparseable(
+        self,
+        record: ModelUnparseableDlqRecord,
+        status: EnumReplayStatus,
+        quarantine_correlation_id: UUID,
+        error_message: str,
+    ) -> None:
+        """Write the audit row for a record that could not be parsed (OMN-18111).
+
+        Three fields cannot be read off an unparseable record, and each is
+        answered with the truth rather than with a plausible-looking value:
+
+        ``original_message_id``
+            There is no correlation id to carry — establishing one is exactly
+            what failed. A UUIDv5 over the record's DLQ COORDINATE
+            (``topic/partition/offset``) is used instead: it is derived from
+            something real, it is stable, and two rows for one coordinate are
+            recognisably the same record, which is the identity a
+            reclassification owner works from.
+        ``original_topic``
+            Unknown. The only topic that is true of this record is the DLQ it
+            was read from, so that is what the row says.
+        ``target_topic``
+            The quarantine topic, because that is where the record actually
+            went. Naming a replay target it was never published to would make
+            the row a nicer-looking lie.
+
+        ``retry_count`` is 0: an unparseable record carries no readable retry
+        count, and the column is NOT NULL.
+        """
+        if self._tracking is None or not self._tracking.is_tracking_enabled:
+            return
+        coordinate = f"{record.dlq_topic}/{record.dlq_partition}/{record.dlq_offset}"
+        await self._write_audit_row(
+            ModelDlqReplayRecord(
+                id=uuid4(),
+                original_message_id=uuid5(NAMESPACE_URL, coordinate),
+                replay_correlation_id=quarantine_correlation_id,
+                original_topic=record.dlq_topic,
+                target_topic=self._config.quarantine_topic,
+                replay_status=status,
+                replay_timestamp=datetime.now(UTC),
+                success=False,
+                error_message=error_message,
+                dlq_offset=record.dlq_offset,
+                dlq_partition=record.dlq_partition,
+                retry_count=0,
+            )
+        )
+
+    async def _write_audit_row(self, record: ModelDlqReplayRecord) -> None:
+        """Persist one audit row, ISOLATED from the outcome it describes.
+
+        OMN-18111. Every caller reaches this only after the outcome is already
+        durable: the replay publish or the quarantine publish has been
+        CONFIRMED by the broker. Letting a tracking failure propagate from here
+        would therefore convert a confirmed quarantine into a ``FAILED``
+        result, block the partition in ``_mark_offset``, and have the record
+        redelivered and re-quarantined on the next run — reintroducing the
+        OMN-18084 amplification through the audit path, with a database outage
+        as its trigger.
+
+        So the row is best-effort and the failure is LOUD: an ERROR log naming
+        the outcome that went unrecorded, never a silent swallow. A row lost
+        here is an audit gap; a verdict lost here would be a live loop.
+        """
+        if self._tracking is None:
+            return
+        try:
+            await self._tracking.record_replay_attempt(record)
+        except Exception:  # boundary: an audit write may not change a durable outcome
+            logger.exception(
+                "FAILED to write the dlq_replay_history audit row for the %s "
+                "outcome at %s/%s (replay_correlation_id=%s). The outcome "
+                "itself is durable and STANDS; only the audit row is lost "
+                "(OMN-18111).",
+                record.replay_status.value,
+                record.dlq_partition,
+                record.dlq_offset,
+                record.replay_correlation_id,
+            )
 
     def _summarize(
         self, results: list[ModelDlqReplayResult]
