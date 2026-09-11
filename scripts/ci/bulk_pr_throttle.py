@@ -342,8 +342,10 @@ def run_bulk_operation(
                     pr_numbers=wave,
                     operation=operation,
                     dry_run=True,
-                    queue_depth_before=-1,
-                    queue_depth_after=-1,
+                    # Dry-run does not probe GitHub; use the same explicit
+                    # unavailable value as a failed best-effort observation.
+                    queue_depth_before=None,
+                    queue_depth_after=None,
                     started_at=ts,
                     completed_at=ts,
                     outcomes=(),
@@ -485,7 +487,9 @@ def write_receipt(report: BulkRunReport, path: Path) -> None:
                 "pr_numbers": list(wave.pr_numbers),
                 "pr_count": len(wave.pr_numbers),
                 "operation": wave.operation,
-                "queue_depth_gate_applied": report.queue_depth_gate_applied,
+                "queue_depth_gate_applied": OPERATION_QUEUE_DEPTH_POLICY[
+                    wave.operation
+                ],
                 "dry_run": wave.dry_run,
                 "queue_depth_before": wave.queue_depth_before,
                 "queue_depth_after": wave.queue_depth_after,
