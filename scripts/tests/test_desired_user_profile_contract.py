@@ -25,7 +25,9 @@ _BUILTIN_ATTRS = ("username", "email", "firstName", "lastName")
 
 def _attr(profile: dict[str, Any], name: str) -> dict[str, Any]:
     matches = [a for a in profile["attributes"] if a["name"] == name]
-    assert len(matches) == 1, f"expected exactly one attribute named {name!r}, got {len(matches)}"
+    assert len(matches) == 1, (
+        f"expected exactly one attribute named {name!r}, got {len(matches)}"
+    )
     return matches[0]
 
 
@@ -38,7 +40,7 @@ def test_tenant_attrs_view_is_admin_only(profile: dict[str, Any]) -> None:
     for name in _TENANT_ATTRS:
         attr = _attr(profile, name)
         assert attr["permissions"]["view"] == ["admin"], (
-            f"{name}: expected view=[\"admin\"], got {attr['permissions']['view']}"
+            f'{name}: expected view=["admin"], got {attr["permissions"]["view"]}'
         )
 
 
@@ -46,7 +48,7 @@ def test_tenant_attrs_edit_is_admin_only(profile: dict[str, Any]) -> None:
     for name in _TENANT_ATTRS:
         attr = _attr(profile, name)
         assert attr["permissions"]["edit"] == ["admin"], (
-            f"{name}: expected edit=[\"admin\"], got {attr['permissions']['edit']}"
+            f'{name}: expected edit=["admin"], got {attr["permissions"]["edit"]}'
         )
 
 
@@ -69,15 +71,21 @@ def test_tenant_attrs_are_in_user_metadata_group(profile: dict[str, Any]) -> Non
 def test_builtin_attrs_are_present(profile: dict[str, Any]) -> None:
     attr_names = {a["name"] for a in profile["attributes"]}
     for name in _BUILTIN_ATTRS:
-        assert name in attr_names, f"built-in attribute {name!r} missing from desired-user-profile.json"
+        assert name in attr_names, (
+            f"built-in attribute {name!r} missing from desired-user-profile.json"
+        )
 
 
 def test_user_metadata_group_is_declared(profile: dict[str, Any]) -> None:
     group_names = {g["name"] for g in profile.get("groups", [])}
-    assert "user-metadata" in group_names, "groups must contain an entry with name='user-metadata'"
+    assert "user-metadata" in group_names, (
+        "groups must contain an entry with name='user-metadata'"
+    )
 
 
 def test_all_three_tenant_attrs_are_present(profile: dict[str, Any]) -> None:
     attr_names = {a["name"] for a in profile["attributes"]}
     missing = [n for n in _TENANT_ATTRS if n not in attr_names]
-    assert not missing, f"tenant attributes missing from desired-user-profile.json: {missing}"
+    assert not missing, (
+        f"tenant attributes missing from desired-user-profile.json: {missing}"
+    )

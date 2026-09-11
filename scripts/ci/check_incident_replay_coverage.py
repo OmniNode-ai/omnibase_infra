@@ -121,6 +121,24 @@ LOCATOR_GRAMMARS: dict[str, re.Pattern[str]] = {
     "gh-api": re.compile(
         r"^gh-api:[A-Za-z0-9._/-]*(?:/\d{2,}|[0-9a-f]{40})[A-Za-z0-9._/?=&,-]*$"
     ),
+    # gh-graphql:repos/OmniNode-ai/omninode_infra/pulls/1310/timelineItems
+    #
+    # Added by OMN-18179, which could not otherwise be replayed at all -- the
+    # same reason container-probe was added by OMN-15676. That incident's
+    # guard reads a PR's auto-merge timeline, and the REST timeline does not
+    # carry it: `gh api repos/.../issues/1310/timeline` on the very PR this
+    # replays returns the `auto_merge_disabled` event and NO enable event of
+    # any kind, so a `gh-api:` capture of that surface physically cannot
+    # exhibit the enable-then-disable ordering the guard decides on. Only the
+    # GraphQL `timelineItems` connection carries both sides.
+    #
+    # The locator pins one PR and one connection on it, so it re-fetches to a
+    # single resource exactly as the REST grammar requires. Re-fetch:
+    #   gh api graphql -f query='...pullRequest(number:$pr){timelineItems(...)}'
+    # with the itemTypes filter the guard's own workflow step uses.
+    "gh-graphql": re.compile(
+        r"^gh-graphql:repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pulls/\d+/[A-Za-z0-9_.]+$"
+    ),
     # git-object:OmniNode-ai/omnimarket@879d6fc6...:.github/workflows/x.yml
     "git-object": re.compile(
         r"^git-object:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}:[A-Za-z0-9_./-]+$"
