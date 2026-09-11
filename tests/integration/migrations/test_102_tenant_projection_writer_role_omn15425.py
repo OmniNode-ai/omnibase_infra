@@ -66,6 +66,15 @@ GRANT_FILE = (
     / "node_projection_delegation_inference_response"
     / "0004_grant_tenant_projection_writer.sql"
 )
+AGGREGATE_VIEWS_FILE = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_delegation"
+    / "0039_delegation_aggregate_views_per_tenant.sql"
+)
 BOOTSTRAP_SCRIPT = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "000_create_multiple_databases.sh"
 )
@@ -275,25 +284,44 @@ def test_tenant_projection_binds_its_own_dsn_env_not_the_analytics_one() -> None
 # =============================================================================
 
 
+def _declared_table_objects(privilege: str) -> set[str]:
+    """Topology TABLE objects whose declared privileges include ``privilege``.
+
+    A TABLE grant block is not automatically a WRITE block. ``access: read`` in
+    a node contract's ``db_io.db_tables`` maps to ``READ_PRIVILEGES`` --
+    ``{SELECT}`` -- in ``topology/table_grant_derivation.py``, and the generator
+    emits it as its own TABLE block with ``privileges: [SELECT]``. Unioning
+    every TABLE block's objects and comparing that to a write-triple grant
+    therefore asks a read declaration to satisfy a write assertion, which it
+    can never do.
+    """
+    topology = yaml.safe_load(LOCAL_TOPOLOGY.read_text())
+    principal = topology["databases"]["application"]["principals"][PRINCIPAL]
+    return {
+        name
+        for grant in principal["grants"]
+        if grant["object_type"] == "TABLE" and privilege in grant["privileges"]
+        for name in grant["objects"]
+    }
+
+
 @pytest.mark.integration
-def test_grant_migration_matches_the_topology_declared_table_set() -> None:
+def test_grant_migration_matches_the_topology_declared_writable_table_set() -> None:
     """The grant list is a transcription of the topology, not a hand-picked set.
 
     The topology's TABLE grants are themselves generated from node contract
     ``db_io.db_tables`` declarations by
     ``scripts/generate_application_database_table_grants.py --write``. If a
-    contract adds a tenant-classified relation and this file is not updated in
-    the same change, the new table's writes are denied at runtime — this test is
-    what turns that into a red build instead of a silent zero-row projection.
+    contract adds a tenant-classified relation it WRITES and this file is not
+    updated in the same change, the new table's writes are denied at runtime —
+    this test is what turns that into a red build instead of a silent zero-row
+    projection.
+
+    Scoped to the WRITABLE declarations (OMN-18159). The read-only half is not
+    dropped: it is asserted immediately below, against the file that actually
+    carries it, plus a refusal that it is never handed write privileges.
     """
-    topology = yaml.safe_load(LOCAL_TOPOLOGY.read_text())
-    principal = topology["databases"]["application"]["principals"][PRINCIPAL]
-    declared = {
-        name
-        for grant in principal["grants"]
-        if grant["object_type"] == "TABLE"
-        for name in grant["objects"]
-    }
+    declared = _declared_table_objects("INSERT")
 
     granted = set(
         re.findall(
@@ -303,9 +331,58 @@ def test_grant_migration_matches_the_topology_declared_table_set() -> None:
         )
     )
 
+    assert declared, "positive control: the topology declares writable tables"
     assert granted == declared, (
         "grant migration drifted from the topology declaration: "
         f"missing={sorted(declared - granted)!r} extra={sorted(granted - declared)!r}"
+    )
+
+
+@pytest.mark.integration
+def test_read_only_declarations_are_granted_select_and_never_write() -> None:
+    """A read declaration is delivered as SELECT, and only as SELECT.
+
+    The four delegation aggregates are SQL VIEWS over ``delegation_events``
+    (``node_projection_delegation`` migrations 0039/0040). They are declared
+    ``access: read`` and the generator emits them as a ``privileges: [SELECT]``
+    TABLE block. Their grant is carried by the migration that CREATES them,
+    not by :data:`GRANT_FILE`, because a grant belongs with the relation it
+    names -- 0039 has to DROP and CREATE each view, and a DROP discards the
+    view's privileges along with it, so restoring them anywhere else would
+    leave a window where the relation exists and nothing can read it.
+
+    Both halves are asserted. Missing the SELECT would deny the reader at
+    runtime, which is the same silent-zero-rows shape the writable test above
+    exists to prevent. Carrying a write would be worse than redundant: 0040
+    made these views ``security_invoker`` precisely so a read evaluates
+    row-level security against the CALLER, and INSERT/UPDATE on a grouped
+    aggregate view is not a coherent privilege to hold.
+    """
+    read_only = _declared_table_objects("SELECT") - _declared_table_objects("INSERT")
+    assert read_only, "positive control: the topology declares read-only relations"
+
+    aggregate_views_sql = AGGREGATE_VIEWS_FILE.read_text()
+    select_granted = set(
+        re.findall(
+            rf"GRANT SELECT ON (?:public\.)?([a-z0-9_]+) TO {PRINCIPAL}",
+            aggregate_views_sql,
+        )
+    )
+    assert read_only <= select_granted, (
+        "read-only topology declarations are not granted SELECT: "
+        f"missing={sorted(read_only - select_granted)!r}"
+    )
+
+    write_granted = set(
+        re.findall(
+            r"GRANT [A-Z, ]*(?:INSERT|UPDATE|DELETE)[A-Z, ]* ON "
+            rf"(?:public\.)?([a-z0-9_]+) TO {PRINCIPAL}",
+            GRANT_FILE.read_text() + aggregate_views_sql,
+        )
+    )
+    assert not (read_only & write_granted), (
+        "a read-only declaration was granted write privileges: "
+        f"{sorted(read_only & write_granted)!r}"
     )
 
 
