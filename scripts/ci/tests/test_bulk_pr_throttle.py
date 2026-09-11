@@ -420,6 +420,31 @@ class TestRunBulkOperationFlow:
         assert receipt["queue_depth_gate_applied"] is False
         assert receipt["waves"][0]["queue_depth_gate_applied"] is False
 
+    @pytest.mark.parametrize("operation", ["arm-automerge", "noop-dry-run"])
+    def test_observation_only_policy_is_explicit_and_immutable(self, operation):
+        from bulk_pr_throttle import OPERATION_QUEUE_DEPTH_POLICY
+
+        assert OPERATION_QUEUE_DEPTH_POLICY[operation] is False
+        with pytest.raises(TypeError):
+            OPERATION_QUEUE_DEPTH_POLICY[operation] = True  # type: ignore[index]
+
+    def test_arm_automerge_dry_run_records_non_gated_policy_without_probing(self):
+        from bulk_pr_throttle import run_bulk_operation
+
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="onex_change_control",
+            pr_numbers=[1, 2, 3, 4, 5],
+            operation="arm-automerge",
+            dry_run=True,
+            get_queue_depth=None,
+            apply_pr_operation=None,
+        )
+
+        assert report.queue_depth_gate_applied is False
+        assert all(wave.queue_depth_before == -1 for wave in report.waves)
+        assert all(wave.queue_depth_after == -1 for wave in report.waves)
+
     @pytest.mark.parametrize("failed_call", [1, 2])
     def test_arm_automerge_queue_observation_failure_does_not_refuse(self, failed_call):
         from bulk_pr_throttle import (
@@ -461,6 +486,40 @@ class TestRunBulkOperationFlow:
         assert report.waves[0].queue_depth_after == (None if failed_call == 2 else 200)
         assert any("observation unavailable" in message for message in logs)
         assert any("continuing" in message for message in logs)
+        if failed_call == 1:
+            assert any(
+                "queue depth unavailable is observation-only" in message
+                for message in logs
+            )
+
+    @pytest.mark.parametrize("failed_call", [1, 2])
+    def test_arm_automerge_unexpected_observation_error_propagates(self, failed_call):
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        depth_calls = 0
+        applied: list[int] = []
+
+        def get_queue_depth() -> int:
+            nonlocal depth_calls
+            depth_calls += 1
+            if depth_calls == failed_call:
+                raise AssertionError("programming error")
+            return 200
+
+        with pytest.raises(AssertionError, match="programming error"):
+            run_bulk_operation(
+                owner="OmniNode-ai",
+                repo="onex_change_control",
+                pr_numbers=[1],
+                operation="arm-automerge",
+                get_queue_depth=get_queue_depth,
+                apply_pr_operation=lambda owner, repo, pr, operation: (
+                    applied.append(pr)
+                    or PrOutcome(pr_number=pr, success=True, detail="armed")
+                ),
+            )
+
+        assert applied == ([] if failed_call == 1 else [1])
 
     @pytest.mark.parametrize("operation", ["update-branch", "rerun-failed"])
     def test_load_creating_operations_still_refuse_at_high_depth(self, operation):
@@ -654,6 +713,18 @@ class TestWriteReceipt:
         assert report.wave_size == 10
         assert report.queue_depth_gate_applied is True
 
+        with pytest.raises(TypeError):
+            BulkRunReport(
+                "OmniNode-ai",
+                "onex_change_control",
+                "update-branch",
+                10,
+                150,
+                False,
+                (),
+                False,
+            )
+
 
 # ---------------------------------------------------------------------------
 # gh CLI integration seam (mock _run_gh — never call the real GitHub API)
@@ -698,6 +769,20 @@ class TestGhIntegration:
 
         monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
         with pytest.raises(bulk_pr_throttle.BulkPrThrottleError, match="HTTP 502"):
+            bulk_pr_throttle.gh_queue_depth("OmniNode-ai", "onex_change_control")
+
+    def test_gh_queue_depth_wraps_invalid_output(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 0, "not-a-count\n", ""),
+        )
+
+        with pytest.raises(
+            bulk_pr_throttle.BulkPrThrottleError, match="invalid output"
+        ):
             bulk_pr_throttle.gh_queue_depth("OmniNode-ai", "onex_change_control")
 
     def test_gh_apply_pr_operation_update_branch(self, monkeypatch):

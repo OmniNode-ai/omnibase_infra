@@ -19,14 +19,14 @@ This script is the mechanism. ALL bulk PR operations (update-branch,
 arm-automerge, mass reruns, mass body edits) should route through it rather
 than a hand-rolled loop over ``gh``.
 
-Mechanical guard (no bypass)
------------------------------
+Mechanical policy (bounded waves; no caller bypass)
+----------------------------------------------------
 Load-creating operations use the queue-depth gate
 (:func:`wait_for_queue_depth`), which has no force/skip/bypass parameter
 anywhere in this module or its CLI. Operations that do not directly dispatch
 check suites still use bounded waves and sample queue depth on a best-effort
 basis, but depth is observational rather than a reason to refuse them. A
-caller cannot change an operation's policy — see
+caller cannot change the immutable operation policy — see
 ``knowledge-base:runbooks/bulk-pr-operations.md`` for the doctrine-wiring follow-up
 that makes *not using it* visible.
 
@@ -51,10 +51,11 @@ import json
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 
 # ---------------------------------------------------------------------------
 # Tunables. Every numeric default here is deliberately conservative — the
@@ -80,15 +81,18 @@ DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 
 # True means the operation directly creates check-suite load and must wait for
 # queue capacity. False means queue depth is sampled on a best-effort basis but
-# cannot block the operation. Keeping every operation in one explicit map
-# prevents future operations from silently inheriting the less restrictive
-# policy.
-OPERATION_QUEUE_DEPTH_POLICY = {
-    "update-branch": True,
-    "arm-automerge": False,
-    "rerun-failed": True,
-    "noop-dry-run": False,
-}
+# cannot block the operation. OMN-18032 explicitly classifies arm-automerge as
+# observation-only because arming the flag mints no check suite. Keeping every
+# operation in one immutable map prevents callers from bypassing the selected
+# policy and prevents new operations from silently inheriting a default.
+OPERATION_QUEUE_DEPTH_POLICY: Mapping[str, bool] = MappingProxyType(
+    {
+        "update-branch": True,
+        "arm-automerge": False,
+        "rerun-failed": True,
+        "noop-dry-run": False,
+    }
+)
 VALID_OPERATIONS = tuple(OPERATION_QUEUE_DEPTH_POLICY)
 
 
@@ -135,7 +139,7 @@ class BulkRunReport:
     waves: tuple[WaveReceipt, ...]
     # Keep this defaulted field last so pre-OMN-18032 positional constructors
     # retain their original argument order and conservative gated semantics.
-    queue_depth_gate_applied: bool = True
+    queue_depth_gate_applied: bool = field(default=True, kw_only=True)
 
 
 class PartialBulkRunError(BulkPrThrottleError):
@@ -388,10 +392,13 @@ def run_bulk_operation(
                     wave_index=idx,
                     log=log,
                 )
+                observed_depth = (
+                    str(depth_before) if depth_before is not None else "unavailable"
+                )
                 log(
                     f"[bulk-pr-throttle] operation={operation} does not "
                     "directly dispatch check suites; queue depth "
-                    f"{depth_before} is observation-only"
+                    f"{observed_depth} is observation-only"
                 )
         except BulkPrThrottleError as exc:
             if wave_receipts:
@@ -533,7 +540,12 @@ def gh_queue_depth(owner: str, repo: str) -> int:
         raise BulkPrThrottleError(
             f"gh api queued-run count failed: {result.stderr.strip()}"
         )
-    return int(result.stdout.strip())
+    try:
+        return int(result.stdout.strip())
+    except ValueError as exc:
+        raise BulkPrThrottleError(
+            f"gh api queued-run count returned invalid output: {result.stdout!r}"
+        ) from exc
 
 
 def gh_apply_pr_operation(
