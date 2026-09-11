@@ -34,6 +34,20 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         "llm_cost_aggregates",
         "pattern_learning_artifacts",
         "projection_delegation_inference_response_text",
+        # OMN-18159: the four delegation aggregate READ VIEWS, re-grouped on
+        # tenant_id by node_projection_delegation/0039. Same bridge as their
+        # own source table delegation_events above, and as the
+        # node_projection_savings read views below -- logically tenant-domain
+        # per contract.yaml, physically created bare in `public` because no
+        # `tenant` Postgres schema exists on any lane today. A view cannot
+        # live in a schema its base table does not, so enumerating them here
+        # is what makes physical_grant_schema_for_table('tenant', <view>)
+        # resolve to 'public' and the derived GRANT match the migration's
+        # actual bare GRANT.
+        "projection_delegation_model_routing",
+        "projection_delegation_quality_gate",
+        "projection_delegation_summary",
+        "projection_delegation_token_usage",
         # OMN-15533: these node_projection_savings read views were physically
         # created bare in public by migrations 076/078/079, and the dashboard
         # projection_api exposures already declare schema: public. Migration

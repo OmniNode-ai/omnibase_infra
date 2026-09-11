@@ -202,6 +202,15 @@ databases:
               - SELECT
               - UPDATE
             schema: public
+          - object_type: TABLE
+            objects:
+              - projection_delegation_model_routing
+              - projection_delegation_quality_gate
+              - projection_delegation_summary
+              - projection_delegation_token_usage
+            privileges:
+              - SELECT
+            schema: public
         login: true
       validator_ro:
         bypass_rls: false
@@ -347,5 +356,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 0e01755c1dc17827d763b60c287617357be7a2393123df2575d9278be73a1816
   repository: OmniNode-ai/omnibase_infra
-  sha256: 432b4c96ba960d749989c3b7b41da956808f1feb8cc9467589b353eb3b2b7e33
+  sha256: 73ea27344efeb0003e6f27a6c865eec3a8618965677af3b663742d29ea4fd39c
 topology_instance: onex-prod

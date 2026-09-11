@@ -561,7 +561,19 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # omnibase_infra first, so the node-migration vendor parity gate can prove
     # a clean redeploy will create the projection column before the handler
     # starts returning it.
-    assert len(result.declarations) == 176
+    #
+    # 176 -> 177 for OMN-18159's
+    # nodes/node_projection_delegation/
+    # 0039_delegation_aggregate_views_per_tenant.sql, which re-groups the four
+    # delegation aggregate views on tenant_id. They previously aggregated the
+    # whole table and depended on the reader arriving with a row-level-security
+    # session scope for the numbers to mean anything; a reader that derives its
+    # scope from a tenant filter cannot do that, saw no rows, and published
+    # zeros that read as a quiet period rather than as a fault. Same ordering
+    # as the row above -- the omnimarket source PR waits on this vendored
+    # migration, so the vendor parity gate can prove a clean redeploy creates
+    # the grouped views before the publisher reads them.
+    assert len(result.declarations) == 177
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
