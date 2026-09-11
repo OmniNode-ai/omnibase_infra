@@ -205,8 +205,8 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "secretEnv": "KEYCLOAK_ADMIN_CLIENT_SECRET",
-      "realmRoles": ["realm-management:manage-users", "realm-management:view-users"],
-      "clientScopeMappings": ["realm-management:manage-users", "realm-management:view-users"],
+      "realmRoles": ["realm-management:manage-clients", "realm-management:manage-users", "realm-management:view-clients", "realm-management:view-users"],
+      "clientScopeMappings": ["realm-management:manage-clients", "realm-management:manage-users", "realm-management:view-clients", "realm-management:view-users"],
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
