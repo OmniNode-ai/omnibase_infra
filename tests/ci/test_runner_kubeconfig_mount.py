@@ -49,12 +49,11 @@ COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runners.sh"
 SCRIPTS_CI = REPO_ROOT / "scripts" / "ci"
 
-EXPECTED_MOUNT_TARGET = "/home/runner/.kube/lab-ci-reader.kubeconfig"
+EXPECTED_MOUNT_TARGET = "/home/runner/.lab-credentials"
 EXPECTED_MOUNT_SOURCE_EXPR = (
-    "${RUNNER_LAB_KUBECONFIG_HOST_PATH:-"
-    "/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}"
+    "${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}"
 )
-EXPECTED_KUBECONFIG_ENV = "/home/runner/.kube/lab-ci-reader.kubeconfig"
+EXPECTED_KUBECONFIG_ENV = "/home/runner/.lab-credentials/lab-ci-reader.kubeconfig"
 FLEET_SERVICE_COUNT = 88
 
 
@@ -134,7 +133,7 @@ def test_the_mount_is_read_only() -> None:
 
 
 def test_the_mount_source_uses_the_documented_default() -> None:
-    """The host path is override-able via RUNNER_LAB_KUBECONFIG_HOST_PATH with
+    """The host path is override-able via RUNNER_LAB_CREDENTIALS_HOST_DIR with
     a `:-` (soft) default, not `:?` (fail-fast) -- confirmed against
     docker-compose.runners.yml's own "CONSOLIDATED REQUIRED ENV VARS" comment
     in deploy-runners.sh, which enumerates only the `:?`-guarded vars. A
@@ -153,7 +152,7 @@ def test_the_mount_source_uses_the_documented_default() -> None:
 def test_the_required_env_vars_comment_does_not_need_a_new_entry() -> None:
     """Positive control for the claim above: the three vars actually listed
     under CONSOLIDATED REQUIRED ENV VARS are all `:?`-guarded in compose, and
-    RUNNER_LAB_KUBECONFIG_HOST_PATH (a `:-` default) is correctly absent --
+    RUNNER_LAB_CREDENTIALS_HOST_DIR (a `:-` default) is correctly absent --
     proving the comment block's own criterion (fail-fast guard) rather than
     just asserting the new var's name is missing, which a checker with no
     real criterion would also satisfy.
@@ -169,11 +168,46 @@ def test_the_required_env_vars_comment_does_not_need_a_new_entry() -> None:
     ):
         assert required_var in block
         assert f"{required_var}:?" in compose_text
-    assert "RUNNER_LAB_KUBECONFIG_HOST_PATH" not in block
-    assert "RUNNER_LAB_KUBECONFIG_HOST_PATH:?" not in compose_text
+    assert "RUNNER_LAB_CREDENTIALS_HOST_DIR" not in block
+    assert "RUNNER_LAB_CREDENTIALS_HOST_DIR:?" not in compose_text
 
 
 # --- omninode-deploy-runner is deliberately out of scope --------------------
+
+
+def test_the_mount_is_a_directory_not_a_single_file() -> None:
+    """The directory is the point, and a regression to a file is silent.
+
+    Mounting one file meant any second lab credential needed a compose edit and
+    a recreate of all 88 containers, which costs about three hours because
+    docker compose serialises container stop and start and the roll must skip
+    runners that are executing a job. Mounting the parent directory makes the
+    next credential a file drop on the host. Reverting to a file path would
+    still pass every other assertion here, so it is asserted directly.
+    """
+    compose = _load_compose()
+    for name in _fleet_services(compose):
+        entries = compose["services"][name].get("volumes", [])
+        match = next(e for e in entries if EXPECTED_MOUNT_TARGET in e)
+        target = match.split(":")[-2]
+        assert target == EXPECTED_MOUNT_TARGET, (
+            f"{name} mounts {target!r}, not the credentials DIRECTORY "
+            f"{EXPECTED_MOUNT_TARGET!r}."
+        )
+        assert not target.endswith(".kubeconfig"), (
+            f"{name} has regressed to mounting a single file: {target!r}"
+        )
+
+
+def test_kubeconfig_env_points_inside_the_mounted_directory() -> None:
+    """Env and mount must move together or the fleet loses its credential."""
+    compose = _load_compose()
+    for name in _fleet_services(compose):
+        value = compose["services"][name].get("environment", {}).get("KUBECONFIG")
+        assert value.startswith(EXPECTED_MOUNT_TARGET + "/"), (
+            f"{name} sets KUBECONFIG={value!r}, which is not inside the mounted "
+            f"directory {EXPECTED_MOUNT_TARGET!r}."
+        )
 
 
 def test_the_deploy_runner_service_is_not_part_of_the_fleet_count() -> None:
@@ -245,7 +279,7 @@ def test_docker_compose_config_resolves_without_error_for_the_fleet(
 ) -> None:
     """Full-fidelity check via `docker compose config`, not just PyYAML: this
     is the same interpolation/merge engine that runs `up -d` on the host, and
-    it proves RUNNER_LAB_KUBECONFIG_HOST_PATH's soft default does not turn
+    it proves RUNNER_LAB_CREDENTIALS_HOST_DIR's soft default does not turn
     into a fail-fast interpolation error for anyone running a plain
     `docker compose -f docker-compose.runners.yml config` with none of the
     optional vars exported.
