@@ -276,6 +276,24 @@ uv run pytest tests/ -n auto     # Parallel
 uv run pytest tests/ -n 0 -xvs   # Debug mode (no parallelism)
 ```
 
+### Pre-push runs no tests (retired 2026-09-10)
+
+The pre-push test leg was retired in this repo on 2026-09-10 per
+`knowledge-base-internal#328` phase 1, merged as `e50b0b84`. Pre-push is now policy,
+type and lint only — mypy, architecture-layer validation, and deploy-scope DoD parity —
+and finishes in seconds. Hosted CI is the enforced merge gate and the test surface. Run
+tests locally when you want them, with the commands above; nothing runs them for you at
+`git push`.
+
+Rollback is `git revert` of that squash. There is no environment variable that turns the
+leg back on, deliberately, and no dual path.
+
+**This is a dated pointer, not the doctrine rewrite.** The full rewrite lands after the
+phase-0 report, because phase 1 is reversible and coupling the rules to a revertible
+change means a revert silently reverts the rules. Until then, treat any standing
+instruction that names the governed impacted-test selector as the final local pre-push
+check as superseded for this repo.
+
 ### Runtime Startup is a First-Class CI Gate
 
 Any PR that touches `auto_wiring/`, `service_kernel.py`, handler `__init__` signatures, or kernel-level registration MUST include a test that:

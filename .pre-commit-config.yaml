@@ -1375,8 +1375,14 @@ repos:
   #
   # Do NOT re-add a test-running hook at the pre-push stage here without a ruling
   # that supersedes the one above. No env knob restores this leg, and adding one
-  # would recreate the bypass surface the retirement exists to remove. Enforced by
+  # would recreate the bypass surface the retirement exists to remove. Rollback is
+  # a `git revert` of the squash, not a switch. Enforced by
   # tests/ci/test_prepush_test_leg_retired_omn18162.py.
+  #
+  # The standing doctrine rewrite is PENDING the phase-0 report and is deliberately
+  # not folded in here: phase 1 is reversible, and coupling the rules to a
+  # revertible change means a revert silently reverts the rules. CLAUDE.md carries
+  # the dated pointer in the meantime.
   # ---------------------------------------------------------------------------
   # Deploy-scope DoD parity at PRE-PUSH (OMN-14681 / WS7 fan-out of the OMN-14655
   # canary). Shifts the hosted required `deploy-gate` check left: it runs the

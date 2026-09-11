@@ -9,8 +9,29 @@
 # - @pytest.mark.slow: Performance tests (>1s runtime)
 # - @pytest.mark.chaos: Chaos engineering tests (fault injection, resilience)
 # - @pytest.mark.replay: Event replay and recovery tests
+# - @pytest.mark.performance: microbenchmarks (OMN-18162; see below)
 #
-# Related: OMN-955 (Chaos and replay testing)
+# OMN-18162 — why the performance job exists and is separate.
+#
+#   ci.yml runs `-m "not slow and not chaos and not kafka and not performance
+#   and not live_github_api"`. The `slow` and `chaos` halves of that exclusion
+#   have always landed here. The `performance` half never did: 25 tests under
+#   tests/unit carry that marker, no workflow selected it positively, and the
+#   only surface that ever ran them was the pre-push test leg -- which
+#   OMN-18162 retired. Retiring it without this job would have removed their
+#   last execution path with nobody noticing.
+#
+#   It is a separate job rather than a widened filter on the one above for two
+#   reasons. These assert wall-clock thresholds, so they run serially and on
+#   the lab fleet, where a nearly idle 88-runner pool gives steadier timings
+#   than a hosted runner; the slow/chaos job keeps its own placement and its
+#   `-n 2` parallelism unchanged. And a red benchmark stays attributable to the
+#   benchmark rather than merging into the slow/chaos result.
+#
+#   Both jobs feed the same summary and the same failure notification, so
+#   there is one alert path, not two.
+#
+# Related: OMN-955 (Chaos and replay testing), OMN-18162 (performance job)
 
 name: Nightly Tests
 
@@ -96,6 +117,66 @@ jobs:
           path: nightly-junit.xml
           retention-days: 14
 
+  # OMN-18162: the execution path for the `performance` marker, which ci.yml
+  # deselects and which no other workflow selected. See the header.
+  performance-tests:
+    name: Performance Microbenchmarks
+    # Pinned to the lab fleet rather than read from the routing seam. These
+    # assert wall-clock thresholds and the seam currently resolves to a hosted
+    # runner; the fleet was measured at 88 online with 2 busy, which is the
+    # steadier of the two. This is a deliberate placement for timing
+    # sensitivity, not a general routing change -- the job above is untouched.
+    runs-on: [self-hosted, omnibase-ci]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi
+
+      - name: Run performance microbenchmarks
+        run: |
+          # Serial by design. These measure wall-clock time, so running them
+          # under xdist alongside each other measures contention instead.
+          uv run pytest tests/ \
+            --ignore=tests/integration/docker \
+            -m "performance" \
+            -n 0 \
+            -p no:randomly \
+            --timeout=600 \
+            --timeout-method=signal \
+            --tb=short \
+            --junitxml=performance-junit.xml \
+            -v
+
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-performance-results
+          path: performance-junit.xml
+          retention-days: 14
+
   # Summary job to report overall status
   nightly-summary:
     timeout-minutes: 30
@@ -108,21 +189,26 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [slow-tests]
+    needs: [slow-tests, performance-tests]
     if: always()
 
     steps:
       - name: Check test results
         run: |
           slow="${{ needs.slow-tests.result }}"
+          perf="${{ needs.performance-tests.result }}"
 
-          if [[ "$slow" == "success" ]]; then
+          echo "Slow & Chaos Tests:         $slow"
+          echo "Performance Microbenchmarks: $perf"
+
+          # Both must succeed. A skipped or cancelled job is not a pass: it is
+          # indistinguishable from a job that never ran, and telling those
+          # apart is the whole reason OMN-18162 added the second job.
+          if [[ "$slow" == "success" && "$perf" == "success" ]]; then
             echo "All nightly tests passed successfully"
-            echo "Slow & Chaos Tests: Passed"
             exit 0
           else
             echo "Nightly tests failed"
-            echo "Slow & Chaos Tests: $slow"
             exit 1
           fi
 

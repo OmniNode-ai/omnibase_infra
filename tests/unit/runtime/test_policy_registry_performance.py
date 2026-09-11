@@ -15,31 +15,26 @@ Key optimizations tested:
 
 from __future__ import annotations
 
-import os
 import time
 
 import pytest
 
-# OMN-18162: these four microbenchmarks used to key their skip off the generic
-# `CI` environment variable, which GitHub Actions always sets. Combined with
-# ci.yml's `-m "not slow and not performance"`, that left them with NO CI
-# execution path at all: the pre-push test leg was the only surface that ever
-# ran them, and retiring it would have removed their last one silently.
+# OMN-18162: four microbenchmarks in this module used to carry a skip keyed
+# off the generic CI environment variable that every GitHub Actions runner
+# sets. Combined with ci.yml's `-m "not performance"`, that left them unable to
+# run in any job at all -- including one written specifically to run them.
 #
-# The switch is now an explicit opt-in. `microbenchmarks-nightly.yml` sets it;
-# nothing else does, so these stay skipped on an ordinary pull request and on a
-# developer machine, which is what the original `CI` check was reaching for.
-# Their reasons below are unchanged and still true -- they are timing-sensitive
-# and will read differently on a shared runner. The nightly exists to catch hard
-# breakage (an exception, a broken import, an order-of-magnitude regression),
-# not to be a precision benchmark harness. If variance makes it noisy, the fix
-# is to widen these assertions or delete the test, never to re-hide it behind a
-# condition that no surface satisfies.
-_RUN_MICROBENCHMARKS: bool = os.environ.get(
-    "ONEX_RUN_MICROBENCHMARKS", ""
-).strip().lower() in {"1", "true", "yes", "on"}
-_SKIP_MICROBENCHMARKS: bool = not _RUN_MICROBENCHMARKS
-
+# The skip is gone and selection is by marker alone. `performance` keeps them
+# out of pull-request CI exactly as before, and the nightly performance job in
+# .github/workflows/nightly-tests.yml selects that marker positively. Nothing
+# gates them on an environment variable, deliberately: an ambient variable is
+# inherited by every descendant process, is bound to no commit, and leaves no
+# receipt, which is the shape this repo refuses elsewhere.
+#
+# They are still timing-sensitive, which is why they stay out of pull-request
+# CI and why the nightly runs them serially on the lab fleet. If a threshold
+# proves noisy there, widen the assertion or delete the test -- never re-hide
+# it behind a condition that no surface satisfies.
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
 from omnibase_infra.runtime.registry_policy import RegistryPolicy
@@ -204,10 +199,6 @@ class TestPolicyRegistryPerformance:
             f"Fast path too slow: {elapsed_ms:.2f}ms for 1000 lookups (expected < 150ms)"
         )
 
-    @pytest.mark.skipif(
-        _SKIP_MICROBENCHMARKS,
-        reason="Flaky in CI: microbenchmark variance can show warm > cold time",
-    )
     def test_semver_cache_performance(
         self, large_policy_registry: RegistryPolicy
     ) -> None:
@@ -540,10 +531,7 @@ class TestPolicyRegistryPerformanceRegression:
                 )
         return registry
 
-    @pytest.mark.skipif(
-        _SKIP_MICROBENCHMARKS,
-        reason="Flaky in CI: P99 latency microbenchmark too sensitive to environment variance",
-    )
+    @pytest.mark.performance
     def test_get_p99_latency_under_threshold(
         self, large_registry: RegistryPolicy
     ) -> None:
@@ -592,10 +580,7 @@ class TestPolicyRegistryPerformanceRegression:
             f"This indicates potential secondary index regression."
         )
 
-    @pytest.mark.skipif(
-        _SKIP_MICROBENCHMARKS,
-        reason="Flaky in CI: registration throughput microbenchmark too sensitive to shared runner variance",
-    )
+    @pytest.mark.performance
     def test_registration_throughput_regression(self) -> None:
         """Registration of 1000 policies must complete in < 500ms.
 
@@ -689,10 +674,7 @@ class TestPolicyRegistryPerformanceRegression:
             f"This indicates lock contention regression."
         )
 
-    @pytest.mark.skipif(
-        _SKIP_MICROBENCHMARKS,
-        reason="Flaky in CI: simulated O(n) is too fast for accurate comparison",
-    )
+    @pytest.mark.performance
     def test_secondary_index_speedup(self) -> None:
         """Secondary index must provide >1.1x speedup vs simulated O(n) scan.
 
