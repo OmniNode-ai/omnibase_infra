@@ -365,14 +365,23 @@ def test_onex_admin_declares_the_client_management_roles_its_code_path_calls() -
     config = json.loads(_CONFIG_PATH.read_text())
     onex_admin = _client(config, "onex-admin")
 
+    # The client-management half, needed by ensure_tenant_keycloak_client.
     required = {
         "realm-management:manage-clients",
         "realm-management:view-clients",
+        # The user-management half, which predates this and must SURVIVE any
+        # future edit to the lists above. Asserted rather than assumed: a
+        # subset check on the new roles alone would pass an edit that REPLACED
+        # these two, and losing manage-users breaks /v1/auth/provision -- the
+        # one tenant path that kept working throughout the OMN-18170 outage.
+        "realm-management:manage-users",
+        "realm-management:view-users",
     }
     for field in ("realmRoles", "clientScopeMappings"):
         missing = required - set(onex_admin.get(field, []))
         assert not missing, (
             f"onex-admin is missing {sorted(missing)} from '{field}'. Without "
-            f"both of these in BOTH lists, POST /v1/tenants/bootstrap 503s on "
-            f"every call (OMN-18170)."
+            f"the client-management pair in BOTH lists, POST "
+            f"/v1/tenants/bootstrap 503s on every call; without the "
+            f"user-management pair, /v1/auth/provision breaks too (OMN-18170)."
         )
