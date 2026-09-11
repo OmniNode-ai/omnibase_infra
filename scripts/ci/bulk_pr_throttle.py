@@ -79,16 +79,17 @@ DEFAULT_BLOCK_POLL_SECONDS = 30.0
 DEFAULT_MAX_BLOCK_SECONDS = 1800.0
 DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 
-# True means the operation directly creates check-suite load and must wait for
-# queue capacity. False means queue depth is sampled on a best-effort basis but
-# cannot block the operation. OMN-18032 explicitly classifies arm-automerge as
-# observation-only because arming the flag mints no check suite. Keeping every
-# operation in one immutable map prevents callers from bypassing the selected
-# policy and prevents new operations from silently inheriting a default.
+# True means the operation can create or unlock check-suite load and must wait
+# for queue capacity. False means queue depth is sampled on a best-effort basis
+# but cannot block the operation. Arming auto-merge does not mint a check suite
+# immediately, but it authorizes a merge that can trigger base-branch and
+# dependent CI bursts, so it remains gated. Keeping every operation in one
+# immutable map prevents callers from bypassing the selected policy and
+# prevents new operations from silently inheriting a default.
 OPERATION_QUEUE_DEPTH_POLICY: Mapping[str, bool] = MappingProxyType(
     {
         "update-branch": True,
-        "arm-automerge": False,
+        "arm-automerge": True,
         "rerun-failed": True,
         "noop-dry-run": False,
     }

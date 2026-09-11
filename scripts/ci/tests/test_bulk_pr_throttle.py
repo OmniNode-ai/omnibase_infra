@@ -373,11 +373,11 @@ class TestRunBulkOperationFlow:
             assert wave.queue_depth_after == 10
             assert all(o.success for o in wave.outcomes)
 
-    @pytest.mark.parametrize("operation", ["arm-automerge", "noop-dry-run"])
-    def test_observation_only_operations_run_at_high_depth(self, tmp_path, operation):
-        """Observation-only operations record depth without waiting on it."""
+    def test_noop_dry_run_operation_records_high_depth_without_waiting(self, tmp_path):
+        """The noop operation records depth without waiting on it."""
         from bulk_pr_throttle import PrOutcome, run_bulk_operation, write_receipt
 
+        operation = "noop-dry-run"
         depth_calls = 0
         sleeps: list[float] = []
         applied: list[int] = []
@@ -421,15 +421,15 @@ class TestRunBulkOperationFlow:
         assert receipt["queue_depth_gate_applied"] is False
         assert receipt["waves"][0]["queue_depth_gate_applied"] is False
 
-    @pytest.mark.parametrize("operation", ["arm-automerge", "noop-dry-run"])
-    def test_observation_only_policy_is_explicit_and_immutable(self, operation):
+    def test_noop_dry_run_policy_is_explicit_and_immutable(self):
         from bulk_pr_throttle import OPERATION_QUEUE_DEPTH_POLICY
 
+        operation = "noop-dry-run"
         assert OPERATION_QUEUE_DEPTH_POLICY[operation] is False
         with pytest.raises(TypeError):
             OPERATION_QUEUE_DEPTH_POLICY[operation] = True  # type: ignore[index]
 
-    def test_arm_automerge_dry_run_records_non_gated_policy_without_probing(self):
+    def test_arm_automerge_dry_run_records_gated_policy_without_probing(self):
         from bulk_pr_throttle import run_bulk_operation
 
         report = run_bulk_operation(
@@ -442,12 +442,12 @@ class TestRunBulkOperationFlow:
             apply_pr_operation=None,
         )
 
-        assert report.queue_depth_gate_applied is False
+        assert report.queue_depth_gate_applied is True
         assert all(wave.queue_depth_before == -1 for wave in report.waves)
         assert all(wave.queue_depth_after == -1 for wave in report.waves)
 
     @pytest.mark.parametrize("failed_call", [1, 2])
-    def test_arm_automerge_queue_observation_failure_does_not_refuse(self, failed_call):
+    def test_noop_dry_run_queue_observation_failure_does_not_refuse(self, failed_call):
         from bulk_pr_throttle import (
             BulkPrThrottleError,
             PrOutcome,
@@ -469,7 +469,7 @@ class TestRunBulkOperationFlow:
             owner="OmniNode-ai",
             repo="onex_change_control",
             pr_numbers=[1, 2, 3, 4, 5],
-            operation="arm-automerge",
+            operation="noop-dry-run",
             wave_size=5,
             queue_depth_threshold=150,
             dry_run=False,
@@ -494,7 +494,7 @@ class TestRunBulkOperationFlow:
             )
 
     @pytest.mark.parametrize("failed_call", [1, 2])
-    def test_arm_automerge_unexpected_observation_error_propagates(self, failed_call):
+    def test_noop_dry_run_unexpected_observation_error_propagates(self, failed_call):
         from bulk_pr_throttle import PrOutcome, run_bulk_operation
 
         depth_calls = 0
@@ -512,7 +512,7 @@ class TestRunBulkOperationFlow:
                 owner="OmniNode-ai",
                 repo="onex_change_control",
                 pr_numbers=[1],
-                operation="arm-automerge",
+                operation="noop-dry-run",
                 get_queue_depth=get_queue_depth,
                 apply_pr_operation=lambda owner, repo, pr, operation: (
                     applied.append(pr)
@@ -522,7 +522,7 @@ class TestRunBulkOperationFlow:
 
         assert applied == ([] if failed_call == 1 else [1])
 
-    def test_arm_automerge_later_wave_observation_failure_does_not_refuse(self):
+    def test_noop_dry_run_later_wave_observation_failure_does_not_refuse(self):
         from bulk_pr_throttle import (
             BulkPrThrottleError,
             PrOutcome,
@@ -543,7 +543,7 @@ class TestRunBulkOperationFlow:
             owner="OmniNode-ai",
             repo="onex_change_control",
             pr_numbers=[1, 2, 3, 4, 5, 6],
-            operation="arm-automerge",
+            operation="noop-dry-run",
             wave_size=3,
             get_queue_depth=get_queue_depth,
             apply_pr_operation=lambda owner, repo, pr, operation: (
@@ -560,7 +560,9 @@ class TestRunBulkOperationFlow:
         assert report.waves[1].queue_depth_before is None
         assert report.waves[1].queue_depth_after == 204
 
-    @pytest.mark.parametrize("operation", ["update-branch", "rerun-failed"])
+    @pytest.mark.parametrize(
+        "operation", ["update-branch", "arm-automerge", "rerun-failed"]
+    )
     def test_load_creating_operations_still_refuse_at_high_depth(self, operation):
         from bulk_pr_throttle import (
             PrOutcome,
@@ -725,7 +727,7 @@ class TestWriteReceipt:
         wave = WaveReceipt(
             wave_index=1,
             pr_numbers=(1,),
-            operation="arm-automerge",
+            operation="noop-dry-run",
             dry_run=False,
             queue_depth_before=200,
             queue_depth_after=201,
@@ -808,7 +810,7 @@ class TestWriteReceipt:
             (),
         )
 
-        assert report.queue_depth_gate_applied is False
+        assert report.queue_depth_gate_applied is True
 
     def test_receipt_rejects_unknown_wave_operation_with_clear_error(self, tmp_path):
         from bulk_pr_throttle import BulkRunReport, WaveReceipt, write_receipt
