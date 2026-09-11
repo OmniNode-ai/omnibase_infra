@@ -573,7 +573,22 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # as the row above -- the omnimarket source PR waits on this vendored
     # migration, so the vendor parity gate can prove a clean redeploy creates
     # the grouped views before the publisher reads them.
-    assert len(result.declarations) == 177
+    #
+    # 177 -> 178 for OMN-18159's
+    # nodes/node_projection_delegation/
+    # 0040_delegation_aggregate_views_owner_realign.sql. 0039 had to DROP and
+    # CREATE each of those four views -- a replace cannot change the column
+    # list -- and a DROP discards the view's OWNER. The role reaching 0039 is
+    # not the one that created them (0032, 0033 and 0034 each RESET ROLE), so
+    # they came back owned by the migration runner, a superuser, and a view
+    # reads its base tables as its owner. A superuser bypasses row-level
+    # security unconditionally, so every read through the four returned all
+    # tenants' rows regardless of app.tenant_id. 0040 realigns the owner back
+    # to delegation_events'. 0039's bytes are frozen (applied on the .201 dev
+    # lane with a recorded content_sha256 and declared here), so the repair is
+    # additive, which is also what makes it correct for a lane that already
+    # applied 0039.
+    assert len(result.declarations) == 178
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
