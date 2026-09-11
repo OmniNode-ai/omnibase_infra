@@ -51,7 +51,88 @@ trusted_runner_variable:
   # self-hosted, the first of them 71 seconds after the flip; reproduced on
   # omnimarket run 34122888401. Before any future flip of this seam, that gate
   # (and every other testcontainer-backed gate) needs a hosted class of its own.
-  repository_overrides: {}
+  #
+  # OMN-18031 phase 5, 2026-09-11T21:12:33Z: two shadows below are now DECLARED
+  # divergences rather than drift. Authority is the operator ruling of
+  # 2026-09-11 ~21:07Z, "Yes we should move things back to the lab as
+  # necessary", and the phase-0 gate it answers is met. Measured immediately
+  # before the write: 279 jobs sat queued across six repositories, every one of
+  # them carrying `ubuntu-latest` with no runner assigned and the longest
+  # waiting 18 minutes, while 70 of the 88 runners in this group were online
+  # and idle. That is runner availability, not concurrency-group
+  # serialisation -- a job blocked on `needs:` is not reported queued with a
+  # started_at, and all 279 carried one.
+  #
+  # The exclusions are the substance of this entry. omnimarket and
+  # omnibase_infra are deliberately NOT flipped: the required gate named in the
+  # A/B above, "Customer Path Boundary (OMN-18012)", resolves its runs-on
+  # through this very seam in BOTH repositories (omnimarket ci.yml, and this
+  # repo's ci.yml) and docker-pulls redpandadata/redpanda with
+  # OMN18012_REQUIRE_HARNESS=1 set so a missing daemon is red rather than a
+  # green skip. Flipping either shadow re-runs the 2026-09-07 harm verbatim.
+  # The org variable is not flipped either: it is inherited by omninode_infra --
+  # private, carrying a live staging deploy path, and with only five
+  # seam-driven job definitions, so almost no yield for a large blast radius --
+  # and by omnimemory, omnidash, omnibase_spi and omnibase_compat, none of
+  # which were enumerated for container exposure.
+  #
+  # Two shadows were flipped at 21:12:33Z. ONE WAS REVERTED 35 MINUTES LATER on
+  # measured harm, and the reason is a finding worth more than the flip was.
+  #
+  # onex_change_control was flipped and reverted to '["ubuntu-latest"]' at
+  # 2026-09-11T21:47:18Z. It is NOT in the override map below, so the audit
+  # holds it to expected_json above, which is now correct again. The cause was
+  # NOT the container defect and NOT runner contamination: the step "Verify
+  # centralized runner routing standard", in that repo's
+  # .github/workflows/omni-standards-compliance.yml, builds its forbidden-label
+  # set FROM THE LIVE VALUES of OMNI_PUBLIC_PR_RUNS_ON_JSON and
+  # OMNI_TRUSTED_CI_RUNS_ON_JSON, then greps .github/workflows for each label,
+  # filtering out only lines that contain one of the two `fromJSON(vars...||`
+  # fallback expressions. Flipping the trusted seam to self-hosted therefore
+  # makes the gate hunt for the literal string "self-hosted" in its own
+  # workflow directory -- and it hits exactly one line, a PROSE COMMENT at
+  # release-staleness-gate.yml:52 reading "not contend for the same self-hosted
+  # runners". The gate fails on a comment.
+  #
+  # So that repository is structurally unflippable until the gate's filter is
+  # fixed, and the defect is invisible while the seam is hosted: the label set
+  # is then just {ubuntu-latest}, every occurrence of which IS on a fallback
+  # line. A gate that passes only because the value it guards has never been
+  # exercised has not been tested. Clean A/B, same shape as the 2026-09-07
+  # entry above: 59 of 59 conclusive pre-flip runs SUCCESS on hosted, 3 of 3
+  # conclusive post-flip runs FAILURE on the fleet, zero fleet successes.
+  #
+  # omnibase_core does NOT carry that gate -- grep for its step name returns
+  # nothing in that repo's workflow directory -- which is why it stays flipped
+  # and is the one override declared below. It carries no `testcontainers`
+  # dependency and no `docker` step in any workflow.
+  #
+  # THE COST, measured rather than estimated. Between 21:13:15Z and 21:49:29Z
+  # that gate failed 5 runs across 5 branches -- 3 OCC companion branches and 2
+  # product branches inside that repo -- and because it feeds the required
+  # summary check, no companion could merge, which blocks product PRs
+  # fleet-wide. Window from first failure start to first pass after the revert:
+  # 36m14s. One of the blocked companions was this very pull request's, so the
+  # flip blocked its own paperwork.
+  #
+  # omnibase_core was checked for the same gate rather than assumed safe, and
+  # from origin/dev rather than from a local clone: its
+  # omni-standards-compliance.yml contains ZERO occurrences of either the step
+  # name or the error string, against exactly one of each in the other repo as
+  # the positive control. It carries ~108 prose matches for the label, but
+  # nothing in that repo greps for them, so they are inert. That is why it stays
+  # flipped, and its jobs are executing and passing on named fleet runners.
+  #
+  # What the flip proved before the revert, and it is worth recording: queue
+  # depth went from 279 queued jobs at 21:15Z to 0 at 21:42Z, with 76
+  # onex_change_control jobs executing on named fleet runners, and fleet busy
+  # count rising from 16 to 51 of 88. The mechanism works. One repository's
+  # self-referential gate is what stopped it, not the fleet.
+  repository_overrides:
+    omnibase_core:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        The same three conditions as onex_change_control above. This repository additionally carries 20 job definitions pinned to a literal ubuntu-latest, which this override does not move and must not be assumed to have moved; if any of those is later switched to read the seam, re-check it for container exposure before leaving this override in place.
 public_pr_runner_variable:
   name: OMNI_PUBLIC_PR_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'
