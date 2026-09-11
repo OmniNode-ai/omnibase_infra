@@ -176,6 +176,84 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="credentials",
         ),
     ),
+    # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
+    # exactly the reason the docstring above gives -- the migration that
+    # creates them is vendored here, but the producing node's db_io
+    # declaration is not yet in the PINNED omnimarket contracts root this
+    # repo's CI derives from, and the pin advances only after the omnimarket
+    # source PR merges. The source PR in turn cannot merge until this grant
+    # exists, because the runtime validates the binding principal's declared
+    # read privilege before it will wire the handler. Declaring them here
+    # breaks that cycle without pointing the pin at an unmerged commit.
+    #
+    # These entries become redundant once the pin advances past the source
+    # PR and the contract declares the same four relations; removing them
+    # then is the follow-up, and leaving them is inert rather than wrong --
+    # the derivation is idempotent per relation.
+    ContractTableDeclaration(
+        node="legacy_migration:projection_delegation_model_routing",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="projection_delegation_model_routing",
+            database_ref="application",
+            schema="tenant",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+            ),
+            access="read",
+            role="aggregate_model_routing",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:projection_delegation_quality_gate",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="projection_delegation_quality_gate",
+            database_ref="application",
+            schema="tenant",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+            ),
+            access="read",
+            role="aggregate_quality_gate",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:projection_delegation_summary",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="projection_delegation_summary",
+            database_ref="application",
+            schema="tenant",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+            ),
+            access="read",
+            role="aggregate_summary",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:projection_delegation_token_usage",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="projection_delegation_token_usage",
+            database_ref="application",
+            schema="tenant",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+            ),
+            access="read",
+            role="aggregate_token_usage",
+        ),
+    ),
 )
 
 

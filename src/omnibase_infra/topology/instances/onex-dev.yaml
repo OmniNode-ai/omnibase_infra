@@ -188,6 +188,14 @@ databases:
               - tenant_inference_credentials
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
+          - object_type: TABLE
+            objects:
+              - projection_delegation_model_routing
+              - projection_delegation_quality_gate
+              - projection_delegation_summary
+              - projection_delegation_token_usage
+            privileges: [SELECT]
+            schema: public
         login: true
       validator_ro:
         bypass_rls: false
