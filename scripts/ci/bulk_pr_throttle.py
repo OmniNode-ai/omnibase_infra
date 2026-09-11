@@ -96,6 +96,16 @@ OPERATION_QUEUE_DEPTH_POLICY: Mapping[str, bool] = MappingProxyType(
 VALID_OPERATIONS = tuple(OPERATION_QUEUE_DEPTH_POLICY)
 
 
+def queue_depth_gate_for_operation(operation: str) -> bool:
+    """Return the immutable queue policy or reject an unknown operation."""
+    try:
+        return OPERATION_QUEUE_DEPTH_POLICY[operation]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown operation {operation!r}; must be one of {VALID_OPERATIONS}"
+        ) from exc
+
+
 class BulkPrThrottleError(RuntimeError):
     """Base class for refusal / fatal errors raised by this tool."""
 
@@ -137,9 +147,17 @@ class BulkRunReport:
     queue_depth_threshold: int
     dry_run: bool
     waves: tuple[WaveReceipt, ...]
-    # Keep this defaulted field last so pre-OMN-18032 positional constructors
-    # retain their original argument order and conservative gated semantics.
-    queue_depth_gate_applied: bool = field(default=True, kw_only=True)
+    # Derived rather than caller-supplied so the report cannot contradict the
+    # immutable operation policy. init=False preserves the legacy positional
+    # constructor without introducing an override surface.
+    queue_depth_gate_applied: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "queue_depth_gate_applied",
+            queue_depth_gate_for_operation(self.operation),
+        )
 
 
 class PartialBulkRunError(BulkPrThrottleError):
@@ -307,7 +325,7 @@ def run_bulk_operation(
         raise BulkPrThrottleError(
             f"unknown operation {operation!r}; must be one of {VALID_OPERATIONS}"
         )
-    queue_depth_gate_applied = OPERATION_QUEUE_DEPTH_POLICY[operation]
+    queue_depth_gate_applied = queue_depth_gate_for_operation(operation)
     if not pr_numbers:
         raise BulkPrThrottleError("pr_numbers must be non-empty")
 
@@ -332,7 +350,6 @@ def run_bulk_operation(
             owner=owner,
             repo=repo,
             operation=operation,
-            queue_depth_gate_applied=queue_depth_gate_applied,
             wave_size=wave_size,
             queue_depth_threshold=queue_depth_threshold,
             dry_run=True,
@@ -342,10 +359,10 @@ def run_bulk_operation(
                     pr_numbers=wave,
                     operation=operation,
                     dry_run=True,
-                    # Dry-run does not probe GitHub; use the same explicit
-                    # unavailable value as a failed best-effort observation.
-                    queue_depth_before=None,
-                    queue_depth_after=None,
+                    # Preserve the legacy dry-run sentinel on the wire. None
+                    # is reserved for a failed live best-effort observation.
+                    queue_depth_before=-1,
+                    queue_depth_after=-1,
                     started_at=ts,
                     completed_at=ts,
                     outcomes=(),
@@ -366,7 +383,6 @@ def run_bulk_operation(
             owner=owner,
             repo=repo,
             operation=operation,
-            queue_depth_gate_applied=queue_depth_gate_applied,
             wave_size=wave_size,
             queue_depth_threshold=queue_depth_threshold,
             dry_run=False,
@@ -463,7 +479,6 @@ def run_bulk_operation(
         owner=owner,
         repo=repo,
         operation=operation,
-        queue_depth_gate_applied=queue_depth_gate_applied,
         wave_size=wave_size,
         queue_depth_threshold=queue_depth_threshold,
         dry_run=False,
@@ -487,9 +502,9 @@ def write_receipt(report: BulkRunReport, path: Path) -> None:
                 "pr_numbers": list(wave.pr_numbers),
                 "pr_count": len(wave.pr_numbers),
                 "operation": wave.operation,
-                "queue_depth_gate_applied": OPERATION_QUEUE_DEPTH_POLICY[
+                "queue_depth_gate_applied": queue_depth_gate_for_operation(
                     wave.operation
-                ],
+                ),
                 "dry_run": wave.dry_run,
                 "queue_depth_before": wave.queue_depth_before,
                 "queue_depth_after": wave.queue_depth_after,
