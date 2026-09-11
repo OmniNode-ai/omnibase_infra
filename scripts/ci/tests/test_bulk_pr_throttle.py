@@ -374,7 +374,7 @@ class TestRunBulkOperationFlow:
             assert all(o.success for o in wave.outcomes)
 
     def test_arm_automerge_observes_high_depth_without_blocking(self, tmp_path):
-        """Arming auto-merge creates no check suite, so depth is evidence only."""
+        """Arming auto-merge dispatches no check suite, so depth is evidence only."""
         from bulk_pr_throttle import PrOutcome, run_bulk_operation, write_receipt
 
         depth_calls = 0
@@ -419,6 +419,48 @@ class TestRunBulkOperationFlow:
         receipt = json.loads(receipt_path.read_text())
         assert receipt["queue_depth_gate_applied"] is False
         assert receipt["waves"][0]["queue_depth_gate_applied"] is False
+
+    @pytest.mark.parametrize("failed_call", [1, 2])
+    def test_arm_automerge_queue_observation_failure_does_not_refuse(self, failed_call):
+        from bulk_pr_throttle import (
+            BulkPrThrottleError,
+            PrOutcome,
+            run_bulk_operation,
+        )
+
+        depth_calls = 0
+        applied: list[int] = []
+        logs: list[str] = []
+
+        def get_queue_depth() -> int:
+            nonlocal depth_calls
+            depth_calls += 1
+            if depth_calls == failed_call:
+                raise BulkPrThrottleError("temporary gh failure")
+            return 200
+
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="onex_change_control",
+            pr_numbers=[1, 2, 3, 4, 5],
+            operation="arm-automerge",
+            wave_size=5,
+            queue_depth_threshold=150,
+            dry_run=False,
+            get_queue_depth=get_queue_depth,
+            apply_pr_operation=lambda owner, repo, pr, operation: (
+                applied.append(pr)
+                or PrOutcome(pr_number=pr, success=True, detail="armed")
+            ),
+            log=logs.append,
+        )
+
+        assert applied == [1, 2, 3, 4, 5]
+        assert report.queue_depth_gate_applied is False
+        assert report.waves[0].queue_depth_before == (None if failed_call == 1 else 200)
+        assert report.waves[0].queue_depth_after == (None if failed_call == 2 else 200)
+        assert any("observation unavailable" in message for message in logs)
+        assert any("continuing" in message for message in logs)
 
     @pytest.mark.parametrize("operation", ["update-branch", "rerun-failed"])
     def test_load_creating_operations_still_refuse_at_high_depth(self, operation):
@@ -592,6 +634,25 @@ class TestWriteReceipt:
         nested = tmp_path / "a" / "b" / "c" / "receipt.json"
         write_receipt(report, nested)
         assert nested.exists()
+        data = json.loads(nested.read_text())
+        assert data["queue_depth_gate_applied"] is False
+        assert data["waves"][0]["queue_depth_gate_applied"] is False
+
+    def test_report_preserves_legacy_positional_constructor_order(self):
+        from bulk_pr_throttle import BulkRunReport
+
+        report = BulkRunReport(
+            "OmniNode-ai",
+            "onex_change_control",
+            "update-branch",
+            10,
+            150,
+            False,
+            (),
+        )
+
+        assert report.wave_size == 10
+        assert report.queue_depth_gate_applied is True
 
 
 # ---------------------------------------------------------------------------

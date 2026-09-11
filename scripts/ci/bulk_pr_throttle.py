@@ -23,9 +23,10 @@ Mechanical guard (no bypass)
 -----------------------------
 Load-creating operations use the queue-depth gate
 (:func:`wait_for_queue_depth`), which has no force/skip/bypass parameter
-anywhere in this module or its CLI. Zero-load operations still use bounded
-waves and record queue depth, but depth is observational rather than a reason
-to refuse them. A caller cannot change an operation's policy — see
+anywhere in this module or its CLI. Operations that do not directly dispatch
+check suites still use bounded waves and sample queue depth on a best-effort
+basis, but depth is observational rather than a reason to refuse them. A
+caller cannot change an operation's policy — see
 ``knowledge-base:runbooks/bulk-pr-operations.md`` for the doctrine-wiring follow-up
 that makes *not using it* visible.
 
@@ -77,10 +78,11 @@ DEFAULT_BLOCK_POLL_SECONDS = 30.0
 DEFAULT_MAX_BLOCK_SECONDS = 1800.0
 DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 
-# True means the operation creates check-suite load and must wait for queue
-# capacity. False means queue depth is still receipted but cannot block the
-# operation. Keeping every operation in one explicit map prevents future
-# operations from silently inheriting the less restrictive policy.
+# True means the operation directly creates check-suite load and must wait for
+# queue capacity. False means queue depth is sampled on a best-effort basis but
+# cannot block the operation. Keeping every operation in one explicit map
+# prevents future operations from silently inheriting the less restrictive
+# policy.
 OPERATION_QUEUE_DEPTH_POLICY = {
     "update-branch": True,
     "arm-automerge": False,
@@ -115,7 +117,7 @@ class WaveReceipt:
     pr_numbers: tuple[int, ...]
     operation: str
     dry_run: bool
-    queue_depth_before: int
+    queue_depth_before: int | None
     queue_depth_after: int | None
     started_at: str
     completed_at: str
@@ -127,11 +129,13 @@ class BulkRunReport:
     owner: str
     repo: str
     operation: str
-    queue_depth_gate_applied: bool
     wave_size: int
     queue_depth_threshold: int
     dry_run: bool
     waves: tuple[WaveReceipt, ...]
+    # Keep this defaulted field last so pre-OMN-18032 positional constructors
+    # retain their original argument order and conservative gated semantics.
+    queue_depth_gate_applied: bool = True
 
 
 class PartialBulkRunError(BulkPrThrottleError):
@@ -237,6 +241,31 @@ def wait_for_queue_depth(
     return depth
 
 
+def observe_queue_depth(
+    *,
+    get_queue_depth: Callable[[], int],
+    operation: str,
+    phase: str,
+    wave_index: int,
+    log: Callable[[str], None],
+) -> int | None:
+    """Best-effort queue sample for an operation that is not depth-gated.
+
+    Observation must never become an accidental refusal path. Expected probe
+    failures are recorded in the log and represented as ``None`` in the wave
+    receipt; unexpected programming errors still propagate.
+    """
+    try:
+        return get_queue_depth()
+    except BulkPrThrottleError as exc:
+        log(
+            f"[bulk-pr-throttle] WARNING: queue depth {phase} observation "
+            f"unavailable for wave {wave_index}, operation={operation}: {exc}; "
+            "continuing because this operation is not queue-depth gated"
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Core wave-gated run
 # ---------------------------------------------------------------------------
@@ -340,6 +369,7 @@ def run_bulk_operation(
 
     for idx, wave in enumerate(waves, start=1):
         started_at = now_fn().isoformat()
+        depth_before: int | None
         try:
             if queue_depth_gate_applied:
                 depth_before = wait_for_queue_depth(
@@ -351,11 +381,17 @@ def run_bulk_operation(
                     log=log,
                 )
             else:
-                depth_before = get_queue_depth()
+                depth_before = observe_queue_depth(
+                    get_queue_depth=get_queue_depth,
+                    operation=operation,
+                    phase="before",
+                    wave_index=idx,
+                    log=log,
+                )
                 log(
-                    f"[bulk-pr-throttle] operation={operation} creates no "
-                    f"check-suite load; queue depth {depth_before} is "
-                    "observation-only"
+                    f"[bulk-pr-throttle] operation={operation} does not "
+                    "directly dispatch check suites; queue depth "
+                    f"{depth_before} is observation-only"
                 )
         except BulkPrThrottleError as exc:
             if wave_receipts:
@@ -372,23 +408,33 @@ def run_bulk_operation(
                 f"success={outcome.success} detail={outcome.detail}"
             )
         completed_at = now_fn().isoformat()
-        try:
-            depth_after = get_queue_depth()
-        except BulkPrThrottleError as exc:
-            wave_receipts.append(
-                WaveReceipt(
-                    wave_index=idx,
-                    pr_numbers=wave,
-                    operation=operation,
-                    dry_run=False,
-                    queue_depth_before=depth_before,
-                    queue_depth_after=None,
-                    started_at=started_at,
-                    completed_at=completed_at,
-                    outcomes=outcomes,
+        depth_after: int | None
+        if queue_depth_gate_applied:
+            try:
+                depth_after = get_queue_depth()
+            except BulkPrThrottleError as exc:
+                wave_receipts.append(
+                    WaveReceipt(
+                        wave_index=idx,
+                        pr_numbers=wave,
+                        operation=operation,
+                        dry_run=False,
+                        queue_depth_before=depth_before,
+                        queue_depth_after=None,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        outcomes=outcomes,
+                    )
                 )
+                raise PartialBulkRunError(str(exc), partial_report()) from exc
+        else:
+            depth_after = observe_queue_depth(
+                get_queue_depth=get_queue_depth,
+                operation=operation,
+                phase="after",
+                wave_index=idx,
+                log=log,
             )
-            raise PartialBulkRunError(str(exc), partial_report()) from exc
         log(f"[bulk-pr-throttle] wave {idx}/{len(waves)}: depth_after={depth_after}")
         wave_receipts.append(
             WaveReceipt(
