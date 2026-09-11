@@ -76,17 +76,43 @@ trusted_runner_variable:
   # and by omnimemory, omnidash, omnibase_spi and omnibase_compat, none of
   # which were enumerated for container exposure.
   #
-  # The two repositories below were chosen because they can be moved safely and
-  # are where the queue actually is: neither carries a `testcontainers`
-  # dependency, neither has a `docker` step in any workflow, and
-  # onex_change_control has zero hardcoded `runs-on: ubuntu-latest` job
-  # definitions, so its 79 seam-driven jobs are the whole of its CI and it held
-  # 185 of the 279 queued jobs.
+  # Two shadows were flipped at 21:12:33Z. ONE WAS REVERTED 35 MINUTES LATER on
+  # measured harm, and the reason is a finding worth more than the flip was.
+  #
+  # onex_change_control was flipped and reverted to '["ubuntu-latest"]' at
+  # 2026-09-11T21:47:18Z. It is NOT in the override map below, so the audit
+  # holds it to expected_json above, which is now correct again. The cause was
+  # NOT the container defect and NOT runner contamination: the step "Verify
+  # centralized runner routing standard", in that repo's
+  # .github/workflows/omni-standards-compliance.yml, builds its forbidden-label
+  # set FROM THE LIVE VALUES of OMNI_PUBLIC_PR_RUNS_ON_JSON and
+  # OMNI_TRUSTED_CI_RUNS_ON_JSON, then greps .github/workflows for each label,
+  # filtering out only lines that contain one of the two `fromJSON(vars...||`
+  # fallback expressions. Flipping the trusted seam to self-hosted therefore
+  # makes the gate hunt for the literal string "self-hosted" in its own
+  # workflow directory -- and it hits exactly one line, a PROSE COMMENT at
+  # release-staleness-gate.yml:52 reading "not contend for the same self-hosted
+  # runners". The gate fails on a comment.
+  #
+  # So that repository is structurally unflippable until the gate's filter is
+  # fixed, and the defect is invisible while the seam is hosted: the label set
+  # is then just {ubuntu-latest}, every occurrence of which IS on a fallback
+  # line. A gate that passes only because the value it guards has never been
+  # exercised has not been tested. Clean A/B, same shape as the 2026-09-07
+  # entry above: 59 of 59 conclusive pre-flip runs SUCCESS on hosted, 3 of 3
+  # conclusive post-flip runs FAILURE on the fleet, zero fleet successes.
+  #
+  # omnibase_core does NOT carry that gate -- grep for its step name returns
+  # nothing in that repo's workflow directory -- which is why it stays flipped
+  # and is the one override declared below. It carries no `testcontainers`
+  # dependency and no `docker` step in any workflow.
+  #
+  # What the flip proved before the revert, and it is worth recording: queue
+  # depth went from 279 queued jobs at 21:15Z to 0 at 21:42Z, with 76
+  # onex_change_control jobs executing on named fleet runners, and fleet busy
+  # count rising from 16 to 51 of 88. The mechanism works. One repository's
+  # self-referential gate is what stopped it, not the fleet.
   repository_overrides:
-    onex_change_control:
-      expected_json: '["self-hosted","omnibase-ci"]'
-      revert_when: >-
-        Any job in this repository fails on the fleet for a fleet-specific reason -- a container it cannot bootstrap, a tool the runner image lacks, or disk exhaustion -- or the repository acquires a testcontainer-backed or image-building gate that reads this seam. Also revert once the hosted queue this relieves is gone: if a sustained sample shows no job-level queue wait attributable to runner availability, hosted is the cheaper default for a public repository, where hosted minutes are free.
     omnibase_core:
       expected_json: '["self-hosted","omnibase-ci"]'
       revert_when: >-
