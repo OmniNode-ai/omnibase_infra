@@ -67,7 +67,7 @@ WITH summary AS (
             AS quality_failed_count,
         COALESCE(AVG(COALESCE(latency_ms, delegation_latency_ms)), 0)::float
             AS avg_latency_ms,
-        COALESCE(MAX(EXTRACT(EPOCH FROM created_at)), 0)::float AS latest_event_at,
+        COALESCE(MAX(EXTRACT(EPOCH FROM (created_at))), 0)::float AS latest_event_at,
         COALESCE(SUM(cost_savings_usd), 0)::float AS total_savings_usd,
         MAX(created_at) AS latest_projection_updated_at
     FROM delegation_events
@@ -231,7 +231,7 @@ decision_traces AS (
                     'routing_candidates', NULL,
                     'latency_ms', COALESCE(latency_ms, delegation_latency_ms),
                     'quality_gate_passed', quality_gate_passed,
-                    'created_at', EXTRACT(EPOCH FROM created_at)
+                    'created_at', EXTRACT(EPOCH FROM (created_at))
                 ) ORDER BY created_at DESC
             ),
             '[]'::jsonb
