@@ -89,3 +89,49 @@ def test_all_three_tenant_attrs_are_present(profile: dict[str, Any]) -> None:
     assert not missing, (
         f"tenant attributes missing from desired-user-profile.json: {missing}"
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18165: which built-in attributes may be required of a signing-up user
+# ---------------------------------------------------------------------------
+#
+# The omniweb signup form labels First name / Last name optional and does not
+# submit them. The FORM is the product contract (operator ruling, 2026-09-11).
+# A `required.roles: ["user"]` declaration on either one makes Keycloak's
+# VERIFY_PROFILE required action fire on the account's first login, which is
+# what blocked the C5 sign-on walk. Email stays required -- it is the login
+# identifier and the verification target.
+
+_MUST_NOT_BE_REQUIRED = ("firstName", "lastName")
+
+
+@pytest.mark.parametrize("name", _MUST_NOT_BE_REQUIRED)
+def test_person_name_attrs_are_not_required(profile: dict[str, Any], name: str) -> None:
+    attr = _attr(profile, name)
+    assert "required" not in attr, (
+        f"{name}: must not be required -- the omniweb signup form does not "
+        f"collect it, so requiring it here triggers VERIFY_PROFILE at first "
+        f"login and blocks sign-on (OMN-18165)"
+    )
+
+
+@pytest.mark.parametrize("name", _MUST_NOT_BE_REQUIRED)
+def test_person_name_attrs_remain_user_editable(
+    profile: dict[str, Any], name: str
+) -> None:
+    """Optional is not the same as absent: a user who wants a name can set one."""
+    attr = _attr(profile, name)
+    assert "user" in attr["permissions"]["view"], (
+        f"{name}: user must be able to view it"
+    )
+    assert "user" in attr["permissions"]["edit"], (
+        f"{name}: user must be able to edit it"
+    )
+
+
+def test_email_is_still_required(profile: dict[str, Any]) -> None:
+    """The narrowing in OMN-18165 is names only -- email is the login identifier."""
+    attr = _attr(profile, "email")
+    assert attr.get("required", {}).get("roles") == ["user"], (
+        "email must stay required for role 'user'"
+    )

@@ -12,7 +12,9 @@ Usage:
         --config docker/keycloak/desired-clients.json
 
 Env-var equivalents (all CLI flags can be omitted when the env vars are set):
-    KC_URL, KC_REALM, KC_ADMIN_USERNAME, KC_ADMIN_PASSWORD, KC_CONFIG
+    KC_URL, KC_REALM, KC_ADMIN_USERNAME, KC_ADMIN_PASSWORD, KC_CONFIG,
+    KC_USER_PROFILE_CONFIG (optional -- also reconcile the realm's declarative
+    User Profile from desired-user-profile.json)
 
 Idempotent: re-running against an already-correct realm produces all
 op=unchanged lines and exits 0.
@@ -539,6 +541,67 @@ def _reconcile_realm_settings(
 
 
 # ---------------------------------------------------------------------------
+# Declarative User Profile (upConfig)
+# ---------------------------------------------------------------------------
+
+
+def _canonical_profile(profile: dict[str, Any]) -> str:
+    """Stable string form of a user-profile document, for drift detection.
+
+    Drops ``_``-prefixed documentation keys (they are not part of Keycloak's
+    user-profile schema and are never sent) and sorts every object's keys, so a
+    round-tripped GET compares equal to the desired document whenever nothing
+    has actually changed. Attribute ORDER is significant -- it is the field
+    order Keycloak renders on user-facing forms -- so lists are not sorted.
+    """
+    stripped = {k: v for k, v in profile.items() if not k.startswith("_")}
+    return json.dumps(stripped, sort_keys=True)
+
+
+def _reconcile_user_profile(
+    kc_url: str,
+    realm: str,
+    token: str,
+    desired: dict[str, Any],
+) -> None:
+    """Reconcile the realm's declarative User Profile against desired state.
+
+    OMN-16195: before this, ``desired-user-profile.json`` was validated desired
+    state with no applier -- the live upConfig was hand-mutated and could drift
+    from the reviewed file without any signal. Same GET/diff/PUT shape as
+    :func:`_reconcile_realm_settings`, and the same merge posture: sections the
+    desired document does not declare are preserved from the live document
+    rather than dropped.
+    """
+    url = f"{kc_url}/admin/realms/{realm}/users/profile"
+    status, existing = _request("GET", url, token=token)
+    if status != 200 or existing is None:
+        _die(f"Failed to fetch user profile for realm '{realm}': HTTP {status}")
+
+    payload = {k: v for k, v in desired.items() if not k.startswith("_")}
+    if not payload:
+        _die("User profile config declares no sections")
+
+    merged = {**existing, **payload}
+    if _canonical_profile(merged) == _canonical_profile(existing):
+        _log("unchanged", f"realm:{realm}:users-profile")
+        return
+
+    drift_fields = [
+        key
+        for key in payload
+        if _canonical_profile({"v": existing.get(key)})
+        != _canonical_profile({"v": payload[key]})
+    ]
+
+    status, _ = _request("PUT", url, token=token, payload=merged)
+    if status not in (200, 201, 204):
+        _die(f"Failed to update user profile for realm '{realm}': HTTP {status}")
+
+    _log("updated", f"realm:{realm}:users-profile", drift_fields)
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap admin reset
 # ---------------------------------------------------------------------------
 
@@ -588,6 +651,16 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--admin-password", default=os.environ.get("KC_ADMIN_PASSWORD", ""))
     p.add_argument("--config", default=os.environ.get("KC_CONFIG", ""))
     p.add_argument(
+        "--user-profile-config",
+        default=os.environ.get("KC_USER_PROFILE_CONFIG", ""),
+        help=(
+            "Path to desired-user-profile.json. When set, the realm's "
+            "declarative User Profile is reconciled too (OMN-16195). Optional: "
+            "omitting it leaves the live upConfig untouched, so a deployment "
+            "that has not yet mounted the file behaves exactly as before."
+        ),
+    )
+    p.add_argument(
         "--reset-bootstrap-admin",
         action="store_true",
         default=False,
@@ -626,6 +699,13 @@ def main() -> None:
         _reconcile_realm_settings(
             args.kc_url, args.realm, token, config["realmSettings"]
         )
+
+    if args.user_profile_config:
+        profile_path = Path(args.user_profile_config)
+        if not profile_path.is_file():
+            _die(f"User profile config file not found: {profile_path}")
+        with profile_path.open() as f:
+            _reconcile_user_profile(args.kc_url, args.realm, token, json.load(f))
 
     for client_spec in clients:
         _reconcile_client(args.kc_url, args.realm, token, client_spec)
