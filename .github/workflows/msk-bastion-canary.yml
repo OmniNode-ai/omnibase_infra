@@ -1,0 +1,128 @@
+---
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# msk-bastion-canary.yml — OMN-15744
+#
+# WHY THIS EXISTS
+#   On 2026-08-06 MSK `omninode-dev-msk` ran INCREASE_BROKER_COUNT 2 -> 6. The
+#   SNI bastion's nginx stream map still described the 2-broker cluster and
+#   carried `default b1`, so SNI for b-3..b-6 fell through onto broker 1.
+#   Nothing detected it for a MONTH.
+#
+#   The reason nothing detected it is the important part: bootstrap and
+#   metadata are served by ANY broker, so every liveness surface stayed green.
+#   Only leader-routed requests failed, with NotLeaderForPartition, which reads
+#   as transient Kafka noise. Eight of 21 tenant topic-partitions were silently
+#   unwritable, including delegation-request/completed/failed.
+#
+#   It was found by hand, during an unrelated diagnosis. This job is what
+#   replaces that luck.
+#
+# WHY SELF-HOSTED omnibase-deploy
+#   Same fate boundary as chain-canary.yml and dev-lane-liveness.yml. The
+#   bastion is reachable from the .201 tailnet and from nowhere on
+#   GitHub-hosted compute, so an ubuntu-latest job could only ever assert
+#   "I cannot see it."
+#
+# EXPECTED RED AT LANDING TIME — read this before "fixing" the first failure
+#   This job needs an AWS identity and the `omnibase-deploy` runner has none
+#   today. The first scheduled runs are EXPECTED to be RED with a message
+#   naming exactly what is missing. That red is the proof the canary works and
+#   is honest about its own precondition; it is NOT a defect in the tests.
+#   Precedent for landing a knowingly-red canary rather than a silently-skipped
+#   one: chain-canary.yml (OMN-16773), same repo, same reasoning.
+#
+#   What must be provisioned to turn it green — deliberately NOT done in the PR
+#   that added this file, because provisioning an identity is a credential
+#   action and belongs to whoever owns credentials, not to the lane that found
+#   the routing bug:
+#     * control plane, needed by all three tests: kafka:ListClustersV2 and
+#       kafka:ListNodes on omninode-dev-msk.
+#     * data plane, needed by the golden test only: an MSK IAM identity that
+#       can describe tenant topics. The .201 host ALREADY has a working one —
+#       the gateway's IAM Roles Anywhere profile at
+#       /etc/omninode/gateway/aws/config (profile `gateway`, via
+#       aws_signing_helper). Referencing that existing profile from the runner
+#       is configuration, not a new credential; minting a second identity would
+#       be the wrong move.
+#
+# WHY NOT continue-on-error
+#   A canary that cannot fail is a status badge. If this job is ever made
+#   non-failing, tests/ci/test_msk_bastion_canary_workflow.py goes red.
+#
+# LANE SCOPE
+#   Reads only. This job performs NO produce and NO topic creation against MSK
+#   or any tenant topic — unlike chain-canary.yml, which publishes a real
+#   delegation command. It opens connections and reads offsets. It must stay
+#   that way: producing to a tenant topic on a schedule is a customer-visible
+#   side effect.
+
+name: MSK Bastion Canary
+
+"on":
+  schedule:
+    # Twice an hour offset from chain-canary.yml (:41) so the two do not
+    # contend for the single omnibase-deploy runner.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: msk-bastion-canary
+  cancel-in-progress: false
+
+jobs:
+  bastion-canary:
+    name: MSK bastion routing canary
+    runs-on: [self-hosted, omnibase-deploy]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Resize detector and error chain (no data-plane credentials)
+        id: cheap
+        env:
+          AWS_REGION: us-east-1
+          MSK_CLUSTER_NAME: omninode-dev-msk
+        run: |
+          uv run pytest tests/integration/bastion \
+            -k "error_chain or covers_every_live_broker" \
+            -v -s -m "integration and bastion"
+
+      - name: Golden chain — every broker answers as itself
+        env:
+          AWS_REGION: us-east-1
+          MSK_CLUSTER_NAME: omninode-dev-msk
+        run: |
+          uv run pytest tests/integration/bastion \
+            -k "golden_every_broker" \
+            -v -s -m "integration and bastion"
+
+      - name: Record outcome
+        if: always()
+        run: |
+          {
+            echo "### MSK bastion canary"
+            echo ""
+            echo "Cheap legs (resize + error chain): ${{ steps.cheap.outcome }}"
+            echo ""
+            echo "A red run means the bastion broker map no longer"
+            echo "matches the live MSK cluster, or the fail-closed"
+            echo "default is gone. Regenerate and apply, from the"
+            echo "omninode_infra repo, the two scripts under"
+            echo "aws/cluster-dev/msk-sni-bastion/ :"
+            echo "  render-nginx-conf.sh --write"
+            echo "  apply-nginx-conf.sh --execute"
+          } >> "$GITHUB_STEP_SUMMARY"
