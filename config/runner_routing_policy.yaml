@@ -107,6 +107,22 @@ trusted_runner_variable:
   # and is the one override declared below. It carries no `testcontainers`
   # dependency and no `docker` step in any workflow.
   #
+  # THE COST, measured rather than estimated. Between 21:13:15Z and 21:49:29Z
+  # that gate failed 5 runs across 5 branches -- 3 OCC companion branches and 2
+  # product branches inside that repo -- and because it feeds the required
+  # summary check, no companion could merge, which blocks product PRs
+  # fleet-wide. Window from first failure start to first pass after the revert:
+  # 36m14s. One of the blocked companions was this very pull request's, so the
+  # flip blocked its own paperwork.
+  #
+  # omnibase_core was checked for the same gate rather than assumed safe, and
+  # from origin/dev rather than from a local clone: its
+  # omni-standards-compliance.yml contains ZERO occurrences of either the step
+  # name or the error string, against exactly one of each in the other repo as
+  # the positive control. It carries ~108 prose matches for the label, but
+  # nothing in that repo greps for them, so they are inert. That is why it stays
+  # flipped, and its jobs are executing and passing on named fleet runners.
+  #
   # What the flip proved before the revert, and it is worth recording: queue
   # depth went from 279 queued jobs at 21:15Z to 0 at 21:42Z, with 76
   # onex_change_control jobs executing on named fleet runners, and fleet busy
