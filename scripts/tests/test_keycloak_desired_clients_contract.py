@@ -326,3 +326,62 @@ def test_role_bearing_service_clients_have_matching_scope_mappings() -> None:
             f"covered by clientScopeMappings -- those roles will be dropped from "
             f"client_credentials tokens when fullScopeAllowed=false"
         )
+
+
+def test_onex_admin_declares_the_client_management_roles_its_code_path_calls() -> None:
+    """OMN-18170: ``onex-admin`` must declare manage-clients AND view-clients.
+
+        ``onex-api``'s per-tenant credential chain
+        (``_provision_tenant_credentials_p0b`` -> ``ensure_tenant_keycloak_client``)
+        does four things against the Keycloak Admin API with this one credential:
+        a client LOOKUP (``GET /clients?clientId=``), a client CREATE
+        (``POST /clients``), a fail-closed re-READ, and a client-secret read. The
+        create needs ``manage-clients``; the reads need ``view-clients``.
+
+    Both are declared rather than relying on one implying the other.
+        Observed on the ``omninode`` realm on 2026-09-11, ``manage-clients`` was
+        not composite (it expanded to ``[]``) while ``view-clients`` expanded to
+        ``['query-clients']`` -- so manage-clients alone did not confer the read,
+        and the lookup returned an EMPTY LIST (HTTP 200, not 403), silently
+        reporting "no such client" for a client that exists and turning the
+        idempotent-reuse branch into a duplicate create.
+
+        That composite structure is realm state an administrator can change, so it
+        is recorded here as a dated observation, not as a standing fact. This
+        assertion does not depend on it: declaring both roles is correct whether or
+        not one is ever made composite of the other, and declaring the narrower one
+        alongside the broader one costs nothing.
+
+        Why this test and not only the generic coverage test above: that one
+        checks realmRoles and clientScopeMappings agree with EACH OTHER, so a
+        client declaring neither half of a required role passes it. That is the
+        exact shape of the defect this pins. Between 2026-08-15 and 2026-09-11
+        ``manage-clients`` was assigned to the service-account user out of band
+        but was in neither list here, so the seeder never added the matching
+        scope mapping, Keycloak's scope filter stripped the role from every
+        client_credentials token, and ``POST /v1/tenants/bootstrap`` answered
+        503 on every call -- zero tenants could be minted on onex-dev.
+    """
+    config = json.loads(_CONFIG_PATH.read_text())
+    onex_admin = _client(config, "onex-admin")
+
+    # The client-management half, needed by ensure_tenant_keycloak_client.
+    required = {
+        "realm-management:manage-clients",
+        "realm-management:view-clients",
+        # The user-management half, which predates this and must SURVIVE any
+        # future edit to the lists above. Asserted rather than assumed: a
+        # subset check on the new roles alone would pass an edit that REPLACED
+        # these two, and losing manage-users breaks /v1/auth/provision -- the
+        # one tenant path that kept working throughout the OMN-18170 outage.
+        "realm-management:manage-users",
+        "realm-management:view-users",
+    }
+    for field in ("realmRoles", "clientScopeMappings"):
+        missing = required - set(onex_admin.get(field, []))
+        assert not missing, (
+            f"onex-admin is missing {sorted(missing)} from '{field}'. Without "
+            f"the client-management pair in BOTH lists, POST "
+            f"/v1/tenants/bootstrap 503s on every call; without the "
+            f"user-management pair, /v1/auth/provision breaks too (OMN-18170)."
+        )
