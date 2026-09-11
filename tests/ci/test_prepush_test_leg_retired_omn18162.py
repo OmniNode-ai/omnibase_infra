@@ -355,75 +355,96 @@ def test_retirement_introduced_no_bypass_knob() -> None:
 
 
 @pytest.mark.unit
-def test_deselected_unit_tests_keep_an_execution_path() -> None:
+def test_deselected_tests_keep_an_execution_path() -> None:
     """The tests pull-request CI deselects still run somewhere (OMN-18162).
 
-    This is the half of the retirement that is easy to get wrong. Pre-push ran
-    ``-m "not integration"``; ci.yml runs ``-m "not slow and not chaos and not
-    kafka and not performance and not live_github_api"``. Collecting
-    ``tests/unit`` under each filter and diffing gave 39 tests -- 25
-    ``performance``, 14 ``slow`` -- whose only execution path was the leg this
-    change removes. Losing them silently was the one outcome the OMN-18162
-    review named as the bad option, ahead of both keeping the leg and deleting
-    the tests.
+    This is the half of the retirement that is easy to get wrong. ci.yml runs
+    ``-m "not slow and not chaos and not kafka and not performance and not
+    live_github_api"``. The ``slow`` and ``chaos`` halves of that exclusion
+    have always been picked up by the nightly workflow's original job. The
+    ``performance`` half never was: 25 tests under ``tests/unit`` carried the
+    marker, no workflow selected it positively, and the only surface that ran
+    them was the pre-push leg this change removed.
 
-    ``microbenchmarks-nightly.yml`` is that path. Asserting its existence and
-    its selection here means deleting it fails a test rather than quietly
-    restoring the gap.
+    The fix is a second job in the SAME nightly workflow rather than a new
+    workflow, so there is one nightly surface and one failure notification.
+    Asserting it here means deleting the job fails a test rather than quietly
+    re-opening the gap.
     """
-    workflow = REPO_ROOT / ".github" / "workflows" / "microbenchmarks-nightly.yml"
+    workflow = REPO_ROOT / ".github" / "workflows" / "nightly-tests.yml"
     assert workflow.is_file(), (
-        "microbenchmarks-nightly.yml is gone. It is the only execution path for "
-        "the 39 tests/unit tests that pull-request CI deselects by marker. "
-        "Deleting it re-opens the coverage gap OMN-18162 closed; if these tests "
-        "should not run at all, delete the tests too and update this module."
+        "nightly-tests.yml is gone; it is the execution path for every marker ci.yml deselects."
     )
 
     parsed = yaml.safe_load(workflow.read_text(encoding="utf-8"))
     assert isinstance(parsed, dict)
+    jobs = parsed.get("jobs") or {}
 
-    # `on` is parsed by PyYAML 1.1 rules as the boolean True, not the string.
-    triggers = parsed.get("on", parsed.get(True))
-    assert isinstance(triggers, dict) and "schedule" in triggers, (
-        "The deselected-test workflow must stay scheduled. A manual-only "
-        "workflow is not an execution path, it is a button nobody presses."
+    assert "performance-tests" in jobs, (
+        "The nightly performance job is gone. The 'performance' marker is "
+        "deselected by ci.yml and selected positively nowhere else, so its "
+        "tests would run on no surface at all. If these should not run, "
+        "delete the tests too and update this module."
     )
 
-    body = workflow.read_text(encoding="utf-8")
-    for marker in ("performance", "slow"):
-        assert marker in body, (
-            f"The nightly no longer selects the {marker!r} marker, which "
-            "pull-request CI deselects. Those tests would then run nowhere."
-        )
-    assert "ONEX_RUN_MICROBENCHMARKS" in body, (
-        "The nightly must set ONEX_RUN_MICROBENCHMARKS. Four microbenchmarks in "
-        "tests/unit/runtime/test_policy_registry_performance.py skip without "
-        "it, so scheduling alone would run zero of them and report green."
+    perf = jobs["performance-tests"]
+    # Read the marker off the raw file, not off a re-dumped mapping: safe_dump
+    # re-quotes the shell line and the literal stops matching.
+    raw = workflow.read_text(encoding="utf-8")
+    assert '-m "performance"' in raw, (
+        "The nightly performance job no longer selects the 'performance' "
+        "marker, so it would run without covering what it exists to cover."
+    )
+
+    # Pinned, not routed. These assert wall-clock thresholds and the trusted-CI
+    # seam currently resolves to a hosted runner; a seam flip must not silently
+    # move them.
+    assert perf.get("runs-on") == ["self-hosted", "omnibase-ci"], (
+        "The nightly performance job must stay pinned to the lab fleet. It "
+        f"reads {perf.get('runs-on')!r}. Reading the routing seam here means a "
+        "flip elsewhere relocates timing-sensitive benchmarks without review."
+    )
+
+    summary = jobs.get("nightly-summary") or {}
+    assert "performance-tests" in (summary.get("needs") or []), (
+        "nightly-summary does not depend on performance-tests, so a failing "
+        "benchmark would not reach the workflow's failure notification and the "
+        "job could go red unnoticed."
     )
 
 
 @pytest.mark.unit
 def test_microbenchmark_skip_is_not_keyed_on_the_generic_ci_variable() -> None:
-    """The microbenchmark skip may not key off ``CI`` again (OMN-18162).
+    """Marker selection only; no environment variable gates these (OMN-18162).
 
-    ``CI`` is set by every GitHub Actions runner, so a ``skipif`` on it means
-    "never runs in CI, anywhere, including a job written specifically to run
-    it". Combined with ci.yml's marker deselection that left four tests with no
-    execution path at all, discoverable only by reading two filters against
-    each other. The switch is an explicit opt-in now, and must stay one.
+    Four microbenchmarks used to carry a ``skipif`` on the generic ``CI``
+    variable, which every Actions runner sets. Combined with ci.yml's marker
+    deselection that left them unable to run in any job, discoverable only by
+    reading two filters against each other.
+
+    The replacement is the marker, not a different variable. An ambient
+    environment variable is inherited by every descendant process, is bound to
+    no commit, and leaves no receipt, so swapping one gate for another would
+    reproduce the failure in a new spelling.
     """
     module = (
         REPO_ROOT / "tests" / "unit" / "runtime" / "test_policy_registry_performance.py"
     )
     executable = _strip_python_prose(module.read_text(encoding="utf-8"))
+
     assert 'os.environ.get("CI"' not in executable, (
         "test_policy_registry_performance.py keys a skip off the generic CI "
         "environment variable again. Every Actions runner sets it, so the "
-        "tests it guards can never run in any job. Gate them on "
-        "ONEX_RUN_MICROBENCHMARKS, which only microbenchmarks-nightly.yml sets."
+        "tests it guards can never run in any job. Use the 'performance' "
+        "marker, which ci.yml deselects and the nightly selects."
     )
-    assert "ONEX_RUN_MICROBENCHMARKS" in executable, (
-        "test_policy_registry_performance.py no longer reads "
-        "ONEX_RUN_MICROBENCHMARKS, so microbenchmarks-nightly.yml cannot lift "
-        "its skips and the nightly would report green having run nothing."
+    assert "skipif" not in executable, (
+        "A skipif reappeared in test_policy_registry_performance.py. These "
+        "tests are selected by marker; a runtime skip on top of that is how "
+        "four of them became unrunnable everywhere."
+    )
+    assert "os.environ" not in executable, (
+        "test_policy_registry_performance.py reads an environment variable "
+        "again. OMN-18162 removed the env-var gate deliberately; selection is "
+        "by pytest marker, with no ambient switch and no dual path."
     )
