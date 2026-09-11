@@ -50,6 +50,23 @@ readonly SERVICE_NAME="gateway-forwarder"
 readonly CONTAINER_NAME="omninode-gateway-forwarder"
 readonly SYSTEMD_UNIT="onex-gateway-forwarder"
 
+# OMN-18134: the unit (docker/gateway/onex-gateway-forwarder.service) is
+# `Type=oneshot` with `RemainAfterExit=yes`. systemd refuses a reload JOB on a
+# unit that is not active, so `systemctl reload` is only a valid deploy step
+# while the unit is already running. When it is `failed` -- as it was on .201
+# from 2026-09-10T18:16:19Z -- the reload exits non-zero and, under `set -e`,
+# kills the deploy at its LAST step, after gateway.env has already been pinned
+# to a digest nothing is running. The recovery is to clear the failure and
+# start the unit: ExecStart brings the container up on the pinned digest,
+# which is what ExecReload's force-recreate would otherwise have done.
+#
+# This is the single copy-pasteable spelling of that sequence. reload_service()
+# performs it step by step (so each command is logged); write_registry() embeds
+# this string in the rollback_command, because a rollback is most often reached
+# FROM a failed unit -- a rollback one-liner ending in a bare `systemctl
+# reload` is unrunnable exactly when it is needed.
+readonly RELOAD_COMMAND_STRING="if sudo systemctl is-active --quiet ${SYSTEMD_UNIT}; then sudo systemctl reload ${SYSTEMD_UNIT}; else sudo systemctl reset-failed ${SYSTEMD_UNIT} 2>/dev/null || true; sudo systemctl start ${SYSTEMD_UNIT}; fi"
+
 # OMN-16449 added this sidecar to docker/docker-compose.gateway.yml --
 # gateway-forwarder now depends_on it (condition: service_healthy) via a
 # per-container `dns:` key. The systemd unit reloads with `--no-build`
@@ -161,8 +178,10 @@ WHAT --execute DOES, IN ORDER
        when no previous image was retained (first deploy, or the previous
        image had already been pruned) -- never a command built from an empty
        digest.
-    10. 'systemctl reload ${SYSTEMD_UNIT}' (force-recreates the container on
-        the new digest; requires sudo) unless --skip-reload.
+    10. Bring ${SYSTEMD_UNIT} onto the new digest (requires sudo) unless
+        --skip-reload. State-aware, because the unit is Type=oneshot and
+        systemd refuses a reload job on an inactive one: reload if active,
+        otherwise 'reset-failed' (when failed) followed by 'start'.
     11. Verify: the container is actually running the digest just built (not
         just that labels are non-empty -- a reload that silently fails to
         recreate the container is caught here instead of reporting success),
@@ -725,6 +744,7 @@ write_registry() {
         --arg compose_project "${COMPOSE_PROJECT}" \
         --arg gateway_env_file "${GATEWAY_ENV_FILE}" \
         --arg host_compose_file "${GATEWAY_HOST_DIR}/docker-compose.gateway.yml" \
+        --arg reload_command "${RELOAD_COMMAND_STRING}" \
         '{
             active_version: $active_version,
             git_sha: $git_sha,
@@ -737,7 +757,7 @@ write_registry() {
             host_compose_file: $host_compose_file,
             rollback_command: (
                 if ($previous_digest != "") then
-                    ("sudo sed -i \"s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=" + $previous_digest + "|\" " + $gateway_env_file + " && sudo systemctl reload onex-gateway-forwarder")
+                    ("sudo sed -i \"s|^GATEWAY_IMAGE=.*|GATEWAY_IMAGE=" + $previous_digest + "|\" " + $gateway_env_file + " && " + $reload_command)
                 else
                     null
                 end
@@ -753,10 +773,35 @@ write_registry() {
 # Reload
 # =============================================================================
 
+# The unit's activation state as systemd reports it: "active", "inactive",
+# "failed", "activating", ... `is-active` exits non-zero for every state but
+# "active", so it must be guarded against `set -e`.
+unit_activation_state() {
+    sudo systemctl is-active "${SYSTEMD_UNIT}" 2>/dev/null || true
+}
+
+# OMN-18134: state-aware. See RELOAD_COMMAND_STRING above for why a bare
+# `systemctl reload` is not a safe deploy step against this oneshot unit.
 reload_service() {
     log_step "Reload ${SYSTEMD_UNIT}"
-    log_cmd "sudo systemctl reload ${SYSTEMD_UNIT}"
-    sudo systemctl reload "${SYSTEMD_UNIT}"
+    local state
+    state="$(unit_activation_state)"
+    log_info "${SYSTEMD_UNIT} activation state: ${state:-<unknown>}"
+
+    if [[ "${state}" == "active" ]]; then
+        log_cmd "sudo systemctl reload ${SYSTEMD_UNIT}"
+        sudo systemctl reload "${SYSTEMD_UNIT}"
+        return
+    fi
+
+    if [[ "${state}" == "failed" ]]; then
+        log_warn "${SYSTEMD_UNIT} is failed -- clearing the failure before starting it."
+        log_cmd "sudo systemctl reset-failed ${SYSTEMD_UNIT}"
+        sudo systemctl reset-failed "${SYSTEMD_UNIT}" || true
+    fi
+
+    log_cmd "sudo systemctl start ${SYSTEMD_UNIT}"
+    sudo systemctl start "${SYSTEMD_UNIT}"
 }
 
 # =============================================================================
@@ -834,7 +879,8 @@ main() {
         log_info "Would pin GATEWAY_IMAGE in ${GATEWAY_ENV_FILE} to the resolved build digest"
         log_info "Would write ${GATEWAY_REGISTRY_FILE}"
         if [[ "${SKIP_RELOAD}" != true ]]; then
-            log_info "Would run: sudo systemctl reload ${SYSTEMD_UNIT}"
+            log_info "Would bring ${SYSTEMD_UNIT} onto the new digest (reload if active, else reset-failed + start):"
+            log_info "  ${RELOAD_COMMAND_STRING}"
         fi
         log_info "Re-run with --execute to perform this deploy."
         exit 0
