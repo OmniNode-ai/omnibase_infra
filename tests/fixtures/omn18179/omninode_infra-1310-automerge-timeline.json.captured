@@ -1,0 +1,1 @@
+{"data":{"repository":{"pullRequest":{"labels":{"nodes":[]},"timelineItems":{"nodes":[{"__typename":"AutoSquashEnabledEvent","createdAt":"2026-09-10T17:15:29Z"},{"__typename":"AutoMergeDisabledEvent","createdAt":"2026-09-10T18:50:55Z","reason":"Manually disabled by user"}]}}}}}

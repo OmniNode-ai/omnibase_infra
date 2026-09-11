@@ -159,6 +159,23 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn18179-automerge-rearmed-over-a-human-disable
+    guard: scripts/ci/check_auto_merge_hold.py
+    incident: OmniNode-ai/omninode_infra#1310
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn18179.py::test_the_same_guard_arms_a_pr_nobody_disabled
+    artifact:
+      fixture: tests/fixtures/omn18179/omninode_infra-1310-automerge-timeline.json.captured
+      sha256: 57879f431b99418a9b8402360be14d28d35b9171e858f0f7c200f9c34a6b267f
+    capture:
+      method: gh-graphql
+      source: gh-graphql:repos/OmniNode-ai/omninode_infra/pulls/1310/timelineItems
+      captured_at: '2026-09-11T12:45:00Z'
+      captured_by: lane replay (OMN-18179)
+    test: tests/ci/test_incident_replay_omn18179.py::test_the_real_guard_holds_the_pr_that_was_armed_over_a_human_disable
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the absence of any check at all in the arming path: the Enable Auto-Merge job answered "arm" for a PR whose auto-merge a person had explicitly turned off 95 minutes earlier, with every check green and nothing in any log saying a decision had been overridden. The PR is omninode_infra#1310, feat(OMN-14201) scale the onex-prod namespace down to the website -- 13 Deployments to zero replicas -- and containment was manual, convertPullRequestToDraft at 18:52:35Z, because draft was the only pause anyone trusted to hold. Two sibling PRs took the same shape inside the same 24 hours (omninode_infra#1313, omnibase_core#1678). NOT A RECONSTRUCTION -- the artifact is the byte-for-byte gh api graphql response for that PR's auto-merge timeline, the exact surface and exact itemTypes filter the new workflow step queries, and the replay feeds it through the same two jq extractions auto-merge.yml runs before calling the module. WHY A NEW LOCATOR GRAMMAR: the REST timeline cannot express this capture. gh api repos/OmniNode-ai/omninode_infra/issues/1310/timeline on this very PR returns the auto_merge_disabled event and NO enable event of any kind, so a gh-api capture physically cannot exhibit the enable-then-disable ordering the guard decides on; only the GraphQL timelineItems connection carries both sides, which is the same "no existing grammar can reach the failing surface" that added container-probe under OMN-15676. The captured bytes also pin the detail that makes a naive detector silently blind: both live captures carry AutoSquashEnabledEvent, not AutoMergeEnabledEvent, because arming with an explicit method emits the squash variant -- a filter naming only AutoMergeEnabledEvent reads an empty enable history for every PR this workflow has ever armed and never errors. THE DISCRIMINATOR IS LOAD-BEARING, not a formality: a gate that answered hold unconditionally would satisfy the reject case and be worthless, and it would be invisible from outside, because "this PR has not merged yet" is the normal state of a PR and nobody would notice arming had stopped. So the same function is driven over a second live capture, omnibase_core#1678 (armed on open 2026-09-11T10:40:33Z, never disabled), and is required to answer arm.
   - id: omn18031-route-pinned-ci-yml-hosted-off-the-wrong-allowlist
     guard: scripts/ci/runner_route_decision.py
     incident: OMN-18031
