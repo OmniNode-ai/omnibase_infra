@@ -25,27 +25,36 @@
 #   GitHub-hosted compute, so an ubuntu-latest job could only ever assert
 #   "I cannot see it."
 #
-# EXPECTED RED AT LANDING TIME — read this before "fixing" the first failure
-#   This job needs an AWS identity and the `omnibase-deploy` runner has none
-#   today. The first scheduled runs are EXPECTED to be RED with a message
-#   naming exactly what is missing. That red is the proof the canary works and
-#   is honest about its own precondition; it is NOT a defect in the tests.
+# THE AWS IDENTITY — half provisioned, and which half is which (OMN-18168)
+#   This job was landed knowingly-red because the `omnibase-deploy` runner had
+#   no AWS identity at all. It now has one, and only one. Read this before
+#   "fixing" a failure of the golden step.
+#
+#   CONTROL PLANE — PROVISIONED. All three tests call the MSK control plane to
+#   enumerate live brokers, and that is now covered by the IAM role
+#   `msk-bastion-canary-control-plane` (omninode_infra
+#   aws/cluster-dev/msk_bastion_canary_iam.tf), assumed below through GitHub
+#   OIDC. It carries exactly kafka:ListClustersV2 and kafka:ListNodes on
+#   omninode-dev-msk and nothing else — verified with simulate-custom-policy
+#   negative controls, not asserted.
+#
+#   DATA PLANE — NOT PROVISIONED, BY DECISION. Only the golden test speaks the
+#   Kafka protocol, and it needs an MSK IAM identity that can reach the data
+#   plane. The .201 host ALREADY has a working one — the gateway's IAM Roles
+#   Anywhere profile at /etc/omninode/gateway/aws/config (profile `gateway`,
+#   role omninode-dev-msk-edge-gateway-201, via aws_signing_helper).
+#   Referencing that existing profile from the runner is configuration, not a
+#   new credential; minting a second identity would be the wrong move, so the
+#   role above deliberately carries no kafka-cluster:* grant.
+#
+#   So the honest expected state until that profile is wired into the runner:
+#   the two cheap legs (resize detector + error chain) go GREEN, the golden leg
+#   stays RED on missing data-plane credentials, and the job is RED overall.
+#   That is a narrower red than the one this workflow landed with, and it is
+#   still a real one — do not paper over it with continue-on-error, and do not
+#   close it by adding data-plane actions to the control-plane role.
 #   Precedent for landing a knowingly-red canary rather than a silently-skipped
 #   one: chain-canary.yml (OMN-16773), same repo, same reasoning.
-#
-#   What must be provisioned to turn it green — deliberately NOT done in the PR
-#   that added this file, because provisioning an identity is a credential
-#   action and belongs to whoever owns credentials, not to the lane that found
-#   the routing bug:
-#     * control plane, needed by all three tests: kafka:ListClustersV2 and
-#       kafka:ListNodes on omninode-dev-msk.
-#     * data plane, needed by the golden test only: an MSK IAM identity that
-#       can describe tenant topics. The .201 host ALREADY has a working one —
-#       the gateway's IAM Roles Anywhere profile at
-#       /etc/omninode/gateway/aws/config (profile `gateway`, via
-#       aws_signing_helper). Referencing that existing profile from the runner
-#       is configuration, not a new credential; minting a second identity would
-#       be the wrong move.
 #
 # WHY NOT continue-on-error
 #   A canary that cannot fail is a status badge. If this job is ever made
@@ -69,6 +78,11 @@ name: MSK Bastion Canary
 
 permissions:
   contents: read
+  # OMN-18168: the OIDC subject token the runner exchanges for the MSK
+  # control-plane role. Without it configure-aws-credentials has nothing to
+  # present and the job fails with a missing-token error rather than an
+  # honest "no identity" one.
+  id-token: write
 
 concurrency:
   group: msk-bastion-canary
@@ -90,6 +104,28 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen --all-extras
+
+      # OMN-18168. Control plane only — see the header. No `continue-on-error`:
+      # if the assume fails the job must go red here, naming the role, rather
+      # than falling through to a boto3 NoCredentialsError three steps later
+      # that reads as a broken test.
+      - name: Assume the MSK control-plane role
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6 (pinned, matching omninode_infra)
+        with:
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/msk-bastion-canary-control-plane
+          role-session-name: gha-msk-bastion-canary
+
+      # Same shape omninode_infra's AWS-assuming workflows carry, but through
+      # boto3 rather than the AWS CLI: the omnibase-deploy runner image has no
+      # `aws` binary (checked on the live container, not assumed), and a verify
+      # step that failed on a missing CLI would look exactly like a failed
+      # assume. An assume that silently produced the wrong principal would
+      # otherwise surface two steps later as an AccessDenied inside the tests,
+      # which reads as a broken test rather than a broken credential.
+      - name: Verify AWS caller identity
+        run: |
+          uv run python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Arn'])"
 
       - name: Resize detector and error chain (no data-plane credentials)
         id: cheap
