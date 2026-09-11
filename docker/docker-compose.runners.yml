@@ -64,7 +64,7 @@ x-runner-base: &runner-base
     # as the healthcheck definition below -- a recreate of all 88 runner
     # containers is required for this to take effect; a bind-mounted file
     # update alone does not change a live container's env.
-    KUBECONFIG: /home/runner/.kube/lab-ci-reader.kubeconfig
+    KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
@@ -119,19 +119,42 @@ x-runner-base: &runner-base
     # disk_admission_self_pause() fails open (no-op) on the missing mount; the
     # primary per-job admission gate is unaffected and needs no recreate.
     - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-    # OMN-18188 — read-only lab k3s kubeconfig, fleet-wide (see KUBECONFIG
-    # env above for the rationale). The mounted identity is the
-    # least-privilege `lab-ci-reader` k3s ServiceAccount token -- never the
-    # node admin kubeconfig -- generated on the host and never rsynced from
-    # this repo (deploy-runners.sh SYNC_PATHS deliberately excludes it; it
-    # is a host-generated secret, not a build artifact). `:ro` is load-bearing:
-    # no runner job may mutate the lab cluster's credential file.
+    # OMN-18188 — read-only LAB CREDENTIALS DIRECTORY, fleet-wide.
+    #
+    # A DIRECTORY, not the single kubeconfig file it started as, and that is
+    # the whole point of this revision. Mounting one file meant that adding any
+    # second lab credential required editing this compose and recreating all 88
+    # containers, and a recreate of this fleet costs about THREE HOURS: docker
+    # compose serialises container stop and start no matter how many services
+    # you name, so it cannot be parallelised, and it must skip any runner
+    # currently executing a job rather than killing another lane's work. That
+    # cost was paid once to learn it. Mounting the parent directory means the
+    # next credential is a file drop on the host and no fleet change at all.
+    #
+    # What is in it today is the least-privilege `lab-ci-reader` k3s
+    # ServiceAccount token -- never the node admin kubeconfig, which is
+    # cluster-admin on the lab cluster and would be handed to every job in the
+    # org. KUBECONFIG above points INTO this directory.
+    #
+    # Contents are host-generated secrets, not build artifacts, and are
+    # deliberately excluded from deploy-runners.sh SYNC_PATHS so an rsync can
+    # never overwrite them. `:ro` is load-bearing: no runner job may mutate a
+    # lab credential.
+    #
+    # Ownership is NOT incidental. A bind mount shares the kernel's uid space
+    # with no translation, and job steps run as the runner image's `runner`
+    # user, uid 1001 -- so files here must be owned by 1001, not by the
+    # operator. A file written 0600 as uid 1000 is unreadable to every job
+    # while still being perfectly readable to `docker exec`, which defaults to
+    # root. That asymmetry produced a green verification and a fleet on which
+    # every workflow failed; see k8s/onex-lab-ci-rbac/ in omninode_infra.
+    #
     # NOTE: like the disk-admission mount above, volumes are NOT inherited
     # by the per-service blocks below via the YAML merge key -- lists don't
     # merge, only mappings do (see the OMN-16363 precedent, which is
     # duplicated the same way). This line documents the shared shape; the
     # per-service `volumes:` blocks below carry the actual effective copy.
-    - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+    - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
   group_add:
     - "984" # Match host Docker socket GID for DinD access
   # OMN-12433 / OMN-13915: healthcheck proves BOTH the listener is alive AND
@@ -164,7 +187,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
     !!merge <<: *runner-base
@@ -178,7 +201,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
     !!merge <<: *runner-base
@@ -192,7 +215,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
     !!merge <<: *runner-base
@@ -206,7 +229,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
     !!merge <<: *runner-base
@@ -220,7 +243,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
     !!merge <<: *runner-base
@@ -234,7 +257,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
     !!merge <<: *runner-base
@@ -248,7 +271,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
     !!merge <<: *runner-base
@@ -262,7 +285,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
     !!merge <<: *runner-base
@@ -276,7 +299,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
     !!merge <<: *runner-base
@@ -290,7 +313,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-10-creds:/home/runner/.runner-creds
   omninode-runner-11:
     !!merge <<: *runner-base
@@ -304,7 +327,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-11-creds:/home/runner/.runner-creds
   omninode-runner-12:
     !!merge <<: *runner-base
@@ -318,7 +341,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-12-creds:/home/runner/.runner-creds
   omninode-runner-13:
     !!merge <<: *runner-base
@@ -332,7 +355,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-13-creds:/home/runner/.runner-creds
   omninode-runner-14:
     !!merge <<: *runner-base
@@ -346,7 +369,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-14-creds:/home/runner/.runner-creds
   omninode-runner-15:
     !!merge <<: *runner-base
@@ -360,7 +383,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-15-creds:/home/runner/.runner-creds
   omninode-runner-16:
     !!merge <<: *runner-base
@@ -374,7 +397,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-16-creds:/home/runner/.runner-creds
   omninode-runner-17:
     !!merge <<: *runner-base
@@ -388,7 +411,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-17-creds:/home/runner/.runner-creds
   omninode-runner-18:
     !!merge <<: *runner-base
@@ -402,7 +425,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-18-creds:/home/runner/.runner-creds
   omninode-runner-19:
     !!merge <<: *runner-base
@@ -416,7 +439,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-19-creds:/home/runner/.runner-creds
   omninode-runner-20:
     !!merge <<: *runner-base
@@ -430,7 +453,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-20-creds:/home/runner/.runner-creds
   omninode-runner-21:
     !!merge <<: *runner-base
@@ -444,7 +467,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-21-creds:/home/runner/.runner-creds
   omninode-runner-22:
     !!merge <<: *runner-base
@@ -458,7 +481,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-22-creds:/home/runner/.runner-creds
   omninode-runner-23:
     !!merge <<: *runner-base
@@ -472,7 +495,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-23-creds:/home/runner/.runner-creds
   omninode-runner-24:
     !!merge <<: *runner-base
@@ -486,7 +509,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-24-creds:/home/runner/.runner-creds
   omninode-runner-25:
     !!merge <<: *runner-base
@@ -500,7 +523,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-25-creds:/home/runner/.runner-creds
   omninode-runner-26:
     !!merge <<: *runner-base
@@ -514,7 +537,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-26-creds:/home/runner/.runner-creds
   omninode-runner-27:
     !!merge <<: *runner-base
@@ -528,7 +551,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-27-creds:/home/runner/.runner-creds
   omninode-runner-28:
     !!merge <<: *runner-base
@@ -542,7 +565,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-28-creds:/home/runner/.runner-creds
   omninode-runner-29:
     !!merge <<: *runner-base
@@ -556,7 +579,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-29-creds:/home/runner/.runner-creds
   omninode-runner-30:
     !!merge <<: *runner-base
@@ -570,7 +593,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-30-creds:/home/runner/.runner-creds
   omninode-runner-31:
     !!merge <<: *runner-base
@@ -584,7 +607,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-31-creds:/home/runner/.runner-creds
   omninode-runner-32:
     !!merge <<: *runner-base
@@ -598,7 +621,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-32-creds:/home/runner/.runner-creds
   omninode-runner-33:
     !!merge <<: *runner-base
@@ -612,7 +635,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-33-creds:/home/runner/.runner-creds
   omninode-runner-34:
     !!merge <<: *runner-base
@@ -626,7 +649,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-34-creds:/home/runner/.runner-creds
   omninode-runner-35:
     !!merge <<: *runner-base
@@ -640,7 +663,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-35-creds:/home/runner/.runner-creds
   omninode-runner-36:
     !!merge <<: *runner-base
@@ -654,7 +677,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-36-creds:/home/runner/.runner-creds
   omninode-runner-37:
     !!merge <<: *runner-base
@@ -668,7 +691,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-37-creds:/home/runner/.runner-creds
   omninode-runner-38:
     !!merge <<: *runner-base
@@ -682,7 +705,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-38-creds:/home/runner/.runner-creds
   omninode-runner-39:
     !!merge <<: *runner-base
@@ -696,7 +719,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-39-creds:/home/runner/.runner-creds
   omninode-runner-40:
     !!merge <<: *runner-base
@@ -710,7 +733,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-40-creds:/home/runner/.runner-creds
   omninode-runner-41:
     !!merge <<: *runner-base
@@ -724,7 +747,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-41-creds:/home/runner/.runner-creds
   omninode-runner-42:
     !!merge <<: *runner-base
@@ -738,7 +761,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-42-creds:/home/runner/.runner-creds
   omninode-runner-43:
     !!merge <<: *runner-base
@@ -752,7 +775,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-43-creds:/home/runner/.runner-creds
   omninode-runner-44:
     !!merge <<: *runner-base
@@ -766,7 +789,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-44-creds:/home/runner/.runner-creds
   omninode-runner-45:
     !!merge <<: *runner-base
@@ -780,7 +803,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-45-creds:/home/runner/.runner-creds
   omninode-runner-46:
     !!merge <<: *runner-base
@@ -794,7 +817,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-46-creds:/home/runner/.runner-creds
   omninode-runner-47:
     !!merge <<: *runner-base
@@ -808,7 +831,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-47-creds:/home/runner/.runner-creds
   omninode-runner-48:
     !!merge <<: *runner-base
@@ -822,7 +845,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-48-creds:/home/runner/.runner-creds
   omninode-runner-49:
     !!merge <<: *runner-base
@@ -836,7 +859,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-49-creds:/home/runner/.runner-creds
   omninode-runner-50:
     !!merge <<: *runner-base
@@ -850,7 +873,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-50-creds:/home/runner/.runner-creds
   omninode-runner-51:
     !!merge <<: *runner-base
@@ -864,7 +887,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-51-creds:/home/runner/.runner-creds
   omninode-runner-52:
     !!merge <<: *runner-base
@@ -878,7 +901,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-52-creds:/home/runner/.runner-creds
   omninode-runner-53:
     !!merge <<: *runner-base
@@ -892,7 +915,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-53-creds:/home/runner/.runner-creds
   omninode-runner-54:
     !!merge <<: *runner-base
@@ -906,7 +929,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-54-creds:/home/runner/.runner-creds
   omninode-runner-55:
     !!merge <<: *runner-base
@@ -920,7 +943,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-55-creds:/home/runner/.runner-creds
   omninode-runner-56:
     !!merge <<: *runner-base
@@ -934,7 +957,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-56-creds:/home/runner/.runner-creds
   omninode-runner-57:
     !!merge <<: *runner-base
@@ -948,7 +971,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-57-creds:/home/runner/.runner-creds
   omninode-runner-58:
     !!merge <<: *runner-base
@@ -962,7 +985,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-58-creds:/home/runner/.runner-creds
   omninode-runner-59:
     !!merge <<: *runner-base
@@ -976,7 +999,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-59-creds:/home/runner/.runner-creds
   omninode-runner-60:
     !!merge <<: *runner-base
@@ -990,7 +1013,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-60-creds:/home/runner/.runner-creds
   omninode-runner-61:
     !!merge <<: *runner-base
@@ -1004,7 +1027,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-61-creds:/home/runner/.runner-creds
   omninode-runner-62:
     !!merge <<: *runner-base
@@ -1018,7 +1041,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-62-creds:/home/runner/.runner-creds
   omninode-runner-63:
     !!merge <<: *runner-base
@@ -1032,7 +1055,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-63-creds:/home/runner/.runner-creds
   omninode-runner-64:
     !!merge <<: *runner-base
@@ -1046,7 +1069,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-64-creds:/home/runner/.runner-creds
   omninode-runner-65:
     !!merge <<: *runner-base
@@ -1060,7 +1083,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-65-creds:/home/runner/.runner-creds
   omninode-runner-66:
     !!merge <<: *runner-base
@@ -1074,7 +1097,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-66-creds:/home/runner/.runner-creds
   omninode-runner-67:
     !!merge <<: *runner-base
@@ -1088,7 +1111,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-67-creds:/home/runner/.runner-creds
   omninode-runner-68:
     !!merge <<: *runner-base
@@ -1102,7 +1125,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-68-creds:/home/runner/.runner-creds
   omninode-runner-69:
     !!merge <<: *runner-base
@@ -1116,7 +1139,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-69-creds:/home/runner/.runner-creds
   omninode-runner-70:
     !!merge <<: *runner-base
@@ -1130,7 +1153,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-70-creds:/home/runner/.runner-creds
   omninode-runner-71:
     !!merge <<: *runner-base
@@ -1144,7 +1167,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-71-creds:/home/runner/.runner-creds
   omninode-runner-72:
     !!merge <<: *runner-base
@@ -1158,7 +1181,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-72-creds:/home/runner/.runner-creds
   omninode-runner-73:
     !!merge <<: *runner-base
@@ -1172,7 +1195,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-73-creds:/home/runner/.runner-creds
   omninode-runner-74:
     !!merge <<: *runner-base
@@ -1186,7 +1209,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-74-creds:/home/runner/.runner-creds
   omninode-runner-75:
     !!merge <<: *runner-base
@@ -1200,7 +1223,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-75-creds:/home/runner/.runner-creds
   omninode-runner-76:
     !!merge <<: *runner-base
@@ -1214,7 +1237,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-76-creds:/home/runner/.runner-creds
   omninode-runner-77:
     !!merge <<: *runner-base
@@ -1228,7 +1251,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-77-creds:/home/runner/.runner-creds
   omninode-runner-78:
     !!merge <<: *runner-base
@@ -1242,7 +1265,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-78-creds:/home/runner/.runner-creds
   omninode-runner-79:
     !!merge <<: *runner-base
@@ -1256,7 +1279,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-79-creds:/home/runner/.runner-creds
   omninode-runner-80:
     !!merge <<: *runner-base
@@ -1270,7 +1293,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-80-creds:/home/runner/.runner-creds
   omninode-runner-81:
     !!merge <<: *runner-base
@@ -1284,7 +1307,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-81-creds:/home/runner/.runner-creds
   omninode-runner-82:
     !!merge <<: *runner-base
@@ -1298,7 +1321,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-82-creds:/home/runner/.runner-creds
   omninode-runner-83:
     !!merge <<: *runner-base
@@ -1312,7 +1335,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-83-creds:/home/runner/.runner-creds
   omninode-runner-84:
     !!merge <<: *runner-base
@@ -1326,7 +1349,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-84-creds:/home/runner/.runner-creds
   omninode-runner-85:
     !!merge <<: *runner-base
@@ -1340,7 +1363,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-85-creds:/home/runner/.runner-creds
   omninode-runner-86:
     !!merge <<: *runner-base
@@ -1354,7 +1377,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-86-creds:/home/runner/.runner-creds
   omninode-runner-87:
     !!merge <<: *runner-base
@@ -1368,7 +1391,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-87-creds:/home/runner/.runner-creds
   omninode-runner-88:
     !!merge <<: *runner-base
@@ -1382,7 +1405,7 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_KUBECONFIG_HOST_PATH:-/home/jonah/.omnibase/runners/kubeconfig/lab-ci-reader.kubeconfig}:/home/runner/.kube/lab-ci-reader.kubeconfig:ro
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-88-creds:/home/runner/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
