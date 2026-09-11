@@ -588,7 +588,17 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # lane with a recorded content_sha256 and declared here), so the repair is
     # additive, which is also what makes it correct for a lane that already
     # applied 0039.
-    assert len(result.declarations) == 178
+    #
+    # 178 -> 179 for OMN-18159 Phase 2's
+    # nodes/node_projection_savings/088_savings_views_invoker_scoped.sql. A
+    # read-only readback of onex-dev found TWO MORE views over delegation_events
+    # with security_invoker unset -- projection_delegation_savings and
+    # _savings_series -- missed only because they belong to a different node with
+    # a different migration lineage, not because anything about them differs.
+    # Two ALTER VIEW statements and nothing else: their shape does not change, so
+    # nothing needs dropping, and a DROP is what re-owns a view to whoever ran
+    # the migration, which is the defect 0040 above records.
+    assert len(result.declarations) == 179
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
