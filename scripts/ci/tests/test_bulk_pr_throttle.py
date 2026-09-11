@@ -373,6 +373,87 @@ class TestRunBulkOperationFlow:
             assert wave.queue_depth_after == 10
             assert all(o.success for o in wave.outcomes)
 
+    def test_arm_automerge_observes_high_depth_without_blocking(self, tmp_path):
+        """Arming auto-merge creates no check suite, so depth is evidence only."""
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation, write_receipt
+
+        depth_calls = 0
+        sleeps: list[float] = []
+        applied: list[int] = []
+
+        def get_queue_depth() -> int:
+            nonlocal depth_calls
+            depth_calls += 1
+            return 200
+
+        def apply_pr_operation(
+            owner: str, repo: str, pr: int, operation: str
+        ) -> PrOutcome:
+            applied.append(pr)
+            return PrOutcome(pr_number=pr, success=True, detail="armed")
+
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="onex_change_control",
+            pr_numbers=[1, 2, 3, 4, 5],
+            operation="arm-automerge",
+            wave_size=5,
+            queue_depth_threshold=150,
+            dry_run=False,
+            get_queue_depth=get_queue_depth,
+            apply_pr_operation=apply_pr_operation,
+            poll_seconds=1.0,
+            max_wait_seconds=0.0,
+            sleep_fn=sleeps.append,
+        )
+
+        assert applied == [1, 2, 3, 4, 5]
+        assert sleeps == []
+        assert depth_calls == 2
+        assert report.queue_depth_gate_applied is False
+        assert report.waves[0].queue_depth_before == 200
+        assert report.waves[0].queue_depth_after == 200
+
+        receipt_path = tmp_path / "arm-automerge.json"
+        write_receipt(report, receipt_path)
+        receipt = json.loads(receipt_path.read_text())
+        assert receipt["queue_depth_gate_applied"] is False
+        assert receipt["waves"][0]["queue_depth_gate_applied"] is False
+
+    @pytest.mark.parametrize("operation", ["update-branch", "rerun-failed"])
+    def test_load_creating_operations_still_refuse_at_high_depth(self, operation):
+        from bulk_pr_throttle import (
+            PrOutcome,
+            QueueDepthTimeoutError,
+            run_bulk_operation,
+        )
+
+        applied: list[int] = []
+
+        def apply_pr_operation(
+            owner: str, repo: str, pr: int, selected_operation: str
+        ) -> PrOutcome:
+            applied.append(pr)
+            return PrOutcome(pr_number=pr, success=True, detail="unexpected")
+
+        with pytest.raises(QueueDepthTimeoutError, match="above threshold"):
+            run_bulk_operation(
+                owner="OmniNode-ai",
+                repo="onex_change_control",
+                pr_numbers=[1, 2, 3, 4, 5],
+                operation=operation,
+                wave_size=5,
+                queue_depth_threshold=150,
+                dry_run=False,
+                get_queue_depth=lambda: 200,
+                apply_pr_operation=apply_pr_operation,
+                poll_seconds=1.0,
+                max_wait_seconds=0.0,
+                sleep_fn=lambda seconds: None,
+            )
+
+        assert applied == []
+
     def test_flow_blocks_mid_batch_when_a_later_wave_sees_high_depth(self):
         """Threshold blocking (mocked gh call) applies per-wave, not just once."""
         from bulk_pr_throttle import PrOutcome, run_bulk_operation
@@ -486,8 +567,10 @@ class TestWriteReceipt:
         assert data["owner"] == "OmniNode-ai"
         assert data["repo"] == "onex_change_control"
         assert data["operation"] == "rerun-failed"
+        assert data["queue_depth_gate_applied"] is True
         assert len(data["waves"]) == 1
         wave = data["waves"][0]
+        assert wave["queue_depth_gate_applied"] is True
         assert wave["queue_depth_before"] == 3
         assert wave["queue_depth_after"] == 3
         assert wave["pr_numbers"] == [1, 2]
@@ -947,6 +1030,7 @@ class TestMainCli:
             owner="OmniNode-ai",
             repo="onex_change_control",
             operation="rerun-failed",
+            queue_depth_gate_applied=True,
             wave_size=10,
             queue_depth_threshold=150,
             dry_run=False,

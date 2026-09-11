@@ -21,9 +21,11 @@ than a hand-rolled loop over ``gh``.
 
 Mechanical guard (no bypass)
 -----------------------------
-The queue-depth gate (:func:`wait_for_queue_depth`) has no force/skip/bypass
-parameter anywhere in this module or its CLI. A caller cannot opt out of
-throttling short of not using this tool at all — see
+Load-creating operations use the queue-depth gate
+(:func:`wait_for_queue_depth`), which has no force/skip/bypass parameter
+anywhere in this module or its CLI. Zero-load operations still use bounded
+waves and record queue depth, but depth is observational rather than a reason
+to refuse them. A caller cannot change an operation's policy — see
 ``knowledge-base:runbooks/bulk-pr-operations.md`` for the doctrine-wiring follow-up
 that makes *not using it* visible.
 
@@ -75,12 +77,17 @@ DEFAULT_BLOCK_POLL_SECONDS = 30.0
 DEFAULT_MAX_BLOCK_SECONDS = 1800.0
 DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 
-VALID_OPERATIONS = (
-    "update-branch",
-    "arm-automerge",
-    "rerun-failed",
-    "noop-dry-run",
-)
+# True means the operation creates check-suite load and must wait for queue
+# capacity. False means queue depth is still receipted but cannot block the
+# operation. Keeping every operation in one explicit map prevents future
+# operations from silently inheriting the less restrictive policy.
+OPERATION_QUEUE_DEPTH_POLICY = {
+    "update-branch": True,
+    "arm-automerge": False,
+    "rerun-failed": True,
+    "noop-dry-run": False,
+}
+VALID_OPERATIONS = tuple(OPERATION_QUEUE_DEPTH_POLICY)
 
 
 class BulkPrThrottleError(RuntimeError):
@@ -120,6 +127,7 @@ class BulkRunReport:
     owner: str
     repo: str
     operation: str
+    queue_depth_gate_applied: bool
     wave_size: int
     queue_depth_threshold: int
     dry_run: bool
@@ -253,7 +261,7 @@ def run_bulk_operation(
     now_fn: Callable[[], datetime] = lambda: datetime.now(UTC),
     log: Callable[[str], None] = print,
 ) -> BulkRunReport:
-    """Process ``pr_numbers`` through ``operation`` in bounded, queue-gated waves."""
+    """Process ``pr_numbers`` through bounded, operation-aware waves."""
     if not owner:
         raise BulkPrThrottleError(
             "owner must be explicitly provided (no silent default)"
@@ -266,6 +274,7 @@ def run_bulk_operation(
         raise BulkPrThrottleError(
             f"unknown operation {operation!r}; must be one of {VALID_OPERATIONS}"
         )
+    queue_depth_gate_applied = OPERATION_QUEUE_DEPTH_POLICY[operation]
     if not pr_numbers:
         raise BulkPrThrottleError("pr_numbers must be non-empty")
 
@@ -280,7 +289,8 @@ def run_bulk_operation(
         log(
             f"[bulk-pr-throttle] DRY-RUN plan: {len(pr_numbers)} PR(s) across "
             f"{len(waves)} wave(s) of <= {wave_size}, operation={operation}, "
-            f"owner={owner}, repo={repo}, queue_depth_threshold={queue_depth_threshold}"
+            f"owner={owner}, repo={repo}, queue_depth_threshold={queue_depth_threshold}, "
+            f"queue_depth_gate_applied={queue_depth_gate_applied}"
         )
         for idx, wave in enumerate(waves, start=1):
             log(f"[bulk-pr-throttle]   wave {idx}: {list(wave)}")
@@ -289,6 +299,7 @@ def run_bulk_operation(
             owner=owner,
             repo=repo,
             operation=operation,
+            queue_depth_gate_applied=queue_depth_gate_applied,
             wave_size=wave_size,
             queue_depth_threshold=queue_depth_threshold,
             dry_run=True,
@@ -320,6 +331,7 @@ def run_bulk_operation(
             owner=owner,
             repo=repo,
             operation=operation,
+            queue_depth_gate_applied=queue_depth_gate_applied,
             wave_size=wave_size,
             queue_depth_threshold=queue_depth_threshold,
             dry_run=False,
@@ -329,14 +341,22 @@ def run_bulk_operation(
     for idx, wave in enumerate(waves, start=1):
         started_at = now_fn().isoformat()
         try:
-            depth_before = wait_for_queue_depth(
-                get_queue_depth=get_queue_depth,
-                threshold=queue_depth_threshold,
-                poll_seconds=poll_seconds,
-                max_wait_seconds=max_wait_seconds,
-                sleep_fn=sleep_fn,
-                log=log,
-            )
+            if queue_depth_gate_applied:
+                depth_before = wait_for_queue_depth(
+                    get_queue_depth=get_queue_depth,
+                    threshold=queue_depth_threshold,
+                    poll_seconds=poll_seconds,
+                    max_wait_seconds=max_wait_seconds,
+                    sleep_fn=sleep_fn,
+                    log=log,
+                )
+            else:
+                depth_before = get_queue_depth()
+                log(
+                    f"[bulk-pr-throttle] operation={operation} creates no "
+                    f"check-suite load; queue depth {depth_before} is "
+                    "observation-only"
+                )
         except BulkPrThrottleError as exc:
             if wave_receipts:
                 raise PartialBulkRunError(str(exc), partial_report()) from exc
@@ -388,6 +408,7 @@ def run_bulk_operation(
         owner=owner,
         repo=repo,
         operation=operation,
+        queue_depth_gate_applied=queue_depth_gate_applied,
         wave_size=wave_size,
         queue_depth_threshold=queue_depth_threshold,
         dry_run=False,
@@ -401,6 +422,7 @@ def write_receipt(report: BulkRunReport, path: Path) -> None:
         "owner": report.owner,
         "repo": report.repo,
         "operation": report.operation,
+        "queue_depth_gate_applied": report.queue_depth_gate_applied,
         "wave_size": report.wave_size,
         "queue_depth_threshold": report.queue_depth_threshold,
         "dry_run": report.dry_run,
@@ -410,6 +432,7 @@ def write_receipt(report: BulkRunReport, path: Path) -> None:
                 "pr_numbers": list(wave.pr_numbers),
                 "pr_count": len(wave.pr_numbers),
                 "operation": wave.operation,
+                "queue_depth_gate_applied": report.queue_depth_gate_applied,
                 "dry_run": wave.dry_run,
                 "queue_depth_before": wave.queue_depth_before,
                 "queue_depth_after": wave.queue_depth_after,
