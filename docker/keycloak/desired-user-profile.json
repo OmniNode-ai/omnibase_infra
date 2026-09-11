@@ -1,5 +1,5 @@
 {
-  "_comment": "OMN-16184: desired state for the omninode realm's declarative User Profile (upConfig). Before this file the realm's user-profile config existed ONLY live, hand-mutated, with no representation in source -- so the attribute permissions that decide which fields render on user-facing forms, and which attributes persist at all, were unreviewable and undiffable. Applied via PUT /admin/realms/{realm}/users/profile. Validated by .github/workflows/user-profile-contract.yml. The apply path is NOT yet wired (OMN-16195) -- this is validated desired state, not an applied artifact. See https://github.com/OmniNode-ai/knowledge-base-internal/blob/main/reference/keycloak-user-profile.md.",
+  "_comment": "OMN-16184: desired state for the omninode realm's declarative User Profile (upConfig). Before this file the realm's user-profile config existed ONLY live, hand-mutated, with no representation in source -- so the attribute permissions that decide which fields render on user-facing forms, and which attributes persist at all, were unreviewable and undiffable. Applied via PUT /admin/realms/{realm}/users/profile. Validated by .github/workflows/user-profile-contract.yml. The apply path is NOT yet wired (OMN-16195) -- this is validated desired state, not an applied artifact. See https://github.com/OmniNode-ai/knowledge-base-internal/blob/main/reference/keycloak-user-profile.md. OMN-18165: firstName and lastName are NOT required. The omniweb signup form labels both optional and does not submit them, and the form is the product contract -- a required-for-role-user declaration here makes Keycloak's VERIFY_PROFILE required action fire on every such account's first login, which is what blocked the C5 sign-on walk. Both remain declared, user-viewable and user-editable, so a user who wants to supply a name still can; they are simply not a precondition of signing in. email stays required.",
   "attributes": [
     {
       "name": "username",
@@ -45,9 +45,6 @@
         },
         "person-name-prohibited-characters": {}
       },
-      "required": {
-        "roles": ["user"]
-      },
       "permissions": {
         "view": ["admin", "user"],
         "edit": ["admin", "user"]
@@ -62,9 +59,6 @@
           "max": 255
         },
         "person-name-prohibited-characters": {}
-      },
-      "required": {
-        "roles": ["user"]
       },
       "permissions": {
         "view": ["admin", "user"],
