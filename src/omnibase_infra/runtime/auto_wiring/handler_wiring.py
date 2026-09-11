@@ -41,6 +41,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
     Final,
@@ -73,6 +74,7 @@ from omnibase_core.models.core.model_deployment_topology_database import (
     ModelDeploymentTopologyDatabase,
 )
 from omnibase_core.models.errors import ModelOnexError
+from omnibase_core.models.projection import build_upsert_plan
 from omnibase_core.models.resolver.model_handler_resolver_context import (
     ModelHandlerResolverContext,
 )
@@ -2817,10 +2819,62 @@ class ProjectionTableOperation:
                 f"access={self._target.table.access!r}; read refused"
             )
 
-    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+    def _prepare_write(
+        self, conflict_key: str, row: dict[str, object]
+    ) -> tuple[dict[str, object], VerifiedProjectionTenantAuthority | None, str | None]:
+        """Apply this domain's write guards and resolve the statement scope.
+
+        OMN-18159. Extracted so ``upsert`` and ``upsert_returning`` cannot
+        diverge on the guards. Each subclass overrides THIS rather than each
+        entry point, so a domain rule added later is applied to both by
+        construction -- when the attested write was first added it inherited
+        the base ``upsert`` and silently skipped the tenant-attribution and
+        canonical-field guards the subclasses apply, which is exactly the
+        shape this hook removes.
+        """
         self._assert_write_declared()
-        return self._adapter._execute_upsert(
-            self._target, conflict_key, row, tenant_context=None
+        return dict(row), None, None
+
+    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+        prepared, context, scope = self._prepare_write(conflict_key, row)
+        # OMN-18159. One composed statement, not two: a separate bool-only
+        # path would be a second place for the arm placement to drift, which
+        # is the whole failure this ticket is unwinding. A plain upsert is the
+        # same statement with no RETURNING clause.
+        self._adapter._execute_upsert_returning(
+            self._target,
+            conflict_key,
+            prepared,
+            tenant_context=context,
+            recorded_scope=scope,
+        )
+        return True
+
+    def upsert_returning(
+        self,
+        conflict_key: str,
+        row: dict[str, object],
+        *,
+        insert_only_columns: frozenset[str] = frozenset(),
+        sql_expression_columns: Mapping[str, str] = MappingProxyType({}),
+        returning: Sequence[str] = (),
+    ) -> list[dict[str, object]]:
+        """OMN-18159. The attested write, through the same access check.
+
+        The declared-access assertion runs FIRST and unconditionally, so this
+        entry point cannot become a way around it -- a relation the contract
+        declares ``read`` refuses here exactly as it refuses on ``upsert``.
+        """
+        prepared, context, scope = self._prepare_write(conflict_key, row)
+        return self._adapter._execute_upsert_returning(
+            self._target,
+            conflict_key,
+            prepared,
+            tenant_context=context,
+            recorded_scope=scope,
+            insert_only_columns=insert_only_columns,
+            sql_expression_columns=sql_expression_columns,
+            returning=returning,
         )
 
     def query(
@@ -2907,7 +2961,14 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
                 "verified projection authority"
             )
 
-    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+    def _prepare_write(
+        self, conflict_key: str, row: dict[str, object]
+    ) -> tuple[dict[str, object], VerifiedProjectionTenantAuthority | None, str | None]:
+        """Tenant attribution and scope, applied to EVERY write entry point.
+
+        OMN-18159 moved this off ``upsert`` so the attested write gets the
+        same treatment. Nothing about the rules changed.
+        """
         self._assert_write_declared()
         context = self._context()
         attributed_row = dict(row)
@@ -2929,12 +2990,10 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
             # currently receiving traffic. The scope value IS the row's own
             # tenant_id, so this widens nothing: the row can only be written
             # under the identity it already declares.
-            return self._adapter._execute_upsert(
-                self._target,
-                conflict_key,
+            return (
                 attributed_row,
-                tenant_context=None,
-                recorded_scope=_recorded_tenant_scope(attributed_row),
+                None,
+                _recorded_tenant_scope(attributed_row),
             )
         supplied_tenant = attributed_row.get("tenant_id")
         if supplied_tenant is not None:
@@ -2943,12 +3002,7 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
         # equal, so this now normalizes representation -- it no longer
         # substitutes an identity the event did not claim.
         attributed_row["tenant_id"] = context.tenant_id
-        return self._adapter._execute_upsert(
-            self._target,
-            conflict_key,
-            attributed_row,
-            tenant_context=context,
-        )
+        return attributed_row, context, None
 
     def query(
         self,
@@ -3002,7 +3056,9 @@ class TenantProjectionTableOperation(ProjectionTableOperation):
 class InternalProjectionTableOperation(ProjectionTableOperation):
     """Internal operation that never resolves or sets tenant context."""
 
-    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+    def _prepare_write(
+        self, conflict_key: str, row: dict[str, object]
+    ) -> tuple[dict[str, object], VerifiedProjectionTenantAuthority | None, str | None]:
         _reject_canonical_tenant_field(row, domain=self._target.domain)
         conflict_keys = {key.strip() for key in conflict_key.split(",")}
         if "source_tenant_id" in conflict_keys:
@@ -3010,7 +3066,7 @@ class InternalProjectionTableOperation(ProjectionTableOperation):
                 "Internal source_tenant_id is provenance only and cannot be an "
                 "upsert conflict key"
             )
-        return super().upsert(conflict_key, row)
+        return super()._prepare_write(conflict_key, row)
 
     def query(
         self,
@@ -3029,9 +3085,11 @@ class InternalProjectionTableOperation(ProjectionTableOperation):
 class CatalogProjectionTableOperation(ProjectionTableOperation):
     """Catalog operation enforcing the declaration's explicit access mode."""
 
-    def upsert(self, conflict_key: str, row: dict[str, object]) -> bool:
+    def _prepare_write(
+        self, conflict_key: str, row: dict[str, object]
+    ) -> tuple[dict[str, object], VerifiedProjectionTenantAuthority | None, str | None]:
         _reject_canonical_tenant_field(row, domain=self._target.domain)
-        return super().upsert(conflict_key, row)
+        return super()._prepare_write(conflict_key, row)
 
     def query(
         self,
@@ -3175,6 +3233,34 @@ class ProjectionBindingConnections:
             conn.autocommit = True  # type: ignore[attr-defined]
 
 
+def _fetch_returned_rows(
+    cursor: object, returning: Sequence[str]
+) -> list[dict[str, object]]:
+    """Read back a RETURNING result, or nothing when none was asked for.
+
+    OMN-18159. A module-level function rather than a method because it touches
+    no adapter state -- and because the pattern gate counts methods, which is a
+    fair proxy here: this is statement plumbing, not part of the router's
+    surface.
+
+    An empty list for a statement that named no ``RETURNING`` columns is not a
+    guess about the stored row -- the statement was never asked for one. A
+    statement that DID ask and came back empty took the ``DO NOTHING`` arm, and
+    an empty list is equally honest there: no stored row exists for this call
+    to describe, and inventing one would be a confident-empty failure inverted.
+    """
+    if not returning:
+        return []
+    if getattr(cursor, "description", None) is None:
+        return []
+    return [
+        dict(record)
+        if isinstance(record, Mapping)
+        else dict(zip(returning, record, strict=True))
+        for record in cursor.fetchall()  # type: ignore[attr-defined]
+    ]
+
+
 class ProjectionDatabaseOperations:
     """Router over separate table operations selected from typed topology."""
 
@@ -3258,7 +3344,7 @@ class ProjectionDatabaseOperations:
             for key, value in row.items()
         }
 
-    def _execute_upsert(
+    def _execute_upsert_returning(
         self,
         target: ProjectionTableTarget,
         conflict_key: str,
@@ -3266,47 +3352,88 @@ class ProjectionDatabaseOperations:
         *,
         tenant_context: VerifiedProjectionTenantAuthority | None,
         recorded_scope: str | None = None,
-    ) -> bool:
-        conflict_keys = [key.strip() for key in conflict_key.split(",") if key.strip()]
-        if not conflict_keys:
-            raise ValueError("conflict_key must contain at least one column")
-        if any(not _TABLE_NAME_RE.fullmatch(key) for key in conflict_keys):
-            raise ValueError(f"Invalid conflict key: {conflict_key!r}")
-        cols = list(row)
-        bad_cols = [column for column in cols if not _TABLE_NAME_RE.fullmatch(column)]
-        if bad_cols:
-            raise ValueError(f"Invalid column names: {bad_cols!r}")
-        missing = [key for key in conflict_keys if key not in row]
-        if missing:
-            raise KeyError(f"row missing conflict key(s): {missing!r}")
-        quoted_cols = ", ".join(f'"{column}"' for column in cols)
-        placeholders = ", ".join(f"%({column})s" for column in cols)
-        conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
-        conflict_set = set(conflict_keys)
+        insert_only_columns: frozenset[str] = frozenset(),
+        sql_expression_columns: Mapping[str, str] = MappingProxyType({}),
+        returning: Sequence[str] = (),
+    ) -> list[dict[str, object]]:
+        """OMN-18159. The one composed UPSERT, with the attested-write features.
+
+        The DECISIONS come from :func:`omnibase_core.models.projection
+        .build_upsert_plan` -- which column goes on which arm, which SQL
+        expression is admissible, which identifier is safe. That plan is shared
+        with ``omnimarket``'s three sync adapters precisely so the closed set of
+        expressions that reach a statement UNCAST cannot exist in four
+        divergent copies.
+
+        The rendered SQL is NOT taken from the plan, deliberately. This adapter
+        quotes every identifier and schema-qualifies the table, which no other
+        consumer does, so rendering here keeps the statement byte-for-byte what
+        it has always been while the decisions stay in one place. A test pins
+        that byte-for-byte claim rather than leaving it asserted.
+
+        ``sql_expression_columns`` reach the statement unparameterised, on BOTH
+        arms. That is the whole point of the write attestation: a bound
+        parameter would let this process decide what the row says about who
+        wrote it, and the update arm must RESTATE the expression because a
+        column DEFAULT is consulted only on INSERT -- an existing row would
+        otherwise wear its first writer's stamp forever.
+        """
+        plan = build_upsert_plan(
+            table=target.table.name,
+            conflict_key=conflict_key,
+            row=row,
+            insert_only_columns=insert_only_columns,
+            sql_expression_columns=sql_expression_columns,
+            returning=returning,
+        )
+        # The plan validated every identifier against its own rule; this
+        # adapter's rule is narrower and is applied on top rather than
+        # replaced, so relaxing one never silently relaxes the other.
+        for name in (*plan.insert_columns, *plan.conflict_keys, *plan.returning):
+            if not _TABLE_NAME_RE.fullmatch(name):
+                raise ValueError(f"Invalid column names: {[name]!r}")
+
+        quoted_cols = ", ".join(f'"{column}"' for column in plan.bound_columns)
+        placeholders = ", ".join(f"%({column})s" for column in plan.bound_columns)
+        expression_cols = "".join(f', "{column}"' for column in plan.expression_columns)
+        expression_values = "".join(
+            f", {expression}" for expression in plan.expression_columns.values()
+        )
+        conflict_columns = ", ".join(f'"{key}"' for key in plan.conflict_keys)
         updates = ", ".join(
             f'"{column}" = EXCLUDED."{column}"'
-            for column in cols
-            if column not in conflict_set
+            if expression is None
+            else f'"{column}" = {expression}'
+            for column, expression in plan.update_assignments
         )
         action = f"DO UPDATE SET {updates}" if updates else "DO NOTHING"
-        insert_sql = " ".join(
-            (
-                f'INSERT INTO "{target.physical_schema}"."{target.table.name}" ({quoted_cols})',
-                f"VALUES ({placeholders})",
-                f"ON CONFLICT ({conflict_columns}) {action}",
+        returning_clause = (
+            " RETURNING " + ", ".join(f'"{column}"' for column in plan.returning)
+            if plan.returning
+            else ""
+        )
+        insert_sql = (
+            " ".join(
+                (
+                    f'INSERT INTO "{target.physical_schema}"."{target.table.name}"'
+                    f" ({quoted_cols}{expression_cols})",
+                    f"VALUES ({placeholders}{expression_values})",
+                    f"ON CONFLICT ({conflict_columns}) {action}",
+                )
             )
+            + returning_clause
         )
         conn = self._binding_connections.get(target.write_binding)
-        adapted_row = self._adapt_row(row)
+        adapted_row = self._adapt_row({c: row[c] for c in plan.bound_columns})
         scope = _statement_tenant_scope(tenant_context, recorded_scope)
         if scope is None:
             with conn.cursor() as cursor:  # type: ignore[attr-defined]
                 cursor.execute(insert_sql, adapted_row)
-        else:
-            with self._binding_connections.tenant_transaction(conn, scope):
-                with conn.cursor() as cursor:  # type: ignore[attr-defined]
-                    cursor.execute(insert_sql, adapted_row)
-        return True
+                return _fetch_returned_rows(cursor, plan.returning)
+        with self._binding_connections.tenant_transaction(conn, scope):
+            with conn.cursor() as cursor:  # type: ignore[attr-defined]
+                cursor.execute(insert_sql, adapted_row)
+                return _fetch_returned_rows(cursor, plan.returning)
 
     def _execute_query(
         self,
@@ -3418,6 +3545,52 @@ class ProjectionDatabaseOperations:
 
     def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
         return self._operation(table).upsert(conflict_key, row)
+
+    def upsert_returning(
+        self,
+        table: str,
+        conflict_key: str,
+        row: dict[str, object],
+        *,
+        tenant: str | None = None,
+        insert_only_columns: frozenset[str] = frozenset(),
+        sql_expression_columns: Mapping[str, str] = MappingProxyType({}),
+        returning: Sequence[str] = (),
+    ) -> list[dict[str, object]]:
+        """OMN-18159. UPSERT and return the rows the database actually stored.
+
+        This is what lets an in-process projection handler stamp a write
+        attestation the writing process cannot forge -- ``writer_identity`` as
+        ``CURRENT_USER``, ``written_at`` as ``NOW()``, both restated on the
+        ``DO UPDATE`` arm -- and republish the row Postgres returned rather
+        than the dict it built. Until this existed, a handler running under
+        this kernel could not express the attestation at all, so
+        ``omnimarket``'s delegation handler refused this adapter by name
+        rather than writing a row whose attestation column would be NULL.
+
+        ``tenant`` is accepted for signature compatibility with the sync
+        projection protocol and REFUSED when supplied. Tenant scope here is
+        not the caller's to assert: it is derived from the verified projection
+        authority when one is bound, and otherwise from the row's own recorded
+        attribution. Accepting a caller-supplied override would reintroduce
+        exactly the attribution-from-the-caller path the tenant operation's
+        guards exist to close.
+        """
+        if tenant is not None:
+            raise ValueError(
+                "tenant is not a caller-supplied value on this adapter: the "
+                "statement scope is derived from the verified projection "
+                "authority, or from the row's own recorded attribution when "
+                "none is bound. Supplying it here would let a caller assert "
+                "an attribution the runtime never verified."
+            )
+        return self._operation(table).upsert_returning(
+            conflict_key,
+            row,
+            insert_only_columns=insert_only_columns,
+            sql_expression_columns=sql_expression_columns,
+            returning=returning,
+        )
 
     def query(
         self,
