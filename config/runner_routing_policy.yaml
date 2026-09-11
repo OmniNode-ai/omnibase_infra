@@ -51,7 +51,46 @@ trusted_runner_variable:
   # self-hosted, the first of them 71 seconds after the flip; reproduced on
   # omnimarket run 34122888401. Before any future flip of this seam, that gate
   # (and every other testcontainer-backed gate) needs a hosted class of its own.
-  repository_overrides: {}
+  #
+  # OMN-18031 phase 5, 2026-09-11T21:12:33Z: two shadows below are now DECLARED
+  # divergences rather than drift. Authority is the operator ruling of
+  # 2026-09-11 ~21:07Z, "Yes we should move things back to the lab as
+  # necessary", and the phase-0 gate it answers is met. Measured immediately
+  # before the write: 279 jobs sat queued across six repositories, every one of
+  # them carrying `ubuntu-latest` with no runner assigned and the longest
+  # waiting 18 minutes, while 70 of the 88 runners in this group were online
+  # and idle. That is runner availability, not concurrency-group
+  # serialisation -- a job blocked on `needs:` is not reported queued with a
+  # started_at, and all 279 carried one.
+  #
+  # The exclusions are the substance of this entry. omnimarket and
+  # omnibase_infra are deliberately NOT flipped: the required gate named in the
+  # A/B above, "Customer Path Boundary (OMN-18012)", resolves its runs-on
+  # through this very seam in BOTH repositories (omnimarket ci.yml, and this
+  # repo's ci.yml) and docker-pulls redpandadata/redpanda with
+  # OMN18012_REQUIRE_HARNESS=1 set so a missing daemon is red rather than a
+  # green skip. Flipping either shadow re-runs the 2026-09-07 harm verbatim.
+  # The org variable is not flipped either: it is inherited by omninode_infra --
+  # private, carrying a live staging deploy path, and with only five
+  # seam-driven job definitions, so almost no yield for a large blast radius --
+  # and by omnimemory, omnidash, omnibase_spi and omnibase_compat, none of
+  # which were enumerated for container exposure.
+  #
+  # The two repositories below were chosen because they can be moved safely and
+  # are where the queue actually is: neither carries a `testcontainers`
+  # dependency, neither has a `docker` step in any workflow, and
+  # onex_change_control has zero hardcoded `runs-on: ubuntu-latest` job
+  # definitions, so its 79 seam-driven jobs are the whole of its CI and it held
+  # 185 of the 279 queued jobs.
+  repository_overrides:
+    onex_change_control:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        Any job in this repository fails on the fleet for a fleet-specific reason -- a container it cannot bootstrap, a tool the runner image lacks, or disk exhaustion -- or the repository acquires a testcontainer-backed or image-building gate that reads this seam. Also revert once the hosted queue this relieves is gone: if a sustained sample shows no job-level queue wait attributable to runner availability, hosted is the cheaper default for a public repository, where hosted minutes are free.
+    omnibase_core:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        The same three conditions as onex_change_control above. This repository additionally carries 20 job definitions pinned to a literal ubuntu-latest, which this override does not move and must not be assumed to have moved; if any of those is later switched to read the seam, re-check it for container exposure before leaving this override in place.
 public_pr_runner_variable:
   name: OMNI_PUBLIC_PR_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'
