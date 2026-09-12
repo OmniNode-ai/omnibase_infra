@@ -75,6 +75,15 @@ AGGREGATE_VIEWS_FILE = (
     / "node_projection_delegation"
     / "0039_delegation_aggregate_views_per_tenant.sql"
 )
+SAVINGS_AGGREGATE_VIEWS_FILE = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_savings"
+    / "089_savings_aggregate_views_per_tenant.sql"
+)
 BOOTSTRAP_SCRIPT = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "000_create_multiple_databases.sh"
 )
@@ -342,14 +351,14 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
 def test_read_only_declarations_are_granted_select_and_never_write() -> None:
     """A read declaration is delivered as SELECT, and only as SELECT.
 
-    The four delegation aggregates are SQL VIEWS over ``delegation_events``
-    (``node_projection_delegation`` migrations 0039/0040). They are declared
+    The read-only declarations include aggregate SQL VIEWS over
+    ``delegation_events`` and savings estimates. They are declared
     ``access: read`` and the generator emits them as a ``privileges: [SELECT]``
     TABLE block. Their grant is carried by the migration that CREATES them,
     not by :data:`GRANT_FILE`, because a grant belongs with the relation it
-    names -- 0039 has to DROP and CREATE each view, and a DROP discards the
-    view's privileges along with it, so restoring them anywhere else would
-    leave a window where the relation exists and nothing can read it.
+    names -- these migrations have to DROP and CREATE each view, and a DROP
+    discards the view's privileges along with it, so restoring them anywhere
+    else would leave a window where the relation exists and nothing can read it.
 
     Both halves are asserted. Missing the SELECT would deny the reader at
     runtime, which is the same silent-zero-rows shape the writable test above
@@ -361,7 +370,12 @@ def test_read_only_declarations_are_granted_select_and_never_write() -> None:
     read_only = _declared_table_objects("SELECT") - _declared_table_objects("INSERT")
     assert read_only, "positive control: the topology declares read-only relations"
 
-    aggregate_views_sql = AGGREGATE_VIEWS_FILE.read_text()
+    aggregate_views_sql = "\n".join(
+        (
+            AGGREGATE_VIEWS_FILE.read_text(),
+            SAVINGS_AGGREGATE_VIEWS_FILE.read_text(),
+        )
+    )
     select_granted = set(
         re.findall(
             rf"GRANT SELECT ON (?:public\.)?([a-z0-9_]+) TO {PRINCIPAL}",
