@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-18205 THROWAWAY CANARY. This file is never merged. It exists to answer one
+# question that no merged workflow can currently ask: does the customer-path
+# boundary harness bootstrap its broker on a .201 fleet runner now that the
+# runner-topology fix has landed?
+#
+# Why it cannot be asked any other way. The real gate
+# ("Customer Path Boundary (OMN-18012)" in ci.yml) resolves its runner from
+# vars.OMNI_TRUSTED_CI_RUNS_ON_JSON, which is ["ubuntu-latest"] on this repo and
+# is a single-owner variable (CLAUDE.md rule 14) that must not be flipped to
+# find out whether a flip is safe. So this job pins the fleet labels literally
+# and runs the gate's steps verbatim.
+#
+# The evidence it replaces is stale. config/runner_routing_policy.yaml records a
+# clean A/B of 5 hosted successes against 5 fleet failures, and excludes this
+# repo from the phase-5 flip on the strength of it. Every one of those fleet
+# failures predates 761a786432a87872029519e6629103161fd35397 (#3286, merged
+# 2026-09-07T15:03:14Z), which added resolve_docker_host_address() and moved
+# readiness onto the client path. The shadow had already reverted to hosted at
+# 12:57:48Z that day, two hours and six minutes earlier, so the fixed harness
+# has never once executed on a fleet runner.
+#
+# The steps below are copied from the customer-path-boundary job in ci.yml at
+# fccef30d5 and differ from it in exactly two ways: the literal runs-on, and the
+# topology readback step at the end, which prints what the harness resolved so a
+# green result is attributable rather than merely green.
+name: OMN-18205 fleet broker canary
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - ".github/workflows/omn18205-fleet-broker-canary.yml"
+      - "tests/integration/customer_path/**"
+
+concurrency:
+  group: omn18205-fleet-broker-canary-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.8.3"
+  CACHE_VERSION: v1
+
+jobs:
+  customer-path-boundary-on-fleet:
+    name: OMN-18205 canary — Customer Path Boundary on the fleet
+    # Deliberately a literal, NOT the selector block. The whole point is to run
+    # on the fleet while the seam says hosted. Never copy this into a merged
+    # workflow.
+    runs-on: [self-hosted, omnibase-ci]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Record the runner topology this job actually got
+        run: |
+          echo "runner_name=${RUNNER_NAME:-unset}"
+          echo "hostname=$(hostname)"
+          echo "-- is this process in a container? --"
+          if [ -f /proc/self/cgroup ]; then head -5 /proc/self/cgroup; else echo "no cgroup file"; fi
+          echo "-- default route (the Docker host side of this container's bridge) --"
+          awk 'NR>1 && $2=="00000000" { printf "%d.%d.%d.%d\n", \
+            strtonum("0x" substr($3,7,2)), strtonum("0x" substr($3,5,2)), \
+            strtonum("0x" substr($3,3,2)), strtonum("0x" substr($3,1,2)) }' /proc/net/route
+          echo "-- docker daemon --"
+          docker info --format '{{.ServerVersion}}'
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Pre-pull the harness broker image
+        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+
+      - name: Show what the harness resolves before the tests run
+        run: |
+          uv run python - <<'PY'
+          from tests.integration.customer_path.redpanda_sasl_harness import (
+              REDPANDA_IMAGE,
+              declared_bootstrap,
+              docker_available,
+              resolve_docker_host_address,
+          )
+
+          print(f"docker_available()            = {docker_available()}")
+          print(f"declared_bootstrap()          = {declared_bootstrap()!r}")
+          print(f"resolve_docker_host_address() = {resolve_docker_host_address()!r}")
+          print(f"REDPANDA_IMAGE                = {REDPANDA_IMAGE}")
+          PY
+
+      - name: Run customer-path boundary tests
+        env:
+          OMN18012_REQUIRE_HARNESS: "1"
+          OMN18012_BROKER_BOOTSTRAP: ${{ vars.OMN18012_BROKER_BOOTSTRAP }}
+          OMN18012_BROKER_CONTAINER: ${{ vars.OMN18012_BROKER_CONTAINER }}
+          OMN18012_BROKER_INTERNAL_BOOTSTRAP: ${{ vars.OMN18012_BROKER_INTERNAL_BOOTSTRAP }}
+          OMN18012_BROKER_SASL_USERNAME: ${{ vars.OMN18012_BROKER_SASL_USERNAME }}
+          OMN18012_BROKER_SASL_PASSWORD: ${{ secrets.OMN18012_BROKER_SASL_PASSWORD }}
+          OMN18012_BROKER_SASL_MECHANISM: ${{ vars.OMN18012_BROKER_SASL_MECHANISM }}
+        run: |
+          uv run pytest tests/integration/customer_path/ \
+            tests/unit/event_bus/test_omn18012_sasl_scram_credentials.py \
+            -v --tb=short -p no:randomly
