@@ -64,8 +64,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+# NOT imported at module scope. PyYAML is a declared dependency
+# (pyproject.toml) for the hosted `route` job and the hosted `saturation-record`
+# job, but the self-hosted `lab-load-probe` job (OMN-18031 G7) runs on the bare
+# fleet image's system python3, which does NOT have it. A module-scope
+# `import yaml` therefore made `from runner_route_decision import
+# probe_lab_saturation_from_fleet` raise `ModuleNotFoundError: No module named
+# 'yaml'` on that job even though NOTHING it calls touches YAML --
+# `load_route_policy` is the only function that does. Measured: 10 of the last
+# 12 scheduled `lab-load-probe` runs failed on exactly this import, on a bare
+# `python3 -` invocation with no venv (the sanctioned `uv run` path is too
+# heavy for a <3s probe and would still need `uv sync` on a cold cache).
+# Importing it lazily, only inside the one function that needs it, is the
+# targeted fix: it costs the probe path nothing and changes no behavior for
+# the two hosted call sites, which already have PyYAML on `uv run python3`.
 ORG = "OmniNode-ai"
 DEFAULT_POLICY = Path("config/runner_routing_policy.yaml")
 
@@ -117,7 +129,13 @@ class RouteDecision:
 
 
 def load_route_policy(path: Path) -> dict[str, Any]:
-    """Load the ``route:`` section, failing on any missing threshold."""
+    """Load the ``route:`` section, failing on any missing threshold.
+
+    Imports PyYAML locally -- see the module docstring's note on why this is
+    the one function in the module allowed to need it.
+    """
+    import yaml
+
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise ValueError(f"{path} must contain a YAML mapping")
@@ -323,21 +341,43 @@ def _decide_unchecked(
         # addresses), so this record arrives asynchronously from the
         # saturation monitor and is FRESHNESS-BOUNDED. Stale is unknown, and
         # unknown is hosted -- never "assume ample".
+        #
+        # `lab_error` rides in `inputs` on every `lab_unknown` branch so a
+        # zero-byte or malformed lab-load.json artifact reads as a NAMED,
+        # distinguishable cause in the decision record -- "unreadable_record",
+        # "stale", "no_hosts", "malformed_host" -- rather than the same bare
+        # `lab_unknown` string a genuinely-missing record also produces. The
+        # `reason` enum itself is unchanged (existing consumers key off it), so
+        # this is additive.
         if not isinstance(lab, dict) or not lab.get("ok"):
-            return hosted_result("lab_unknown", extra=fleet_inputs)
+            lab_error = (
+                lab.get("error") if isinstance(lab, dict) else "unexpected_shape"
+            )
+            return hosted_result(
+                "lab_unknown",
+                extra={**fleet_inputs, "lab_error": lab_error or "unknown"},
+            )
         age = lab.get("age_seconds")
         if not isinstance(age, int) or age > int(policy["lab_record_max_age_seconds"]):
-            return hosted_result("lab_unknown", extra=fleet_inputs)
+            return hosted_result(
+                "lab_unknown", extra={**fleet_inputs, "lab_error": "stale"}
+            )
         hosts = lab.get("hosts")
         if not isinstance(hosts, list) or not hosts:
-            return hosted_result("lab_unknown", extra=fleet_inputs)
+            return hosted_result(
+                "lab_unknown", extra={**fleet_inputs, "lab_error": "no_hosts"}
+            )
         for host in hosts:
             if not isinstance(host, dict):
-                return hosted_result("lab_unknown", extra=fleet_inputs)
+                return hosted_result(
+                    "lab_unknown", extra={**fleet_inputs, "lab_error": "malformed_host"}
+                )
             ratio = host.get("ratio")
             free_mem = host.get("free_mem_mib")
             if not isinstance(ratio, (int, float)) or not isinstance(free_mem, int):
-                return hosted_result("lab_unknown", extra=fleet_inputs)
+                return hosted_result(
+                    "lab_unknown", extra={**fleet_inputs, "lab_error": "malformed_host"}
+                )
             # Load ranks, memory ADMITS (OMN-17392): a host at 0.10x load with
             # 2.5 GiB free is the target that cost an OMN-17316 landing hours
             # of OOM kills.
@@ -480,6 +520,60 @@ def probe_fleet(token: str | None, runner_group: str, api_url: str) -> dict[str,
     # the registry read is stale, the listener is not dead (OMN-16030).
     busy = sum(1 for item in grouped if item.get("busy") is True)
     return {"ok": True, "online": online, "busy": busy, "total": len(grouped)}
+
+
+def probe_lab_saturation_from_fleet(
+    token: str | None, runner_group: str, api_url: str
+) -> dict[str, Any]:
+    """The lab-load record the self-hosted ``lab-load-probe`` job publishes,
+    sourced from the org runner registry's busy/idle counts rather than this
+    container's own ``/proc/loadavg``.
+
+    WHY NOT ``probe_local_lab_load``'s ratio, from inside this job. The fleet
+    runners are Docker containers on the ``.201`` lab host, and a container's
+    own ``load1 / os.cpu_count()`` reading does not describe the host it runs
+    on: measured live in the same window, the SAME machine read 1.524x
+    (load1 48.76 / 32 cores) from an on-host dry run and 0.2232x from inside
+    one of its own runner containers. ``max_lab_load_ratio`` is calibrated
+    against the host-scoped number, so feeding it the container-scoped one is
+    not "slightly off" -- it is a different, uncalibrated quantity that
+    happens to share a threshold.
+
+    No host-published load metric exists to read instead (checked: no
+    node-exporter/cAdvisor surface and no deploy-agent host-metrics artifact
+    anywhere in this repo), so this reads the one live number the probe CAN
+    measure honestly from inside a container with nothing but outbound HTTPS:
+    the org runner registry's busy/idle counts for ``runner_group`` --
+    ``probe_fleet``'s own signal, the same one S4 already trusts for fleet
+    saturation.
+
+    Free memory stays LOCALLY sourced (``_free_mem_mib``): OMN-17392's OOM
+    finding was about the runner container's own memory pressure, which a
+    container-scoped reading answers correctly -- unlike load, memory here is
+    the resource actually being contended for host-adjacent test runs.
+    """
+    fleet = probe_fleet(token, runner_group, api_url)
+    if not fleet.get("ok"):
+        return {"ok": False, "error": fleet.get("error", "probe_failed")}
+    online = fleet.get("online")
+    busy = fleet.get("busy")
+    if not isinstance(online, int) or not isinstance(busy, int):
+        return {"ok": False, "error": "unexpected_shape"}
+    free_mem_mib = _free_mem_mib()
+    if free_mem_mib is None:
+        return {"ok": False, "error": "mem_unreadable"}
+    ratio = (busy / online) if online else 1.0
+    return {
+        "ok": True,
+        "age_seconds": 0,
+        "hosts": [
+            {
+                "label": f"org:{runner_group}",
+                "ratio": round(ratio, 4),
+                "free_mem_mib": free_mem_mib,
+            }
+        ],
+    }
 
 
 def read_lab_record(path: Path | None, now: datetime | None = None) -> dict[str, Any]:

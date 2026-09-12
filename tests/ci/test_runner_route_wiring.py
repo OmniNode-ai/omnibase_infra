@@ -304,6 +304,48 @@ def test_the_saturation_record_runs_even_when_its_input_failed() -> None:
     assert set(job["needs"]) == {"lab-load-probe"}
 
 
+def _step(job: dict[str, Any], name: str) -> dict[str, Any]:
+    for step in job["steps"]:
+        if step.get("name") == name:
+            return step
+    raise AssertionError(f"no step named {name!r} in job {job.get('name')!r}")
+
+
+def test_the_lab_probe_step_fails_loudly_and_does_not_read_the_container() -> None:
+    """OMN-18031 follow-up (2026-09-12): the probe step used to run
+    ``set -uo pipefail`` (no ``-e``) around a bare ``python3 -`` call to
+    ``probe_local_lab_load()``, which measures THIS CONTAINER's own
+    ``/proc/loadavg`` and ``os.cpu_count()`` -- not the ``.201`` host
+    ``max_lab_load_ratio`` is calibrated against. It must now fail the step on
+    a crash (``-e``) and call the org-busy/idle-based function instead.
+    """
+    job = _workflow("dev-lane-liveness.yml")["jobs"]["lab-load-probe"]
+    step = _step(
+        job, "Probe the fleet's org busy/idle counts as the lab saturation signal"
+    )
+    script = step["run"]
+    assert "set -euo pipefail" in script
+    assert "probe_lab_saturation_from_fleet" in script
+    assert "probe_local_lab_load" not in script
+
+
+def test_route_reason_is_no_longer_a_hardcoded_literal() -> None:
+    """OMN-18031 follow-up (2026-09-12): ``ROUTE_REASON: unknown`` had no
+    input, so condition 3 (``route_fallback_sustained`` -- the alert the
+    operator actually asked for) could never fire. It must now be sourced
+    from a step output, with ``unknown`` only as its documented fallback.
+    """
+    job = _workflow("dev-lane-liveness.yml")["jobs"]["saturation-record"]
+    step = _step(job, "Build the record and evaluate sustained saturation")
+    route_reason_env = str(step["env"]["ROUTE_REASON"])
+    assert route_reason_env != "unknown"
+    assert "steps.route_reason.outputs.reason" in route_reason_env
+
+    reason_step = _step(job, "Fetch the most recent route decision's reason")
+    assert reason_step["id"] == "route_reason"
+    assert reason_step["continue-on-error"] is True
+
+
 # --- the seam is read, never written --------------------------------------
 
 
