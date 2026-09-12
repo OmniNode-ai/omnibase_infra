@@ -56,35 +56,67 @@ its own merits before this module is called; turning a lab-overlay failure into
 a failed rebuild would report a lane that IS running the merged sha as broken.
 The lab verdict travels in its own receipt, on its own lane value.
 
-THE FOUR IMAGE PINS
--------------------
+THE FOUR IMAGE PINS, ALL BUILT OR PROMOTED EVERY RUN
+----------------------------------------------------
 ``apply_lab_lane.sh`` commits no digest by design (OMN-17533 AC-5) and requires
-the caller to pin all four images. Three of the four are derived by this
-pipeline and one is read off the live lane:
+the caller to pin all four images. This module builds or promotes **all four**
+from the merged sha on **every** run and pins what it just imported. Nothing is
+ever carried forward from the ledger, from the host's Docker daemon, or from the
+content store.
+
+That is a measured requirement. **k3s garbage-collects unreferenced images**, and
+``apply_lab_lane.sh`` deletes both migrate Jobs on completion, so from the moment
+an apply finishes nothing references either migrate image. Measured on the lab
+lane 2026-09-12: both were resident at a 15:54Z apply and gone by that night. The
+apply that then pinned what it found passed the preflight, wrote every object, and
+died at the migrate barrier because the Job could not pull an image that was no
+longer there -- leaving three runtime pods in CrashLoopBackOff on a missing
+``public.db_metadata`` relation, migrations never having run. A resident image is
+therefore not a pinnable one.
+
+The worse half of a scavenging caller is not that it breaks; it is that it
+*keeps the lane stale and passes*. Nothing rebuilds these images on their own,
+which is exactly why the lane sat three days behind, so a caller that faithfully
+re-pins what it finds reproduces the defect it was written to remove. Building
+every pin also gets the AC6 readback for free: the version in the pod has to
+match the sha by construction.
 
 ``--runtime-image``
-    ``docker tag`` of the image this agent just built, promoted into the
-    ``onex-lab/`` name space and imported into the k3s content store. Never
-    rebuilt -- a second build of the same source would be a different digest
-    for no reason.
+    ``docker tag`` of the image this agent just built for the compose lane from
+    the merged sha, promoted into the ``onex-lab/`` name space and imported. The
+    one pin that is promoted rather than rebuilt, because a second build of the
+    same source is a different digest for no reason. Imported every run like the
+    rest.
 ``--infra-migrate-image``
-    Built here from ``docker/Dockerfile.migrate`` in this agent's own clone,
-    which is already checked out at the merged sha. It is an ``alpine`` image
-    whose only layers are two ``COPY`` directives, so the build is seconds. It
-    is rebuilt EVERY run rather than carried forward, because it is the
-    OMN-17702 barrier: a migrate bundle whose lineage lags the runtime image is
-    precisely the failure that barrier exists to catch.
+    Built from ``docker/Dockerfile.migrate`` in this agent's own clone, already
+    at the merged sha. ``alpine`` plus two ``COPY`` layers, so seconds. It is the
+    OMN-17702 barrier the runtime image's entrypoint dies without.
 ``--cloud-migrate-image``
-    Built here the same way from ``omninode_infra``'s ``docker/Dockerfile.migrate``
-    in the archived overlay tree, so its lineage is the overlay's lineage.
+    Built the same way from the archived overlay tree, so its lineage is the
+    overlay's lineage.
 ``--api-image``
-    READ OFF THE LIVE ``onex-api`` Deployment. This is the one pin this module
-    does not produce, stated rather than hidden: ``onex-api`` is a full
-    application build from ``omninode_infra``, and this trigger fires on
-    ``omnibase_infra`` merges, so building it here would rebuild a large image
-    on every merge of an unrelated repository. Carried forward, and verified
-    resident in the k3s content store, so a pin that has been garbage-collected
-    is a named refusal rather than an ``ImagePullBackOff`` ten minutes later.
+    Built from the overlay tree's ``docker/onex-api/Dockerfile`` with context
+    ``docker/onex-api`` -- the same file and the same context
+    ``build-and-push-onex-api.yml`` uses, so the lab image is the image CI builds
+    and not a lookalike assembled from a wider tree. A two-stage
+    ``python:3.12-slim`` build, minutes cold and fast warm.
+
+Each pin is then verified resident in the content store immediately before the
+apply, so a pin that is somehow still absent after its own build is a named
+refusal rather than an ``ImagePullBackOff`` ten minutes into a rollout.
+
+THE APPLY DOES NOT PRUNE, SO THIS MODULE DOES
+---------------------------------------------
+``apply_lab_lane.sh`` applies a document set. A workload removed from the
+manifests therefore keeps running on the lane forever, on whatever image it was
+last given. Measured 2026-09-12: after an apply that pinned a fresh image, 16 of
+17 Deployments carried it and the seventeenth was the standalone
+``omnimarket-projection-delegation-writer`` that ``omninode_infra#1355`` had
+already retired, still on a stamp four days old. Left alone, the lane runs retired
+workloads and the receipt says PASS -- the same false green in a new place. The
+prune considers only Deployments carrying both of the overlay's own management
+labels, treats the render as the sole authority on what survives, refuses a render
+that declares no Deployment at all, and reports every deletion in the record.
 
 THE OVERLAY LINEAGE IS NOT THE MERGED SHA, and the receipt says so. The merged
 sha is an ``omnibase_infra`` commit; the overlay is ``omninode_infra`` code. The
@@ -121,6 +153,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -164,12 +198,30 @@ RUNTIME_DEPLOYMENT = "omninode-runtime"
 #: control, not by review.
 RUNTIME_POD_SELECTOR = f"app.kubernetes.io/name={RUNTIME_DEPLOYMENT}"
 
+#: The two labels the overlay stamps on everything it owns, read off the live
+#: lane rather than assumed. The prune considers ONLY objects carrying both, so a
+#: workload a person or another system put in this namespace is out of reach of
+#: it by construction.
+LANE_MANAGED_SELECTOR = "omninode/managed=true,omninode/lane=onex-lab"
+
 #: The ``onex-lab/`` names the three built-or-promoted pins are published under.
 #: ``docker.io/`` is prepended when the reference is compared against the k3s
 #: content store, which normalises every unqualified name to that registry.
 RUNTIME_IMAGE_NAME = "onex-lab/omninode-runtime"
 INFRA_MIGRATE_IMAGE_NAME = "onex-lab/omnibase-infra-migrate"
 CLOUD_MIGRATE_IMAGE_NAME = "onex-lab/omninode-cloud-migrate"
+API_IMAGE_NAME = "onex-lab/omnicloud-core"
+
+#: Build recipes for the three images this caller builds from source, keyed by
+#: the repository tree they are built in. Context and Dockerfile are BOTH named
+#: because they differ: the two migrate bundles build from their repo root while
+#: onex-api builds from ``docker/onex-api`` -- the same context
+#: ``build-and-push-onex-api.yml`` uses, so the lab image is the image CI builds
+#: and not a lookalike assembled from a wider tree.
+MIGRATE_DOCKERFILE = "docker/Dockerfile.migrate"
+MIGRATE_CONTEXT = "."
+API_DOCKERFILE = "docker/onex-api/Dockerfile"
+API_CONTEXT = "docker/onex-api"
 
 #: The five bootstrap keys ``k8s/onex-lab/lab_secret_store.py`` demands, minus
 #: the environment slug, which ``apply_lab_lane.sh`` passes as its own flag.
@@ -228,6 +280,11 @@ SHORT_TIMEOUT_SECONDS = 120
 IMPORT_TIMEOUT_SECONDS = 900
 #: The two migrate bundles are ``alpine`` plus ``COPY`` layers.
 MIGRATE_BUILD_TIMEOUT_SECONDS = 600
+#: ``onex-api`` is a two-stage ``python:3.12-slim`` build with a pip install, so
+#: it is minutes rather than seconds on a cold layer cache and fast on a warm
+#: one. It is still built EVERY run -- see ``_derive_pins`` for why a resident
+#: image is not a pinnable one.
+API_BUILD_TIMEOUT_SECONDS = 1200
 
 
 class LabOverlayRefusalError(Exception):
@@ -704,29 +761,102 @@ class LabOverlayApplier:
             )
             raise LabOverlayRefusalError(msg)
 
-    def build_migrate_bundle(self, *, context: Path, target: str) -> None:
-        """Build one migrate bundle and import it.
+    def build_and_import(
+        self,
+        *,
+        tree: Path,
+        dockerfile: str,
+        context: str,
+        target: str,
+        timeout: int,
+    ) -> None:
+        """Build one image from source and import it into the k3s content store.
 
-        Both bundles are ``alpine`` plus ``COPY`` layers, so this is seconds, and
-        both are rebuilt every run on purpose: the migrate image is the
-        OMN-17702 barrier the runtime image's entrypoint dies without, and a
-        bundle carried forward from an older lineage than the runtime it gates
-        is the exact condition the barrier exists to refuse.
+        Every image this caller pins goes through here, and every one is rebuilt
+        on every run. That is not thrift-blindness; it is the only shape in which
+        a pin is guaranteed pullable. See ``_derive_pins``.
         """
         self._run(
-            [
-                "docker",
-                "build",
-                "-f",
-                "docker/Dockerfile.migrate",
-                "-t",
-                target,
-                ".",
-            ],
-            timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
-            cwd=context,
+            ["docker", "build", "-f", dockerfile, "-t", target, context],
+            timeout=timeout,
+            cwd=tree,
         )
         self._import_into_containerd(target)
+
+    # -- prune -------------------------------------------------------------
+    def declared_deployments(self, render_path: Path) -> frozenset[str]:
+        """Every Deployment name the rendered overlay declares.
+
+        Read from the render ``apply_lab_lane.sh`` itself produced, not from a
+        list in this file: a hand-kept list is how a prune starts deleting a
+        workload somebody legitimately added.
+        """
+        names: set[str] = set()
+        with render_path.open(encoding="utf-8") as handle:
+            for doc in yaml.safe_load_all(handle):
+                if isinstance(doc, dict) and doc.get("kind") == "Deployment":
+                    names.add(str(doc["metadata"]["name"]))
+        if not names:
+            msg = (
+                f"{render_path} declares no Deployment at all; refusing to treat "
+                "that as 'everything on the lane is retired'"
+            )
+            raise LabOverlayRefusalError(msg)
+        return frozenset(names)
+
+    def prune_retired_deployments(
+        self, kubeconfig: Path, render_path: Path
+    ) -> list[str]:
+        """Delete lane-managed Deployments the render no longer declares.
+
+        WHY THIS IS NEEDED. ``apply_lab_lane.sh`` applies a document set; it does
+        not prune. A workload removed from the manifests therefore keeps running
+        on the lane forever, on whatever image it was last given. Measured on the
+        lab lane 2026-09-12: after an apply that pinned a fresh image, 16 of 17
+        Deployments carried it and the seventeenth was
+        ``omnimarket-projection-delegation-writer`` -- the standalone writer
+        ``omninode_infra#1355`` had already retired from the manifests -- still on
+        a stamp four days old. Without this step the lane runs retired workloads
+        and the receipt says PASS, which is the same false green in a new place.
+
+        THE SCOPE IS NARROW AND IT IS A SCOPE, NOT A FILTER ON GOOD INTENTIONS.
+        Only Deployments carrying BOTH of the overlay's own management labels are
+        considered, so nothing a person or another system put in this namespace is
+        in reach, and the render is the sole authority on what survives. A render
+        that declares no Deployment is refused rather than read as "retire
+        everything" (rule 16: an empty result is not evidence of absence).
+
+        Every deletion is returned so it lands in the record's evidence. A prune
+        nobody can read afterwards is a silent mutation.
+        """
+        declared = self.declared_deployments(render_path)
+        raw = self._kubectl(
+            [
+                "get",
+                "deployments",
+                "-l",
+                LANE_MANAGED_SELECTOR,
+                "-o",
+                "json",
+            ],
+            kubeconfig,
+            timeout=SHORT_TIMEOUT_SECONDS,
+        )
+        payload = json.loads(raw) if raw else {"items": []}
+        live = {
+            str(item["metadata"]["name"])
+            for item in payload.get("items", [])
+            if isinstance(item, dict)
+        }
+        retired = sorted(live - declared)
+        for name in retired:
+            logger.info("lab_overlay: pruning retired Deployment %s", name)
+            self._kubectl(
+                ["delete", f"deployment/{name}", "--ignore-not-found", "--wait=true"],
+                kubeconfig,
+                timeout=SHORT_TIMEOUT_SECONDS,
+            )
+        return retired
 
     # -- live lane reads ----------------------------------------------------
     def _kubectl(self, args: Sequence[str], kubeconfig: Path, *, timeout: int) -> str:
@@ -735,32 +865,6 @@ class LabOverlayApplier:
             timeout=timeout,
             extra_env={"KUBECONFIG": str(kubeconfig)},
         )
-
-    def carried_forward_api_pin(self, kubeconfig: Path) -> str:
-        """The ``--api-image`` pin, read off the live ``onex-api`` Deployment.
-
-        A blank result is a refusal, not a default. There is no fallback image:
-        an unpinned lane is a lane whose verdict names no candidate, which is
-        the rule ``apply_lab_lane.sh`` states for all four of its arguments.
-        """
-        ref = self._kubectl(
-            [
-                "get",
-                f"deployment/{API_DEPLOYMENT}",
-                "-o",
-                "jsonpath={.spec.template.spec.containers[0].image}",
-            ],
-            kubeconfig,
-            timeout=SHORT_TIMEOUT_SECONDS,
-        )
-        if not ref:
-            msg = (
-                f"the live {API_DEPLOYMENT} Deployment in {LAB_NAMESPACE} declares no "
-                "image, so the api pin cannot be carried forward. Apply the lane "
-                "once by hand to establish it."
-            )
-            raise LabOverlayRefusalError(msg)
-        return ref
 
     def running_runtime_image_ids(self, kubeconfig: Path) -> dict[str, str]:
         """``pod name -> imageID`` for the runtime Deployment's Running pods."""
@@ -870,7 +974,6 @@ class LabOverlayApplier:
             pins = self._derive_pins(
                 sha=sha,
                 stamp=stamp,
-                kubeconfig=kubeconfig,
                 overlay_tree=overlay_tree,
                 manifest_sha=manifest_sha,
             )
@@ -950,6 +1053,7 @@ class LabOverlayApplier:
                 kubeconfig=kubeconfig,
                 pins=pins,
                 runtime_digest=runtime_digest,
+                render_path=work / "apply" / "onex-lab-render.yaml",
             )
         )
         shred(kubeconfig)
@@ -965,31 +1069,75 @@ class LabOverlayApplier:
         *,
         sha: str,
         stamp: str,
-        kubeconfig: Path,
         overlay_tree: Path,
         manifest_sha: str,
     ) -> ModelLabOverlayPins:
-        """Produce the four pins, verifying every one is resident before the apply.
+        """Build, import and pin all four images, then verify every one is resident.
 
-        A pin that is not in the k3s content store is refused HERE, by name. The
-        alternative is an apply that writes every object, rolls every Deployment
-        and surfaces minutes later as ``ImagePullBackOff`` -- the same
-        succeeds-then-fails-later shape ``preflight_lab_cluster.sh`` exists to
-        remove for the node address.
+        ALL FOUR ARE BUILT OR PROMOTED FROM THE MERGED SHA ON EVERY RUN, AND NONE
+        IS EVER CARRIED FORWARD. That is a measured requirement, not a
+        preference. **k3s garbage-collects unreferenced images**, and
+        ``apply_lab_lane.sh`` deletes the two migrate Jobs on completion, so from
+        the moment an apply finishes nothing in the cluster references either
+        migrate image and both become collectable. Measured on the lab lane
+        2026-09-12: both were resident at a 15:54Z apply and gone by that night,
+        leaving only partially-collected unnamed ``import-*`` refs. The apply that
+        then pinned what it found passed the preflight, wrote every object, and
+        died at the migrate barrier -- the Job could not pull an image that was no
+        longer there -- leaving three runtime pods in CrashLoopBackOff on a
+        missing ``public.db_metadata`` relation because migrations had never run.
+
+        So a resident image is NOT a pinnable one: residency between applies is
+        the thing that is not guaranteed. Scavenging a pin from the ledger, from
+        the host's Docker daemon, or from the content store is the same defect
+        three ways, and the worst of it is that it *keeps the lane stale and
+        passes* -- which is the condition this whole ticket exists to remove.
+
+        A pin that is somehow still not resident after its own build is refused
+        HERE, by name. The alternative is an apply that writes every object,
+        rolls every Deployment and surfaces minutes later as
+        ``ImagePullBackOff`` -- the succeeds-then-fails-later shape
+        ``preflight_lab_cluster.sh`` exists to remove for the node address.
         """
         tag = f"{stamp}-{sha[:8]}"
+        overlay_tag = f"{manifest_sha[:8]}-{stamp}"
         runtime_image = f"{RUNTIME_IMAGE_NAME}:{tag}"
         infra_migrate_image = f"{INFRA_MIGRATE_IMAGE_NAME}:{tag}"
-        cloud_migrate_image = f"{CLOUD_MIGRATE_IMAGE_NAME}:{manifest_sha[:8]}-{stamp}"
+        cloud_migrate_image = f"{CLOUD_MIGRATE_IMAGE_NAME}:{overlay_tag}"
+        api_image = f"{API_IMAGE_NAME}:{overlay_tag}"
 
+        # The runtime image is PROMOTED rather than rebuilt -- this agent just
+        # built it for the compose lane from the merged sha, and a second build
+        # of the same source would be a different digest for no reason. It is
+        # still imported every run, for the same GC reason as the rest.
         self._runtime_digest = self.promote_and_import(
             source=self.env.get("LAB_RUNTIME_SOURCE_IMAGE")
             or "omnibase-infra-omninode-runtime:latest",
             target=runtime_image,
         )
-        self.build_migrate_bundle(context=self.repo_dir, target=infra_migrate_image)
-        self.build_migrate_bundle(context=overlay_tree, target=cloud_migrate_image)
-        api_image = self.carried_forward_api_pin(kubeconfig)
+        # omnibase_infra's own tree, already checked out at the merged sha.
+        self.build_and_import(
+            tree=self.repo_dir,
+            dockerfile=MIGRATE_DOCKERFILE,
+            context=MIGRATE_CONTEXT,
+            target=infra_migrate_image,
+            timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
+        )
+        # The overlay's tree, so these two carry the overlay's lineage.
+        self.build_and_import(
+            tree=overlay_tree,
+            dockerfile=MIGRATE_DOCKERFILE,
+            context=MIGRATE_CONTEXT,
+            target=cloud_migrate_image,
+            timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
+        )
+        self.build_and_import(
+            tree=overlay_tree,
+            dockerfile=API_DOCKERFILE,
+            context=API_CONTEXT,
+            target=api_image,
+            timeout=API_BUILD_TIMEOUT_SECONDS,
+        )
 
         resident = self.resident_images()
         absent = [
@@ -1028,6 +1176,7 @@ class LabOverlayApplier:
         kubeconfig: Path,
         pins: ModelLabOverlayPins,
         runtime_digest: str,
+        render_path: Path,
     ) -> list[ModelLabOverlayCheck]:
         """AC6, as two checks the lane cannot pass while it is stale.
 
@@ -1122,6 +1271,40 @@ class LabOverlayApplier:
             checks.append(
                 ModelLabOverlayCheck(
                     name="runtime_omnimarket_version",
+                    ok=False,
+                    evidence=f"{type(exc).__name__}: {_truncate(str(exc))}",
+                )
+            )
+
+        # The prune runs LAST and reports what it deleted. Ordering is not
+        # arbitrary: pruning before the image readback would remove the very
+        # evidence that a Deployment was running the wrong image.
+        try:
+            retired = self.prune_retired_deployments(kubeconfig, render_path)
+            checks.append(
+                ModelLabOverlayCheck(
+                    name="retired_workloads_pruned",
+                    ok=True,
+                    evidence=(
+                        f"lane-managed Deployments absent from {render_path.name} "
+                        + (
+                            f"and deleted: {retired}"
+                            if retired
+                            else "and deleted: none -- the lane declares exactly "
+                            "what the render declares"
+                        )
+                    ),
+                )
+            )
+        except (
+            LabOverlayRefusalError,
+            OSError,
+            ValueError,
+            subprocess.SubprocessError,
+        ) as exc:
+            checks.append(
+                ModelLabOverlayCheck(
+                    name="retired_workloads_pruned",
                     ok=False,
                     evidence=f"{type(exc).__name__}: {_truncate(str(exc))}",
                 )
