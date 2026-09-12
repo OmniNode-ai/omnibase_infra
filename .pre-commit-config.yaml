@@ -247,6 +247,18 @@ repos:
       # only when no path matches at all, so a zero-byte file satisfies it, and
       # a zero-byte file is exactly what the lab-load probe produced on 10 of
       # its first 12 runs while every run stayed green.
+      # OMN-18253: the lab-load probe must report honestly in its own
+      # conclusion and in its artifact. Pins that a busy lab still exits 0 (the
+      # control that makes removing the job-level suppression safe), that every
+      # failure state still writes a non-empty record, and that the job carries
+      # no suppression at either level.
+      - id: lab-load-probe-honesty
+        name: Lab-load probe reports honestly (OMN-18253)
+        entry: uv run --frozen pytest tests/ci/test_lab_load_probe_omn18253.py -q
+        language: system
+        files: ^(\.github/workflows/dev-lane-liveness\.yml|scripts/ci/probe_lab_load\.py|tests/ci/test_lab_load_probe_omn18253\.py|tests/fixtures/omn18253/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ci-evidence-policy
         name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
         entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q
