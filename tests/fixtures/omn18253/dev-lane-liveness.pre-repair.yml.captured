@@ -141,26 +141,8 @@ jobs:
     # report it as the lab. Same reasoning the dev-lane-liveness job above
     # already applies to its own runs-on.
     runs-on: [self-hosted, omnibase-ci]
-    # OMN-18253: `continue-on-error: true` used to sit here, on the stated
-    # reasoning that "this job failing IS a data point, not an outage". The
-    # reasoning was right and is preserved; the mechanism was wrong.
-    #
-    # What it actually bought was that NO failure inside this job reached the
-    # run's conclusion -- including the ModuleNotFoundError that killed 10 of
-    # the job's first 12 runs and left a zero-byte artifact. "The lab is quiet",
-    # "I could not reach the API" and "I crashed before writing anything" were
-    # one green.
-    #
-    # The data-point property now lives where it belongs, in the probe itself:
-    # `probe_lab_load.py` exits 0 for a MEASUREMENT, saturated or not, and
-    # non-zero only when it could not measure at all. A busy lab host therefore
-    # still cannot fail this job. What can is the probe being unable to answer,
-    # which is exactly the state worth seeing.
-    #
-    # Nothing downstream is blocked either way: `dev-lane-liveness` has no
-    # `needs` on this job, and `saturation-record` runs under `if: always()`
-    # because an absent lab record is alert condition 4.
-    # tests/ci/test_lab_load_probe_omn18253.py pins all of it.
+    # Never blocks the lane probe: this job failing IS a data point, not an outage.
+    continue-on-error: true
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
@@ -181,36 +163,28 @@ jobs:
         # honestly with nothing but outbound HTTPS. See
         # `probe_lab_saturation_from_fleet`'s docstring for the full reasoning.
         #
-        # OMN-18253: the probe moved out of an inline heredoc into
-        # `scripts/ci/probe_lab_load.py`. Two reasons, both measured rather
-        # than stylistic.
-        #
-        # (1) THE HEREDOC COULD NOT FAIL HONESTLY.
-        # `probe_lab_saturation_from_fleet` NEVER raises -- every failure comes
-        # back as `{"ok": false, "error": ...}` -- so the heredoc printed a
-        # record saying it had measured nothing and exited 0. `set -euo
-        # pipefail` does not help: nothing returned non-zero. A probe that
-        # could not reach the runner API was a green step.
-        # (2) THE REDIRECT MANUFACTURED THE ZERO-BYTE ARTIFACT. `> lab-load.json`
-        # creates the file before python runs, so an import failure left an
-        # empty record that looked like a measurement of nothing. The module
-        # writes the file itself, after deciding what to say, and records even
-        # an unhandled exception rather than dying before writing.
-        #
-        # A BUSY LAB STILL EXITS 0. Saturation is `ok: true` with a high ratio;
-        # only an inability to measure is non-zero. That is what keeps this a
-        # data point rather than an outage now that the job no longer suppresses
-        # its own failures.
+        # `set -euo pipefail` (was `set -uo pipefail`, missing `-e`) makes a
+        # crashing probe FAIL THIS STEP rather than let `cat` on an empty file
+        # exit 0 afterwards and read as a quiet success. The job's own
+        # `continue-on-error: true` still keeps a failure here from blocking
+        # the lane probe; it no longer also keeps the failure invisible in the
+        # step's own conclusion.
         env:
           RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/probe_lab_load.py \
-            --out lab-load.json \
-            --runner-group omnibase-ci \
-            --api-url "${GITHUB_API_URL:-https://api.github.com}" \
-            --token "${RUNNER_FLEET_STATUS_TOKEN:-${CROSS_REPO_PAT:-}}"
+          python3 - <<'PYEOF' > lab-load.json
+          import json, os, sys, datetime
+          sys.path.insert(0, "scripts/ci")
+          from runner_route_decision import probe_lab_saturation_from_fleet
+          token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get("CROSS_REPO_PAT")
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          record = probe_lab_saturation_from_fleet(token, "omnibase-ci", api_url)
+          record["sampled_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+          print(json.dumps(record))
+          PYEOF
+          cat lab-load.json
       # OMN-18247. `if: always()` is load-bearing here for the same reason it is
       # on the uploader: when the producing step dies, `> lab-load.json` has
       # ALREADY created the file, so what reaches the uploader is a zero-byte

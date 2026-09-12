@@ -1835,6 +1835,16 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
 
+      - name: Check the lab-load probe reports honestly (OMN-18253)
+        run: |
+          echo "================================================================"
+          echo "Lab-Load Probe Honesty (OMN-18253)"
+          echo "A measurement exits 0 even when the lab is saturated; only an"
+          echo "inability to measure exits non-zero, and every state writes a"
+          echo "non-empty record. The job carries no suppression at either level."
+          echo "================================================================"
+          uv run pytest tests/ci/test_lab_load_probe_omn18253.py -v --tb=short
+
       - name: Check CI evidence-artifact policy (OMN-18247)
         run: |
           echo "================================================================"
