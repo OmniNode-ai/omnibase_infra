@@ -43,6 +43,14 @@ SELECTOR_V2_MARKER = "OMNI_RUNNER_SELECTOR_V2"
 # A marker sits directly above the `runs-on:` it describes. The bound exists so
 # an unrelated marker elsewhere in the same job cannot satisfy the requirement.
 SELECTOR_MARKER_WINDOW = 24
+REQUIRED_OVERRIDE_ACTIVATION_GATE_KEYS: tuple[str, ...] = (
+    "sustained_samples",
+    "sustained_min_span_seconds",
+    "capacity_budget",
+    "maintenance_roll_convergence",
+    "evidence_companion_fate_isolation",
+    "positive_control_acceptance",
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,33 @@ def _load_policy(path: Path) -> dict[str, Any]:
 
 def _canonical_json(value: str) -> str:
     return json.dumps(json.loads(value), separators=(",", ":"))
+
+
+def _require_override_activation_gate(repo_name: str, override: dict[str, Any]) -> None:
+    gate = override.get("activation_gate")
+    if not isinstance(gate, dict):
+        raise ValueError(
+            f"repository_overrides[{repo_name}] must carry activation_gate: "
+            "future flips need sustained sampling, a capacity budget, maintenance "
+            "convergence, evidence-companion fate isolation, and a positive control"
+        )
+    for key in REQUIRED_OVERRIDE_ACTIVATION_GATE_KEYS:
+        if key not in gate:
+            raise ValueError(
+                f"repository_overrides[{repo_name}].activation_gate is missing "
+                f"required key {key!r}"
+            )
+        value = gate[key]
+        if isinstance(value, str) and not value.strip():
+            raise ValueError(
+                f"repository_overrides[{repo_name}].activation_gate[{key!r}] "
+                "must not be blank"
+            )
+        if value is None:
+            raise ValueError(
+                f"repository_overrides[{repo_name}].activation_gate[{key!r}] "
+                "must not be null"
+            )
 
 
 def _run_gh(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
@@ -144,6 +179,7 @@ def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
                     "a declared divergence with no stated end is indistinguishable "
                     "from drift to the next lane"
                 )
+            _require_override_activation_gate(repo_name, override)
             repo_expected_raw = str(override["expected_json"])
         repo_expected = _canonical_json(repo_expected_raw)
         actual = _variable_value(_variables(["--repo", f"{ORG}/{repo_name}"]), name)
