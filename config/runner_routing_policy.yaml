@@ -388,6 +388,43 @@ security_scan_runner_variable:
   org_scope: absent
   revert_when: >-
     Declared for visibility, not for movement. Nothing in OMN-18205 flips it. A security scan that resolves through the fleet shares fate with the host it scans, so it stays hosted until a separate claim argues otherwise.
+omninode_infra_fleet_runner_variable:
+  name: OMNI_INFRA_FLEET_RUNS_ON_JSON
+  # OMN-18205 phase 3 (cloud-ci-phase3, 2026-09-12). omninode_infra#1390 moves
+  # 40 of that repository's hardcoded-fleet job definitions onto this
+  # DEDICATED variable rather than pointing them at OMNI_TRUSTED_CI_RUNS_ON_JSON
+  # above. Standing up a repo-scoped trusted-seam shadow for these 40 jobs
+  # would couple their placement to any future org- or repo-scope flip of that
+  # seam -- including the two lab-kubeconfig-bound jobs and the
+  # AWS-role-bearing jobs #1390 documents as never allowed to move
+  # automatically. This is not a hypothetical: earlier the same day, a
+  # repo-scoped OMNI_TRUSTED_CI_RUNS_ON_JSON shadow on omninode_infra
+  # relocated 13 already-seam-driven jobs onto the fleet mid-session, two of
+  # which cannot run there (yq/kustomize absent from the fleet image), and CI
+  # Summary -- a required check aggregating both -- blocked every open PR in
+  # that repository for 41 minutes before the shadow's own owner reverted it
+  # (docs/tracking/ROLLING_WORK_LEDGER.md :7056/:7057 in omni_home). A
+  # dedicated variable makes the 40-job fleet-migration decision independent
+  # of whatever the trusted seam is doing, so the same collision cannot recur
+  # through this path.
+  #
+  # Fallback literal while unset: '["self-hosted","omnibase-ci"]' -- the exact
+  # label these 40 jobs were hardcoded to before #1390, so leaving the
+  # variable unset is placement-neutral by construction.
+  #
+  # Deliberately UNSET everywhere, on the same terms as
+  # OMNI_OCC_AUTOBIND_RUNS_ON_JSON and OMNI_RUNTIME_REBUILD_RUNS_ON_JSON
+  # documented in trusted_runner_variable above: unset is the intended state
+  # and a set one is the defect. NOT a member of SCOPED_VARIABLE_KEYS /
+  # audit_scoped_variables below -- there is no live per-repo absence check
+  # for it, the same honest limit those two knobs carry. Setting it is its own
+  # single-owner claim under rule 14 (name every scope live before the first
+  # PATCH) and must never be bundled with a write to
+  # OMNI_TRUSTED_CI_RUNS_ON_JSON at any scope.
+  fallback_json: '["self-hosted","omnibase-ci"]'
+  owner: cloud-ci lane (OMN-18205)
+  repositories:
+    - omninode_infra
 public_pr_runner_variable:
   name: OMNI_PUBLIC_PR_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'
