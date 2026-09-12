@@ -4,8 +4,8 @@
 """Incident replay: the probe died, the run stayed green (OMN-18253).
 
 THE INCIDENT, in the runner's own words
-    ``tests/fixtures/omn18253/lab-load-probe-job103556840056.log.captured`` is
-    the verbatim log of the ``lab-load-probe`` job in run 34694995666. It records
+    ``tests/fixtures/omn18253/lab-load-probe-job103556840056.log.gz.captured``
+    is the verbatim log of the ``lab-load-probe`` job in run 34694995666. It records
     a ``Traceback``, ``ModuleNotFoundError: No module named 'yaml'``, and
     ``Process completed with exit code 1``.
 
@@ -34,6 +34,7 @@ THE DISCRIMINATOR IS LOAD-BEARING
 
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 import sys
@@ -46,7 +47,7 @@ CAPTURE = (
     / "tests"
     / "fixtures"
     / "omn18253"
-    / "lab-load-probe-job103556840056.log.captured"
+    / "lab-load-probe-job103556840056.log.gz.captured"
 )
 
 # The import failure the capture records, reproduced as a module the probe
@@ -83,7 +84,14 @@ def test_the_capture_records_a_crashed_probe_under_a_green_run() -> None:
     the import error -- from the captured bytes themselves.
     """
     assert CAPTURE.is_file(), f"{CAPTURE} is missing"
-    log = CAPTURE.read_text(encoding="utf-8", errors="replace")
+    # Stored gzipped, and the compression is deterministic (`gzip -n`, no
+    # mtime) so the committed sha256 pins the exact log bytes. The raw log
+    # carries the runner's ANSI escape sequences, and a committed file holding
+    # them makes `gh pr diff` refuse the whole diff, which takes the hostile
+    # reviewer down with it. Compressing keeps the bytes byte-for-byte rather
+    # than stripping them, which would have made the capture no longer the log
+    # that failed.
+    log = gzip.decompress(CAPTURE.read_bytes()).decode("utf-8", errors="replace")
     assert "ModuleNotFoundError: No module named 'yaml'" in log
     assert "Process completed with exit code 1" in log
 
