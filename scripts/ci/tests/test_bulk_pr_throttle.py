@@ -429,22 +429,47 @@ class TestRunBulkOperationFlow:
         with pytest.raises(TypeError):
             OPERATION_QUEUE_DEPTH_POLICY[operation] = True  # type: ignore[index]
 
-    def test_arm_automerge_dry_run_records_gated_policy_without_probing(self):
-        from bulk_pr_throttle import run_bulk_operation
+    def test_arm_automerge_completes_at_high_depth_with_wave_receipt(self, tmp_path):
+        from bulk_pr_throttle import (
+            OPERATION_QUEUE_DEPTH_POLICY,
+            PrOutcome,
+            run_bulk_operation,
+            write_receipt,
+        )
+
+        operation = "arm-automerge"
+        applied: list[int] = []
 
         report = run_bulk_operation(
             owner="OmniNode-ai",
             repo="onex_change_control",
             pr_numbers=[1, 2, 3, 4, 5],
-            operation="arm-automerge",
-            dry_run=True,
-            get_queue_depth=None,
-            apply_pr_operation=None,
+            operation=operation,
+            wave_size=5,
+            queue_depth_threshold=150,
+            dry_run=False,
+            get_queue_depth=lambda: 200,
+            apply_pr_operation=lambda owner, repo, pr, selected_operation: (
+                applied.append(pr)
+                or PrOutcome(pr_number=pr, success=True, detail="armed")
+            ),
+            max_wait_seconds=0.0,
         )
 
-        assert report.queue_depth_gate_applied is True
-        assert all(wave.queue_depth_before == -1 for wave in report.waves)
-        assert all(wave.queue_depth_after == -1 for wave in report.waves)
+        assert OPERATION_QUEUE_DEPTH_POLICY[operation] is False
+        assert applied == [1, 2, 3, 4, 5]
+        assert report.queue_depth_gate_applied is False
+        assert report.waves[0].queue_depth_before == 200
+        assert report.waves[0].queue_depth_after == 200
+
+        receipt_path = tmp_path / f"{operation}.json"
+        write_receipt(report, receipt_path)
+        receipt = json.loads(receipt_path.read_text())
+        assert receipt["queue_depth_gate_applied"] is False
+        assert receipt["waves"][0]["outcomes"] == [
+            {"detail": "armed", "pr_number": pr, "success": True}
+            for pr in [1, 2, 3, 4, 5]
+        ]
 
     @pytest.mark.parametrize("failed_call", [1, 2])
     def test_noop_dry_run_queue_observation_failure_does_not_refuse(self, failed_call):
@@ -560,9 +585,7 @@ class TestRunBulkOperationFlow:
         assert report.waves[1].queue_depth_before is None
         assert report.waves[1].queue_depth_after == 204
 
-    @pytest.mark.parametrize(
-        "operation", ["update-branch", "arm-automerge", "rerun-failed"]
-    )
+    @pytest.mark.parametrize("operation", ["update-branch", "rerun-failed"])
     def test_load_creating_operations_still_refuse_at_high_depth(self, operation):
         from bulk_pr_throttle import (
             PrOutcome,
@@ -797,7 +820,7 @@ class TestWriteReceipt:
                 False,
             )
 
-    def test_report_gate_flag_is_derived_from_operation(self):
+    def test_report_observation_flag_is_derived_from_arm_automerge(self):
         from bulk_pr_throttle import BulkRunReport
 
         report = BulkRunReport(
@@ -810,7 +833,7 @@ class TestWriteReceipt:
             (),
         )
 
-        assert report.queue_depth_gate_applied is True
+        assert report.queue_depth_gate_applied is False
 
     def test_receipt_rejects_unknown_wave_operation_with_clear_error(self, tmp_path):
         from bulk_pr_throttle import BulkRunReport, WaveReceipt, write_receipt
