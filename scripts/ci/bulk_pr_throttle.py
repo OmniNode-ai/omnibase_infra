@@ -81,15 +81,15 @@ DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 
 # True means the operation can create or unlock check-suite load and must wait
 # for queue capacity. False means queue depth is sampled on a best-effort basis
-# but cannot block the operation. Arming auto-merge does not mint a check suite
-# immediately, but it authorizes a merge that can trigger base-branch and
-# dependent CI bursts, so it remains gated. Keeping every operation in one
-# immutable map prevents callers from bypassing the selected policy and
-# prevents new operations from silently inheriting a default.
+# but cannot block the operation. Arming auto-merge does not mint a check suite;
+# GitHub merges only after the PR's existing checks are green, so the operation
+# itself is observation-only. Keeping every operation in one immutable map
+# prevents callers from bypassing the selected policy and prevents new
+# operations from silently inheriting a default.
 OPERATION_QUEUE_DEPTH_POLICY: Mapping[str, bool] = MappingProxyType(
     {
         "update-branch": True,
-        "arm-automerge": True,
+        "arm-automerge": False,
         "rerun-failed": True,
         "noop-dry-run": False,
     }
