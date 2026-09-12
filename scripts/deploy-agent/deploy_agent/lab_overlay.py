@@ -329,6 +329,19 @@ class ModelLabOverlayCheck:
 
 
 @dataclass(frozen=True)
+class ModelRunningImage:
+    """What one Running pod reports about the image it is actually running.
+
+    ``reference`` is the tag the kubelet resolved; ``image_id`` is the digest
+    containerd reports for it. They answer different questions and only the
+    first is comparable against a pin -- see ``_readback_checks``.
+    """
+
+    reference: str
+    image_id: str
+
+
+@dataclass(frozen=True)
 class ModelLabOverlayPins:
     """The four image references one apply pins, and the lineage of each."""
 
@@ -866,8 +879,12 @@ class LabOverlayApplier:
             extra_env={"KUBECONFIG": str(kubeconfig)},
         )
 
-    def running_runtime_image_ids(self, kubeconfig: Path) -> dict[str, str]:
-        """``pod name -> imageID`` for the runtime Deployment's Running pods."""
+    def running_runtime_images(self, kubeconfig: Path) -> dict[str, ModelRunningImage]:
+        """``pod name -> the image reference and imageID`` for Running pods.
+
+        BOTH are read, and only the REFERENCE is compared. See
+        ``_readback_checks`` for why the digest cannot be.
+        """
         raw = self._kubectl(
             [
                 "get",
@@ -882,13 +899,16 @@ class LabOverlayApplier:
             timeout=SHORT_TIMEOUT_SECONDS,
         )
         payload = json.loads(raw) if raw else {"items": []}
-        ids: dict[str, str] = {}
+        running: dict[str, ModelRunningImage] = {}
         for item in payload.get("items", []):
             name = item.get("metadata", {}).get("name", "")
             for status in item.get("status", {}).get("containerStatuses", []) or []:
                 if status.get("name") == RUNTIME_DEPLOYMENT:
-                    ids[name] = str(status.get("imageID", ""))
-        return ids
+                    running[name] = ModelRunningImage(
+                        reference=str(status.get("image", "")),
+                        image_id=str(status.get("imageID", "")),
+                    )
+        return running
 
     def pod_omnimarket_version(self, kubeconfig: Path, pod: str) -> str:
         return self._kubectl(
@@ -1180,51 +1200,76 @@ class LabOverlayApplier:
     ) -> list[ModelLabOverlayCheck]:
         """AC6, as two checks the lane cannot pass while it is stale.
 
-        ``deployed_image`` compares by image ID, not by tag: two builds can carry
-        one tag, and the 2026-09-11 state was a lane pinned to a three-day-old
-        stamp with a green trigger above it. ``runtime_omnimarket_version``
-        compares the lab pod against the compose dev lane's own running
-        container, which is the exact discrepancy that was found by hand --
-        compose at 0.4.61, lab at 0.4.30.
+        ``deployed_image`` compares the IMAGE REFERENCE each Running pod reports
+        against the pin this run applied. ``runtime_omnimarket_version`` compares
+        the lab pod's installed distribution against the compose dev lane's own
+        running container, which is the exact discrepancy found by hand on
+        2026-09-11 -- compose at 0.4.61, lab at 0.4.30.
+
+        WHY THE REFERENCE AND NOT THE DIGEST, corrected 2026-09-12 by a live run
+        rather than by review. The first build of this check compared the pod's
+        ``imageID`` against the DIGEST column of ``k3s ctr images ls`` for the
+        applied pin, on a measurement showing the two were byte-identical. They
+        are identical only for an image imported from an OCI archive carrying an
+        index, which is what the lane's previous hand-applied pin happened to be.
+        For an image imported from ``docker save``, that column reports the
+        CONFIG digest -- the same value ``docker inspect {{.Id}}`` returns --
+        while the kubelet reports the manifest digest, and the two never match.
+        Measured on the first real run: the pod ran the correct freshly applied
+        pin and reported ``sha256:5f0b4623...`` while the content store reported
+        ``sha256:b0f56ab5...`` for the same tag. The check FAILED on a correctly
+        applied lane.
+
+        That is a false red, and a false red on this check is not harmless: the
+        receipt's verdict is derived from its checks, so every receipt would have
+        been a FAIL and the gate would have taught its readers to ignore it.
+
+        The reference is comparable and is not weaker here. The tag is minted
+        fresh on every run from this run's own timestamp and the merged sha
+        (``_derive_pins``), so it cannot be a tag some earlier build also carried
+        -- which is the reuse a tag comparison is normally weak against. Both
+        digests are still RECORDED in the evidence, because they are useful to a
+        reader; they are simply not asserted equal, since they answer different
+        questions.
         """
         checks: list[ModelLabOverlayCheck] = []
         try:
-            running = self.running_runtime_image_ids(kubeconfig)
+            running = self.running_runtime_images(kubeconfig)
             if not running:
                 msg = (
                     f"no Running {RUNTIME_DEPLOYMENT} pod in {LAB_NAMESPACE}, so the "
                     "lane's image cannot be read back"
                 )
                 raise LabOverlayRefusalError(msg)
-            # An empty expected digest would make `in` true for every pod and
-            # turn this check into a vacuous PASS -- the readback reached
-            # without a promotion having happened. Refuse it explicitly.
-            expected = runtime_digest.split(":")[-1]
-            if not expected:
-                msg = (
-                    "no runtime digest was recorded for this run, so there is "
-                    "nothing to compare the lane's pods against"
-                )
-                raise LabOverlayRefusalError(msg)
+            expected = normalise_image_ref(pins.runtime_image)
             mismatched = {
-                pod: image_id
-                for pod, image_id in running.items()
-                if expected not in image_id
+                pod: image.reference
+                for pod, image in running.items()
+                if normalise_image_ref(image.reference) != expected
             }
+            # The DIGEST portion, not the first N characters of the whole
+            # reference: a pod's imageID is often `<registry>/<name>@sha256:...`,
+            # so a blind prefix records the registry and truncates the one part a
+            # reader wants.
+            digests = ", ".join(
+                f"{pod}={image.image_id.rsplit('@', 1)[-1][:19]}..."
+                for pod, image in sorted(running.items())
+            )
             checks.append(
                 ModelLabOverlayCheck(
                     name="deployed_image",
                     ok=not mismatched,
                     evidence=(
-                        f"{len(running)} Running {RUNTIME_DEPLOYMENT} pod(s); "
-                        f"expected the promoted {pins.runtime_image} "
-                        f"(k3s content digest {runtime_digest[:19]}...); "
+                        f"{len(running)} Running {RUNTIME_DEPLOYMENT} pod(s); expected "
+                        f"{pins.runtime_image}; "
                         + (
-                            f"{len(mismatched)} still on another image: "
-                            f"{sorted(mismatched)}"
+                            f"{len(mismatched)} on another image: {sorted(mismatched.values())}"
                             if mismatched
-                            else "every pod matches"
+                            else "every pod runs it"
                         )
+                        + f". Content digests recorded, not compared: applied pin carries "
+                        f"{runtime_digest[:26]}... in the k3s content store; pods report "
+                        f"{digests}"
                     ),
                 )
             )

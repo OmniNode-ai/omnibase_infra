@@ -141,6 +141,9 @@ class FakeRunner:
                                 "containerStatuses": [
                                     {
                                         "name": "omninode-runtime",
+                                        "image": (
+                                            f"{RUNTIME_IMAGE_NAME}:{STAMP}-{SHA[:8]}"
+                                        ),
                                         "imageID": POD_IMAGE_ID,
                                     }
                                 ]
@@ -298,6 +301,7 @@ def test_a_lane_still_running_the_previous_image_fails_deployed_image(
                         "containerStatuses": [
                             {
                                 "name": "omninode-runtime",
+                                "image": f"{RUNTIME_IMAGE_NAME}:stale-stamp",
                                 "imageID": "docker.io/x@sha256:" + "e" * 64,
                             }
                         ]
@@ -314,7 +318,8 @@ def test_a_lane_still_running_the_previous_image_fails_deployed_image(
     record = json.loads(path.read_text())
     deployed = next(c for c in record["checks"] if c["name"] == "deployed_image")
     assert deployed["ok"] is False
-    assert "still on another image" in deployed["evidence"]
+    assert "on another image" in deployed["evidence"]
+    assert "stale-stamp" in deployed["evidence"]
 
 
 def test_a_lane_at_a_different_omnimarket_version_than_compose_fails(
@@ -687,3 +692,56 @@ def test_an_absent_content_store_row_is_a_refusal_not_an_empty_digest(
 
     with pytest.raises(LabOverlayRefusalError, match="no digest row"):
         applier.containerd_digest("onex-lab/x:t")
+
+
+def test_the_deployed_image_check_compares_the_reference_not_the_digest(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """Corrected 2026-09-12 by a live run, not by review.
+
+    The first build compared the pod's imageID against the DIGEST column of the
+    k3s content store. Those are equal only for an image imported from an OCI
+    archive carrying an index; for a docker-save import that column is the CONFIG
+    digest while the kubelet reports the manifest digest. On the first real run
+    the pod ran the correct freshly applied pin and reported sha256:5f0b4623...
+    against a content store reporting sha256:b0f56ab5..., so the check failed on a
+    correctly applied lane.
+
+    A false red here is not harmless: the receipt verdict is derived from its
+    checks, so every receipt would have been a FAIL.
+    """
+    divergent = json.dumps(
+        {
+            "items": [
+                {
+                    "metadata": {"name": "omninode-runtime-1"},
+                    "status": {
+                        "containerStatuses": [
+                            {
+                                "name": "omninode-runtime",
+                                # the CORRECT pin ...
+                                "image": f"{RUNTIME_IMAGE_NAME}:{STAMP}-{SHA[:8]}",
+                                # ... reported under a digest that is not the
+                                # content store's, which is the real-world shape.
+                                "imageID": "docker.io/library/import@sha256:"
+                                + "f" * 64,
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+    )
+    runner = FakeRunner({"get pods": (0, divergent)})
+    applier = _applier(tmp_path, overlay_source, runner)
+
+    path = applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
+
+    record = json.loads(path.read_text())
+    deployed = next(c for c in record["checks"] if c["name"] == "deployed_image")
+    assert deployed["ok"] is True, deployed["evidence"]
+    # Both digests are still recorded, because a reader wants them; they are
+    # simply not asserted equal.
+    assert "not compared" in deployed["evidence"]
+    assert "sha256:" + "f" * 12 in deployed["evidence"]
+    assert "sha256:" + "d" * 12 in deployed["evidence"]
