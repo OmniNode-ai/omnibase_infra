@@ -142,7 +142,8 @@ def test_self_container_id_falls_back_to_the_hostname(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert harness._self_container_id() == _RUNNER_CONTAINER_ID
-    assert seen and "8f635a7e3c47" in seen[0]
+    assert seen
+    assert "8f635a7e3c47" in seen[0]
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +549,8 @@ def test_an_adopted_broker_is_never_torn_down(
     harness.stop_redpanda(
         harness.RedpandaSasl(container="omn18012-rp-abc", port=19092, owned=True)
     )
-    assert calls and calls[0] == ["docker", "rm", "-f", "omn18012-rp-abc"]
+    assert calls
+    assert calls[0] == ["docker", "rm", "-f", "omn18012-rp-abc"]
 
 
 def test_the_advertise_host_override_wins_over_detection(

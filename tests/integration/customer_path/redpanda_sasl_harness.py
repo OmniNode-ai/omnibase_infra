@@ -85,6 +85,7 @@ credential appears in any test, fixture or compose file.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import socket
@@ -179,10 +180,8 @@ def _self_container_id() -> str | None:
     candidates: list[str] = list(
         dict.fromkeys(re.findall(r"[0-9a-f]{64}", _read_cgroup()))
     )
-    try:
+    with contextlib.suppress(OSError):
         candidates.append(socket.gethostname())
-    except OSError:
-        pass
     for candidate in candidates:
         if not candidate:
             continue
@@ -403,9 +402,8 @@ class RedpandaSasl:
         proc = self.rpk("topic", "describe", topic, "-p")
         for line in proc.stdout.splitlines():
             fields = line.split()
-            if len(fields) >= 6 and fields[0].isdigit():
-                if int(fields[0]) == partition:
-                    return int(fields[4]), int(fields[5])
+            if len(fields) >= 6 and fields[0].isdigit() and int(fields[0]) == partition:
+                return int(fields[4]), int(fields[5])
         raise HarnessError(
             f"partition {partition} absent from rpk describe of {topic}: {proc.stdout}"
         )

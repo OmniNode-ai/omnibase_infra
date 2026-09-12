@@ -43,12 +43,20 @@ jobs:
     name: runner-image-build-smoke
     # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted
     # omnibase-ci; public forks default to ubuntu-latest.
+    # OMN-18205: this job executes docker, so its placement is governed by
+    # OMNI_DOCKER_CI_RUNS_ON_JSON before the general trusted seam -- the same
+    # precedence chain the seven docker-executing jobs in docker-build.yml,
+    # legacy-rds-fixture-proof.yml and application-acl-postgres16-proof.yml
+    # already use. Both variables read ["ubuntu-latest"] on this repository
+    # today, so this changes no placement; what it buys is the ability to move
+    # the hermetic bulk of CI to the lab fleet without moving a container-backed
+    # job in the same write, and to move one back on its own if it regresses.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     # The prebuilt-env bake runs `uv sync --frozen --all-extras --all-groups`,
     # which dominates the build. 30 min gives a comfortable buffer for a cold
