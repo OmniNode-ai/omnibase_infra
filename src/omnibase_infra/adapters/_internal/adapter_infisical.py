@@ -52,6 +52,9 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraProtocolError,
+    InfraRateLimitedError,
+    InfraRequestRejectedError,
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
@@ -63,6 +66,50 @@ from omnibase_infra.utils.util_error_sanitization import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_infisical_not_found_error(error: Exception) -> bool:
+    """Return whether an SDK exception is Infisical's typed 404 response."""
+    return _infisical_status_code(error) == 404
+
+
+def _infisical_status_code(error: Exception) -> int | None:
+    """Return an Infisical SDK APIError status code when the type is trustworthy."""
+    try:
+        from infisical_sdk.infisical_requests import (  # type: ignore[import-untyped]
+            APIError,
+        )
+    except ImportError:
+        return None
+    if not isinstance(error, APIError):
+        return None
+    status_code = getattr(error, "status_code", None)
+    return status_code if isinstance(status_code, int) else None
+
+
+def _normalise_secret_name(secret_name: str, *, operation: str) -> str:
+    """Return a validated Infisical secret key."""
+    if not secret_name.strip():
+        ctx = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.INFISICAL,
+            operation=operation,
+            target_name="infisical-adapter",
+        )
+        raise SecretResolutionError(
+            "Infisical secret name must not be empty.",
+            context=ctx,
+        )
+    if secret_name != secret_name.strip():
+        ctx = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.INFISICAL,
+            operation=operation,
+            target_name="infisical-adapter",
+        )
+        raise SecretResolutionError(
+            "Infisical secret name must not have surrounding whitespace.",
+            context=ctx,
+        )
+    return secret_name
 
 
 class AdapterInfisical:
@@ -513,6 +560,102 @@ class AdapterInfisical:
                 f"Failed to update secret in Infisical (path={sanitized_path})",
                 context=ctx,
             ) from e
+
+    def delete_secret(
+        self,
+        secret_name: str,
+        *,
+        project_id: str | None = None,
+        environment_slug: str | None = None,
+        secret_path: str | None = None,
+    ) -> None:
+        """Delete a secret from Infisical by name.
+
+        Args:
+            secret_name: The secret key/name to delete.
+            project_id: Override default project ID.
+            environment_slug: Override default environment slug.
+            secret_path: Override default secret path.
+
+        Raises:
+            SecretResolutionError: If client is not initialized.
+            InfraAuthenticationError: If Infisical rejects authorization.
+            InfraRateLimitedError: If Infisical rate-limits the delete.
+            InfraRequestRejectedError: If Infisical rejects the request shape.
+            InfraUnavailableError: If Infisical returns a server-side failure.
+            InfraProtocolError: If delete returns success but readback still finds the key.
+            InfraConnectionError: If the SDK call fails without a typed status.
+        """
+        secret_name = _normalise_secret_name(secret_name, operation="delete_secret")
+
+        if self._client is None or not self._authenticated:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="delete_secret",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                "Infisical adapter not initialized. Call initialize() first.",
+                context=ctx,
+            )
+
+        effective_project = project_id or str(self._config.project_id)
+        effective_env = environment_slug or self._config.environment_slug
+        effective_path = secret_path or self._config.secret_path
+
+        try:
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
+            self._client.secrets.delete_secret_by_name(  # type: ignore[attr-defined]
+                secret_name=secret_name,
+                secret_path=effective_path,
+                environment_slug=effective_env,
+                project_id=effective_project,
+            )
+        except Exception as e:
+            # A 404 from Infisical means the secret is already absent -- treat as
+            # success for this destructive step. A caller that also publishes a
+            # revocation event must still publish on retry; this method only
+            # proves the store is absent after its own operation.
+            if _is_infisical_not_found_error(e):
+                return
+            sanitized_path = sanitize_secret_path(effective_path)
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="delete_secret",
+                target_name="infisical-adapter",
+            )
+            status_code = _infisical_status_code(e)
+            message = f"Failed to delete secret from Infisical (path={sanitized_path})"
+            if status_code in {401, 403}:
+                raise InfraAuthenticationError(message, context=ctx) from e
+            if status_code == 429:
+                raise InfraRateLimitedError(message, context=ctx) from e
+            if status_code in {400, 422}:
+                raise InfraRequestRejectedError(
+                    message, context=ctx, status_code=status_code
+                ) from e
+            if status_code is not None and status_code >= 500:
+                raise InfraUnavailableError(
+                    message, context=ctx, status_code=status_code
+                ) from e
+            raise InfraConnectionError(message, context=ctx) from e
+        try:
+            self.get_secret(
+                secret_name,
+                project_id=effective_project,
+                environment_slug=effective_env,
+                secret_path=effective_path,
+            )
+        except SecretResolutionError:
+            return
+        raise InfraProtocolError(
+            "Infisical reported delete success, but readback still found the secret.",
+            context=ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="delete_secret",
+                target_name="infisical-adapter",
+            ),
+        )
 
     def shutdown(self) -> None:
         """Release SDK client resources."""

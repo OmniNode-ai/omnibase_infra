@@ -20,9 +20,8 @@ Architecture notes:
     - ``set_secret`` tries ``update_secret`` first (the common case after
       first write) and falls back to ``create_secret`` if the SDK reports
       the secret does not yet exist.
-    - ``delete_secret`` raises ``RuntimeError``: ``AdapterInfisical``
-      deliberately exposes no delete operation per the OMN-2286 read-only
-      policy.
+    - ``delete_secret`` delegates to ``AdapterInfisical.delete_secret``,
+      which calls the vendored SDK's ``delete_secret_by_name`` (OMN-18086).
     - ``close`` shuts down the underlying SDK client. ``timeout_seconds``
       is accepted for protocol compatibility; the SDK shutdown is
       synchronous and effectively immediate.
@@ -34,7 +33,11 @@ import asyncio
 import logging
 
 from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical
-from omnibase_infra.errors import InfraConnectionError, SecretResolutionError
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraRequestRejectedError,
+    SecretResolutionError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +57,13 @@ class InfisicalSecretStore:
         project_id: str,
         environment_slug: str,
         secret_path: str,
+        allow_delete: bool = False,
     ) -> None:
         self._adapter = adapter
         self._project_id = str(project_id)
         self._environment_slug = environment_slug
         self._secret_path = secret_path
+        self._allow_delete = allow_delete
 
     async def get_secret(self, key: str) -> str | None:
         """Retrieve a secret value, or ``None`` if not present."""
@@ -98,8 +103,35 @@ class InfisicalSecretStore:
             return True
 
     async def delete_secret(self, key: str) -> bool:
-        """Always raises — AdapterInfisical exposes no delete (OMN-2286)."""
-        raise RuntimeError("Infisical adapter is read-only by OMN-2286 policy")
+        """Delete a secret by key.
+
+        Returns ``True`` when the key is absent after the call, including an
+        idempotent retry where the adapter already deleted it.
+
+        Raises:
+            InfraRequestRejectedError: If this store was not constructed with
+                destructive delete enabled.
+            SecretResolutionError: If the key is blank or padded.
+            InfraConnectionError: If the adapter delete fails.
+        """
+        if not self._allow_delete:
+            raise InfraRequestRejectedError(
+                "InfisicalSecretStore.delete_secret requires allow_delete=True."
+            )
+        if not key.strip():
+            raise SecretResolutionError("Infisical secret key must not be empty.")
+        if key != key.strip():
+            raise SecretResolutionError(
+                "Infisical secret key must not have surrounding whitespace."
+            )
+        await asyncio.to_thread(
+            self._adapter.delete_secret,
+            key,
+            project_id=self._project_id,
+            environment_slug=self._environment_slug,
+            secret_path=self._secret_path,
+        )
+        return True
 
     async def list_keys(self, prefix: str | None = None) -> list[str]:
         """List secret keys at the configured path, optionally filtered."""
