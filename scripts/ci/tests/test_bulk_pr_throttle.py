@@ -9,6 +9,7 @@ paths — plus the gh CLI integration seam and the CLI entrypoint.
 
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess
 import sys
@@ -18,6 +19,16 @@ import pytest
 
 SCRIPTS_CI = Path(__file__).parent.parent
 sys.path.insert(0, str(SCRIPTS_CI))
+
+
+def idle_fleet() -> dict[str, object]:
+    """A healthy sample with matching online capacity."""
+    return {"ok": True, "online": 88, "busy": 58, "total": 88}
+
+
+def starved_fleet() -> dict[str, object]:
+    """A healthy sample whose matching runners are all busy."""
+    return {"ok": True, "online": 88, "busy": 88, "total": 88}
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +312,137 @@ class TestWaitForQueueDepth:
         assert not params & {"force", "skip", "bypass", "ignore_threshold"}
 
 
+class TestRunnerFleetCapacity:
+    def test_package_import_preserves_the_shared_probe(self):
+        module = importlib.import_module("scripts.ci.bulk_pr_throttle")
+
+        assert module.probe_fleet.__name__ == "probe_fleet"
+
+    @pytest.mark.parametrize("queued", [183, 186])
+    def test_idle_matching_capacity_is_not_starvation_at_deep_queue(self, queued):
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        applied: list[int] = []
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="onex_change_control",
+            pr_numbers=[1],
+            operation="rerun-failed",
+            get_queue_depth=lambda: queued,
+            get_runner_fleet=idle_fleet,
+            apply_pr_operation=lambda owner, repo, pr, operation: (
+                applied.append(pr)
+                or PrOutcome(pr_number=pr, success=True, detail="reran")
+            ),
+            max_wait_seconds=0.0,
+        )
+
+        assert applied == [1]
+        assert report.waves[0].queue_depth_before == queued
+        assert report.waves[0].queue_depth_after == queued
+
+    def test_zero_matching_idle_capacity_refuses(self):
+        from bulk_pr_throttle import (
+            PrOutcome,
+            RunnerFleetStarvationTimeoutError,
+            run_bulk_operation,
+        )
+
+        applied: list[int] = []
+        with pytest.raises(
+            RunnerFleetStarvationTimeoutError,
+            match=r"online=88, busy=88, total=88",
+        ):
+            run_bulk_operation(
+                owner="OmniNode-ai",
+                repo="onex_change_control",
+                pr_numbers=[1],
+                operation="update-branch",
+                get_queue_depth=lambda: 0,
+                get_runner_fleet=starved_fleet,
+                apply_pr_operation=lambda owner, repo, pr, operation: (
+                    applied.append(pr)
+                    or PrOutcome(pr_number=pr, success=True, detail="unexpected")
+                ),
+                max_wait_seconds=0.0,
+            )
+
+        assert applied == []
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "missing_token",
+            "bad_api_scheme",
+            "http_403",
+            "timeout",
+            "malformed_json",
+            "empty_fleet",
+        ],
+    )
+    def test_every_probe_error_refuses_and_names_the_error(self, error):
+        from bulk_pr_throttle import (
+            PrOutcome,
+            RunnerFleetProbeError,
+            run_bulk_operation,
+        )
+
+        applied: list[int] = []
+        with pytest.raises(RunnerFleetProbeError, match=error):
+            run_bulk_operation(
+                owner="OmniNode-ai",
+                repo="onex_change_control",
+                pr_numbers=[1],
+                operation="rerun-failed",
+                get_queue_depth=lambda: 186,
+                get_runner_fleet=lambda: {"ok": False, "error": error},
+                apply_pr_operation=lambda owner, repo, pr, operation: (
+                    applied.append(pr)
+                    or PrOutcome(pr_number=pr, success=True, detail="unexpected")
+                ),
+                max_wait_seconds=0.0,
+            )
+
+        assert applied == []
+
+    @pytest.mark.parametrize(
+        "fleet",
+        [
+            {"ok": True, "online": "88", "busy": 58, "total": 88},
+            {"ok": True, "online": 88, "busy": -1, "total": 88},
+            {"ok": True, "online": 89, "busy": 58, "total": 88},
+        ],
+    )
+    def test_malformed_success_payload_refuses(self, fleet):
+        from bulk_pr_throttle import RunnerFleetProbeError, runner_fleet_is_starved
+
+        with pytest.raises(RunnerFleetProbeError, match="malformed_fleet"):
+            runner_fleet_is_starved(fleet)
+
+    def test_busy_fleet_is_polled_until_idle_capacity_appears(self):
+        from bulk_pr_throttle import wait_for_runner_capacity
+
+        fleets = iter([starved_fleet(), starved_fleet(), idle_fleet()])
+        sleeps: list[float] = []
+        result = wait_for_runner_capacity(
+            get_runner_fleet=lambda: next(fleets),
+            poll_seconds=2.0,
+            max_wait_seconds=10.0,
+            sleep_fn=sleeps.append,
+        )
+
+        assert result == idle_fleet()
+        assert sleeps == [2.0, 2.0]
+
+    def test_capacity_gate_has_no_bypass_parameter(self):
+        import inspect
+
+        from bulk_pr_throttle import wait_for_runner_capacity
+
+        params = set(inspect.signature(wait_for_runner_capacity).parameters)
+        assert not params & {"force", "skip", "bypass", "ignore_capacity"}
+
+
 # ---------------------------------------------------------------------------
 # Full run_bulk_operation flow (waves + logging + receipts)
 # ---------------------------------------------------------------------------
@@ -360,6 +502,7 @@ class TestRunBulkOperationFlow:
             queue_depth_threshold=150,
             dry_run=False,
             get_queue_depth=get_queue_depth,
+            get_runner_fleet=idle_fleet,
             apply_pr_operation=apply_pr_operation,
         )
 
@@ -586,12 +729,8 @@ class TestRunBulkOperationFlow:
         assert report.waves[1].queue_depth_after == 204
 
     @pytest.mark.parametrize("operation", ["update-branch", "rerun-failed"])
-    def test_load_creating_operations_still_refuse_at_high_depth(self, operation):
-        from bulk_pr_throttle import (
-            PrOutcome,
-            QueueDepthTimeoutError,
-            run_bulk_operation,
-        )
+    def test_load_creating_operations_use_capacity_not_queue_depth(self, operation):
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
 
         applied: list[int] = []
 
@@ -601,31 +740,34 @@ class TestRunBulkOperationFlow:
             applied.append(pr)
             return PrOutcome(pr_number=pr, success=True, detail="unexpected")
 
-        with pytest.raises(QueueDepthTimeoutError, match="above threshold"):
-            run_bulk_operation(
-                owner="OmniNode-ai",
-                repo="onex_change_control",
-                pr_numbers=[1, 2, 3, 4, 5],
-                operation=operation,
-                wave_size=5,
-                queue_depth_threshold=150,
-                dry_run=False,
-                get_queue_depth=lambda: 200,
-                apply_pr_operation=apply_pr_operation,
-                poll_seconds=1.0,
-                max_wait_seconds=0.0,
-                sleep_fn=lambda seconds: None,
-            )
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="onex_change_control",
+            pr_numbers=[1, 2, 3, 4, 5],
+            operation=operation,
+            wave_size=5,
+            queue_depth_threshold=150,
+            dry_run=False,
+            get_queue_depth=lambda: 200,
+            get_runner_fleet=idle_fleet,
+            apply_pr_operation=apply_pr_operation,
+            poll_seconds=1.0,
+            max_wait_seconds=0.0,
+            sleep_fn=lambda seconds: None,
+        )
 
-        assert applied == []
+        assert applied == [1, 2, 3, 4, 5]
+        assert report.waves[0].queue_depth_before == 200
 
-    def test_flow_blocks_mid_batch_when_a_later_wave_sees_high_depth(self):
-        """Threshold blocking (mocked gh call) applies per-wave, not just once."""
+    def test_flow_blocks_mid_batch_when_later_wave_has_no_runner_capacity(self):
+        """Runner-capacity blocking applies per wave, not just once."""
         from bulk_pr_throttle import PrOutcome, run_bulk_operation
 
-        # wave 1 poll: 20 (ok). wave 1 after-poll: 20.
-        # wave 2 poll: 300 (blocks), then 300 (blocks), then 50 (ok). wave 2 after: 50.
-        depth_sequence = iter([20, 20, 300, 300, 50, 50])
+        # Queue depth is only observed. Fleet capacity blocks wave 2 twice.
+        depth_sequence = iter([20, 20, 300, 50])
+        fleet_sequence = iter(
+            [idle_fleet(), starved_fleet(), starved_fleet(), idle_fleet()]
+        )
         sleeps: list[float] = []
 
         def get_queue_depth() -> int:
@@ -645,13 +787,15 @@ class TestRunBulkOperationFlow:
             queue_depth_threshold=150,
             dry_run=False,
             get_queue_depth=get_queue_depth,
+            get_runner_fleet=lambda: next(fleet_sequence),
             apply_pr_operation=apply_pr_operation,
             poll_seconds=1.0,
             max_wait_seconds=100.0,
             sleep_fn=sleeps.append,
         )
         assert len(report.waves) == 2
-        assert report.waves[1].queue_depth_before == 50
+        assert report.waves[1].queue_depth_before == 300
+        assert report.waves[1].queue_depth_after == 50
         assert sleeps == [1.0, 1.0]
 
     def test_logs_timestamp_count_and_depth_before_after_to_stdout(self, capsys):
@@ -665,6 +809,7 @@ class TestRunBulkOperationFlow:
             wave_size=10,
             dry_run=False,
             get_queue_depth=lambda: 5,
+            get_runner_fleet=idle_fleet,
             apply_pr_operation=lambda o, r, pr, op: PrOutcome(
                 pr_number=pr, success=True, detail="ok"
             ),
@@ -678,7 +823,8 @@ class TestRunBulkOperationFlow:
     def test_later_wave_timeout_preserves_completed_wave_receipt(self):
         from bulk_pr_throttle import PartialBulkRunError, PrOutcome, run_bulk_operation
 
-        depth_sequence = iter([10, 10, 999, 999])
+        depth_sequence = iter([10, 10])
+        fleet_sequence = iter([idle_fleet(), starved_fleet(), starved_fleet()])
 
         with pytest.raises(PartialBulkRunError) as exc_info:
             run_bulk_operation(
@@ -690,6 +836,7 @@ class TestRunBulkOperationFlow:
                 queue_depth_threshold=150,
                 dry_run=False,
                 get_queue_depth=lambda: next(depth_sequence),
+                get_runner_fleet=lambda: next(fleet_sequence),
                 apply_pr_operation=lambda o, r, pr, op: PrOutcome(
                     pr_number=pr, success=True, detail="ok"
                 ),
@@ -721,6 +868,7 @@ class TestWriteReceipt:
             wave_size=10,
             dry_run=False,
             get_queue_depth=lambda: 3,
+            get_runner_fleet=idle_fleet,
             apply_pr_operation=lambda o, r, pr, op: PrOutcome(
                 pr_number=pr, success=True, detail="ok"
             ),
@@ -922,6 +1070,46 @@ class TestGhIntegration:
             bulk_pr_throttle.BulkPrThrottleError, match="invalid output"
         ):
             bulk_pr_throttle.gh_queue_depth("OmniNode-ai", "onex_change_control")
+
+    def test_gh_runner_fleet_reuses_sanctioned_probe_and_primary_token(
+        self, monkeypatch
+    ):
+        import bulk_pr_throttle
+
+        seen: list[tuple[str | None, str, str]] = []
+        monkeypatch.setenv("RUNNER_FLEET_STATUS_TOKEN", "fleet-token")
+        monkeypatch.setenv("CROSS_REPO_PAT", "fallback-token")
+        monkeypatch.setenv("GITHUB_API_URL", "https://github.example/api/v3")
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "probe_fleet",
+            lambda token, runner_group, api_url: (
+                seen.append((token, runner_group, api_url)) or idle_fleet()
+            ),
+        )
+
+        assert bulk_pr_throttle.gh_runner_fleet() == idle_fleet()
+        assert seen == [("fleet-token", "omnibase-ci", "https://github.example/api/v3")]
+
+    def test_gh_runner_fleet_falls_back_to_existing_cross_repo_pat(self, monkeypatch):
+        import bulk_pr_throttle
+
+        seen: list[str | None] = []
+        monkeypatch.delenv("RUNNER_FLEET_STATUS_TOKEN", raising=False)
+        monkeypatch.setenv("CROSS_REPO_PAT", "fallback-token")
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "probe_fleet",
+            lambda token, runner_group, api_url: (
+                seen.append(token) or {"ok": False, "error": "http_403"}
+            ),
+        )
+
+        assert bulk_pr_throttle.gh_runner_fleet() == {
+            "ok": False,
+            "error": "http_403",
+        }
+        assert seen == ["fallback-token"]
 
     def test_gh_apply_pr_operation_update_branch(self, monkeypatch):
         import bulk_pr_throttle
@@ -1423,11 +1611,12 @@ class TestMainCli:
         assert "REFUSED" in err
 
     def test_non_dry_run_uses_real_gh_seam(self, monkeypatch, tmp_path):
-        """Non-dry-run wires get_queue_depth/apply_pr_operation to the gh functions."""
+        """Non-dry-run wires queue, capacity, and apply to the gh functions."""
         import bulk_pr_throttle
         from bulk_pr_throttle import PrOutcome, main
 
         monkeypatch.setattr(bulk_pr_throttle, "gh_queue_depth", lambda owner, repo: 5)
+        monkeypatch.setattr(bulk_pr_throttle, "gh_runner_fleet", idle_fleet)
         monkeypatch.setattr(
             bulk_pr_throttle,
             "gh_apply_pr_operation",
@@ -1462,6 +1651,7 @@ class TestMainCli:
         from bulk_pr_throttle import PrOutcome, main
 
         monkeypatch.setattr(bulk_pr_throttle, "gh_queue_depth", lambda owner, repo: 5)
+        monkeypatch.setattr(bulk_pr_throttle, "gh_runner_fleet", idle_fleet)
         monkeypatch.setattr(
             bulk_pr_throttle,
             "gh_apply_pr_operation",

@@ -21,12 +21,13 @@ than a hand-rolled loop over ``gh``.
 
 Mechanical policy (bounded waves; no caller bypass)
 ----------------------------------------------------
-Load-creating operations use the queue-depth gate
-(:func:`wait_for_queue_depth`), which has no force/skip/bypass parameter
-anywhere in this module or its CLI. Operations that do not directly dispatch
-check suites still use bounded waves and sample queue depth on a best-effort
-basis, but depth is observational rather than a reason to refuse them. A
-caller cannot change the immutable operation policy — see
+Load-creating operations use the runner-capacity gate
+(:func:`wait_for_runner_capacity`), which has no force/skip/bypass parameter
+anywhere in this module or its CLI. Queue depth remains a best-effort receipt
+observation: a deep queue is not itself evidence of starvation when matching
+``omnibase-ci`` runners are idle. Operations that do not directly dispatch
+check suites still use bounded waves without probing runner capacity. A caller
+cannot change the immutable operation policy — see
 ``knowledge-base:runbooks/bulk-pr-operations.md`` for the doctrine-wiring follow-up
 that makes *not using it* visible.
 
@@ -41,13 +42,14 @@ Usage
 
 Exit codes: 0 = all waves completed with all PR operations succeeding
 (or a dry-run plan was printed), 1 = refused (bad input / cap exceeded /
-queue-depth timeout) or at least one PR operation failed.
+runner-capacity starvation or probe failure) or at least one PR operation failed.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -56,6 +58,13 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
+
+# Reuse the sanctioned fleet probe in both supported execution modes: package
+# import under pytest/tooling and direct ``python scripts/ci/...`` invocation.
+try:  # pragma: no cover - both branches are exercised across execution contexts
+    from scripts.ci.runner_route_decision import probe_fleet
+except ImportError:  # pragma: no cover - direct-script fallback
+    from runner_route_decision import probe_fleet  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Tunables. Every numeric default here is deliberately conservative — the
@@ -73,15 +82,17 @@ DEFAULT_QUEUE_DEPTH_THRESHOLD = 150
 #: defaults", applied to batch size rather than owner/repo).
 DEFAULT_MAX_TOTAL_PRS = 50
 DEFAULT_BLOCK_POLL_SECONDS = 30.0
-#: Maximum total time this tool will block waiting for queue depth to drop
-#: before a single wave. A gate that can block forever is indistinguishable
-#: from a hang; this raises QueueDepthTimeoutError instead of proceeding.
+#: Maximum total time this tool will block waiting for fleet capacity before a
+#: single wave. A gate that can block forever is indistinguishable from a hang.
 DEFAULT_MAX_BLOCK_SECONDS = 1800.0
 DEFAULT_GH_TIMEOUT_SECONDS = 120.0
+RUNNER_GROUP = "omnibase-ci"
+DEFAULT_GITHUB_API_URL = "https://api.github.com"  # url-authority-ok: canonical public GitHub REST base; probe_fleet scheme-pins it to https before any request
 
 # True means the operation can create or unlock check-suite load and must wait
-# for queue capacity. False means queue depth is sampled on a best-effort basis
-# but cannot block the operation. Arming auto-merge does not mint a check suite;
+# for runner capacity. The historical public field name remains
+# ``queue_depth_gate_applied`` so existing receipts stay wire-compatible; queue
+# depth itself is observation-only. Arming auto-merge does not mint a check suite;
 # GitHub merges only after the PR's existing checks are green, so the operation
 # itself is observation-only. Keeping every operation in one immutable map
 # prevents callers from bypassing the selected policy and prevents new
@@ -98,7 +109,7 @@ VALID_OPERATIONS = tuple(OPERATION_QUEUE_DEPTH_POLICY)
 
 
 def queue_depth_gate_for_operation(operation: str) -> bool:
-    """Return the immutable queue policy or reject an unknown operation."""
+    """Return the immutable load-gating policy under its legacy public name."""
     try:
         return OPERATION_QUEUE_DEPTH_POLICY[operation]
     except KeyError as exc:
@@ -117,6 +128,14 @@ class TotalPrLimitExceededError(BulkPrThrottleError):
 
 class QueueDepthTimeoutError(BulkPrThrottleError):
     """Raised when queue depth stays above threshold past max_wait_seconds."""
+
+
+class RunnerFleetProbeError(BulkPrThrottleError):
+    """Raised when the fleet probe cannot prove dispatch capacity."""
+
+
+class RunnerFleetStarvationTimeoutError(BulkPrThrottleError):
+    """Raised when no matching idle runner appears before the wait expires."""
 
 
 @dataclass(frozen=True)
@@ -264,6 +283,91 @@ def wait_for_queue_depth(
     return depth
 
 
+def _runner_fleet_counts(fleet: Mapping[str, object]) -> tuple[int, int, int]:
+    """Validate and return ``(online, busy, total)`` from a successful probe."""
+    if fleet.get("ok") is not True:
+        raw_error = fleet.get("error")
+        error = raw_error if isinstance(raw_error, str) and raw_error else "unknown"
+        raise RunnerFleetProbeError(f"runner fleet probe refused: {error}")
+
+    online = fleet.get("online")
+    busy = fleet.get("busy")
+    total = fleet.get("total")
+    counts = (online, busy, total)
+    if any(type(value) is not int for value in counts):
+        raise RunnerFleetProbeError("runner fleet probe refused: malformed_fleet")
+    online_count = int(online)
+    busy_count = int(busy)
+    total_count = int(total)
+    if (
+        min(online_count, busy_count, total_count) < 0
+        or online_count > total_count
+        or busy_count > total_count
+    ):
+        raise RunnerFleetProbeError("runner fleet probe refused: malformed_fleet")
+    return online_count, busy_count, total_count
+
+
+def runner_fleet_is_starved(fleet: Mapping[str, object]) -> bool:
+    """Return whether the sanctioned fleet sample proves zero idle capacity.
+
+    ``probe_fleet`` is intentionally the only production reader. Every
+    ``ok: false`` result is a refusal, and its stable error class is included
+    in the exception so operators can distinguish credentials, HTTP, timeout,
+    decoding, and empty-fleet failures without guessing.
+    """
+    online, busy, _total = _runner_fleet_counts(fleet)
+
+    # probe_fleet counts a stale offline-but-busy runner as busy on purpose.
+    # Subtracting it is conservative: uncertain capacity never authorizes more
+    # load, while any positive remainder proves at least one online idle slot.
+    return online - busy <= 0
+
+
+def wait_for_runner_capacity(
+    *,
+    get_runner_fleet: Callable[[], Mapping[str, object]],
+    poll_seconds: float,
+    max_wait_seconds: float,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    log: Callable[[str], None] = lambda msg: None,
+) -> Mapping[str, object]:
+    """Wait until the ``omnibase-ci`` probe proves an online idle runner.
+
+    Probe faults refuse immediately. A valid but fully busy fleet is polled up
+    to the existing bounded wait budget, then refuses rather than dispatching.
+    """
+    if poll_seconds <= 0:
+        raise ValueError(f"poll_seconds must be > 0, got {poll_seconds}")
+
+    waited = 0.0
+    while True:
+        try:
+            fleet = get_runner_fleet()
+        except Exception as exc:
+            error = f"internal_{type(exc).__name__}"
+            raise RunnerFleetProbeError(f"runner fleet probe refused: {error}") from exc
+
+        if not runner_fleet_is_starved(fleet):
+            return fleet
+
+        if waited >= max_wait_seconds:
+            raise RunnerFleetStarvationTimeoutError(
+                "runner fleet remains starved "
+                f"(online={fleet['online']}, busy={fleet['busy']}, "
+                f"total={fleet['total']}) after waiting {waited:.0f}s "
+                f"(max_wait_seconds={max_wait_seconds}) — aborting rather "
+                "than dispatching without matching idle capacity"
+            )
+        log(
+            "runner fleet has no matching idle capacity "
+            f"(online={fleet['online']}, busy={fleet['busy']}, "
+            f"total={fleet['total']}); blocking {poll_seconds:.0f}s before re-poll"
+        )
+        sleep_fn(poll_seconds)
+        waited += poll_seconds
+
+
 def observe_queue_depth(
     *,
     get_queue_depth: Callable[[], int],
@@ -272,7 +376,7 @@ def observe_queue_depth(
     wave_index: int,
     log: Callable[[str], None],
 ) -> int | None:
-    """Best-effort queue sample for an operation that is not depth-gated.
+    """Best-effort queue sample for a receipt; it never authorizes dispatch.
 
     Observation must never become an accidental refusal path. Expected probe
     failures are recorded in the log and represented as ``None`` in the wave
@@ -306,6 +410,7 @@ def run_bulk_operation(
     explicit_max_total_prs: bool = False,
     dry_run: bool = False,
     get_queue_depth: Callable[[], int] | None = None,
+    get_runner_fleet: Callable[[], Mapping[str, object]] | None = None,
     apply_pr_operation: Callable[[str, str, int, str], PrOutcome] | None = None,
     poll_seconds: float = DEFAULT_BLOCK_POLL_SECONDS,
     max_wait_seconds: float = DEFAULT_MAX_BLOCK_SECONDS,
@@ -376,6 +481,10 @@ def run_bulk_operation(
         raise BulkPrThrottleError(
             "get_queue_depth and apply_pr_operation are required outside dry-run mode"
         )
+    if queue_depth_gate_applied and get_runner_fleet is None:
+        raise BulkPrThrottleError(
+            "get_runner_fleet is required for load-creating operations"
+        )
 
     wave_receipts: list[WaveReceipt] = []
 
@@ -395,13 +504,26 @@ def run_bulk_operation(
         depth_before: int | None
         try:
             if queue_depth_gate_applied:
-                depth_before = wait_for_queue_depth(
-                    get_queue_depth=get_queue_depth,
-                    threshold=queue_depth_threshold,
+                assert get_runner_fleet is not None
+                fleet_before = wait_for_runner_capacity(
+                    get_runner_fleet=get_runner_fleet,
                     poll_seconds=poll_seconds,
                     max_wait_seconds=max_wait_seconds,
                     sleep_fn=sleep_fn,
                     log=log,
+                )
+                depth_before = observe_queue_depth(
+                    get_queue_depth=get_queue_depth,
+                    operation=operation,
+                    phase="before",
+                    wave_index=idx,
+                    log=log,
+                )
+                online, busy, total = _runner_fleet_counts(fleet_before)
+                log(
+                    f"[bulk-pr-throttle] runner capacity admitted wave {idx}: "
+                    f"online={online}, busy={busy}, idle={max(online - busy, 0)}, "
+                    f"total={total}"
                 )
             else:
                 depth_before = observe_queue_depth(
@@ -435,32 +557,13 @@ def run_bulk_operation(
             )
         completed_at = now_fn().isoformat()
         depth_after: int | None
-        if queue_depth_gate_applied:
-            try:
-                depth_after = get_queue_depth()
-            except BulkPrThrottleError as exc:
-                wave_receipts.append(
-                    WaveReceipt(
-                        wave_index=idx,
-                        pr_numbers=wave,
-                        operation=operation,
-                        dry_run=False,
-                        queue_depth_before=depth_before,
-                        queue_depth_after=None,
-                        started_at=started_at,
-                        completed_at=completed_at,
-                        outcomes=outcomes,
-                    )
-                )
-                raise PartialBulkRunError(str(exc), partial_report()) from exc
-        else:
-            depth_after = observe_queue_depth(
-                get_queue_depth=get_queue_depth,
-                operation=operation,
-                phase="after",
-                wave_index=idx,
-                log=log,
-            )
+        depth_after = observe_queue_depth(
+            get_queue_depth=get_queue_depth,
+            operation=operation,
+            phase="after",
+            wave_index=idx,
+            log=log,
+        )
         log(f"[bulk-pr-throttle] wave {idx}/{len(waves)}: depth_after={depth_after}")
         wave_receipts.append(
             WaveReceipt(
@@ -566,6 +669,17 @@ def gh_queue_depth(owner: str, repo: str) -> int:
         raise BulkPrThrottleError(
             f"gh api queued-run count returned invalid output: {result.stdout!r}"
         ) from exc
+
+
+def gh_runner_fleet() -> dict[str, object]:
+    """Probe the sanctioned ``omnibase-ci`` org-runner capacity seam."""
+    token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get(
+        "CROSS_REPO_PAT"
+    )
+    api_url = os.environ.get(
+        "GITHUB_API_URL", DEFAULT_GITHUB_API_URL
+    )  # url-authority-ok: Actions-injected GitHub REST base; probe_fleet rejects non-HTTPS authority
+    return probe_fleet(token, RUNNER_GROUP, api_url)
 
 
 def gh_apply_pr_operation(
@@ -756,7 +870,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--operation", required=True, choices=VALID_OPERATIONS)
     parser.add_argument("--wave-size", type=int, default=DEFAULT_WAVE_SIZE)
     parser.add_argument(
-        "--queue-depth-threshold", type=int, default=DEFAULT_QUEUE_DEPTH_THRESHOLD
+        "--queue-depth-threshold",
+        type=int,
+        default=DEFAULT_QUEUE_DEPTH_THRESHOLD,
+        help="Legacy receipt field; queue depth is observational, not the capacity gate.",
     )
     parser.add_argument(
         "--max-total-prs",
@@ -813,6 +930,7 @@ def main(argv: list[str] | None = None) -> int:
             get_queue_depth=(
                 None if args.dry_run else lambda: gh_queue_depth(args.owner, args.repo)
             ),
+            get_runner_fleet=(None if args.dry_run else gh_runner_fleet),
             apply_pr_operation=(None if args.dry_run else gh_apply_pr_operation),
             poll_seconds=args.poll_seconds,
             max_wait_seconds=args.max_wait_seconds,
