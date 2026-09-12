@@ -78,7 +78,47 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    # OMN-18200 AC3 -- 5 -> 15, and the number comes from a measurement rather
+    # than from rounding up.
+    #
+    # WHAT WAS MEASURED. Step 7, "Set up CI Python environment", is BIMODAL, and
+    # the ceiling was set as though it were always warm:
+    #
+    #   run 34673385741   4s      warm
+    #   run 34669945527   4m01s   cold; job total 4m20s, i.e. 40s of headroom
+    #   run 34669847808   3m56s   cold and CANCELLED at the ceiling with the step
+    #                             still running, so its true cost is >= 3m56s and
+    #                             was never observed
+    #
+    # WHY COLD IS NOT RARE. This job resolves Python through the shared CI env
+    # (`shared-env-enabled: true`), whose directory is keyed by a digest that
+    # includes the lockfile (`scripts/ci/ensure_ci_env.sh` -> `ci_env_digest.py`)
+    # and which lives INSIDE each runner container at
+    # `/home/runner/.cache/omni/ci-envs`. So every change to `uv.lock` invalidates
+    # it on all 88 containers at once, and the first job on each container then
+    # pays the full build. A release version bump does exactly that -- #3449 bumped
+    # `dev` to 0.38.24 -- which is why the two cold runs above are adjacent in
+    # time. Cold is therefore guaranteed after every bump, not an outlier.
+    #
+    # WHY NOT NARROW THE ENV INSTEAD, which is the obvious alternative and is
+    # measured rather than dismissed. The publisher imports only `click`, `yaml`,
+    # `pydantic` and `confluent_kafka`, all four in the main dependency group, so
+    # passing `shared-env-install-args: --frozen --no-default-groups
+    # --no-install-project` is available. Measured locally: it takes the
+    # environment from 196 installed packages to 138, a 30% cut and nowhere near
+    # enough to make a cold build fast, because the main group alone resolves to
+    # those 138. And it would make the COMMON case worse: the digest keys on the
+    # install args, so a narrower set is a DIFFERENT env directory that no other
+    # job warms, converting today's 4s warm hit into a cold build on most runs.
+    # Rejected on that basis.
+    #
+    # WHY 15. It covers the measured cold build with roughly 3x margin, which the
+    # 5-minute ceiling did not cover at all. The cost of the larger number is
+    # bounded and small: this job publishes one command and does no long-running
+    # work, so when the env is warm it still finishes in seconds, and the only
+    # case that holds a runner slot longer is the one that previously produced a
+    # cancelled run and no classification at all.
+    timeout-minutes: 15
     # Consumed by verify-lane-converged below: AC4 requires a
     # delivered-but-not-applied redeploy to surface on the SAME run that
     # published it, and only this job knows whether a command was published.
