@@ -351,14 +351,22 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
 def test_read_only_declarations_are_granted_select_and_never_write() -> None:
     """A read declaration is delivered as SELECT, and only as SELECT.
 
-    The read-only declarations include aggregate SQL VIEWS over
-    ``delegation_events`` and savings estimates. They are declared
+    The four delegation aggregates are SQL VIEWS over ``delegation_events``
+    (``node_projection_delegation`` migrations 0039/0040). They are declared
     ``access: read`` and the generator emits them as a ``privileges: [SELECT]``
     TABLE block. Their grant is carried by the migration that CREATES them,
     not by :data:`GRANT_FILE`, because a grant belongs with the relation it
-    names -- these migrations have to DROP and CREATE each view, and a DROP
-    discards the view's privileges along with it, so restoring them anywhere
-    else would leave a window where the relation exists and nothing can read it.
+    names -- 0039 has to DROP and CREATE each view, and a DROP discards the
+    view's privileges along with it, so restoring them anywhere else would
+    leave a window where the relation exists and nothing can read it.
+
+    OMN-17426 added a fifth read-only relation, ``projection_cost_savings_
+    overview`` -- a ``node_projection_savings`` view, not a
+    ``node_projection_delegation`` one, so its grant is carried by that node's
+    own creating migration (089), not by 0039. The two source files are
+    unioned here for the same reason :data:`GRANT_FILE` alone was never
+    enough: the grant belongs with the relation it names, and different
+    relations here are named by different nodes' migrations.
 
     Both halves are asserted. Missing the SELECT would deny the reader at
     runtime, which is the same silent-zero-rows shape the writable test above
@@ -370,11 +378,8 @@ def test_read_only_declarations_are_granted_select_and_never_write() -> None:
     read_only = _declared_table_objects("SELECT") - _declared_table_objects("INSERT")
     assert read_only, "positive control: the topology declares read-only relations"
 
-    aggregate_views_sql = "\n".join(
-        (
-            AGGREGATE_VIEWS_FILE.read_text(),
-            SAVINGS_AGGREGATE_VIEWS_FILE.read_text(),
-        )
+    aggregate_views_sql = (
+        AGGREGATE_VIEWS_FILE.read_text() + SAVINGS_AGGREGATE_VIEWS_FILE.read_text()
     )
     select_granted = set(
         re.findall(
