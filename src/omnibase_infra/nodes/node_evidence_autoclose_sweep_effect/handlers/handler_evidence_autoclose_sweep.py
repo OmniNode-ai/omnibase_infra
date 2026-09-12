@@ -588,6 +588,17 @@ _CHECK_PROOF_CLASS_KEY = "proof_class"
 #: the contract was read and declares none. Both hold; only one of them is a
 #: contract-authoring gap.
 _CHECK_BINDS_AC_KEY = "binds_ac"
+#: OMN-18238. The subset of `binds_ac` on this check that is a PROPOSAL rather
+#: than an accepted binding. A machine may propose; it may not decide.
+#: A passing check whose name resembles a criterion is not proof of the
+#: criterion it names, so a draft label is excluded from the discharge set and
+#: its criterion stays unbound until a person accepts the proposal.
+#:
+#: ABSENT means "nothing here is a proposal", which is what every one of the
+#: 67 contracts that declared a binding before this existed means: each was
+#: hand-authored, which IS the acceptance this rule asks for. The key narrows
+#: `binds_ac`; it can never add to it.
+_CHECK_DRAFT_BINDS_AC_KEY = "draft_binds_ac"
 
 #: Per-check statuses, as `EnumEvidenceCheckStatus` spells them.
 _CHECK_STATUS_VERIFIED = "verified"
@@ -608,7 +619,7 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.12.2"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.12.3"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -1870,13 +1881,15 @@ def _canonical_ac_label(text: str) -> str:
 
 def _declared_ac_bindings(
     verdict: dict[str, object],
-) -> tuple[bool, dict[str, tuple[tuple[str, str, str], ...]]]:
+) -> tuple[
+    bool, dict[str, tuple[tuple[str, str, str], ...]], dict[str, tuple[str, ...]]
+]:
     """Bindings the verdict's checks DECLARE, keyed by canonical AC label.
 
-    Returns ``(field_present, bindings)`` where each binding value is a tuple
-    of ``(check_id, status, proof_class)`` for every check naming that label --
-    including the ones that did NOT verify, so a declared-but-unproven binding
-    is visible in the table rather than silently absent.
+    Returns ``(field_present, bindings, drafts)``. Each binding value is a
+    tuple of ``(check_id, status, proof_class)`` for every check naming that
+    label -- including the ones that did NOT verify, so a declared-but-unproven
+    binding is visible in the table rather than silently absent.
 
     ``field_present`` is True as soon as ANY check carries the key at all,
     even as an empty list. That distinction is the whole reason it is
@@ -1884,12 +1897,27 @@ def _declared_ac_bindings(
     predates this change), an EMPTY one means the contract was read and
     declares none. Both hold the flip; only the second is a gap the ticket's
     author can close.
+
+    OMN-18238 -- A PROPOSAL IS NOT A BINDING.
+    -----------------------------------------
+    A label the check also names in ``draft_binds_ac`` is a PROPOSAL awaiting
+    acceptance. It is excluded from ``bindings`` and reported in ``drafts``, so the
+    criterion stays unbound and the hold can say WHY in words that match the
+    repair. The cheap way to make bindings plentiful is to let a machine guess
+    a criterion from a matching check name, and a passing check with a matching
+    name is not proof of the criterion it names -- so a machine may propose and
+    a person decides.
+
+    The exclusion narrows and never widens. A draft label the check does not
+    also claim in ``binds_ac`` is ignored outright: ``draft_binds_ac`` cannot
+    introduce a criterion, only demote one.
     """
     checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
     if not isinstance(checks, list):
-        return False, {}
+        return False, {}, {}
     field_present = False
     collected: dict[str, list[tuple[str, str, str]]] = {}
+    drafted: dict[str, list[str]] = {}
     for entry in checks:
         if not isinstance(entry, dict):
             continue
@@ -1902,12 +1930,26 @@ def _declared_ac_bindings(
         check_id = str(entry.get(_CHECK_ID_KEY) or "")
         status = str(entry.get(_CHECK_STATUS_KEY) or "")
         proof_class = str(entry.get(_CHECK_PROOF_CLASS_KEY) or "")
+        raw_drafts = entry.get(_CHECK_DRAFT_BINDS_AC_KEY)
+        draft_labels: set[str] = set()
+        if isinstance(raw_drafts, list):
+            for proposed in raw_drafts:
+                label = _canonical_ac_label(str(proposed))
+                if label:
+                    draft_labels.add(label)
         for declared in raw:
             label = _canonical_ac_label(str(declared))
             if not label:
                 continue
+            if label in draft_labels:
+                drafted.setdefault(label, []).append(check_id)
+                continue
             collected.setdefault(label, []).append((check_id, status, proof_class))
-    return field_present, {label: tuple(rows) for label, rows in collected.items()}
+    return (
+        field_present,
+        {label: tuple(rows) for label, rows in collected.items()},
+        {label: tuple(ids) for label, ids in drafted.items()},
+    )
 
 
 def _coverage_corpus_counts(
@@ -2138,7 +2180,7 @@ def _ac_binding_gap(
     and each appears in the table with its status so the near-miss is legible.
     """
     contract = f"contracts/{ticket_id}.yaml"
-    field_present, bindings = _declared_ac_bindings(verdict)
+    field_present, bindings, drafts = _declared_ac_bindings(verdict)
     items = tuple(_acceptance_criteria_items(description))
 
     if not items:
@@ -2252,6 +2294,36 @@ def _ac_binding_gap(
         if readback_blocked
         else ""
     )
+    # OMN-18238. A criterion whose only declaration is a PROPOSAL is unbound,
+    # and saying so is not the same statement as "declared by nothing". The
+    # repair differs: one needs a binding written, the other needs an existing
+    # one reviewed and accepted. A hold that conflated them would send the
+    # author to write a binding that is already sitting there.
+    proposed = tuple(
+        dict.fromkeys(
+            label
+            for text in unbound
+            for label in (_canonical_ac_label(text),)
+            if label and label in drafts
+        )
+    )
+    more_proposals = len(proposed) - _MAX_UNCOVERED_LISTED
+    proposal_suffix = f" and {more_proposals} more" if more_proposals > 0 else ""
+    proposal_note = (
+        (
+            " OMN-18238: "
+            + ", ".join(proposed[:_MAX_UNCOVERED_LISTED])
+            + proposal_suffix
+            + " IS declared, but only as a PROPOSAL — an autobound draft "
+            "awaiting acceptance. A machine may propose a binding; it may not decide "
+            "one, because a passing check whose name resembles a criterion is "
+            "not proof of the criterion it names. Accept the proposal on the "
+            "contract's evidence item (record who accepted it and when) and "
+            "this criterion binds."
+        )
+        if proposed
+        else ""
+    )
     unlabelled = sum(1 for text in unbound if not _canonical_ac_label(text))
     labelling = (
         f" {unlabelled} of them carry no `AC<n>`/`DoD<n>` label at all, so "
@@ -2280,7 +2352,8 @@ def _ac_binding_gap(
     return (
         f"{len(unbound)} of {len(items)} acceptance criterion(s) in this "
         f"ticket's description are bound to NO verified probative check in "
-        f"`{contract}`: {named}. {why}{readback_note}{labelling}{fallback}",
+        f"`{contract}`: {named}. {why}{proposal_note}{readback_note}"
+        f"{labelling}{fallback}",
         tuple(unbound),
         tuple(rows),
     )
