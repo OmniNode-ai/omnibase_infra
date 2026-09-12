@@ -18,7 +18,11 @@ from omnibase_infra.adapters._internal.adapter_infisical import (
     AdapterInfisical,
     ModelInfisicalSecretResult,
 )
-from omnibase_infra.errors import InfraConnectionError, SecretResolutionError
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraRequestRejectedError,
+    SecretResolutionError,
+)
 from omnibase_infra.secret_stores.infisical_secret_store import InfisicalSecretStore
 from omnibase_spi.protocols.services.protocol_secret_store import ProtocolSecretStore
 
@@ -27,12 +31,15 @@ _ENV = "dev"
 _PATH = "/services/omnimarket/llm"
 
 
-def _make_store(adapter: MagicMock) -> InfisicalSecretStore:
+def _make_store(
+    adapter: MagicMock, *, allow_delete: bool = False
+) -> InfisicalSecretStore:
     return InfisicalSecretStore(
         adapter,
         project_id=_PROJECT_ID,
         environment_slug=_ENV,
         secret_path=_PATH,
+        allow_delete=allow_delete,
     )
 
 
@@ -127,11 +134,72 @@ async def test_set_secret_falls_back_to_create_on_connection_error() -> None:
 
 
 @pytest.mark.unit
-async def test_delete_secret_raises_runtime_error() -> None:
+async def test_delete_secret_calls_adapter_delete_and_returns_true() -> None:
     adapter = MagicMock(spec=AdapterInfisical)
+    adapter.delete_secret.return_value = None
+
+    store = _make_store(adapter, allow_delete=True)
+    result = await store.delete_secret("API_KEY")
+
+    assert result is True
+    adapter.delete_secret.assert_called_once_with(
+        "API_KEY",
+        project_id=str(_PROJECT_ID),
+        environment_slug=_ENV,
+        secret_path=_PATH,
+    )
+
+
+@pytest.mark.unit
+async def test_delete_secret_returns_true_when_key_already_absent_on_retry() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+    adapter.delete_secret.return_value = None
+
+    store = _make_store(adapter, allow_delete=True)
+    assert await store.delete_secret("API_KEY") is True
+
+
+@pytest.mark.unit
+async def test_delete_secret_requires_explicit_delete_permission() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+
     store = _make_store(adapter)
-    with pytest.raises(RuntimeError, match="OMN-2286"):
-        await store.delete_secret("ANY")
+    with pytest.raises(InfraRequestRejectedError, match="allow_delete=True"):
+        await store.delete_secret("API_KEY")
+
+    adapter.delete_secret.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_delete_secret_rejects_blank_key_before_adapter_call() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+
+    store = _make_store(adapter, allow_delete=True)
+    with pytest.raises(SecretResolutionError, match="must not be empty"):
+        await store.delete_secret("  ")
+
+    adapter.delete_secret.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_delete_secret_rejects_padded_key_before_adapter_call() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+
+    store = _make_store(adapter, allow_delete=True)
+    with pytest.raises(SecretResolutionError, match="surrounding whitespace"):
+        await store.delete_secret(" API_KEY ")
+
+    adapter.delete_secret.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_delete_secret_propagates_adapter_error() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+    adapter.delete_secret.side_effect = InfraConnectionError("delete failed")
+
+    store = _make_store(adapter, allow_delete=True)
+    with pytest.raises(InfraConnectionError):
+        await store.delete_secret("API_KEY")
 
 
 @pytest.mark.unit
