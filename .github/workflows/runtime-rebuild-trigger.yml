@@ -385,3 +385,143 @@ jobs:
           path: /tmp/lab-pass-receipt
           retention-days: 90
           if-no-files-found: error
+
+  # OMN-18200 AC5/AC6/AC7 -- the k3s onex-lab overlay's half of rule 24(a).
+  #
+  # THE DEFECT THIS CLOSES. Rule 24(a) states that every runtime-affecting merge
+  # re-applies the k3s `onex-lab` overlay from the merged head and emits a
+  # lab-pass receipt for it. Measured 2026-09-11, that half had no implementation
+  # at all: omninode_infra's k8s/onex-lab/apply_lab_lane.sh had ZERO callers
+  # anywhere in the org. The persistent lab lane -- the one provider_key_chain.sh
+  # and the three m3 chain runners grade against -- was pinned to an image stamped
+  # 2026-09-08 running omnimarket==0.4.30 while dev was at 0.4.61, and this
+  # workflow reported green over it the whole time.
+  #
+  # WHERE THE WORK HAPPENS, AND WHY NOT HERE. The apply needs host root on the lab
+  # host: the k3s admin kubeconfig is 0600 root and pinning an image into the
+  # `onex-lab/` name space means importing it into a root-owned containerd. The
+  # runner fleet holds a READ-ONLY lab-ci-reader ServiceAccount kubeconfig
+  # (OMN-18188) -- enough to read the lane, not to apply to it -- and could reach
+  # host root only by launching a privileged container through the Docker socket,
+  # which is a worse blast radius than using the process that already owns host
+  # root by design. So deploy-agent-dev.service performs the apply, immediately
+  # after the compose lane it just rebuilt is verified, and writes a sha-keyed
+  # record (deploy_agent/lab_overlay.py).
+  #
+  # That also answers AC3's asynchronous gap for this lane without a wall clock:
+  # the agent's own completion is the signal, not a timer started at publish.
+  #
+  # WHY THIS JOB EXISTS AT ALL, then: a GitHub Actions artifact can only be
+  # created by a job inside a run, and the lab-pass surface is an artifact by
+  # deliberate design (scripts/ci/lab_pass_receipt.py's header: no new credential,
+  # no bucket, no cluster access). One writer of facts, one publisher of receipts.
+  #
+  # THE LANE VALUE IS `onex-lab-k3s`, NOT `onex-lab`. `onex-lab` is ALREADY the
+  # ephemeral kind cluster the candidate-boot-gate job creates in
+  # deliver-dev-candidate-to-staging.yml, which emits
+  # lab-pass-receipt-onex-lab-<sha> for the same sha on this same repository.
+  # evaluate_gate reads the NEWEST artifact per name, on the premise that a name
+  # has one emitter; a second emitter on that name would silently supersede the
+  # boot gate's verdict. They are also different claims -- a throwaway node with
+  # one side-loaded image and an inert credential store, against the persistent
+  # lane with the host's own secret store bound and the lane's tenant minted.
+  verify-lab-overlay-converged:
+    name: Verify the k3s onex-lab overlay applied the merged sha
+    needs: [trigger-rebuild, verify-lane-converged]
+    # `always()` so this runs even when the compose convergence guard FAILED. A
+    # failed compose lane is exactly when the lab lane's state most needs
+    # recording: "the lab apply failed" and "nobody ran it" are the two states
+    # the receipt exists to tell apart, and skipping here produces the second
+    # while meaning the first.
+    if: >-
+      always() &&
+      needs.trigger-rebuild.outputs.published == 'true' &&
+      needs.trigger-rebuild.outputs.runtime_lane == 'dev'
+    # The agent's HTTP surface is on the lab host's LAN; hosted compute cannot
+    # see it. Same reasoning and same label as the convergence guard above: the
+    # checkout is pinned to the trusted base ref, so no fork-authored code runs
+    # on the fleet.
+    runs-on: [self-hosted, omnibase-deploy]
+    # The agent's apply carries its own 1500s budget (DEFAULT_APPLY_BUDGET_SECONDS)
+    # and begins only after the compose rebuild it follows, so the poll window
+    # below is the one that matters and this ceiling is that window plus a tail
+    # for the emit and the upload. A job killed by timeout uploads NO receipt,
+    # which is the single outcome worse than a failing one.
+    timeout-minutes: 35
+    steps:
+      - name: Checkout the reader from the trusted base ref
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # NEVER the merge ref -- a merged fork PR would put fork-authored code
+          # on the self-hosted fleet.
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+
+      # Repo invariant (tests/ci/test_ci_workflow_resilience.py): every job in
+      # this workflow resolves Python through the shared CI env action.
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-lab-overlay-receipt
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      - name: Record the lab-pass window start
+        run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Read the deploy agent's onex-lab overlay record
+        id: record
+        if: always()
+        env:
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          # `host.docker.internal`, NOT `localhost`. This job runs in the
+          # omninode-deploy-runner CONTAINER on the lab host, not in the host's
+          # network namespace, and that runner is the one carrying the
+          # host-gateway alias (docker/docker-compose.runners.yml extra_hosts) --
+          # the same reason the compose-dev probe above and chain-canary.yml use
+          # this form. The dev-lane deploy agent listens on 0.0.0.0:8098; the
+          # prod-pinned unit holds 8099 and is deliberately not read here.
+          # No LAN address is committed: the alias resolves to the docker bridge
+          # gateway.
+          LAB_AGENT_URL: http://host.docker.internal:8098
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lab-overlay-receipt
+          uv run python scripts/ci/fetch_lab_overlay_record.py \
+            --sha "$MERGE_SHA" \
+            --agent-url "$LAB_AGENT_URL" \
+            --wait-seconds 1800 \
+            --poll-interval-seconds 30 \
+            --out /tmp/lab-overlay-checks.json
+          cat /tmp/lab-overlay-checks.json
+
+      # if: always() on emit and upload, for the reason both other emitters state:
+      # a FAILED lab pass is exactly as worth recording as a passing one. The emit
+      # step exits non-zero on a FAIL receipt, so AC6's red signal lands on this
+      # run rather than waiting for somebody to probe a pod.
+      - name: Emit the onex-lab-k3s lab-pass receipt
+        if: always()
+        env:
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py emit \
+            --sha "$MERGE_SHA" \
+            --lane onex-lab-k3s \
+            --started-at "${LAB_PASS_STARTED_AT}" \
+            --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --checks-json /tmp/lab-overlay-checks.json \
+            --out /tmp/lab-overlay-receipt/receipt.json
+
+      - name: Upload the onex-lab-k3s lab-pass receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries by;
+          # it must match artifact_name(EnumLabLane.ONEX_LAB_K3S, sha) exactly.
+          name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
+          path: /tmp/lab-overlay-receipt
+          retention-days: 90
+          if-no-files-found: error
