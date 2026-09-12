@@ -58,8 +58,10 @@ repos:
   # Ratchet: NEW fingerprints fail; existing violations grandfathered in the
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/url_authority_baseline.json.
   # Baseline is burn-down only. Suppress with: # url-authority-ok: <reason>
+  # OMN-15692 (ruling 39): rev bumped to pull in rule 5
+  # (msk-direct-broker-endpoint), merged to omnibase_core dev by PR #1547.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: be4f95460dcd6865264ab0713a5b1cc48b41aef9 # pragma: allowlist secret
+    rev: 478e205d6f415adb2b5edd06b61f185279bba12e # pragma: allowlist secret
     hooks:
       - id: check-url-authority
         args: [--repo, omnibase_infra, --repo-root, .]
