@@ -97,7 +97,13 @@ class InfisicalSecretStore:
             return True
 
     async def delete_secret(self, key: str) -> bool:
-        """Delete a secret by key. Returns True on success; raises on failure."""
+        """Delete a secret by key.
+
+        Returns ``True`` when the key is absent after the call, including an
+        idempotent retry where the adapter already deleted it.
+        """
+        if not key.strip():
+            raise SecretResolutionError("Infisical secret key must not be empty.")
         await asyncio.to_thread(
             self._adapter.delete_secret,
             key,

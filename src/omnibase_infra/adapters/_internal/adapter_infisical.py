@@ -65,6 +65,17 @@ from omnibase_infra.utils.util_error_sanitization import (
 logger = logging.getLogger(__name__)
 
 
+def _is_infisical_not_found_error(error: Exception) -> bool:
+    """Return whether an SDK exception is Infisical's typed 404 response."""
+    try:
+        from infisical_sdk.infisical_requests import (  # type: ignore[import-untyped]
+            APIError,
+        )
+    except ImportError:
+        return False
+    return isinstance(error, APIError) and getattr(error, "status_code", None) == 404
+
+
 class AdapterInfisical:
     """Thin wrapper around the Infisical SDK.
 
@@ -534,6 +545,17 @@ class AdapterInfisical:
             SecretResolutionError: If client is not initialized.
             InfraConnectionError: If the SDK call fails.
         """
+        if not secret_name.strip():
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="delete_secret",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                "Infisical secret name must not be empty.",
+                context=ctx,
+            )
+
         if self._client is None or not self._authenticated:
             ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.INFISICAL,
@@ -561,11 +583,7 @@ class AdapterInfisical:
             # A 404 from Infisical means the secret is already absent -- treat as
             # success. This makes delete idempotent: a retry after a publish failure
             # (delete succeeded, Kafka failed) will not block revocation permanently.
-            from infisical_sdk.infisical_requests import (  # type: ignore[import-untyped]
-                APIError,
-            )
-
-            if isinstance(e, APIError) and e.status_code == 404:
+            if _is_infisical_not_found_error(e):
                 return
             sanitized_path = sanitize_secret_path(effective_path)
             ctx = ModelInfraErrorContext.with_correlation(

@@ -144,6 +144,26 @@ async def test_delete_secret_calls_adapter_delete_and_returns_true() -> None:
 
 
 @pytest.mark.unit
+async def test_delete_secret_returns_true_when_key_already_absent_on_retry() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+    adapter.delete_secret.return_value = None
+
+    store = _make_store(adapter)
+    assert await store.delete_secret("API_KEY") is True
+
+
+@pytest.mark.unit
+async def test_delete_secret_rejects_blank_key_before_adapter_call() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+
+    store = _make_store(adapter)
+    with pytest.raises(SecretResolutionError, match="must not be empty"):
+        await store.delete_secret("  ")
+
+    adapter.delete_secret.assert_not_called()
+
+
+@pytest.mark.unit
 async def test_delete_secret_propagates_adapter_error() -> None:
     adapter = MagicMock(spec=AdapterInfisical)
     adapter.delete_secret.side_effect = InfraConnectionError("delete failed")

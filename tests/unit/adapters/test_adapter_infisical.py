@@ -612,6 +612,19 @@ class TestAdapterInfisicalDeleteSecret:
         with pytest.raises(SecretResolutionError, match="not initialized"):
             adapter.delete_secret("CRED_KEY")
 
+    def test_delete_secret_rejects_blank_secret_name_before_sdk_call(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        with pytest.raises(SecretResolutionError, match="must not be empty"):
+            adapter.delete_secret("  ")
+
+        mock_client.secrets.delete_secret_by_name.assert_not_called()
+
     def test_delete_secret_sdk_failure_wraps_to_infra_connection_error(
         self, adapter_config: ModelInfisicalAdapterConfig
     ) -> None:
@@ -668,6 +681,25 @@ class TestAdapterInfisicalDeleteSecret:
 
         # Should not raise -- 404 is treated as "already deleted"
         adapter.delete_secret("CRED_KEY")
+
+    def test_delete_secret_sdk_error_import_failure_does_not_mask_original_error(
+        self,
+        adapter_config: ModelInfisicalAdapterConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sys
+
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+        mock_client.secrets.delete_secret_by_name.side_effect = RuntimeError(
+            "SDK internal error"
+        )
+        monkeypatch.setitem(sys.modules, "infisical_sdk.infisical_requests", None)
+
+        with pytest.raises(InfraConnectionError, match="Failed to delete secret"):
+            adapter.delete_secret("CRED_KEY")
 
     def test_delete_secret_non_404_api_error_wraps_to_infra_connection_error(
         self, adapter_config: ModelInfisicalAdapterConfig
