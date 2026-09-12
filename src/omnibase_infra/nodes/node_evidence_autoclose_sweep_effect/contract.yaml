@@ -334,15 +334,29 @@
 #     states a verdict without a remedy teaches nobody anything, which is what
 #     three lanes spent a night rediscovering by measurement.
 #
+#   - OMN-18233 (node_version 1.12.2): A CLOSED CASCADE BUMP ONLY STOPS
+#     BLOCKING WHEN SUPERSESSION IS PROVEN. The cited-PR merge conjunct used to
+#     refuse every closed-unmerged PR forever. That is right for ordinary work
+#     and wrong for dependency-cascade bump PRs that carry release provenance
+#     and were closed because a later merged bump delivered the same or newer
+#     source package version. The handler now resolves that narrow case through
+#     a four-clause predicate: machine-readable cascade provenance, a merged PR
+#     in the same repo that moved the source package pin, delivered version >=
+#     the required version by package-version comparison, and default-branch
+#     readback of the delivered version. Every unreadable or ambiguous clause
+#     holds the cited PR as blocking. Titles and ordering are deliberately not
+#     evidence. The predicate lives outside handlers/ because it is a helper,
+#     not a routed handler.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 7
-  patch: 0
-node_version: "1.12.1"
+  patch: 1
+node_version: "1.12.2"
 description: >
-  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done or posts a gap comment via the Linear API. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
+  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, or holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
 input_model:
   name: "ModelEvidenceAutocloseSweepRequest"

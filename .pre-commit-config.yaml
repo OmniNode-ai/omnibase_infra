@@ -240,6 +240,20 @@ repos:
         files: ^(\.github/workflows/.*\.ya?ml|docker/.*/compose\.ya?ml|docker/docker-compose\..*\.ya?ml|tests/ci/test_compose_proof_teardown_policy\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18247 (epic OMN-18232 phase 3): every artifact declared in
+      # config/ci_evidence_policy.yaml must be asserted present and non-empty
+      # at its uploader, on parsed workflow structure rather than file text.
+      # `if-no-files-found: error` is necessary and NOT sufficient -- it fires
+      # only when no path matches at all, so a zero-byte file satisfies it, and
+      # a zero-byte file is exactly what the lab-load probe produced on 10 of
+      # its first 12 runs while every run stayed green.
+      - id: ci-evidence-policy
+        name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
+        entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|config/ci_evidence_policy\.yaml|scripts/ci/assert_evidence_artifact\.py|tests/ci/test_ci_evidence_policy\.py|tests/fixtures/ci_evidence_policy/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-16516: structural (tomllib, not regex) guard against the
       # 2026-08-23 mirror-leak incident (OMN-16162) -- a committed uv.lock
       # that resolves any package from a non-public registry/git/artifact

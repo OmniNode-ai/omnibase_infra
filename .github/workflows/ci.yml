@@ -1800,6 +1800,52 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_compose_proof_teardown_policy.py -v --tb=short
 
+  # OMN-18247 (epic OMN-18232 phase 3): CI evidence-artifact honesty.
+  #
+  # An evidence-producing job that reports green while producing nothing is the
+  # defect class. This job enforces the first of its three forms: a declared
+  # evidence artifact must be asserted present and non-empty AT its uploader,
+  # and its uploader must treat absence as an error rather than a warning.
+  #
+  # Unconditional (no needs/if) so a skip is anomalous, and registered in
+  # scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS so deleting it cannot go
+  # green: this repo requires exactly one context, and the summary gate's
+  # default-deny sweep catches a FAILING job but not an ABSENT one.
+  ci-evidence-policy:
+    name: "CI Evidence Policy (OMN-18247)"
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Check CI evidence-artifact policy (OMN-18247)
+        run: |
+          echo "================================================================"
+          echo "CI Evidence Policy Gate (OMN-18247)"
+          echo "Every artifact declared in config/ci_evidence_policy.yaml is"
+          echo "asserted present and non-empty at its uploader, and its uploader"
+          echo "treats a missing file as an error rather than a warning."
+          echo "Read from parsed workflow structure, never from file text."
+          echo "================================================================"
+          uv run pytest tests/ci/test_ci_evidence_policy.py -v --tb=short
+
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
     needs: occ-preflight

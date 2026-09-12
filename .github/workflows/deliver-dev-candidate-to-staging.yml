@@ -751,6 +751,18 @@ jobs:
             --check "runtime_family_ready:${{ steps.boot-wait.outcome == 'success' && 'ok' || 'fail' }}:every runtime-family Deployment plus the projection snapshot topic, within ${BOOT_WAIT_SECONDS}s" \
             --out /tmp/lab-pass-receipt/receipt.json
 
+      # OMN-18247. `if-no-files-found: error` below fires only when the whole
+      # /tmp/lab-pass-receipt directory matches nothing. A receipt that exists
+      # and is zero bytes satisfies it, passes the uploader, and then fails the
+      # lab-pass gate that reads it — the worst of the three states, because the
+      # failure surfaces one workflow away from its cause.
+      - name: Assert the onex-lab lab-pass receipt is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 omnibase_infra/scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-pass-receipt-onex-lab \
+            --require /tmp/lab-pass-receipt/receipt.json
       - name: Upload the onex-lab lab-pass receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
