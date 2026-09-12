@@ -123,12 +123,23 @@ trusted_runner_variable:
   # two conclusive successes on fleet runners, runs 34662092826 on runner 82 and
   # 34661727557 on runner 68.
   #
-  # One honest limit on that live proof, recorded because it would be easy to
-  # overclaim: the same pull request also reworded the prose comment the gate
-  # used to match. A green gate after this flip therefore cannot by itself
-  # separate the matcher fix from the reword. The matcher fix is verified
-  # present in source, and the injected-pin control exercises the new logic
-  # directly, which is where the confidence comes from.
+  # One honest limit on that live proof, and its provenance corrected after a
+  # peer challenged it. The matcher-fix pull request does NOT touch the workflow
+  # carrying the prose comment the old check used to match: `git show --stat` on
+  # that squash lists five files and that workflow is not among them. The reword
+  # instead landed in an unrelated pull request at 2026-09-11T19:35Z, before this
+  # flip, found with `git log -S` on the old wording.
+  #
+  # So the confound is real but differently sourced than first recorded, and it
+  # does not disappear: replaying the OLD whole-file matcher against the current
+  # integration tree flags ZERO lines for either fleet label, which means a green
+  # gate there is consistent with both the fix and the reword. What the
+  # correction removes is the wrong attribution, not the limit.
+  #
+  # The basis for confidence is therefore the injected-pin control rather than
+  # the green gate: a folded-scalar hard-coded fleet label planted in a job's
+  # runs-on was reported by file, job and label, which exercises the new logic
+  # directly and cannot be satisfied by a reworded comment.
   #
   # THE COST, measured rather than estimated. Between 21:13:15Z and 21:49:29Z
   # that gate failed 5 runs across 5 branches -- 3 OCC companion branches and 2
