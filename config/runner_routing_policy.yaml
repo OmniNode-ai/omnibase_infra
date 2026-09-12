@@ -163,8 +163,12 @@ trusted_runner_variable:
   # a BUSY runner and 87 of 88 were busy. And the routing starved the evidence
   # companion of the very pull request recording it.
   #
-  # omnibase_core stays on the fleet: it was not the saturation source, and it
-  # has run clean since 2026-09-11T21:12:33Z.
+  # omnibase_core stayed on the fleet at the time this paragraph was written: it
+  # was not the saturation source, and it had run clean since
+  # 2026-09-11T21:12:33Z. SUPERSEDED 2026-09-12T14:01:27Z -- see the OMN-18205
+  # cloud-migration entry at the end of this block. The sentence is kept in the
+  # past tense because it is accurate history of the 2026-09-11 flip; it is no
+  # longer the current state and must not be cited as one.
   #
   # THE COST, measured rather than estimated. Between 21:13:15Z and 21:49:29Z
   # that gate failed 5 runs across 5 branches -- 3 OCC companion branches and 2
@@ -179,8 +183,11 @@ trusted_runner_variable:
   # omni-standards-compliance.yml contains ZERO occurrences of either the step
   # name or the error string, against exactly one of each in the other repo as
   # the positive control. It carries ~108 prose matches for the label, but
-  # nothing in that repo greps for them, so they are inert. That is why it stays
-  # flipped, and its jobs are executing and passing on named fleet runners.
+  # nothing in that repo greps for them, so they are inert. That is why it
+  # stayed flipped through 2026-09-12T14:01:27Z, with its jobs executing and
+  # passing on named fleet runners. That finding is unretracted and is the
+  # reason the flip was safe; it is not a reason the repository must remain
+  # there, and the cloud-migration entry below is what moved it.
   #
   # What the flip proved before the revert, and it is worth recording: queue
   # depth went from 279 queued jobs at 21:15Z to 0 at 21:42Z, with 76
@@ -196,22 +203,54 @@ trusted_runner_variable:
   # positive-control acceptance criteria. That is the policy guard that prevents
   # a repeat of the +11min quiet-snapshot mistake: the checked shape must exist
   # before the audit will accept any repo shadow divergence.
-  repository_overrides:
-    omnibase_core:
-      expected_json: '["self-hosted","omnibase-ci"]'
-      revert_when: >-
-        The same three conditions as onex_change_control above. This repository additionally carries 20 job definitions pinned to a literal ubuntu-latest, which this override does not move and must not be assumed to have moved; if any of those is later switched to read the seam, re-check it for container exposure before leaving this override in place.
-      activation_gate:
-        sustained_samples: 4
-        sustained_min_span_seconds: 3600
-        capacity_budget: >-
-          Allow only while a sustained sample over at least one hour shows this repository's routed fan-out keeps fleet busy <= 80 percent and leaves at least 12 idle runners after projected concurrent jobs. omnibase_core is retained on this basis only because it was not the saturation source in the 2026-09-12 onex_change_control incident and has run clean since 2026-09-11T21:12:33Z; that statement is not transferable to any other repository.
-        maintenance_roll_convergence: >-
-          Before adding or retaining an override during a maintenance window, prove the runner roller can recreate or drain at least one sampled busy runner, or set the override back to hosted before the roller starts.
-        evidence_companion_fate_isolation: >-
-          The PR that records a routing flip must keep its OCC evidence companion and hostile-review thread gate reachable on hosted or otherwise fate-isolated compute, so the evidence path cannot be queued behind the fleet state it is documenting.
-        positive_control_acceptance: >-
-          The injected-pin control must plant a folded-scalar hard-coded fleet label in a job runs-on and the validator must report file, job, and label; a green routing audit without this positive control is not sufficient proof.
+  #
+  # OMN-18205 CLOUD MIGRATION, 2026-09-12T14:01:27Z. The last remaining override
+  # is REMOVED and this map is empty again, which the shape test above calls the
+  # correct steady state. omnibase_core's trusted-CI shadow was patched from the
+  # fleet pair back to '["ubuntu-latest"]' at that timestamp, so every audited
+  # scope in the organization now agrees with expected_json above and no
+  # divergence is declared anywhere.
+  #
+  # AUTHORITY. The override's authority was the operator ruling of
+  # 2026-09-11 ~21:07Z, which directed work back onto the lab as necessary. A
+  # later operator ruling reverses that direction and names this shadow: the
+  # OPERATOR-CONSENT row at docs/tracking/ROLLING_WORK_LEDGER.md:6999 in the
+  # omni_home registry (2026-09-12T13:56:45Z), whose approved scope is to move
+  # CI work off the lab hosts to cloud runners and lists the trusted-seam
+  # shadow on this repository explicitly. A later ruling supersedes an earlier
+  # one; that is the whole reason this entry is gone, and nothing in the
+  # technical findings above is retracted to make room for it.
+  #
+  # WHAT WAS MEASURED BEFORE THE WRITE, since narrative is not authorization.
+  # Read live across the seventeen hours the override was in force
+  # (2026-09-11T21:12:33Z to 2026-09-12T14:01Z), job level, from the Actions
+  # API: 299 omnibase_core jobs executed on the fleet for 2831 runner-minutes,
+  # spread across 87 of the 88 runners in the group -- roughly 2.8 runners held
+  # continuously, which made this repository the largest single lab CI consumer
+  # measured anywhere in the estate. For comparison the plan of record's
+  # previously-largest exception, the omninode_infra pull-request test job, is
+  # 276 minutes over SEVEN DAYS. The activation_gate's capacity budget was not
+  # breached at the moment of the write (46 of 88 busy, 42 idle), so this is a
+  # deliberate policy change and NOT a capacity revert; recording which of the
+  # two it is matters, because a future lane reading a bare removal would
+  # reasonably infer the gate had fired.
+  #
+  # WHY THE MOVE COSTS NOTHING. omnibase_core is a PUBLIC repository, and
+  # standard GitHub-hosted runner minutes are free in public repositories. The
+  # nine-day billing read in the plan of record shows this repository at 65,800
+  # minutes gross and $0.00 net billed. So the 2831 runner-minutes above leave
+  # the lab and arrive somewhere they are not invoiced. That asymmetry is the
+  # reason a public repository is the right first thing to move and a private
+  # one is not.
+  #
+  # THE ONE SCOPE STILL ON THE FLEET, stated rather than left absent: omniweb's
+  # trusted-CI shadow, set 2026-09-01T12:39:22Z, is the only remaining
+  # self-hosted routing value at any scope in the organization. It is a private
+  # repository, so its hosted minutes bill, and it is still not in the audited
+  # `repositories` list below -- the hourly audit therefore never looks at it.
+  # That is a known gap folded into the plan of record's phase 4; this entry
+  # does not close it and does not flip that shadow.
+  repository_overrides: {}
 # OMN-18205, 2026-09-12: THE EXCLUSION ABOVE RESTS ON PRE-FIX EVIDENCE, and
 # this entry is the correction. The 5-of-5 self-hosted failures of "Customer
 # Path Boundary (OMN-18012)" recorded above all predate commit
