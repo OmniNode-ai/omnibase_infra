@@ -169,6 +169,9 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.cascade_supersession import (
+    resolve_verified_supersession,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_ac_binding_check_status import (
     EnumAcBindingCheckStatus,
 )
@@ -5009,6 +5012,39 @@ class HandlerEvidenceAutocloseSweep:
                 cited_merged_at = str(cited_payload.get("merged_at") or "")
                 if not cited_merged_at:
                     state = str(cited_payload.get("state") or "unknown").upper()
+                    # OMN-18233. THE VERIFIED-SUPERSESSION PREDICATE.
+                    #
+                    # An OPEN pull request can still merge, so the conjunct
+                    # above is right about it and the next tick re-offers the
+                    # candidate. A CLOSED one cannot, ever — and cascade bump
+                    # pull requests carry the RELEASING ticket's id, so every
+                    # ticket whose release opens downstream bumps inherits a
+                    # PERMANENT block the moment one of those bumps is closed
+                    # in favour of a better one. OMN-18201 is the measured
+                    # case: four criteria evidenced, refused on `#3446`.
+                    #
+                    # The remedy is not "ignore closed bumps". A closed bump
+                    # with no replacement is abandoned work and must keep
+                    # blocking. It is ignorable only when supersession is
+                    # PROVEN by the four-clause predicate, which reads no
+                    # title, imposes no ordering, and fails closed on every
+                    # clause it cannot resolve.
+                    if state == "CLOSED":
+                        supersession = await resolve_verified_supersession(
+                            repo=cited_repo,
+                            closed_pr_number=cited_number,
+                            closed_pr_body=str(cited_payload.get("body") or ""),
+                            run_gh_command=self._run_gh_command,
+                            gh_timeout_seconds=request.gh_timeout_seconds,
+                        )
+                        if supersession.superseded:
+                            continue
+                        unmerged_citations.append(
+                            f"{cited_repo}#{cited_number}: state={state}, "
+                            f"merged_at=null, and not proven superseded — "
+                            f"{supersession.detail}"
+                        )
+                        continue
                     unmerged_citations.append(
                         f"{cited_repo}#{cited_number}: state={state}, merged_at=null"
                     )
