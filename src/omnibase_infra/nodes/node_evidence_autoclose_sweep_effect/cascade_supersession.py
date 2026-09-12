@@ -34,6 +34,14 @@ refuse the single case this predicate was built for.
 Every clause fails CLOSED. "I could not read the default branch" resolves to
 "this bump still blocks", never to "so I will ignore it" — the same direction
 every other fence in this node fails in.
+
+This module sits at the node ROOT and not under ``handlers/`` deliberately: it
+is not a handler, it is routed by no contract, and it is invoked as a function
+by the sweep handler. Everything under ``handlers/`` is audited as a handler and
+must appear in the contract's ``handler_routing`` — a rule this module would
+have to be exempted from rather than satisfy. ``node_chain_canary_effect``'s
+``lane_transport`` is the same shape. It is split out of the handler module only
+because that file is already around six thousand lines.
 """
 
 from __future__ import annotations

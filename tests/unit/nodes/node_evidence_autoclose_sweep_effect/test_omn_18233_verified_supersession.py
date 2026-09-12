@@ -36,7 +36,7 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.cascade_supersession import (
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.cascade_supersession import (
     parse_cascade_provenance,
     pinned_version_from_lockfile,
     pinned_version_from_pyproject,
