@@ -180,6 +180,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - projection_cost_savings_overview
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
               - projection_delegation_summary

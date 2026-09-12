@@ -598,7 +598,18 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # Two ALTER VIEW statements and nothing else: their shape does not change, so
     # nothing needs dropping, and a DROP is what re-owns a view to whoever ran
     # the migration, which is the defect 0040 above records.
-    assert len(result.declarations) == 179
+    #
+    # 179 -> 180 for OMN-17426's
+    # nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql,
+    # which converts the two savings aggregate exposures the customer arrival
+    # page reads. It re-groups both views on tenant_id and APPENDS the column
+    # last, so CREATE OR REPLACE VIEW suffices -- Postgres permits an append and
+    # refuses a rename, a retype or a reorder -- and no grant and no view option
+    # is discarded. It also sets security_invoker on
+    # projection_cost_savings_overview, which 088 above left behind because that
+    # view read only savings_estimates at the time and reads delegation_events
+    # as of this migration.
+    assert len(result.declarations) == 180
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
