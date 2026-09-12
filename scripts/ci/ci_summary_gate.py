@@ -148,6 +148,17 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # unconditional in ci.yml (`if: always()`), so a skip is anomalous and never a
     # legitimate opt-out.
     "Exposed Identifier Gate (OMN-17320)",  # exposed-identifier-gate
+    # OMN-18247: every artifact declared in config/ci_evidence_policy.yaml is
+    # asserted present and non-empty AT its uploader. THIS LINE IS HALF THE
+    # MECHANISM, on the identical reasoning as the entries above: the
+    # default-deny sweep fails CI Summary when this job FAILS, but an
+    # unregistered job that is `skipped` or ABSENT yields SUCCESS. The failure
+    # mode this gate exists for is itself silent -- the lab-load probe produced
+    # a zero-byte artifact on 10 of its first 12 runs and never went red -- so a
+    # gate that could be silently deleted would reproduce the exact shape it
+    # closes. The job is unconditional in ci.yml (no needs/if), so a skip is
+    # anomalous and never a legitimate opt-out.
+    "CI Evidence Policy (OMN-18247)",  # ci-evidence-policy
     # OMN-18031: the per-run runner routing decision. THIS LINE IS HALF THE
     # MECHANISM, on the identical reasoning as the three entries above: this
     # repo requires exactly one context (`CI Summary`), the default-deny sweep

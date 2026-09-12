@@ -415,6 +415,15 @@ jobs:
             --checks-json /tmp/lab-pass-checks.json \
             --out /tmp/lab-pass-receipt/receipt.json
 
+      # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
+      # since the directory matches whether or not the receipt carries bytes.
+      - name: Assert the compose-dev lab-pass receipt is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-pass-receipt-compose-dev \
+            --require /tmp/lab-pass-receipt/receipt.json
       - name: Upload the compose-dev lab-pass receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -555,6 +564,14 @@ jobs:
             --checks-json /tmp/lab-overlay-checks.json \
             --out /tmp/lab-overlay-receipt/receipt.json
 
+      # OMN-18247: same zero-byte gap as the compose-dev receipt above.
+      - name: Assert the onex-lab-k3s lab-pass receipt is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-pass-receipt-onex-lab-k3s \
+            --require /tmp/lab-overlay-receipt/receipt.json
       - name: Upload the onex-lab-k3s lab-pass receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
