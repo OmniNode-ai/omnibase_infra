@@ -18,9 +18,11 @@ from typing import Any
 
 import pytest
 from deploy_agent.lab_overlay import (
+    API_IMAGE_NAME,
     CLOUD_MIGRATE_IMAGE_NAME,
     INFRA_MIGRATE_IMAGE_NAME,
     LAB_LANE_VALUE,
+    LANE_MANAGED_SELECTOR,
     OMNIMARKET_VERSION_PROGRAM,
     RUNTIME_IMAGE_NAME,
     RUNTIME_POD_SELECTOR,
@@ -110,11 +112,25 @@ class FakeRunner:
                     f"docker.io/{RUNTIME_IMAGE_NAME}:{STAMP}-{SHA[:8]}",
                     f"docker.io/{INFRA_MIGRATE_IMAGE_NAME}:{STAMP}-{SHA[:8]}",
                     f"docker.io/{CLOUD_MIGRATE_IMAGE_NAME}:{MANIFEST_SHA[:8]}-{STAMP}",
-                    "docker.io/onex-lab/omnicloud-core:carried-forward",
+                    f"docker.io/{API_IMAGE_NAME}:{MANIFEST_SHA[:8]}-{STAMP}",
                 ]
             )
-        if "jsonpath={.spec.template.spec.containers[0].image}" in joined:
-            return "docker.io/onex-lab/omnicloud-core:carried-forward"
+        if "get deployments" in joined:
+            # Two lane-managed Deployments live, one of which the render no longer
+            # declares: the 2026-09-12 state, where the standalone delegation
+            # writer omninode_infra#1355 retired kept running after the apply.
+            return json.dumps(
+                {
+                    "items": [
+                        {"metadata": {"name": "omninode-runtime"}},
+                        {
+                            "metadata": {
+                                "name": "omnimarket-projection-delegation-writer"
+                            }
+                        },
+                    ]
+                }
+            )
         if "get pods" in joined:
             return json.dumps(
                 {
@@ -177,6 +193,14 @@ def _applier(
         (destination / "docker").mkdir(exist_ok=True)
         return MANIFEST_SHA
 
+    # apply_lab_lane.sh writes its render to $LAB_WORK_DIR; the real script is a
+    # stub here, so the fixture writes the render the prune reads.
+    render = tmp_path / "state" / "lab-overlay" / "work" / "apply"
+    render.mkdir(parents=True, exist_ok=True)
+    (render / "onex-lab-render.yaml").write_text(
+        "kind: Deployment\nmetadata:\n  name: omninode-runtime\n"
+    )
+
     applier.archive_overlay = _archive  # type: ignore[method-assign]
     applier.materialise_kubeconfig = lambda destination: destination  # type: ignore[method-assign]
     return applier
@@ -203,6 +227,7 @@ def test_apply_writes_a_passing_record(tmp_path: Path, overlay_source: Path) -> 
         "lab_overlay_applied",
         "deployed_image",
         "runtime_omnimarket_version",
+        "retired_workloads_pruned",
     ]
 
 
@@ -363,41 +388,172 @@ def test_the_apply_carries_all_four_pins_and_both_store_flags(
         f"{RUNTIME_IMAGE_NAME}:{STAMP}-{SHA[:8]}"
     )
     assert argv[argv.index("--api-image") + 1] == (
-        "docker.io/onex-lab/omnicloud-core:carried-forward"
+        f"{API_IMAGE_NAME}:{MANIFEST_SHA[:8]}-{STAMP}"
     )
     assert argv[argv.index("--lab-secret-store-environment") + 1] == "dev"
 
 
-def test_both_migrate_bundles_are_built_and_the_runtime_is_only_promoted(
+def test_all_four_pins_are_built_or_promoted_and_none_is_carried_forward(
     tmp_path: Path, overlay_source: Path
 ) -> None:
-    """The runtime image is TAGGED, never rebuilt -- a second build of the same
-    source is a different digest for no reason. The two migrate bundles ARE
-    rebuilt every run, because a bundle whose lineage lags the runtime it gates
-    is the OMN-17702 barrier failure."""
+    """Measured 2026-09-12: k3s garbage-collects unreferenced images, and
+    apply_lab_lane.sh deletes both migrate Jobs, so between applies nothing
+    references either migrate image and both become collectable. An apply that
+    pinned what it found died at the migrate barrier and left three runtime pods
+    crash-looping on a missing db_metadata relation. So THREE images are built
+    every run and the fourth is promoted -- never carried forward from the
+    ledger, from docker, or from the content store."""
     runner = FakeRunner()
     applier = _applier(tmp_path, overlay_source, runner)
     applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
 
     builds = runner.argv_containing("docker build")
-    assert len(builds) == 2
+    assert len(builds) == 3, [" ".join(b) for b in builds]
+    built = {b[b.index("-t") + 1].split(":")[0] for b in builds}
+    assert built == {
+        INFRA_MIGRATE_IMAGE_NAME,
+        CLOUD_MIGRATE_IMAGE_NAME,
+        API_IMAGE_NAME,
+    }
+    # The runtime image is TAGGED, never rebuilt: a second build of the same
+    # source is a different digest for no reason.
     assert len(runner.argv_containing("docker tag")) == 1
     assert not [c for c in builds if "Dockerfile.runtime" in " ".join(c)]
+    # Every one of the four is imported into containerd, because residency
+    # between applies is the thing that is not guaranteed.
+    assert len(applier._popen.refs) == 4, applier._popen.refs
 
 
-def test_the_lane_is_never_mutated_outside_the_apply_script(
+def test_no_pin_is_read_off_a_live_deployment(
     tmp_path: Path, overlay_source: Path
 ) -> None:
-    """No in-place mutation verb reaches the cluster from this module. The
-    overlay's own apply path is the ONLY writer; anything else is the drift
-    k8s/onex-lab exists to refuse."""
+    """A resident image is not a pinnable one. The caller must never ask the lane
+    what it is running and reuse that as a pin -- that is what kept the lane
+    stale while passing."""
     runner = FakeRunner()
     applier = _applier(tmp_path, overlay_source, runner)
     applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
 
     for call in runner.argv_containing("kubectl"):
+        joined = " ".join(call)
+        assert "deployment/onex-api" not in joined
+        assert "spec.template.spec.containers[0].image" not in joined
+    assert not hasattr(applier, "carried_forward_api_pin")
+
+
+def test_the_api_image_is_built_the_way_ci_builds_it(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """Same Dockerfile and same CONTEXT as build-and-push-onex-api.yml. The
+    context is docker/onex-api, not the repo root, so a lab image built from a
+    wider tree would be a lookalike rather than the image CI ships."""
+    runner = FakeRunner()
+    applier = _applier(tmp_path, overlay_source, runner)
+    applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
+
+    api = next(
+        b
+        for b in runner.argv_containing("docker build")
+        if API_IMAGE_NAME in " ".join(b)
+    )
+    assert api[api.index("-f") + 1] == "docker/onex-api/Dockerfile"
+    assert api[-1] == "docker/onex-api"
+
+
+def test_a_retired_deployment_is_pruned_and_recorded(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """Measured 2026-09-12: after an apply that pinned a fresh image, 16 of 17
+    Deployments carried it and the seventeenth was the standalone delegation
+    writer omninode_infra#1355 had already retired, still four days stale.
+    apply_lab_lane.sh applies a document set and never prunes, so left alone the
+    lane runs retired workloads and the receipt says PASS."""
+    runner = FakeRunner()
+    applier = _applier(tmp_path, overlay_source, runner)
+
+    path = applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
+
+    record = json.loads(path.read_text())
+    pruned = next(
+        c for c in record["checks"] if c["name"] == "retired_workloads_pruned"
+    )
+    assert pruned["ok"] is True
+    assert "omnimarket-projection-delegation-writer" in pruned["evidence"]
+    deletes = runner.argv_containing("delete deployment/")
+    assert len(deletes) == 1
+    assert "omnimarket-projection-delegation-writer" in " ".join(deletes[0])
+    # The one the render declares is never touched.
+    assert "deployment/omninode-runtime" not in " ".join(" ".join(c) for c in deletes)
+
+
+def test_the_prune_only_reaches_lane_managed_objects(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """The scope is a label selector, not a filter on good intentions: anything a
+    person or another system put in this namespace is out of reach."""
+    runner = FakeRunner()
+    applier = _applier(tmp_path, overlay_source, runner)
+    applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
+
+    listing = next(c for c in runner.argv_containing("get deployments") if "-l" in c)
+    assert listing[listing.index("-l") + 1] == LANE_MANAGED_SELECTOR
+
+
+def test_an_empty_render_is_refused_rather_than_retiring_everything(
+    tmp_path: Path,
+) -> None:
+    """Rule 16. A render declaring no Deployment is a failed read, not a
+    statement that every workload on the lane is retired."""
+    runner = FakeRunner()
+    applier = LabOverlayApplier(
+        state_dir=tmp_path / "state",
+        repo_dir=tmp_path,
+        overlay_source_dir=tmp_path,
+        env=STORE_ENV,
+        runner=runner,
+        popen=FakePopen(),
+    )
+    empty = tmp_path / "render.yaml"
+    empty.write_text("kind: ConfigMap\nmetadata:\n  name: x\n")
+
+    with pytest.raises(LabOverlayRefusalError, match="declares no Deployment"):
+        applier.declared_deployments(empty)
+    assert not runner.argv_containing("delete deployment/")
+
+
+def test_no_in_place_mutation_verb_ever_reaches_the_lane(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """The overlay's own apply path is the only thing that WRITES objects; this
+    module never edits a live one. The verbs that edit in place -- apply, patch,
+    set, edit, replace, scale, annotate, label -- are the drift k8s/onex-lab
+    exists to refuse, and none of them appears.
+
+    `delete` is the one exception and it is a narrow one: pruning a Deployment
+    the render no longer declares removes a retired workload, it does not edit a
+    declared one. It is asserted separately to be label-scoped and
+    render-authorised."""
+    runner = FakeRunner()
+    applier = _applier(tmp_path, overlay_source, runner)
+    applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
+
+    forbidden = {
+        "apply",
+        "patch",
+        "set",
+        "edit",
+        "replace",
+        "scale",
+        "annotate",
+        "label",
+        "rollout",
+    }
+    for call in runner.argv_containing("kubectl"):
         assert call[0] == "kubectl"
-        assert call[3] in {"get", "exec"}, call
+        assert call[3] in {"get", "exec", "delete"}, call
+        assert not forbidden & set(call), call
+        if call[3] == "delete":
+            assert call[4].startswith("deployment/"), call
 
 
 # --------------------------------------------------------------------------- #
