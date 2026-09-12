@@ -25,6 +25,8 @@ ORG = "OmniNode-ai"
 DEFAULT_POLICY = Path("config/runner_routing_policy.yaml")
 PUBLIC_PR_RUNNER_VARIABLE = "OMNI_PUBLIC_PR_RUNS_ON_JSON"
 TRUSTED_CI_RUNNER_VARIABLE = "OMNI_TRUSTED_CI_RUNS_ON_JSON"
+# The GitHub-hosted label a job may not pin directly without a policy exception.
+HOSTED_RUNNER_LABEL = "ubuntu-latest"
 REQUIRED_CI_RUNNER_VARIABLE = "OMNI_REQUIRED_CI_RUNS_ON_JSON"
 FORK_PR_PREDICATE = (
     "github.event_name=='pull_request'&&"
@@ -224,6 +226,65 @@ def _normalized_expression(value: str) -> str:
     return re.sub(r"\s+", "", value)
 
 
+class UnreadableRunsOnError(Exception):
+    """A job declares runs-on in a shape this auditor cannot interpret.
+
+    Raised rather than returning an empty label set, because an empty set is
+    indistinguishable from a compliant job and would let the gate silently stop
+    gating. See ``runs_on_labels``.
+    """
+
+
+def runs_on_labels(runs_on: Any) -> list[str]:
+    """Return the runner labels a job's ``runs-on`` value resolves to.
+
+    Reads the PARSED value, never the source text. That is the whole point of
+    this helper: YAML resolves a block scalar to a plain string, so
+    ``runs-on: >-`` followed by the label on the next line is the same value as
+    ``runs-on: ubuntu-latest``, and a line-oriented matcher anchored on
+    ``runs-on:`` sees only the ``>-`` and misses the label entirely. The same
+    hole swallows a literal block scalar (``|-``) and an ordinary multi-line
+    sequence.
+
+    Accepts the three shapes Actions itself accepts -- a string, a sequence of
+    strings, and the group/labels mapping -- and raises ``UnreadableRunsOnError`` for
+    anything else, naming the type. Callers must not convert that to an empty
+    result.
+    """
+    if isinstance(runs_on, str):
+        return [runs_on]
+    if isinstance(runs_on, list):
+        if not all(isinstance(item, str) for item in runs_on):
+            raise UnreadableRunsOnError(
+                f"runs-on sequence contains a non-string entry: {runs_on!r}"
+            )
+        return list(runs_on)
+    if isinstance(runs_on, dict):
+        labels = runs_on.get("labels", [])
+        if isinstance(labels, str):
+            return [labels]
+        if isinstance(labels, list) and all(isinstance(i, str) for i in labels):
+            return list(labels)
+        raise UnreadableRunsOnError(
+            f"runs-on mapping has an unreadable labels entry: {labels!r}"
+        )
+    raise UnreadableRunsOnError(
+        f"runs-on is a {type(runs_on).__name__}, which is not a string, "
+        "sequence or group/labels mapping"
+    )
+
+
+def is_bare_hosted_pin(labels: list[str]) -> bool:
+    """True when the resolved labels are a literal hosted pin, not an expression.
+
+    A value carrying ``${{`` is selector-driven and is judged elsewhere; only a
+    label that Actions would use verbatim counts as a bare pin here.
+    """
+    if any("${{" in label for label in labels):
+        return False
+    return any(label.strip() == HOSTED_RUNNER_LABEL for label in labels)
+
+
 def runner_variable_for_event(
     event_name: str,
     head_repository: str | None,
@@ -249,9 +310,6 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
         for item in policy.get("hosted_runner_allowlist", [])
         if isinstance(item, dict) and "path" in item
     }
-    bare_hosted = re.compile(
-        r"^\s*runs-on:\s*(?:\[)?\s*ubuntu-latest(?![\w-])", re.MULTILINE
-    )
     findings: list[Finding] = []
     for path in _workflow_paths(repo_root):
         rel = path.relative_to(repo_root).as_posix()
@@ -263,13 +321,6 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
                     "pull_request_target is prohibited because untrusted fork code must never reach self-hosted runners",
                 )
             )
-        if bare_hosted.search(text) and rel not in allowlist:
-            findings.append(
-                Finding(
-                    rel,
-                    "bare runs-on: ubuntu-latest is not allowed; use OMNI_RUNNER_SELECTOR_V1 or add an explicit policy exception",
-                )
-            )
 
         workflow = yaml.safe_load(text)
         jobs = workflow.get("jobs", {}) if isinstance(workflow, dict) else {}
@@ -278,6 +329,36 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
         for job_name, job in jobs.items():
             if not isinstance(job, dict):
                 continue
+
+            # OMN-18031: the bare-hosted-pin check reads the PARSED runs-on
+            # value per job. It used to be a regex over the raw file anchored on
+            # `runs-on:` with the label on the same line, which a block scalar
+            # or a multi-line sequence walks straight past -- a gate that fails
+            # open and reads as compliance. A job that delegates with `uses:`
+            # has no runs-on of its own and is out of scope: the callee owns
+            # placement.
+            if "runs-on" in job:
+                try:
+                    labels = runs_on_labels(job["runs-on"])
+                except UnreadableRunsOnError as exc:
+                    findings.append(Finding(f"{rel}:{job_name}", str(exc)))
+                    continue
+                if is_bare_hosted_pin(labels) and rel not in allowlist:
+                    findings.append(
+                        Finding(
+                            f"{rel}:{job_name}",
+                            f"bare runs-on: {HOSTED_RUNNER_LABEL} is not allowed; "
+                            "use OMNI_RUNNER_SELECTOR_V1 or add an explicit policy exception",
+                        )
+                    )
+            elif "uses" not in job:
+                findings.append(
+                    Finding(
+                        f"{rel}:{job_name}",
+                        "job declares neither runs-on nor uses, so its runner placement cannot be audited",
+                    )
+                )
+
             runs_on = job.get("runs-on")
             if not isinstance(runs_on, str):
                 continue
