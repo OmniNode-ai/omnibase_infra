@@ -126,6 +126,26 @@ def _pyproject(version: str) -> str:
     )
 
 
+def _pyproject_constraint(version: str = "0.47.0") -> str:
+    return (
+        "[project]\n"
+        'name = "omnibase-infra"\n'
+        "dependencies = [\n"
+        f'    "omnibase-core>={version}",\n'
+        "]\n"
+    )
+
+
+def _pyproject_with_extra_pin(version: str) -> str:
+    return (
+        "[project]\n"
+        'name = "omnibase-infra"\n'
+        "dependencies = [\n"
+        f'    "omnibase-core[server]=={version}",\n'
+        "]\n"
+    )
+
+
 def _lockfile(version: str) -> str:
     return (
         "version = 1\n\n"
@@ -135,6 +155,16 @@ def _lockfile(version: str) -> str:
         "[[package]]\n"
         'name = "omnibase-core"\n'
         f'version = "{version}"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+    )
+
+
+def _lockfile_version_first(version: str) -> str:
+    return (
+        "version = 1\n\n"
+        "[[package]]\n"
+        f'version = "{version}"\n'
+        'name = "omnibase-core"\n'
         'source = { registry = "https://pypi.org/simple" }\n'
     )
 
@@ -342,6 +372,14 @@ class TestPinReading:
         underscored = _pyproject("0.47.12").replace("omnibase-core", "omnibase_core")
         assert pinned_version_from_pyproject(underscored, "omnibase-core") == "0.47.12"
 
+    def test_the_pyproject_pin_reader_accepts_extras(self) -> None:
+        assert (
+            pinned_version_from_pyproject(
+                _pyproject_with_extra_pin("0.47.12"), "omnibase-core"
+            )
+            == "0.47.12"
+        )
+
     def test_an_absent_package_reads_as_no_pin(self) -> None:
         assert (
             pinned_version_from_pyproject(_pyproject("0.47.12"), "omnimarket") is None
@@ -353,6 +391,14 @@ class TestPinReading:
         )
         # And it reads the right package's version, not the first one it sees.
         assert pinned_version_from_lockfile(_lockfile("0.47.12"), "redis") == "6.1.0"
+
+    def test_the_lockfile_reader_accepts_version_before_name(self) -> None:
+        assert (
+            pinned_version_from_lockfile(
+                _lockfile_version_first("0.47.12"), "omnibase-core"
+            )
+            == "0.47.12"
+        )
 
 
 # ------------------------------------------------------- the predicate ------
@@ -567,6 +613,32 @@ class TestFourClausePredicate:
 
         assert verdict.superseded is True
         assert verdict.delivered_version == "0.47.12"
+
+    async def test_clause_two_compares_versions_within_the_same_pin_source(
+        self,
+    ) -> None:
+        """An unchanged pyproject constraint must not hide a moved lockfile."""
+        gh = _green_gh(
+            contents={
+                ("pyproject.toml", "dev"): _pyproject_constraint(),
+                ("uv.lock", "dev"): _lockfile("0.47.12"),
+                ("pyproject.toml", "49572505b86e"): _pyproject_constraint(),
+                ("uv.lock", "49572505b86e"): _lockfile("0.47.12"),
+                ("pyproject.toml", "fccef30d554f"): _pyproject_constraint(),
+                ("uv.lock", "fccef30d554f"): _lockfile("0.47.11"),
+            }
+        )
+
+        verdict = await resolve_verified_supersession(
+            repo=_PRODUCT_REPO,
+            closed_pr_number=3446,
+            closed_pr_body=PR_3446_BODY,
+            run_gh_command=gh,
+            gh_timeout_seconds=30,
+        )
+
+        assert verdict.superseded is True
+        assert "uv.lock from 0.47.11 to 0.47.12" in verdict.detail
 
 
 # ------------------------------------------------- wired into the closer ----

@@ -142,7 +142,7 @@ def pinned_version_from_pyproject(text: str, distribution: str) -> str | None:
     """
     wanted = normalise_distribution(distribution)
     pattern = re.compile(
-        r"""["']\s*([\w.-]+)\s*==\s*([^"',\s\[\]]+)""",
+        r"""["']\s*([\w.-]+)(?:\[[^\]]+\])?\s*==\s*([^"',\s\[\]]+)""",
     )
     for name, version in pattern.findall(text):
         if normalise_distribution(name) == wanted:
@@ -153,33 +153,41 @@ def pinned_version_from_pyproject(text: str, distribution: str) -> str | None:
 def pinned_version_from_lockfile(text: str, distribution: str) -> str | None:
     """The version ``uv.lock`` resolves ``distribution`` to, if any."""
     wanted = normalise_distribution(distribution)
-    current_name = ""
-    for raw in text.splitlines():
+    current: dict[str, str] = {}
+
+    def resolved(block: dict[str, str]) -> str | None:
+        if normalise_distribution(block.get("name", "")) == wanted:
+            return block.get("version") or None
+        return None
+
+    for raw in [*text.splitlines(), "[[package]]"]:
         line = raw.strip()
+        if line == "[[package]]":
+            version = resolved(current)
+            if version:
+                return version
+            current = {}
+            continue
         name_match = re.match(r'^name\s*=\s*"([^"]+)"$', line)
         if name_match:
-            current_name = normalise_distribution(name_match.group(1))
+            current["name"] = name_match.group(1)
             continue
         version_match = re.match(r'^version\s*=\s*"([^"]+)"$', line)
-        if version_match and current_name == wanted:
-            return version_match.group(1)
+        if version_match:
+            current["version"] = version_match.group(1)
     return None
 
 
-async def _read_pinned_version(
+async def _read_pinned_versions(
     *,
     repo: str,
     ref: str,
     distribution: str,
     run_gh_command: GhRunner,
     gh_timeout_seconds: int,
-) -> tuple[str, str]:
-    """``(version, path)`` for ``distribution`` at ``ref``; ``("", "")`` if none.
-
-    Reads the declaration first and the resolution second. An unreadable path is
-    indistinguishable from an absent one HERE on purpose: both mean this ref
-    does not prove a version, and the caller holds on either.
-    """
+) -> dict[str, str]:
+    """Every readable pinned version for ``distribution`` at ``ref``, by path."""
+    versions: dict[str, str] = {}
     for path in _PIN_PATHS:
         payload, _error = await run_gh_command(
             ["gh", "api", f"repos/{repo}/contents/{path}?ref={ref}"],
@@ -200,6 +208,34 @@ async def _read_pinned_version(
             else pinned_version_from_lockfile
         )
         version = reader(text, distribution)
+        if version:
+            versions[path] = version
+    return versions
+
+
+async def _read_pinned_version(
+    *,
+    repo: str,
+    ref: str,
+    distribution: str,
+    run_gh_command: GhRunner,
+    gh_timeout_seconds: int,
+) -> tuple[str, str]:
+    """``(version, path)`` for ``distribution`` at ``ref``; ``("", "")`` if none.
+
+    Reads the declaration first and the resolution second. An unreadable path is
+    indistinguishable from an absent one HERE on purpose: both mean this ref
+    does not prove a version, and the caller holds on either.
+    """
+    versions = await _read_pinned_versions(
+        repo=repo,
+        ref=ref,
+        distribution=distribution,
+        run_gh_command=run_gh_command,
+        gh_timeout_seconds=gh_timeout_seconds,
+    )
+    for path in _PIN_PATHS:
+        version = versions.get(path, "")
         if version:
             return version, path
     return "", ""
@@ -303,28 +339,33 @@ async def _pull_request_moved_the_pin(
     base_sha = str(base.get("sha") or "") if isinstance(base, dict) else ""
     if not merge_sha or not base_sha:
         return ""
-    after, path = await _read_pinned_version(
+    after_versions = await _read_pinned_versions(
         repo=repo,
         ref=merge_sha,
         distribution=distribution,
         run_gh_command=run_gh_command,
         gh_timeout_seconds=gh_timeout_seconds,
     )
-    if not after:
+    if not after_versions:
         return ""
-    before, _before_path = await _read_pinned_version(
+    before_versions = await _read_pinned_versions(
         repo=repo,
         ref=base_sha,
         distribution=distribution,
         run_gh_command=run_gh_command,
         gh_timeout_seconds=gh_timeout_seconds,
     )
-    if before == after:
-        return ""
-    return (
-        f"{repo}#{pr_number} merged and moved the {distribution} entry in "
-        f"{path} from {before or 'absent'} to {after}"
-    )
+    for path in _PIN_PATHS:
+        after = after_versions.get(path, "")
+        if not after:
+            continue
+        before = before_versions.get(path, "")
+        if before != after:
+            return (
+                f"{repo}#{pr_number} merged and moved the {distribution} entry "
+                f"in {path} from {before or 'absent'} to {after}"
+            )
+    return ""
 
 
 async def resolve_verified_supersession(
