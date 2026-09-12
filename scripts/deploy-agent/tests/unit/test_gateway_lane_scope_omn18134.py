@@ -582,3 +582,103 @@ class TestFailClosed:
                 build_source=BuildSource.RELEASE,
                 lane=EnumRuntimeLane.DEV,
             )
+
+
+class TestTheCommandsPinReachesTheGatewayScript:
+    """OMN-18134 -- the accepted command's ``git_ref`` must reach the gateway.
+
+    MEASURED, NOT REVIEWED. Deploy-agent job
+    ``a1b8137b-8ff7-49c2-a95d-cf22b530ef69`` (accepted 2026-09-12T15:59:15Z,
+    ``git_ref=ce70bd1eb37644a5c4bbae1c6ce34a43b41eedeb``) completed with
+    ``runtime: failed`` and one error::
+
+        GATEWAY_DEPLOY_FAILED: bash .../scripts/deploy-gateway.sh --execute
+        exited 5. stderr: ERROR: DEPLOY_REF unset -- refusing to stage the
+        AMBIENT host tree (OMN-17291).
+
+    ``deploy-gateway.sh`` calls ``stage_workspace_if_needed`` ->
+    ``scripts/runtime_build/stage_workspace.sh``, whose OMN-17291 guard refuses
+    an unpinned build. ``_stage_workspace`` exports the pin for the RUNTIME
+    family's own staging; ``_gateway_child_env`` did not, so the pin was dropped
+    between the consumer and the gateway step -- the identical shape OMN-16442
+    fixed one step earlier in the same file.
+
+    THE BLAST RADIUS IS NOT THE GATEWAY. ``agent.py::_run_rebuild`` calls
+    ``_apply_lab_overlay`` as the LAST statement of its ``try``, after
+    ``rebuild_scope``, so this exception skips the OMN-18200 lab-overlay caller
+    entirely. Rule 24(a)'s k3s ``onex-lab`` half therefore did not run on the
+    only runtime-affecting merge of 2026-09-12, and the lane stayed 16 hours
+    behind ``dev`` with nothing reporting it.
+
+    The guard STAYS, exactly as OMN-16442 recorded: this passes the pin the
+    command already carries. It does not weaken, skip, or opt out of the
+    assertion, and an empty ``git_ref`` exports nothing so the script still
+    refuses in its own words.
+    """
+
+    def test_the_gateway_script_receives_the_commands_git_ref_as_deploy_ref(
+        self,
+    ) -> None:
+        commands, envs = _captured(EnumRuntimeLane.DEV)
+        index = next(
+            i
+            for i, cmd in enumerate(commands)
+            if any("deploy-gateway.sh" in tok for tok in cmd)
+        )
+        assert envs[index].get("DEPLOY_REF") == "origin/dev", (
+            "the gateway deploy script ran without the accepted command's pin, "
+            "so stage_workspace.sh refuses with 'DEPLOY_REF unset' (exit 5) and "
+            "takes the whole rebuild -- and with it the OMN-18200 lab-overlay "
+            "re-apply -- down with it."
+        )
+
+    def test_the_sibling_fallback_ref_travels_with_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # OMN-17135: the CI publisher pins a bare omnibase_infra SHA, which
+        # names no commit in any sibling. The runtime staging already carries
+        # the declared tracking head as each sibling's own ref; the gateway
+        # stages the same siblings from the same script and needs the same
+        # fallback, or fixing DEPLOY_REF alone just moves the failure one line
+        # down to "cannot resolve ref".
+        monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
+        commands, envs = _captured(EnumRuntimeLane.DEV)
+        index = next(
+            i
+            for i, cmd in enumerate(commands)
+            if any("deploy-gateway.sh" in tok for tok in cmd)
+        )
+        assert envs[index].get("DEPLOY_SIBLING_FALLBACK_REF") == "origin/dev"
+
+    def test_an_absent_pin_exports_nothing_rather_than_a_default(self) -> None:
+        # The refusal is correct for a caller with no pin to offer. Substituting
+        # a plausible-looking default here would be the OMN-17291 ambient build
+        # the guard exists to refuse, laundered through this agent.
+        commands: list[list[str]] = []
+        envs: list[dict[str, str]] = []
+
+        def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            commands.append(list(cmd))
+            env = kwargs.get("env")
+            envs.append(dict(env) if isinstance(env, dict) else {})
+            return _ok()
+
+        with (
+            patch("deploy_agent.executor._run", side_effect=_fake_run),
+            patch.object(DeployExecutor, "_compose_up", return_value=None),
+        ):
+            DeployExecutor().rebuild_scope(
+                Scope.RUNTIME,
+                [],
+                _noop_phase_update,
+                git_sha="0" * 40,
+                git_ref="",
+                build_source=BuildSource.RELEASE,
+                lane=EnumRuntimeLane.DEV,
+            )
+        index = next(
+            i
+            for i, cmd in enumerate(commands)
+            if any("deploy-gateway.sh" in tok for tok in cmd)
+        )
+        assert "DEPLOY_REF" not in envs[index]

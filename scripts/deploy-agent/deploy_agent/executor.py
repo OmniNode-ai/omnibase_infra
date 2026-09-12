@@ -1931,6 +1931,7 @@ class DeployExecutor:
                 lane=lane,
                 build_source=build_source,
                 targets=gateway_targets,
+                git_ref=git_ref,
             )
             return services_for_scope(Scope.FULL, lane=lane)
 
@@ -1959,10 +1960,13 @@ class DeployExecutor:
             lane=lane,
             build_source=build_source,
             targets=gateway_targets,
+            git_ref=git_ref,
         )
         return services if services else services_for_scope(scope, lane=lane)
 
-    def _gateway_child_env(self, build_source: BuildSource | str) -> dict[str, str]:
+    def _gateway_child_env(
+        self, build_source: BuildSource | str, *, git_ref: str = ""
+    ) -> dict[str, str]:
         """Return the environment the gateway deploy script runs under.
 
         Every ``GATEWAY_``-prefixed variable except the three location overrides
@@ -1972,6 +1976,29 @@ class DeployExecutor:
         (from its own operator env file, or inherited from a peer lane) is the
         one a map path resolves to. That is AC1's "never from env", enforced
         rather than assumed.
+
+        THE COMMAND'S PIN TRAVELS WITH IT (OMN-18134). ``deploy-gateway.sh``
+        calls ``stage_workspace_if_needed`` -> ``stage_workspace.sh``, whose
+        OMN-17291 guard refuses to stage the AMBIENT host tree when
+        ``DEPLOY_REF`` is unset. ``_stage_workspace`` exports the pin for the
+        runtime family's own staging; this env did not, so the pin was dropped
+        between the consumer and the gateway step -- the identical shape
+        OMN-16442 fixed one step earlier in this same file. Measured live on
+        job ``a1b8137b-8ff7-49c2-a95d-cf22b530ef69`` (2026-09-12T15:59:15Z):
+        ``GATEWAY_DEPLOY_FAILED: ... exited 5 ... ERROR: DEPLOY_REF unset``.
+
+        The blast radius was not the gateway. ``agent.py::_run_rebuild`` calls
+        ``_apply_lab_overlay`` as the LAST statement of its ``try``, so this
+        exception skipped the OMN-18200 lab-overlay caller entirely and the
+        persistent k3s ``onex-lab`` lane sat 16 hours behind ``dev`` with
+        nothing reporting it -- rule 24(a)'s k3s half, silently not running.
+
+        The guard STAYS. This passes the pin the accepted command already
+        carries; it does not weaken, skip or opt out of the assertion. An empty
+        ``git_ref`` exports NOTHING rather than a plausible default, so the
+        script still refuses in its own words -- substituting one here would be
+        the ambient build OMN-17291 exists to refuse, laundered through this
+        agent.
         """
         env = _compose_env()
         for key in [
@@ -1984,6 +2011,16 @@ class DeployExecutor:
         # gateway config and must match the runtime family's build exactly, or
         # the gateway image drifts from the lane it forwards for.
         env["BUILD_SOURCE"] = _coerce_build_source(build_source, layer="gateway").value
+        if git_ref:
+            env["DEPLOY_REF"] = git_ref
+            # OMN-17135: the CI publisher pins a bare omnibase_infra SHA, which
+            # names no commit in any sibling, so a DEPLOY_REF alone just moves
+            # the refusal one line down to "cannot resolve ref". The runtime
+            # staging already hands each sibling the declared tracking head to
+            # resolve for itself; the gateway stages the same siblings through
+            # the same script and needs the same fallback.
+            if os.environ.get("DEPLOY_AGENT_TRACKING_REF"):
+                env["DEPLOY_SIBLING_FALLBACK_REF"] = load_tracking_remote_ref_from_env()
         return env
 
     def _assert_gateway_lane_config(self) -> str:
@@ -2026,6 +2063,7 @@ class DeployExecutor:
         lane: EnumRuntimeLane,
         build_source: BuildSource | str,
         targets: list[str],
+        git_ref: str = "",
     ) -> None:
         """Deploy the gateway compose project via its sanctioned script.
 
@@ -2062,7 +2100,7 @@ class DeployExecutor:
             cmd,
             timeout=GATEWAY_DEPLOY_TIMEOUT_SECONDS,
             cwd=REPO_DIR,
-            env=self._gateway_child_env(build_source),
+            env=self._gateway_child_env(build_source, git_ref=git_ref),
         )
         if result.returncode != 0:
             raise RuntimeError(
