@@ -107,39 +107,45 @@ trusted_runner_variable:
   # and is the one override declared below. It carries no `testcontainers`
   # dependency and no `docker` step in any workflow.
   #
-  # RE-FLIPPED 2026-09-12T00:27:32Z, after the gate defect above was fixed.
-  # onex_change_control#9140 (squash dbec685b7b0f4d0737db87c5a42a6e749f36492b)
-  # moved that check out of a whole-file grep and into that repo's canonical
-  # routing validator, reading the YAML-parsed runs-on value so comments, name:
-  # fields and step bodies are structurally out of scope. The old error string
-  # is gone from the workflow entirely; verified on origin/dev, not inferred
-  # from the pull request.
+  # RE-FLIPPED 2026-09-12T00:27:32Z and REVERTED AGAIN at 01:56:49Z, this time
+  # because the fleet could not carry the load. That second revert is the more
+  # important measurement in this whole entry, so it is recorded here rather
+  # than only in a ticket.
   #
-  # Proven before the write and again after it. BEFORE: a clean export of that
-  # repo's dev tree was run through the new validator with the fleet label set
-  # injected, which passed, and a POSITIVE CONTROL planting a folded-scalar
-  # hard-coded self-hosted pin was caught by file, job and label -- so the pass
-  # is a real gate result rather than a vacuous one. AFTER: the gate returned
-  # two conclusive successes on fleet runners, runs 34662092826 on runner 82 and
-  # 34661727557 on runner 68.
+  # The gate defect that forced the FIRST revert was genuinely fixed
+  # (onex_change_control#9140, squash dbec685b7b0f4d0737db87c5a42a6e749f36492b),
+  # verified on that repo's integration branch, and proven on the fleet by two
+  # conclusive gate successes plus an injected-pin control. None of that is
+  # retracted. What failed is capacity.
   #
-  # One honest limit on that live proof, and its provenance corrected after a
-  # peer challenged it. The matcher-fix pull request does NOT touch the workflow
-  # carrying the prose comment the old check used to match: `git show --stat` on
-  # that squash lists five files and that workflow is not among them. The reword
-  # instead landed in an unrelated pull request at 2026-09-11T19:35Z, before this
-  # flip, found with `git log -S` on the old wording.
+  # MEASURED, job level, six repositories:
   #
-  # So the confound is real but differently sourced than first recorded, and it
-  # does not disappear: replaying the OLD whole-file matcher against the current
-  # integration tree flags ZERO lines for either fleet label, which means a green
-  # gate there is consistent with both the fix and the reword. What the
-  # correction removes is the wrong attribution, not the limit.
+  #   pre-flip  21:15Z  279 queued jobs, max wait 18m, all hosted,
+  #                     70 of 88 fleet runners idle
+  #   +11min    00:38Z  0 queued, 97 jobs on fleet runners, 47 busy / 37 idle
+  #   +86min    01:54Z  336 queued jobs, max wait 25m, 293 of them waiting on
+  #                     FLEET labels, fleet 87 of 88 BUSY, 1 idle
   #
-  # The basis for confidence is therefore the injected-pin control rather than
-  # the green gate: a folded-scalar hard-coded fleet label planted in a job's
-  # runs-on was reported by file, job and label, which exercises the new logic
-  # directly and cannot be satisfied by a reworded comment.
+  # So routing was WORSE than the hosted baseline it replaced, on both queue
+  # depth and tail latency, and 182 of those 336 queued jobs were the routed
+  # repository's own. The +11min reading was a quiet-moment snapshot and was
+  # wrongly reported as the outcome; the honest reading needs a sustained
+  # sample, which is what the plan's phase 0 asked for and what a single
+  # snapshot cannot give.
+  #
+  # The premise this refutes is specific and worth stating: the fleet being
+  # near-unused at rest (~0.03 percent of available runner-minutes) does not
+  # imply it can absorb one busy repository's CI. Eighty-eight runners against
+  # that repository's fan-out is not spare capacity, it is a smaller bottleneck
+  # than the hosted pool.
+  #
+  # Two further harms, either sufficient on its own. A concurrent fleet
+  # maintenance roll could not converge, because its roller refuses to recreate
+  # a BUSY runner and 87 of 88 were busy. And the routing starved the evidence
+  # companion of the very pull request recording it.
+  #
+  # omnibase_core stays on the fleet: it was not the saturation source, and it
+  # has run clean since 2026-09-11T21:12:33Z.
   #
   # THE COST, measured rather than estimated. Between 21:13:15Z and 21:49:29Z
   # that gate failed 5 runs across 5 branches -- 3 OCC companion branches and 2
@@ -163,10 +169,6 @@ trusted_runner_variable:
   # count rising from 16 to 51 of 88. The mechanism works. One repository's
   # self-referential gate is what stopped it, not the fleet.
   repository_overrides:
-    onex_change_control:
-      expected_json: '["self-hosted","omnibase-ci"]'
-      revert_when: >-
-        Any job in this repository fails on the fleet for a fleet-specific reason -- a container it cannot bootstrap, a tool the runner image lacks, or disk exhaustion -- or the repository acquires a testcontainer-backed or image-building gate that reads this seam. Also revert once the hosted queue this relieves is gone: if a sustained sample shows no job-level queue wait attributable to runner availability, hosted is the cheaper default for a public repository, where hosted minutes are free.
     omnibase_core:
       expected_json: '["self-hosted","omnibase-ci"]'
       revert_when: >-
