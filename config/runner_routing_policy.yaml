@@ -107,6 +107,29 @@ trusted_runner_variable:
   # and is the one override declared below. It carries no `testcontainers`
   # dependency and no `docker` step in any workflow.
   #
+  # RE-FLIPPED 2026-09-12T00:27:32Z, after the gate defect above was fixed.
+  # onex_change_control#9140 (squash dbec685b7b0f4d0737db87c5a42a6e749f36492b)
+  # moved that check out of a whole-file grep and into that repo's canonical
+  # routing validator, reading the YAML-parsed runs-on value so comments, name:
+  # fields and step bodies are structurally out of scope. The old error string
+  # is gone from the workflow entirely; verified on origin/dev, not inferred
+  # from the pull request.
+  #
+  # Proven before the write and again after it. BEFORE: a clean export of that
+  # repo's dev tree was run through the new validator with the fleet label set
+  # injected, which passed, and a POSITIVE CONTROL planting a folded-scalar
+  # hard-coded self-hosted pin was caught by file, job and label -- so the pass
+  # is a real gate result rather than a vacuous one. AFTER: the gate returned
+  # two conclusive successes on fleet runners, runs 34662092826 on runner 82 and
+  # 34661727557 on runner 68.
+  #
+  # One honest limit on that live proof, recorded because it would be easy to
+  # overclaim: the same pull request also reworded the prose comment the gate
+  # used to match. A green gate after this flip therefore cannot by itself
+  # separate the matcher fix from the reword. The matcher fix is verified
+  # present in source, and the injected-pin control exercises the new logic
+  # directly, which is where the confidence comes from.
+  #
   # THE COST, measured rather than estimated. Between 21:13:15Z and 21:49:29Z
   # that gate failed 5 runs across 5 branches -- 3 OCC companion branches and 2
   # product branches inside that repo -- and because it feeds the required
@@ -129,6 +152,10 @@ trusted_runner_variable:
   # count rising from 16 to 51 of 88. The mechanism works. One repository's
   # self-referential gate is what stopped it, not the fleet.
   repository_overrides:
+    onex_change_control:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        Any job in this repository fails on the fleet for a fleet-specific reason -- a container it cannot bootstrap, a tool the runner image lacks, or disk exhaustion -- or the repository acquires a testcontainer-backed or image-building gate that reads this seam. Also revert once the hosted queue this relieves is gone: if a sustained sample shows no job-level queue wait attributable to runner availability, hosted is the cheaper default for a public repository, where hosted minutes are free.
     omnibase_core:
       expected_json: '["self-hosted","omnibase-ci"]'
       revert_when: >-
