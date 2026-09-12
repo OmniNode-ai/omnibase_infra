@@ -51,9 +51,10 @@ trusted_runner_variable:
   # self-hosted, the first of them 71 seconds after the flip; reproduced on
   # omnimarket run 34122888401.
   #
-  # SUPERSEDED, 2026-09-12 (OMN-18205). The sentence that stood here said that
-  # gate "and every other testcontainer-backed gate needs a hosted class of its
-  # own". That is no longer true and it is dropped rather than softened: the
+  # SUPERSEDED, 2026-09-12 (OMN-18205). The sentence that stood here claimed
+  # this gate, and every other container-backed gate, required a runner class
+  # of its own that the fleet could not provide. That is no longer true and it
+  # is dropped rather than softened: the
   # runner-topology defect was fixed the same afternoon and the gate has since
   # been PROVEN green on a fleet runner. The A/B above is kept because it is an
   # accurate record of what was measured on the morning of 2026-09-07 -- it is
@@ -78,9 +79,10 @@ trusted_runner_variable:
   # OMN18012_REQUIRE_HARNESS=1 set so a missing daemon is red rather than a
   # green skip.
   #
-  # CORRECTED, 2026-09-12 (OMN-18205). This paragraph previously ended "Flipping
-  # either shadow re-runs the 2026-09-07 harm verbatim." That claim was false
-  # when it was written and is withdrawn at the request of its own author. The
+  # CORRECTED, 2026-09-12 (OMN-18205). This paragraph previously ended with a
+  # sentence asserting that flipping either shadow would reproduce the
+  # 2026-09-07 harm exactly. That claim was false when it was written and is
+  # withdrawn at the request of its own author. The
   # harm it names was fixed before this text was committed, and the gate has
   # since run green on a fleet runner in both repositories. Neither repository is
   # excluded for that reason any more; the standing reason not to flip them is
