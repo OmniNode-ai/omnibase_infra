@@ -168,6 +168,16 @@ _BUILD_PROVENANCE_BY_SOURCE: dict[BuildSource, tuple[str, str]] = {
 _PROMOTION_GUARD_PATH = Path(REPO_DIR) / "scripts" / "check_prod_promotion_lineage.py"
 
 
+def _load_optional_tracking_remote_ref_from_env() -> str | None:
+    """Return the declared remote tracking ref, or none when it is undeclared."""
+    try:
+        return load_tracking_remote_ref_from_env()
+    except RuntimeError as exc:
+        if "DEPLOY_AGENT_TRACKING_REF is required" in str(exc):
+            return None
+        raise
+
+
 def _load_promotion_guard() -> ModuleType:
     """Load the prod promotion-lineage guard module from scripts/ by path.
 
@@ -1892,6 +1902,7 @@ class DeployExecutor:
                 lane=lane,
                 build_source=build_source,
                 targets=gateway_targets,
+                git_ref=git_ref,
             )
             return services
 
@@ -1965,7 +1976,7 @@ class DeployExecutor:
         return services if services else services_for_scope(scope, lane=lane)
 
     def _gateway_child_env(
-        self, build_source: BuildSource | str, *, git_ref: str = ""
+        self, build_source: BuildSource | str, *, git_ref: str
     ) -> dict[str, str]:
         """Return the environment the gateway deploy script runs under.
 
@@ -2018,9 +2029,10 @@ class DeployExecutor:
             # the refusal one line down to "cannot resolve ref". The runtime
             # staging already hands each sibling the declared tracking head to
             # resolve for itself; the gateway stages the same siblings through
-            # the same script and needs the same fallback.
-            if os.environ.get("DEPLOY_AGENT_TRACKING_REF"):
-                env["DEPLOY_SIBLING_FALLBACK_REF"] = load_tracking_remote_ref_from_env()
+            # the same script and needs the same validated fallback.
+            sibling_fallback_ref = _load_optional_tracking_remote_ref_from_env()
+            if sibling_fallback_ref:
+                env["DEPLOY_SIBLING_FALLBACK_REF"] = sibling_fallback_ref
         return env
 
     def _assert_gateway_lane_config(self) -> str:
@@ -2063,7 +2075,7 @@ class DeployExecutor:
         lane: EnumRuntimeLane,
         build_source: BuildSource | str,
         targets: list[str],
-        git_ref: str = "",
+        git_ref: str,
     ) -> None:
         """Deploy the gateway compose project via its sanctioned script.
 

@@ -44,6 +44,7 @@ claims.
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -617,8 +618,9 @@ class TestTheCommandsPinReachesTheGatewayScript:
     """
 
     def test_the_gateway_script_receives_the_commands_git_ref_as_deploy_ref(
-        self,
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
         commands, envs = _captured(EnumRuntimeLane.DEV)
         index = next(
             i
@@ -649,6 +651,29 @@ class TestTheCommandsPinReachesTheGatewayScript:
             if any("deploy-gateway.sh" in tok for tok in cmd)
         )
         assert envs[index].get("DEPLOY_SIBLING_FALLBACK_REF") == "origin/dev"
+
+    def test_invalid_declared_tracking_ref_still_fails_closed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "origin/dev")
+        with pytest.raises(RuntimeError, match="must be a bare branch name"):
+            DeployExecutor()._gateway_child_env(
+                BuildSource.RELEASE, git_ref="origin/dev"
+            )
+
+    def test_gateway_env_requires_an_explicit_git_ref(self) -> None:
+        signature = inspect.signature(DeployExecutor._gateway_child_env)
+        assert signature.parameters["git_ref"].default is inspect.Parameter.empty
+
+    def test_undeclared_tracking_ref_exports_no_sibling_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("DEPLOY_AGENT_TRACKING_REF", raising=False)
+        env = DeployExecutor()._gateway_child_env(
+            BuildSource.RELEASE, git_ref="origin/dev"
+        )
+        assert env["DEPLOY_REF"] == "origin/dev"
+        assert "DEPLOY_SIBLING_FALLBACK_REF" not in env
 
     def test_an_absent_pin_exports_nothing_rather_than_a_default(self) -> None:
         # The refusal is correct for a caller with no pin to offer. Substituting
@@ -682,3 +707,4 @@ class TestTheCommandsPinReachesTheGatewayScript:
             if any("deploy-gateway.sh" in tok for tok in cmd)
         )
         assert "DEPLOY_REF" not in envs[index]
+        assert "DEPLOY_SIBLING_FALLBACK_REF" not in envs[index]
