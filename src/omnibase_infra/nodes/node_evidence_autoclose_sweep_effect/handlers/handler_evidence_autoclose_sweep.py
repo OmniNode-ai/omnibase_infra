@@ -586,8 +586,7 @@ _CHECK_PROOF_CLASS_KEY = "proof_class"
 #: contract-authoring gap.
 _CHECK_BINDS_AC_KEY = "binds_ac"
 #: OMN-18238. The subset of `binds_ac` on this check that is a PROPOSAL rather
-#: than a binding -- an `ac_bindings` record carrying the criterion hash it was
-#: derived against and no acceptance. A machine may propose; it may not decide.
+#: than an accepted binding. A machine may propose; it may not decide.
 #: A passing check whose name resembles a criterion is not proof of the
 #: criterion it names, so a draft label is excluded from the discharge set and
 #: its criterion stays unbound until a person accepts the proposal.
@@ -1898,9 +1897,8 @@ def _declared_ac_bindings(
 
     OMN-18238 -- A PROPOSAL IS NOT A BINDING.
     -----------------------------------------
-    A label the check also names in ``draft_binds_ac`` is a PROPOSAL: a record
-    carrying the criterion hash it was derived against and no acceptance. It is
-    excluded from ``bindings`` and reported in ``drafts`` instead, so the
+    A label the check also names in ``draft_binds_ac`` is a PROPOSAL awaiting
+    acceptance. It is excluded from ``bindings`` and reported in ``drafts``, so the
     criterion stays unbound and the hold can say WHY in words that match the
     repair. The cheap way to make bindings plentiful is to let a machine guess
     a criterion from a matching check name, and a passing check with a matching
@@ -2298,19 +2296,23 @@ def _ac_binding_gap(
     # repair differs: one needs a binding written, the other needs an existing
     # one reviewed and accepted. A hold that conflated them would send the
     # author to write a binding that is already sitting there.
-    proposed = [
-        label
-        for text in unbound
-        for label in (_canonical_ac_label(text),)
-        if label and label in drafts
-    ]
+    proposed = tuple(
+        dict.fromkeys(
+            label
+            for text in unbound
+            for label in (_canonical_ac_label(text),)
+            if label and label in drafts
+        )
+    )
+    more_proposals = len(proposed) - _MAX_UNCOVERED_LISTED
+    proposal_suffix = f" and {more_proposals} more" if more_proposals > 0 else ""
     proposal_note = (
         (
             " OMN-18238: "
             + ", ".join(proposed[:_MAX_UNCOVERED_LISTED])
+            + proposal_suffix
             + " IS declared, but only as a PROPOSAL — an autobound draft "
-            "carrying the criterion hash it was derived against and no "
-            "acceptance. A machine may propose a binding; it may not decide "
+            "awaiting acceptance. A machine may propose a binding; it may not decide "
             "one, because a passing check whose name resembles a criterion is "
             "not proof of the criterion it names. Accept the proposal on the "
             "contract's evidence item (record who accepted it and when) and "

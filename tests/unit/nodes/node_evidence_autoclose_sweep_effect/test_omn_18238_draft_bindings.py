@@ -10,8 +10,8 @@ autobinder guess a criterion from a matching check name, and a passing check
 with a matching name is not proof of the criterion it names. Adopting that would
 convert the whole mechanism into an expensive way of restating check names.
 
-So a machine may PROPOSE. A proposal is a binding record carrying the criterion
-hash it was derived against and no acceptance, and the closer does not count it.
+So a machine may PROPOSE. A proposal is a binding record awaiting acceptance,
+and the closer does not count it.
 It becomes proof when the evidence author or a reviewer accepts it, and the
 acceptance is recorded on the item.
 
@@ -61,6 +61,10 @@ DESCRIPTION = (
     "\n"
     "- AC1: the behaviour this fixture exercises is proven by a verified "
     "probative check.\n"
+)
+
+MULTI_DESCRIPTION = "## Acceptance criteria\n\n" + "\n".join(
+    f"- AC{idx}: behaviour {idx}." for idx in range(1, 23)
 )
 
 
@@ -150,6 +154,27 @@ class TestDeclaredBindings:
         assert "AC1" in bindings
         assert "AC9" not in drafts
 
+    def test_a_draft_on_one_check_does_not_demote_an_accepted_binding_on_another(
+        self,
+    ) -> None:
+        verdict = _verdict(draft=False)
+        checks = verdict["checks"]
+        assert isinstance(checks, list)
+        checks.append(
+            {
+                "evidence_id": "omn18238-draft-sibling",
+                "status": "verified",
+                "proof_class": "behavior",
+                "binds_ac": ["AC1"],
+                "draft_binds_ac": ["AC1"],
+            }
+        )
+
+        _present, bindings, drafts = _declared_ac_bindings(verdict)
+
+        assert bindings["AC1"] == (("omn18238-check", "verified", "behavior"),)
+        assert drafts["AC1"] == ("omn18238-draft-sibling",)
+
 
 class TestAcBindingGap:
     def test_a_criterion_whose_only_declaration_is_a_draft_is_unbound(self) -> None:
@@ -178,6 +203,25 @@ class TestAcBindingGap:
 
         assert reason == ""
         assert uncovered == ()
+
+    def test_proposal_note_deduplicates_and_reports_elided_labels(self) -> None:
+        verdict = _verdict(draft=True)
+        checks = verdict["checks"]
+        assert isinstance(checks, list)
+        checks[0]["binds_ac"] = [f"AC{idx}" for idx in range(1, 23)]
+        checks[0]["draft_binds_ac"] = [f"AC{idx}" for idx in range(1, 23)]
+
+        reason, uncovered, _rows = _ac_binding_gap(
+            MULTI_DESCRIPTION, verdict, "OMN-0000"
+        )
+
+        assert uncovered
+        proposal_note = reason.split("OMN-18238: ", 1)[1]
+        assert proposal_note.startswith(
+            "AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, "
+            "AC11, AC12, AC13, AC14, AC15, AC16, AC17, AC18, AC19, AC20 "
+        )
+        assert "and 2 more" in reason
 
 
 # ------------------------------------------------- wired into the closer -----
