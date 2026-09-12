@@ -33,7 +33,11 @@ import asyncio
 import logging
 
 from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical
-from omnibase_infra.errors import InfraConnectionError, SecretResolutionError
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraRequestRejectedError,
+    SecretResolutionError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +57,13 @@ class InfisicalSecretStore:
         project_id: str,
         environment_slug: str,
         secret_path: str,
+        allow_delete: bool = False,
     ) -> None:
         self._adapter = adapter
         self._project_id = str(project_id)
         self._environment_slug = environment_slug
         self._secret_path = secret_path
+        self._allow_delete = allow_delete
 
     async def get_secret(self, key: str) -> str | None:
         """Retrieve a secret value, or ``None`` if not present."""
@@ -101,9 +107,23 @@ class InfisicalSecretStore:
 
         Returns ``True`` when the key is absent after the call, including an
         idempotent retry where the adapter already deleted it.
+
+        Raises:
+            InfraRequestRejectedError: If this store was not constructed with
+                destructive delete enabled.
+            SecretResolutionError: If the key is blank or padded.
+            InfraConnectionError: If the adapter delete fails.
         """
+        if not self._allow_delete:
+            raise InfraRequestRejectedError(
+                "InfisicalSecretStore.delete_secret requires allow_delete=True."
+            )
         if not key.strip():
             raise SecretResolutionError("Infisical secret key must not be empty.")
+        if key != key.strip():
+            raise SecretResolutionError(
+                "Infisical secret key must not have surrounding whitespace."
+            )
         await asyncio.to_thread(
             self._adapter.delete_secret,
             key,
