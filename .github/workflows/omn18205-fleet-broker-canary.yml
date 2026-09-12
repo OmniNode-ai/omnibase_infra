@@ -58,17 +58,22 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Record the runner topology this job actually got
+        # Informational only, and it must never be the reason this canary is
+        # red: the whole value of the run is what the harness does, so this step
+        # ends in `true` and uses no awk extension (`strtonum` is gawk-only and
+        # the runner image carries mawk -- that mistake is what failed the first
+        # attempt at this canary in 33 seconds and told us nothing).
+        continue-on-error: true
         run: |
           echo "runner_name=${RUNNER_NAME:-unset}"
           echo "hostname=$(hostname)"
           echo "-- is this process in a container? --"
-          if [ -f /proc/self/cgroup ]; then head -5 /proc/self/cgroup; else echo "no cgroup file"; fi
-          echo "-- default route (the Docker host side of this container's bridge) --"
-          awk 'NR>1 && $2=="00000000" { printf "%d.%d.%d.%d\n", \
-            strtonum("0x" substr($3,7,2)), strtonum("0x" substr($3,5,2)), \
-            strtonum("0x" substr($3,3,2)), strtonum("0x" substr($3,1,2)) }' /proc/net/route
+          head -5 /proc/self/cgroup || echo "no cgroup file"
+          echo "-- raw route table (the harness parses this itself) --"
+          cat /proc/net/route || true
           echo "-- docker daemon --"
-          docker info --format '{{.ServerVersion}}'
+          docker info --format '{{.ServerVersion}}' || true
+          true
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
