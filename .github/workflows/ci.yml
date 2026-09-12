@@ -3870,12 +3870,20 @@ jobs:
   customer-path-boundary:
     name: Customer Path Boundary (OMN-18012)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # OMN-18205: this job executes docker, so its placement is governed by
+    # OMNI_DOCKER_CI_RUNS_ON_JSON before the general trusted seam -- the same
+    # precedence chain the seven docker-executing jobs in docker-build.yml,
+    # legacy-rds-fixture-proof.yml and application-acl-postgres16-proof.yml
+    # already use. Both variables read ["ubuntu-latest"] on this repository
+    # today, so this changes no placement; what it buys is the ability to move
+    # the hermetic bulk of CI to the lab fleet without moving a container-backed
+    # job in the same write, and to move one back on its own if it regresses.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 30
 
@@ -4405,12 +4413,20 @@ jobs:
     name: Integration Silent-Skip Guard (OMN-14172)
     needs: [occ-preflight, zone-filter]
     if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    # OMN-18205: this job executes docker, so its placement is governed by
+    # OMNI_DOCKER_CI_RUNS_ON_JSON before the general trusted seam -- the same
+    # precedence chain the seven docker-executing jobs in docker-build.yml,
+    # legacy-rds-fixture-proof.yml and application-acl-postgres16-proof.yml
+    # already use. Both variables read ["ubuntu-latest"] on this repository
+    # today, so this changes no placement; what it buys is the ability to move
+    # the hermetic bulk of CI to the lab fleet without moving a container-backed
+    # job in the same write, and to move one back on its own if it regresses.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 15
     # OMN-15249: Postgres is provisioned by EXPLICIT steps below, NOT a

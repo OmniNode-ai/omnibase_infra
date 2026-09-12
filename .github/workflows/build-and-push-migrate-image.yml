@@ -72,13 +72,17 @@ env:
 jobs:
   build-and-push:
     name: Build and push migration image
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # OMN-18205: pinned hosted, and declared in hosted_runner_allowlist rather
+    # than left to the seam. This job builds an image and pushes it to ECR, which
+    # is the workload OMN-13747 recorded as failing from the self-hosted fleet's
+    # egress path; build-and-push-runtime.yml and
+    # build-workspace-candidate-runtime.yml are already pinned and allowlisted on
+    # exactly those grounds. Reading the seam here meant a routing flip would
+    # have moved a registry push onto the fleet as a side effect nobody
+    # enumerated. Fork PRs never reach this workflow (it has no pull_request
+    # trigger), so the fork branch has nothing to select and is dropped rather
+    # than left as decoration.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     outputs:
