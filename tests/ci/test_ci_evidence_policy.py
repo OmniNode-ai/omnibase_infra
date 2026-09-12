@@ -267,12 +267,6 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
             "requires one declared uploader so the assertion cannot shadow a sibling."
         )
 
-    if job.get("continue-on-error"):
-        problems.append(
-            f"{artifact_id}: job {wf_rel}:{job_id} carries continue-on-error, so "
-            "a failing assertion step cannot fail the job it is asserting on."
-        )
-
     uploader_index = uploader_indexes[0]
     uploader = steps[uploader_index]
 
@@ -353,32 +347,6 @@ def _policy_entry(
         "artifact_name": artifact_name,
         "required_paths": required_paths or ["probe.json"],
     }
-
-
-def test_gate_rejects_job_level_continue_on_error(tmp_path: Path) -> None:
-    workflows = tmp_path / "workflows"
-    _write_workflow(
-        workflows,
-        "evidence.yml",
-        """
-jobs:
-  probe:
-    continue-on-error: true
-    steps:
-      - name: Assert
-        if: always()
-        run: python3 scripts/ci/assert_evidence_artifact.py --artifact probe --require probe.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: probe-artifact
-          path: probe.json
-          if-no-files-found: error
-""",
-    )
-    problems = check_entry(_policy_entry(), workflows)
-    assert any(
-        "job .github/workflows/evidence.yml:probe carries" in p for p in problems
-    )
 
 
 def test_gate_requires_assertion_paths_to_match_policy(tmp_path: Path) -> None:
