@@ -169,6 +169,26 @@ class EnumLabLane(StrEnum):
     ``omnibase-infra``, ports 8085/8086). ``ONEX_LAB`` is the ``k8s/onex-lab``
     overlay applied from the same head.
 
+    ``ONEX_LAB_K3S`` (OMN-18200) is the PERSISTENT lab cluster -- the same
+    overlay, applied to the k3s node on the lab host by
+    ``k8s/onex-lab/apply_lab_lane.sh`` rather than to a per-candidate ``kind``
+    cluster. It is a separate value rather than a second emitter on ``ONEX_LAB``
+    for two reasons, both load-bearing:
+
+    *``evaluate_gate`` assumes one emitter per name.* It sorts an exact-name
+    artifact query newest-first and reads only the newest, on the premise that a
+    later artifact for a name is a re-run of the same job. Two unrelated
+    emitters on one name would therefore let whichever finished last silently
+    supersede the other's verdict, with nothing recording that a verdict had
+    been discarded.
+
+    *They are not the same claim.* ``ONEX_LAB`` proves the candidate BOOTS
+    against the real manifests on a throwaway node with one side-loaded image and
+    an inert credential store. ``ONEX_LAB_K3S`` proves the persistent lane a
+    chain runner actually grades against is RUNNING the merged sha, with the lab
+    host's own secret store bound and the lane's tenant minted. A receipt that
+    conflated them would answer a question nobody asked.
+
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
     itself in a receipt. A lab pass is a statement about a lab.
@@ -176,6 +196,7 @@ class EnumLabLane(StrEnum):
 
     COMPOSE_DEV = "compose-dev"
     ONEX_LAB = "onex-lab"
+    ONEX_LAB_K3S = "onex-lab-k3s"
 
 
 class EnumLabPassResult(StrEnum):
@@ -264,8 +285,10 @@ class ModelLabPassReceipt:
     #: The deploy agent's correlation id for the rebuild this receipt attests
     #: to. Required with no default (rule 8: fail fast rather than guess), and
     #: explicitly nullable, because an emitter that cannot resolve it must say
-    #: so rather than invent one. The ``onex-lab`` apply has no agent command
-    #: at all and always carries ``null``.
+    #: so rather than invent one. The ``onex-lab`` boot gate has no agent command
+    #: at all and always carries ``null``; ``onex-lab-k3s`` DOES carry one, since
+    #: its apply is performed by the agent as part of one rebuild correlation
+    #: (OMN-18200), which is another respect in which the two are not one lane.
     agent_command_id: str | None
     receipt_version: str = RECEIPT_VERSION
 
