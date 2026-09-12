@@ -148,14 +148,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Probe this host's load and free memory
+      - name: Probe the fleet's org busy/idle counts as the lab saturation signal
+        # OMN-18031 follow-up (2026-09-12): this used to call
+        # `probe_local_lab_load()`, which reads THIS CONTAINER's own
+        # `/proc/loadavg` and `os.cpu_count()`. That measures the runner
+        # container, not the `.201` host: the same host read 1.524x from an
+        # on-host dry run and 0.2232x from inside one of its own runner
+        # containers in the same window, and `max_lab_load_ratio` is
+        # calibrated against the host-scoped number. No host-published load
+        # metric exists to read instead (checked: no node-exporter/cAdvisor
+        # surface, no deploy-agent host-metrics artifact in this repo), so
+        # this reads the org runner registry's busy/idle counts for
+        # `omnibase-ci` instead -- the one live signal this probe CAN measure
+        # honestly with nothing but outbound HTTPS. See
+        # `probe_lab_saturation_from_fleet`'s docstring for the full reasoning.
+        #
+        # `set -euo pipefail` (was `set -uo pipefail`, missing `-e`) makes a
+        # crashing probe FAIL THIS STEP rather than let `cat` on an empty file
+        # exit 0 afterwards and read as a quiet success. The job's own
+        # `continue-on-error: true` still keeps a failure here from blocking
+        # the lane probe; it no longer also keeps the failure invisible in the
+        # step's own conclusion.
+        env:
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           python3 - <<'PYEOF' > lab-load.json
-          import json, sys, datetime
+          import json, os, sys, datetime
           sys.path.insert(0, "scripts/ci")
-          from runner_route_decision import probe_local_lab_load
-          record = probe_local_lab_load()
+          from runner_route_decision import probe_lab_saturation_from_fleet
+          token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get("CROSS_REPO_PAT")
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          record = probe_lab_saturation_from_fleet(token, "omnibase-ci", api_url)
           record["sampled_at"] = datetime.datetime.now(datetime.UTC).isoformat()
           print(json.dumps(record))
           PYEOF
@@ -232,14 +257,73 @@ jobs:
           done < ./.sat-runs.txt
           find ./.sat-history -name '*.json' | head -20 || true
 
+      # OMN-18031 follow-up (2026-09-12): this step used to not exist, and
+      # ROUTE_REASON below was a hardcoded literal `unknown` -- NOT on the
+      # condition-3 allowlist, so `route_fallback_sustained` (the alert the
+      # operator actually asked for) could never fire. This aggregates the
+      # `route` job's own most recent `runner-route-decision-*` artifact
+      # (uploaded by every `ci.yml` run via runner-route-reusable.yml) the
+      # same way the earlier step already aggregates `lab-load` artifacts:
+      # a repo-wide listing, filtered and picked by a pure, unit-tested
+      # function (`select_latest_route_artifact` /
+      # `extract_route_reason` in runner_saturation_record.py), then a
+      # best-effort download. Any failure anywhere in this chain leaves
+      # `reason` at the same safe `unknown` default this workflow already had.
+      - name: Fetch the most recent route decision's reason
+        id: route_reason
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p ./.route-reason
+          reason="unknown"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            > ./.route-reason/artifacts.json 2> ./.route-reason/artifacts.err \
+            || cat ./.route-reason/artifacts.err
+          if [ -s ./.route-reason/artifacts.json ]; then
+            artifact_id="$(python3 - <<'PYEOF'
+          import json, sys
+          sys.path.insert(0, "scripts/ci")
+          from runner_saturation_record import select_latest_route_artifact
+          with open("./.route-reason/artifacts.json", encoding="utf-8") as handle:
+              payload = json.load(handle)
+          artifact = select_latest_route_artifact(payload.get("artifacts", []))
+          print(artifact["id"] if artifact else "")
+          PYEOF
+          )" || artifact_id=""
+            if [ -n "${artifact_id}" ]; then
+              download_url="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}" \
+                --jq '.archive_download_url' || true)"
+              if [ -n "${download_url}" ] \
+                && curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -o ./.route-reason/artifact.zip "${download_url}" \
+                && unzip -p ./.route-reason/artifact.zip runner-route-decision.json \
+                  > ./.route-reason/decision.json 2>/dev/null; then
+                extracted="$(python3 - <<'PYEOF'
+          import json, sys
+          sys.path.insert(0, "scripts/ci")
+          from runner_saturation_record import extract_route_reason
+          with open("./.route-reason/decision.json", encoding="utf-8") as handle:
+              payload = json.load(handle)
+          value = extract_route_reason(payload)
+          print(value or "")
+          PYEOF
+          )" || extracted=""
+                [ -n "${extracted}" ] && reason="${extracted}"
+              fi
+            fi
+          fi
+          echo "reason=${reason}" >> "${GITHUB_OUTPUT}"
+
       - name: Build the record and evaluate sustained saturation
         id: evaluate
         env:
-          # Until a route job publishes its reason into this workflow, the
-          # monitor records `unknown`, which is NOT on the condition-3
-          # allowlist and therefore raises nothing. Silence here is honest:
-          # condition 3 has no input yet, rather than a fabricated one.
-          ROUTE_REASON: unknown
+          # Populated from the route job's own most recent decision artifact
+          # by the step above; falls back to `unknown` (not on the
+          # condition-3 allowlist, so it raises nothing) when no artifact
+          # could be found or read.
+          ROUTE_REASON: ${{ steps.route_reason.outputs.reason || 'unknown' }}
           # Same channel the fleet canary already alerts to — inherited, not
           # chosen here. Absent tokens degrade to annotation + artifact only.
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}

@@ -26,6 +26,7 @@ from __future__ import annotations
 import importlib.util
 import itertools
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -486,3 +487,196 @@ def test_decide_and_the_elimination_are_separate_callables() -> None:
     """
     assert route.decide is not route._decide_unchecked
     assert callable(route._decide_unchecked)
+
+
+# --- 13. OMN-18031 follow-up (2026-09-12): the lab-load-probe defects -------
+#
+# Three measured problems on the self-hosted `lab-load-probe` job: (1) a
+# module-scope `import yaml` made merely IMPORTING this module raise
+# `ModuleNotFoundError` on the fleet image's bare python3 (10 of the last 12
+# scheduled runs), even though nothing the probe calls touches YAML; (2) the
+# probe read `os.getloadavg()` from inside the runner CONTAINER, which does
+# not describe the `.201` HOST `max_lab_load_ratio` was calibrated against
+# (measured: 1.524x from an on-host dry run, 0.2232x from inside the same
+# host's own runner container, same window); (3) a zero-byte/corrupt artifact
+# must resolve to a NAMED cause, not the same bare `lab_unknown` a
+# genuinely-missing record also produces.
+
+
+def _run_with_site_packages_hidden(snippet: str) -> subprocess.CompletedProcess[str]:
+    """Run ``snippet`` under ``python -S`` (skip ``site``, so nothing in
+    site-packages -- including this venv's own PyYAML -- is importable).
+
+    Reproduces the shape of interpreter the fleet runner's bare `python3 -`
+    invocation has: only stdlib modules survive `-S`, and PyYAML is not
+    stdlib.
+    """
+    return subprocess.run(
+        [sys.executable, "-S", "-c", snippet],
+        check=False,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_probe_local_lab_load_does_not_require_pyyaml() -> None:
+    """RED before the fix: importing the module at all pulled in PyYAML at
+    module scope, so ``from runner_route_decision import probe_local_lab_load``
+    raised ``ModuleNotFoundError: No module named 'yaml'`` on the self-hosted
+    fleet image's bare system python3, which has no PyYAML installed.
+    """
+    result = _run_with_site_packages_hidden(
+        "import sys; sys.path.insert(0, 'scripts/ci'); "
+        "from runner_route_decision import probe_local_lab_load; "
+        "print(probe_local_lab_load()['ok'])"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert result.stdout.strip() == "True"
+
+
+def test_probe_lab_saturation_from_fleet_also_does_not_require_pyyaml() -> None:
+    """Same reproduction for the function the lab-load-probe job now calls."""
+    result = _run_with_site_packages_hidden(
+        "import sys; sys.path.insert(0, 'scripts/ci'); "
+        "from runner_route_decision import probe_lab_saturation_from_fleet; "
+        "print(probe_lab_saturation_from_fleet(None, 'omnibase-ci', "
+        "'https://api.github.com')['error'])"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert result.stdout.strip() == "missing_token"
+
+
+def test_load_route_policy_still_needs_pyyaml_when_actually_called() -> None:
+    """Positive control for the two tests above: proves ``-S`` really does
+    remove PyYAML from view, so their passing is the lazy-import fix and not
+    an accident of the interpreter already lacking PyYAML for some other
+    reason. ``load_route_policy`` is the one function still allowed to need
+    it, and only when called.
+    """
+    result = _run_with_site_packages_hidden(
+        "import sys; sys.path.insert(0, 'scripts/ci'); "
+        "from runner_route_decision import load_route_policy; "
+        "from pathlib import Path; "
+        "load_route_policy(Path('config/runner_routing_policy.yaml'))"
+    )
+    assert result.returncode != 0
+    assert "ModuleNotFoundError: No module named 'yaml'" in result.stderr
+
+
+def test_a_missing_lab_record_names_the_cause_as_lab_error() -> None:
+    """The ``lab_unknown`` reason stays the stable enum consumers key off,
+    but the underlying cause now rides along in ``inputs["lab_error"]`` -- a
+    zero-byte/corrupt artifact reads as a NAMED, distinguishable state rather
+    than the same bare "unknown" a genuinely-missing record also produces.
+    """
+    result = _decide(lab={"ok": False, "error": "no_record"})
+    assert result.reason == "lab_unknown"
+    assert result.inputs["lab_error"] == "no_record"
+
+
+def test_an_unreadable_lab_record_names_the_cause_distinctly() -> None:
+    """The zero-byte/corrupt-artifact case specifically -- the failure mode a
+    dead or crashing lab-load-probe actually produces.
+    """
+    result = _decide(lab={"ok": False, "error": "unreadable_record"})
+    assert result.reason == "lab_unknown"
+    assert result.inputs["lab_error"] == "unreadable_record"
+
+
+def test_a_stale_lab_record_names_the_cause_as_stale() -> None:
+    result = _decide(lab=_lab(age_seconds=900))
+    assert result.reason == "lab_unknown"
+    assert result.inputs["lab_error"] == "stale"
+
+
+def test_read_lab_record_on_a_zero_byte_file_is_unreadable_not_silently_ok(
+    tmp_path: Path,
+) -> None:
+    """The literal artifact shape a crashed probe publishes: the file EXISTS
+    (``upload-artifact``'s ``if-no-files-found: warn`` accepts an empty file)
+    but has no content. This must resolve to a distinct error, never to a
+    healthy-looking ``{"ok": True, ...}`` that would let S6 silently read it
+    as "no load".
+    """
+    zero_byte = tmp_path / "lab-load.json"
+    zero_byte.write_text("", encoding="utf-8")
+    assert route.read_lab_record(zero_byte) == {
+        "ok": False,
+        "error": "unreadable_record",
+    }
+
+
+def test_probe_lab_saturation_from_fleet_missing_token_is_fail_closed() -> None:
+    result = route.probe_lab_saturation_from_fleet(
+        None, "omnibase-ci", "https://api.github.com"
+    )
+    assert result == {"ok": False, "error": "missing_token"}
+
+
+def test_probe_lab_saturation_from_fleet_uses_the_org_busy_idle_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of the fix: ``ratio`` now comes from the org runner
+    registry's busy/idle counts, not this container's own
+    ``load1 / os.cpu_count()``.
+    """
+    monkeypatch.setattr(
+        route,
+        "probe_fleet",
+        lambda token, runner_group, api_url: {
+            "ok": True,
+            "online": 88,
+            "busy": 22,
+            "total": 88,
+        },
+    )
+    monkeypatch.setattr(route, "_free_mem_mib", lambda: 60000)
+    result = route.probe_lab_saturation_from_fleet(
+        "tok", "omnibase-ci", "https://api.github.com"
+    )
+    assert result["ok"] is True
+    assert result["hosts"] == [
+        {"label": "org:omnibase-ci", "ratio": 0.25, "free_mem_mib": 60000}
+    ]
+
+
+def test_probe_lab_saturation_from_fleet_propagates_a_fleet_probe_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        route,
+        "probe_fleet",
+        lambda token, runner_group, api_url: {"ok": False, "error": "http_403"},
+    )
+    result = route.probe_lab_saturation_from_fleet(
+        "tok", "omnibase-ci", "https://api.github.com"
+    )
+    assert result == {"ok": False, "error": "http_403"}
+
+
+def test_probe_lab_saturation_from_fleet_treats_zero_online_as_fully_saturated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Matches the same convention ``_decide_unchecked`` uses for
+    ``busy_fraction`` when ``online`` is 0: never divide by zero into a false
+    "0 load".
+    """
+    monkeypatch.setattr(
+        route,
+        "probe_fleet",
+        lambda token, runner_group, api_url: {
+            "ok": True,
+            "online": 0,
+            "busy": 0,
+            "total": 0,
+        },
+    )
+    monkeypatch.setattr(route, "_free_mem_mib", lambda: 1000)
+    result = route.probe_lab_saturation_from_fleet(
+        "tok", "omnibase-ci", "https://api.github.com"
+    )
+    assert result["hosts"][0]["ratio"] == 1.0
