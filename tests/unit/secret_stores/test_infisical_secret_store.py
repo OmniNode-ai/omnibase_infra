@@ -127,11 +127,30 @@ async def test_set_secret_falls_back_to_create_on_connection_error() -> None:
 
 
 @pytest.mark.unit
-async def test_delete_secret_raises_runtime_error() -> None:
+async def test_delete_secret_calls_adapter_delete_and_returns_true() -> None:
     adapter = MagicMock(spec=AdapterInfisical)
+    adapter.delete_secret.return_value = None
+
     store = _make_store(adapter)
-    with pytest.raises(RuntimeError, match="OMN-2286"):
-        await store.delete_secret("ANY")
+    result = await store.delete_secret("API_KEY")
+
+    assert result is True
+    adapter.delete_secret.assert_called_once_with(
+        "API_KEY",
+        project_id=str(_PROJECT_ID),
+        environment_slug=_ENV,
+        secret_path=_PATH,
+    )
+
+
+@pytest.mark.unit
+async def test_delete_secret_propagates_adapter_error() -> None:
+    adapter = MagicMock(spec=AdapterInfisical)
+    adapter.delete_secret.side_effect = InfraConnectionError("delete failed")
+
+    store = _make_store(adapter)
+    with pytest.raises(InfraConnectionError):
+        await store.delete_secret("API_KEY")
 
 
 @pytest.mark.unit

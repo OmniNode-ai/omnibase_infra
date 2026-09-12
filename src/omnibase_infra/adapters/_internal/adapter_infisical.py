@@ -514,6 +514,70 @@ class AdapterInfisical:
                 context=ctx,
             ) from e
 
+    def delete_secret(
+        self,
+        secret_name: str,
+        *,
+        project_id: str | None = None,
+        environment_slug: str | None = None,
+        secret_path: str | None = None,
+    ) -> None:
+        """Delete a secret from Infisical by name.
+
+        Args:
+            secret_name: The secret key/name to delete.
+            project_id: Override default project ID.
+            environment_slug: Override default environment slug.
+            secret_path: Override default secret path.
+
+        Raises:
+            SecretResolutionError: If client is not initialized.
+            InfraConnectionError: If the SDK call fails.
+        """
+        if self._client is None or not self._authenticated:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="delete_secret",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                "Infisical adapter not initialized. Call initialize() first.",
+                context=ctx,
+            )
+
+        effective_project = project_id or str(self._config.project_id)
+        effective_env = environment_slug or self._config.environment_slug
+        effective_path = secret_path or self._config.secret_path
+
+        try:
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
+            self._client.secrets.delete_secret_by_name(  # type: ignore[attr-defined]
+                secret_name=secret_name,
+                secret_path=effective_path,
+                environment_slug=effective_env,
+                project_id=effective_project,
+            )
+        except Exception as e:
+            # A 404 from Infisical means the secret is already absent -- treat as
+            # success. This makes delete idempotent: a retry after a publish failure
+            # (delete succeeded, Kafka failed) will not block revocation permanently.
+            from infisical_sdk.infisical_requests import (  # type: ignore[import-untyped]
+                APIError,
+            )
+
+            if isinstance(e, APIError) and e.status_code == 404:
+                return
+            sanitized_path = sanitize_secret_path(effective_path)
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="delete_secret",
+                target_name="infisical-adapter",
+            )
+            raise InfraConnectionError(
+                f"Failed to delete secret from Infisical (path={sanitized_path})",
+                context=ctx,
+            ) from e
+
     def shutdown(self) -> None:
         """Release SDK client resources."""
         self._client = None

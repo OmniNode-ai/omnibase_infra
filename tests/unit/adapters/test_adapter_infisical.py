@@ -582,3 +582,109 @@ class TestAdapterInfisicalUpdateSecret:
             secret_path=adapter_config.secret_path,
             secret_value="",
         )
+
+
+class TestAdapterInfisicalDeleteSecret:
+    """Test delete_secret method."""
+
+    def test_delete_secret_calls_sdk_delete_by_name(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        adapter.delete_secret("CRED_KEY")
+
+        mock_client.secrets.delete_secret_by_name.assert_called_once_with(
+            secret_name="CRED_KEY",
+            secret_path=adapter_config.secret_path,
+            environment_slug=adapter_config.environment_slug,
+            project_id=str(adapter_config.project_id),
+        )
+
+    def test_delete_secret_raises_when_not_initialized(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        adapter = AdapterInfisical(adapter_config)
+
+        with pytest.raises(SecretResolutionError, match="not initialized"):
+            adapter.delete_secret("CRED_KEY")
+
+    def test_delete_secret_sdk_failure_wraps_to_infra_connection_error(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_client.secrets.delete_secret_by_name.side_effect = RuntimeError(
+            "SDK internal error"
+        )
+
+        with pytest.raises(InfraConnectionError, match="Failed to delete secret"):
+            adapter.delete_secret("CRED_KEY")
+
+    def test_delete_secret_with_overrides(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        adapter.delete_secret(
+            "CRED_KEY",
+            project_id="override-proj",
+            environment_slug="staging",
+            secret_path="/staging/creds/",
+        )
+
+        mock_client.secrets.delete_secret_by_name.assert_called_once_with(
+            secret_name="CRED_KEY",
+            secret_path="/staging/creds/",
+            environment_slug="staging",
+            project_id="override-proj",
+        )
+
+    def test_delete_secret_treats_404_as_success(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """A 404 from Infisical means the key is already gone -- idempotent delete."""
+        from infisical_sdk.infisical_requests import APIError
+
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_client.secrets.delete_secret_by_name.side_effect = APIError(
+            message="Secret not found",
+            status_code=404,
+            response={"message": "Secret not found"},
+        )
+
+        # Should not raise -- 404 is treated as "already deleted"
+        adapter.delete_secret("CRED_KEY")
+
+    def test_delete_secret_non_404_api_error_wraps_to_infra_connection_error(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Non-404 API errors (auth, server) still raise InfraConnectionError."""
+        from infisical_sdk.infisical_requests import APIError
+
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_client.secrets.delete_secret_by_name.side_effect = APIError(
+            message="Unauthorized",
+            status_code=401,
+            response={"message": "Unauthorized"},
+        )
+
+        with pytest.raises(InfraConnectionError, match="Failed to delete secret"):
+            adapter.delete_secret("CRED_KEY")
