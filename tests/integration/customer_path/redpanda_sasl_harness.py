@@ -85,6 +85,7 @@ credential appears in any test, fixture or compose file.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import socket
@@ -113,6 +114,12 @@ INTERNAL_PORT = 9092
 # Applied to every container this harness starts. Concurrent CI jobs share one
 # Docker host; a leaked container has to be attributable.
 HARNESS_LABEL = "com.omninode.omn18012-harness"
+
+# How long to wait for teardown removal. Generous rather than tight: the fleet's
+# Docker host is shared by up to 88 runner containers, and a removal that is slow
+# because the daemon is busy is not a defect in anything this suite tests. A
+# timeout here is reported and swallowed -- see ``stop_redpanda``.
+REMOVE_TIMEOUT_S = 300
 
 # docker's own wording when a host port is taken. `_free_port()` binds in the
 # TEST PROCESS's namespace, which on a containerized runner is not the
@@ -179,10 +186,8 @@ def _self_container_id() -> str | None:
     candidates: list[str] = list(
         dict.fromkeys(re.findall(r"[0-9a-f]{64}", _read_cgroup()))
     )
-    try:
+    with contextlib.suppress(OSError):
         candidates.append(socket.gethostname())
-    except OSError:
-        pass
     for candidate in candidates:
         if not candidate:
             continue
@@ -403,9 +408,8 @@ class RedpandaSasl:
         proc = self.rpk("topic", "describe", topic, "-p")
         for line in proc.stdout.splitlines():
             fields = line.split()
-            if len(fields) >= 6 and fields[0].isdigit():
-                if int(fields[0]) == partition:
-                    return int(fields[4]), int(fields[5])
+            if len(fields) >= 6 and fields[0].isdigit() and int(fields[0]) == partition:
+                return int(fields[4]), int(fields[5])
         raise HarnessError(
             f"partition {partition} absent from rpk describe of {topic}: {proc.stdout}"
         )
@@ -725,12 +729,39 @@ def stop_redpanda(broker: RedpandaSasl) -> None:
 
     Tearing down a broker the harness did not create is how a test suite takes
     down the lane it was handed.
+
+    CLEANUP NEVER FAILS THE SESSION (OMN-18205). Measured 2026-09-12T01:29:59Z on
+    omnimarket fleet run 34664495108: all four boundary tests PASSED and the job
+    still went red, because ``docker rm -f`` exceeded 120 s during teardown while
+    the shared Docker host was at 88 of 88 runners busy. Removal is not an
+    assertion about the system under test, so a slow or failed removal is
+    reported and swallowed rather than raised as a teardown error that reads,
+    from the check list, exactly like a boundary defect.
+
+    The leak is attributable rather than silent: every container this harness
+    starts carries the ``HARNESS_LABEL``, so anything left behind is findable
+    with one ``docker ps`` filter, and the message below names both the
+    container and that filter.
     """
     if not broker.owned:
         return
-    subprocess.run(
-        ["docker", "rm", "-f", broker.container],
-        capture_output=True,
-        timeout=120,
-        check=False,
-    )
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", broker.container],
+            capture_output=True,
+            timeout=REMOVE_TIMEOUT_S,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"WARNING: `docker rm -f {broker.container}` exceeded "
+            f"{REMOVE_TIMEOUT_S}s and was abandoned. The tests already ran; this "
+            "is cleanup, not a result. Find anything left behind with: "
+            f"docker ps -a --filter label={HARNESS_LABEL}=1"
+        )
+    except OSError as error:
+        print(
+            f"WARNING: `docker rm -f {broker.container}` could not be executed "
+            f"({error}). Find anything left behind with: "
+            f"docker ps -a --filter label={HARNESS_LABEL}=1"
+        )

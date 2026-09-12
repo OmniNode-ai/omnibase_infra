@@ -245,10 +245,18 @@ def test_boot_job_runs_on_uses_self_hosted_conditional(workflow: Workflow) -> No
     assert "fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '[\"ubuntu-latest\"]')" in (
         normalized
     )
+    # OMN-18205: this job executes docker, so its placement is governed by
+    # OMNI_DOCKER_CI_RUNS_ON_JSON before the general trusted seam. The property
+    # this test defends -- fork pull requests never reach a trusted self-hosted
+    # runner -- is untouched by that: the fork branch above is unchanged, and the
+    # narrower variable sits only inside the trusted branch. The assertion is the
+    # full chain rather than the single-variable spelling it replaced, so it is
+    # exactly as strict: the self-hosted literal is still only ever the last
+    # fallback, and inserting anything else into this chain still fails here.
     assert (
-        'fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || \'["self-hosted","omnibase-ci"]\')'
-        in normalized
-    )
+        "fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || "
+        'vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || \'["self-hosted","omnibase-ci"]\')'
+    ) in normalized
 
 
 def test_boot_env_parameterizes_runtime_host_and_pg_port(workflow: Workflow) -> None:

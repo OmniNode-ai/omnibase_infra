@@ -142,7 +142,8 @@ def test_self_container_id_falls_back_to_the_hostname(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert harness._self_container_id() == _RUNNER_CONTAINER_ID
-    assert seen and "8f635a7e3c47" in seen[0]
+    assert seen
+    assert "8f635a7e3c47" in seen[0]
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +549,8 @@ def test_an_adopted_broker_is_never_torn_down(
     harness.stop_redpanda(
         harness.RedpandaSasl(container="omn18012-rp-abc", port=19092, owned=True)
     )
-    assert calls and calls[0] == ["docker", "rm", "-f", "omn18012-rp-abc"]
+    assert calls
+    assert calls[0] == ["docker", "rm", "-f", "omn18012-rp-abc"]
 
 
 def test_the_advertise_host_override_wins_over_detection(
@@ -579,3 +581,50 @@ def test_a_malformed_declaration_is_rejected_by_shape(
 
     assert harness.DECLARED_BOOTSTRAP_ENV in str(raised.value)
     assert exec_fake.run_argv() == []
+
+
+def test_a_slow_container_removal_does_not_fail_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Teardown is cleanup, not a result (OMN-18205).
+
+    Measured on omnimarket fleet run 34664495108: all four boundary tests passed
+    and the job still reported failure, because ``docker rm -f`` exceeded its
+    timeout while the shared Docker host was at 88 of 88 runners busy. From the
+    check list that red is indistinguishable from a boundary defect, which is
+    the worst possible way for a gate to lie. A removal that cannot finish is
+    reported, names the label the leak can be found by, and is swallowed.
+    """
+
+    def slow_remove(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd, harness.REMOVE_TIMEOUT_S)
+
+    monkeypatch.setattr(subprocess, "run", slow_remove)
+    harness.stop_redpanda(
+        harness.RedpandaSasl(container="omn18012-rp-slow", port=19092, owned=True)
+    )
+    warning = capsys.readouterr().out
+    assert "omn18012-rp-slow" in warning
+    assert harness.HARNESS_LABEL in warning
+
+
+def test_removal_still_happens_and_is_not_merely_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Swallowing a timeout must not become "never try to remove anything".
+
+    The positive control for the test above: on a healthy daemon the removal is
+    issued exactly once, with the force flag, for the owned container.
+    """
+    calls: list[list[str]] = []
+
+    def record(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", record)
+    harness.stop_redpanda(
+        harness.RedpandaSasl(container="omn18012-rp-healthy", port=19092, owned=True)
+    )
+    assert calls == [["docker", "rm", "-f", "omn18012-rp-healthy"]]
