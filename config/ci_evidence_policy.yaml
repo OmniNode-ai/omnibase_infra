@@ -1,0 +1,100 @@
+# CI evidence-artifact policy (OMN-18247, epic OMN-18232 phase 3)
+#
+# WHAT AN "EVIDENCE ARTIFACT" IS
+#   A CI artifact whose EXISTENCE is a claim about a measurement: a lab-pass
+#   receipt, a saturation record, a probe's output. Something downstream reads
+#   it, or somebody later cites it as proof that a thing was exercised.
+#
+#   A debug log bundle uploaded on failure is NOT an evidence artifact. Nothing
+#   asserts a claim from its presence, and its absence means "the failure did
+#   not produce one", which is honest. Declaring one here would add ceremony
+#   without closing anything.
+#
+# WHY DECLARATION IS EXPLICIT RATHER THAN INFERRED
+#   There is no structural difference in a workflow file between an upload that
+#   carries a claim and an upload that carries a log. Guessing from the artifact
+#   name is exactly the name-matching the epic's phase 1 rejects for acceptance
+#   bindings, and for the same reason: a string resemblance is not an assertion
+#   anyone made.
+#
+#   Declaration is therefore reviewed data. Two mechanisms stop the declared set
+#   from quietly shrinking, both in tests/ci/test_ci_evidence_policy.py:
+#     1. the expected id set is pinned IN THE TEST FILE, so dropping an entry
+#        here fails until someone also edits the test -- a reviewed act;
+#     2. any uploader anywhere in .github/workflows/ that sets
+#        `if-no-files-found: error` MUST be declared here. That setting is its
+#        author stating that absence is fatal, which is the definition above.
+#        You cannot escape the policy by deleting a line from this file.
+#
+# WHAT DECLARING AN ARTIFACT OBLIGES
+#   For every entry below, the gate requires, on parsed workflow structure:
+#     * the uploader sets `if-no-files-found: error` (never warn/ignore/default);
+#     * an assertion step running scripts/ci/assert_evidence_artifact.py with
+#       this entry's `id` runs EARLIER in the same job, under `if: always()`,
+#       and is not itself suppressed.
+#   `if-no-files-found: error` alone is not enough: it fires only when NO path
+#   matches, so a zero-byte file satisfies it. The zero-byte case is the one the
+#   lab-load probe actually produced for the whole time it was dead.
+#
+# HOW TO ADD ONE
+#   Add the entry, add its id to EXPECTED_EVIDENCE_IDS in the test, add the
+#   assertion step before the uploader, and set `if-no-files-found: error`.
+#   Four edits in one PR, all of them visible.
+version: 1
+evidence_artifacts:
+  # --- dev-lane-liveness.yml: the lab saturation signal (OMN-18031) ---------
+  #
+  # This pair is the plan's named regression fixture. The probe was dead from
+  # the day it landed and produced a ZERO-BYTE lab-load.json on 10 of 12 runs
+  # while every run stayed green, because the producing step's redirect creates
+  # the file before python runs and `if-no-files-found: warn` treats an empty
+  # file and a real measurement identically.
+  - id: lab-load
+    workflow: .github/workflows/dev-lane-liveness.yml
+    job: lab-load-probe
+    artifact_name: lab-load
+    required_paths:
+      - lab-load.json
+    rationale: >-
+      The lab half of the runner saturation record. saturation-record consumes it; alert condition 4 (lab_probe_unavailable_sustained) is a statement about this file, so an empty one is a false negative on that alert.
+  - id: saturation-record
+    workflow: .github/workflows/dev-lane-liveness.yml
+    job: saturation-record
+    artifact_name: saturation-record
+    required_paths:
+      - runner-saturation-record.json
+      - runner-saturation-alerts.json
+    rationale: >-
+      The merged fleet+lab record and the alerts derived from it. The alerts file is required, not optional: the writer emits `[]` when nothing fired, so an ABSENT alerts file means the evaluation never ran, which is a different fact from "no alert fired" and must not read the same.
+  # --- the rule-24 lab-pass receipts ---------------------------------------
+  #
+  # These three already set `if-no-files-found: error`, which is their authors
+  # declaring absence fatal. What that setting cannot catch is a zero-byte or
+  # partially-written receipt inside a directory upload: the directory matches,
+  # so the uploader is satisfied. Rule 24(b) fails staging delivery closed on a
+  # missing receipt for a sha, so a receipt that exists and says nothing is the
+  # worst of the three states -- it passes the uploader and fails the reader.
+  - id: lab-pass-receipt-onex-lab
+    workflow: .github/workflows/deliver-dev-candidate-to-staging.yml
+    job: candidate-boot-gate
+    artifact_name: lab-pass-receipt-onex-lab-${{ github.sha }}
+    required_paths:
+      - /tmp/lab-pass-receipt/receipt.json
+    rationale: >-
+      The onex-lab lab pass for the delivered sha. deliver-dev-candidate-to- staging.yml's lab-pass-gate job refuses the staging announcement without a PASS receipt for the exact sha (rule 24(b)).
+  - id: lab-pass-receipt-compose-dev
+    workflow: .github/workflows/runtime-rebuild-trigger.yml
+    job: verify-lane-converged
+    artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
+    required_paths:
+      - /tmp/lab-pass-receipt/receipt.json
+    rationale: >-
+      The .201 compose dev lane's lab pass for the merged sha (rule 24(a)).
+  - id: lab-pass-receipt-onex-lab-k3s
+    workflow: .github/workflows/runtime-rebuild-trigger.yml
+    job: verify-lab-overlay-converged
+    artifact_name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
+    required_paths:
+      - /tmp/lab-overlay-receipt/receipt.json
+    rationale: >-
+      The k3s onex-lab overlay's half of rule 24(a), on its own lane name so it cannot supersede the boot gate's onex-lab receipt for the same sha.

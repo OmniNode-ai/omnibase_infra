@@ -185,28 +185,13 @@ jobs:
           print(json.dumps(record))
           PYEOF
           cat lab-load.json
-      # OMN-18247. `if: always()` is load-bearing here for the same reason it is
-      # on the uploader: when the producing step dies, `> lab-load.json` has
-      # ALREADY created the file, so what reaches the uploader is a zero-byte
-      # record that `if-no-files-found` cannot see at any setting. That is the
-      # exact state this job shipped in for 10 of its first 12 runs. Running the
-      # assertion only on success would leave precisely that case unchecked.
-      - name: Assert the lab load record is present and non-empty
-        if: always()
-        run: |
-          set -euo pipefail
-          python3 scripts/ci/assert_evidence_artifact.py \
-            --artifact lab-load \
-            --require lab-load.json
       - name: Upload lab load record
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lab-load
           path: lab-load.json
-          # `error`, not `warn`: absence of this record is a fact about the
-          # lab, not a note to scroll past (OMN-18247).
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
   # --- OMN-18031 G7: merge, evaluate, alert --------------------------------
@@ -353,18 +338,6 @@ jobs:
             --history ./.sat-history \
             --out runner-saturation-record.json
 
-      # OMN-18247. Both files are required, not just the record. The writer
-      # emits `[]` into the alerts file when nothing fired, so an ABSENT alerts
-      # file means the evaluation never ran — a different fact from "no alert
-      # fired", and one a directory-shaped upload would hide behind its sibling.
-      - name: Assert the saturation record and its alerts are present and non-empty
-        if: always()
-        run: |
-          set -euo pipefail
-          python3 scripts/ci/assert_evidence_artifact.py \
-            --artifact saturation-record \
-            --require runner-saturation-record.json \
-            --require runner-saturation-alerts.json
       - name: Upload the saturation record
         if: always()
         uses: actions/upload-artifact@v4
@@ -373,5 +346,5 @@ jobs:
           path: |
             runner-saturation-record.json
             runner-saturation-alerts.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
