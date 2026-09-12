@@ -251,13 +251,24 @@ trusted_runner_variable:
 docker_ci_runner_variable:
   name: OMNI_DOCKER_CI_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'
-  scope: omnibase_infra
+  # Consumed by audit_scoped_variables. `repositories` is the closed set of repos
+  # that MUST carry this shadow at expected_json; every other audited repo MUST
+  # NOT carry it at all. That second half is the drift this pass exists to catch:
+  # a new shadow appearing where none is declared is exactly the invisible edit
+  # that had no surface before OMN-18205. `org_scope: absent` asserts there is no
+  # organization-level value, so one appearing is also a finding.
+  repositories:
+    - omnibase_infra
+  org_scope: absent
   revert_when: >-
     This value may go to '["self-hosted","omnibase-ci"]' only after a fleet run of "Customer Path Boundary (OMN-18012)" with the post-#3286 harness reports success on a named omninode-runner-*. Revert it if any docker-executing job reports a container it cannot reach from the test process, which is the 2026-09-07 signature, or if a registry push appears among the jobs it governs -- registry pushes are pinned hosted, not routed.
 security_scan_runner_variable:
   name: OMNI_SECURITY_SCAN_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'
-  scope: omnibase_infra, omniclaude
+  repositories:
+    - omnibase_infra
+    - omniclaude
+  org_scope: absent
   revert_when: >-
     Declared for visibility, not for movement. Nothing in OMN-18205 flips it. A security scan that resolves through the fleet shares fate with the host it scans, so it stays hosted until a separate claim argues otherwise.
 public_pr_runner_variable:
