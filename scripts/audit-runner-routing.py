@@ -304,6 +304,116 @@ def runner_variable_for_event(
     return TRUSTED_CI_RUNNER_VARIABLE
 
 
+SCOPED_VARIABLE_KEYS = (
+    "docker_ci_runner_variable",
+    "security_scan_runner_variable",
+)
+
+
+def audit_scoped_variables(policy: dict[str, Any]) -> list[Finding]:
+    """Audit the narrower routing variables that sit AHEAD of the trusted seam.
+
+    ADDITIVE ON PURPOSE, and separate from ``audit_github_variables`` because the
+    trusted seam has per-repo override semantics these do not: a scoped variable
+    is set on a closed set of repositories and must be ABSENT everywhere else.
+
+    Why this pass exists (OMN-18205). ``OMNI_DOCKER_CI_RUNS_ON_JSON`` and
+    ``OMNI_SECURITY_SCAN_RUNS_ON_JSON`` have been live for weeks -- the first on
+    this repository, the second here and on omniclaude -- and were read by no
+    rule, no plan enumeration and no audit surface. Ten job definitions in this
+    repository resolve their runner through the docker one, ahead of the seam, so
+    a silent edit to it moves ten jobs and the seam's own audit reports green.
+
+    The half that catches drift is the ABSENCE assertion. A declared scope
+    drifting in value is the obvious case; a NEW shadow appearing on a repository
+    that declares none is the invisible one, because nothing else in the estate
+    would ever mention it. Both are findings here.
+    """
+    findings: list[Finding] = []
+    audited = [str(r) for r in policy.get("repositories", [])]
+    for key in SCOPED_VARIABLE_KEYS:
+        declaration = policy.get(key)
+        if declaration is None:
+            findings.append(
+                Finding(
+                    "policy",
+                    f"{key} is missing from the policy file; this pass audits it "
+                    f"by name, so removing the declaration silently stops "
+                    f"auditing a live variable",
+                )
+            )
+            continue
+        name = str(declaration["name"])
+        expected_raw = str(declaration["expected_json"])
+        expected = _canonical_json(expected_raw)
+        declared = [str(r) for r in declaration["repositories"]]
+        org_scope = str(declaration["org_scope"])
+        if org_scope != "absent":
+            raise ValueError(
+                f"{key}.org_scope must be 'absent'; an org-level value for a "
+                f"scoped variable would silently govern every repository"
+            )
+
+        org_actual = _variable_value(_variables(["--org", ORG]), name)
+        if org_actual is not None:
+            findings.append(
+                Finding(
+                    ORG,
+                    f"{name} is declared org_scope: absent but an org-level "
+                    f"value {org_actual!r} exists; it would govern every repo",
+                )
+            )
+
+        undeclared = [r for r in declared if r not in audited]
+        if undeclared:
+            findings.append(
+                Finding(
+                    "policy",
+                    f"{key}.repositories names {undeclared} which are not in the "
+                    f"audited repositories list, so they are never read",
+                )
+            )
+
+        for repo_name in audited:
+            actual = _variable_value(_variables(["--repo", f"{ORG}/{repo_name}"]), name)
+            if repo_name not in declared:
+                if actual is not None:
+                    findings.append(
+                        Finding(
+                            repo_name,
+                            f"{name} appeared with value {actual!r} but this "
+                            f"repository declares no scope for it; an undeclared "
+                            f"shadow governs jobs ahead of the trusted seam",
+                        )
+                    )
+                continue
+            if actual is None:
+                findings.append(
+                    Finding(
+                        repo_name,
+                        f"{name} is declared for this repository at "
+                        f"{expected_raw!r} but no shadow exists, so its jobs fall "
+                        f"through to the trusted seam",
+                    )
+                )
+                continue
+            try:
+                normalized = _canonical_json(actual)
+            except json.JSONDecodeError:
+                findings.append(
+                    Finding(repo_name, f"{name} is not valid JSON: {actual!r}")
+                )
+                continue
+            if normalized != expected:
+                findings.append(
+                    Finding(
+                        repo_name,
+                        f"{name} drifted to {actual!r}; expected {expected_raw!r}",
+                    )
+                )
+    return findings
+
+
 def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Finding]:
     allowlist = {
         str(item["path"])
@@ -664,6 +774,10 @@ def main() -> int:
         findings.extend(audit_selector_markers(args.repo_root))
     if args.github_vars:
         findings.extend(audit_github_variables(policy))
+        # OMN-18205: additive, and inside the SAME step as the seam audit so a
+        # finding here cannot be masked by the step-level ordering OMN-16727
+        # records -- main() extends one findings list and prints them all.
+        findings.extend(audit_scoped_variables(policy))
 
     if findings:
         for finding in findings:

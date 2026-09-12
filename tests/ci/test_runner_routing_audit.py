@@ -666,3 +666,208 @@ def test_runs_on_labels_reads_each_accepted_shape() -> None:
     for bad in (17, None, {"group": "g", "labels": 3}, ["ok", 5]):
         with pytest.raises(module.UnreadableRunsOnError):
             module.runs_on_labels(bad)
+
+
+# ---------------------------------------------------------------------------
+# OMN-18205: the scoped routing variables, which sit AHEAD of the trusted seam
+# ---------------------------------------------------------------------------
+#
+# These two variables were live for weeks and read by nothing: no rule, no plan
+# enumeration, no audit surface. Ten job definitions in this repository resolve
+# their runner through the docker one BEFORE the seam is consulted, so a silent
+# edit to it moves ten jobs while the seam's own audit reports green.
+
+
+def _scoped_policy() -> dict[str, object]:
+    return {
+        "docker_ci_runner_variable": {
+            "name": "OMNI_DOCKER_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repositories": ["omnibase_infra"],
+            "org_scope": "absent",
+        },
+        "security_scan_runner_variable": {
+            "name": "OMNI_SECURITY_SCAN_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repositories": ["omnibase_infra", "omniclaude"],
+            "org_scope": "absent",
+        },
+        "repositories": ["omnibase_infra", "omniclaude", "omnimarket"],
+    }
+
+
+def _fake_vars(
+    monkeypatch: pytest.MonkeyPatch,
+    module: object,
+    table: dict[str, list[tuple[str, str]]],
+) -> None:
+    def fake_variables(args: list[str]) -> list[dict[str, str]]:
+        key = args[1]
+        return [{"name": n, "value": v} for n, v in table.get(key, [])]
+
+    monkeypatch.setattr(module, "_variables", fake_variables)
+
+
+def test_scoped_variable_audit_passes_on_the_declared_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clean case: declared repos carry the value, others carry nothing."""
+    module = _load_script()
+    _fake_vars(
+        monkeypatch,
+        module,
+        {
+            "OmniNode-ai": [],
+            "OmniNode-ai/omnibase_infra": [
+                ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+            ],
+            "OmniNode-ai/omniclaude": [
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
+            ],
+            "OmniNode-ai/omnimarket": [],
+        },
+    )
+    assert module.audit_scoped_variables(_scoped_policy()) == []
+
+
+def test_scoped_variable_audit_catches_an_undeclared_shadow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The finding that matters, and the reason this pass exists.
+
+    A shadow APPEARING on a repository that declares none is the invisible edit:
+    nothing else in the estate would ever mention it, and it governs placement
+    ahead of the seam. This is the positive control for the clean case above --
+    an audit that can only ever pass is indistinguishable from one that is not
+    running.
+    """
+    module = _load_script()
+    _fake_vars(
+        monkeypatch,
+        module,
+        {
+            "OmniNode-ai": [],
+            "OmniNode-ai/omnibase_infra": [
+                ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+            ],
+            "OmniNode-ai/omniclaude": [
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
+            ],
+            "OmniNode-ai/omnimarket": [
+                ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["self-hosted","omnibase-ci"]')
+            ],
+        },
+    )
+    findings = module.audit_scoped_variables(_scoped_policy())
+    assert len(findings) == 1, findings
+    assert findings[0].scope == "omnimarket"
+    assert "declares no scope" in findings[0].message
+
+
+def test_scoped_variable_audit_catches_drift_in_a_declared_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    _fake_vars(
+        monkeypatch,
+        module,
+        {
+            "OmniNode-ai": [],
+            "OmniNode-ai/omnibase_infra": [
+                ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["self-hosted","omnibase-ci"]'),
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+            ],
+            "OmniNode-ai/omniclaude": [
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
+            ],
+            "OmniNode-ai/omnimarket": [],
+        },
+    )
+    findings = module.audit_scoped_variables(_scoped_policy())
+    assert len(findings) == 1, findings
+    assert findings[0].scope == "omnibase_infra"
+    assert "drifted" in findings[0].message
+
+
+def test_scoped_variable_audit_catches_a_missing_declared_shadow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A declared scope with no shadow falls through to the seam silently."""
+    module = _load_script()
+    _fake_vars(
+        monkeypatch,
+        module,
+        {
+            "OmniNode-ai": [],
+            "OmniNode-ai/omnibase_infra": [
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
+            ],
+            "OmniNode-ai/omniclaude": [
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
+            ],
+            "OmniNode-ai/omnimarket": [],
+        },
+    )
+    findings = module.audit_scoped_variables(_scoped_policy())
+    assert len(findings) == 1, findings
+    assert "no shadow exists" in findings[0].message
+
+
+def test_scoped_variable_audit_catches_an_org_level_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An org value for a scoped variable would govern every repository."""
+    module = _load_script()
+    _fake_vars(
+        monkeypatch,
+        module,
+        {
+            "OmniNode-ai": [("OMNI_DOCKER_CI_RUNS_ON_JSON", '["ubuntu-latest"]')],
+            "OmniNode-ai/omnibase_infra": [
+                ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+            ],
+            "OmniNode-ai/omniclaude": [
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
+            ],
+            "OmniNode-ai/omnimarket": [],
+        },
+    )
+    findings = module.audit_scoped_variables(_scoped_policy())
+    assert len(findings) == 1, findings
+    assert findings[0].scope == "OmniNode-ai"
+    assert "org_scope: absent" in findings[0].message
+
+
+def test_removing_a_scoped_declaration_is_itself_a_finding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deleting the declaration must not silently stop auditing a live variable.
+
+    Without this, the cheapest way to make a drift finding go away would be to
+    delete the declaration that produced it.
+    """
+    module = _load_script()
+    _fake_vars(monkeypatch, module, {"OmniNode-ai": []})
+    policy = _scoped_policy()
+    del policy["docker_ci_runner_variable"]
+    findings = module.audit_scoped_variables(policy)
+    assert any("is missing from the policy file" in f.message for f in findings)
+
+
+def test_the_live_policy_declares_both_scoped_variables() -> None:
+    """The shipped policy file must carry both declarations, machine-readable."""
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    for key in ("docker_ci_runner_variable", "security_scan_runner_variable"):
+        declaration = policy[key]
+        assert declaration["org_scope"] == "absent"
+        assert isinstance(declaration["repositories"], list)
+        assert declaration["repositories"]
+        for repo in declaration["repositories"]:
+            assert repo in policy["repositories"], (
+                f"{key} names {repo}, which the audit never reads"
+            )
