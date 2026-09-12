@@ -348,15 +348,30 @@
 #     evidence. The predicate lives outside handlers/ because it is a helper,
 #     not a routed handler.
 #
+#   - OMN-18238 (node_version 1.12.3): A PROPOSED BINDING IS NOT PROOF. A
+#     criterion is discharged by a VERIFIED check that DECLARES it, which is
+#     the right rule for a binding a person wrote and the wrong rule the moment
+#     a machine can write one -- the cheap way to make bindings plentiful is to
+#     guess a criterion from a matching check name, and a passing check with a
+#     matching name is not proof of the criterion it names. A check may now
+#     mark a subset of its claimed criteria as PROPOSALS; those labels are
+#     excluded from the discharge set and their criteria stay unbound until a
+#     person accepts the proposal. The hold says the binding is a proposal
+#     awaiting acceptance rather than "declared by nothing", because the repair
+#     differs. The marking NARROWS and never widens: a proposed label the check
+#     does not also claim is ignored, so it can demote a criterion and never
+#     introduce one. Absent means nothing is a proposal, which is what every
+#     hand-authored binding in the corpus is.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 7
   patch: 1
-node_version: "1.12.2"
+node_version: "1.12.3"
 description: >
-  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, or holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
+  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, and holds a criterion whose only declaring check marks it a proposal until a person accepts it. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
 input_model:
   name: "ModelEvidenceAutocloseSweepRequest"
