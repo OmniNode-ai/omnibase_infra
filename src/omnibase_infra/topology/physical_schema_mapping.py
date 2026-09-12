@@ -54,6 +54,21 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
         # 083 replaces those existing public views without moving authority.
         "projection_delegation_savings",
         "projection_delegation_savings_series",
+        # OMN-17426: the THIRD node_projection_savings read view, and the one
+        # this set had always been missing. `projection_cost_savings_overview`
+        # was physically created bare in public by migration 077 exactly like
+        # its two siblings above, and is declared `schema: tenant` in the same
+        # ownership manifest they are -- so it belongs to the same family by
+        # every property the bridge keys on. It stayed absent only because no
+        # migration after the gate landed had touched it: 083 and 087 replace
+        # the two siblings, 088 alters them, and 077 predates the gate and sits
+        # in its frozen shrink-only baseline. Migration 089 is the first new
+        # deployable SQL to name it, and without this entry it resolves to ZERO
+        # ownership declarations with no admissible way to satisfy the gate --
+        # declaring `schema: public` upstream is rejected as a conflicting
+        # declaration against the node contract's own `schema`. Same gap, same
+        # shape and same remedy as OMN-16993's `omninode_internal` half.
+        "projection_cost_savings_overview",
         "savings_estimates",
         "skill_execution_snapshots",
         # OMN-16316: node_projection_tenant_credentials' BYOK inference-
