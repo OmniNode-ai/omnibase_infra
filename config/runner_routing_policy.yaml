@@ -250,6 +250,65 @@ trusted_runner_variable:
   # `repositories` list below -- the hourly audit therefore never looks at it.
   # That is a known gap folded into the plan of record's phase 4; this entry
   # does not close it and does not flip that shadow.
+  #
+  # OMN-18205 PHASE 2, 2026-09-12: A SHADOW WAS SET ON omninode_infra AND
+  # REVERTED 41 MINUTES LATER ON MEASURED HARM. The map stays EMPTY, which the
+  # shape test above calls the correct steady state. This entry exists because
+  # the attempt is the useful evidence, and a future lane that reads only
+  # "empty" would try the same thing again.
+  #
+  # WHAT WAS TRIED, AND THE REASONING THAT LOOKED SOUND. omninode_infra pins 44
+  # of its 101 job definitions to the fleet label directly in workflow files,
+  # where no routing surface can see them. omninode_infra#1390 moves the
+  # hermetic 40 of those onto the seam expression. Those rewired jobs read
+  # fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]'),
+  # and the literal fallback applies only when the variable is UNSET -- the org
+  # value is set at visibility: all and therefore reaches this repository. So
+  # merging that PR with no shadow would move 40 jobs of a PRIVATE repository
+  # onto billed hosted runners, roughly $500/month, as a silent side effect of a
+  # mechanical refactor. Setting the shadow to the fleet pair first was meant to
+  # make the rewiring placement-neutral: change WHERE placement is decided and
+  # nothing about where the jobs run.
+  #
+  # WHY IT WAS WRONG, and the half the reasoning missed. The shadow does not
+  # only govern the 40 jobs that PR rewires. omninode_infra already had 13
+  # seam-driven jobs on dev, rewired by earlier work from hardcoded
+  # `ubuntu-latest` and resolving to the ORG value ever since -- ci.yml's own
+  # comment beside one of them says so in as many words: "It carries no routing
+  # shadow, so this expression resolves to the organization value." Setting the
+  # shadow relocated all 13 from GitHub-hosted onto the fleet in one write,
+  # which was neither intended nor anticipated, and two of them do not run
+  # there: "Validate ONEX Manifest Hygiene" fails at its Install yq step, and
+  # "Repo Scripts Tests" fails with `renderer 'kustomize' not found`. Both tools
+  # are present on hosted images and absent from the fleet runner image.
+  #
+  # BLAST RADIUS, stated rather than softened: `CI Summary` is a required check
+  # on that repository's dev branch and aggregates both, so for 41 minutes every
+  # open pull request there was blocked, including PRs belonging to other lanes.
+  #
+  # THE EVIDENCE IS A CLEAN BEFORE/AFTER WITH A CONTROL, not an inference.
+  # k8s-validate.yml succeeded on every run through 15:40:24Z and failed on
+  # every run after the write at 15:55:54Z -- including run 34704455773 on an
+  # unrelated branch, which is the control proving the cause was the variable
+  # and not the PR under test. After the shadow was deleted at 16:36Z the same
+  # job re-ran green on `GitHub Actions 1003094636`, a hosted runner, while the
+  # fleet-literal job `Validate Manifest Hygiene` in the same run stayed on
+  # `omninode-runner-15` and also passed -- so the fleet itself was healthy and
+  # only the relocated jobs broke.
+  #
+  # WHAT THIS CHANGE STILL DOES. omninode_infra is added to the audited
+  # `repositories` list below and KEPT there. With no shadow present the audit
+  # records no finding, and if any shadow appears on that repository later it
+  # becomes a reported drift instead of the invisible edit it was until today.
+  # That is the durable half of this work and it is worth keeping on its own.
+  #
+  # WHAT A LATER LANE MUST DO FIRST. Re-setting this shadow is not blocked, it
+  # is SEQUENCED: pin those 13 previously-hosted jobs to a hosted literal, or
+  # install yq and kustomize in the fleet runner image, BEFORE the shadow goes
+  # back. Enumerate the seam-driven jobs from each job's parsed `runs-on` on the
+  # target repository's default branch -- never from whether a file mentions the
+  # variable -- because that enumeration is exactly the step this attempt
+  # skipped.
   repository_overrides: {}
 # OMN-18205, 2026-09-12: THE EXCLUSION ABOVE RESTS ON PRE-FIX EVIDENCE, and
 # this entry is the correction. The 5-of-5 self-hosted failures of "Customer
@@ -338,6 +397,23 @@ repositories:
   - omniclaude
   - omnimarket
   - onex_change_control
+  # OMN-18205 phase 2, 2026-09-12: added so this repository is audited at all.
+  # The audit loop iterates this list; a repository absent from it is never
+  # queried, whatever the policy declares about it. This repository pins 44 of
+  # its 101 job definitions to the fleet label directly in workflow files and
+  # was the largest lab CI consumer in the estate, yet it was invisible to every
+  # routing surface -- so adding it closes an audit gap rather than widening
+  # one, and it stays whether or not a shadow is ever declared for it.
+  #
+  # It carries NO trusted-seam shadow today, and none is declared above. With
+  # both absent the audit records no finding; if a shadow appears here later it
+  # becomes a reported drift rather than the silent edit it would have been.
+  # That is the whole value of this line, and the reason it survived the revert
+  # described in the repository_overrides comment above.
+  #
+  # It declares no docker-CI or security-scan scope and carries neither shadow,
+  # so the scoped-variable pass now asserts their ABSENCE here too.
+  - omninode_infra
 hosted_runner_allowlist:
   - path: .github/workflows/ci.yml
     reason: "OMN-14127: CI Summary is a lightweight hosted fail-closed aggregator so required status always posts during self-hosted saturation."
