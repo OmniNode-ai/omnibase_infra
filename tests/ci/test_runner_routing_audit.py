@@ -39,7 +39,11 @@ def test_local_workflow_audit_rejects_unallowlisted_hosted_runner(
     findings = module.audit_local_workflows(policy, tmp_path)
 
     assert len(findings) == 1
-    assert findings[0].scope == ".github/workflows/bad.yml"
+    # OMN-18031: the scope gained the job name when this check moved from a
+    # whole-file regex to a per-job read of the parsed runs-on value. A file
+    # can pin several jobs and only some of them wrongly, so the file alone was
+    # never enough to act on.
+    assert findings[0].scope == ".github/workflows/bad.yml:test"
     assert "OMNI_RUNNER_SELECTOR_V1" in findings[0].message
 
 
@@ -504,3 +508,161 @@ def test_repository_override_activation_gate_requires_all_criteria(
 
     with pytest.raises(ValueError, match="sustained_min_span_seconds"):
         module.audit_github_variables(policy)
+
+
+# ---------------------------------------------------------------------------
+# OMN-18031: a bare hosted pin must be caught whatever YAML shape it is written
+# in. The check used to be a regex over raw file text anchored on `runs-on:`
+# with the label on the SAME line, so every multi-line spelling of the same
+# value walked past it. That is a gate failing open, which reads as compliance.
+#
+# The evasions below are not hypothetical shapes invented for a test: 69 of the
+# 72 runs-on declarations in the onex_change_control workflow tree use a folded
+# block scalar, and that repo's sibling gate shipped the same line-oriented
+# assumption.
+# ---------------------------------------------------------------------------
+
+_EVASIONS = {
+    "folded_block_scalar": "name: x\njobs:\n  a:\n    runs-on: >-\n      ubuntu-latest\n",
+    "literal_block_scalar": "name: x\njobs:\n  a:\n    runs-on: |-\n      ubuntu-latest\n",
+    "multiline_sequence": "name: x\njobs:\n  a:\n    runs-on:\n      - ubuntu-latest\n",
+    "same_line": "name: x\njobs:\n  a:\n    runs-on: ubuntu-latest\n",
+    "inline_sequence": "name: x\njobs:\n  a:\n    runs-on: [ubuntu-latest]\n",
+    "group_labels_mapping": (
+        "name: x\njobs:\n  a:\n    runs-on:\n      group: g\n      labels:\n        - ubuntu-latest\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_EVASIONS))
+def test_bare_hosted_pin_is_caught_in_every_yaml_shape(
+    tmp_path: Path, shape: str
+) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "bad.yml").write_text(_EVASIONS[shape], encoding="utf-8")
+
+    findings = module.audit_local_workflows({"hosted_runner_allowlist": []}, tmp_path)
+
+    assert [f.scope for f in findings] == [".github/workflows/bad.yml:a"], (
+        f"a bare hosted pin written as {shape} was not reported"
+    )
+
+
+def test_legacy_line_regex_missed_the_multiline_shapes() -> None:
+    """The positive control for the fix: prove the old matcher really failed.
+
+    Without this, "the new check catches it" is unfalsifiable -- a check that
+    was never broken and a check that was fixed look identical once green.
+    """
+    import re
+
+    legacy = re.compile(
+        r"^\s*runs-on:\s*(?:\[)?\s*ubuntu-latest(?![\w-])", re.MULTILINE
+    )
+
+    # The shapes the old regex did catch.
+    assert legacy.search(_EVASIONS["same_line"])
+    assert legacy.search(_EVASIONS["inline_sequence"])
+
+    # The shapes it walked straight past, every one a real hosted pin.
+    for shape in ("folded_block_scalar", "literal_block_scalar", "multiline_sequence"):
+        assert not legacy.search(_EVASIONS[shape]), (
+            f"{shape} is expected to defeat the legacy regex; if this now matches, "
+            "the control is stale and the fix needs re-justifying"
+        )
+
+
+def test_selector_expression_is_not_a_bare_pin(tmp_path: Path) -> None:
+    """A compliant folded selector must not become a false positive."""
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "ok.yml").write_text(
+        "name: x\njobs:\n  a:\n    runs-on: >-\n"
+        "      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON"
+        ' || \'["self-hosted","omnibase-ci"]\') }}\n',
+        encoding="utf-8",
+    )
+
+    assert module.audit_local_workflows({"hosted_runner_allowlist": []}, tmp_path) == []
+
+
+def test_allowlisted_path_still_exempts_a_bare_pin(tmp_path: Path) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "ok.yml").write_text(
+        _EVASIONS["folded_block_scalar"], encoding="utf-8"
+    )
+    policy = {
+        "hosted_runner_allowlist": [
+            {"path": ".github/workflows/ok.yml", "reason": "test"}
+        ]
+    }
+
+    assert module.audit_local_workflows(policy, tmp_path) == []
+
+
+def test_job_delegating_with_uses_is_out_of_scope(tmp_path: Path) -> None:
+    """The callee owns placement, so a `uses:` job has no runs-on to audit."""
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "ok.yml").write_text(
+        "name: x\njobs:\n  a:\n    uses: OmniNode-ai/other/.github/workflows/w.yml@main\n",
+        encoding="utf-8",
+    )
+
+    assert module.audit_local_workflows({"hosted_runner_allowlist": []}, tmp_path) == []
+
+
+def test_unreadable_runs_on_is_a_finding_not_an_empty_pass(tmp_path: Path) -> None:
+    """Fail loud on a shape we cannot read.
+
+    An unreadable value that returned no labels would be indistinguishable from
+    a compliant job -- the same class of silent pass this whole change exists to
+    remove.
+    """
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "weird.yml").write_text(
+        "name: x\njobs:\n  a:\n    runs-on: 17\n", encoding="utf-8"
+    )
+
+    findings = module.audit_local_workflows({"hosted_runner_allowlist": []}, tmp_path)
+
+    assert [f.scope for f in findings] == [".github/workflows/weird.yml:a"]
+    assert "int" in findings[0].message
+
+
+def test_job_with_neither_runs_on_nor_uses_is_reported(tmp_path: Path) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "weird.yml").write_text(
+        "name: x\njobs:\n  a:\n    steps:\n      - run: echo hi\n", encoding="utf-8"
+    )
+
+    findings = module.audit_local_workflows({"hosted_runner_allowlist": []}, tmp_path)
+
+    assert [f.scope for f in findings] == [".github/workflows/weird.yml:a"]
+    assert "neither runs-on nor uses" in findings[0].message
+
+
+def test_runs_on_labels_reads_each_accepted_shape() -> None:
+    module = _load_script()
+
+    assert module.runs_on_labels("ubuntu-latest") == ["ubuntu-latest"]
+    assert module.runs_on_labels(["self-hosted", "omnibase-ci"]) == [
+        "self-hosted",
+        "omnibase-ci",
+    ]
+    assert module.runs_on_labels({"group": "g", "labels": ["a", "b"]}) == ["a", "b"]
+    assert module.runs_on_labels({"group": "g", "labels": "solo"}) == ["solo"]
+
+    for bad in (17, None, {"group": "g", "labels": 3}, ["ok", 5]):
+        with pytest.raises(module.UnreadableRunsOnError):
+            module.runs_on_labels(bad)
