@@ -54,7 +54,13 @@ def _extract(capture: Path, into: Path) -> Path:
             f"{capture.name} holds {names}; the capture is supposed to be the "
             "artifact GitHub served for this run, which carried exactly one member."
         )
-        archive.extractall(into)
+        for member in archive.infolist():
+            target = (into / member.filename).resolve()
+            assert target == (into / "lab-load.json").resolve(), (
+                f"{capture.name} contains unsafe or unexpected member path "
+                f"{member.filename!r}"
+            )
+            archive.extract(member, into)
     return into / "lab-load.json"
 
 

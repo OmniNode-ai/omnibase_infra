@@ -37,10 +37,11 @@ THE RED CASE IS THE REAL JOB
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 import yaml
@@ -105,17 +106,94 @@ def _if_no_files_found(step: dict[str, Any]) -> str:
     return str(with_block["if-no-files-found"])
 
 
-def _is_assertion_for(step: dict[str, Any], artifact_id: str) -> bool:
-    """True when ``step`` invokes the assertion script for ``artifact_id``.
+class AssertionInvocation(NamedTuple):
+    artifact_id: str | None
+    required_paths: tuple[str, ...]
 
-    Matched on the script BASENAME because the delivery workflow checks this
-    repository out into a subdirectory and invokes it as
-    ``omnibase_infra/scripts/ci/assert_evidence_artifact.py``.
+
+def _logical_shell_lines(run: str) -> list[str]:
+    lines: list[str] = []
+    current = ""
+    for raw_line in run.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            current += line[:-1] + " "
+            continue
+        lines.append(current + line)
+        current = ""
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _assertion_invocations(step: dict[str, Any]) -> list[AssertionInvocation]:
+    """Return concrete assertion-script invocations from a run step.
+
+    The match is on shell tokens, not free text. Matched on script BASENAME
+    because the delivery workflow checks this repository out into a subdirectory
+    and invokes it as ``omnibase_infra/scripts/ci/assert_evidence_artifact.py``.
     """
+    invocations: list[AssertionInvocation] = []
     run = str(step.get("run") or "")
-    if ASSERTION_SCRIPT not in run:
-        return False
-    return f"--artifact {artifact_id}" in run or f'--artifact "{artifact_id}"' in run
+    for line in _logical_shell_lines(run):
+        try:
+            words = shlex.split(line)
+        except ValueError:
+            continue
+        if not words or words[0] in {"cat", "echo", "printf"}:
+            continue
+        script_index = next(
+            (
+                idx
+                for idx, word in enumerate(words)
+                if Path(word).name == ASSERTION_SCRIPT
+            ),
+            None,
+        )
+        if script_index is None:
+            continue
+        artifact_id: str | None = None
+        required_paths: list[str] = []
+        args = words[script_index + 1 :]
+        idx = 0
+        while idx < len(args):
+            arg = args[idx]
+            if arg == "--artifact" and idx + 1 < len(args):
+                artifact_id = args[idx + 1]
+                idx += 2
+                continue
+            if arg.startswith("--artifact="):
+                artifact_id = arg.split("=", 1)[1]
+                idx += 1
+                continue
+            if arg == "--require" and idx + 1 < len(args):
+                required_paths.append(args[idx + 1])
+                idx += 2
+                continue
+            if arg.startswith("--require="):
+                required_paths.append(arg.split("=", 1)[1])
+                idx += 1
+                continue
+            idx += 1
+        invocations.append(AssertionInvocation(artifact_id, tuple(required_paths)))
+    return invocations
+
+
+def _workflow_path(workflows_dir: Path, workflow: str) -> Path:
+    rel = Path(workflow)
+    prefix = Path(".github/workflows")
+    if rel.parts[: len(prefix.parts)] == prefix.parts:
+        rel = Path(*rel.parts[len(prefix.parts) :])
+    return workflows_dir / rel
+
+
+def _workflow_name(path: Path, workflows_dir: Path) -> str:
+    try:
+        return f".github/workflows/{path.relative_to(workflows_dir).as_posix()}"
+    except ValueError:
+        return path.name
 
 
 def load_policy(path: Path = POLICY_PATH) -> list[dict[str, Any]]:
@@ -132,12 +210,12 @@ def load_policy(path: Path = POLICY_PATH) -> list[dict[str, Any]]:
 def all_uploaders(root: Path = WORKFLOWS_DIR) -> list[tuple[str, str, dict[str, Any]]]:
     """Every upload-artifact step in every workflow, as (file, job id, step)."""
     found: list[tuple[str, str, dict[str, Any]]] = []
-    for wf in sorted(root.glob("*.y*ml")):
+    for wf in sorted(root.rglob("*.y*ml")):
         doc = _load_workflow(wf)
         for job_id, job in _jobs(doc).items():
             for step in _steps(job):
                 if _is_uploader(step):
-                    found.append((wf.name, job_id, step))
+                    found.append((_workflow_name(wf, root), job_id, step))
     return found
 
 
@@ -156,7 +234,7 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
     if not required:
         problems.append(f"{artifact_id}: declares no required_paths")
 
-    wf_path = workflows_dir / Path(wf_rel).name
+    wf_path = _workflow_path(workflows_dir, wf_rel)
     if not wf_path.is_file():
         problems.append(f"{artifact_id}: workflow {wf_rel} does not exist")
         return problems
@@ -168,13 +246,13 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
         return problems
 
     steps = _steps(job)
-    uploader_index: int | None = None
-    for idx, step in enumerate(steps):
-        if _is_uploader(step) and _artifact_name(step) == declared_name:
-            uploader_index = idx
-            break
+    uploader_indexes = [
+        idx
+        for idx, step in enumerate(steps)
+        if _is_uploader(step) and _artifact_name(step) == declared_name
+    ]
 
-    if uploader_index is None:
+    if not uploader_indexes:
         problems.append(
             f"{artifact_id}: no upload-artifact step in {wf_rel}:{job_id} names "
             f"'{declared_name}'. A declaration that resolves to nothing is a gate "
@@ -182,6 +260,20 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
         )
         return problems
 
+    if len(uploader_indexes) > 1:
+        problems.append(
+            f"{artifact_id}: {wf_rel}:{job_id} has {len(uploader_indexes)} "
+            f"upload-artifact steps named '{declared_name}'. The evidence policy "
+            "requires one declared uploader so the assertion cannot shadow a sibling."
+        )
+
+    if job.get("continue-on-error"):
+        problems.append(
+            f"{artifact_id}: job {wf_rel}:{job_id} carries continue-on-error, so "
+            "a failing assertion step cannot fail the job it is asserting on."
+        )
+
+    uploader_index = uploader_indexes[0]
     uploader = steps[uploader_index]
 
     # AC1, first half: absence must be a failure, never a warning.
@@ -195,9 +287,16 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
 
     # AC1, second half: the zero-byte case if-no-files-found cannot see.
     assertion_index: int | None = None
+    assertion_requires: tuple[str, ...] | None = None
     for idx in range(uploader_index):
-        if _is_assertion_for(steps[idx], artifact_id):
+        matching = [
+            invocation
+            for invocation in _assertion_invocations(steps[idx])
+            if invocation.artifact_id == artifact_id
+        ]
+        if matching:
             assertion_index = idx
+            assertion_requires = matching[-1].required_paths
             break
 
     if assertion_index is None:
@@ -209,6 +308,11 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
         return problems
 
     assertion = steps[assertion_index]
+    if tuple(required) != assertion_requires:
+        problems.append(
+            f"{artifact_id}: assertion --require paths {list(assertion_requires or ())} "
+            f"do not match policy required_paths {required}."
+        )
 
     # An assertion that does not run when the producer failed is decorative:
     # the always() uploader would still upload the empty file.
@@ -227,6 +331,166 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
         )
 
     return problems
+
+
+def _write_workflow(workflows_dir: Path, name: str, text: str) -> None:
+    path = workflows_dir / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _policy_entry(
+    *,
+    workflow: str = ".github/workflows/evidence.yml",
+    job: str = "probe",
+    artifact_name: str = "probe-artifact",
+    required_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": "probe",
+        "workflow": workflow,
+        "job": job,
+        "artifact_name": artifact_name,
+        "required_paths": required_paths or ["probe.json"],
+    }
+
+
+def test_gate_rejects_job_level_continue_on_error(tmp_path: Path) -> None:
+    workflows = tmp_path / "workflows"
+    _write_workflow(
+        workflows,
+        "evidence.yml",
+        """
+jobs:
+  probe:
+    continue-on-error: true
+    steps:
+      - name: Assert
+        if: always()
+        run: python3 scripts/ci/assert_evidence_artifact.py --artifact probe --require probe.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifact
+          path: probe.json
+          if-no-files-found: error
+""",
+    )
+    problems = check_entry(_policy_entry(), workflows)
+    assert any(
+        "job .github/workflows/evidence.yml:probe carries" in p for p in problems
+    )
+
+
+def test_gate_requires_assertion_paths_to_match_policy(tmp_path: Path) -> None:
+    workflows = tmp_path / "workflows"
+    _write_workflow(
+        workflows,
+        "evidence.yml",
+        """
+jobs:
+  probe:
+    steps:
+      - name: Assert
+        if: always()
+        run: |
+          python3 scripts/ci/assert_evidence_artifact.py \\
+            --artifact probe \\
+            --require other.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifact
+          path: probe.json
+          if-no-files-found: error
+""",
+    )
+    problems = check_entry(_policy_entry(), workflows)
+    assert any("do not match policy required_paths" in p for p in problems)
+
+
+def test_gate_does_not_accept_artifact_prefix_or_echoed_assertions(
+    tmp_path: Path,
+) -> None:
+    workflows = tmp_path / "workflows"
+    _write_workflow(
+        workflows,
+        "evidence.yml",
+        """
+jobs:
+  probe:
+    steps:
+      - name: Echo a different assertion
+        if: always()
+        run: echo "python3 scripts/ci/assert_evidence_artifact.py --artifact probe-extra --require probe.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifact
+          path: probe.json
+          if-no-files-found: error
+""",
+    )
+    problems = check_entry(_policy_entry(), workflows)
+    joined = "\n".join(problems)
+    assert ASSERTION_SCRIPT in joined
+    assert "probe-extra" not in joined
+
+
+def test_gate_rejects_duplicate_declared_uploaders(tmp_path: Path) -> None:
+    workflows = tmp_path / "workflows"
+    _write_workflow(
+        workflows,
+        "evidence.yml",
+        """
+jobs:
+  probe:
+    steps:
+      - name: Assert
+        if: always()
+        run: python3 scripts/ci/assert_evidence_artifact.py --artifact probe --require probe.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifact
+          path: probe.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifact
+          path: probe.json
+          if-no-files-found: error
+""",
+    )
+    problems = check_entry(_policy_entry(), workflows)
+    assert any("upload-artifact steps named 'probe-artifact'" in p for p in problems)
+
+
+def test_membership_binds_workflow_job_and_artifact_name(tmp_path: Path) -> None:
+    workflows = tmp_path / "workflows"
+    _write_workflow(
+        workflows,
+        "nested/other.yml",
+        """
+jobs:
+  other:
+    steps:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifact
+          path: probe.json
+          if-no-files-found: error
+""",
+    )
+    declared_uploaders = {
+        (str(e.get("workflow")), str(e.get("job")), str(e.get("artifact_name")))
+        for e in [_policy_entry()]
+    }
+    undeclared = [
+        (wf_name, job_id, _artifact_name(step))
+        for wf_name, job_id, step in all_uploaders(workflows)
+        if (step.get("with") or {}).get("if-no-files-found") == "error"
+        and (wf_name, job_id, _artifact_name(step)) not in declared_uploaders
+    ]
+    assert undeclared == [
+        (".github/workflows/nested/other.yml", "other", "probe-artifact")
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -263,12 +527,16 @@ def test_every_fatal_absence_uploader_is_declared() -> None:
     of the policy by being left out of the declaration file; the only way out is
     to downgrade the setting, which is a visible change to the workflow.
     """
-    declared_names = {str(e.get("artifact_name")) for e in load_policy()}
+    declared_uploaders = {
+        (str(e.get("workflow")), str(e.get("job")), str(e.get("artifact_name")))
+        for e in load_policy()
+    }
     undeclared: list[str] = []
     for wf_name, job_id, step in all_uploaders():
         if (step.get("with") or {}).get("if-no-files-found") != "error":
             continue
-        if _artifact_name(step) not in declared_names:
+        uploader_key = (wf_name, job_id, _artifact_name(step))
+        if uploader_key not in declared_uploaders:
             undeclared.append(f"{wf_name}:{job_id} -> {_artifact_name(step)}")
     assert not undeclared, (
         "these uploaders set if-no-files-found: error (declaring absence fatal) but "
@@ -344,6 +612,15 @@ def test_assertion_fails_on_a_zero_byte_file(tmp_path: Path) -> None:
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "EMPTY" in result.stdout
+
+
+def test_assertion_fails_on_a_whitespace_only_file(tmp_path: Path) -> None:
+    (tmp_path / "lab-load.json").write_text("\n  \t\n", encoding="utf-8")
+    result = _run_assertion(
+        ["--artifact", "lab-load", "--require", "lab-load.json"], tmp_path
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "BLANK" in result.stdout
 
 
 def test_assertion_passes_on_a_measured_record(tmp_path: Path) -> None:

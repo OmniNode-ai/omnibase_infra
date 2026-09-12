@@ -49,31 +49,43 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 # Keep in one place so the failure text and the tests agree on the vocabulary.
 _ABSENT = "ABSENT"
 _EMPTY = "EMPTY (zero bytes)"
+_BLANK = "BLANK (whitespace only)"
 _NOT_A_FILE = "NOT A FILE"
 _UNREADABLE = "UNREADABLE"
 
 
-def classify(path: Path) -> str | None:
-    """Return a failure reason for ``path``, or ``None`` when it is good.
+@dataclass(frozen=True)
+class Classification:
+    reason: str | None
+    size: int = 0
 
-    ``None`` means: the path exists, is a regular file, and holds at least one
-    byte. Every other outcome is a reason string reported verbatim.
+
+def classify(path: Path) -> Classification:
+    """Return the path's failure reason and observed size.
+
+    ``reason is None`` means: the path exists, is a regular file, and holds at
+    least one non-whitespace byte. Every other outcome is a reason string
+    reported verbatim.
     """
     try:
         if not path.exists():
-            return _ABSENT
+            return Classification(_ABSENT)
         if not path.is_file():
-            return _NOT_A_FILE
-        if path.stat().st_size == 0:
-            return _EMPTY
+            return Classification(_NOT_A_FILE)
+        data = path.read_bytes()
     except OSError as exc:  # pragma: no cover - surfaced, never swallowed
-        return f"{_UNREADABLE}: {exc}"
-    return None
+        return Classification(f"{_UNREADABLE}: {exc}")
+    if len(data) == 0:
+        return Classification(_EMPTY)
+    if not data.strip():
+        return Classification(_BLANK, len(data))
+    return Classification(None, len(data))
 
 
 def assert_required(artifact: str, required: list[str]) -> int:
@@ -81,13 +93,12 @@ def assert_required(artifact: str, required: list[str]) -> int:
     failures: list[tuple[str, str]] = []
     for raw in required:
         path = Path(raw)
-        reason = classify(path)
-        if reason is None:
-            size = path.stat().st_size
-            print(f"  OK      {raw} ({size} bytes)")
+        result = classify(path)
+        if result.reason is None:
+            print(f"  OK      {raw} ({result.size} bytes)")
         else:
-            print(f"  FAIL    {raw} -- {reason}")
-            failures.append((raw, reason))
+            print(f"  FAIL    {raw} -- {result.reason}")
+            failures.append((raw, result.reason))
 
     if failures:
         print(

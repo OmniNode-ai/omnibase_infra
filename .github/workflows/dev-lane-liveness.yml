@@ -141,8 +141,9 @@ jobs:
     # report it as the lab. Same reasoning the dev-lane-liveness job above
     # already applies to its own runs-on.
     runs-on: [self-hosted, omnibase-ci]
-    # Never blocks the lane probe: this job failing IS a data point, not an outage.
-    continue-on-error: true
+    # A failed probe is a red lane signal. The saturation-record job still runs
+    # under `if: always()` and records the absence as data, but this job must not
+    # neutralize the evidence assertion that protects the uploaded lab-load file.
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
@@ -165,10 +166,7 @@ jobs:
         #
         # `set -euo pipefail` (was `set -uo pipefail`, missing `-e`) makes a
         # crashing probe FAIL THIS STEP rather than let `cat` on an empty file
-        # exit 0 afterwards and read as a quiet success. The job's own
-        # `continue-on-error: true` still keeps a failure here from blocking
-        # the lane probe; it no longer also keeps the failure invisible in the
-        # step's own conclusion.
+        # exit 0 afterwards and read as a quiet success.
         env:
           RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
