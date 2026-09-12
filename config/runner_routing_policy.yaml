@@ -49,8 +49,15 @@ trusted_runner_variable:
   # runner's own localhost. Clean A/B on omnibase_infra ci.yml, same job: 5 of 5
   # pre-flip runs SUCCESS on ubuntu-latest, 5 of 5 post-flip runs FAILURE on
   # self-hosted, the first of them 71 seconds after the flip; reproduced on
-  # omnimarket run 34122888401. Before any future flip of this seam, that gate
-  # (and every other testcontainer-backed gate) needs a hosted class of its own.
+  # omnimarket run 34122888401.
+  #
+  # SUPERSEDED, 2026-09-12 (OMN-18205). The sentence that stood here said that
+  # gate "and every other testcontainer-backed gate needs a hosted class of its
+  # own". That is no longer true and it is dropped rather than softened: the
+  # runner-topology defect was fixed the same afternoon and the gate has since
+  # been PROVEN green on a fleet runner. The A/B above is kept because it is an
+  # accurate record of what was measured on the morning of 2026-09-07 -- it is
+  # history, not a current constraint. Read it with the OMN-18205 entry below.
   #
   # OMN-18031 phase 5, 2026-09-11T21:12:33Z: two shadows below are now DECLARED
   # divergences rather than drift. Authority is the operator ruling of
@@ -69,7 +76,17 @@ trusted_runner_variable:
   # through this very seam in BOTH repositories (omnimarket ci.yml, and this
   # repo's ci.yml) and docker-pulls redpandadata/redpanda with
   # OMN18012_REQUIRE_HARNESS=1 set so a missing daemon is red rather than a
-  # green skip. Flipping either shadow re-runs the 2026-09-07 harm verbatim.
+  # green skip.
+  #
+  # CORRECTED, 2026-09-12 (OMN-18205). This paragraph previously ended "Flipping
+  # either shadow re-runs the 2026-09-07 harm verbatim." That claim was false
+  # when it was written and is withdrawn at the request of its own author. The
+  # harm it names was fixed before this text was committed, and the gate has
+  # since run green on a fleet runner in both repositories. Neither repository is
+  # excluded for that reason any more; the standing reason not to flip them is
+  # CAPACITY, recorded in the OMN-18205 entry below. Both gates now resolve
+  # through docker_ci_runner_variable, so a flip of THIS seam would not move them
+  # in any case.
   # The org variable is not flipped either: it is inherited by omninode_infra --
   # private, carrying a live staging deploy path, and with only five
   # seam-driven job definitions, so almost no yield for a large blast radius --
