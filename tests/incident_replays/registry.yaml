@@ -159,6 +159,22 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn18200-lab-lane-three-days-stale-under-a-green-trigger
+    guard: scripts/ci/fetch_lab_overlay_record.py
+    incident: OMN-18200
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18200/agent-lab-overlay-71e3da6c.http.captured
+      sha256: b0b6723d5b2cf4270b35a3c25cf70153c6f1b60016d5b1b8ecb05f05b341f009
+    capture:
+      method: live-http
+      source: live-http:omni-201-ts:8098/lab-overlay/71e3da6c189a2509d6247054404af320a7e5698d
+      captured_at: '2026-09-12T01:19:40Z'
+      captured_by: lane replay (OMN-18200)
+    test: tests/ci/test_incident_replay_omn18200.py::test_the_real_reader_fails_the_sha_whose_lab_lane_was_never_applied
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green here is unusually pure: there was no read at all, so there was nothing to answer wrongly. Rule 24(a) states that every runtime-affecting merge re-applies the k3s onex-lab overlay from the merged head and emits a lab-pass receipt for it; omninode_infra's k8s/onex-lab/apply_lab_lane.sh had ZERO callers anywhere in the org, so the sentence was true of nothing and the lane was advanced only when a person ran the script by hand. Run 34657547387 of runtime-rebuild-trigger.yml, on the merge of omnibase_infra#3441 (squash 71e3da6c), reported success; its verify job was SKIPPED; no lab-pass receipt artifact existed for the sha on any lane; and the lab lane's fifteen runtime-family Deployments were all pinned to docker.io/onex-lab/omninode-runtime:20260908T123804Z with the runtime pod reporting omnimarket==0.4.30 against a dev at 0.4.61. That is not one release of lag, it is an overlay nothing had re-applied across many merges, and it cost a full diagnostic pass because a stale lane under a green trigger is indistinguishable from a wedged deploy agent. NOT A RECONSTRUCTION -- the artifact is the byte-for-byte response, headers included, that the dev-lane deploy agent's own HTTP surface gave for that exact commit, and it is 404 because no lab-overlay record for 71e3da6c has ever existed. The replay serves those bytes back over a real socket and drives the real poll() through its real transport, requiring a failing check that names the sha, so a reader that treated an absent record as nothing to report -- which is precisely the pre-change behaviour, a green run with no lab evidence anywhere -- cannot satisfy it. The verdict is derived rather than stated: a companion assertion feeds the resulting check through the real build_receipt and requires EnumLabPassResult.FAIL, so the absence reaches the gate as a failure and never as a silent pass.
   - id: omn18179-automerge-rearmed-over-a-human-disable
     guard: scripts/ci/check_auto_merge_hold.py
     incident: OmniNode-ai/omninode_infra#1310

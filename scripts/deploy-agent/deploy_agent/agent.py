@@ -10,6 +10,7 @@ import logging
 import os
 import signal
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from aiohttp import web
@@ -26,6 +27,7 @@ from deploy_agent.events import (
     Scope,
 )
 from deploy_agent.executor import (
+    REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
     assert_prod_request_has_stability_digest,
@@ -34,6 +36,10 @@ from deploy_agent.executor import (
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
+from deploy_agent.lab_overlay import (
+    DEFAULT_APPLY_BUDGET_SECONDS,
+    LabOverlayApplier,
+)
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
@@ -49,6 +55,27 @@ STATE_DIR = Path(
 )
 HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
 PUBLISH_RETRY_INTERVAL = 30
+
+#: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
+#:
+#: Default ON deliberately, per rule 5 ("enforcement, not detection"): an opt-in
+#: lab re-apply is one nobody turns on, which is exactly how the lane reached
+#: three days of staleness under a green trigger. ``off`` is an incident kill
+#: switch for the case where a wedged apply is holding this agent's single-flight
+#: lock, and a disabled run says so in the journal rather than being silent.
+LAB_OVERLAY_ENABLED = os.environ.get("DEPLOY_AGENT_LAB_OVERLAY", "on").lower() != "off"
+LAB_OVERLAY_BUDGET_SECONDS = int(
+    os.environ.get("DEPLOY_AGENT_LAB_OVERLAY_BUDGET", str(DEFAULT_APPLY_BUDGET_SECONDS))
+)
+#: The ``omninode_infra`` clone the overlay is archived from. Derived from
+#: ``REPO_DIR``'s parent rather than written out, because the two are siblings in
+#: the same ``omni_home`` clone by construction and a second literal path is a
+#: second thing to keep in step (rule 6).
+LAB_OVERLAY_SOURCE_DIR = Path(
+    os.environ.get(
+        "DEPLOY_AGENT_LAB_OVERLAY_SOURCE", str(Path(REPO_DIR).parent / "omninode_infra")
+    )
+)
 
 # NOTE (OMN-13760): no systemd watchdog. _run_deploy runs minutes-long
 # synchronous subprocess.run() rebuilds that block the event loop, so a periodic
@@ -304,6 +331,21 @@ class DeployAgent:
             self.job_store.complete(cid, status="success")
             logger.info("Job %s completed successfully", cid)
 
+            # OMN-18200 AC5 -- the k3s onex-lab overlay's half of rule 24(a).
+            #
+            # AFTER the compose lane is verified and the job is marked complete,
+            # and deliberately NOT part of its verdict. The compose lane
+            # converged on its own merits by this point; a lab-overlay failure
+            # must not report a lane that IS running the merged sha as broken.
+            # The lab verdict travels in its own sha-keyed receipt, on its own
+            # lane value, emitted by the workflow job that reads the record this
+            # writes.
+            #
+            # Only the dev lane. A merge to `main` targets stability-test, which
+            # is a governed lane this agent's fence already refuses, and the lab
+            # overlay is not a stability surface.
+            self._apply_lab_overlay(cmd)
+
         except Exception as e:
             logger.exception("Job %s failed: %s", cid, e)
             self.job_store.complete(cid, status="failed", errors=[str(e)])
@@ -336,6 +378,55 @@ class DeployAgent:
                 logger.warning("Publish failed for %s, marked pending", cid)
 
         self._state = "idle"
+
+    def _apply_lab_overlay(self, cmd: ModelRebuildRequested) -> None:
+        """Re-apply the k3s onex-lab overlay for this merge (OMN-18200 AC5).
+
+        Swallows every exception by design. The record the applier writes is the
+        channel this result travels on; a raise here would convert a lab finding
+        into a failed compose deploy, which is the opposite of what the two
+        separate lane values exist to keep apart. An exception that escapes the
+        applier is itself logged and then dropped, because the applier's own
+        contract is that it writes a record on both outcomes -- so an escape is a
+        defect in the applier, reported as one, not a reason to lose the deploy.
+        """
+        if cmd.runtime_lane != EnumRuntimeLane.DEV:
+            return
+        if not LAB_OVERLAY_ENABLED:
+            logger.info(
+                "lab overlay re-apply DISABLED by DEPLOY_AGENT_LAB_OVERLAY=off; "
+                "no onex-lab-k3s record will exist for %s",
+                self._current_git_sha,
+            )
+            return
+        sha = self._current_git_sha
+        if not sha or len(sha) != 40:
+            logger.warning(
+                "lab overlay re-apply skipped: the resolved deploy sha is %r, and a "
+                "record must be keyed by an exact 40-character sha",
+                sha,
+            )
+            return
+        try:
+            applier = LabOverlayApplier(
+                state_dir=STATE_DIR,
+                repo_dir=Path(REPO_DIR),
+                overlay_source_dir=LAB_OVERLAY_SOURCE_DIR,
+                env=os.environ,
+                budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
+            )
+            path = applier.apply(
+                sha=sha,
+                stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+                correlation_id=str(cmd.correlation_id),
+            )
+            logger.info("lab overlay re-apply recorded at %s", path)
+        except Exception:
+            logger.exception(
+                "lab overlay re-apply raised instead of recording for %s; the "
+                "onex-lab-k3s receipt for this sha will report a missing record",
+                sha,
+            )
 
     def _publish_rejected(self, cmd: ModelRebuildRequested, *, reason: str) -> None:
         from kafka import KafkaProducer
