@@ -102,6 +102,54 @@ class Alert:
     detail: str
 
 
+def select_latest_route_artifact(
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Pick the newest non-expired ``runner-route-decision-*`` artifact from a
+    repo-wide ``GET /actions/artifacts`` listing.
+
+    OMN-18031 G7 gap: ``ROUTE_REASON`` was hardcoded to ``"unknown"`` in
+    ``dev-lane-liveness.yml`` because nothing aggregated the route job's own
+    decision artifacts into this workflow, so condition 3
+    (``route_fallback_sustained``, the alert the operator actually asked for)
+    had no input and could never fire. This is the pure selection half; the
+    network read (``gh api .../actions/artifacts``) is a workflow step, kept
+    out of this function so the selection logic is testable without a live
+    API call.
+
+    Returns ``None`` when no matching, unexpired artifact exists -- the
+    caller's fallback to ``"unknown"`` is then the same safe default as
+    before this landed, not a new failure mode.
+    """
+    candidates = [
+        item
+        for item in artifacts
+        if isinstance(item, dict)
+        and isinstance(item.get("name"), str)
+        and item["name"].startswith("runner-route-decision-")
+        and not item.get("expired", False)
+        and isinstance(item.get("created_at"), str)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: str(item["created_at"]))
+
+
+def extract_route_reason(payload: Any) -> str | None:
+    """Pull ``reason`` out of a downloaded ``runner-route-decision.json``.
+
+    Returns ``None`` on any shape other than a decision record carrying a
+    non-empty string reason -- malformed or unexpected content must fall back
+    to the caller's ``"unknown"`` default, never be laundered into an empty
+    string that then fails to match anything in ``SATURATION_FALLBACK_REASONS``
+    while LOOKING like a real value in the record.
+    """
+    if not isinstance(payload, dict):
+        return None
+    reason = payload.get("reason")
+    return reason if isinstance(reason, str) and reason else None
+
+
 def load_alert_policy(path: Path) -> dict[str, Any]:
     """Load ``route.saturation_alert``, failing on any missing threshold."""
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))

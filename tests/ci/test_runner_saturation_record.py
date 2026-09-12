@@ -360,3 +360,120 @@ def test_condition_3_positive_control_every_allowlisted_reason_does_fire(
     window = _window([_record(route_reason=pressure_reason)] * 12)
     alerts = sat.evaluate_alerts(window, ALERT_POLICY)
     assert "route_fallback_sustained" in [a.condition for a in alerts]
+
+
+# --- OMN-18031 follow-up (2026-09-12): ROUTE_REASON was hardcoded ----------
+#
+# ``dev-lane-liveness.yml`` hardcoded ``ROUTE_REASON: unknown`` because
+# nothing aggregated the route job's own ``runner-route-decision-*``
+# artifacts into this workflow -- condition 3 (``route_fallback_sustained``,
+# the alert the operator actually asked for) had no input and could never
+# fire. ``select_latest_route_artifact`` / ``extract_route_reason`` are the
+# pure halves of the fix; the network read (``gh api``) is a workflow step.
+
+
+def _artifact(
+    name: str, created_at: str, *, expired: bool = False, artifact_id: int = 1
+) -> dict[str, Any]:
+    return {
+        "id": artifact_id,
+        "name": name,
+        "created_at": created_at,
+        "expired": expired,
+    }
+
+
+def test_select_latest_route_artifact_picks_the_newest_by_created_at() -> None:
+    artifacts = [
+        _artifact(
+            "runner-route-decision-1-route", "2026-09-12T10:00:00Z", artifact_id=1
+        ),
+        _artifact(
+            "runner-route-decision-2-route", "2026-09-12T12:00:00Z", artifact_id=2
+        ),
+        _artifact(
+            "runner-route-decision-3-route", "2026-09-12T11:00:00Z", artifact_id=3
+        ),
+    ]
+    picked = sat.select_latest_route_artifact(artifacts)
+    assert picked is not None
+    assert picked["id"] == 2
+
+
+def test_select_latest_route_artifact_ignores_other_artifact_names() -> None:
+    """The listing is REPO-WIDE (`/actions/artifacts`), not scoped to this
+    workflow -- `lab-load`, `saturation-record`, and every other artifact in
+    the repo's retention window are in the same response and must not match.
+    """
+    artifacts = [
+        _artifact("lab-load", "2026-09-12T12:00:00Z", artifact_id=1),
+        _artifact("saturation-record", "2026-09-12T13:00:00Z", artifact_id=2),
+        _artifact(
+            "runner-route-decision-4-route", "2026-09-12T09:00:00Z", artifact_id=3
+        ),
+    ]
+    picked = sat.select_latest_route_artifact(artifacts)
+    assert picked is not None
+    assert picked["id"] == 3
+
+
+def test_select_latest_route_artifact_skips_expired_artifacts() -> None:
+    """An expired artifact's download URL 404s; picking it would make the
+    step's best-effort download fail for a reason indistinguishable from "no
+    artifact exists", so it must be filtered out here instead.
+    """
+    artifacts = [
+        _artifact(
+            "runner-route-decision-1-route",
+            "2026-09-12T12:00:00Z",
+            expired=True,
+            artifact_id=1,
+        ),
+        _artifact(
+            "runner-route-decision-2-route", "2026-09-12T10:00:00Z", artifact_id=2
+        ),
+    ]
+    picked = sat.select_latest_route_artifact(artifacts)
+    assert picked is not None
+    assert picked["id"] == 2
+
+
+def test_select_latest_route_artifact_returns_none_when_nothing_matches() -> None:
+    """The safe fallback: the caller's ``ROUTE_REASON`` stays at ``unknown``,
+    the same default this workflow already had before the fix -- not a new
+    failure mode.
+    """
+    assert sat.select_latest_route_artifact([]) is None
+    assert (
+        sat.select_latest_route_artifact(
+            [_artifact("lab-load", "2026-09-12T12:00:00Z")]
+        )
+        is None
+    )
+    assert (
+        sat.select_latest_route_artifact([{"name": "runner-route-decision-1-route"}])
+        is None
+    )  # missing created_at
+
+
+def test_extract_route_reason_reads_the_reason_field() -> None:
+    assert sat.extract_route_reason({"reason": "lab_saturated"}) == "lab_saturated"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"reason": ""},
+        {"no_reason_field": True},
+        {"reason": 123},
+        None,
+        "not-a-dict",
+        [],
+    ],
+)
+def test_extract_route_reason_is_none_on_any_malformed_shape(payload: Any) -> None:
+    """Every malformed shape falls back to ``None`` -- never an empty string
+    that would look like a real, distinct value while matching nothing in
+    ``SATURATION_FALLBACK_REASONS``.
+    """
+    assert sat.extract_route_reason(payload) is None
