@@ -299,6 +299,14 @@ def test_github_variable_audit_honors_repository_override(
                 "omnimarket": {
                     "expected_json": '["self-hosted","omnibase-ci"]',
                     "revert_when": "interim",
+                    "activation_gate": {
+                        "sustained_samples": 4,
+                        "sustained_min_span_seconds": 3600,
+                        "capacity_budget": "measured fan-out leaves headroom",
+                        "maintenance_roll_convergence": "roller can drain busy runners",
+                        "evidence_companion_fate_isolation": "companion stays hosted",
+                        "positive_control_acceptance": "reports file, job, and label",
+                    },
                 }
             },
         },
@@ -339,6 +347,14 @@ def test_github_variable_audit_rejects_drift_from_a_repository_override(
                 "omnimarket": {
                     "expected_json": '["self-hosted","omnibase-ci"]',
                     "revert_when": "interim",
+                    "activation_gate": {
+                        "sustained_samples": 4,
+                        "sustained_min_span_seconds": 3600,
+                        "capacity_budget": "measured fan-out leaves headroom",
+                        "maintenance_roll_convergence": "roller can drain busy runners",
+                        "evidence_companion_fate_isolation": "companion stays hosted",
+                        "positive_control_acceptance": "reports file, job, and label",
+                    },
                 }
             },
         },
@@ -383,6 +399,14 @@ def test_repository_override_does_not_relax_the_org_scope(
                 "omnimarket": {
                     "expected_json": '["self-hosted","omnibase-ci"]',
                     "revert_when": "interim",
+                    "activation_gate": {
+                        "sustained_samples": 4,
+                        "sustained_min_span_seconds": 3600,
+                        "capacity_budget": "measured fan-out leaves headroom",
+                        "maintenance_roll_convergence": "roller can drain busy runners",
+                        "evidence_companion_fate_isolation": "companion stays hosted",
+                        "positive_control_acceptance": "reports file, job, and label",
+                    },
                 }
             },
         },
@@ -410,3 +434,73 @@ def test_every_repository_override_carries_a_revert_condition() -> None:
         assert entry["expected_json"], f"{repo} override has no expected_json"
         module._canonical_json(entry["expected_json"])
         assert entry.get("revert_when"), f"{repo} override has no revert_when"
+        assert entry.get("activation_gate"), f"{repo} override has no activation_gate"
+
+
+def test_repository_override_without_activation_gate_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A future fleet flip needs a measured activation gate, not only a note."""
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "_variables",
+        lambda args: [
+            {
+                "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                "value": '["ubuntu-latest"]',
+            }
+        ],
+    )
+    policy = {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repository_overrides": {
+                "onex_change_control": {
+                    "expected_json": '["self-hosted","omnibase-ci"]',
+                    "revert_when": "until hosted queue drains",
+                }
+            },
+        },
+        "repositories": ["onex_change_control"],
+    }
+
+    with pytest.raises(ValueError, match="activation_gate"):
+        module.audit_github_variables(policy)
+
+
+def test_repository_override_activation_gate_requires_all_criteria(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sustained samples alone are not enough to authorize a repo shadow flip."""
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "_variables",
+        lambda args: [
+            {
+                "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                "value": '["self-hosted","omnibase-ci"]',
+            }
+        ],
+    )
+    policy = {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repository_overrides": {
+                "onex_change_control": {
+                    "expected_json": '["self-hosted","omnibase-ci"]',
+                    "revert_when": "until hosted queue drains",
+                    "activation_gate": {
+                        "sustained_samples": 4,
+                    },
+                }
+            },
+        },
+        "repositories": ["onex_change_control"],
+    }
+
+    with pytest.raises(ValueError, match="sustained_min_span_seconds"):
+        module.audit_github_variables(policy)
