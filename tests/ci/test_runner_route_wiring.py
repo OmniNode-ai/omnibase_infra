@@ -278,17 +278,27 @@ def test_no_third_scheduled_routing_workflow_was_added() -> None:
 
 
 def test_the_lab_probe_is_pinned_self_hosted_by_a_literal_not_the_seam() -> None:
-    """It must run ON the lab (a hosted runner has no route to the lab's
-    tailnet/RFC1918 addresses) and its failure is a data point, not an outage.
+    """It must run ON the lab: a hosted runner has no route to the lab's
+    tailnet/RFC1918 addresses.
 
     The runs-on is a LITERAL and not OMNI_RUNNER_SELECTOR_V1 on purpose: routed
     through the seam, a flip could relocate this probe onto GitHub-hosted
     compute, where it would measure the wrong machine and publish the reading as
     the lab's. The pre-existing dev-lane-liveness job pins its own runner for
     the same reason.
+
+    OMN-18253: this used to also assert ``continue-on-error is True`` here, on
+    the reasoning that the job's failure is a data point rather than an outage.
+    That reasoning is correct and is NOT dropped -- it moved into the probe,
+    which exits 0 for a measurement whether or not the lab is saturated and
+    non-zero only when it cannot measure at all. The blanket was what also hid
+    the ModuleNotFoundError that killed 10 of this job's first 12 runs, so the
+    property is now asserted where it is true rather than where it was
+    convenient. tests/ci/test_lab_load_probe_omn18253.py owns that half,
+    including the saturated-lab control; this asserts the blanket is gone.
     """
     job = _workflow("dev-lane-liveness.yml")["jobs"]["lab-load-probe"]
-    assert job["continue-on-error"] is True
+    assert "continue-on-error" not in job
     assert job["timeout-minutes"] <= 3
     assert job["runs-on"] == ["self-hosted", "omnibase-ci"]
     assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" not in str(job["runs-on"])
@@ -318,6 +328,14 @@ def test_the_lab_probe_step_fails_loudly_and_does_not_read_the_container() -> No
     ``/proc/loadavg`` and ``os.cpu_count()`` -- not the ``.201`` host
     ``max_lab_load_ratio`` is calibrated against. It must now fail the step on
     a crash (``-e``) and call the org-busy/idle-based function instead.
+
+    OMN-18253 moved the call out of the inline heredoc into
+    ``scripts/ci/probe_lab_load.py``, because a heredoc that could not fail
+    honestly -- the probe never raises, so an unreachable API exited 0 -- and
+    could not be driven by a test was half the reason the job stayed dead. The
+    requirement is unchanged and is asserted through the module: the workflow
+    invokes it, and the module sources the ORG-BUSY function rather than the
+    container-scoped one.
     """
     job = _workflow("dev-lane-liveness.yml")["jobs"]["lab-load-probe"]
     step = _step(
@@ -325,8 +343,14 @@ def test_the_lab_probe_step_fails_loudly_and_does_not_read_the_container() -> No
     )
     script = step["run"]
     assert "set -euo pipefail" in script
-    assert "probe_lab_saturation_from_fleet" in script
+    assert "scripts/ci/probe_lab_load.py" in script
     assert "probe_local_lab_load" not in script
+
+    module = (
+        Path(__file__).resolve().parents[2] / "scripts" / "ci" / "probe_lab_load.py"
+    ).read_text(encoding="utf-8")
+    assert "probe_lab_saturation_from_fleet" in module
+    assert "probe_local_lab_load" not in module
 
 
 def test_route_reason_is_no_longer_a_hardcoded_literal() -> None:
