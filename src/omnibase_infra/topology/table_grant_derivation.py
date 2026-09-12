@@ -254,6 +254,29 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="aggregate_token_usage",
         ),
     ),
+    # OMN-17426: the savings overview READ VIEW follows the same temporary
+    # supplemental-declaration path as OMN-18159 above. Infra vendors migration
+    # 089 before the omnimarket source PR can merge, and the market PR cannot
+    # merge until this infra PR gives the tenant projection reader an explicit
+    # grant. The source contract declaration makes this redundant once the pin
+    # advances; until then, the vendored migration is the local authority.
+    ContractTableDeclaration(
+        node="legacy_migration:projection_cost_savings_overview",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="projection_cost_savings_overview",
+            database_ref="application",
+            schema="tenant",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_savings/"
+                "089_savings_aggregate_views_per_tenant.sql"
+            ),
+            access="read",
+            role="aggregate_savings_overview",
+        ),
+    ),
 )
 
 
