@@ -871,3 +871,41 @@ def test_the_live_policy_declares_both_scoped_variables() -> None:
             assert repo in policy["repositories"], (
                 f"{key} names {repo}, which the audit never reads"
             )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18205: withdrawn claims must not come back
+# ---------------------------------------------------------------------------
+
+
+def test_the_policy_does_not_assert_the_withdrawn_exclusion_claims() -> None:
+    """Two claims in this file were measurably false and are withdrawn.
+
+    Both said, in different words, that the customer-path boundary gate cannot
+    run on the self-hosted fleet: that it "needs a hosted class of its own", and
+    that flipping either repository shadow "re-runs the 2026-09-07 harm
+    verbatim". The runner-topology defect behind both was fixed in #3286, merged
+    2026-09-07T15:03:14Z -- two hours and six minutes AFTER the shadow reverted
+    to hosted at 12:57:48Z -- so the five-of-five failure A/B those sentences
+    rest on is pre-fix by construction, and the gate has since run green on a
+    named fleet runner in both repositories.
+
+    This test exists because the file is the asserted-intent surface every
+    future flip lane reads, and a stale exclusion reason there gets cited as
+    current. That is precisely how the pre-fix A/B blocked two already-fixed
+    repositories for four days. The measured A/B itself is deliberately NOT
+    pinned here -- it is accurate history and should survive; what must not come
+    back is the forward-looking claim attached to it.
+    """
+    text = POLICY.read_text(encoding="utf-8")
+    withdrawn = (
+        "needs a hosted class of its own",
+        "re-runs the 2026-09-07 harm verbatim",
+    )
+    present = [claim for claim in withdrawn if claim in text]
+    assert not present, (
+        "config/runner_routing_policy.yaml asserts a withdrawn claim: "
+        f"{present}. The boundary gate has been proven green on a fleet runner; "
+        "if it regresses, record the new evidence rather than restoring the old "
+        "sentence."
+    )
