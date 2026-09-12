@@ -107,6 +107,46 @@ trusted_runner_variable:
   # and is the one override declared below. It carries no `testcontainers`
   # dependency and no `docker` step in any workflow.
   #
+  # RE-FLIPPED 2026-09-12T00:27:32Z and REVERTED AGAIN at 01:56:49Z, this time
+  # because the fleet could not carry the load. That second revert is the more
+  # important measurement in this whole entry, so it is recorded here rather
+  # than only in a ticket.
+  #
+  # The gate defect that forced the FIRST revert was genuinely fixed
+  # (onex_change_control#9140, squash dbec685b7b0f4d0737db87c5a42a6e749f36492b),
+  # verified on that repo's integration branch, and proven on the fleet by two
+  # conclusive gate successes plus an injected-pin control. None of that is
+  # retracted. What failed is capacity.
+  #
+  # MEASURED, job level, six repositories:
+  #
+  #   pre-flip  21:15Z  279 queued jobs, max wait 18m, all hosted,
+  #                     70 of 88 fleet runners idle
+  #   +11min    00:38Z  0 queued, 97 jobs on fleet runners, 47 busy / 37 idle
+  #   +86min    01:54Z  336 queued jobs, max wait 25m, 293 of them waiting on
+  #                     FLEET labels, fleet 87 of 88 BUSY, 1 idle
+  #
+  # So routing was WORSE than the hosted baseline it replaced, on both queue
+  # depth and tail latency, and 182 of those 336 queued jobs were the routed
+  # repository's own. The +11min reading was a quiet-moment snapshot and was
+  # wrongly reported as the outcome; the honest reading needs a sustained
+  # sample, which is what the plan's phase 0 asked for and what a single
+  # snapshot cannot give.
+  #
+  # The premise this refutes is specific and worth stating: the fleet being
+  # near-unused at rest (~0.03 percent of available runner-minutes) does not
+  # imply it can absorb one busy repository's CI. Eighty-eight runners against
+  # that repository's fan-out is not spare capacity, it is a smaller bottleneck
+  # than the hosted pool.
+  #
+  # Two further harms, either sufficient on its own. A concurrent fleet
+  # maintenance roll could not converge, because its roller refuses to recreate
+  # a BUSY runner and 87 of 88 were busy. And the routing starved the evidence
+  # companion of the very pull request recording it.
+  #
+  # omnibase_core stays on the fleet: it was not the saturation source, and it
+  # has run clean since 2026-09-11T21:12:33Z.
+  #
   # THE COST, measured rather than estimated. Between 21:13:15Z and 21:49:29Z
   # that gate failed 5 runs across 5 branches -- 3 OCC companion branches and 2
   # product branches inside that repo -- and because it feeds the required
@@ -128,11 +168,31 @@ trusted_runner_variable:
   # onex_change_control jobs executing on named fleet runners, and fleet busy
   # count rising from 16 to 51 of 88. The mechanism works. One repository's
   # self-referential gate is what stopped it, not the fleet.
+  #
+  # OPERATIONAL GUARD ADDED AFTER HOSTILE REVIEW, 2026-09-12. A future
+  # repository_override is no longer authorized by narrative alone:
+  # scripts/audit-runner-routing.py rejects every override without an
+  # activation_gate carrying sustained sampling, capacity budget,
+  # maintenance-roll convergence, evidence-companion fate isolation, and
+  # positive-control acceptance criteria. That is the policy guard that prevents
+  # a repeat of the +11min quiet-snapshot mistake: the checked shape must exist
+  # before the audit will accept any repo shadow divergence.
   repository_overrides:
     omnibase_core:
       expected_json: '["self-hosted","omnibase-ci"]'
       revert_when: >-
         The same three conditions as onex_change_control above. This repository additionally carries 20 job definitions pinned to a literal ubuntu-latest, which this override does not move and must not be assumed to have moved; if any of those is later switched to read the seam, re-check it for container exposure before leaving this override in place.
+      activation_gate:
+        sustained_samples: 4
+        sustained_min_span_seconds: 3600
+        capacity_budget: >-
+          Allow only while a sustained sample over at least one hour shows this repository's routed fan-out keeps fleet busy <= 80 percent and leaves at least 12 idle runners after projected concurrent jobs. omnibase_core is retained on this basis only because it was not the saturation source in the 2026-09-12 onex_change_control incident and has run clean since 2026-09-11T21:12:33Z; that statement is not transferable to any other repository.
+        maintenance_roll_convergence: >-
+          Before adding or retaining an override during a maintenance window, prove the runner roller can recreate or drain at least one sampled busy runner, or set the override back to hosted before the roller starts.
+        evidence_companion_fate_isolation: >-
+          The PR that records a routing flip must keep its OCC evidence companion and hostile-review thread gate reachable on hosted or otherwise fate-isolated compute, so the evidence path cannot be queued behind the fleet state it is documenting.
+        positive_control_acceptance: >-
+          The injected-pin control must plant a folded-scalar hard-coded fleet label in a job runs-on and the validator must report file, job, and label; a green routing audit without this positive control is not sufficient proof.
 # OMN-18205, 2026-09-12: THE EXCLUSION ABOVE RESTS ON PRE-FIX EVIDENCE, and
 # this entry is the correction. The 5-of-5 self-hosted failures of "Customer
 # Path Boundary (OMN-18012)" recorded above all predate commit
