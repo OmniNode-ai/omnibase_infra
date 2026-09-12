@@ -412,6 +412,14 @@ omninode_infra_fleet_runner_variable:
   # label these 40 jobs were hardcoded to before #1390, so leaving the
   # variable unset is placement-neutral by construction.
   #
+  # NOTE FOR THE NEXT COMPANION PR ON THIS TICKET: do not hand-write a
+  # companion-citation line into a PR body or commit message before the
+  # OCC autobind effect mints one and PATCHes it on. A manually written
+  # placeholder is indistinguishable, to the born-path consumer, from a
+  # real citation, and it suppressed this PR's own mint the first time
+  # (this PR's own history, corrected in a follow-up commit). Leave that
+  # field blank and let the automated PATCH populate it.
+  #
   # Deliberately UNSET everywhere, on the same terms as
   # OMNI_OCC_AUTOBIND_RUNS_ON_JSON and OMNI_RUNTIME_REBUILD_RUNS_ON_JSON
   # documented in trusted_runner_variable above: unset is the intended state
