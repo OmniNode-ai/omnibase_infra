@@ -89,6 +89,26 @@ class TestWordBoundaryMatching:
         assert resolution.task_type == "short_keyword"
         assert resolution.resolution is EnumTaskTypeResolution.CONTRACT
 
+    def test_contract_phrases_are_case_insensitive(self, tmp_path: Path) -> None:
+        contract = tmp_path / "case.yaml"
+        contract.write_text(
+            "task_classes:\n"
+            "  standup:\n"
+            "    gateway_exposure: public\n"
+            "    selection:\n"
+            "      priority: 50\n"
+            "      phrases: ['Standup']\n",
+            encoding="utf-8",
+        )
+        classes = load_selectable_task_classes(contract)
+
+        resolution = resolve_task_type(
+            "write the standup", explicit=None, classes=classes
+        )
+
+        assert resolution.task_type == "standup"
+        assert resolution.resolution is EnumTaskTypeResolution.CONTRACT
+
 
 class TestShapeOutranksKeywordFrequency:
     def test_a_long_prompt_is_ineligible_for_a_short_class(

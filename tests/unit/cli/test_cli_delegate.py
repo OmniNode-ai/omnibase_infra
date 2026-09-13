@@ -35,6 +35,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import get_args
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -70,7 +71,9 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     check_omnimarket_drift,
 )
+from omnibase_infra.cli.task_class_selection import TaskClassContractError
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
@@ -312,6 +315,23 @@ class TestTaskTypeVocabulary:
         """The two classes an engineering standup belongs to were unreachable."""
         assert "summarization" in cli_delegate.TASK_TYPE_CHOICES
         assert "planning" in cli_delegate.TASK_TYPE_CHOICES
+
+    def test_explicit_task_type_does_not_require_omnimarket_contract(self) -> None:
+        with patch.object(
+            cli_delegate,
+            "resolve_task_class_contract_path",
+            side_effect=TaskClassContractError("omnimarket absent"),
+        ):
+            resolved = cli_delegate.resolve_task_class(
+                "summarise the ledger", explicit="summarization"
+            )
+
+        assert resolved.task_type == "summarization"
+        assert resolved.resolution is EnumTaskTypeResolution.EXPLICIT
+
+    def test_unknown_explicit_task_type_is_rejected_without_contract(self) -> None:
+        with pytest.raises(TaskClassContractError, match="unknown task type"):
+            cli_delegate.resolve_task_class("summarise", explicit="bogus")
 
 
 class TestReceiptEnvironmentIsolation:
@@ -1868,6 +1888,7 @@ class TestLocalRunArtifacts:
             state_root=tmp_path,
             prompt="research the route",
             task_type="research",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -1908,6 +1929,7 @@ class TestLocalRunArtifacts:
             state_root=tmp_path,
             prompt="research the route",
             task_type="research",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -1928,8 +1950,19 @@ class TestLocalRunArtifacts:
             state_root=tmp_path,
             prompt="proof",
             task_type="research",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
         )
         assert not (tmp_path / "runs").exists()
+
+    def test_refuses_to_fabricate_task_type_resolution(self, tmp_path: Path) -> None:
+        receipt = self._receipt()
+        with pytest.raises(ValueError, match="task_type_resolution is required"):
+            _write_local_run_files(
+                receipt=receipt,
+                state_root=tmp_path,
+                prompt="research the route",
+                task_type="research",
+            )
 
 
 class TestLocalRunArtifactsOnEscalatedRun:
@@ -2032,6 +2065,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
             state_root=tmp_path,
             prompt="Reply with exactly: OK",
             task_type="research",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2072,6 +2106,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
             state_root=tmp_path,
             prompt="Reply with exactly: OK",
             task_type="research",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2099,6 +2134,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
             state_root=tmp_path,
             prompt="proof",
             task_type="research",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
         )
         assert not (tmp_path / "runs").exists()
 
@@ -2160,6 +2196,7 @@ class TestFailedDelegationIsRendered:
             state_root=tmp_path,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
+            task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2194,6 +2231,7 @@ class TestFailedDelegationIsRendered:
             state_root=tmp_path,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
+            task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2236,6 +2274,7 @@ class TestFailedDelegationIsRendered:
             state_root=tmp_path,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
+            task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)

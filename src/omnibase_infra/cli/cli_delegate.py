@@ -204,10 +204,10 @@ DELEGATE_SOURCE_CHOICES: tuple[str, ...] = ("claude-code", "codex", "external-cl
 # and the same treatment as ``DELEGATE_SOURCE_CHOICES`` above.
 #
 # DRIFT GUARD: ``tests/unit/cli/test_cli_delegate.py::TestTaskTypeVocabulary``
-# asserts this tuple equals the live contract's public projection whenever
-# omnimarket is resolvable, and against this same documented list when it is
-# not -- so the tuple and this comment cannot disagree silently. Before
-# OMN-18305 this tuple listed SEVEN classes against the contract's eleven, and
+# asserts this mirror matches the stand-in contract used by infra CI. The live
+# omnimarket contract has its own vocabulary pin in omnimarket's test suite;
+# repo layering forbids importing that package here. Before OMN-18305 this
+# tuple listed SEVEN classes against the contract's eleven, and
 # ``summarization`` and ``planning`` -- the two classes an engineering standup
 # actually belongs to -- were unreachable from the CLI by hand or by
 # classifier.
@@ -440,7 +440,7 @@ def _write_local_run_files(
     state_root: Path,
     prompt: str,
     task_type: str,
-    task_type_resolution: str = EnumTaskTypeResolution.EXPLICIT.value,
+    task_type_resolution: str | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -448,6 +448,10 @@ def _write_local_run_files(
     route from the last attempted backend would make a failed or escalated run
     look like a truthful answer.
     """
+    if task_type_resolution is None:
+        raise ValueError(
+            "task_type_resolution is required; refusing to fabricate provenance"
+        )
     receipt_dump = getattr(receipt, "model_dump", None)
     if not callable(receipt_dump):
         raise ValueError("delegate receipt is not a serializable typed result")
@@ -672,6 +676,17 @@ def resolve_task_class(
     classes: tuple[ModelSelectableTaskClass, ...] | None = None,
 ) -> ModelTaskTypeResolution:
     """Resolve this run's task class and carry HOW it was resolved with it."""
+    if explicit is not None and classes is None:
+        if explicit not in TASK_TYPE_CHOICES:
+            raise TaskClassContractError(
+                f"unknown task type {explicit!r}; known task types: "
+                + ", ".join(TASK_TYPE_CHOICES)
+            )
+        return ModelTaskTypeResolution(
+            task_type=explicit,
+            resolution=EnumTaskTypeResolution.EXPLICIT,
+            reason="explicitly selected with --task-type",
+        )
     resolved = (
         classes
         if classes is not None

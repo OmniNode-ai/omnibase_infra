@@ -38,6 +38,9 @@ class ModelSelectableTaskClass(BaseModel):
         not a thing a contract author should have to reason about.
         """
         for phrase in sorted(self.phrases, key=lambda item: (-len(item), item)):
-            if re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", lowered_prompt):
+            normalized = phrase.lower()
+            if normalized and re.search(
+                rf"(?<!\w){re.escape(normalized)}(?!\w)", lowered_prompt
+            ):
                 return phrase
         return None
