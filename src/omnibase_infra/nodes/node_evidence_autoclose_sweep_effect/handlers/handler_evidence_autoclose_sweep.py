@@ -2831,8 +2831,23 @@ class _LinearClient:
             self._auth_header = self._explicit_api_key
             return self._auth_header
 
-        client_id = os.environ.get(_LINEAR_CLOSER_CLIENT_ID_ENV, "").strip()
-        client_secret = os.environ.get(_LINEAR_CLOSER_CLIENT_SECRET_ENV, "").strip()
+        # ONEX_EXCLUDE: the application-identity pair is this node's OWN
+        # credential, and the sweep dispatches through RuntimeLocal's
+        # single-shot compute path, which injects only state_root/event_bus
+        # into a handler's constructor. There is no config-prefetch or overlay
+        # seam reachable from it, and in a GitHub Actions job there is no
+        # overlay to resolve one from — the same reason already recorded for
+        # this file in scripts/check-env-reads.sh, which allowlists it and
+        # requires the names to be self-declared in `required_secrets` above.
+        # The pre-existing LINEAR_API_KEY read below stays counted; only the
+        # two names this change adds carry the marker, so the ratchet ceiling
+        # is unchanged rather than raised.
+        client_id = os.environ.get(  # ONEX_EXCLUDE: see above
+            _LINEAR_CLOSER_CLIENT_ID_ENV, ""
+        ).strip()
+        client_secret = os.environ.get(  # ONEX_EXCLUDE: see above
+            _LINEAR_CLOSER_CLIENT_SECRET_ENV, ""
+        ).strip()
         api_key = os.environ.get(_LINEAR_API_KEY_ENV, "").strip()
 
         if bool(client_id) != bool(client_secret):
