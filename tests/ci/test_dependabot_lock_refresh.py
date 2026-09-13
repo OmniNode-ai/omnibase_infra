@@ -123,7 +123,8 @@ def git_fixture(tmp_path: Path) -> Path:
     _git("config", "user.name", "test", cwd=repo)
 
     (repo / "pyproject.toml").write_text(
-        "[project]\nname = 'x'\nversion = '1'\n", encoding="utf-8"
+        "[project]\nname = 'x'\nversion = '1'\ndependencies = ['pkg==1.0.0']\n",
+        encoding="utf-8",
     )
     (repo / "uv.lock").write_text("# lock v1\n", encoding="utf-8")
     (repo / ".github" / "actions" / "setup-python-uv").mkdir(parents=True)
@@ -157,8 +158,14 @@ def git_fixture(tmp_path: Path) -> Path:
     _git("commit", "-q", "-m", "base", cwd=repo)
 
     _git("checkout", "-q", "-b", "dependabot/pip/example", cwd=repo)
+    # A real Dependabot bump moves a DEPENDENCY, not the project's own version.
+    # OMN-18351 narrowed the binding to the tables that shape `uv sync`, so a
+    # `version = ...` edit no longer re-binds the image -- correctly, since the
+    # bake runs `--no-install-project` and never installs the project at all.
+    # The fixture now exercises the shape Dependabot actually produces.
     (repo / "pyproject.toml").write_text(
-        "[project]\nname = 'x'\nversion = '2'\n", encoding="utf-8"
+        "[project]\nname = 'x'\nversion = '1'\ndependencies = ['pkg==2.0.0']\n",
+        encoding="utf-8",
     )
     _git("commit", "-q", "-am", "bump", cwd=repo)
     _git("checkout", "-q", "base", cwd=repo)

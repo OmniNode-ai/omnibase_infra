@@ -8,15 +8,106 @@ import argparse
 import hashlib
 import json
 import platform
+import tomllib
 from pathlib import Path
+from typing import Any
 
+# Inputs hashed as raw bytes. ``pyproject.toml`` is deliberately NOT here: it
+# participates through ``pyproject_dependency_projection`` instead (OMN-18351).
 DEFAULT_ENV_INPUTS = (
-    "pyproject.toml",
     "uv.lock",
     ".github/actions/setup-python-uv/action.yml",
     "scripts/ci/ci_env_digest.py",
     "scripts/ci/ensure_ci_env.sh",
 )
+
+PYPROJECT_RELATIVE = "pyproject.toml"
+
+# The parts of ``pyproject.toml`` that shape what the shared env and the runner
+# image actually contain. The bake is
+# ``uv sync --frozen --all-extras --all-groups --no-install-project``, so the
+# installed set is: the resolved lock, the dependency tables below, the
+# interpreter floor, and uv's own resolution settings. Nothing else in the file
+# reaches the environment -- under ``--no-install-project`` the project is never
+# installed, so its version, its entry points and its tool configuration are
+# absent from the image by construction.
+#
+# OMN-18351. This is a NARROWING of the binding, not a relaxation of the gate.
+# Hashing the whole file bound bytes that cannot change the image, which made
+# every unrelated PR re-commit docker/runners/runner-image.lock.json -- and,
+# because CI evaluates the lock against the MERGE tree, made the correct value
+# unknowable from any single branch. A merge that combines dev's pyproject edit
+# with the PR's produces a manifest neither parent hashed, so whichever side of
+# the lock file the merge resolves to is wrong. Binding parsed values instead of
+# file layout makes the projection of a merge equal to the merge of the
+# projections whenever the two sides touched different tables, which is the
+# case that was costing a regenerate-merge-regenerate loop per PR.
+DEPENDENCY_PATHS: tuple[tuple[str, ...], ...] = (
+    ("build-system",),
+    ("project", "requires-python"),
+    ("project", "dependencies"),
+    ("project", "optional-dependencies"),
+    ("dependency-groups",),
+    ("tool", "uv"),
+)
+
+# Absence and emptiness must not hash alike: a missing ``dependencies`` key is
+# a different manifest from ``dependencies = []``.
+_ABSENT = "<absent>"
+
+
+def _lookup(document: dict[str, Any], path: tuple[str, ...]) -> Any:
+    cursor: Any = document
+    for key in path:
+        if not isinstance(cursor, dict) or key not in cursor:
+            return _ABSENT
+        cursor = cursor[key]
+    return cursor
+
+
+def _table_names(document: dict[str, Any]) -> list[str]:
+    """Return every table name at depth one and two, sorted.
+
+    This is the tripwire that keeps the allowlist above honest. A future table
+    that shapes the environment would otherwise be dropped in silence; carrying
+    the names means its arrival moves the digest and forces someone to decide
+    whether it belongs in ``DEPENDENCY_PATHS``. Depth stops at two so that
+    adding an entry to an existing table -- a pytest marker, an entry point --
+    stays invisible, which is the churn this exists to remove.
+    """
+    names: list[str] = []
+    for key, value in document.items():
+        names.append(key)
+        if isinstance(value, dict):
+            names.extend(
+                f"{key}.{sub}" for sub, item in value.items() if isinstance(item, dict)
+            )
+    return sorted(names)
+
+
+def pyproject_dependency_projection(repo_root: Path) -> bytes:
+    """Return the canonical dependency projection of ``pyproject.toml``.
+
+    Fails closed: an absent or unparseable manifest raises rather than
+    projecting an empty dependency set, because hashing a default would make
+    every broken tree agree with every other one -- silent under-binding, which
+    is strictly worse than the churn this narrowing removes.
+    """
+    path = repo_root / PYPROJECT_RELATIVE
+    with path.open("rb") as handle:
+        document = tomllib.load(handle)
+    if not isinstance(document, dict):
+        raise TypeError(f"pyproject.toml must parse to a table: {path}")
+
+    projection = {
+        "schema": 1,
+        "tables": _table_names(document),
+        "values": {
+            ".".join(path_parts): _lookup(document, path_parts)
+            for path_parts in DEPENDENCY_PATHS
+        },
+    }
+    return json.dumps(projection, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def compute_digest(
@@ -43,6 +134,11 @@ def compute_digest(
 
     digest = hashlib.sha256()
     digest.update(json.dumps(payload, sort_keys=True).encode("utf-8"))
+    digest.update(b"\0")
+
+    digest.update(PYPROJECT_RELATIVE.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(pyproject_dependency_projection(root))
     digest.update(b"\0")
 
     for relative in DEFAULT_ENV_INPUTS:

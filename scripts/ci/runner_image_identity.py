@@ -37,15 +37,28 @@ DEFAULT_LOCK_FILE = Path("docker/runners/runner-image.lock.json")
 
 # Manifest inputs whose bytes participate in the dependency-manifest portion of
 # the binding. Changing any of these is a new runner image identity.
-MANIFEST_INPUTS = (
-    "pyproject.toml",
-    "uv.lock",
-)
+#
+# ``pyproject.toml`` is NOT hashed as raw bytes (OMN-18351). It participates
+# through ``ci_env_digest.pyproject_dependency_projection``, which binds the
+# tables that shape ``uv sync`` and ignores the ones that cannot reach the
+# image. See that function for why: hashing the whole file bound bytes the bake
+# never installs, and made the correct value unknowable on a pull request,
+# because CI evaluates the lock against the merge tree.
+MANIFEST_INPUTS = ("uv.lock",)
 
 
 def _read_manifest_digest(repo_root: Path) -> str:
-    """Return a deterministic digest of the dependency manifest files."""
+    """Return a deterministic digest of the dependency manifest.
+
+    ``uv.lock`` is the resolved set and keeps full raw-byte participation;
+    ``pyproject.toml`` contributes its dependency projection. Both are folded
+    in under their own names so the two cannot be confused for one another.
+    """
     digest = hashlib.sha256()
+    digest.update(ci_env_digest.PYPROJECT_RELATIVE.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(ci_env_digest.pyproject_dependency_projection(repo_root))
+    digest.update(b"\0")
     for relative in MANIFEST_INPUTS:
         path = repo_root / relative
         digest.update(relative.encode("utf-8"))
