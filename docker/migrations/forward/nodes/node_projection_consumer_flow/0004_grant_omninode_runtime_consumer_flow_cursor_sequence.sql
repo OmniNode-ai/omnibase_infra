@@ -87,11 +87,21 @@
 --   OMN-18043's `?since=<cursor>` paginated read depends on, and a writer that
 --   can rewind the sequence can silently violate it.
 --
---   The sequence is resolved through `pg_get_serial_sequence` rather than by
---   spelling `consumer_flow_windows_projection_cursor_seq`, so a restore, a
---   rename or an out-of-band apply that produced a differently-named sequence
---   still converges. A NULL return contradicts `0001`'s BIGSERIAL declaration
---   and fails loud rather than no-opping into another silent half-grant.
+--   The sequence is named literally rather than resolved through
+--   `pg_get_serial_sequence` inside a `DO ... EXECUTE format(...)` block, which
+--   is the shape `node_pr_merged_projection/0002` uses. That shape is
+--   grandfathered and closed: `scripts/ci/check_application_database_sql.py`
+--   rejects a new procedural block whose relation targets cannot be proven
+--   statically, and it is right to -- a gate that reads SQL cannot audit a
+--   string assembled at run time. `node_merge_state_projection/0003` is the
+--   open precedent and this file follows it.
+--
+--   The property the dynamic form bought is kept by assertion instead: section
+--   3 fails loud unless `pg_get_serial_sequence` resolves this exact column to
+--   this exact sequence. A NULL return (the column is not sequence-backed, so
+--   `0001`'s BIGSERIAL declaration is contradicted) and a differently-named
+--   sequence (a restore, a rename, an out-of-band apply) both fail the
+--   migration rather than no-opping into another silent half-grant.
 --
 -- Idempotency: GRANT is idempotent; re-running is a no-op. Nothing here touches
 -- RLS, ownership, table shape, or any role attribute.
@@ -107,29 +117,24 @@ GRANT USAGE ON SCHEMA omninode_internal TO omninode_runtime;
 -- ---------------------------------------------------------------------------
 -- 2. Sequence grant -- the half that was missing.
 -- ---------------------------------------------------------------------------
-DO $$
-DECLARE
-    v_seq TEXT;
-BEGIN
-    v_seq := pg_get_serial_sequence(
-        'omninode_internal.consumer_flow_windows', 'projection_cursor'
-    );
-    IF v_seq IS NULL THEN
-        RAISE EXCEPTION
-            'OMN-18353: omninode_internal.consumer_flow_windows.projection_cursor is not backed by a sequence, but 0001_add_projection_cursor.sql declares it BIGSERIAL. Refusing to grant a privilege on an object that does not exist -- reconcile the column shape first.';
-    END IF;
-    EXECUTE format('GRANT USAGE ON SEQUENCE %s TO omninode_runtime', v_seq);
-END$$;
+GRANT USAGE ON SEQUENCE omninode_internal.consumer_flow_windows_projection_cursor_seq TO omninode_runtime;
 
 -- ---------------------------------------------------------------------------
--- 3. Assertions: fail the migration if either half did not take. Division by
---    zero when the grant is absent -- the fail-loud shape 0003 and the sibling
---    grant files already use.
+-- 3. Assertions: fail the migration if any of the three facts does not hold.
+--    Division by zero when the fact is false -- the fail-loud shape 0003 and
+--    the sibling grant files already use.
 --
---    The SECOND assertion is the one this ticket exists for. Asserting only the
---    table INSERT is exactly what let the broken state ship: it was TRUE for
+--    The FIRST assertion replaces what the dynamic form gave for free: that the
+--    literal sequence named above is in fact the one this column drives. The
+--    THIRD is the one this ticket exists for. Asserting only the table INSERT
+--    (the second) is exactly what let the broken state ship: it was TRUE for
 --    the whole outage.
 -- ---------------------------------------------------------------------------
+SELECT 1 / count(*) AS consumer_flow_windows_cursor_sequence_identity_assertion
+WHERE pg_get_serial_sequence(
+          'omninode_internal.consumer_flow_windows', 'projection_cursor'
+      ) = 'omninode_internal.consumer_flow_windows_projection_cursor_seq';
+
 SELECT 1 / count(*) AS consumer_flow_windows_insert_grant_assertion
 FROM information_schema.role_table_grants
 WHERE table_schema = 'omninode_internal'
@@ -140,8 +145,6 @@ WHERE table_schema = 'omninode_internal'
 SELECT 1 / count(*) AS consumer_flow_windows_sequence_usage_assertion
 WHERE has_sequence_privilege(
           'omninode_runtime',
-          pg_get_serial_sequence(
-              'omninode_internal.consumer_flow_windows', 'projection_cursor'
-          ),
+          'omninode_internal.consumer_flow_windows_projection_cursor_seq',
           'USAGE'
       );
