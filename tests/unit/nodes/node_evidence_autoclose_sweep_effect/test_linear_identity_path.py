@@ -149,7 +149,28 @@ async def test_application_secrets_are_exchanged_for_a_bearer_token(
     assert token_post["data"]["client_id"] == "client-id-abc"
     assert token_post["data"]["client_secret"] == _FAKE_CLIENT_SECRET
     assert token_post["data"]["scope"] == sweep_mod._LINEAR_CLOSER_TOKEN_SCOPES
+    # Comma separated, not space separated — the endpoint rejects the latter.
     assert "," in sweep_mod._LINEAR_CLOSER_TOKEN_SCOPES
+    assert " " not in sweep_mod._LINEAR_CLOSER_TOKEN_SCOPES
+    # Exactly the three surfaces the closer touches, and no more. `admin` is
+    # not grantable to an app actor token and is asserted absent so a later
+    # widening has to be deliberate.
+    assert set(sweep_mod._LINEAR_CLOSER_TOKEN_SCOPES.split(",")) == {
+        "read",
+        "write",
+        "comments:create",
+    }
+    # `actor=app` belongs to the authorization-code flow's authorize URL. A
+    # client-credentials token is an app actor token by construction, so
+    # sending it here would be a parameter the endpoint never asked for.
+    assert "actor" not in token_post["data"]
+    # The four documented parameters, nothing else on the wire.
+    assert set(token_post["data"]) == {
+        "grant_type",
+        "client_id",
+        "client_secret",
+        "scope",
+    }
 
     assert graphql_post["url"] == sweep_mod._LINEAR_API_URL
     assert graphql_post["headers"]["Authorization"] == f"Bearer {_FAKE_ACCESS_TOKEN}"

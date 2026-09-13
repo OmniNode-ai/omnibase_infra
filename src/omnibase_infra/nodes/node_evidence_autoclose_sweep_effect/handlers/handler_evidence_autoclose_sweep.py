@@ -350,10 +350,26 @@ _LINEAR_API_KEY_ENV = "LINEAR_API_KEY"
 _LINEAR_CLOSER_CLIENT_ID_ENV = "LINEAR_CLOSER_CLIENT_ID"
 _LINEAR_CLOSER_CLIENT_SECRET_ENV = "LINEAR_CLOSER_CLIENT_SECRET"
 # Comma separated, per Linear OAuth documentation -- a space-separated list is
-# rejected. `write` (not `issues:create`) is what an issue STATE transition
-# needs; `admin` is deliberately absent and is not grantable to an app actor
-# token in any case.
-_LINEAR_CLOSER_TOKEN_SCOPES = "read,write"
+# rejected. Exactly the three the closer's surfaces need and no more:
+#
+#   read            -- the issue, its team states, its history, its comments;
+#   write           -- the issue STATE transition (the flip itself). `write` is
+#                      what a state change needs; `issues:create` is a
+#                      different, narrower grant and the closer creates nothing;
+#   comments:create -- the audit comment. Implied by `write`, and named anyway,
+#                      because the two write surfaces are a flip and a comment
+#                      and a grant that says so is one a reviewer can check.
+#
+# `admin` is deliberately absent and is not grantable to an app actor token in
+# any case. The set is written once and not varied per call: Linear revokes
+# every existing app actor token for an application when a token is requested
+# with a DIFFERENT scope set, so a varying request would silently invalidate a
+# concurrent run's token.
+#
+# `actor=app` is deliberately NOT sent. That parameter belongs to the
+# authorization-code flow's authorize URL; a client-credentials token is an app
+# actor token by construction, and passing it here is not part of this grant.
+_LINEAR_CLOSER_TOKEN_SCOPES = "read,write,comments:create"
 _LINEAR_TOKEN_TYPE_BEARER = "bearer"
 
 # The operator-facing messages below spell the environment variable names as
