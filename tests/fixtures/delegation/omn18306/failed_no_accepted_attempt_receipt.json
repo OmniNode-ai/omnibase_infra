@@ -1,0 +1,243 @@
+{
+  "artifact_refs": [
+    {
+      "ref": "sha256:433908c9fafe36feb7b1cb78e7c314fc4e464953d3b2f81249d67704efa7df04"
+    },
+    {
+      "ref": "sha256:1e12d17f092a0af3912ed19fb3d30a4c8de6e309362ccd768f87ad62831c57e7"
+    }
+  ],
+  "correlation_id": "04b8d0e3-852f-48f5-b873-92a0ca7185fd",
+  "duration_ms": 6651,
+  "exit_code": 1,
+  "metrics": {
+    "capture_log_bytes": 9805.0
+  },
+  "node_name": "node_delegate_skill_orchestrator",
+  "result": {
+    "capture_log": "<redacted: local capture log>",
+    "dispatch_target": "",
+    "error": "",
+    "exit_code": 1,
+    "handler_locus": "in_process",
+    "handler_result": {
+      "attempts": [
+        {
+          "acceptance_decision": "climb",
+          "acceptance_reason": "provider_call_failed",
+          "backend_id": "local-heavy-reasoning",
+          "cost_usd": 0.0,
+          "error_message": "input 14149 tokens exceeds backend local-heavy-reasoning's declared grounding budget of 8000 tokens; escalating rather than truncating. This is a GROUNDING budget, not the model's context window -- the prompt fits the window and would have been answered, ungrounded.",
+          "failure_class": "context_too_large",
+          "input_token_budget": 8000,
+          "input_tokens_measured": 14149,
+          "model_id": "Qwen3.6-35B-A3B",
+          "quality_gate_passed": false,
+          "quality_score": null,
+          "tier": "local"
+        },
+        {
+          "acceptance_decision": "climb",
+          "acceptance_reason": "provider_call_failed",
+          "backend_id": "cloud-gemini-pro",
+          "cost_usd": 0.0,
+          "error_message": "Server error '503 Service Unavailable' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503 | provider response: [{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n]",
+          "failure_class": "model_unavailable",
+          "input_token_budget": null,
+          "input_tokens_measured": null,
+          "model_id": "gemini-2.5-flash",
+          "quality_gate_passed": false,
+          "quality_score": null,
+          "tier": "cheap_cloud"
+        }
+      ],
+      "attempts_count": 2,
+      "correlation_id": "04b8d0e3-852f-48f5-b873-92a0ca7185fd",
+      "error_message": "Server error '503 Service Unavailable' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503 | provider response: [{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n]",
+      "escalation_count": 1,
+      "metrics": {
+        "compliance_attempts": 0,
+        "cost_savings_usd": 0.0,
+        "cost_usd": 0.0,
+        "frontier_costs_usd": {
+          "claude-haiku-3-5": 0.0,
+          "claude-opus-4-6": 0.0,
+          "claude-sonnet-4-20250514": 0.0,
+          "gpt-4o": 0.0
+        },
+        "input_tokens": 0,
+        "latency_ms": 0,
+        "output_tokens": 0,
+        "premium_counterfactual": {
+          "as_of": "2026-02-01",
+          "counterfactual_cost_usd": "0.000",
+          "measured": false,
+          "model": "claude-opus-4-6",
+          "price_in_per_1k": "0.015",
+          "price_out_per_1k": "0.075",
+          "pricing_source": "pricing_manifest",
+          "tokens_in": 0,
+          "tokens_out": 0
+        },
+        "tokens_to_compliance": 0,
+        "total_tokens": 0
+      },
+      "model_cloud_baseline": "claude-opus-4-6",
+      "model_name": "gemini-2.5-flash",
+      "pricing_manifest_version": 1,
+      "prompt_text": "<redacted: the 56593-byte OMN-18297 grounding-source prompt>",
+      "provider": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "quality_gate_passed": false,
+      "quality_gates_failed": [],
+      "quality_score": 0.0,
+      "response": "",
+      "status": "failed",
+      "task_type": "complex_reasoning",
+      "tenant_id": null,
+      "terminal_failure_cause": "provider_error"
+    },
+    "orchestrator_distribution": "omnimarket 0.4.75 (/Users/jonah/Code/omni_home/omnibase_infra/.venv/lib/python3.12/site-packages/omnimarket)",
+    "terminal_payload": {
+      "attempts": [
+        {
+          "acceptance_decision": "climb",
+          "acceptance_reason": "provider_call_failed",
+          "backend_id": "local-heavy-reasoning",
+          "cost_usd": 0.0,
+          "error_message": "input 14149 tokens exceeds backend local-heavy-reasoning's declared grounding budget of 8000 tokens; escalating rather than truncating. This is a GROUNDING budget, not the model's context window -- the prompt fits the window and would have been answered, ungrounded.",
+          "failure_class": "context_too_large",
+          "input_token_budget": 8000,
+          "input_tokens_measured": 14149,
+          "model_id": "Qwen3.6-35B-A3B",
+          "quality_gate_passed": false,
+          "quality_score": null,
+          "tier": "local"
+        },
+        {
+          "acceptance_decision": "climb",
+          "acceptance_reason": "provider_call_failed",
+          "backend_id": "cloud-gemini-pro",
+          "cost_usd": 0.0,
+          "error_message": "Server error '503 Service Unavailable' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503 | provider response: [{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n]",
+          "failure_class": "model_unavailable",
+          "input_token_budget": null,
+          "input_tokens_measured": null,
+          "model_id": "gemini-2.5-flash",
+          "quality_gate_passed": false,
+          "quality_score": null,
+          "tier": "cheap_cloud"
+        }
+      ],
+      "attempts_count": 2,
+      "correlation_id": "04b8d0e3-852f-48f5-b873-92a0ca7185fd",
+      "error_message": "Server error '503 Service Unavailable' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503 | provider response: [{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n]",
+      "escalation_count": 1,
+      "metrics": {
+        "compliance_attempts": 0,
+        "cost_savings_usd": 0.0,
+        "cost_usd": 0.0,
+        "frontier_costs_usd": {
+          "claude-haiku-3-5": 0.0,
+          "claude-opus-4-6": 0.0,
+          "claude-sonnet-4-20250514": 0.0,
+          "gpt-4o": 0.0
+        },
+        "input_tokens": 0,
+        "latency_ms": 0,
+        "output_tokens": 0,
+        "premium_counterfactual": {
+          "as_of": "2026-02-01",
+          "counterfactual_cost_usd": "0.000",
+          "measured": false,
+          "model": "claude-opus-4-6",
+          "price_in_per_1k": "0.015",
+          "price_out_per_1k": "0.075",
+          "pricing_source": "pricing_manifest",
+          "tokens_in": 0,
+          "tokens_out": 0
+        },
+        "tokens_to_compliance": 0,
+        "total_tokens": 0
+      },
+      "model_cloud_baseline": "claude-opus-4-6",
+      "model_name": "gemini-2.5-flash",
+      "pricing_manifest_version": 1,
+      "prompt_text": "<redacted: the 56593-byte OMN-18297 grounding-source prompt>",
+      "provider": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "quality_gate_passed": false,
+      "quality_gates_failed": [],
+      "quality_score": 0.0,
+      "response": "",
+      "status": "failed",
+      "task_type": "complex_reasoning",
+      "tenant_id": null,
+      "terminal_failure_cause": "provider_error"
+    },
+    "wire_correlation_id": "04b8d0e3-852f-48f5-b873-92a0ca7185fd",
+    "workflow": "/Users/jonah/Code/omni_home/omnibase_infra/.venv/lib/python3.12/site-packages/omnimarket/nodes/node_delegate_skill_orchestrator/contract.yaml",
+    "workflow_result": "failed"
+  },
+  "result_model": "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary",
+  "run_id": "c94ecb3c-9fd9-40d0-885a-1335f076b392",
+  "runtime_identity": {
+    "config_source": "/Users/jonah/Code/omni_home/omnibase_infra/.venv/lib/python3.12/site-packages/omnimarket/nodes/node_delegate_skill_orchestrator/contract.yaml",
+    "execution_locus": "REDACTED-LOCAL-PATH",
+    "host": "REDACTED-HOST",
+    "interpreter": "REDACTED-LOCAL-PATH",
+    "locus_kind": "venv",
+    "packages": {
+      "omnibase_compat": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_compat",
+        "source": "registry",
+        "version": "0.5.7"
+      },
+      "omnibase_core": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_core",
+        "source": "registry",
+        "version": "0.47.12"
+      },
+      "omnibase_infra": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_infra",
+        "source": "local_path",
+        "version": "0.38.24"
+      },
+      "omnibase_spi": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_spi",
+        "source": "registry",
+        "version": "0.23.3"
+      },
+      "omnimarket": {
+        "commit": "b01691031d4456714ecfae6941698f623f784f78",
+        "import_path": null,
+        "name": "omnimarket",
+        "source": "vcs",
+        "version": "0.4.75"
+      }
+    },
+    "schema_version": {
+      "build": null,
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": null
+    },
+    "stamped_at": "2026-09-13T14:45:46.089587Z"
+  },
+  "schema_version": {
+    "build": null,
+    "major": 1,
+    "minor": 1,
+    "patch": 0,
+    "prerelease": null
+  },
+  "skill_name": "node_delegate_skill_orchestrator",
+  "status": "failed"
+}

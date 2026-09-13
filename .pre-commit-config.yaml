@@ -277,10 +277,10 @@ repos:
       # captured check-run responses, because an alerter that is always silent
       # and an alerter that is correct look identical from a green run.
       - id: nonrequired-check-failure-rate
-        name: Non-required check failure-rate alert (OMN-18254)
-        entry: uv run --frozen pytest tests/ci/test_nonrequired_check_failure_rate_omn18254.py tests/ci/test_incident_replay_omn18254.py -q
+        name: Non-required check failure-rate alert (OMN-18254, OMN-18322)
+        entry: uv run --frozen pytest tests/ci/test_nonrequired_check_failure_rate_omn18254.py tests/ci/test_incident_replay_omn18254.py tests/ci/test_scheduled_run_failure_rate_omn18322.py -q
         language: system
-        files: ^(scripts/ci/nonrequired_check_failure_rate\.py|config/runner_routing_policy\.yaml|tests/ci/test_nonrequired_check_failure_rate_omn18254\.py|tests/ci/test_incident_replay_omn18254\.py|tests/fixtures/omn18254/.*)$
+        files: ^(scripts/ci/nonrequired_check_failure_rate\.py|config/runner_routing_policy\.yaml|tests/ci/test_nonrequired_check_failure_rate_omn18254\.py|tests/ci/test_incident_replay_omn18254\.py|tests/fixtures/omn18254/.*|tests/ci/test_scheduled_run_failure_rate_omn18322\.py|tests/fixtures/omn18322/.*)$
         pass_filenames: false
         stages: [pre-commit]
       - id: ci-evidence-policy
@@ -493,6 +493,39 @@ repos:
       - id: onex-check-node-migration-sync
         name: ONEX Node Migration Vendor Sync Check
         entry: bash scripts/sync-node-migrations.sh --check
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      # OMN-18321: the OmniMarket delegation consumer protocol and this repo's
+      # RuntimeDelegationDispatchPort are one boundary held together by nothing
+      # but structural conformance. Repo layering puts omnimarket ABOVE
+      # omnibase_infra, so neither side's type checker ever sees both
+      # signatures, and the call site is resolved only at runtime.
+      #
+      # OMN-18172 (omnimarket#2494, squash 849fdae6) added a `provenance`
+      # keyword on the consumer side alone. The TypeError that produced on the
+      # deployed bus path was swallowed by the consumer's own `except
+      # Exception` into a delegate-skill-failed terminal, so the .201 dev-lane
+      # delegation chain died SILENTLY: every scheduled Chain Canary run went
+      # RED with projection_row_absent from 2026-09-12T17:44Z, and
+      # delegation_workflow_state took no row at all for a day.
+      #
+      # always_run, and the reason is the same one recorded for the migration
+      # vendor sync above: the drift is introduced in the OTHER repo and touches
+      # no path in this one, so any files:-scoped trigger is green exactly when
+      # it matters. The check reads the consumer's own declaration (parsed with
+      # ast -- never imported, which would invert the layering) rather than a
+      # list maintained here, so a keyword the consumer newly starts sending is
+      # caught rather than merely a keyword somebody remembered to freeze.
+      # Fail-closed: an unresolvable consumer source FAILS. Resolution is
+      # $ONEX_DELEGATION_CONSUMER_SOURCE, then $OMNI_HOME/omnimarket, then the
+      # installed distribution. CI runs the same test over a sparse checkout --
+      # .github/workflows/delegation-seam-gate.yml, job consumer-kwarg-parity.
+      - id: onex-delegation-dispatch-consumer-kwarg-parity
+        name: ONEX Delegation Dispatch Consumer Keyword Parity (OMN-18321)
+        entry: >-
+          uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q
         language: system
         pass_filenames: false
         always_run: true

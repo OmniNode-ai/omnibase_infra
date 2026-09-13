@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# A HAND-WRITTEN probe contract, not a copy of the production one.
+#
+# It exists so the OMN-18305 selection evaluator's RULES — word boundaries,
+# presence-not-frequency, shape gating, priority ordering — are pinned in an
+# environment that has no omnimarket installed (the ordinary omnibase_infra CI
+# env). The PRODUCTION vocabulary and predicates are asserted separately,
+# against the live contract, by the drift guard.
+version: "probe"
+task_classes:
+  long_prose:
+    gateway_exposure: public
+    selection:
+      priority: 80
+      min_words: 10
+      phrases:
+        - "summarise"
+        - "standup"
+  short_keyword:
+    gateway_exposure: public
+    selection:
+      priority: 40
+      max_words: 9
+      phrases:
+        - "test"
+        - "write a test"
+  fallback_class:
+    gateway_exposure: public
+    selection:
+      priority: 10
+      phrases:
+        - "investigate"
+  never_from_a_prompt:
+    gateway_exposure: internal
+    selection:
+      priority: 99
+      phrases:
+        - "summarise"
+  no_prompt_selects_this:
+    gateway_exposure: public
+    selection:
+      priority: 95
+      phrases: []

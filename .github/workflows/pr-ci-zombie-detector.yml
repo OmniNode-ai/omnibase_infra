@@ -125,10 +125,16 @@ jobs:
   # three separate pull requests before anyone asked whether it meant companions
   # were never publishing.
   #
+  # OMN-18322 extends the same job (same script, same policy file, same report
+  # artifact, same destinations) to scheduled (event == schedule) runs, which
+  # have no pull-request head and so were invisible to the read above: the
+  # 2026-09-13 friction trend report measured scheduled runs failing at 15.4%
+  # over 9,746 runs against 2.9% on pull requests, with nothing triaging them.
+  #
   # GitHub-hosted for the same reason the job above is: a monitor must not share
   # fate with the fleet whose CI it reports on.
   nonrequired-check-failure-rate:
-    name: Non-required check failure rate (OMN-18254)
+    name: Non-required check failure rate (OMN-18254, OMN-18322)
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
