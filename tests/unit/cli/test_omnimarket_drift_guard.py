@@ -233,6 +233,74 @@ def test_not_installed_refusal_names_the_running_interpreter() -> None:
     )
 
 
+def test_not_installed_refusal_names_shadowing_onex_and_canonical_wrapper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: a shadow symlink reports its PATH entry and the wrapper."""
+    path_bin = tmp_path / "path-bin"
+    shadowing_onex = path_bin / "onex"
+    shadow_target = tmp_path / "user-local" / "bin" / "onex"
+    canonical_wrapper = tmp_path / "omnibase_infra" / "scripts" / "onex"
+    path_bin.mkdir()
+    shadow_target.parent.mkdir(parents=True)
+    shadow_target.write_text("#!/bin/sh\n", encoding="utf-8")
+    shadow_target.chmod(0o755)
+    shadowing_onex.symlink_to(shadow_target)
+    monkeypatch.setenv("PATH", str(path_bin))
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert "shadowing binary" in message
+    assert "Canonical wrapper" in message
+    assert str(shadowing_onex) in message
+    assert str(canonical_wrapper) in message
+
+
+def test_not_installed_refusal_recognizes_canonical_onex_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: a PATH symlink to the wrapper is not a shadowing binary."""
+    path_bin = tmp_path / "path-bin"
+    canonical_wrapper = tmp_path / "omnibase_infra" / "scripts" / "onex"
+    canonical_wrapper.parent.mkdir(parents=True)
+    canonical_wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+    canonical_wrapper.chmod(0o755)
+    path_bin.mkdir()
+    path_onex = path_bin / "onex"
+    path_onex.symlink_to(canonical_wrapper)
+    monkeypatch.setenv("PATH", str(path_bin))
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert "through the canonical wrapper" in message
+    assert "shadowing binary" not in message
+    assert str(path_onex) in message
+
+
 def test_drift_check_fails_open_when_no_canonical_clone() -> None:
     with (
         patch(
