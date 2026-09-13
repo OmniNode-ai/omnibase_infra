@@ -11,12 +11,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.container import ModelONEXContainer
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger import (
     HandlerDelegationChainLedger,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
     EnumTierTwoVerdict,
+    ModelDelegationTerminalPayload,
     ModelObservedHop,
 )
 
@@ -35,12 +35,10 @@ def _handler(declared_chain: tuple[str, ...] = _CHAIN) -> HandlerDelegationChain
     return handler
 
 
-def _envelope(correlation_id: UUID) -> ModelEventEnvelope[object]:
-    return ModelEventEnvelope[object](
-        payload={"status": "completed"},
+def _request(correlation_id: UUID) -> ModelDelegationTerminalPayload:
+    return ModelDelegationTerminalPayload(
         correlation_id=correlation_id,
-        envelope_id=uuid4(),
-        event_type="omnimarket.delegate-skill-completed",
+        status="completed",
     )
 
 
@@ -75,7 +73,7 @@ async def test_complete_chain_writes_green_rows() -> None:
     persisted = AsyncMock()
     handler._persist_rows = persisted  # type: ignore[method-assign]
 
-    output = await handler.handle(_envelope(correlation_id))
+    output = await handler.handle(_request(correlation_id))
 
     assert output.result is not None
     assert output.result.rows_written == 4
@@ -96,7 +94,7 @@ async def test_broken_edge_cannot_be_written_as_replay_green() -> None:
     persisted = AsyncMock()
     handler._persist_rows = persisted  # type: ignore[method-assign]
 
-    output = await handler.handle(_envelope(correlation_id))
+    output = await handler.handle(_request(correlation_id))
 
     assert output.result is not None
     assert output.result.chain_complete is True
@@ -116,7 +114,7 @@ async def test_empty_declaration_writes_skip_and_never_passes() -> None:
     persisted = AsyncMock()
     handler._persist_rows = persisted  # type: ignore[method-assign]
 
-    output = await handler.handle(_envelope(correlation_id))
+    output = await handler.handle(_request(correlation_id))
 
     assert output.result is not None
     assert output.result.verifier_verdict is EnumTierTwoVerdict.SKIP
@@ -135,7 +133,7 @@ async def test_unavailable_event_ledger_fails_closed() -> None:
     handler._persist_rows = AsyncMock()  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="event ledger unavailable"):
-        await handler.handle(_envelope(correlation_id))
+        await handler.handle(_request(correlation_id))
 
     handler._persist_rows.assert_not_awaited()  # type: ignore[attr-defined]
 
@@ -151,7 +149,7 @@ async def test_missing_hop_is_persisted_as_incomplete_not_filled() -> None:
     persisted = AsyncMock()
     handler._persist_rows = persisted  # type: ignore[method-assign]
 
-    output = await handler.handle(_envelope(correlation_id))
+    output = await handler.handle(_request(correlation_id))
 
     assert output.result is not None
     assert output.result.rows_written == 3

@@ -13,7 +13,6 @@ from uuid import UUID, uuid4
 import yaml
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -26,6 +25,7 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay impor
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
     EnumTierTwoVerdict,
+    ModelDelegationTerminalPayload,
     ModelLedgerChainRow,
     ModelLedgerChainWriteResult,
     ModelObservedHop,
@@ -168,13 +168,13 @@ class HandlerDelegationChainLedger:
             self._initialized = True
 
     async def handle(
-        self, envelope: ModelEventEnvelope[object]
+        self, request: ModelDelegationTerminalPayload
     ) -> ModelHandlerOutput[ModelLedgerChainWriteResult]:
-        """Assemble and persist one chain using the terminal's correlation id."""
+        """Assemble and persist one chain from the typed terminal payload."""
         correlation_id = self._required_uuid(
-            envelope.correlation_id, "terminal envelope correlation_id"
+            request.correlation_id, "terminal payload correlation_id"
         )
-        input_envelope_id = self._optional_uuid(envelope.envelope_id) or uuid4()
+        input_envelope_id = uuid4()
         await self._ensure_db_ready()
 
         observed: tuple[ModelObservedHop, ...] = ()
