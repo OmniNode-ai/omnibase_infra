@@ -176,6 +176,9 @@ from omnibase_infra.runtime.protocols.protocol_contract_scoped_dispatch_engine i
     ProtocolContractScopedDispatchEngine,
 )
 from omnibase_infra.runtime.providers.provider_postgres_pool import ProviderPostgresPool
+from omnibase_infra.runtime.state_io.model_completion_bound import (
+    ModelCompletionBound,
+)
 from omnibase_infra.runtime.state_io.state_store_adapter import (
     CONTEXTVAR_STATE_IO_ROWS,
     StateIoUnconfiguredError,
@@ -444,6 +447,14 @@ _STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS = 30.0
 # a fresh non-terminal row committed with neither is structurally unrecoverable
 # by ``select_recoverable_batches`` and silently strands the workflow.
 _STATE_IO_TERMINAL_STATE_NAMES = frozenset({"COMPLETED", "FAILED"})
+# OMN-18296: the FSM state an abandoned row is closed into, and the cadence of
+# the background sweep that closes it. The interval is derived from the
+# contract's own bound rather than fixed, so a contract declaring a short bound
+# is swept proportionally often; the floor keeps a very short bound from turning
+# the sweeper into a busy loop.
+_TERMINAL_FSM_STATE_FAILED = "FAILED"
+_BOUND_SWEEP_DIVISOR = 4.0
+_BOUND_SWEEP_MIN_INTERVAL_SECONDS = 15.0
 # OMN-16924: ``state_io.key`` names both a wire payload field and a SQL
 # identifier (the row's primary-key column), so it is validated the same way
 # StateStoreAdapter validates its table name before interpolating it into SQL.
@@ -2722,6 +2733,45 @@ def _read_state_io(contract_path: Path) -> dict[str, object]:
     return state_io if isinstance(state_io, dict) else {}
 
 
+def _read_completion_bound(contract_path: Path) -> ModelCompletionBound | None:
+    """Read and validate the top-level ``completion_bound`` block (OMN-18296).
+
+    Returns ``None`` when the block is absent — a ``state_io`` contract that
+    declares no bound keeps the pre-OMN-18296 behaviour (the environment-variable
+    give-up TTL, row-only), so this is additive for every contract that has not
+    opted in. A block that IS present but malformed raises: a bound the runtime
+    cannot read is worse than no bound at all, because a reader would believe one
+    was being enforced.
+
+    Shape and rationale live in
+    :mod:`omnibase_infra.runtime.state_io.model_completion_bound`.
+    """
+    try:
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
+        import yaml  # type: ignore[import-untyped]
+
+        with open(contract_path) as f:
+            raw = yaml.safe_load(f)
+    except FileNotFoundError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    block = raw.get("completion_bound")
+    if block is None:
+        return None
+    if not isinstance(block, dict):
+        raise ModelOnexError(
+            f"handler_wiring: completion_bound in {contract_path} must be a "
+            f"mapping — got {type(block).__name__}."
+        )
+    try:
+        return ModelCompletionBound.model_validate(block)
+    except ValidationError as exc:
+        raise ModelOnexError(
+            f"handler_wiring: completion_bound in {contract_path} is invalid: {exc}"
+        ) from exc
+
+
 def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_state_io(contract.contract_path))
 
@@ -4780,6 +4830,7 @@ def _make_stateful_dispatch_callback(
     *,
     event_bus: object | None = None,
     output_topic_map: dict[str, str] | None = None,
+    completion_bound: ModelCompletionBound | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback for contracts that declare ``state_io``.
 
@@ -4929,6 +4980,18 @@ def _make_stateful_dispatch_callback(
     # 0.0 sentinel means "never run" -- always due on the first dispatch.
     _recovery_last_run_monotonic = 0.0
     _recovery_lock = asyncio.Lock()
+    # OMN-18296: the contract-declared completion bound, and the handle on the
+    # background task that enforces it. The task is started on the first
+    # dispatch (wiring is synchronous, so there is no running loop at wiring
+    # time) and then runs on its OWN timer for the life of the process --
+    # deliberately NOT piggybacked on dispatch traffic the way
+    # ``_ensure_stale_rows_recovered`` is. That distinction is the whole point:
+    # a lane whose last delegation was abandoned by a pod restart has, by
+    # definition, no traffic left to trigger a traffic-gated sweep, which is
+    # exactly how correlation a2fe0848 sat in_flight for half an hour past a
+    # 900s TTL on 2026-09-13 while the sweep code that would have closed it was
+    # present, correct, and never called.
+    _bound_sweeper_task: asyncio.Task[None] | None = None
 
     def _outbox_topic_for(class_name: str) -> str | None:
         """Resolve an outbox entry's Kafka topic from the published_events map.
@@ -5215,6 +5278,158 @@ def _make_stateful_dispatch_callback(
                     _sanitize_exc(exc),
                 )
 
+    async def _terminalise_abandoned_rows() -> int:
+        """Emit a REAL terminal event for every row past the contract's bound.
+
+        This is the half ``recover_stale_rows`` could never do (OMN-14107, named
+        as a limitation in its own docstring since OMN-14208): it flipped the row
+        to ``FAILED`` and told nobody. Downstream, the ONLY way a gateway
+        workflow leaves ``published`` is a terminal event consumed off the bus,
+        so a row-only give-up left the customer's delegation non-terminal
+        forever while the runtime's own state of record said FAILED. Two
+        different answers to the same question, one of them invisible.
+
+        Sequencing mirrors ``_recover_outbox_batches``: build, publish, THEN
+        CAS-finalize. A crash between publish and finalize re-publishes on the
+        next sweep, and the deterministic row-derived envelope id (``uuid5`` over
+        the correlation, as everywhere else on this path) collapses the duplicate
+        at the consume-path dedupe. A crash before publish leaves the row exactly
+        as it was and the next sweep tries again. What must never happen is the
+        reverse order: a finalized row whose terminal was never published is
+        indistinguishable from a workflow that completed, and is unrecoverable
+        because the predicate that finds it no longer matches.
+
+        Per-row isolation for the same reason ``_recover_outbox_batches`` has it
+        (OMN-14600): one row the running code cannot build a terminal for must
+        not abort the sweep for every other row.
+        """
+        if completion_bound is None or event_bus is None:
+            return 0
+        if not hasattr(adapter, "select_abandoned_rows"):
+            return 0
+        builder = getattr(codec, "build_abandoned_terminal", None)
+        if builder is None:
+            logger.warning(
+                "state_io completion bound declared (max_wall_seconds=%d) but "
+                "codec %s has no build_abandoned_terminal — cannot emit a "
+                "terminal event, so abandoned rows in %s stay non-terminal. "
+                "The bound is NOT being enforced for this contract.",
+                completion_bound.max_wall_seconds,
+                type(codec).__name__,
+                table,
+            )
+            return 0
+        rows = await adapter.select_abandoned_rows(completion_bound.max_wall_seconds)
+        terminalised = 0
+        for row in rows:
+            row_cid = str(row["correlation_id"])
+            try:
+                built = builder(
+                    correlation_id=row_cid,
+                    tenant_id=str(row["tenant_id"]),
+                    state=str(row["state"]),
+                    payload_json=str(row["payload_json"]),
+                    failure_class=completion_bound.failure_class,
+                    failure_code=completion_bound.failure_code,
+                    max_wall_seconds=completion_bound.max_wall_seconds,
+                )
+            except Exception as exc:  # noqa: BLE001 — per-row isolation, see docstring
+                logger.error(
+                    "state_io completion-bound sweep: codec could not build a "
+                    "terminal for cid=%s (%s) — row left non-terminal, retried "
+                    "on the next sweep.",
+                    row_cid,
+                    _sanitize_exc(exc),
+                )
+                continue
+            if built is None:
+                continue
+            module_name, class_name, event_payload = built
+            entry: dict[str, object] = {
+                "module": module_name,
+                "class_name": class_name,
+                "payload": event_payload,
+                "correlation_id": row_cid,
+                # No causing envelope exists: the leg that would have caused this
+                # terminal is the one that was lost. The correlation is its own
+                # causation, which keeps the derived envelope id deterministic
+                # across repeated sweeps of the same row.
+                "causation_envelope_id": row_cid,
+                "index": 0,
+                "tenant_id": str(row["tenant_id"]),
+            }
+            try:
+                await _publish_outbox_batch([entry])
+                await _finalize_outbox_row(
+                    row_cid,
+                    str(row["tenant_id"]),
+                    _TERMINAL_FSM_STATE_FAILED,
+                    str(row["payload_json"]),
+                    int(cast("int", row["version"])),
+                )
+            except Exception as exc:  # noqa: BLE001 — per-row isolation, see docstring
+                logger.error(
+                    "state_io completion-bound sweep: failed to terminalise "
+                    "cid=%s (%s) — retried on the next sweep.",
+                    row_cid,
+                    _sanitize_exc(exc),
+                )
+                continue
+            terminalised += 1
+            logger.warning(
+                "state_io completion bound exceeded: cid=%s was %s and "
+                "in_flight for more than %ds — emitted %s with failure_class=%s "
+                "and closed the row FAILED.",
+                row_cid,
+                row["state"],
+                completion_bound.max_wall_seconds,
+                class_name,
+                completion_bound.failure_class,
+            )
+        return terminalised
+
+    async def _bound_sweeper_loop() -> None:
+        """Run the completion-bound sweep on its own timer, forever.
+
+        Cadence is a fraction of the bound rather than a constant, so a contract
+        that declares a short bound is swept proportionally often and one that
+        declares a long bound does not pay for a tight poll it cannot use. The
+        floor exists so a very short bound cannot turn this into a busy loop.
+        """
+        interval = max(
+            _BOUND_SWEEP_MIN_INTERVAL_SECONDS,
+            completion_bound.max_wall_seconds / _BOUND_SWEEP_DIVISOR
+            if completion_bound is not None
+            else _BOUND_SWEEP_MIN_INTERVAL_SECONDS,
+        )
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await _terminalise_abandoned_rows()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — a sweep failure must not kill the sweeper
+                logger.error(
+                    "state_io completion-bound sweep raised (%s) — the sweeper "
+                    "stays alive and retries on the next interval.",
+                    _sanitize_exc(exc),
+                )
+
+    def _ensure_bound_sweeper_started() -> None:
+        """Start the bound sweeper once, on the first dispatch.
+
+        Wiring is synchronous so there is no running loop to attach to there;
+        the first dispatch is the same deterministic async point
+        ``_ensure_stale_rows_recovered`` uses. Unlike that one, what starts here
+        is a task that then runs on its own and never needs another dispatch.
+        """
+        nonlocal _bound_sweeper_task
+        if completion_bound is None:
+            return
+        if _bound_sweeper_task is not None and not _bound_sweeper_task.done():
+            return
+        _bound_sweeper_task = asyncio.create_task(_bound_sweeper_loop())
+
     async def _ensure_stale_rows_recovered(skip_cid: str | None = None) -> None:
         """Run outbox re-publish + the give-up sweep, at most once per interval.
 
@@ -5249,7 +5464,16 @@ def _make_stateful_dispatch_callback(
             ):
                 return
             await _recover_outbox_batches(skip_cid=skip_cid)
-            await adapter.recover_stale_rows()
+            # OMN-18296: ONE owner of give-up per contract. Where a completion
+            # bound is declared, giving up means emitting the contract's terminal
+            # FAILURE event; the legacy blind-FAIL must not run alongside it,
+            # because it would reach the same abandoned row first, flip it to
+            # FAILED, and leave the bound sweeper with nothing left to emit —
+            # restoring the exact silent give-up this ticket exists to remove.
+            if completion_bound is not None:
+                await _terminalise_abandoned_rows()
+            else:
+                await adapter.recover_stale_rows()
             _recovery_last_run_monotonic = time.monotonic()
 
     async def _find_recoverable_row(cid: str) -> dict[str, object] | None:
@@ -5593,6 +5817,7 @@ def _make_stateful_dispatch_callback(
                 )
             retry_correlation_id = None
 
+        _ensure_bound_sweeper_started()
         await _ensure_stale_rows_recovered(skip_cid=cid)
 
         _row_count, result = await retry_on_optimistic_conflict(
@@ -10668,6 +10893,7 @@ def _prepare_handler_wiring(
             state_io,
             event_bus=event_bus,
             output_topic_map=_outbox_topic_map,
+            completion_bound=_read_completion_bound(contract.contract_path),
         )
         logger.info(
             "Auto-wired stateful handler with state_io in-row outbox "
