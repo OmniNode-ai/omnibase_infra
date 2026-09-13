@@ -72,9 +72,20 @@ TOOL_EXECUTED = "onex.evt.omniclaude.tool-executed.v1"
 PROMPT_SUBMITTED = "onex.evt.omniclaude.prompt-submitted.v1"
 SESSION_STARTED = "onex.evt.omniclaude.session-started.v1"
 SESSION_ENDED = "onex.evt.omniclaude.session-ended.v1"
+SKILL_STARTED = "onex.evt.omniclaude.skill-started.v1"
+SKILL_COMPLETED = "onex.evt.omniclaude.skill-completed.v1"
+TOOL_OUTPUT_CAPTURED = "onex.evt.omnimarket.tool-output-captured.v1"
+CAPTURE_TOPICS = (
+    SESSION_STARTED,
+    SESSION_ENDED,
+    PROMPT_SUBMITTED,
+    TOOL_EXECUTED,
+    SKILL_STARTED,
+    SKILL_COMPLETED,
+    TOOL_OUTPUT_CAPTURED,
+)
 UNGOVERNED_OUTBOUND = "onex.evt.omnibase-infra.inference-response.v1"
-# Never admitted to the outbound set by this ticket, and asserted to stay out.
-STILL_DENIED = "onex.evt.omniclaude.tool-output-captured.v1"
+STILL_DENIED = "onex.evt.omniclaude.unregistered-capture.v1"
 
 # The four values of omnibase_core's EnumArtifactRedactionState (OMN-13152).
 STATE_RAW = "raw"
@@ -103,33 +114,10 @@ def _forwarder_block() -> dict[str, object]:
 # ---------------------------------------------------------------------------
 
 
-def test_contract_outbound_carries_the_two_content_bearing_hook_classes() -> None:
-    """AC1: at least one hook class beyond the OD-9 session-lifecycle pair."""
+def test_contract_outbound_carries_all_seven_capture_classes() -> None:
+    """All capture classes cross only through the declared trust boundary."""
     outbound = _forwarder_block()["mirror_topics"]["outbound"]  # type: ignore[index]
-    assert TOOL_EXECUTED in outbound
-    assert PROMPT_SUBMITTED in outbound
-
-
-def test_contract_outbound_keeps_the_od9_session_pair() -> None:
-    """The OMN-16204 pair is extended, never replaced."""
-    outbound = _forwarder_block()["mirror_topics"]["outbound"]  # type: ignore[index]
-    assert SESSION_STARTED in outbound
-    assert SESSION_ENDED in outbound
-
-
-def test_contract_does_not_widen_beyond_the_two_declared_classes() -> None:
-    """Deny-by-default polarity: this ticket widens by exactly two topics.
-
-    ``tool-output-captured`` is the class that carries raw tool OUTPUT. It stays
-    denied; admitting it is a separate decision behind OMN-17207, not a side
-    effect of this one.
-    """
-    outbound = _forwarder_block()["mirror_topics"]["outbound"]  # type: ignore[index]
-    assert STILL_DENIED not in outbound
-    omniclaude = sorted(t for t in outbound if ".omniclaude." in t)
-    assert omniclaude == sorted(
-        [SESSION_STARTED, SESSION_ENDED, TOOL_EXECUTED, PROMPT_SUBMITTED]
-    )
+    assert set(CAPTURE_TOPICS) <= set(outbound)
 
 
 def test_contract_declares_an_egress_redaction_block() -> None:
@@ -137,11 +125,10 @@ def test_contract_declares_an_egress_redaction_block() -> None:
     assert "egress_redaction" in _forwarder_block()
 
 
-def test_every_widened_class_is_governed_by_the_egress_gate() -> None:
-    """A widening that is not also governed is exactly the passthrough AC1 forbids."""
+def test_every_capture_class_is_governed_by_the_egress_gate() -> None:
+    """A widened capture class without governance would be a raw passthrough."""
     governed = _forwarder_block()["egress_redaction"]["governed_topics"]  # type: ignore[index]
-    assert TOOL_EXECUTED in governed
-    assert PROMPT_SUBMITTED in governed
+    assert set(governed) == set(CAPTURE_TOPICS)
 
 
 def test_the_egress_gate_never_admits_the_raw_state() -> None:
@@ -156,7 +143,7 @@ def test_the_egress_gate_never_admits_the_raw_state() -> None:
 def test_contract_version_advanced_for_the_widening() -> None:
     version = _contract()["contract_version"]
     assert isinstance(version, dict)
-    assert (version["major"], version["minor"], version["patch"]) >= (0, 1, 5)
+    assert (version["major"], version["minor"], version["patch"]) >= (0, 1, 6)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +213,24 @@ def test_config_refuses_a_content_bearing_hook_class_that_is_not_governed() -> N
                 state_field="redaction_state",
                 admitted_states=(STATE_REDACTED,),
                 governed_topics=(PROMPT_SUBMITTED,),
+            ),
+        )
+
+
+@pytest.mark.parametrize("missing_topic", CAPTURE_TOPICS)
+def test_config_refuses_each_capture_class_when_its_governance_is_missing(
+    missing_topic: str,
+) -> None:
+    """The all-seven interlock must include sessions and metadata-only output."""
+    with pytest.raises(ValueError, match="governed"):
+        _config(
+            outbound=(UNGOVERNED_OUTBOUND, *CAPTURE_TOPICS),
+            egress_redaction=ModelGatewayEgressRedaction(
+                state_field="redaction_state",
+                admitted_states=(STATE_REDACTED,),
+                governed_topics=tuple(
+                    topic for topic in CAPTURE_TOPICS if topic != missing_topic
+                ),
             ),
         )
 
@@ -316,11 +321,11 @@ def _config(
 
 def _governed_config() -> ModelGatewayForwarderConfig:
     return _config(
-        outbound=(UNGOVERNED_OUTBOUND, TOOL_EXECUTED, PROMPT_SUBMITTED),
+        outbound=(UNGOVERNED_OUTBOUND, *CAPTURE_TOPICS),
         egress_redaction=ModelGatewayEgressRedaction(
             state_field="redaction_state",
             admitted_states=(STATE_REDACTED, STATE_RESTRICTED, STATE_SECRET_DETECTED),
-            governed_topics=(TOOL_EXECUTED, PROMPT_SUBMITTED),
+            governed_topics=CAPTURE_TOPICS,
         ),
     )
 
@@ -341,27 +346,29 @@ def _envelope(payload: dict[str, object]) -> ModelEventEnvelope[dict[str, object
 
 
 @pytest.mark.asyncio
-async def test_a_redacted_hook_record_crosses_the_boundary() -> None:
+@pytest.mark.parametrize("topic", CAPTURE_TOPICS)
+async def test_a_redacted_capture_record_crosses_the_boundary(topic: str) -> None:
     """The positive control. Without it a gate that drops everything passes."""
     local_bus, cloud_bus = _MockGatewayBus(), _MockGatewayBus()
     service = ServiceGatewayForwarder(
         config=_governed_config(), local_bus=local_bus, cloud_bus=cloud_bus
     )
     envelope = _envelope({"tool_name": "Bash", "redaction_state": STATE_REDACTED})
-    await service.forward_outbound_message(local_bus.message(TOOL_EXECUTED, envelope))
+    await service.forward_outbound_message(local_bus.message(topic, envelope))
     assert len(cloud_bus.published) == 1
-    assert cloud_bus.published[0].topic == f"tenant-acme.{TOOL_EXECUTED}"
+    assert cloud_bus.published[0].topic == f"tenant-acme.{topic}"
 
 
 @pytest.mark.asyncio
-async def test_an_unstamped_hook_record_is_dropped_not_forwarded() -> None:
+@pytest.mark.parametrize("topic", CAPTURE_TOPICS)
+async def test_an_unstamped_capture_record_is_dropped_not_forwarded(topic: str) -> None:
     """The load-bearing assertion: no redaction stamp, no crossing."""
     local_bus, cloud_bus = _MockGatewayBus(), _MockGatewayBus()
     service = ServiceGatewayForwarder(
         config=_governed_config(), local_bus=local_bus, cloud_bus=cloud_bus
     )
     envelope = _envelope({"tool_name": "Bash"})
-    await service.forward_outbound_message(local_bus.message(TOOL_EXECUTED, envelope))
+    await service.forward_outbound_message(local_bus.message(topic, envelope))
     assert cloud_bus.published == []
 
 
@@ -424,9 +431,7 @@ async def test_an_ungoverned_topic_is_unaffected_by_the_gate() -> None:
 
 @pytest.mark.asyncio
 async def test_a_non_mirrored_omniclaude_topic_is_still_refused() -> None:
-    """AC2: a denied class stays denied. ``tool-output-captured`` is not in the
-    outbound set at all, so it is refused by the pre-existing declaration check.
-    """
+    """AC2: an unregistered class stays denied by the declaration check."""
     local_bus, cloud_bus = _MockGatewayBus(), _MockGatewayBus()
     service = ServiceGatewayForwarder(
         config=_governed_config(), local_bus=local_bus, cloud_bus=cloud_bus
@@ -478,14 +483,10 @@ def test_the_validate_path_resolves_the_same_decision_as_the_forward_path() -> N
 # ---------------------------------------------------------------------------
 
 
-def test_governed_set_matches_the_upstream_redaction_contract_topics() -> None:
-    """The two halves must name the same topics. omnimarket's
-    ``capture_redaction.yaml`` (OMN-17209) declares the posture for exactly
-    these two topics; this node refuses anything it did not stamp. If one side
-    is widened without the other, this fails rather than opening a hole.
-    """
+def test_governed_set_matches_all_seven_upstream_capture_topics() -> None:
+    """The forwarder cannot declare a smaller governed set than the policy."""
     governed = set(_forwarder_block()["egress_redaction"]["governed_topics"])  # type: ignore[index]
-    assert governed == {TOOL_EXECUTED, PROMPT_SUBMITTED}
+    assert governed == set(CAPTURE_TOPICS)
 
 
 # ---------------------------------------------------------------------------
@@ -496,22 +497,20 @@ def test_governed_set_matches_the_upstream_redaction_contract_topics() -> None:
 @pytest.mark.parametrize(
     "topic",
     [
+        SESSION_STARTED,
+        SESSION_ENDED,
         TOOL_EXECUTED,
         PROMPT_SUBMITTED,
-        STILL_DENIED,
-        "onex.evt.omniclaude.skill-started.v1",
-        "onex.evt.omniclaude.skill-completed.v1",
+        SKILL_STARTED,
+        SKILL_COMPLETED,
     ],
 )
 def test_known_omniclaude_content_classes_are_content_bearing(topic: str) -> None:
     assert is_content_bearing_hook_topic(topic) is True
 
 
-@pytest.mark.parametrize("topic", [SESSION_STARTED, SESSION_ENDED])
-def test_the_od9_session_pair_is_not_content_bearing(topic: str) -> None:
-    """OD-9 (operator ruling 2026-08-18) established the pair as content-free,
-    and OMN-16204 already mirrors it outbound without a gate."""
-    assert is_content_bearing_hook_topic(topic) is False
+def test_metadata_only_tool_output_is_content_bearing() -> None:
+    assert is_content_bearing_hook_topic(TOOL_OUTPUT_CAPTURED) is True
 
 
 def test_a_hook_class_that_does_not_exist_yet_is_content_bearing() -> None:
