@@ -17,6 +17,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
     EnumEvidenceAutocloseTrigger,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_linear_identity_path import (
+    EnumLinearIdentityPath,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_binding_row import (
     ModelAcBindingRow,
 )
@@ -42,6 +45,7 @@ __all__ = [
     "EnumEvidenceAutocloseDecision",
     "EnumEvidenceAutocloseMode",
     "EnumEvidenceAutocloseTrigger",
+    "EnumLinearIdentityPath",
     "ModelAcBindingRow",
     "ModelCascadeProvenance",
     "ModelEvidenceAutocloseOutcome",

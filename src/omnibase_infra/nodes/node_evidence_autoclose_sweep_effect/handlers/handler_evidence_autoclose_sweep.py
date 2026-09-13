@@ -187,6 +187,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
     EnumEvidenceAutocloseTrigger,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_linear_identity_path import (
+    EnumLinearIdentityPath,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_binding_row import (
     ModelAcBindingRow,
 )
@@ -324,6 +327,40 @@ _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
 _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
 
 _LINEAR_API_URL = "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
+
+# OMN-17664. THE IDENTITY THE CLOSER WRITES AS.
+#
+# `LINEAR_API_KEY` is a PERSONAL api key. Linear attributes its writes to the
+# person who minted it, so until now every flip and every audit comment this
+# closer wrote was, on the ticket own history, indistinguishable from a human
+# edit -- measured 2026-09-05T20:33Z on OMN-17957, where the sweep own
+# 19:36:02.430Z flip carried `actorId 7a850ce1-f95e-431f-b4e3-62f7449f04c0`,
+# the same uuid `viewer` resolves to for that key. That is the premise the
+# `actorId`-null half of `_prior_revert_reason` fence rested on, and it is why
+# that half was structurally dead for the population it exists to protect.
+#
+# Linear client-credentials grant answers with an APP ACTOR token: writes made
+# with it attribute to the application rather than to any person. The exchange
+# is per run, not per request, and the token is never persisted -- Linear own
+# guidance is to request a new client credentials token at the start of each
+# run and use it only for that run, and a 30-day token copied into a secret
+# store is just a second long-lived key with worse properties.
+_LINEAR_OAUTH_TOKEN_URL = "https://api.linear.app/oauth/token"  # url-authority-ok: fixed public OAuth token endpoint, no ONEX routing authority
+_LINEAR_API_KEY_ENV = "LINEAR_API_KEY"
+_LINEAR_CLOSER_CLIENT_ID_ENV = "LINEAR_CLOSER_CLIENT_ID"
+_LINEAR_CLOSER_CLIENT_SECRET_ENV = "LINEAR_CLOSER_CLIENT_SECRET"
+# Comma separated, per Linear OAuth documentation -- a space-separated list is
+# rejected. `write` (not `issues:create`) is what an issue STATE transition
+# needs; `admin` is deliberately absent and is not grantable to an app actor
+# token in any case.
+_LINEAR_CLOSER_TOKEN_SCOPES = "read,write"
+_LINEAR_TOKEN_TYPE_BEARER = "bearer"
+_MISSING_LINEAR_CREDENTIAL_ERROR = (
+    f"No Linear credential is configured: set {_LINEAR_CLOSER_CLIENT_ID_ENV} and "
+    f"{_LINEAR_CLOSER_CLIENT_SECRET_ENV} (preferred -- writes attribute to the "
+    f"application), or {_LINEAR_API_KEY_ENV} (fallback -- writes attribute to a "
+    "person)."
+)
 
 # `description` is fetched for the AC-coverage guard below (OMN-16736): the
 # acceptance criteria dod_verify CANNOT see are exactly the ones that live only
@@ -642,6 +679,7 @@ _LINEAR_RATE_LIMIT_TOKENS: tuple[str, ...] = (
     "rate limit",
     "too many requests",
 )
+_HTTP_OK = 200
 _HTTP_TOO_MANY_REQUESTS = 429
 _HTTP_SERVER_ERROR = 500
 
@@ -2710,7 +2748,14 @@ class _LinearClient:
 
     # OMN-14951 gap 2: self-declared secret-ish env-var names read by this
     # boundary file (see scripts/check-env-reads.sh's check_secret_name_declarations).
-    required_secrets: tuple[str, ...] = ("LINEAR_API_KEY",)
+    # OMN-17664 adds the application-identity pair. The literals are spelled
+    # here rather than referenced through the module constants because the
+    # checker matches a quoted occurrence of the NAME in this file.
+    required_secrets: tuple[str, ...] = (
+        "LINEAR_API_KEY",
+        "LINEAR_CLOSER_CLIENT_ID",
+        "LINEAR_CLOSER_CLIENT_SECRET",
+    )
 
     def __init__(
         self,
@@ -2719,9 +2764,18 @@ class _LinearClient:
         max_attempts: int = _LINEAR_RETRY_DEFAULT_MAX_ATTEMPTS,
         base_delay_seconds: float = _LINEAR_RETRY_DEFAULT_BASE_DELAY_SECONDS,
     ) -> None:
-        self._api_key = (
-            api_key if api_key is not None else os.environ.get("LINEAR_API_KEY", "")
-        )
+        # OMN-17664. Credential resolution is DEFERRED to the first call rather
+        # than done here, because the application path exchanges credentials
+        # over HTTP and ``__init__`` is sync. An explicitly passed ``api_key``
+        # stays an explicit injection — including an explicitly EMPTY one,
+        # which means "no credential" and never "read the environment". That is
+        # the pre-existing constructor contract the retry tests rely on and it
+        # is deliberately unchanged.
+        self._explicit_api_key = api_key
+        self._auth_header: str | None = None
+        #: Which credential this client resolved, and therefore whose name a
+        #: write it makes will carry. ``None`` until the first call.
+        self.identity_path: EnumLinearIdentityPath | None = None
         self._timeout = timeout
         self._max_attempts = max(1, max_attempts)
         self._base_delay_seconds = max(0.0, base_delay_seconds)
@@ -2740,6 +2794,160 @@ class _LinearClient:
         """
         self._max_attempts = max(1, max_attempts)
         self._base_delay_seconds = max(0.0, base_delay_seconds)
+
+    async def _resolve_auth_header(self) -> str | None:
+        """Resolve this run's ``Authorization`` value once. None means refuse.
+
+        Three states and one refusal, in the order they are checked:
+
+        * an explicitly injected key — used verbatim, no exchange, no env read;
+        * both application secrets present — exchanged for an app actor token,
+          so every write attributes to the application rather than to a person;
+        * exactly one application secret present — REFUSED. The fall-through to
+          the personal key is deliberately NOT taken: an operator who set one of
+          the two believes the application path is live, and a run that quietly
+          wrote as a person under that belief is worse than a run that wrote
+          nothing. This is the same silent-degradation class OMN-16832 removed
+          from this workflow's GitHub credential, where a ``||`` fallback read
+          as "a stronger token, if configured" and had in fact always been a
+          dead branch over a weaker one;
+        * neither present, a personal key present — the documented fallback,
+          taken LOUDLY, because the run log is the only place that can say the
+          writes about to be made will carry a person's name.
+
+        The resolved header is cached for the life of the client, which is one
+        per run: Linear's guidance is one client-credentials token per run, not
+        one per request.
+        """
+        if self._auth_header is not None:
+            return self._auth_header
+
+        if self._explicit_api_key is not None:
+            if not self._explicit_api_key:
+                self.last_error = _MISSING_LINEAR_CREDENTIAL_ERROR
+                logger.warning("%s", self.last_error)
+                return None
+            self.identity_path = EnumLinearIdentityPath.PERSONAL_API_KEY
+            self._auth_header = self._explicit_api_key
+            return self._auth_header
+
+        client_id = os.environ.get(_LINEAR_CLOSER_CLIENT_ID_ENV, "").strip()
+        client_secret = os.environ.get(_LINEAR_CLOSER_CLIENT_SECRET_ENV, "").strip()
+        api_key = os.environ.get(_LINEAR_API_KEY_ENV, "").strip()
+
+        if bool(client_id) != bool(client_secret):
+            set_name, unset_name = (
+                (_LINEAR_CLOSER_CLIENT_ID_ENV, _LINEAR_CLOSER_CLIENT_SECRET_ENV)
+                if client_id
+                else (_LINEAR_CLOSER_CLIENT_SECRET_ENV, _LINEAR_CLOSER_CLIENT_ID_ENV)
+            )
+            self.identity_path = EnumLinearIdentityPath.MISCONFIGURED
+            self.last_error = (
+                f"Partial Linear application identity: {set_name} is set and "
+                f"{unset_name} is not. Refusing to fall back to "
+                f"{_LINEAR_API_KEY_ENV} — a half-configured application identity "
+                "is a deployment error, not a reason to write as a person."
+            )
+            logger.error("%s", self.last_error)
+            return None
+
+        if client_id and client_secret:
+            token = await self._fetch_application_token(client_id, client_secret)
+            if token is None:
+                return None
+            self.identity_path = EnumLinearIdentityPath.OAUTH_APPLICATION
+            self._auth_header = f"Bearer {token}"
+            logger.info(
+                "Linear identity path: %s — client id %s; every write this run "
+                "makes attributes to the application, not to a person.",
+                EnumLinearIdentityPath.OAUTH_APPLICATION.value,
+                client_id,
+            )
+            return self._auth_header
+
+        if api_key:
+            self.identity_path = EnumLinearIdentityPath.PERSONAL_API_KEY
+            logger.warning(
+                "Linear identity path: %s — %s and %s are both absent, so this "
+                "run falls back to the personal key and every write it makes is "
+                "attributed on the ticket to the person who minted that key.",
+                EnumLinearIdentityPath.PERSONAL_API_KEY.value,
+                _LINEAR_CLOSER_CLIENT_ID_ENV,
+                _LINEAR_CLOSER_CLIENT_SECRET_ENV,
+            )
+            self._auth_header = api_key
+            return self._auth_header
+
+        self.last_error = _MISSING_LINEAR_CREDENTIAL_ERROR
+        logger.warning("%s", self.last_error)
+        return None
+
+    async def _fetch_application_token(
+        self, client_id: str, client_secret: str
+    ) -> str | None:
+        """Exchange the application secrets for an app actor token.
+
+        Fails CLOSED on every fault: a rejected or unreadable exchange returns
+        None and the caller makes no Linear call at all, rather than degrading
+        to the personal key. The credentials are sent form-encoded (Linear also
+        accepts HTTP basic; the form is the documented default and keeps the
+        value out of a header that intermediaries log more readily).
+
+        Deliberately NOT retried through ``_backoff_seconds``: the failures this
+        call can have are a wrong client id, a wrong secret, or a revoked
+        application, all of which a retry reproduces exactly — the same split
+        ``_query`` already encodes for a 4xx.
+
+        Neither the secret nor the returned token is ever logged or placed in
+        ``last_error``.
+        """
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": _LINEAR_CLOSER_TOKEN_SCOPES,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(_LINEAR_OAUTH_TOKEN_URL, data=payload)
+            if response.status_code != _HTTP_OK:
+                self.last_error = (
+                    "Linear client-credentials exchange returned HTTP "
+                    f"{response.status_code}."
+                )
+                logger.error("%s", self.last_error)
+                return None
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            self.last_error = (
+                "Linear client-credentials exchange failed: "
+                f"{sanitize_error_message(exc)}"
+            )
+            # `exception` rather than `error`: the traceback is the diagnostic
+            # for an exchange that never reached a status code, and it carries
+            # no secret — Python renders frames, never frame locals, so the
+            # form payload holding the client secret is not in it.
+            logger.exception("%s", self.last_error)
+            return None
+
+        token = data.get("access_token") if isinstance(data, dict) else None
+        token_type = str(data.get("token_type", "")) if isinstance(data, dict) else ""
+        if not isinstance(token, str) or not token:
+            self.last_error = (
+                "Linear client-credentials exchange returned no access token."
+            )
+            logger.error("%s", self.last_error)
+            return None
+        if token_type.strip().lower() != _LINEAR_TOKEN_TYPE_BEARER:
+            # A token this code would send as a bearer but the vendor did not
+            # call one is a shape change, not a credential this run may use.
+            self.last_error = (
+                "Linear client-credentials exchange returned unexpected "
+                f"token_type {token_type!r}."
+            )
+            logger.error("%s", self.last_error)
+            return None
+        return token
 
     @staticmethod
     def _retry_after_seconds(response: httpx.Response) -> float | None:
@@ -2792,12 +3000,14 @@ class _LinearClient:
     async def _query(
         self, query: str, variables: dict[str, object]
     ) -> dict[str, object] | None:
-        if not self._api_key:
-            self.last_error = "LINEAR_API_KEY is not set."
-            logger.warning("LINEAR_API_KEY is not set — cannot call Linear API.")
+        # OMN-17664. Resolved once per client (one client per run), before the
+        # retry loop: an unresolvable credential is not a lost attempt and must
+        # not be re-tried, and a resolution failure must not reach the network.
+        auth_header = await self._resolve_auth_header()
+        if auth_header is None:
             return None
         headers = {
-            "Authorization": self._api_key,
+            "Authorization": auth_header,
             "Content-Type": "application/json",
         }
         payload = {"query": query, "variables": variables}

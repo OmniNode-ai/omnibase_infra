@@ -425,7 +425,9 @@ error_handling:
       recoverable: true
       retry_strategy: "none"
     - name: "LINEAR_NOT_CONFIGURED"
-      description: "LINEAR_API_KEY not set — every ticket fails closed as ERROR_LINEAR_API."
+      description: >
+        No usable Linear identity — neither the LINEAR_CLOSER_CLIENT_ID / LINEAR_CLOSER_CLIENT_SECRET pair nor the LINEAR_API_KEY fallback resolved, or exactly one half of the pair was set (refused, never degraded to the personal key), or the client-credentials exchange was rejected. Every ticket fails closed as ERROR_LINEAR_API.
+
       recoverable: false
       retry_strategy: "none"
     - name: "DOD_VERIFY_NONZERO_EXIT"
@@ -622,11 +624,32 @@ io_operations:
 #     omnimarket (see omnimarket_drift_guard /
 #     scripts/install-node-skill-package.sh).
 dependencies:
+  # OMN-17664. THE IDENTITY THE CLOSER WRITES AS. Exactly one of two shapes is
+  # valid and the handler refuses anything else: the application pair below
+  # (preferred), or the personal key alone (fallback). Exactly one half of the
+  # pair is a deployment error and is refused rather than silently degraded,
+  # because whoever set that half believes the application path is live.
+  - name: "linear_closer_client_id"
+    type: "environment"
+    env_var: "LINEAR_CLOSER_CLIENT_ID"
+    description: >
+      OAuth client id of the closer application. With its secret, exchanged per run for an app actor token, so a flip carries the application as its actor instead of a person. Required together with LINEAR_CLOSER_CLIENT_SECRET.
+
+    required: false
+  - name: "linear_closer_client_secret"
+    type: "environment"
+    env_var: "LINEAR_CLOSER_CLIENT_SECRET"
+    description: >
+      OAuth client secret of the closer application. Never persisted as a token: the client-credentials exchange runs once at the start of each run. Required together with LINEAR_CLOSER_CLIENT_ID.
+
+    required: false
   - name: "linear_api_key"
     type: "environment"
     env_var: "LINEAR_API_KEY"
-    description: "Linear API key for issue read + issueUpdate/commentCreate mutations."
-    required: true
+    description: >
+      PERSONAL Linear API key for issue read + issueUpdate/commentCreate mutations. The FALLBACK identity, used only when neither application secret is set, and taken loudly: Linear attributes its writes to the person who minted it, so a flip made with it is indistinguishable on the ticket history from a human edit (measured on OMN-17957, where the sweep own 19:36:02.430Z flip carried the same actorId a person edit would).
+
+    required: false
   - name: "autoclose_kill_switch"
     type: "environment"
     env_var: "ONEX_AUTOCLOSE_DISABLED"
@@ -642,10 +665,18 @@ health_check:
   endpoint: "/health"
   interval_seconds: 300
   checks:
+    - name: "linear_application_identity_configured"
+      check_type: "environment"
+      env_var: "LINEAR_CLOSER_CLIENT_ID"
+      description: >
+        Verify the preferred identity is configured: the closer application client id, whose secret pairs with it to yield an app actor token.
+
     - name: "linear_configured"
       check_type: "environment"
       env_var: "LINEAR_API_KEY"
-      description: "Verify LINEAR_API_KEY is set."
+      description: >
+        Verify the FALLBACK personal key is set. Absent is not a fault when the application pair above is configured.
+
 metadata:
   description: "Evidence autoclose sweep: companion-merge -> dod_verify -> governed Done flip (OMN-16106 first slice)"
   author: "OmniNode Team"
