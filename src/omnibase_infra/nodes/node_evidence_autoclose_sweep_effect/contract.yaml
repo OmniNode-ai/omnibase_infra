@@ -363,15 +363,41 @@
 #     introduce one. Absent means nothing is a proposal, which is what every
 #     hand-authored binding in the corpus is.
 #
+#   - OMN-18330 (node_version 1.13.0): AN ACCEPTED BINDING IS PROOF ABOUT THE
+#     CRITERION IT WAS ACCEPTED AGAINST, AND NO OTHER. OMN-18236 gave a binding
+#     record a `criterion_hash` -- the sha256 of the criterion text it was
+#     derived or accepted against -- and nothing in this node read it, so a
+#     criterion could be rewritten under a still-passing check and its binding
+#     went on reading as proof of a sentence that no longer existed. The binding
+#     leg now recomputes each criterion's hash from the ticket text as it reads
+#     NOW and compares it to the pin the check carries. A pinned label whose
+#     hash no longer matches does not discharge its criterion, and the hold
+#     names the label and says the text changed after acceptance. A pinned label
+#     whose record carries no readable hash does not discharge either, and is
+#     named apart from the stale case because the repair differs. A label with
+#     NO pin is untouched: 67 of the 68 contracts declaring `binds_ac` carry no
+#     binding record, every one hand-authored, and holding them on a pin that
+#     does not exist yet is out of scope. The pin arrives on the per-check
+#     record (`ac_binding_hashes`), the same route `binds_ac` and
+#     `draft_binds_ac` take, because the verifier is the only component that
+#     resolves and reads the contract and a second parser here would be a second
+#     truth -- and because a contract fetch on an armed closer's flip path would
+#     make a transient GitHub failure choose between a false hold and a false
+#     flip. STATED LIMIT: the verifier reads `ac_bindings` today only to derive
+#     `draft_binds_ac` and discards the hashes, so until it carries them this
+#     join is proven by fixture rather than by corpus. What is closed here is
+#     that the closer had no way to learn a criterion had moved; it now does,
+#     with no caller switch and no parameter a caller can forget.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 7
-  patch: 1
-node_version: "1.12.3"
+  minor: 8
+  patch: 0
+node_version: "1.13.0"
 description: >
-  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, and holds a criterion whose only declaring check marks it a proposal until a person accepts it. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
+  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, and holds a criterion whose only declaring check marks it a proposal until a person accepts it, and holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
 input_model:
   name: "ModelEvidenceAutocloseSweepRequest"
