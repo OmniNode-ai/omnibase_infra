@@ -1489,3 +1489,70 @@ def test_projection_callback_omits_envelope_timestamp_when_absent() -> None:
 
     assert len(received) == 1
     assert "_envelope_timestamp" not in received[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        pytest.param(datetime(2026, 9, 13, 17, 44, 8), id="naive-datetime"),
+        pytest.param("2026-09-13T17:44:08Z", id="iso-string"),
+        pytest.param(1789000000, id="epoch-int"),
+        pytest.param({"envelope_timestamp": "2026-09-13T17:44:08Z"}, id="mapping"),
+    ],
+)
+def test_projection_callback_injects_no_event_time_it_cannot_trust(
+    recorded: object,
+) -> None:
+    """A present-but-unusable recorded time injects NO key, and never a guess.
+
+    OMN-18326, hostile-reviewer MAJOR findings 2 and 3. Two distinct ways a
+    value can be present and still not be an authoritative event time, and both
+    have to reach the reader as ABSENT rather than as something:
+
+    * a TIMEZONE-NAIVE datetime. A producer that stamps a local wall clock with
+      no ``tzinfo`` carries no instant at all -- only a reading on some clock
+      whose offset this process cannot know. Injecting it would put exactly the
+      write-clock ambiguity the OMN-15583 refusal exists to prevent into a NOT
+      NULL event-time column, and stamping it UTC to make it "valid" would be
+      this seam inventing the fact it is supposed to be transporting.
+    * a value of the wrong TYPE entirely -- an ISO string, an epoch int, a
+      mapping. Plausible producer serializations, none of which this extractor
+      may silently coerce: the key it injects is contracted to be the typed
+      ``datetime`` the runtime already holds, and a consumer that re-parses is
+      the drift this seam removes.
+
+    Absent is the correct outcome in every one of those cases, because the
+    reader's refusal is CORRECT for an event whose time is not knowable. What
+    OMN-18326 fixed was the seam making every event look that way; it must not
+    become the seam making an untrustworthy one look fine.
+    """
+    received: list[dict[str, object]] = []
+
+    class EnvelopeAwareHandler:
+        def handle(self, input_data: dict[str, object]) -> dict[str, int]:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope = MagicMock()
+    envelope.event_type = derive_event_type_alias_for_topic(topic)
+    envelope.topic = topic
+    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+    envelope.envelope_id = uuid4()
+    envelope.envelope_timestamp = recorded
+    callback = _make_projection_dispatch_callback(
+        EnvelopeAwareHandler(),
+        projection_database_target("live_events", schema="omninode_internal"),
+        (topic,),
+    )
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert "_envelope_timestamp" not in received[0]
