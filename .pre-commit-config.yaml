@@ -283,6 +283,18 @@ repos:
         files: ^(scripts/ci/nonrequired_check_failure_rate\.py|config/runner_routing_policy\.yaml|tests/ci/test_nonrequired_check_failure_rate_omn18254\.py|tests/ci/test_incident_replay_omn18254\.py|tests/fixtures/omn18254/.*|tests/ci/test_scheduled_run_failure_rate_omn18322\.py|tests/fixtures/omn18322/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18345: the lane-presence guard. Pins BOTH directions -- a lane that
+      # is absent skips, a lane that is present and unwell still FAILS -- because
+      # a guard that only skipped would turn every real lane defect green, which
+      # is worse than the constant red it replaces. The policy half keeps the
+      # next container-inspecting test from re-creating that red.
+      - id: lane-presence-guard
+        name: Lane-presence guard for container-inspecting tests (OMN-18345)
+        entry: uv run --frozen pytest tests/ci/test_lane_presence_guard_omn18345.py -q
+        language: system
+        files: ^(tests/integration/lane_presence\.py|tests/integration/.*test_.*\.py|tests/ci/test_lane_presence_guard_omn18345\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ci-evidence-policy
         name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
         entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q
