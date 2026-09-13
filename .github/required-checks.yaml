@@ -9,7 +9,7 @@
 # invoked via required-check-skip-guard-caller.yml -> omniclaude's reusable
 # workflow). It SUPERSEDES the prior v1 prose-only manifest, which documented
 # `test.yml` (a workflow that no longer exists — CI is now `ci.yml`) and was
-# never read by any script: `scripts/audit-branch-protection.py` fetches
+# never read by any script: the branch-protection auditors fetch
 # required_status_checks live via `gh api`, and the separate parity ratchet
 # (scripts/enforcement_parity_manifest.yaml, OMN-14288) is its own
 # machine-asserted config-as-data file, untouched by this change.
