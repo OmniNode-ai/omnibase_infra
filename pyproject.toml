@@ -422,6 +422,8 @@ ignore = [
 "src/omnibase_infra/validation/linter_contract.py" = ["T201"]
 "src/omnibase_infra/validation/validator_any_type.py" = ["T201"]
 "src/omnibase_infra/tools/contract_topic_extractor.py" = ["T201"]
+# OMN-18329: point-in-time CLI diagnostic, intentional stdout report.
+"src/omnibase_infra/diagnostics/closer_receipt_residual.py" = ["T201"]
 "src/omnibase_infra/scripts/verify_container_manifest.py" = ["T201"]
 "src/omnibase_infra/services/observability/llm_cost_aggregation/consumer.py" = ["T201"]
 # Intentional stdout sinks / fallback output
