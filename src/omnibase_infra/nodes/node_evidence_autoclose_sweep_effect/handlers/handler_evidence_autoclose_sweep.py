@@ -631,7 +631,7 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.13.0"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.14.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -2600,6 +2600,83 @@ def _format_ac_binding_table(rows: tuple[ModelAcBindingRow, ...]) -> str:
     return "\n".join(lines)
 
 
+# -- OMN-18336: turning a revert into a correction --------------------------
+#
+# A revert fence exists and has fired sixteen times. Nothing turned a revert
+# into a correction. Four of forty-seven flips were reverted by hand — an 8.5%
+# false-positive rate being ABSORBED rather than measured — and all four shared
+# one failure class: a guard was proven and its remediation was not.
+#
+# Finding out what the closer BELIEVED at the moment of a wrong flip was an
+# archaeology exercise across receipts. These two surfaces end that: the
+# post-revert comment names the criterion labels the flip counted as bound and
+# the check id that discharged each one, and the receipt carries the revert as
+# a boolean a series can be built from.
+#
+# WHAT THIS IS NOT. It does not change the flip predicate — OMN-18056 already
+# prevents this failure class going forward, and widening the hold further is
+# explicitly not proposed. This is feedback ON the predicate.
+#: A line every post-revert feedback comment carries verbatim, so the reverts
+#: of this closer's own flips are countable by grep over the ticket surface as
+#: well as from the receipt counter. Stable text, never reworded: a panel that
+#: counts it would silently return zero if this string moved.
+_CLOSER_FLIP_REVERTED_MARKER = "closer-flip-reverted: 1"
+
+
+def _counted_ac_bindings(rows: tuple[ModelAcBindingRow, ...]) -> tuple[str, ...]:
+    """``("AC1 -> check-a", ...)`` for the criteria a flip counted as bound.
+
+    Pairs, never a bare list. Which criterion was judged wrongly is only half
+    the question a revert raises; the other half is which check the closer
+    accepted as proving it, and a list of labels leaves that to archaeology.
+
+    An unlabelled criterion cannot appear: nothing in a contract can point at
+    it, so no binding ever discharged it and it is not in the bound set. A
+    bound row with no check id is impossible by construction — the row is built
+    FROM the discharging check — but it is rendered defensively rather than
+    dropped, because a criterion counted as bound by nothing nameable is the
+    single most interesting row a revert could produce.
+    """
+    return tuple(
+        f"{row.label or row.acceptance_criterion[:60]} -> "
+        f"{row.evidence_check or '<no check id recorded>'}"
+        for row in rows
+        if row.bound
+    )
+
+
+def _format_post_revert_feedback(rows: tuple[ModelAcBindingRow, ...]) -> str:
+    """The feedback section of a post-revert comment, marker included.
+
+    Emitted ONLY where a flip of this closer's own was reverted. A reverted
+    HAND flip gets no such section and no marker: that is somebody else's
+    judgement being undone, and claiming it as this mechanism's error would
+    inflate the very rate the marker exists to measure.
+    """
+    counted = _counted_ac_bindings(rows)
+    body = (
+        "\n".join(f"- {pair}" for pair in counted[:_MAX_UNCOVERED_LISTED])
+        if counted
+        else (
+            "- _(this flip counted no labelled criterion as bound — it "
+            "predates the OMN-18056 binding leg)_"
+        )
+    )
+    more = len(counted) - _MAX_UNCOVERED_LISTED
+    tail = f"\n- ... and {more} more (truncated)" if more > 0 else ""
+    return (
+        "**This closer flipped this ticket and the flip was reverted.**\n\n"
+        "It counted these acceptance criteria as discharged, by these "
+        "checks:\n\n"
+        f"{body}{tail}\n\n"
+        "One of them is the criterion that was judged wrongly. Recording the "
+        "pairing here is what lets the next change to the flip predicate be "
+        "argued from cases rather than from guesses — the predicate itself is "
+        "not changed by this comment.\n\n"
+        f"{_CLOSER_FLIP_REVERTED_MARKER}\n"
+    )
+
+
 # -- comment idempotency marker (OMN-16808) --------------------------------
 #
 # Every comment the sweep writes ends with an HTML-comment marker. Linear
@@ -4153,6 +4230,11 @@ class HandlerEvidenceAutocloseSweep:
                 EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING,
             )
         )
+        # OMN-18336. The false-positive rate as a series value. Counted from
+        # the outcome flag, which is set only where the closer's OWN flip
+        # comment is on the ticket -- a reverted hand flip is a revert of
+        # somebody else's judgement and is deliberately not in this number.
+        closer_flips_reverted = sum(1 for o in outcomes if o.closer_flip_reverted)
         errored = sum(
             1
             for o in outcomes
@@ -4220,6 +4302,7 @@ class HandlerEvidenceAutocloseSweep:
             tickets_gap_posted=gap_posted,
             tickets_skipped=skipped,
             tickets_errored=errored,
+            tickets_closer_flip_reverted=closer_flips_reverted,
             outcomes=tuple(outcomes),
         )
 
@@ -5407,30 +5490,69 @@ class HandlerEvidenceAutocloseSweep:
                         verdict_fingerprint=fingerprint,
                         pre_write_head_entry_id=pre_write_head_entry_id,
                     )
+                # OMN-18336. The closer's OWN flip is identified here and
+                # nowhere else in this block: `_prior_flip_fingerprints` reads
+                # the flip comments this mechanism wrote. A reverted HAND flip
+                # leaves none, so it is False below and gets no feedback
+                # comment — counting it would inflate this mechanism's error
+                # rate with an error it did not make.
+                own_flip_reverted = bool(_prior_flip_fingerprints(prior_bodies))
+                counted_bindings = (
+                    _counted_ac_bindings(ac_binding_rows) if own_flip_reverted else ()
+                )
                 if fingerprint in _prior_flip_fingerprints(prior_bodies):
-                    return ModelEvidenceAutocloseOutcome(
-                        ticket_id=ticket_id,
-                        companion_pr_number=companion_pr_number,
-                        companion_pr_url=companion_pr_url,
-                        decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
-                        reason=(
-                            "this closer already flipped this ticket Done on "
-                            f"verdict fingerprint {fingerprint} — its own audit "
-                            "comment carrying that fingerprint is on the ticket "
-                            "— and the ticket has since been moved back out of "
-                            "a completed state. The evidence has not changed, "
-                            "so re-applying the identical verdict would "
-                            "overrule that reversal with a cron tick. A "
-                            "different verdict gets a different fingerprint and "
-                            "is free to close."
+                    # OMN-18336. This branch used to return SILENTLY. It is the
+                    # clearest revert of this closer's own judgement there is —
+                    # the identical verdict, already written and already undone
+                    # — and it produced no record of what the closer had
+                    # believed. It now posts the feedback comment.
+                    return await self._emit_gap_comment(
+                        base=ModelEvidenceAutocloseOutcome(
+                            ticket_id=ticket_id,
+                            companion_pr_number=companion_pr_number,
+                            companion_pr_url=companion_pr_url,
+                            decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            reason=(
+                                "this closer already flipped this ticket Done on "
+                                f"verdict fingerprint {fingerprint} — its own audit "
+                                "comment carrying that fingerprint is on the ticket "
+                                "— and the ticket has since been moved back out of "
+                                "a completed state. The evidence has not changed, "
+                                "so re-applying the identical verdict would "
+                                "overrule that reversal with a cron tick. A "
+                                "different verdict gets a different fingerprint and "
+                                "is free to close."
+                            ),
+                            dod_verify_total_checks=total_checks,
+                            dod_verify_verified_count=verified_count,
+                            dod_verify_failed_count=failed_count,
+                            dod_verify_non_probative_count=non_probative_count,
+                            dod_verify_behavior_proving_count=behavior_proving_count,
+                            verdict_fingerprint=fingerprint,
+                            pre_write_head_entry_id=pre_write_head_entry_id,
+                            ac_binding_rows=ac_binding_rows,
+                            closer_flip_reverted=True,
+                            counted_ac_bindings=counted_bindings,
                         ),
-                        dod_verify_total_checks=total_checks,
-                        dod_verify_verified_count=verified_count,
-                        dod_verify_failed_count=failed_count,
-                        dod_verify_non_probative_count=non_probative_count,
-                        dod_verify_behavior_proving_count=behavior_proving_count,
-                        verdict_fingerprint=fingerprint,
-                        pre_write_head_entry_id=pre_write_head_entry_id,
+                        apply=apply_writes,
+                        issue_id=issue_id,
+                        marker=_sweep_comment_marker(
+                            EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            ("post-revert-feedback", fingerprint),
+                        ),
+                        comment_body=(
+                            "Prior-revert hold (OMN-18336 evidence autoclose "
+                            "sweep) — NOT re-flipped.\n\n"
+                            f"Merged evidence companion: {companion_pr_url}\n"
+                            f"dod_verify: {verified_count}/{total_checks} "
+                            f"verified ({non_probative_count} non-probative), "
+                            f"{failed_count} failed, {behavior_proving_count} "
+                            "behaviour-proving — the same verdict, fingerprint "
+                            f"{fingerprint}.\n\n"
+                            f"{_format_post_revert_feedback(ac_binding_rows)}\n"
+                            "**Acceptance criterion → evidence check**\n\n"
+                            f"{_format_ac_binding_table(ac_binding_rows)}"
+                        ),
                     )
 
                 # OMN-18056 item 7. THE SAME FENCE, MADE POSITIVE.
@@ -5620,6 +5742,8 @@ class HandlerEvidenceAutocloseSweep:
                         verdict_fingerprint=fingerprint,
                         pre_write_head_entry_id=pre_write_head_entry_id,
                         ac_binding_rows=ac_binding_rows,
+                        closer_flip_reverted=own_flip_reverted,
+                        counted_ac_bindings=counted_bindings,
                     )
                     return await self._emit_gap_comment(
                         base=baseline_base,
@@ -5642,7 +5766,16 @@ class HandlerEvidenceAutocloseSweep:
                             "than it does now, closing it again would overrule "
                             "that reversal with a cron tick.\n\n"
                             f"Post-revert baseline fingerprint {fingerprint}\n\n"
-                            "**Acceptance criterion \u2192 evidence check**\n\n"
+                            # OMN-18336. Present only when the reverted flip
+                            # was this closer's own. A reverted hand flip keeps
+                            # today's comment exactly, marker included \u2014 which
+                            # is to say, excluded.
+                            + (
+                                _format_post_revert_feedback(ac_binding_rows) + "\n"
+                                if own_flip_reverted
+                                else ""
+                            )
+                            + "**Acceptance criterion \u2192 evidence check**\n\n"
                             f"{_format_ac_binding_table(ac_binding_rows)}"
                         ),
                     )

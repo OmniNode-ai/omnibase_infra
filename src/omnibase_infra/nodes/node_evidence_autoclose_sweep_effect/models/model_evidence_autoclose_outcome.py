@@ -210,6 +210,43 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
             "was not reached or held."
         ),
     )
+    # OMN-18336. THE FALSE-POSITIVE RATE, MADE COUNTABLE.
+    #
+    # Four of forty-seven closer flips were reverted by hand — an 8.5% error
+    # rate that was being ABSORBED rather than measured, because a revert left
+    # no fact anywhere that a series could be built from. Prose in a hold
+    # reason is not a series value; a boolean on the receipt is.
+    #
+    # True ONLY when this outcome was reached because a flip THIS CLOSER made
+    # was moved back out of a completed state — established from the closer's
+    # own flip comment being on the ticket, not from the reversal alone. A
+    # reverted HAND flip sets it False: that is somebody else's judgement being
+    # undone and counting it here would inflate this mechanism's error rate
+    # with errors it did not make.
+    closer_flip_reverted: bool = Field(
+        default=False,
+        description=(
+            "True when this decision was reached because a flip this closer "
+            "itself made was reverted. The countable form of the "
+            "false-positive rate; False for a reverted hand flip."
+        ),
+    )
+    # OMN-18336. WHAT THE CLOSER BELIEVED AT THE MOMENT OF THE WRONG FLIP.
+    #
+    # `label -> check id` for every criterion the flip counted as discharged.
+    # All four reverted flips shared one failure class — a guard was proven and
+    # its remediation was not — and establishing that took an archaeology
+    # exercise across receipts. Recording the pairing makes the wrongly-judged
+    # criterion a citable fact, so the next predicate change is argued from
+    # cases instead of guesses.
+    counted_ac_bindings: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "`<label> -> <check id>` for each criterion the reverted flip "
+            "counted as bound. Empty when no flip of this closer's was "
+            "reverted, or when the flip counted no labelled criterion."
+        ),
+    )
     linear_comment_posted: bool = Field(
         default=False, description="Whether an audit/gap comment was posted."
     )
