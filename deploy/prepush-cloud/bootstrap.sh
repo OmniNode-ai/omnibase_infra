@@ -47,6 +47,81 @@
 #   ssh <ssh-target> 'bash /tmp/prepush-cloud/bootstrap.sh'
 # Then warm the caches:
 #   deploy/prepush-cloud/warm_cache.sh <ssh-target>
+#
+# -----------------------------------------------------------------------------
+# WHERE THE INSTANCE IDENTITY LIVES: NOT HERE.
+# -----------------------------------------------------------------------------
+# This repository is PUBLIC. The instance id, address, security-group id and
+# account are held in the private placement overlay, exactly as the `hcloud`
+# row in scripts/hooks/prepush_hosts.tsv already states. Everything in this
+# directory takes the host as an argument so no deployment identity is ever
+# committed. Read the identity from the overlay:
+#
+#   CLOUD_SSH_TARGET="<user>@<address-from-the-private-placement-overlay>"
+#   CLOUD_INSTANCE_ID="<instance-id-from-the-private-placement-overlay>"
+#
+# The SHAPE of the instance is not identifying and is worth recording: a
+# 16-vCPU / 32-GiB compute instance, ON-DEMAND, 100 GiB gp3 root volume with
+# DeleteOnTermination=true, InstanceInitiatedShutdownBehavior=stop, and a
+# security group permitting inbound TCP/22 only from allowlisted CIDRs.
+#
+# On-demand rather than spot, deliberately: stop-on-idle is the cost mechanism
+# and a one-time spot instance TERMINATES on OS shutdown, destroying the warm
+# caches, while a spot interruption kills a governed suite mid-run. At the
+# observed volume (~20-40 heavy escalations/month, <=1h each) the saving is a
+# few dollars and the failure modes are not worth it.
+#
+# -----------------------------------------------------------------------------
+# LIFECYCLE AND COST CONTROL
+# -----------------------------------------------------------------------------
+#   * Idle auto-stop: onex-prepush-idle-stop.timer, 10-minute cadence, stops
+#     the instance after two consecutive idle observations (~20-30 min idle).
+#     Idle = no heavy-suite LOCK, no pytest / `uv sync` / wrapper process, no
+#     interactive session, no run-dir activity in 30 min, uptime > 30 min.
+#     FAIL-ACTIVE: an unreadable signal keeps the box up. Never kill a governed
+#     run to save cents.
+#   * Restart on demand, lab side, needs AWS credentials:
+#       aws ec2 start-instances --instance-ids "$CLOUD_INSTANCE_ID"
+#     ~40s to SSH-reachable; the address is static so the host table needs no
+#     edit.
+#   * Picker behavior while stopped: the 3-second SSH probe fails, the row logs
+#     `hcloud=unreachable`, and placement falls through to the lab rows. This is
+#     what preserves lab-first placement -- the cloud row only competes when
+#     someone has deliberately started the instance. Fail-closed semantics are
+#     untouched: SKIP, never "assumed fit".
+#   * Cost at observed volume: ~20-40 runs/month * <=1h * $0.8211/h, about
+#     $16-33/month compute, plus $8/month EBS and ~$3.6/month static address
+#     while stopped. A stopped month costs ~$12.
+#
+# This script substitutes the installing user's workroot into the idle-stop
+# unit at install time. The COMMITTED unit carries the @ONEX_PREPUSH_WORKROOT@
+# placeholder and the idle-stop script fails fast when the variable is unset,
+# so no machine-specific path is checked in and a mis-installed unit cannot
+# silently read "no activity" and stop a host mid-suite.
+#
+# -----------------------------------------------------------------------------
+# COLLABORATOR ACCESS
+# -----------------------------------------------------------------------------
+# An authorized collaborator's public key is installed for the same user the
+# picker dispatches as. Interactive use is an ordinary `ssh "$CLOUD_SSH_TARGET"`;
+# a governed pre-push needs nothing special, because once their checkout carries
+# the `hcloud` table row their hook's picker probes and dispatches here exactly
+# as it does for lab hosts. Collaborators who reach the lab over the tailnet do
+# NOT reach this host that way -- it deliberately does not join it -- so their
+# public egress address is added to the security group once:
+#
+#   aws ec2 authorize-security-group-ingress \
+#     --group-id "<security-group-id-from-the-private-placement-overlay>" \
+#     --ip-permissions 'IpProtocol=tcp,FromPort=22,ToPort=22,\
+# IpRanges=[{CidrIp=<address>/32,Description=<label>}]'
+#
+# -----------------------------------------------------------------------------
+# HOST-TABLE ROW
+# -----------------------------------------------------------------------------
+# scripts/hooks/prepush_hosts.tsv, row `hcloud`. Memory+load probed like every
+# other row; ranking unchanged (ascending load ratio among slot-free hosts).
+# Per-repo tables in omnibase_core and omnimarket carry the row only with that
+# repo's own transport proof, per the OMN-17159 / OMN-17435 discipline.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -20,7 +20,7 @@
 # InstanceInitiatedShutdownBehavior=stop, so an OS halt lands it in the EC2
 # STOPPED state ($0 compute, EBS + EIP only) with the warm caches intact. No
 # AWS credentials exist or are needed on this host. Restart is lab-side:
-#   aws ec2 start-instances --instance-ids <id>   (see README.md)
+#   aws ec2 start-instances --instance-ids <id>   (see bootstrap.sh header)
 #
 # FAIL-ACTIVE: any signal that cannot be read counts as activity. The wrong
 # stop kills a governed suite mid-run; the wrong keep-alive costs cents.
