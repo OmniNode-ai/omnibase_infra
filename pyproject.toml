@@ -500,6 +500,7 @@ markers = [
     "linear: Tests requiring a real Linear API key (LINEAR_API_KEY env var)",
     "bastion: Tests that dial the live MSK SNI bastion and AWS MSK (OMN-15744). Excluded from the nightly integration sweep, which runs on a runner with neither AWS credentials nor bastion reach -- there they would be permanent red noise. Selected deliberately by msk-bastion-canary.yml.",
     "live_github_api: Tests that call the live GitHub REST API directly (network-dependent) -- excluded from the merge-required test-parallel path and run on a scheduled, non-required canary instead (OMN-16096)",
+    "cross_repo_consumer: Tests that read the OmniMarket delegation consumer's own source to prove cross-repo keyword parity (OMN-18321). They FAIL CLOSED when that source is unresolvable, by design, so they are deselected from the generic test splits -- which do not check it out -- and selected by the job that does: consumer-kwarg-parity in delegation-seam-gate.yml, plus the always_run pre-commit hook. Deselected here is not skipped there; the gate that owns them is the enforcement surface.",
 ]
 addopts = [
     "--strict-markers",

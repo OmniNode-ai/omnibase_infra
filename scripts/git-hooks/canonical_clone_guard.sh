@@ -37,98 +37,44 @@ set -euo pipefail
 
 hook_name="$(basename "$0")"
 
-# --- path helpers -----------------------------------------------------------
+# --- shared repository-position helpers (OMN-16497) -------------------------
+#
+# resolve_path / absolutize / is_under / canonical_clone_context live beside
+# this script so the ref-transaction guard in the same hooks directory answers
+# "is this a canonical clone?" from the SAME code. Two copies of that answer
+# would drift, and a drifted copy fails in the dangerous direction: a guard
+# that misreads a canonical clone as a worktree permits exactly what it was
+# installed to refuse.
 
-resolve_path() {
-  # Portable realpath: macOS `readlink` has no -f. Resolves symlinks in the
-  # final component, which is all this script needs (the hook symlinks).
-  local target="$1"
-  local dir base link hops=0
-  while [[ -L "$target" ]]; do
-    hops=$((hops + 1))
-    if [[ "$hops" -gt 32 ]]; then
-      printf 'ERROR: symlink loop resolving %s\n' "$1" >&2
-      exit 1
-    fi
-    link="$(readlink "$target")"
-    case "$link" in
-      /*) target="$link" ;;
-      *) target="$(dirname "$target")/$link" ;;
-    esac
-  done
-  dir="$(cd "$(dirname "$target")" && pwd -P)"
-  base="$(basename "$target")"
-  printf '%s/%s\n' "$dir" "$base"
-}
-
-absolutize() {
-  # git may hand back a relative --git-common-dir / --git-dir.
-  local p="$1"
-  case "$p" in
-    /*) printf '%s\n' "$p" ;;
-    *) printf '%s\n' "$(cd "$p" && pwd -P)" ;;
+_self_script="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+while [[ -L "$_self_script" ]]; do
+  _self_link="$(readlink "$_self_script")"
+  case "$_self_link" in
+    /*) _self_script="$_self_link" ;;
+    *) _self_script="$(cd "$(dirname "$_self_script")" && pwd -P)/$_self_link" ;;
   esac
-}
-
-is_under() {
-  # is_under <candidate> <ancestor> -- strict descendant, not equal.
-  local candidate="$1" ancestor="$2"
-  [[ -n "$ancestor" ]] || return 1
-  [[ "$candidate" == "$ancestor"/* ]]
-}
+done
+# shellcheck source=./canonical_clone_paths.sh
+source "$(cd "$(dirname "$_self_script")" && pwd -P)/canonical_clone_paths.sh"
 
 # --- repository facts -------------------------------------------------------
 
-top_level="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -z "$top_level" ]]; then
+top_level=""
+# shellcheck disable=SC2034  # populated by canonical_clone_context; part of its contract
+git_dir=""
+git_common_dir=""
+# shellcheck disable=SC2034  # populated by canonical_clone_context; part of its contract
+is_linked_worktree=0
+omni_home=""
+is_canonical_clone=0
+if ! canonical_clone_context; then
   # Not inside a work tree (bare repo, or git internals) -- nothing to guard.
   exit 0
-fi
-# Compare physical paths throughout: git_common_dir below is resolved with
-# `pwd -P`, so a symlinked registry root would otherwise defeat the
-# canonical-clone refusal by making the two sides incomparable.
-top_level="$(cd "$top_level" && pwd -P)"
-
-git_dir="$(absolutize "$(git rev-parse --git-dir)")"
-git_common_dir="$(absolutize "$(git rev-parse --git-common-dir)")"
-
-# A LINKED worktree has --git-dir == <common>/worktrees/<name>, so it differs
-# from --git-common-dir. The MAIN worktree of a clone has them equal. This test
-# is path-layout independent, which is what makes the guard correct on a host
-# whose registry lives somewhere other than the documented path.
-if [[ "$git_dir" != "$git_common_dir" ]]; then
-  is_linked_worktree=1
-else
-  is_linked_worktree=0
-fi
-
-# Registry root. Prefer the explicit env var (root CLAUDE.md contract); fall
-# back to the clone's own position -- `<registry>/<repo>/.git` -- which holds
-# for a canonical clone AND for every worktree linked to it, because both share
-# the same --git-common-dir. No hardcoded absolute paths (root CLAUDE.md #6).
-omni_home="${OMNI_HOME:-}"
-if [[ -z "$omni_home" ]]; then
-  omni_home="$(cd "$git_common_dir/../.." && pwd -P)"
 fi
 
 # --- decision ---------------------------------------------------------------
 
-allowed=0
-
-if [[ "$top_level" == "$omni_home" ]]; then
-  # The registry meta-repo itself commits directly to its docs branch.
-  allowed=1
-elif is_under "$top_level" "${ONEX_WORKTREES_ROOT:-}"; then
-  allowed=1
-elif is_under "$top_level" "$omni_home/omni_worktrees"; then
-  allowed=1
-elif is_under "$top_level" "$(dirname "$omni_home")/omni_worktrees"; then
-  allowed=1
-elif [[ "$is_linked_worktree" == "1" ]]; then
-  allowed=1
-fi
-
-if [[ "$allowed" == "0" ]] && is_under "$top_level" "$omni_home"; then
+if [[ "$is_canonical_clone" == "1" ]]; then
   if [[ "${ALLOW_CANONICAL_CLONE_COMMIT:-}" != "1" ]]; then
     cat >&2 <<EOF
 ERROR: blocked $hook_name in canonical clone:

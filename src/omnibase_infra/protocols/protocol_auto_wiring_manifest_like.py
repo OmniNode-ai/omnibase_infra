@@ -20,10 +20,23 @@ class ProtocolAutoWiringManifestLike(Protocol):
     Any object exposing ``total_discovered``, ``total_errors``, and
     ``all_subscribe_topics()`` satisfies this protocol, including
     ``ModelAutoWiringManifest``.
+
+    The two counts are declared READ-ONLY (OMN-18324). As bare annotated
+    attributes they were settable variables, and a Protocol with a settable
+    member is satisfied only by an implementation that is ALSO settable — so
+    ``ModelAutoWiringManifest``, which computes both as properties, did not
+    structurally satisfy the protocol named after it. Nothing noticed while
+    every call site already held the protocol type; the first caller to pass
+    the concrete model got an ``arg-type`` error naming a mismatch that had
+    been there since the protocol was written. Read-only accepts both shapes
+    and nothing here ever assigns to either.
     """
 
-    total_discovered: int
-    total_errors: int
+    @property
+    def total_discovered(self) -> int: ...
+
+    @property
+    def total_errors(self) -> int: ...
 
     def all_subscribe_topics(self) -> Iterable[str]:
         pass
