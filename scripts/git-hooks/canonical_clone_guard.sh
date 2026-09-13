@@ -60,8 +60,10 @@ source "$(cd "$(dirname "$_self_script")" && pwd -P)/canonical_clone_paths.sh"
 # --- repository facts -------------------------------------------------------
 
 top_level=""
+# shellcheck disable=SC2034  # populated by canonical_clone_context; part of its contract
 git_dir=""
 git_common_dir=""
+# shellcheck disable=SC2034  # populated by canonical_clone_context; part of its contract
 is_linked_worktree=0
 omni_home=""
 is_canonical_clone=0
