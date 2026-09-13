@@ -1854,6 +1854,8 @@ jobs:
           echo "treats a missing file as an error rather than a warning."
           echo "No continue-on-error on the evidence chain -- the producer, the"
           echo "assertion or the uploader -- nor on the enclosing job (OMN-18249)."
+          echo "An always() uploader has an assertion that CAN fail the job, as an"
+          echo "independently computed predicate rather than an emergent one (OMN-18251)."
           echo "Read from parsed workflow structure, never from file text."
           echo "================================================================"
           uv run pytest tests/ci/test_ci_evidence_policy.py -v --tb=short
