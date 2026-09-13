@@ -440,6 +440,16 @@ cloud_canary_runner_variable:
   # job is exactly what the difference looks like. Fixed by installing the
   # plugin in the fleet's own bootstrap, pinned by version and verified by
   # digest (omninode_infra, OMN-18291), not by narrowing this job.
+  #
+  # AND THEN THE SAME CLASS AGAIN, one line further on. Run 34750597454,
+  # instance i-0b7b99b0fb129eb15: compose now existed and teardown passed, and
+  # the build stopped with "compose build requires buildx 0.17.0 or later". The
+  # distribution DOES ship a buildx plugin, so every presence check passes and
+  # `docker info` lists one -- it is 0.12.1. A tool that is present and too old
+  # is invisible to a check that asks whether the tool is there, which is why
+  # the only check that found either gap was running the real job. Both plugins
+  # are now installed from pinned, digest-verified release binaries and the boot
+  # asserts both before the instance registers.
   expected_json: '["self-hosted","omni-cloud-ci"]'
   repositories:
     - omnibase_infra
