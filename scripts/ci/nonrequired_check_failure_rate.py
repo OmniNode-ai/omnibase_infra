@@ -40,6 +40,25 @@ EXIT CODE IS ALWAYS 0 ON A SUCCESSFUL EVALUATION
     not evaluate, which keeps "the alerter is broken" distinguishable from "the
     alerter fired" -- the same distinction phase 3 exists to enforce everywhere
     else.
+
+SCHEDULED RUNS, ADDED IN OMN-18322
+    The reads above are all pull-request-shaped: a check-run on a head. A
+    scheduled workflow has no head and no pull request, so nothing above
+    watches it -- and the friction trend report (2026-09-13) measured scheduled
+    runs failing at 15.4% over 9,746 runs against 2.9% on pull requests, with
+    nothing triaging the difference.
+
+    For each repo already watched, this lists every ACTIVE workflow, reads its
+    `event == schedule` runs created within the trailing window (policy:
+    `scheduled_window_days`), and alerts per workflow when the failure rate
+    exceeds `scheduled_failure_threshold_pct`. Same conclusions count as a
+    failure as the check-run path (`FAILING_CONCLUSIONS`), same policy file,
+    same report artifact, same annotation/summary/Slack destinations -- no new
+    channel, no new scheduler, per the plan this rides.
+
+    A workflow with zero scheduled runs in the window is silent, not zero
+    percent: a rate with no denominator is not evidence of anything, so it is
+    excluded rather than reported as a 0% or 100% control it did not earn.
 """
 
 from __future__ import annotations
@@ -52,6 +71,7 @@ import sys
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -129,6 +149,63 @@ def evaluate(
     ]
 
 
+@dataclass(frozen=True)
+class ScheduledAlert:
+    repo: str
+    workflow: str
+    failures: int
+    observed: int
+    rate_pct: float
+    last_failure_url: str
+
+    @property
+    def detail(self) -> str:
+        return (
+            f"{self.repo}: scheduled workflow '{self.workflow}' failed "
+            f"{self.rate_pct:.1f}% ({self.failures}/{self.observed}) over the "
+            f"trailing window -- last failure {self.last_failure_url}"
+        )
+
+
+def evaluate_scheduled(
+    repo: str,
+    workflow_path: str,
+    runs: list[dict[str, Any]],
+    threshold_pct: float,
+) -> ScheduledAlert | None:
+    """One workflow's scheduled-run failure rate over an already-windowed list.
+
+    ``runs`` is one workflow's ``event == schedule`` runs, already filtered to
+    the trailing window by the caller (the GitHub `created` query qualifier).
+    Silent (returns ``None``) on zero observed runs -- a rate with no
+    denominator is not evidence, not a 0% control it did not earn -- and on a
+    rate at or below ``threshold_pct``.
+    """
+    observed = len(runs)
+    if observed == 0:
+        return None
+    failing = [
+        run
+        for run in runs
+        if isinstance(run, dict)
+        and str(run.get("conclusion") or "") in FAILING_CONCLUSIONS
+    ]
+    if not failing:
+        return None
+    rate_pct = 100.0 * len(failing) / observed
+    if rate_pct <= threshold_pct:
+        return None
+    last = max(failing, key=lambda run: str(run.get("created_at") or ""))
+    return ScheduledAlert(
+        repo=repo,
+        workflow=workflow_path,
+        failures=len(failing),
+        observed=observed,
+        rate_pct=rate_pct,
+        last_failure_url=str(last.get("html_url") or ""),
+    )
+
+
 def _gh_json(path: str, token: str | None) -> Any:
     env = dict(os.environ)
     if token:
@@ -171,8 +248,66 @@ def _gh_array(path: str, token: str | None) -> list[Any]:
     return payload
 
 
-def post_slack_alert(alerts: list[Alert]) -> None:
-    """Post through the SAME channel secret the fleet canary already uses."""
+def active_workflows(slug: str, token: str | None) -> list[dict[str, Any]]:
+    """Every ACTIVE workflow declared in the repo (OMN-18322).
+
+    Disabled workflows (manually, or by inactivity) are excluded: a `created`
+    filter against one returns zero runs anyway, so including it would only
+    spend an API call for no possible finding.
+    """
+    payload = _gh_object(f"repos/{slug}/actions/workflows?per_page=100", token)
+    workflows = payload.get("workflows")
+    if not isinstance(workflows, list):
+        raise RuntimeError(
+            f"repos/{slug}/actions/workflows returned no 'workflows' array"
+        )
+    return [w for w in workflows if isinstance(w, dict) and w.get("state") == "active"]
+
+
+def scheduled_runs_for_workflow(
+    slug: str,
+    workflow_id: int,
+    since_date: str,
+    token: str | None,
+    max_pages: int = 15,
+) -> list[dict[str, Any]]:
+    """One workflow's ``event == schedule`` runs since ``since_date`` (YYYY-MM-DD).
+
+    The `created=>=<date>` qualifier filters server-side, so this scopes to one
+    workflow's own run history rather than paging through the repo's combined
+    run list -- which for a repo running a 10-minute cron hits GitHub's ~1000-
+    result pagination ceiling in under two days and can never reach a 7-day
+    window (measured live on omnibase_infra's own zombie-detector schedule
+    while building this).
+    """
+    runs: list[dict[str, Any]] = []
+    page = 1
+    while page <= max_pages:
+        payload = _gh_object(
+            f"repos/{slug}/actions/workflows/{workflow_id}/runs"
+            f"?event=schedule&created=>={since_date}&per_page=100&page={page}",
+            token,
+        )
+        batch = payload.get("workflow_runs")
+        if not isinstance(batch, list):
+            raise RuntimeError(
+                f"repos/{slug}/actions/workflows/{workflow_id}/runs returned no "
+                "'workflow_runs' array"
+            )
+        runs.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return runs
+
+
+def post_slack_alert(alerts: list[Any]) -> None:
+    """Post through the SAME channel secret the fleet canary already uses.
+
+    ``alerts`` mixes ``Alert`` (non-required check) and ``ScheduledAlert``
+    (OMN-18322) instances -- both expose ``.detail`` and nothing else here
+    depends on which kind it is.
+    """
     token = os.environ.get("SLACK_BOT_TOKEN")
     channel = os.environ.get("SLACK_CHANNEL_ID")
     if not token or not channel:
@@ -219,6 +354,34 @@ def render(alerts: list[Alert]) -> None:
             )
 
 
+def render_scheduled(alerts: list[ScheduledAlert]) -> None:
+    """OMN-18322: the scheduled-run counterpart of :func:`render`."""
+    for alert in alerts:
+        print(f"::warning title=Scheduled workflow failing::{alert.detail}")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary:
+        return
+    with open(summary, "a", encoding="utf-8") as handle:
+        handle.write("\n## Scheduled workflow failure rate (OMN-18322)\n\n")
+        if not alerts:
+            handle.write(
+                "No scheduled workflow is failing above the trailing-window "
+                "threshold.\n"
+            )
+            return
+        handle.write(
+            "| repo | workflow | fail % | failures/observed | last failure |\n"
+        )
+        handle.write(
+            "|------|----------|--------|--------------------|--------------|\n"
+        )
+        for alert in alerts:
+            handle.write(
+                f"| {alert.repo} | {alert.workflow} | {alert.rate_pct:.1f}% | "
+                f"{alert.failures}/{alert.observed} | {alert.last_failure_url} |\n"
+            )
+
+
 def load_policy(path: Path) -> dict[str, Any]:
     """Read the threshold and the umbrella-enforced contexts.
 
@@ -236,7 +399,12 @@ def load_policy(path: Path) -> dict[str, Any]:
         raise RuntimeError(
             f"{path} is missing the required 'route.nonrequired_check_alert:' section"
         )
-    for key in ("failure_threshold", "heads_observed"):
+    for key in (
+        "failure_threshold",
+        "heads_observed",
+        "scheduled_failure_threshold_pct",
+        "scheduled_window_days",
+    ):
         if key not in block:
             raise KeyError(
                 f"{path} route.nonrequired_check_alert is missing required key {key!r}"
@@ -260,9 +428,15 @@ def main(argv: list[str] | None = None) -> int:
     policy = load_policy(args.policy)
     threshold = int(policy["failure_threshold"])
     umbrella: dict[str, list[str]] = policy.get("umbrella_enforced_contexts") or {}
+    scheduled_threshold_pct = float(policy["scheduled_failure_threshold_pct"])
+    scheduled_window_days = int(policy["scheduled_window_days"])
+    scheduled_since = (
+        datetime.now(UTC) - timedelta(days=scheduled_window_days)
+    ).strftime("%Y-%m-%d")
 
     token = os.environ.get("GH_TOKEN") or os.environ.get("CROSS_REPO_PAT")
     all_alerts: list[Alert] = []
+    all_scheduled_alerts: list[ScheduledAlert] = []
     report: dict[str, Any] = {"schema": "nonrequired_check_report/v1", "repos": {}}
 
     for repo in args.repo:
@@ -286,6 +460,34 @@ def main(argv: list[str] | None = None) -> int:
         ]
         alerts = evaluate(slug, pages, required, threshold)
         all_alerts.extend(alerts)
+
+        scheduled_report: dict[str, Any] = {}
+        for workflow in active_workflows(slug, token):
+            workflow_id = workflow.get("id")
+            workflow_path = str(workflow.get("path") or workflow.get("name") or "")
+            if not isinstance(workflow_id, int) or not workflow_path:
+                continue
+            runs = scheduled_runs_for_workflow(
+                slug, workflow_id, scheduled_since, token
+            )
+            scheduled_alert = evaluate_scheduled(
+                slug, workflow_path, runs, scheduled_threshold_pct
+            )
+            if runs:
+                failing = sum(
+                    1
+                    for run in runs
+                    if isinstance(run, dict)
+                    and str(run.get("conclusion") or "") in FAILING_CONCLUSIONS
+                )
+                scheduled_report[workflow_path] = {
+                    "observed": len(runs),
+                    "failures": failing,
+                    "rate_pct": round(100.0 * failing / len(runs), 1),
+                }
+            if scheduled_alert is not None:
+                all_scheduled_alerts.append(scheduled_alert)
+
         report["repos"][slug] = {
             "heads_observed": len(pages),
             "required_contexts": sorted(required),
@@ -293,14 +495,32 @@ def main(argv: list[str] | None = None) -> int:
                 {"check": a.check, "failures": a.failures, "observed": a.observed}
                 for a in alerts
             ],
+            "scheduled": {
+                "window_days": scheduled_window_days,
+                "threshold_pct": scheduled_threshold_pct,
+                "workflows": scheduled_report,
+                "alerts": [
+                    {
+                        "workflow": a.workflow,
+                        "failures": a.failures,
+                        "observed": a.observed,
+                        "rate_pct": a.rate_pct,
+                        "last_failure_url": a.last_failure_url,
+                    }
+                    for a in all_scheduled_alerts
+                    if a.repo == slug
+                ],
+            },
         }
 
     render(all_alerts)
+    render_scheduled(all_scheduled_alerts)
     args.report.write_text(
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
     )
-    if all_alerts and not args.dry_run:
-        post_slack_alert(all_alerts)
+    combined_alerts: list[Any] = [*all_alerts, *all_scheduled_alerts]
+    if combined_alerts and not args.dry_run:
+        post_slack_alert(combined_alerts)
 
     # Raising an alert is not this job failing. See the module docstring.
     return 0
