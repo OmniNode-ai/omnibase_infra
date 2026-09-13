@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 import yaml
+from pydantic import SecretStr
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -21,6 +23,207 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayTenantIdentity,
 )
 from omnibase_infra.runtime import gateway_forwarder
+
+
+@pytest.mark.asyncio
+async def test_https_resolver_uses_only_explicit_strict_infisical_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bootstrap_path = tmp_path / "bootstrap.json"
+    resolver_path = tmp_path / "resolver.json"
+    bootstrap_path.write_text(
+        """{
+  "host": "https://store.invalid",
+  "client_id": "synthetic-client-id",
+  "client_secret": "synthetic-client-secret",
+  "project_id": "11111111-1111-1111-1111-111111111111",
+  "environment_slug": "dev"
+}
+""",
+        encoding="utf-8",
+    )
+    resolver_path.write_text(
+        """{
+  "enable_convention_fallback": false,
+  "required_secrets": ["gateway.cloud.https.gateway_token"],
+  "mappings": [{
+    "logical_name": "gateway.cloud.https.gateway_token",
+    "source": {
+      "source_type": "infisical",
+      "source_path": "/dev/gateway/GATEWAY_TOKEN"
+    }
+  }]
+}
+""",
+        encoding="utf-8",
+    )
+    initialized: list[dict[str, object]] = []
+
+    class _Handler:
+        def __init__(self, _container: object) -> None:
+            return None
+
+        async def initialize(self, config: dict[str, object]) -> None:
+            typed_config = gateway_forwarder.ModelInfisicalHandlerConfig.model_validate(
+                config
+            )
+            initialized.append(
+                {
+                    "host": typed_config.host,
+                    "client_id": typed_config.client_id.get_secret_value(),
+                    "client_secret": typed_config.client_secret.get_secret_value(),
+                    "project_id": str(typed_config.project_id),
+                    "environment_slug": typed_config.environment_slug,
+                    "secret_path": typed_config.secret_path,
+                    "cache_ttl_seconds": typed_config.cache_ttl_seconds,
+                    "circuit_breaker_threshold": typed_config.circuit_breaker_threshold,
+                    "circuit_breaker_reset_timeout": (
+                        typed_config.circuit_breaker_reset_timeout
+                    ),
+                    "circuit_breaker_enabled": typed_config.circuit_breaker_enabled,
+                }
+            )
+
+    monkeypatch.setattr(gateway_forwarder, "HandlerInfisical", _Handler)
+    monkeypatch.setattr(
+        gateway_forwarder.SecretResolver,
+        "validate_required_secrets",
+        lambda _self: None,
+    )
+
+    resolver = await gateway_forwarder.build_gateway_https_secret_resolver(
+        bootstrap_path=bootstrap_path,
+        resolver_config_path=resolver_path,
+        required_ref="gateway.cloud.https.gateway_token",
+    )
+
+    assert isinstance(resolver, gateway_forwarder.SecretResolver)
+    # This exercises the complete typed bootstrap-to-handler payload, including
+    # preserved synthetic Universal Auth credentials and handler defaults.
+    assert initialized == [
+        {
+            "host": "https://store.invalid",
+            "client_id": "synthetic-client-id",
+            "client_secret": "synthetic-client-secret",
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "environment_slug": "dev",
+            "secret_path": "/",
+            "cache_ttl_seconds": 300.0,
+            "circuit_breaker_threshold": 5,
+            "circuit_breaker_reset_timeout": 60.0,
+            "circuit_breaker_enabled": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_https_resolver_refuses_non_infisical_or_missing_required_mapping(
+    tmp_path: Path,
+) -> None:
+    bootstrap_path = tmp_path / "bootstrap.json"
+    resolver_path = tmp_path / "resolver.json"
+    bootstrap_path.write_text(
+        """{
+  "host": "https://store.invalid",
+  "client_id": "synthetic-client-id",
+  "client_secret": "synthetic-client-secret",
+  "project_id": "11111111-1111-1111-1111-111111111111",
+  "environment_slug": "dev"
+}
+""",
+        encoding="utf-8",
+    )
+    resolver_path.write_text(
+        """{
+  "enable_convention_fallback": false,
+  "required_secrets": ["gateway.cloud.https.gateway_token"],
+  "mappings": [{
+    "logical_name": "gateway.cloud.https.gateway_token",
+    "source": {"source_type": "file", "source_path": "/run/token"}
+  }]
+}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="valid mounted Infisical"):
+        await gateway_forwarder.build_gateway_https_secret_resolver(
+            bootstrap_path=bootstrap_path,
+            resolver_config_path=resolver_path,
+            required_ref="gateway.cloud.https.gateway_token",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("environment_slug", [None, "prod"])
+async def test_https_resolver_refuses_implicit_or_non_dev_bootstrap_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    environment_slug: str | None,
+) -> None:
+    """The typed model's prod default must never select the gateway's dev store."""
+    bootstrap_path = tmp_path / "bootstrap.json"
+    resolver_path = tmp_path / "resolver.json"
+    bootstrap: dict[str, object] = {
+        "host": "https://store.invalid",
+        "client_id": "synthetic-client-id",
+        "client_secret": "synthetic-client-secret",
+        "project_id": "11111111-1111-1111-1111-111111111111",
+    }
+    if environment_slug is not None:
+        bootstrap["environment_slug"] = environment_slug
+    bootstrap_path.write_text(json.dumps(bootstrap), encoding="utf-8")
+    resolver_path.write_text(
+        json.dumps(
+            {
+                "enable_convention_fallback": False,
+                "required_secrets": ["gateway.cloud.https.gateway_token"],
+                "mappings": [
+                    {
+                        "logical_name": "gateway.cloud.https.gateway_token",
+                        "source": {
+                            "source_type": "infisical",
+                            "source_path": "/dev/gateway/GATEWAY_TOKEN",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    initialized = False
+
+    class _Handler:
+        def __init__(self, _container: object) -> None:
+            return None
+
+        async def initialize(self, _config: dict[str, object]) -> None:
+            nonlocal initialized
+            initialized = True
+
+    monkeypatch.setattr(gateway_forwarder, "HandlerInfisical", _Handler)
+
+    with pytest.raises(ValueError, match="explicitly select the dev environment"):
+        await gateway_forwarder.build_gateway_https_secret_resolver(
+            bootstrap_path=bootstrap_path,
+            resolver_config_path=resolver_path,
+            required_ref="gateway.cloud.https.gateway_token",
+        )
+    assert not initialized
+
+
+@pytest.mark.asyncio
+async def test_https_secret_adapter_exposes_text_only_at_http_auth_boundary() -> None:
+    class _Resolver:
+        async def get_secret_async(self, _logical_name: str) -> SecretStr | None:
+            return SecretStr("synthetic-gateway-token")
+
+    result = await gateway_forwarder.resolve_gateway_https_secret(
+        _Resolver(),  # type: ignore[arg-type] -- exercises the minimal resolver seam
+        "gateway.cloud.https.gateway_token",
+    )
+
+    assert result == "synthetic-gateway-token"
 
 
 def _runtime_config() -> ModelGatewayForwarderRuntimeConfig:

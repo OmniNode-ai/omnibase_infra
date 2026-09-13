@@ -26,12 +26,15 @@ from aiokafka.errors import (
     TopicAuthorizationFailedError,
 )
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
 )
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models import ModelEventHeaders
+from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.idempotency import StoreIdempotencySqlite
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
@@ -61,6 +64,10 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror import (
     NodeLaneMirror,
 )
+from omnibase_infra.runtime.models.model_secret_resolver_config import (
+    ModelSecretResolverConfig,
+)
+from omnibase_infra.runtime.secret_resolver import SecretResolver
 from omnibase_infra.secret_stores.adapter_env_secret_store import (
     AdapterEnvSecretStore,
 )
@@ -71,6 +78,82 @@ _GATEWAY_CONTRACT_NAME = "node_bus_forwarder_effect"
 _DEFAULT_GATEWAY_CONTRACT_PATH = (
     Path(__file__).parents[1] / "nodes" / _GATEWAY_CONTRACT_NAME / "contract.yaml"
 )
+
+
+async def build_gateway_https_secret_resolver(
+    *,
+    bootstrap_path: Path,
+    resolver_config_path: Path,
+    required_ref: str,
+) -> SecretResolver:
+    """Build the HTTPS-only strict Infisical resolver from mounted artifacts.
+
+    The gateway does not inherit bootstrap credentials through its environment.
+    The deploy agent writes the two root-owned artifacts atomically and compose
+    mounts them read-only. A direct-MSK deployment never calls this function.
+    """
+    try:
+        bootstrap_raw = json.loads(bootstrap_path.read_text(encoding="utf-8"))
+        resolver_raw = json.loads(resolver_config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "gateway HTTPS ingest requires valid mounted Infisical bootstrap and "
+            "secret-resolver configuration"
+        ) from exc
+    if (
+        not isinstance(bootstrap_raw, dict)
+        or bootstrap_raw.get("environment_slug") != "dev"
+    ):
+        raise ValueError(
+            "gateway HTTPS ingest bootstrap must explicitly select the dev environment"
+        )
+    try:
+        ModelInfisicalHandlerConfig.model_validate(bootstrap_raw)
+        resolver_config = ModelSecretResolverConfig.model_validate(resolver_raw)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            "gateway HTTPS ingest requires valid mounted Infisical bootstrap and "
+            "secret-resolver configuration"
+        ) from exc
+
+    expected_mapping = next(
+        (
+            mapping
+            for mapping in resolver_config.mappings
+            if mapping.logical_name == required_ref
+        ),
+        None,
+    )
+    if (
+        resolver_config.required_secrets != [required_ref]
+        or resolver_config.enable_convention_fallback
+        or expected_mapping is None
+        or expected_mapping.source.source_type != "infisical"
+    ):
+        raise ValueError(
+            "gateway HTTPS ingest resolver must strictly declare its required "
+            "Infisical credential reference"
+        )
+
+    # HandlerInfisical validates this same parsed JSON mapping again. Passing the
+    # original mapping preserves the two SecretStr source values for its auth
+    # boundary; serializing the typed model in JSON mode would mask both values.
+    handler_config = {str(key): value for key, value in bootstrap_raw.items()}
+    handler = HandlerInfisical(ModelONEXContainer())
+    await handler.initialize(handler_config)
+    resolver = SecretResolver(config=resolver_config, infisical_handler=handler)
+    resolver.validate_required_secrets()
+    return resolver
+
+
+async def resolve_gateway_https_secret(
+    resolver: SecretResolver, logical_name: str
+) -> str | None:
+    """Expose the strict resolver's secret value only at the HTTP auth boundary."""
+    resolved = await resolver.get_secret_async(logical_name)
+    if resolved is None:
+        return None
+    return resolved.get_secret_value()
 
 
 def load_gateway_forwarder_runtime_config(
@@ -1423,6 +1506,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--infisical-bootstrap",
+        type=Path,
+        default=Path("/run/gateway/secrets/infisical-bootstrap.json"),
+        help="Root-owned Infisical bootstrap artifact mounted read-only for HTTPS ingest",
+    )
+    parser.add_argument(
+        "--secret-resolver-config",
+        type=Path,
+        default=Path("/run/gateway/secrets/secret-resolver.json"),
+        help="Typed strict resolver artifact mounted read-only for HTTPS ingest",
+    )
+    parser.add_argument(
         "--egress-health-file",
         type=Path,
         default=Path(DEFAULT_EGRESS_HEALTH_PATH),
@@ -1453,6 +1548,20 @@ async def _async_main(args: argparse.Namespace) -> None:
         broker_ref_map_path=args.broker_ref_map,
         lane_credential_map_path=args.lane_credential_map,
     )
+    resolve_secret: Callable[[str], Awaitable[str | None]] = (
+        AdapterEnvSecretStore().get_secret
+    )
+    if config.forwarder.https_ingest is not None:
+        resolver = await build_gateway_https_secret_resolver(
+            bootstrap_path=args.infisical_bootstrap,
+            resolver_config_path=args.secret_resolver_config,
+            required_ref=config.forwarder.https_ingest.ingest_auth_ref,
+        )
+
+        async def resolve_https_secret(logical_name: str) -> str | None:
+            return await resolve_gateway_https_secret(resolver, logical_name)
+
+        resolve_secret = resolve_https_secret
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -1460,7 +1569,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     await run_gateway_forwarder(
         config,
         shutdown_event=shutdown_event,
-        resolve_secret=AdapterEnvSecretStore().get_secret,
+        resolve_secret=resolve_secret,
         ready_path=args.ready_file,
         # OMN-17201: both health surfaces were argparse-only until now.
         # ``--egress-health-file`` was parsed, documented in compose, read

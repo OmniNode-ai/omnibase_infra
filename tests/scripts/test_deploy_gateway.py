@@ -139,6 +139,18 @@ _FAKE_SUDO = """#!/usr/bin/env bash
 # Unit state lives in GW_TEST_UNIT_STATE_FILE so it survives across the
 # several systemctl invocations one deploy makes.
 set -eu
+if [ -n "${GW_TEST_SUDO_LOG:-}" ]; then
+  printf '%s\\n' "$*" >> "${GW_TEST_SUDO_LOG}"
+fi
+if [ -n "${GW_TEST_FAIL_SECRET_RESOLVER_INSTALL_ONCE_FILE:-}" ] && \\
+   [ ! -e "${GW_TEST_FAIL_SECRET_RESOLVER_INSTALL_ONCE_FILE}" ]; then
+  case "${*: -1}" in
+    */secret-resolver.json)
+      : > "${GW_TEST_FAIL_SECRET_RESOLVER_INSTALL_ONCE_FILE}"
+      exit 1
+      ;;
+  esac
+fi
 args=()
 skip_next=0
 for a in "$@"; do
@@ -208,6 +220,12 @@ if [ "${args[0]:-}" = "systemctl" ]; then
       ;;
   esac
 fi
+if [ "${args[0]:-}" = "stat" ] && [ "${args[1]:-}" = "-c" ]; then
+  target="${args[3]:-}"
+  mode="$(/usr/bin/stat -f '%Lp' "${target}")"
+  printf '%s:0:%s\\n' "${mode}" "${GATEWAY_CONTAINER_GID:?}"
+  exit 0
+fi
 exec "${args[@]}"
 """
 
@@ -234,6 +252,7 @@ class _Harness:
         self.registry_dir = tmp_path / "home" / ".omnibase" / "gateway"
         self.docker_log = tmp_path / "docker.log"
         self.systemctl_log = tmp_path / "systemctl.log"
+        self.sudo_log = tmp_path / "sudo.log"
         self.running_image_state = tmp_path / "running-image.state"
         # OMN-18134: the systemd unit's activation state, as the fake
         # systemctl sees it. Defaults to the happy path; a test simulating
@@ -269,6 +288,7 @@ class _Harness:
         e["GATEWAY_REGISTRY_DIR"] = str(self.registry_dir)
         e["GW_TEST_DOCKER_LOG"] = str(self.docker_log)
         e["GW_TEST_SYSTEMCTL_LOG"] = str(self.systemctl_log)
+        e["GW_TEST_SUDO_LOG"] = str(self.sudo_log)
         e["GW_TEST_RUNNING_IMAGE_STATE"] = str(self.running_image_state)
         e["GW_TEST_UNIT_STATE_FILE"] = str(self.unit_state_file)
         e.update(overrides)
@@ -307,6 +327,11 @@ class _Harness:
             (self.registry_dir / "registry.json").read_text(encoding="utf-8")
         )
         return result
+
+    def append_gateway_env(self, **entries: str) -> None:
+        with self.env_file.open("a", encoding="utf-8") as handle:
+            for key, value in entries.items():
+                handle.write(f"{key}={value}\n")
 
 
 @pytest.fixture
@@ -672,6 +697,141 @@ def test_sync_host_files_green_after_diff_is_empty(harness: _Harness) -> None:
         encoding="utf-8"
     )
     assert host_canary == repo_canary
+
+
+def _write_https_resolver_stage(tmp_path: Path) -> Path:
+    stage = tmp_path / "resolver-stage"
+    stage.mkdir(mode=0o700)
+    (stage / "infisical-bootstrap.json").write_text(
+        '{"environment_slug":"dev"}\n', encoding="utf-8"
+    )
+    (stage / "secret-resolver.json").write_text(
+        '{"required_secrets":["gateway.cloud.https.gateway_token"]}\n',
+        encoding="utf-8",
+    )
+    return stage
+
+
+@pytest.mark.unit
+def test_execute_installs_private_root_gid_resolver_pair_from_private_stage(
+    harness: _Harness,
+) -> None:
+    """The non-root agent stage never becomes the live container mount directly."""
+    stage = _write_https_resolver_stage(harness.tmp_path)
+    secret_dir = harness.tmp_path / "secrets"
+    harness.append_gateway_env(
+        GATEWAY_INFISICAL_SECRET_DIR=str(secret_dir),
+        GATEWAY_INFISICAL_SOURCE_PATH="/dev/gateway/GATEWAY_TOKEN",
+    )
+
+    result = harness.run(
+        "--execute",
+        "--https-resolver-stage",
+        str(stage),
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (secret_dir / "infisical-bootstrap.json").read_text(encoding="utf-8") == (
+        stage / "infisical-bootstrap.json"
+    ).read_text(encoding="utf-8")
+    assert (secret_dir / "secret-resolver.json").read_text(encoding="utf-8") == (
+        stage / "secret-resolver.json"
+    ).read_text(encoding="utf-8")
+    assert secret_dir.stat().st_mode & 0o777 == 0o750
+    assert (secret_dir / "infisical-bootstrap.json").stat().st_mode & 0o777 == 0o440
+    assert (secret_dir / "secret-resolver.json").stat().st_mode & 0o777 == 0o440
+    sudo_commands = harness.sudo_log.read_text(encoding="utf-8")
+    assert (
+        f"install -d -m 0750 -o root -g 1000 {harness.tmp_path}/.secrets.candidate."
+        in sudo_commands
+    )
+    assert "install -m 0440 -o root -g 1000" in sudo_commands
+
+
+@pytest.mark.unit
+def test_execute_preserves_old_resolver_pair_when_second_root_install_fails(
+    harness: _Harness,
+) -> None:
+    """A faulted second install must leave the previous coherent pair usable."""
+    stage = _write_https_resolver_stage(harness.tmp_path)
+    secret_dir = harness.tmp_path / "secrets"
+    secret_dir.mkdir(mode=0o750)
+    old_bootstrap = secret_dir / "infisical-bootstrap.json"
+    old_resolver = secret_dir / "secret-resolver.json"
+    old_bootstrap.write_text("old-bootstrap\n", encoding="utf-8")
+    old_resolver.write_text("old-resolver\n", encoding="utf-8")
+    marker = harness.tmp_path / "second-install-failed"
+    harness.append_gateway_env(
+        GATEWAY_INFISICAL_SECRET_DIR=str(secret_dir),
+        GATEWAY_INFISICAL_SOURCE_PATH="/dev/gateway/GATEWAY_TOKEN",
+    )
+
+    result = harness.run(
+        "--execute",
+        "--https-resolver-stage",
+        str(stage),
+        GW_TEST_SECRET_DIR=str(secret_dir),
+        GW_TEST_FAIL_SECRET_RESOLVER_INSTALL_ONCE_FILE=str(marker),
+    )
+
+    assert result.returncode != 0
+    assert marker.is_file(), "the second root install was not exercised"
+    assert old_bootstrap.read_text(encoding="utf-8") == "old-bootstrap\n"
+    assert old_resolver.read_text(encoding="utf-8") == "old-resolver\n"
+
+
+@pytest.mark.unit
+def test_execute_refuses_resolver_target_at_gateway_env_parent_before_sudo(
+    harness: _Harness,
+) -> None:
+    """The root installer may only receive a dedicated child, never a broad parent."""
+    stage = _write_https_resolver_stage(harness.tmp_path)
+    marker = harness.tmp_path / "second-install-failed"
+    harness.append_gateway_env(
+        GATEWAY_INFISICAL_SECRET_DIR=str(harness.tmp_path),
+        GATEWAY_INFISICAL_SOURCE_PATH="/dev/gateway/GATEWAY_TOKEN",
+    )
+
+    result = harness.run(
+        "--execute",
+        "--https-resolver-stage",
+        str(stage),
+        GW_TEST_LABEL_REVISION="3541ac805b86",
+        GW_TEST_LABEL_BUILD_SOURCE="release",
+        GW_TEST_DELIVERY_PRESENT="1",
+        GW_TEST_SQLITE_PRESENT="1",
+        GW_TEST_FAIL_SECRET_RESOLVER_INSTALL_ONCE_FILE=str(marker),
+    )
+
+    assert result.returncode != 0
+    assert "fixed dedicated secrets child" in result.stderr
+    assert not harness.sudo_log.exists(), "unsafe target reached root install"
+
+
+@pytest.mark.unit
+def test_execute_refuses_symlinked_resolver_target_before_sudo(
+    harness: _Harness,
+) -> None:
+    """A dedicated-looking path must not redirect root installation elsewhere."""
+    stage = _write_https_resolver_stage(harness.tmp_path)
+    outside = harness.tmp_path / "outside-resolver-target"
+    outside.mkdir(exist_ok=True)
+    secret_dir = harness.tmp_path / "secrets"
+    secret_dir.symlink_to(outside, target_is_directory=True)
+    harness.append_gateway_env(
+        GATEWAY_INFISICAL_SECRET_DIR=str(secret_dir),
+        GATEWAY_INFISICAL_SOURCE_PATH="/dev/gateway/GATEWAY_TOKEN",
+    )
+
+    result = harness.run("--execute", "--https-resolver-stage", str(stage))
+
+    assert result.returncode != 0
+    assert "dedicated directory" in result.stderr
+    assert not harness.sudo_log.exists(), "symlink target reached root install"
 
 
 # ---------------------------------------------------------------------------
