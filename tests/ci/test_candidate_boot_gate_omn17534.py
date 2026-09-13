@@ -242,9 +242,50 @@ def test_gate_proves_strict_mode_off_the_cluster(gate: dict[str, Any]) -> None:
     """
     run = _run_text(gate)
     assert "ONEX_WIRING_STRICT_MODE" in run
-    assert "kubectl get deploy" in run, (
+    assert "kubectl get " in run and '-n "${LAB_NAMESPACE}"' in run, (
         "strict mode must be read back off the applied Deployment, not out of "
         "the render; the render is the thing under test"
+    )
+
+
+def test_the_strict_readback_covers_every_kernel_pod(gate: dict[str, Any]) -> None:
+    """OMN-18324. One hardcoded Deployment name is not a claim about the lane.
+
+    Until OMN-18324 this step read back ``deploy omninode-runtime`` and nothing
+    else, so both kernel-pod projection writers could be applied at the
+    fail-open default while the step -- and the ``strict_wiring_mode`` leg of
+    the lab-pass receipt that resolves from its outcome -- reported the lane
+    strict. Measured on 2026-09-13:
+    ``omnimarket-projection-delegation-writer`` booted
+    ``wired=0 skipped=0 failed=1`` on the persistent lab lane, reported
+    ``READY 1``, persisted nothing, and passed this gate (OMN-18307).
+
+    The three properties asserted here are the ones that make the widened
+    readback worth more than a longer hardcoded list: the set is DERIVED from
+    the render, the derivation is the ``command:``-override rule rather than a
+    name match, and an empty derived set is a failure rather than a vacuous
+    pass.
+    """
+    run = _run_text(gate)
+
+    assert 'omninode-runtime" -n' not in run and "deploy omninode-runtime" not in run, (
+        "the readback must not target a single hardcoded Deployment name"
+    )
+    assert "KERNEL_DEPLOYS" in run, (
+        "the readback must iterate a derived set of kernel-pod Deployments"
+    )
+    assert "onex-lab-render.yaml" in run, (
+        "the set must be derived from the render that was actually applied, so "
+        "a Deployment added later is covered with no edit here"
+    )
+    assert '"command" in container' in run, (
+        "the derivation is the entrypoint rule -- a command override means the "
+        "process never reaches wire_from_manifest and the flag is inert -- not "
+        "a name match"
+    )
+    assert '${#KERNEL_DEPLOYS[@]}" -eq 0' in run, (
+        "an empty derived set must fail: a loop over nothing prints no error "
+        "and exits 0, which is indistinguishable from a lane that passed"
     )
 
 
