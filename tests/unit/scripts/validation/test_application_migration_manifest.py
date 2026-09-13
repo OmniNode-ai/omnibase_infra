@@ -609,7 +609,12 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # projection_cost_savings_overview, which 088 above left behind because that
     # view read only savings_estimates at the time and reads delegation_events
     # as of this migration.
-    assert len(result.declarations) == 180
+    # 180 -> 181 for OMN-17201's
+    # nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql.
+    # The new nullable UUID is a delivery trace beside the existing content
+    # identity; it has no backfill or uniqueness rule, so historical rows keep
+    # their honest absence of an envelope identifier.
+    assert len(result.declarations) == 181
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
