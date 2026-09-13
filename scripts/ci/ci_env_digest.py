@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import platform
 import tomllib
 from datetime import date, datetime, time
@@ -50,18 +51,35 @@ DEPENDENCY_PATHS: tuple[tuple[str, ...], ...] = (
     ("dependency-groups",),
     ("tool", "uv"),
 )
+TABLE_TRIPWIRE_MAX_DEPTH = 3
 
 
 def _json_ready(value: Any, path: tuple[str, ...]) -> Any:
     """Return ``value`` in canonical JSON form, or fail closed with context."""
-    if value is None or isinstance(value, bool | int | float | str):
-        return value
+    if value is None:
+        return {"type": "null", "value": None}
+    if isinstance(value, bool):
+        return {"type": "bool", "value": value}
+    if isinstance(value, int):
+        return {"type": "int", "value": value}
+    if isinstance(value, float):
+        dotted = ".".join(path)
+        if not math.isfinite(value):
+            raise TypeError(
+                f"pyproject.toml value at {dotted} is not JSON-canonical: {value!r}"
+            )
+        return {"type": "float", "value": value}
+    if isinstance(value, str):
+        return {"type": "str", "value": value}
     if isinstance(value, list):
-        return [_json_ready(item, path) for item in value]
+        return {"type": "list", "value": [_json_ready(item, path) for item in value]}
     if isinstance(value, dict):
         return {
-            str(key): _json_ready(item, (*path, str(key)))
-            for key, item in value.items()
+            "type": "table",
+            "value": {
+                str(key): _json_ready(item, (*path, str(key)))
+                for key, item in value.items()
+            },
         }
     dotted = ".".join(path)
     if isinstance(value, datetime | date | time):
@@ -90,8 +108,9 @@ def _table_names(document: dict[str, Any]) -> list[str]:
     that shapes the environment would otherwise be dropped in silence; carrying
     the names means its arrival moves the digest and forces someone to decide
     whether it belongs in ``DEPENDENCY_PATHS``. Values inside existing tables
-    stay governed by the path allowlist; this tripwire is only for new table
-    surfaces, including nested installer configuration.
+    stay governed by the path allowlist. The tripwire descends to depth three,
+    enough to expose nested installer source tables without making arbitrary
+    tool-internal nesting part of the runner image contract.
     """
     names: list[str] = []
 
@@ -101,7 +120,8 @@ def _table_names(document: dict[str, Any]) -> list[str]:
             if not isinstance(value, dict):
                 continue
             names.append(".".join(current))
-            visit(value, current)
+            if len(current) < TABLE_TRIPWIRE_MAX_DEPTH:
+                visit(value, current)
 
     visit(document)
     return sorted(names)

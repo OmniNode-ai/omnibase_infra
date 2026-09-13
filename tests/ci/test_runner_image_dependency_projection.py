@@ -406,6 +406,37 @@ def test_toml_datetime_dependency_value_fails_with_path_context(
         env_digest.pyproject_dependency_projection(root)
 
 
+def test_non_finite_float_dependency_value_fails_with_path_context(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """NaN/Infinity are rejected instead of serialized as non-canonical JSON."""
+    root = _tree(
+        tmp_path / "nan",
+        BASE_PYPROJECT.replace(
+            "[tool.uv]\npackage = true",
+            "[tool.uv]\npackage = true\nresolution-weight = nan",
+        ),
+    )
+    with pytest.raises(TypeError, match="tool\\.uv\\.resolution-weight"):
+        env_digest.pyproject_dependency_projection(root)
+
+
+def test_table_tripwire_is_bounded_after_depth_three(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """Deep tool-internal nesting does not become an unbounded digest surface."""
+    root = _tree(
+        tmp_path / "deep",
+        BASE_PYPROJECT
+        + '\n[tool.some-future-installer.sources.internal.extra]\nmode = "ignored"\n',
+    )
+    projection = json.loads(
+        env_digest.pyproject_dependency_projection(root).decode("utf-8")
+    )
+    assert "tool.some-future-installer.sources" in projection["tables"]
+    assert "tool.some-future-installer.sources.internal" not in projection["tables"]
+
+
 def test_projection_is_order_independent_across_tables(
     env_digest: Any, tmp_path: Path
 ) -> None:
