@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-16964: caller/writer for chain-canary link 5.
+name: "node_delegation_chain_ledger_effect"
+node_type: "EFFECT_GENERIC"
+runtime_profiles:
+  - effects
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+description: >
+  Records a correlation-scoped delegation chain after its terminal event. The handler reads envelope identity and parent identity from event_ledger, re-derives every causal edge, verifies the observed topics against this contract's declared topology, and idempotently writes public.ledger_chain.
+
+input_model:
+  name: "ModelDelegationTerminalPayload"
+  module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models"
+  description: "Permissive terminal payload; chain evidence comes from the enclosing envelope and event ledger."
+output_model:
+  name: "ModelLedgerChainWriteResult"
+  module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models"
+  description: "Fail-closed summary of the rows written for one correlation."
+event_bus:
+  subscribe_topics:
+    - "onex.evt.omnimarket.delegate-skill-completed.v1"
+handler_routing:
+  routing_strategy: "topic_match"
+  handlers:
+    - topic: "onex.evt.omnimarket.delegate-skill-completed.v1"
+      operation: "delegation_chain.record"
+      message_category: "event"
+      handler_type: "delegation_chain_ledger"
+      event_model:
+        name: "ModelDelegationTerminalPayload"
+        module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models"
+      handler:
+        name: "HandlerDelegationChainLedger"
+        module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger"
+      supported_operations:
+        - "delegation_chain.record"
+# Tier-2 authority. These are the ordered topics declared by the four
+# participating node contracts. The handler reads this list from this file;
+# it does not infer the expected chain from the rows that happened to arrive.
+chain_topology:
+  - "onex.cmd.omnimarket.delegate-skill.v1"
+  - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+  - "onex.evt.omnibase-infra.routing-decision.v1"
+  - "onex.evt.omnimarket.delegate-skill-completed.v1"
+writer:
+  settle_attempts: 20
+  settle_delay_ms: 250
+node_capabilities:
+  postgres: true
+  read: true
+  write: true
+  database: true
+dependencies:
+  - name: "handler_delegation_chain_ledger"
+    type: "handler"
+    class_name: "HandlerDelegationChainLedger"
+    module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger"
+    description: "Reads event evidence, derives verdicts, and writes ledger_chain."
+  - name: "handler_db"
+    type: "handler"
+    class_name: "HandlerDb"
+    module: "omnibase_infra.handlers.handler_db"
+    description: "PostgreSQL transport composed by the writer handler."
+metadata:
+  description: "Evidence-derived writer for OMN-16025 chain-canary link 5."
+  author: "OmniNode Team"
+  created: "2026-09-13"
+  updated: "2026-09-13"
+  ticket: "OMN-16964"
+  tags:
+    - "effect"
+    - "delegation"
+    - "ledger"
+    - "replay"
