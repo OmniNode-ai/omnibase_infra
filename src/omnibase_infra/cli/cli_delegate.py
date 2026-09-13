@@ -122,6 +122,16 @@ from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
 )
+from omnibase_infra.cli.task_class_selection import (
+    DEFAULT_TASK_TYPE,
+    EnumTaskTypeResolution,
+    ModelSelectableTaskClass,
+    ModelTaskTypeResolution,
+    TaskClassContractError,
+    load_selectable_task_classes,
+    resolve_task_class_contract_path,
+    resolve_task_type,
+)
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
@@ -141,6 +151,7 @@ __all__ = [
     "build_backend_overrides",
     "classify_task_type",
     "resolve_default_bus",
+    "resolve_task_class",
     "run_delegate",
 ]
 
@@ -178,21 +189,40 @@ DELEGATE_SOURCE = "claude-code"
 # still fails the moment this comment and the tuple below disagree.
 DELEGATE_SOURCE_CHOICES: tuple[str, ...] = ("claude-code", "codex", "external-client")
 
-# Fallback classification when no keyword matches (the prompt.md default).
-DEFAULT_TASK_TYPE = "research"
-
-# The MVP task taxonomy the delegate node accepts (a subset of the
-# ``ModelDelegateSkillRequest`` Literal — the surfaces the shim exposed).
-# Source of truth for routing is the node contract's allowed_task_types; this
-# CLI exposes the same classification mapping the legacy skill markdown used.
+# The task classes the delegate contract exposes at the public Gateway --
+# a hand-maintained MIRROR of the ``gateway_exposure: public`` projection of
+# omnimarket's ``configs/task_class_contracts.v1.yaml``, used ONLY for the
+# ``--task-type`` help text.
+#
+# It is not the authority and it never decides anything: an explicit
+# ``--task-type`` is validated at run time against the contract itself
+# (:func:`resolve_task_class`), which is what makes the CLI's selectable
+# vocabulary EQUAL the contract's public set rather than merely resemble it.
+# The mirror exists because repo layering forbids importing omnimarket from
+# here and the ordinary omnibase_infra CI environment has no omnimarket
+# installed, so there is nothing to read at import time -- the same constraint
+# and the same treatment as ``DELEGATE_SOURCE_CHOICES`` above.
+#
+# DRIFT GUARD: ``tests/unit/cli/test_cli_delegate.py::TestTaskTypeVocabulary``
+# asserts this mirror matches the stand-in contract used by infra CI. The live
+# omnimarket contract has its own vocabulary pin in omnimarket's test suite;
+# repo layering forbids importing that package here. Before OMN-18305 this
+# tuple listed SEVEN classes against the contract's eleven, and
+# ``summarization`` and ``planning`` -- the two classes an engineering standup
+# actually belongs to -- were unreachable from the CLI by hand or by
+# classifier.
 TASK_TYPE_CHOICES = (
-    "test",
-    "document",
-    "research",
     "code_generation",
-    "refactor",
+    "code_review",
+    "complex_reasoning",
+    "document",
+    "planning",
     "reasoning",
+    "refactor",
+    "research",
     "review",
+    "summarization",
+    "test",
 )
 
 # Event-bus targets the CLI can select (OMN-13532). This is a TRANSPORT
@@ -287,12 +317,130 @@ def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
     return None
 
 
+_ATTEMPT_EVIDENCE_FIELDS: tuple[str, ...] = (
+    "backend_id",
+    "tier",
+    "model_id",
+    "failure_class",
+    "acceptance_decision",
+    "acceptance_reason",
+    "error_message",
+    "input_tokens_measured",
+    "input_token_budget",
+    "quality_gate_passed",
+    "quality_score",
+    "cost_usd",
+)
+
+
+def _attempt_evidence(result: dict[str, object]) -> list[dict[str, object]]:
+    """Return every rung this run attempted, in order, with its own verdict.
+
+    Copied field-by-field rather than wholesale so an attempt record cannot
+    smuggle an unrelated key into the customer artifact, and so a field the
+    runtime stops emitting shows up as ``None`` instead of silently vanishing.
+    """
+    attempts = result.get("attempts")
+    if not isinstance(attempts, list):
+        attempts = result.get("escalation_history")
+    if not isinstance(attempts, list | tuple):
+        return []
+    return [
+        {field: attempt.get(field) for field in _ATTEMPT_EVIDENCE_FIELDS}
+        for attempt in attempts
+        if isinstance(attempt, dict)
+    ]
+
+
+def _write_unattributed_run_files(
+    *,
+    envelope: dict[str, object],
+    result: dict[str, object],
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+) -> None:
+    """Persist a terminally-failed delegation that attributed no route.
+
+    Writes the same three files as the attributed path so a failed run is
+    diagnosable at all -- ``result.txt`` (whatever content a rung managed to
+    produce, usually empty), ``receipt.json``, ``run.json`` -- while stating
+    outright that the route is unattributed. No route identity is written and
+    none is inferred from the last attempted backend: that inference is the
+    lie :func:`_write_local_run_files` exists to refuse.
+    """
+    run_id = str(envelope["run_id"])
+    correlation_id = str(envelope["correlation_id"])
+    run_dir = (state_root / "runs" / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    metrics = result.get("metrics")
+    cost_usd = metrics.get("cost_usd") if isinstance(metrics, dict) else None
+    unattributed = (
+        "no accepted routing attempt: every rung this run attempted was "
+        "refused, errored, or climbed, so no backend can be named as the "
+        "author of this run's output"
+    )
+
+    _atomic_write_text(run_dir / "result.txt", str(result.get("response") or ""))
+    _atomic_write_text(
+        run_dir / "receipt.json",
+        json.dumps(
+            {
+                "receipt_id": correlation_id,
+                "correlation_id": correlation_id,
+                "run_id": run_id,
+                "route_attributed": False,
+                "route_unattributed": unattributed,
+                "status": envelope.get("status"),
+                "terminal_failure_cause": result.get("terminal_failure_cause"),
+                "failure_reason": result.get("error_message"),
+                "quality_gates_failed": result.get("quality_gates_failed"),
+                "quality_gate_passed": result.get("quality_gate_passed"),
+                "quality_score": result.get("quality_score"),
+                "cost_usd": cost_usd,
+                "attempts": _attempt_evidence(result),
+                "receipt": envelope,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    _atomic_write_text(
+        run_dir / "run.json",
+        json.dumps(
+            {
+                "run_id": run_id,
+                "correlation_id": correlation_id,
+                "lane": None,
+                "route_attributed": False,
+                "prompt": prompt,
+                "task_type": task_type,
+                "task_type_resolution": task_type_resolution,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    click.echo(
+        "delegate artifacts (route UNATTRIBUTED -- "
+        + unattributed
+        + "): "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        ),
+        err=True,
+    )
+
+
 def _write_local_run_files(
     *,
     receipt: object,
     state_root: Path,
     prompt: str,
     task_type: str,
+    task_type_resolution: str | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -300,6 +448,10 @@ def _write_local_run_files(
     route from the last attempted backend would make a failed or escalated run
     look like a truthful answer.
     """
+    if task_type_resolution is None:
+        raise ValueError(
+            "task_type_resolution is required; refusing to fabricate provenance"
+        )
     receipt_dump = getattr(receipt, "model_dump", None)
     if not callable(receipt_dump):
         raise ValueError("delegate receipt is not a serializable typed result")
@@ -315,10 +467,22 @@ def _write_local_run_files(
         return
     accepted = _accepted_attempt(result)
     if accepted is None:
-        raise ValueError(
-            "delegate receipt has no accepted routing attempt; refusing to write "
-            "unattributed route artifacts"
+        # OMN-18306: a run with no accepted attempt is still a run the customer
+        # paid for and is owed an account of. Route attribution stays
+        # fail-closed -- no backend, model, tier or endpoint is written, and
+        # nothing is synthesised from the last attempted rung -- but the
+        # terminal failure cause, the failure reason, every rung attempted, and
+        # the cost incurred are written down, because the alternative (what
+        # this raise used to do) was to tell the customer nothing at all.
+        _write_unattributed_run_files(
+            envelope=envelope,
+            result=result,
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
         )
+        return
 
     model = str(
         accepted.get("model_id")
@@ -380,6 +544,7 @@ def _write_local_run_files(
                 "lane": routing_tier,
                 "prompt": prompt,
                 "task_type": task_type,
+                "task_type_resolution": task_type_resolution,
             },
             indent=2,
             sort_keys=True,
@@ -485,32 +650,49 @@ def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[st
     return overrides
 
 
-# Ordered keyword → task_type rules (first match wins). Lifted verbatim from
-# the legacy ``delegate/prompt.md`` classification table so behavior is
-# unchanged; the glue now lives in the CLI, not skill markdown.
-_CLASSIFICATION_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("test", "pytest", "unit test", "assert"), "test"),
-    (("document", "docstring", "readme", "explain how"), "document"),
-    (("refactor", "cleanup", "simplify"), "refactor"),
-    (("review", "audit", "check"), "review"),
-    (("reason", "think through", "decide", "compare"), "reasoning"),
-    (("write", "create", "implement", "build", "generate"), "code_generation"),
-)
+def classify_task_type(
+    prompt: str,
+    *,
+    classes: tuple[ModelSelectableTaskClass, ...] | None = None,
+) -> str:
+    """Resolve ``prompt`` to a task class declared by the task-class contract.
 
+    OMN-18305 removed the hardcoded keyword table this used to be. Selection
+    rules — word boundaries, presence-not-frequency, and shape gating — are
+    declared per class in omnimarket's ``task_class_contracts.v1.yaml`` and
+    evaluated by :mod:`omnibase_infra.cli.task_class_selection`; see that
+    module for what the table got wrong and why.
 
-def classify_task_type(prompt: str) -> str:
-    """Classify ``prompt`` into a delegate task type via keyword match.
-
-    First matching rule wins; falls back to :data:`DEFAULT_TASK_TYPE` when no
-    keyword is present. Matching is case-insensitive against the lowercased
-    prompt. This is the same table the legacy skill markdown carried — the
-    glue moved into the CLI per the plan's single-command simplification.
+    ``classes`` is for callers that already resolved the contract (the CLI
+    resolves it once per run) and for tests pointing at a probe contract.
     """
-    lowered = prompt.lower()
-    for keywords, task_type in _CLASSIFICATION_RULES:
-        if any(keyword in lowered for keyword in keywords):
-            return task_type
-    return DEFAULT_TASK_TYPE
+    return resolve_task_class(prompt, explicit=None, classes=classes).task_type
+
+
+def resolve_task_class(
+    prompt: str,
+    *,
+    explicit: str | None,
+    classes: tuple[ModelSelectableTaskClass, ...] | None = None,
+) -> ModelTaskTypeResolution:
+    """Resolve this run's task class and carry HOW it was resolved with it."""
+    if explicit is not None and classes is None:
+        if explicit not in TASK_TYPE_CHOICES:
+            raise TaskClassContractError(
+                f"unknown task type {explicit!r}; known task types: "
+                + ", ".join(TASK_TYPE_CHOICES)
+            )
+        return ModelTaskTypeResolution(
+            task_type=explicit,
+            resolution=EnumTaskTypeResolution.EXPLICIT,
+            reason="explicitly selected with --task-type",
+        )
+    resolved = (
+        classes
+        if classes is not None
+        else load_selectable_task_classes(resolve_task_class_contract_path())
+    )
+    return resolve_task_type(prompt, explicit=explicit, classes=resolved)
 
 
 def _write_payload(
@@ -641,11 +823,16 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
 @click.option(
     "--task-type",
     "task_type",
-    type=click.Choice(TASK_TYPE_CHOICES),
+    type=str,
     default=None,
     help=(
-        "Task classification for routing. Omit to auto-classify from the "
-        "prompt keywords (default fallback: research)."
+        "Task class for routing, validated at run time against the task-class "
+        "contract's public projection ("
+        + ", ".join(TASK_TYPE_CHOICES)
+        + "). Omit to resolve it from the contract's declared selection "
+        f"predicates; the fallback when none claims the prompt is "
+        f"{DEFAULT_TASK_TYPE}. The chosen class and how it was chosen are "
+        "printed on stderr and recorded in the run artifacts."
     ),
 )
 @click.option(
@@ -901,7 +1088,20 @@ def run_delegate(
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    resolved_task_type = task_type or classify_task_type(prompt)
+    # OMN-18305: resolve the class from the CONTRACT, and say out loud which
+    # class was chosen and how. A class chosen silently is how a prose task
+    # ended up filed as `test`, with the prose quality checks disarmed and the
+    # customer never told.
+    try:
+        task_class = resolve_task_class(prompt, explicit=task_type)
+    except TaskClassContractError as exc:
+        raise click.ClickException(str(exc)) from exc
+    resolved_task_type = task_class.task_type
+    click.echo(
+        f"task class: {resolved_task_type} "
+        f"({task_class.resolution.value} — {task_class.reason})",
+        err=True,
+    )
     resolved_source = source or DELEGATE_SOURCE
     if bus is None:
         if kafka_bootstrap is not None:
@@ -1029,6 +1229,7 @@ def run_delegate(
                     state_root=state_root,
                     prompt=prompt,
                     task_type=resolved_task_type,
+                    task_type_resolution=task_class.resolution.value,
                 ),
             )
     except DelegateTimeoutExceededError as exc:
