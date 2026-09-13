@@ -216,35 +216,102 @@ _CORRELATED_NOOP_CONTRACT = (
 )
 
 
+_OMN18305_PROBE_CONTRACT = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures"
+    / "delegation"
+    / "omn18305"
+    / "task_class_contracts_probe.yaml"
+)
+
+
 class TestClassifyTaskType:
-    @pytest.mark.parametrize(
-        ("prompt", "expected"),
-        [
-            ("write unit tests for verify.py", "test"),
-            ("add a pytest for the parser", "test"),
-            ("document the routing module", "document"),
-            ("write a docstring for this fn", "document"),
-            ("refactor the dispatch loop", "refactor"),
-            ("simplify the config parsing", "refactor"),
-            ("review this PR for correctness", "review"),
-            ("audit the auth flow", "review"),
-            ("reason through the tradeoffs", "reasoning"),
-            ("compare two architectures", "reasoning"),
-            ("implement an HTTP server", "code_generation"),
-            ("build a CLI scaffold", "code_generation"),
-            ("what does a calendar app need", DEFAULT_TASK_TYPE),
-        ],
+    """OMN-18305: classification is contract-declared, not keyword density.
+
+    The rules themselves (word boundaries, presence-not-frequency, shape
+    gating, priority) are pinned in ``test_task_class_selection.py`` against a
+    probe contract so they run without omnimarket. What is pinned HERE is the
+    CLI-facing behaviour and the two reproductions from the ticket.
+    """
+
+    @staticmethod
+    def _probe_classes() -> tuple[object, ...]:
+        from omnibase_infra.cli.task_class_selection import (
+            load_selectable_task_classes,
+        )
+
+        return load_selectable_task_classes(_OMN18305_PROBE_CONTRACT)
+
+    def test_the_latest_window_is_not_a_test_task(self) -> None:
+        """The four-word reproduction: 'latest' must not match 'test'."""
+        assert (
+            classify_task_type("the latest window", classes=self._probe_classes())
+            != "short_keyword"
+        )
+
+    def test_a_genuine_test_request_still_resolves_to_the_test_class(self) -> None:
+        assert (
+            classify_task_type(
+                "write a test for the handler", classes=self._probe_classes()
+            )
+            == "short_keyword"
+        )
+
+    def test_no_keyword_table_survives_in_cli_source(self) -> None:
+        """AC2: the hardcoded table is gone, not merely bypassed."""
+        source = Path(cli_delegate.__file__).read_text(encoding="utf-8")
+        assert "_CLASSIFICATION_RULES" not in source
+
+
+class TestTaskTypeVocabulary:
+    """AC4: the CLI's selectable vocabulary equals the contract's public set."""
+
+    #: The contract's ``gateway_exposure: public`` projection, as of
+    #: OMN-18305. THE OTHER HALF OF THIS ASSERTION LIVES IN OMNIMARKET:
+    #: ``tests/unit/inference/test_task_class_selection_omn18305.py`` pins the
+    #: live contract to this same list. Neither repo can see the other (repo
+    #: layering forbids importing omnimarket here, and omnimarket pins this
+    #: package from the registry), and omnibase_infra's own test suite refuses
+    #: to run at all with omnimarket installed -- the OMN-15620 venv-purity
+    #: gate treats a co-installed omnimarket as duplicate node registration.
+    #: So a live comparison is not available in either suite; two pinned
+    #: halves of one list is. Changing the contract turns omnimarket's half
+    #: red, which is the signal to update this one.
+    EXPECTED_PUBLIC_CLASSES = (
+        "code_generation",
+        "code_review",
+        "complex_reasoning",
+        "document",
+        "planning",
+        "reasoning",
+        "refactor",
+        "research",
+        "review",
+        "summarization",
+        "test",
     )
-    def test_keyword_mapping(self, prompt: str, expected: str) -> None:
-        assert classify_task_type(prompt) == expected
 
-    def test_first_match_wins_test_before_code_generation(self) -> None:
-        # "write" maps to code_generation, "test" maps to test; "test" rule is
-        # ordered first, so a prompt with both classifies as test.
-        assert classify_task_type("write a test for the handler") == "test"
+    def test_choices_mirror_matches_the_contracts_public_projection(self) -> None:
+        assert sorted(cli_delegate.TASK_TYPE_CHOICES) == sorted(
+            self.EXPECTED_PUBLIC_CLASSES
+        )
 
-    def test_case_insensitive(self) -> None:
-        assert classify_task_type("REFACTOR the LOOP") == "refactor"
+    def test_stand_in_contract_carries_the_same_vocabulary(self) -> None:
+        """The test stand-in cannot drift away from the mirror it stands in for."""
+        from omnibase_infra.cli.task_class_selection import (
+            load_selectable_task_classes,
+        )
+        from tests.unit.cli.conftest import STAND_IN_TASK_CLASS_CONTRACT
+
+        stand_in = load_selectable_task_classes(STAND_IN_TASK_CLASS_CONTRACT)
+        assert sorted(entry.name for entry in stand_in) == sorted(
+            cli_delegate.TASK_TYPE_CHOICES
+        )
+
+    def test_summarization_and_planning_are_reachable(self) -> None:
+        """The two classes an engineering standup belongs to were unreachable."""
+        assert "summarization" in cli_delegate.TASK_TYPE_CHOICES
+        assert "planning" in cli_delegate.TASK_TYPE_CHOICES
 
 
 class TestReceiptEnvironmentIsolation:
@@ -336,7 +403,11 @@ class TestPayloadScratch:
 
         run_delegate(
             prompt="refactor the loop",
-            task_type=None,
+            # The subject here is the PAYLOAD SHAPE, so the class is stated
+            # rather than classified -- this test should not also be a test of
+            # whichever selection predicate happens to claim this prompt
+            # (OMN-18305 moved that decision into the task-class contract).
+            task_type="refactor",
             max_tokens=4096,
             state_root=state_root,
             timeout=60,
@@ -1816,20 +1887,37 @@ class TestLocalRunArtifacts:
             "prompt": "research the route",
             "run_id": str(receipt.run_id),
             "task_type": "research",
+            # OMN-18305: a customer can see that a class was chosen for them,
+            # and how, without re-reading the prompt.
+            "task_type_resolution": "explicit",
         }
 
-    def test_refuses_delegate_result_without_accepted_attempt(
+    def test_attributes_no_route_without_an_accepted_attempt(
         self, tmp_path: Path
     ) -> None:
+        """OMN-18306 amended this: the refusal is about the ROUTE, not the run.
+
+        Before OMN-18306 this raised and wrote nothing, and because the raise
+        travelled up through ``run_receipt_mode``'s callback it also erased the
+        receipt. The route attribution is still fail-closed -- no backend,
+        model, tier or endpoint is written -- but the run is recorded.
+        """
         receipt = self._receipt(accepted=False)
-        with pytest.raises(ValueError, match="no accepted routing attempt"):
-            _write_local_run_files(
-                receipt=receipt,
-                state_root=tmp_path,
-                prompt="research the route",
-                task_type="research",
-            )
-        assert not (tmp_path / "runs").exists()
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="research the route",
+            task_type="research",
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        receipt_data = json.loads(
+            (run_dir / "receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt_data["route_attributed"] is False
+        for field in ("backend_id", "model", "endpoint", "routing_tier"):
+            assert receipt_data.get(field) in (None, "")
+        assert receipt_data["attempts"][0]["backend_id"] == "local-coder"
 
     def test_ignores_non_delegate_typed_receipt(self, tmp_path: Path) -> None:
         receipt = self._receipt().model_copy(
@@ -1971,18 +2059,31 @@ class TestLocalRunArtifactsOnEscalatedRun:
         assert run_data["lane"] == "cheap_cloud"
         assert run_data["correlation_id"] == str(receipt.correlation_id)
 
-    def test_refuses_a_failed_run_with_no_accepted_attempt(
-        self, tmp_path: Path
-    ) -> None:
-        """Fail-closed survives the unwrap: no accepted rung, no artifacts."""
-        with pytest.raises(ValueError, match="no accepted routing attempt"):
-            _write_local_run_files(
-                receipt=self._summary_receipt(accepted=False),
-                state_root=tmp_path,
-                prompt="Reply with exactly: OK",
-                task_type="research",
-            )
-        assert not (tmp_path / "runs").exists()
+    def test_attributes_no_route_after_the_summary_unwrap(self, tmp_path: Path) -> None:
+        """Fail-closed ATTRIBUTION survives the unwrap (amended by OMN-18306).
+
+        No accepted rung, so no route is named -- but the run is written down,
+        including the rung that was attempted and climbed, which is the only
+        way a customer can see which backend refused them.
+        """
+        receipt = self._summary_receipt(accepted=False)
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="Reply with exactly: OK",
+            task_type="research",
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        receipt_data = json.loads(
+            (run_dir / "receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt_data["route_attributed"] is False
+        assert [attempt["backend_id"] for attempt in receipt_data["attempts"]] == [
+            "local-heavy-reasoning",
+            "cloud-gemini-pro",
+        ]
+        assert (run_dir / "result.txt").read_text(encoding="utf-8") == "OK"
 
     def test_ignores_a_failed_run_of_some_other_node(self, tmp_path: Path) -> None:
         """The unwrap is scoped to the delegate contract, not to any summary.
@@ -2000,3 +2101,189 @@ class TestLocalRunArtifactsOnEscalatedRun:
             task_type="research",
         )
         assert not (tmp_path / "runs").exists()
+
+
+_OMN18306_FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures"
+    / "delegation"
+    / "omn18306"
+    / "failed_no_accepted_attempt_receipt.json"
+)
+
+
+def _recorded_failed_receipt() -> ModelSkillResult[ModelReceiptRuntimeSummary]:
+    """The verbatim receipt of a real terminally-failed lab delegation.
+
+    Recorded 2026-09-13 against the ``.201`` lab model endpoint; see the
+    fixture's README for the run, the redactions, and what it does not cover.
+    Nothing about its shape is synthesised — this is what the runtime produced.
+    """
+    return ModelSkillResult[ModelReceiptRuntimeSummary].model_validate(
+        json.loads(_OMN18306_FIXTURE.read_text(encoding="utf-8"))
+    )
+
+
+class TestFailedDelegationIsRendered:
+    """OMN-18306: a terminally-failed delegation printed nothing at all.
+
+    THE DEFECT. ``_write_local_run_files`` refuses — correctly — to attribute a
+    route for a run with no accepted attempt, and ``run_receipt_mode`` invoked
+    that writer as ``receipt_callback`` BEFORE reaching its own
+    ``click.echo(receipt.model_dump_json())``. So a correct refusal about route
+    ATTRIBUTION erased the ANSWER: stdout zero bytes, one error line, and no way
+    for the customer to tell a refused run from a crashed one, which rung failed,
+    or whether they were billed.
+
+    Route attribution and receipt rendering must not share a failure domain.
+    """
+
+    def test_recorded_failure_has_no_accepted_attempt(self) -> None:
+        """Positive control on the fixture itself: it really is the bad case."""
+        receipt = _recorded_failed_receipt()
+        payload = receipt.result.terminal_payload
+        assert isinstance(payload, dict)
+        attempts = payload["attempts"]
+        assert isinstance(attempts, list) and len(attempts) == 2
+        assert all(
+            str(attempt["acceptance_decision"]) != "accept" for attempt in attempts
+        )
+        assert payload["status"] == "failed"
+        assert payload["terminal_failure_cause"] == "provider_error"
+
+    def test_writer_records_every_rung_of_a_failed_run(self, tmp_path: Path) -> None:
+        """AC2: the three files exist for a failed run and carry the evidence."""
+        receipt = _recorded_failed_receipt()
+
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="summarise the coordination ledger",
+            task_type="complex_reasoning",
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        assert (run_dir / "result.txt").exists()
+        receipt_data = json.loads(
+            (run_dir / "receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt_data["terminal_failure_cause"] == "provider_error"
+        assert "503" in receipt_data["failure_reason"]
+        assert receipt_data["cost_usd"] == 0.0
+        recorded = receipt_data["attempts"]
+        assert [attempt["backend_id"] for attempt in recorded] == [
+            "local-heavy-reasoning",
+            "cloud-gemini-pro",
+        ]
+        assert recorded[0]["failure_class"] == "context_too_large"
+        assert recorded[0]["input_tokens_measured"] == 14149
+        assert recorded[0]["input_token_budget"] == 8000
+        assert recorded[0]["acceptance_decision"] == "climb"
+        assert recorded[1]["failure_class"] == "model_unavailable"
+        assert recorded[1]["tier"] == "cheap_cloud"
+        run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert run_data["task_type"] == "complex_reasoning"
+        assert run_data["run_id"] == str(receipt.run_id)
+
+    def test_writer_synthesises_no_route_for_a_failed_run(self, tmp_path: Path) -> None:
+        """AC3: fail-closed attribution survives — no route is invented."""
+        receipt = _recorded_failed_receipt()
+
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="summarise the coordination ledger",
+            task_type="complex_reasoning",
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        receipt_data = json.loads(
+            (run_dir / "receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt_data["route_attributed"] is False
+        assert "no accepted routing attempt" in receipt_data["route_unattributed"]
+        # The LAST attempted backend is the lie this guard exists to prevent.
+        for field in ("backend_id", "model", "endpoint", "routing_tier"):
+            assert receipt_data.get(field) in (None, "")
+        run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert run_data["lane"] is None
+        assert run_data["route_attributed"] is False
+
+    def test_writer_carries_model_content_when_a_rung_produced_some(
+        self, tmp_path: Path
+    ) -> None:
+        """AC2's content clause, on the same recorded envelope.
+
+        The recorded run produced no content because no rung answered. The gate
+        -rejection shape that DOES carry content was not reproducible on demand
+        (fixture README), so the mapping is pinned on the recorded envelope with
+        a response substituted into its terminal payload — the ONLY field
+        changed, and one the runtime demonstrably populates on that path.
+        """
+        receipt = _recorded_failed_receipt()
+        payload = dict(receipt.result.terminal_payload or {})
+        payload["response"] = "a partial answer the gate then rejected"
+        receipt = receipt.model_copy(
+            update={
+                "result": receipt.result.model_copy(
+                    update={"terminal_payload": payload, "handler_result": payload}
+                )
+            }
+        )
+
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="summarise the coordination ledger",
+            task_type="complex_reasoning",
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        assert (run_dir / "result.txt").read_text(encoding="utf-8") == (
+            "a partial answer the gate then rejected"
+        )
+
+    def test_render_survives_a_raising_artifact_writer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC1/AC5: an exception in artifact writing cannot suppress the receipt.
+
+        This is the ordering pin. Reorder the callback back in front of the
+        render and stdout goes to zero bytes, which is the defect verbatim.
+        """
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: contract_path,
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+        def _refuse(**_kwargs: object) -> None:
+            raise ValueError(
+                "delegate receipt has no accepted routing attempt; refusing to "
+                "write unattributed route artifacts"
+            )
+
+        monkeypatch.setattr(cli_delegate, "_write_local_run_files", _refuse)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "summarise the coordination ledger",
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        stripped = result.stdout.strip()
+        assert stripped, "a failed artifact write must not erase the receipt"
+        parsed = json.loads(stripped)
+        ModelSkillResult.model_validate(parsed)
+        # AC4: rendering the receipt is not reporting success.
+        assert result.exit_code != 0
