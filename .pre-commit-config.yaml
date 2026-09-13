@@ -259,6 +259,19 @@ repos:
         files: ^(\.github/workflows/dev-lane-liveness\.yml|scripts/ci/probe_lab_load\.py|tests/ci/test_lab_load_probe_omn18253\.py|tests/fixtures/omn18253/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18316: the onex-lab lab-pass receipt must carry a verdict on whether
+      # a wedged lab rollout can report itself. Pins that the boot gate runs
+      # omninode_infra's own rollout-wedge gate (one authority, not a second
+      # copy of the arithmetic), that it runs on a failed boot too, and that
+      # the receipt names the check with a verdict read off the step rather
+      # than spelled as a literal.
+      - id: boot-gate-rollout-deadline-check
+        name: onex-lab receipt carries the rollout-deadline verdict (OMN-18316)
+        entry: uv run --frozen pytest tests/ci/test_boot_gate_rollout_deadline_check_omn18316.py -q
+        language: system
+        files: ^(\.github/workflows/deliver-dev-candidate-to-staging\.yml|tests/ci/test_boot_gate_rollout_deadline_check_omn18316\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-18254: the non-required check failure-rate alerter. Pins the
       # above-threshold alert and the below-threshold control over four real
       # captured check-run responses, because an alerter that is always silent
