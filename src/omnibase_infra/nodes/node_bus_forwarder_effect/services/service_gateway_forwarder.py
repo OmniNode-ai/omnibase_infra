@@ -10,6 +10,7 @@ must never be required from ordinary runtime producers or consumers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -59,6 +60,53 @@ _MESSAGE_ID_HEADER = "message_id"
 _CORRELATION_ID_HEADER = "correlation_id"
 _EVENT_TYPE_HEADER = "event_type"
 _TIMESTAMP_HEADER = "timestamp"
+_EVENT_ID_TAG = "event_id"
+
+
+def content_addressed_event_id(
+    envelope: ModelEventEnvelope[dict[str, object]],
+    canonical_topic: str,
+) -> str:
+    """Return the stable content identity carried across the HTTPS boundary.
+
+    ``envelope_id`` is a UUID identifying one producer envelope and remains
+    the edge-local delivery marker. ``event_id`` is the SHA-256 of the event
+    canonical topic and redacted payload, so metadata added by a transport hop cannot
+    alter it. The redaction seam runs before this forwarder; hashing that
+    emitted payload preserves its identity through forwarding without ever
+    retaining an unredacted form at the cloud boundary.
+    """
+    canonical_payload = json.dumps(
+        envelope.payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(
+        f"{canonical_topic}\n{canonical_payload}".encode()
+    ).hexdigest()
+
+
+def envelope_with_event_id(
+    envelope: ModelEventEnvelope[dict[str, object]],
+    canonical_topic: str,
+) -> ModelEventEnvelope[dict[str, object]]:
+    """Stamp an absent event identity without rewriting an existing one."""
+    existing = envelope.metadata.tags.get(_EVENT_ID_TAG)
+    expected = content_addressed_event_id(envelope, canonical_topic)
+    if existing is not None and existing != expected:
+        raise GatewayRecordRefusedError(
+            "outbound event_id does not match event content"
+        )
+    if existing == expected:
+        return envelope
+    return envelope.model_copy(
+        update={
+            "metadata": envelope.metadata.model_copy(
+                update={"tags": {**envelope.metadata.tags, _EVENT_ID_TAG: expected}}
+            )
+        }
+    )
 
 
 def _header_text(headers: object, name: str) -> str | None:
@@ -427,7 +475,9 @@ class ServiceGatewayForwarder:
             return
         if not egress_admits(self._config.egress_redaction, envelope, source_topic):
             return
-        transformed, wire_topic = self._prepare_outbound(envelope, source_topic)
+        transformed, wire_topic = self._prepare_outbound(
+            envelope_with_event_id(envelope, source_topic), source_topic
+        )
         await self._publish_with_delivery_retry(
             bus=self._cloud_bus,
             topic=wire_topic,
@@ -440,13 +490,43 @@ class ServiceGatewayForwarder:
         """Validate, transform, and broker-acknowledge one outbound message."""
         await self._forward_outbound_message(message)
 
+    async def forward_outbound_messages(self, messages: list[object]) -> None:
+        """Publish a validated outbound poll batch through an HTTPS adapter."""
+        if len(messages) <= 1:
+            for message in messages:
+                await self._forward_outbound_message(message)
+            return
+        publish_batch = getattr(self._cloud_bus, "publish_batch", None)
+        if not callable(publish_batch):
+            for message in messages:
+                await self._forward_outbound_message(message)
+            return
+        records: list[tuple[str, bytes | None, bytes, object | None]] = []
+        for message in messages:
+            source_topic = self._message_topic(message)
+            envelope = self.decode_outbound_message(message)
+            transformed, wire_topic = self._prepare_outbound(
+                envelope_with_event_id(envelope, source_topic), source_topic
+            )
+            records.append(
+                (
+                    wire_topic,
+                    getattr(message, "key", None),
+                    self._encode_envelope(transformed),
+                    getattr(message, "headers", None),
+                )
+            )
+        await publish_batch(records)
+
     def validate_outbound_message(self, message: object) -> None:
         """Validate an outbound trust-boundary message without publishing it."""
         source_topic = self._message_topic(message)
         envelope = self.decode_outbound_message(message)
         direction = envelope.metadata.tags.get("gateway_direction")
         if direction not in _LOCAL_ONLY_DIRECTIONS:
-            self._prepare_outbound(envelope, source_topic)
+            self._prepare_outbound(
+                envelope_with_event_id(envelope, source_topic), source_topic
+            )
 
     async def _consume_inbound_message(self, message: object) -> None:
         wire_topic = self._message_topic(message)

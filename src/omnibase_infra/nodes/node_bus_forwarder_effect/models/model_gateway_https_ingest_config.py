@@ -42,7 +42,7 @@ class ModelGatewayHttpsIngestConfig(BaseModel):
     ingest_url: str
     ingest_url_ref: str
     ingest_auth_ref: str
-    idempotency_key: Literal["envelope_id"]
+    idempotency_key: Literal["event_id"]
     max_batch_records: int = Field(ge=1)
     request_timeout_seconds: float = Field(gt=0)
     retry_initial_seconds: float = Field(gt=0)
