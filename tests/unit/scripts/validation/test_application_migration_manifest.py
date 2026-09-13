@@ -619,7 +619,13 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 0003 delivers was complete and the writer still failed every write. It is
     # declared here, and therefore resident in this repo rather than omnimarket,
     # under the same OMN-15717 exemption its sibling 0003 already uses.
-    assert len(result.declarations) == 181
+    #
+    # 181 -> 182 for OMN-17201's
+    # nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql.
+    # The new nullable UUID is a delivery trace beside the existing content
+    # identity; it has no backfill or uniqueness rule, so historical rows keep
+    # their honest absence of an envelope identifier.
+    assert len(result.declarations) == 182
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
