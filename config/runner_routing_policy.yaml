@@ -619,3 +619,113 @@ route:
     # hours. This floor makes the word "sustained" true: a breach must ALSO
     # span this much wall-clock, read from the records' own sampled_at.
     sustained_min_span_seconds: 900
+  # OMN-18254 - non-required check failure-rate alert.
+  #
+  # WHY A THRESHOLD AND NOT "ANY FAILURE". A single red run on an unenforced
+  # check is ordinary: a flake, a cancelled run, a fork PR without a secret.
+  # What is worth a page is a check failing REPEATEDLY while nothing blocks,
+  # which is what happened on the web repository's companion-effect job - 9 of
+  # 10 recent pull-request runs on missing broker credentials, reported red on
+  # three separate pull requests before anyone asked whether it meant companions
+  # were never publishing.
+  #
+  # 3 of the last 10 heads is deliberately low. The cost of a false positive is
+  # one person reading one annotation; the cost of a false negative is what this
+  # ticket exists for. One head contributes at most one failure per check name,
+  # so a storm of re-runs on a single pull request cannot reach the threshold
+  # on its own.
+  nonrequired_check_alert:
+    failure_threshold: 3
+    heads_observed: 10
+    # ABSENT FROM required_status_checks IS NOT THE SAME AS UNENFORCED.
+    # omnibase_infra requires exactly ONE context on dev - the CI Summary
+    # umbrella - whose poller fails on any job in its own run that concludes
+    # badly, so dozens of checks block a merge while appearing nowhere in branch
+    # protection (OMN-4497 / OMN-14127). Reporting those as unwatched would bury
+    # the real finding in noise, and an alerter nobody reads is the failure mode
+    # OMN-16030 already paid for once on the canary this rides.
+    #
+    # Each entry is a context the repo enforces through a mechanism branch
+    # protection cannot show. The honest limit: a context enforced by something
+    # nobody wrote down still reads as non-required, and the fix is to write it
+    # down here rather than to widen the threshold.
+    umbrella_enforced_contexts:
+      # DERIVED, NOT GUESSED. Every name below is one that the CI Summary poller
+      # requires: its own required context, the strict and skippable aggregate
+      # gates it resolves from this run, and the external contexts it resolves
+      # from the pull-request head. Each of these DOES block a merge while
+      # appearing nowhere in branch protection.
+      #
+      # A LIVE RUN IS WHY THIS LIST EXISTS RATHER THAN JUST THE UMBRELLA NAME.
+      # With only the umbrella declared, the first read-only run raised on
+      # verify / verify and occ-preflight / eligibility -- both enforced, one of
+      # them the Receipt Gate. Four findings, two of them noise, on the very
+      # first run. That is how an alerter gets muted before it ever catches
+      # anything, which is the OMN-16030 failure mode this phase keeps citing.
+      #
+      # This is a dated snapshot of another module's constants and it WILL
+      # drift. test_the_umbrella_list_matches_the_summary_gate reads those
+      # constants live and fails when the two disagree, so drift is a red test
+      # rather than a silent false positive.
+      omnibase_infra:
+        - Application Database Domain Enforcement (OMN-15361)
+        - Arch Invariants (OMN-3343)
+        - CI Evidence Policy (OMN-18247)
+        - CI Summary
+        - CI Tests Gate
+        - Canonical Inference Gate
+        - CodeQL
+        - Contract Compliance
+        - Contract Compliance Check
+        - Contract Sync Gate (Wave C) [OMN-8915]
+        - Customer Path Boundary (OMN-18012)
+        - Demo Loop Gate
+        - Dep Provenance Gate
+        - Dep Provenance Lineage Gate (OMN-15604)
+        - Deploy Agent Tests (OMN-15378) / deploy-agent-tests
+        - Duplication Sweep
+        - Effect-Assertion Gate (RT-5)
+        - Event Chain Gate
+        - Exposed Identifier Gate (OMN-17320)
+        - Fingerprint Check
+        - Infra Node Handler Ownership
+        - Integration Silent-Skip Guard (OMN-14172)
+        - Integration Test Removal Gate
+        - Kafka Schema Handshake (OMN-3411)
+        - Lint
+        - Lockfile CVE Scan (OMN-16228)
+        - Lockfile Registry Allowlist (OMN-16516)
+        - Migration Freeze Check
+        - Migration Integration Test
+        - Node Migration Declaration Check
+        - OCC Companion Merged Gate (OMN-15214)
+        - ONEX Validators
+        - Omni Standards Gate
+        - Pin Reachability (OMN-15538)
+        - Runner Route (OMN-18031) / route
+        - Stale TODO Gate
+        - Subscribe Wiring Health
+        - Topic Drift Check
+        - Topic Enum Drift Check
+        - Topic Naming Lint
+        - Trivyignore Expiry Check (OMN-16229)
+        - Type Safety Validation
+        - URL Authority Gate
+        - Writer-Migration Coupling Check
+        - call-reject-skip-token / scan / reject-skip-gate-token
+        - ci-bus-overlay-binding
+        - contract-validation
+        - deploy-gate / deploy-gate
+        - dispatcher-route-coverage
+        - exposure-reader-coverage
+        - imperative-contract-guard / Imperative Contract Guard
+        - kb-doc-gate / kb-doc-gate
+        - main-target-guard
+        - merge-hold-gate / evaluate
+        - no-noncanonical-lifecycle-classes
+        - non-dev-base-guard
+        - occ-preflight / eligibility
+        - pr-title / check-title
+        - receipt-honesty
+        - required-check-skip-guard / check-skip-vectors
+        - verify / verify
