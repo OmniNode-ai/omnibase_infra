@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Idle auto-stop check for the cloud pre-push host (OMN-16634).
+[Unit]
+Description=onex pre-push cloud host idle auto-stop check
+
+[Service]
+Type=oneshot
+# Substituted by bootstrap.sh at install time; the committed file carries the
+# placeholder so no machine-specific path is ever checked in.
+Environment=ONEX_PREPUSH_WORKROOT=@ONEX_PREPUSH_WORKROOT@
+ExecStart=/usr/local/bin/onex-prepush-idle-stop.sh
