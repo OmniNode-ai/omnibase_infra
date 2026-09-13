@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import logging
 import random
@@ -683,23 +684,48 @@ class TransportGatewayHttpsIngest:
         coordinate, and OMN-17201's contract is that a publisher which cannot
         report where the record landed says so rather than inventing one.
         """
-        idempotency_key = self._idempotency_key(value)
-        record: dict[str, object] = {
-            "topic": topic,
-            "key": base64.b64encode(key).decode("ascii") if key is not None else None,
-            "value": base64.b64encode(value).decode("ascii"),
-            "envelope_id": idempotency_key,
-        }
-        encoded_headers = self._encode_headers(headers)
-        if encoded_headers:
-            record["headers"] = encoded_headers
+        await self.publish_batch([(topic, key, value, headers)])
+        return None
+
+    async def publish_batch(
+        self,
+        records: list[tuple[str, bytes | None, bytes, object | None]],
+    ) -> None:
+        """POST one real record batch and acknowledge only its whole result."""
+        if not records:
+            return
+        encoded_records: list[dict[str, object]] = []
+        for topic, key, value, headers in records:
+            event_id, envelope_id = self._event_identity(value)
+            record: dict[str, object] = {
+                "topic": topic,
+                "key": base64.b64encode(key).decode("ascii")
+                if key is not None
+                else None,
+                "value": base64.b64encode(value).decode("ascii"),
+                "event_id": event_id,
+                "envelope_id": envelope_id,
+            }
+            encoded_headers = self._encode_headers(headers)
+            if encoded_headers:
+                record["headers"] = encoded_headers
+            encoded_records.append(record)
+        batch_key = (
+            str(encoded_records[0]["event_id"])
+            if len(encoded_records) == 1
+            else hashlib.sha256(
+                ",".join(str(record["event_id"]) for record in encoded_records).encode(
+                    "ascii"
+                )
+            ).hexdigest()
+        )
         try:
             response = await self._client.post(
                 self._config.ingest_url,
-                json={"tenant_slug": self._tenant_slug, "records": [record]},
+                json={"records": encoded_records},
                 headers={
                     "authorization": f"Bearer {self._auth_token}",
-                    "idempotency-key": idempotency_key,
+                    "idempotency-key": batch_key,
                     "content-type": "application/json",
                 },
                 timeout=self._config.request_timeout_seconds,
@@ -711,40 +737,46 @@ class TransportGatewayHttpsIngest:
             ) from exc
         if response.status_code >= 500:
             raise InfraUnavailableError(
-                f"gateway https ingest route returned {response.status_code} for "
-                f"topic {topic}; retaining the source message"
+                f"gateway https ingest route returned {response.status_code}; "
+                "retaining the source batch"
             )
         if response.status_code >= 400:
             raise RuntimeError(
-                f"gateway https ingest route rejected the record for topic {topic} "
+                "gateway https ingest route rejected the batch "
                 f"with status {response.status_code}; retrying a rejection cannot "
                 "succeed, so this is not raised as the retryable class"
             )
         # The route answers with an HTTP status, not a broker coordinate. A
         # publisher that cannot say where the record landed says so.
-        return None
+        return
 
-    def _idempotency_key(self, value: bytes) -> str:
-        """Read the content-addressed envelope id the route deduplicates on."""
+    def _event_identity(self, value: bytes) -> tuple[str, str]:
+        """Read the content identity and legacy envelope coordinate from wire."""
         try:
             decoded: object = json.loads(value.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(
                 "gateway https ingest requires a JSON envelope carrying "
-                "envelope_id; the record could not be decoded"
+                "event_id; the record could not be decoded"
             ) from exc
         if not isinstance(decoded, dict):
             raise ValueError(
-                "gateway https ingest requires a JSON object carrying envelope_id"
+                "gateway https ingest requires a JSON object carrying event_id"
             )
         envelope_id = decoded.get("envelope_id")
         if not isinstance(envelope_id, str) or not envelope_id.strip():
             raise ValueError(
-                "gateway https ingest record carries no envelope_id; without the "
-                "content-addressed id the ingest route cannot deduplicate a "
-                "redelivery, so the record is refused rather than sent unkeyed"
+                "gateway https ingest record carries no envelope_id; the standard "
+                "envelope coordinate is required for traceability"
             )
-        return envelope_id.strip()
+        metadata = decoded.get("metadata")
+        tags = metadata.get("tags") if isinstance(metadata, dict) else None
+        event_id = tags.get("event_id") if isinstance(tags, dict) else None
+        if not isinstance(event_id, str) or len(event_id) != 64:
+            raise ValueError(
+                "gateway https ingest record carries no content-addressed event_id"
+            )
+        return event_id, envelope_id.strip()
 
     @staticmethod
     def _encode_headers(headers: object | None) -> dict[str, str]:
