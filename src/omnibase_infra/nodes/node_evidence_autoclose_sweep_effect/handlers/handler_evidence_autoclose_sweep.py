@@ -600,6 +600,18 @@ _CHECK_BINDS_AC_KEY = "binds_ac"
 #: `binds_ac`; it can never add to it.
 _CHECK_DRAFT_BINDS_AC_KEY = "draft_binds_ac"
 
+#: OMN-18330. WHICH REVISION OF EACH CRITERION THIS CHECK'S BINDINGS WERE
+#: ACCEPTED AGAINST: `{label: criterion_hash}`, carried from the contract's
+#: `dod_evidence[].ac_bindings[]` records (`onex_change_control`'s
+#: `ModelAcBinding`) onto the per-check record, the same route `binds_ac` and
+#: `draft_binds_ac` take and for the same reason -- the verifier is the only
+#: component that resolves and reads the contract.
+#:
+#: ABSENT means this check declares no pin, which is 67 of the 68 contracts
+#: that declare a binding at all. Those are hand-authored and bind exactly as
+#: they did; the key can demote a criterion and can never introduce one.
+_CHECK_AC_BINDING_HASHES_KEY = "ac_binding_hashes"
+
 #: Per-check statuses, as `EnumEvidenceCheckStatus` spells them.
 _CHECK_STATUS_VERIFIED = "verified"
 #: OMN-18135 AC4. A check that read live state and asserted on it. It
@@ -619,7 +631,7 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.12.3"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.13.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -1879,6 +1891,125 @@ def _canonical_ac_label(text: str) -> str:
     return f"{match.group(1).upper()}{int(match.group(2))}"
 
 
+# -- OMN-18330: the criterion-revision pin, and validating it -----------------
+#
+# OMN-18236 gave a binding a `criterion_hash`: the sha256 of the criterion text
+# the binding was derived or accepted against. Nothing in THIS module read it.
+# So a binding accepted against one sentence stayed "bound" after the sentence
+# was rewritten into something its check does not prove, and the closer flipped.
+# That is a false-close path, and it is the one this leg closes.
+#
+# THE HASH IS A PORT, NOT A SECOND HASH. The authority is `onex_change_control`
+# `src/onex_change_control/validation/ac_criteria.py`
+# (`normalise_criterion`, `criterion_hash`, `MAX_CRITERION_HASH_INPUT_CHARS`).
+# It is ported rather than imported because that package is a DEV-group
+# dependency of this repository, pinned to an immutable rev that predates the
+# module, so importing it would make a production predicate depend on a
+# test-time install and on a pin bump. The coupling runs the other way too and
+# is already stated on that side: OCC's criterion READER is itself a verbatim
+# port of `_is_ac_heading` / `_acceptance_criteria_items` / `_canonical_ac_label`
+# above. `TestTheHashIsTheChangeControlHash` in
+# `tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18330_criterion_hash.py`
+# pins the shared digest vectors that OCC's own tests pin, so a change on either
+# side fails with a test naming the other.
+#
+# WHICH TEXT IS HASHED. The item string `_acceptance_criteria_items` returns,
+# which is what `_ac_binding_gap` already iterates. OCC's `item_text` is the
+# same function over the same regexes, so a criterion BOTH readers see yields
+# the identical string and the identical digest. The two readers disagree about
+# WHICH criteria they see (OCC re-opens at a second criteria section; this one
+# stops at the first non-criteria heading), and that disagreement cannot produce
+# a spurious mismatch here: a criterion this reader never reads is one this leg
+# never asks about.
+_CRITERION_WHITESPACE_RUN_RE = re.compile(r"\s+")
+#: Ceiling on the text fed to the hash, so a pathological body cannot make the
+#: digest depend on how much of it somebody pasted. Must equal OCC's
+#: `MAX_CRITERION_HASH_INPUT_CHARS`; the shared-vector test pins that.
+_MAX_CRITERION_HASH_INPUT_CHARS = 4000
+
+
+def _normalise_criterion(text: str) -> str:
+    """The criterion text the pin hash is taken over.
+
+    Whitespace runs collapse to one space and the ends are stripped, so
+    re-wrapping a paragraph or re-indenting a bullet is NOT a rewrite. Nothing
+    else is normalised — not case, not punctuation, not markdown emphasis —
+    because each of those can change what a criterion requires. A negation, a
+    changed threshold and a changed modal verb all produce a different digest,
+    which is the entire point.
+    """
+    return _CRITERION_WHITESPACE_RUN_RE.sub(" ", text).strip()[
+        :_MAX_CRITERION_HASH_INPUT_CHARS
+    ]
+
+
+def _criterion_pin_hash(text: str) -> str:
+    """The sha256 hex digest identifying this criterion's current revision."""
+    return hashlib.sha256(_normalise_criterion(text).encode("utf-8")).hexdigest()
+
+
+def _pinned_criterion_hashes(verdict: dict[str, object]) -> dict[str, tuple[str, ...]]:
+    """``{label: (pinned criterion hash, ...)}`` from the verdict's check records.
+
+    A label ABSENT from the returned mapping carries no pin. That is 67 of the
+    68 contracts that declare ``binds_ac`` as of 2026-09-13, and it keeps
+    today's behaviour exactly: a hand-authored ``binds_ac`` is the evidence
+    author speaking, which is the acceptance the rule asks for, and this leg
+    does not widen the hold onto it. Widening there is named Out of scope on
+    OMN-18330 and would hold the entire corpus on a pin that does not exist yet.
+
+    A label PRESENT with an EMPTY tuple carries a binding record whose
+    ``criterion_hash`` is missing or unreadable. That is a different fact and it
+    does not release: a record asserting an acceptance while declining to say
+    which revision was accepted is unvalidated, and unvalidated holds.
+
+    Several records may pin one label -- a re-acceptance appended beside the
+    original, which is the only shape the OCC append-only validator permits, and
+    two evidence items may each bind the same criterion. Every pin is collected
+    and ANY match releases, because "this criterion's current text was accepted"
+    is the fact being asked about.
+
+    WHY THE VERDICT AND NOT THE CONTRACT. The pin lives on the contract's
+    ``dod_evidence[].ac_bindings[]``, and this node could fetch it. It does not,
+    for the reason omnimarket states where it carries ``binds_ac`` itself: this
+    sweep runs on a runner with no contract checkout, and a second contract
+    parser would be a second truth that drifts from the verifier's. The verifier
+    already resolves, pins and reads the contract, so it is the only place the
+    pin can be reported from without adding a second reader. Reading it here
+    would also put a network call on the flip path of an armed closer, where a
+    transient failure has to choose between a false hold and a false flip.
+
+    CONSEQUENCE, STATED RATHER THAN IMPLIED: this half of the join is live only
+    once the verifier carries the key. `node_dod_verify` reads ``ac_bindings``
+    today to compute ``draft_binds_ac`` and discards the hashes; carrying them
+    forward is a one-field omnimarket change in the same surface, and it belongs
+    with the autobinder work that will start producing accepted bindings at
+    volume. Until it lands, one live contract records a pin and the predicate
+    below is proven by fixture rather than by corpus. What this closes is the
+    design hole -- the closer had no way to learn a criterion had moved, and now
+    it does, unskippably, before the binding counts.
+    """
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return {}
+    pinned: dict[str, list[str]] = {}
+    for entry in checks:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get(_CHECK_AC_BINDING_HASHES_KEY)
+        if not isinstance(raw, dict):
+            continue
+        for declared, digest in raw.items():
+            label = _canonical_ac_label(str(declared))
+            if not label:
+                continue
+            slot = pinned.setdefault(label, [])
+            value = str(digest or "").strip().lower()
+            if value and value not in slot:
+                slot.append(value)
+    return {label: tuple(digests) for label, digests in pinned.items()}
+
+
 def _declared_ac_bindings(
     verdict: dict[str, object],
 ) -> tuple[
@@ -2178,7 +2309,25 @@ def _ac_binding_gap(
     verdict but not a proof (OMN-15391), ``skipped`` never ran, ``failed``
     would have been refused upstream -- none of them discharges a criterion,
     and each appears in the table with its status so the near-miss is legible.
+
+    OMN-18330 -- THE PIN IS VALIDATED BEFORE THE BINDING COUNTS.
+    -----------------------------------------------------------
+    The pins come off the verdict's own check records, via
+    :func:`_pinned_criterion_hashes`, and are resolved INSIDE this function
+    rather than handed in. There is deliberately no parameter and no caller
+    switch: a pin validation a caller can forget to pass is one that gets
+    skipped, which is the exact failure this leg exists to remove.
+
+    A label that carries a pin must have one matching the criterion's text AS
+    THE TICKET READS NOW, or it does not discharge -- the binding was accepted
+    against a sentence that no longer exists.
+
+    It NARROWS and never widens. A label carrying NO pin binds exactly as it
+    did before: 68 live contracts declare ``binds_ac``, 67 of them carry no
+    binding record at all, every one hand-authored, and holding them on a pin
+    that does not exist yet is named Out of scope on OMN-18330.
     """
+    pinned_hashes = _pinned_criterion_hashes(verdict)
     contract = f"contracts/{ticket_id}.yaml"
     field_present, bindings, drafts = _declared_ac_bindings(verdict)
     items = tuple(_acceptance_criteria_items(description))
@@ -2204,10 +2353,31 @@ def _ac_binding_gap(
     #: the hold can name the bar rather than say "declared by nothing", which
     #: would be false and would send the author to fix the wrong thing.
     readback_blocked: list[str] = []
+    #: OMN-18330. Criteria whose binding record pins a DIFFERENT revision of
+    #: the criterion text than the ticket carries now, and criteria whose
+    #: record declines to say which revision it pinned at all. Tracked apart
+    #: from `unbound` and from each other because the three repairs differ:
+    #: write a binding, re-accept the existing one against the new wording, or
+    #: record the hash the acceptance was taken against.
+    stale_pinned: list[str] = []
+    unpinned: list[str] = []
     for item in items:
         text = item[:_MAX_AC_TEXT_CHARS]
         label = _canonical_ac_label(item)
         declared = bindings.get(label, ()) if label else ()
+        # OMN-18330. The pin is validated against the criterion AS IT READS
+        # NOW, before any status or proof-class question, because a binding
+        # accepted against a sentence that no longer exists is not evidence
+        # about this criterion whatever its check did. A label absent from
+        # `pinned_hashes` carries no record and is not touched here.
+        pin_stale = False
+        pin_absent = False
+        if label and label in pinned_hashes:
+            pins = pinned_hashes[label]
+            if not pins:
+                pin_absent = True
+            elif _criterion_pin_hash(item) not in pins:
+                pin_stale = True
         verified_rows = tuple(
             row for row in declared if row[1] == _CHECK_STATUS_VERIFIED
         )
@@ -2225,7 +2395,14 @@ def _ac_binding_gap(
             row[2] == _CHECK_PROOF_CLASS_READBACK for row in verified_rows
         )
         proving: tuple[tuple[str, str, str], ...]
-        if readback_only and not _criterion_is_state_shaped(item):
+        if pin_stale or pin_absent:
+            # OMN-18330. Named FIRST among the disqualifications: when the pin
+            # is stale the readback question is moot, and reporting "no
+            # behaviour check" about a criterion whose text moved sends the
+            # author to bind a check to a sentence nobody has re-read.
+            (stale_pinned if pin_stale else unpinned).append(label or text)
+            proving = ()
+        elif readback_only and not _criterion_is_state_shaped(item):
             readback_blocked.append(_canonical_ac_label(item) or text)
             proving = ()
         else:
@@ -2324,6 +2501,43 @@ def _ac_binding_gap(
         if proposed
         else ""
     )
+    # OMN-18330. A criterion whose text CHANGED after its binding was accepted,
+    # and one whose record never said which revision it was accepted against.
+    # Both are named apart from "declared by nothing" and from each other,
+    # because the repair differs in each case and a hold that conflates them
+    # sends the author to fix something that is not broken.
+    more_stale = len(stale_pinned) - _MAX_UNCOVERED_LISTED
+    stale_note = (
+        (
+            " OMN-18330: "
+            + ", ".join(stale_pinned[:_MAX_UNCOVERED_LISTED])
+            + (f" and {more_stale} more" if more_stale > 0 else "")
+            + " IS declared by a binding, but the binding was accepted against "
+            "a DIFFERENT revision of this criterion — the criterion's text on "
+            "this ticket has changed since, so its pinned `criterion_hash` no "
+            "longer matches what the criterion now says. A check that proved "
+            "the old wording is not evidence about the new one. Re-read the "
+            f"criterion, and re-accept the binding in `{contract}` against its "
+            "current text (a fresh `criterion_hash`, acceptor and timestamp)."
+        )
+        if stale_pinned
+        else ""
+    )
+    more_unpinned = len(unpinned) - _MAX_UNCOVERED_LISTED
+    unpinned_note = (
+        (
+            " OMN-18330: "
+            + ", ".join(unpinned[:_MAX_UNCOVERED_LISTED])
+            + (f" and {more_unpinned} more" if more_unpinned > 0 else "")
+            + " carries a binding record with NO readable `criterion_hash`, so "
+            "which revision of the criterion it was accepted against cannot be "
+            "established at all. That is unvalidated rather than stale, and it "
+            "does not discharge the criterion. Record the hash of the criterion "
+            "text the acceptance was taken against on that binding record."
+        )
+        if unpinned
+        else ""
+    )
     unlabelled = sum(1 for text in unbound if not _canonical_ac_label(text))
     labelling = (
         f" {unlabelled} of them carry no `AC<n>`/`DoD<n>` label at all, so "
@@ -2352,8 +2566,8 @@ def _ac_binding_gap(
     return (
         f"{len(unbound)} of {len(items)} acceptance criterion(s) in this "
         f"ticket's description are bound to NO verified probative check in "
-        f"`{contract}`: {named}. {why}{proposal_note}{readback_note}"
-        f"{labelling}{fallback}",
+        f"`{contract}`: {named}. {why}{proposal_note}{stale_note}"
+        f"{unpinned_note}{readback_note}{labelling}{fallback}",
         tuple(unbound),
         tuple(rows),
     )
