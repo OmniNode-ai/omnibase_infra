@@ -1020,12 +1020,28 @@ def run_receipt_mode(
     # discover it had never touched the lane.
     click.echo(render_identity_line(runtime_identity), err=True)
 
-    if receipt_callback is not None:
-        receipt_callback(receipt)
-
+    # OMN-18306: RENDER FIRST, then write artifacts. These two used to run in
+    # the opposite order and therefore shared a failure domain: the delegate
+    # CLI's route-attribution writer refuses -- correctly -- to attribute a
+    # route for a run with no accepted attempt, and that raise propagated out
+    # of this function before the echo below was ever reached. A terminally
+    # failed delegation printed ZERO BYTES on stdout: no answer, no failure
+    # class, no per-rung attempt record, no cost, just the refusal line on
+    # stderr. A correct refusal about ATTRIBUTION must never erase the ANSWER.
+    #
+    # The receipt is this module's whole contract, so nothing downstream of it
+    # may be able to suppress it. Any callback failure is reported and folded
+    # into the exit code instead.
     try:
         click.echo(receipt.model_dump_json())
     except ValidationError as exc:  # pragma: no cover - construction validates
         click.echo(f"receipt mode: receipt serialization failed: {exc}", err=True)
         return 1
+
+    if receipt_callback is not None:
+        try:
+            receipt_callback(receipt)
+        except Exception as exc:  # noqa: BLE001 - a writer must not erase the receipt
+            click.echo(f"receipt mode: receipt callback failed: {exc}", err=True)
+            return exit_code or 1
     return exit_code

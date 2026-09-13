@@ -62,6 +62,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import shutil
 import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, distribution
@@ -153,6 +154,18 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
     return sha if len(sha) == 40 else None
 
 
+def _path_onex_identity() -> tuple[str, Path] | None:
+    """Return PATH's ``onex`` entry and its normalized filesystem identity.
+
+    A drift refusal from a foreign interpreter is usually caused by a second
+    ``onex`` entrypoint preceding the sanctioned wrapper. The raw PATH entry
+    is the actionable location to repair; the resolved path is only for a
+    symlink-safe identity comparison with the canonical wrapper.
+    """
+    path_onex = shutil.which("onex")
+    return (path_onex, Path(path_onex).resolve()) if path_onex else None
+
+
 def check_omnimarket_drift(
     omni_home: str | None = None,
     *,
@@ -237,6 +250,24 @@ def check_omnimarket_drift(
         # not resolvable, and that other interpreter refuses identically
         # regardless of the real venv's state. Printing sys.executable turns
         # the next occurrence into a one-line diagnosis instead of a session.
+        canonical_wrapper = (
+            str(Path(omni_home) / "omnibase_infra" / "scripts" / "onex")
+            if omni_home
+            else "$OMNI_HOME/omnibase_infra/scripts/onex"
+        )
+        path_onex_identity = _path_onex_identity()
+        path_diagnosis = (
+            "PATH did not resolve an 'onex' executable for this process."
+            if path_onex_identity is None
+            else (
+                "PATH resolves 'onex' through the canonical wrapper: "
+                f"{path_onex_identity[0]}."
+                if omni_home
+                and path_onex_identity[1] == Path(canonical_wrapper).resolve()
+                else "PATH resolves 'onex' to a shadowing binary: "
+                f"{path_onex_identity[0]}. Canonical wrapper: {canonical_wrapper}."
+            )
+        )
         detail = (
             "omnimarket is NOT INSTALLED from git in this interpreter "
             f"({sys.executable}) (absent, or installed from PyPI/a non-VCS "
@@ -244,10 +275,9 @@ def check_omnimarket_drift(
             f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
             f"{canonical[:12]}). 'onex skill'/'onex node'/'onex delegate' "
             "dispatch for market-provided nodes (e.g. node_aislop_sweep) "
-            f"will fail with 'Unknown node'. If that interpreter is not "
-            f"$OMNI_HOME/omnibase_infra/.venv/bin/python, the CLI was invoked "
-            f"through something that resolved 'onex' from PATH -- use "
-            f"$OMNI_HOME/omnibase_infra/scripts/onex (see "
+            f"will fail with 'Unknown node'. {path_diagnosis} If that interpreter "
+            f"is not $OMNI_HOME/omnibase_infra/.venv/bin/python, invoke the "
+            f"canonical wrapper directly: {canonical_wrapper} (see "
             f"knowledge-base-internal:runbooks/omnibase-infra-onex-cli-invocation.md). Otherwise repair with: "
             f"{install_cmd} --execute (or {repair_cmd} --repair)."
         )

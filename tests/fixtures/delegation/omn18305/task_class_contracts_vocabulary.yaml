@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# A STAND-IN task-class contract for the ordinary omnibase_infra test
+# environment, which has no omnimarket installed (repo layering forbids the
+# dependency, so the real contract is simply absent here).
+#
+# Its ONLY job is to carry the real public class VOCABULARY so the CLI's
+# plumbing tests -- bus resolution, correlation threading, timeouts -- can
+# run a delegation end to end without the production predicates. The
+# predicates below are deliberately inert: every class declares a phrase
+# nothing matches, so every prompt lands on the declared fallback and no
+# test here can accidentally depend on a production selection rule.
+#
+# DRIFT GUARD: TestTaskTypeVocabulary asserts these names equal
+# cli_delegate.TASK_TYPE_CHOICES, which is itself asserted against the LIVE
+# contract whenever omnimarket is resolvable. Adding a class to the
+# contract without adding it here is a red test, not a silent divergence.
+version: "stand-in"
+task_classes:
+  code_generation:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  code_review:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  complex_reasoning:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  document:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  planning:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  reasoning:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  refactor:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  research:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  review:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  summarization:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []
+  test:
+    gateway_exposure: public
+    selection:
+      priority: 1
+      phrases: []

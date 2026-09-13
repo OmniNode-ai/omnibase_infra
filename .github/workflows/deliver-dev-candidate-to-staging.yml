@@ -451,15 +451,66 @@ jobs:
           # Read strict mode back OFF THE CLUSTER, not out of the render. A lane
           # running 0 quarantines an unwireable handler instead of dying on it,
           # so this gate would go green on exactly the defect class it exists to
-          # catch. That is worth one jsonpath.
-          STRICT="$(kubectl get deploy omninode-runtime -n "${LAB_NAMESPACE}" \
-            -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ONEX_WIRING_STRICT_MODE")].value}')"
-          echo "ONEX_WIRING_STRICT_MODE on the applied Deployment: ${STRICT}"
-          if [ "${STRICT}" != "1" ]; then
-            echo "::error::the applied lane is not running strict wiring mode;" \
-              "this gate would prove nothing"
+          # catch.
+          #
+          # OMN-18324: over EVERY Deployment that runs the auto-wiring kernel,
+          # not the one hardcoded name this readback carried until now. Reading
+          # back `omninode-runtime` alone meant both kernel-pod projection
+          # writers could be applied at the fail-open default while this step,
+          # and the `strict_wiring_mode` leg of the lab-pass receipt that
+          # resolves from its outcome, still reported the lane strict. That is
+          # measured, not hypothetical: on 2026-09-13
+          # omnimarket-projection-delegation-writer booted
+          # `wired=0 skipped=0 failed=1` on the persistent lab lane, reported
+          # READY 1, and persisted nothing (OMN-18307).
+          #
+          # The set is DERIVED from the render that was just applied -- the
+          # runtime image, started by its own entrypoint, with no `command:`
+          # override -- so a sixth kernel pod is covered with no edit here. A
+          # `command:` override replaces the entrypoint, the process never
+          # reaches wire_from_manifest, and the flag is inert on it; that is
+          # the same reasoning OMN-17531 recorded for projection-api and the
+          # contract resolver.
+          mapfile -t KERNEL_DEPLOYS < <(
+            python3 - /tmp/onex-lab-render.yaml <<'KERNELPODS'
+          import sys
+
+          import yaml
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              for doc in yaml.safe_load_all(handle):
+                  if not isinstance(doc, dict) or doc.get("kind") != "Deployment":
+                      continue
+                  spec = ((doc.get("spec") or {}).get("template") or {}).get("spec") or {}
+                  for container in spec.get("containers") or ():
+                      image = str(container.get("image") or "")
+                      if not image or "command" in container:
+                          continue
+                      repository = image.split("@", 1)[0].rsplit(":", 1)[0]
+                      if repository.rsplit("/", 1)[-1] != "omninode-runtime":
+                          continue
+                      print(doc["metadata"]["name"])
+          KERNELPODS
+          )
+
+          # Fail closed on an empty set: a loop over nothing prints no error and
+          # exits 0, which is indistinguishable from a lane that passed.
+          if [ "${#KERNEL_DEPLOYS[@]}" -eq 0 ]; then
+            echo "::error::no Deployment in the applied render runs the auto-wiring kernel;" \
+              "the strict-mode readback checked nothing"
             exit 1
           fi
+
+          for deploy in "${KERNEL_DEPLOYS[@]}"; do
+            STRICT="$(kubectl get "deploy/${deploy}" -n "${LAB_NAMESPACE}" \
+              -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ONEX_WIRING_STRICT_MODE")].value}')"
+            echo "ONEX_WIRING_STRICT_MODE on the applied Deployment ${deploy}: ${STRICT}"
+            if [ "${STRICT}" != "1" ]; then
+              echo "::error::applied Deployment ${deploy} runs the auto-wiring kernel and is not in strict wiring mode;" \
+                "this gate would prove nothing"
+              exit 1
+            fi
+          done
 
       # OMN-17702: MIGRATE THE LANE BEFORE WAITING ON THE RUNTIME FAMILY.
       #
@@ -772,7 +823,7 @@ jobs:
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "manifests_render:${{ steps.render.outcome == 'success' && 'ok' || 'fail' }}:kubectl kustomize ${LAB_OVERLAY} against omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
-            --check "strict_wiring_mode:${{ steps.apply.outcome == 'success' && 'ok' || 'fail' }}:ONEX_WIRING_STRICT_MODE read back off the applied omninode-runtime Deployment" \
+            --check "strict_wiring_mode:${{ steps.apply.outcome == 'success' && 'ok' || 'fail' }}:ONEX_WIRING_STRICT_MODE read back off EVERY applied Deployment that runs the auto-wiring kernel, derived from the render (runtime image, no command override), fail-closed on an empty set (OMN-18324)" \
             --check "migrations_applied:${{ steps.migrate.outcome == 'success' && 'ok' || 'fail' }}:${MIGRATE_JOB_NAME} Job on the candidate migration bundle" \
             --check "runtime_family_ready:${{ steps.boot-wait.outcome == 'success' && 'ok' || 'fail' }}:every runtime-family Deployment plus the projection snapshot topic, within ${BOOT_WAIT_SECONDS}s" \
             --check "rollout_deadline_bounded:${{ steps.rollout-deadline.outcome == 'success' && 'ok' || 'fail' }}:every Deployment's progressDeadlineSeconds under apply_lab_lane.sh's own 900s/300s rollout waits, and every Recreate Deployment naming its single-writer resource, on omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
