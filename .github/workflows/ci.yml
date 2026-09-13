@@ -1855,6 +1855,18 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_nonrequired_check_failure_rate_omn18254.py tests/ci/test_incident_replay_omn18254.py -v --tb=short
 
+      - name: Check the scheduled-run failure-rate extension (OMN-18322)
+        run: |
+          echo "================================================================"
+          echo "Scheduled-Run Failure-Rate Alert (OMN-18322)"
+          echo "A scheduled workflow above the trailing-window threshold raises"
+          echo "one alert naming the workflow, its rate, its count and its last"
+          echo "failing run URL; a below-threshold control fires nothing. Both"
+          echo "are driven over real captured event==schedule run pages, and the"
+          echo "OMN-18254 check-run suite above must pass unmodified alongside."
+          echo "================================================================"
+          uv run pytest tests/ci/test_scheduled_run_failure_rate_omn18322.py -v --tb=short
+
       - name: Check CI evidence-artifact policy (OMN-18247)
         run: |
           echo "================================================================"

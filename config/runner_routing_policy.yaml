@@ -735,6 +735,28 @@ route:
   nonrequired_check_alert:
     failure_threshold: 3
     heads_observed: 10
+    # OMN-18322: the pull-request reads above answer "is a check that fails
+    # forever going unwatched". A scheduled workflow has no pull-request head at
+    # all, so it needed its own threshold rather than reusing the count above --
+    # a percentage over a trailing window, not a count over N heads, because a
+    # scheduled workflow's run cadence varies by workflow (10-minute cron vs.
+    # nightly) and a fixed head-count would either drown a fast cron in noise or
+    # never accumulate for a slow one.
+    #
+    # THE NUMBER: the friction trend report (2026-09-13, kb-internal#406/#407)
+    # measured scheduled workflow runs failing at 15.4% over 9,746 runs against
+    # 2.9% on pull requests, and nothing triaged them. 10% sits below that
+    # measured baseline (so the alert would have caught the condition the report
+    # found) and above the failure rate of every routinely-green scheduled
+    # workflow this alerter's own live read-only run observed (0-9.7% -- see
+    # tests/ci/test_scheduled_run_failure_rate_omn18322.py for the captured
+    # evidence), so a workflow that is merely occasionally flaky does not page.
+    scheduled_failure_threshold_pct: 10.0
+    # 7 days: long enough that a 10-minute cron (pr-ci-zombie-detector.yml
+    # itself: ~1000 scheduled runs/week) and a nightly job (~7 runs/week) both
+    # clear a sample size worth a percentage, short enough that the alert
+    # reflects current behavior rather than an outage that was fixed weeks ago.
+    scheduled_window_days: 7
     # ABSENT FROM required_status_checks IS NOT THE SAME AS UNENFORCED.
     # omnibase_infra requires exactly ONE context on dev - the CI Summary
     # umbrella - whose poller fails on any job in its own run that concludes
