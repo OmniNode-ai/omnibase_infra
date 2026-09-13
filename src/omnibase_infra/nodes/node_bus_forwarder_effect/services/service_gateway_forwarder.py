@@ -60,6 +60,7 @@ _MESSAGE_ID_HEADER = "message_id"
 _CORRELATION_ID_HEADER = "correlation_id"
 _EVENT_TYPE_HEADER = "event_type"
 _TIMESTAMP_HEADER = "timestamp"
+_IDEMPOTENCY_KEY_HEADER = "idempotency_key"
 _EVENT_ID_TAG = "event_id"
 
 
@@ -139,6 +140,23 @@ def _header_uuid(headers: object, name: str) -> UUID | None:
         return UUID(text)
     except ValueError:
         return None
+
+
+def _content_event_id_from_headers(headers: object) -> str | None:
+    """Read a supplied content assertion without confusing corruption with absence."""
+    if not isinstance(headers, Mapping) or _IDEMPOTENCY_KEY_HEADER not in headers:
+        return None
+    raw = headers[_IDEMPOTENCY_KEY_HEADER]
+    if isinstance(raw, bytes):
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise GatewayRecordRefusedError(
+                "outbound idempotency_key header is not valid UTF-8"
+            ) from exc
+    if isinstance(raw, str):
+        return raw
+    raise GatewayRecordRefusedError("outbound idempotency_key header is not text")
 
 
 def decode_envelope_strict(
@@ -225,6 +243,7 @@ def synthesize_outbound_envelope(
     source_topic = getattr(message, "topic", None)
     source_partition = getattr(message, "partition", None)
     source_offset = getattr(message, "offset", None)
+    content_event_id = _content_event_id_from_headers(headers)
     metadata = ModelEnvelopeMetadata(
         tags={
             # The marker exists so a downstream reader can tell a synthesised
@@ -234,6 +253,11 @@ def synthesize_outbound_envelope(
             "gateway_synthesized_source_topic": str(source_topic),
             "gateway_synthesized_source_partition": str(source_partition),
             "gateway_synthesized_source_offset": str(source_offset),
+            **(
+                {_EVENT_ID_TAG: content_event_id}
+                if content_event_id is not None
+                else {}
+            ),
         }
     )
     return ModelEventEnvelope[dict[str, object]](

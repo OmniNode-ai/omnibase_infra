@@ -398,15 +398,19 @@ class NodeGatewayDelivery:
             )
         except asyncio.CancelledError:
             raise
-        except Exception as decode_error:  # noqa: BLE001 — boundary: any decode failure is quarantined, never a bare swallow
+        except Exception as decode_error:
             # A permanently malformed record can never decode no matter how
             # many times it is redelivered -- routing it through the nack
             # path below would seek back to the same offset and re-crash
             # forever (OMN-15748 poison-pill DoS). Quarantine instead: log,
             # best-effort dead-letter, commit past it, keep the loop alive.
-            await self._quarantine_undecodable_message(
+            quarantined = await self._quarantine_undecodable_message(
                 direction, source, message, decode_error
             )
+            if not quarantined:
+                raise RuntimeError(
+                    "gateway quarantine was not durable; retaining source offset"
+                ) from decode_error
             return
         domain = f"gateway:{self._config.tenant_identity.tenant_slug}"
         try:
@@ -477,7 +481,7 @@ class NodeGatewayDelivery:
                 now=datetime.now(UTC),
             )
             publish_egress_health(self._egress_health, self._egress_health_path)
-            await self._quarantine_undecodable_message(
+            quarantined = await self._quarantine_undecodable_message(
                 direction,
                 source,
                 message,
@@ -489,6 +493,10 @@ class NodeGatewayDelivery:
                     "denied_principal_id": denial.principal_id,
                 },
             )
+            if not quarantined:
+                raise RuntimeError(
+                    "gateway quarantine was not durable; retaining source offset"
+                ) from denial
             return
         except GatewayRecordRefusedError as refusal:
             # OMN-17382: a per-record trust-boundary refusal is PERMANENT for
@@ -506,9 +514,13 @@ class NodeGatewayDelivery:
             # committing past THOSE is data loss. A per-topic authorization
             # DENIAL is not one of those -- it is the subclass handled just
             # above (OMN-17201).
-            await self._quarantine_undecodable_message(
+            quarantined = await self._quarantine_undecodable_message(
                 direction, source, message, refusal, classification="refused"
             )
+            if not quarantined:
+                raise RuntimeError(
+                    "gateway quarantine was not durable; retaining source offset"
+                ) from refusal
             return
         except Exception:
             try:
@@ -532,8 +544,8 @@ class NodeGatewayDelivery:
         error: Exception,
         classification: str = "undecodable",
         context: Mapping[str, str] | None = None,
-    ) -> None:
-        """Dead-letter a permanently-undeliverable record and commit past it.
+    ) -> bool:
+        """Dead-letter a permanently-undeliverable record before committing it.
 
         Three callers, one path, because the three failure classes are the same
         shape: a record that cannot decode, a record this gateway refuses to
@@ -592,7 +604,18 @@ class NodeGatewayDelivery:
                         message.partition,
                         message.offset,
                     )
-        await source.commit(message)
+                    return False
+                await source.commit(message)
+                return True
+        logger.error(
+            "Gateway quarantine could not durably dead-letter direction=%s "
+            "source_topic=%s source_partition=%s source_offset=%s; retaining offset",
+            direction,
+            message.topic,
+            message.partition,
+            message.offset,
+        )
+        return False
 
     async def _run_direction(
         self,

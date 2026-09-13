@@ -946,5 +946,66 @@ async def test_a_transport_fault_still_nacks_and_raises() -> None:
     assert source.committed == [], "never commit past a transport fault -- data loss"
 
 
+async def test_failed_quarantine_stops_before_later_same_partition_commit() -> None:
+    """A retained poison offset must stop its partition before a later commit.
+
+    Kafka commits advance the partition position, not an isolated record token.
+    If a failed DLQ write merely avoids committing the poison record but lets the
+    loop poll again, committing the next good record also commits past poison.
+    """
+
+    class _SequencedSource(_Source):
+        def __init__(
+            self, events: list[str], records: list[ModelTransportMessage]
+        ) -> None:
+            super().__init__(events)
+            self.records = records
+            self.poll_calls = 0
+            self.send = None  # type: ignore[method-assign]
+
+        async def poll(
+            self, *, max_messages: int, timeout_ms: int
+        ) -> Sequence[ModelTransportMessage]:
+            self.poll_calls += 1
+            if self.records:
+                return [self.records.pop(0)]
+            await asyncio.sleep(timeout_ms / 1000)
+            return []
+
+    events: list[str] = []
+    poison = ModelTransportMessage(
+        topic=OUTBOUND_TOPIC,
+        partition=0,
+        offset=3,
+        key=b"tenant-key",
+        value=b"SYNTHETIC-not-valid-json{{{",
+        headers={},
+        ack_token=(OUTBOUND_TOPIC, 0, 3),
+    )
+    good = _message()
+    good = good.model_copy(
+        update={"partition": 0, "offset": 4, "ack_token": (OUTBOUND_TOPIC, 0, 4)}
+    )
+    source = _SequencedSource(events, [poison, good])
+    store = _RecordingStore(events)
+    delivery, cloud_bus = _delivery(events, source, store)
+
+    with pytest.raises(RuntimeError, match="quarantine was not durable"):
+        await delivery._run_direction("outbound", source)  # type: ignore[arg-type]
+
+    assert source.poll_calls == 1
+    assert source.committed == []
+    assert cloud_bus.sent == []
+
+    # A restarted consumer receives the same offset. Once its DLQ send works,
+    # the poison is committed, then normal forward progress may resume.
+    source.send = _Source.send.__get__(source, _SequencedSource)  # type: ignore[method-assign]
+    await delivery.deliver_message("outbound", source, poison)  # type: ignore[arg-type]
+    await delivery.deliver_message("outbound", source, good)  # type: ignore[arg-type]
+
+    assert source.committed == [poison, good]
+    assert len(cloud_bus.sent) == 1
+
+
 async def _no_sleep(_seconds: float) -> None:
     return None
