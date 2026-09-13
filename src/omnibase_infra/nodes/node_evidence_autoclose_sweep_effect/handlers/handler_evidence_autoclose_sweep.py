@@ -371,19 +371,19 @@ _NO_LINEAR_IDENTITY_MESSAGE = (
     "LINEAR_CLOSER_CLIENT_SECRET (preferred -- writes attribute to the "
     "application), or LINEAR_API_KEY (fallback -- writes attribute to a person)."
 )
-_PARTIAL_IDENTITY_MESSAGE_ID_SET = (
+_PARTIAL_IDENTITY_MESSAGE_WHEN_ID_PRESENT = (
     "Partial Linear application identity: LINEAR_CLOSER_CLIENT_ID is set and "
     "LINEAR_CLOSER_CLIENT_SECRET is not. Refusing to fall back to "
     "LINEAR_API_KEY -- a half-configured application identity is a deployment "
     "error, not a reason to write as a person."
 )
-_PARTIAL_IDENTITY_MESSAGE_SECRET_SET = (
+_PARTIAL_IDENTITY_MESSAGE_WHEN_ID_ABSENT = (
     "Partial Linear application identity: LINEAR_CLOSER_CLIENT_SECRET is set "
     "and LINEAR_CLOSER_CLIENT_ID is not. Refusing to fall back to "
     "LINEAR_API_KEY -- a half-configured application identity is a deployment "
     "error, not a reason to write as a person."
 )
-_PERSONAL_KEY_FALLBACK_MESSAGE = (
+_PERSONAL_IDENTITY_FALLBACK_MESSAGE = (
     "Linear identity path: %s -- LINEAR_CLOSER_CLIENT_ID and "
     "LINEAR_CLOSER_CLIENT_SECRET are both absent, so this run falls back to the "
     "personal key and every write it makes is attributed on the ticket to the "
@@ -2881,9 +2881,9 @@ class _LinearClient:
         if bool(client_id) != bool(client_secret):
             self.identity_path = EnumLinearIdentityPath.MISCONFIGURED
             self.last_error = (
-                _PARTIAL_IDENTITY_MESSAGE_ID_SET
+                _PARTIAL_IDENTITY_MESSAGE_WHEN_ID_PRESENT
                 if client_id
-                else _PARTIAL_IDENTITY_MESSAGE_SECRET_SET
+                else _PARTIAL_IDENTITY_MESSAGE_WHEN_ID_ABSENT
             )
             logger.error("%s", self.last_error)
             return None
@@ -2905,7 +2905,7 @@ class _LinearClient:
         if api_key:
             self.identity_path = EnumLinearIdentityPath.PERSONAL_API_KEY
             logger.warning(
-                _PERSONAL_KEY_FALLBACK_MESSAGE,
+                _PERSONAL_IDENTITY_FALLBACK_MESSAGE,
                 EnumLinearIdentityPath.PERSONAL_API_KEY.value,
             )
             self._auth_header = api_key

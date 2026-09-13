@@ -338,13 +338,13 @@ def test_operator_messages_name_the_variables_they_are_about() -> None:
     )
     for message in (
         sweep_mod._NO_LINEAR_IDENTITY_MESSAGE,
-        sweep_mod._PARTIAL_IDENTITY_MESSAGE_ID_SET,
-        sweep_mod._PARTIAL_IDENTITY_MESSAGE_SECRET_SET,
+        sweep_mod._PARTIAL_IDENTITY_MESSAGE_WHEN_ID_PRESENT,
+        sweep_mod._PARTIAL_IDENTITY_MESSAGE_WHEN_ID_ABSENT,
     ):
         for name in names:
             assert name in message, f"{name!r} missing from {message!r}"
     for name in names[:2]:
-        assert name in sweep_mod._PERSONAL_KEY_FALLBACK_MESSAGE
+        assert name in sweep_mod._PERSONAL_IDENTITY_FALLBACK_MESSAGE
 
 
 @pytest.mark.unit
