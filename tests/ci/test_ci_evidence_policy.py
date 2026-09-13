@@ -783,3 +783,219 @@ def test_gate_tolerates_suppression_on_a_best_effort_input_step() -> None:
         f"the gate rejected best-effort input steps {suppressed}, which are not "
         "part of the evidence chain"
     )
+
+
+# --------------------------------------------------------------------------
+# OMN-18251: an always-run uploader needs an assertion that CAN fail the job
+# --------------------------------------------------------------------------
+# WHY THIS IS A SEPARATE, INDEPENDENT PREDICATE AND NOT A FOURTH LINE IN
+# check_entry().
+#
+# After OMN-18247 and OMN-18249 landed, this property already held: 18247
+# requires a preceding assertion under `always()`, and 18249 requires neither it
+# nor the enclosing job to be suppressed. Their conjunction IS this rule, and
+# stating that plainly is more useful than inventing scope for this ticket.
+#
+# What is missing from an EMERGENT property is that nothing names it. Narrow
+# either contributing rule later -- for a reason that looks entirely local to
+# it -- and this one disappears with no test going red, which is the same
+# silent-retirement shape the whole phase exists to close. So the predicate is
+# computed HERE, from the parsed workflow, without calling check_entry, and the
+# tests below drive it directly.
+def assertion_can_fail_job(
+    entry: dict[str, Any], workflows_dir: Path = WORKFLOWS_DIR
+) -> tuple[bool, str]:
+    """Can a failed assertion for this artifact actually fail its job?
+
+    Returns ``(True, reason)`` only when every condition holds. Evaluated
+    independently of :func:`check_entry` on purpose -- see the note above.
+    """
+    artifact_id = str(entry.get("id") or "")
+    wf_rel = str(entry.get("workflow") or "")
+    job_id = str(entry.get("job") or "")
+    declared_name = str(entry.get("artifact_name") or "")
+
+    wf_path = _workflow_path(workflows_dir, wf_rel)
+    if not wf_path.is_file():
+        return False, f"{artifact_id}: workflow {wf_rel} is absent"
+    job = _jobs(_load_workflow(wf_path)).get(job_id)
+    if job is None:
+        return False, f"{artifact_id}: job {job_id} is absent"
+
+    steps = _steps(job)
+    uploader_at = next(
+        (
+            i
+            for i, s in enumerate(steps)
+            if _is_uploader(s) and _artifact_name(s) == declared_name
+        ),
+        None,
+    )
+    if uploader_at is None:
+        return False, f"{artifact_id}: no uploader named {declared_name!r}"
+
+    # The rule is conditioned on always(): an uploader that does NOT run after a
+    # failed producer cannot upload the producer's absence in the first place.
+    if "always()" not in str(steps[uploader_at].get("if") or ""):
+        return True, f"{artifact_id}: uploader does not run under always(); rule N/A"
+
+    assertion_at = next(
+        (
+            i
+            for i in range(uploader_at)
+            if any(
+                inv.artifact_id == artifact_id
+                for inv in _assertion_invocations(steps[i])
+            )
+        ),
+        None,
+    )
+    if assertion_at is None:
+        return False, (
+            f"{artifact_id}: the always() uploader in {wf_rel}:{job_id} has no "
+            f"preceding assertion, so it cannot tell a failed producer from a "
+            f"producer that measured nothing"
+        )
+    assertion = steps[assertion_at]
+    if "always()" not in str(assertion.get("if") or ""):
+        return False, (
+            f"{artifact_id}: the assertion is skipped when the producer fails, "
+            f"which is the one case the always() uploader exists for"
+        )
+    if assertion.get("continue-on-error"):
+        return False, f"{artifact_id}: the assertion step is suppressed"
+    if job.get("continue-on-error"):
+        return False, f"{artifact_id}: the enclosing job is suppressed"
+    return True, f"{artifact_id}: assertion can fail the job"
+
+
+@pytest.mark.parametrize("entry", load_policy(), ids=lambda e: str(e.get("id")))
+def test_every_always_run_uploader_has_an_assertion_that_can_fail_the_job(
+    entry: dict[str, Any],
+) -> None:
+    """AC1, on the live tree."""
+    ok, reason = assertion_can_fail_job(entry)
+    assert ok, reason
+
+
+def _staged(tmp_path: Path, mutate: Any) -> Path:
+    """Copy the live lab-lane workflow, apply ``mutate``, and stage it."""
+    staged = tmp_path / "workflows"
+    staged.mkdir()
+    doc = yaml.safe_load(
+        (WORKFLOWS_DIR / "dev-lane-liveness.yml").read_text(encoding="utf-8")
+    )
+    mutate(doc["jobs"]["lab-load-probe"])
+    (staged / "dev-lane-liveness.yml").write_text(
+        yaml.safe_dump(doc, sort_keys=False), encoding="utf-8"
+    )
+    return staged
+
+
+def _assertion_index(job: dict[str, Any]) -> int:
+    return next(
+        i
+        for i, s in enumerate(job["steps"])
+        if ASSERTION_SCRIPT in str(s.get("run") or "")
+    )
+
+
+def test_red_when_the_always_uploader_has_no_assertion(tmp_path: Path) -> None:
+    """The plan's own wording: an uploader that cannot distinguish "the producer
+    failed" from "the producer measured nothing" is the defect."""
+    staged = _staged(tmp_path, lambda job: job["steps"].pop(_assertion_index(job)))
+    entry = next(e for e in load_policy() if str(e.get("id")) == "lab-load")
+    ok, reason = assertion_can_fail_job(entry, staged)
+    assert not ok and "no preceding assertion" in reason, reason
+
+
+def test_red_when_the_assertion_is_skipped_on_a_failed_producer(
+    tmp_path: Path,
+) -> None:
+    """`if: success()` on the assertion is the subtle form.
+
+    The assertion looks present to a reader and to any check that only asks
+    whether it exists, and it is skipped in exactly the case the always()
+    uploader was added for.
+    """
+
+    def mutate(job: dict[str, Any]) -> None:
+        job["steps"][_assertion_index(job)]["if"] = "success()"
+
+    entry = next(e for e in load_policy() if str(e.get("id")) == "lab-load")
+    ok, reason = assertion_can_fail_job(entry, _staged(tmp_path, mutate))
+    assert not ok and "skipped when the producer fails" in reason, reason
+
+
+def test_red_when_the_assertion_is_suppressed(tmp_path: Path) -> None:
+    def mutate(job: dict[str, Any]) -> None:
+        job["steps"][_assertion_index(job)]["continue-on-error"] = True
+
+    entry = next(e for e in load_policy() if str(e.get("id")) == "lab-load")
+    ok, reason = assertion_can_fail_job(entry, _staged(tmp_path, mutate))
+    assert not ok and "assertion step is suppressed" in reason, reason
+
+
+def test_red_when_the_enclosing_job_is_suppressed(tmp_path: Path) -> None:
+    """The real pre-repair shape, reached through this predicate rather than
+    through the suppression rule, which is the point of computing it here."""
+    staged = tmp_path / "workflows"
+    staged.mkdir()
+    (staged / "dev-lane-liveness.yml").write_text(
+        JOB_SUPPRESSED_FIXTURE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    entry = next(e for e in load_policy() if str(e.get("id")) == "lab-load")
+    ok, reason = assertion_can_fail_job(entry, staged)
+    assert not ok, reason
+
+
+def test_the_rule_does_not_apply_to_an_uploader_that_is_not_always_run(
+    tmp_path: Path,
+) -> None:
+    """THE CONTROL, and it is synthetic for a stated reason.
+
+    All five declared uploaders run under always() today, so there is no live
+    example. Without this control the predicate could simply answer False for
+    everything and every red case above would still pass. An uploader that does
+    not run after a failed producer cannot upload the producer's absence, so the
+    rule is genuinely not applicable to it -- and the predicate must say so
+    rather than reject it.
+    """
+
+    def mutate(job: dict[str, Any]) -> None:
+        job["steps"].pop(_assertion_index(job))
+        for step in job["steps"]:
+            if _is_uploader(step):
+                step["if"] = "success()"
+
+    entry = next(e for e in load_policy() if str(e.get("id")) == "lab-load")
+    ok, reason = assertion_can_fail_job(entry, _staged(tmp_path, mutate))
+    assert ok and "rule N/A" in reason, reason
+
+
+def test_the_diagnostics_bundle_is_deliberately_out_of_scope() -> None:
+    """An honest limit, asserted so it cannot drift into an unnoticed hole.
+
+    `candidate-boot-gate` uploads a SECOND artifact under always() with no
+    assertion: pod logs, describes, events, the redacted render and the lane's
+    parity ledger. It is a diagnostic bundle, not an evidence claim -- nothing
+    reads it as proof that anything was exercised -- and its absence honestly
+    means the failure produced none. It is therefore not declared, and this rule
+    does not reach it. Recorded here because "the gate does not cover that" is
+    only acceptable when somebody wrote down which "that".
+    """
+    job = _jobs(_load_workflow(WORKFLOWS_DIR / "deliver-dev-candidate-to-staging.yml"))[
+        "candidate-boot-gate"
+    ]
+    always_uploaders = [
+        _artifact_name(s)
+        for s in _steps(job)
+        if _is_uploader(s) and "always()" in str(s.get("if") or "")
+    ]
+    declared = {str(e.get("artifact_name")) for e in load_policy()}
+    undeclared = [n for n in always_uploaders if n not in declared]
+    assert undeclared == ["candidate-boot-gate-${{ github.run_id }}"], (
+        "the set of undeclared always() uploaders in the boot-gate job changed: "
+        f"{undeclared}. If a new one is an evidence claim, declare it; if it is "
+        "another diagnostic bundle, widen this assertion and say why."
+    )
