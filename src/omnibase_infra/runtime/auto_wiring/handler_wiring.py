@@ -2641,6 +2641,41 @@ def _extract_projection_envelope_id(envelope: object) -> object | None:
     return _coerce_uuid_or_none(value)
 
 
+def _extract_projection_envelope_timestamp(envelope: object) -> datetime | None:
+    """Return the event time the PRODUCER stamped on the dispatched envelope.
+
+    OMN-18326, closing the kernel half of OMN-15583. This is the sibling of
+    :func:`_extract_projection_envelope_id` and exists for the same reason: it
+    is transport-boundary fact that the payload materialization cannot carry.
+
+    A projection whose table holds a NOT NULL event-time column has exactly one
+    authoritative source for it, and for a payload model with no time field of
+    its own -- ``ModelQualityGateResult`` is ``extra="forbid"`` with no
+    ``timestamp``/``evaluated_at``/``completed_at`` -- it is the ONLY source.
+    Without it a handler must either invent a write clock, which then reads
+    forever after as the moment the event happened, or refuse every event.
+
+    It refused every event. ``omnimarket.projection.envelope
+    .envelope_event_timestamp`` reads the time off an ``_envelope`` key that
+    only the STANDALONE runner seam (``unwrap_envelope``) attaches. OMN-18159
+    moved the delegation projection onto a runtime-KERNEL pod, this seam never
+    injected the envelope, and the reader therefore returned ``None`` every
+    time: 146 refusals in the last 3000 log lines of the onex-dev staging
+    delegation writer, and a continuous refusal loop on the onex-lab lane.
+
+    Returns ``None`` -- never ``now()``, never an invented time -- when the
+    envelope records none. The caller then injects NO key, so a reader that
+    finds nothing still refuses and the runtime never becomes the thing that
+    stamps an event-time column with its own clock.
+    """
+    value = (
+        envelope.get("envelope_timestamp")
+        if isinstance(envelope, dict)
+        else getattr(envelope, "envelope_timestamp", None)
+    )
+    return value if isinstance(value, datetime) else None
+
+
 def _is_raw_event_projection_contract(contract: ModelDiscoveredContract) -> bool:
     if contract.event_bus is None:
         return False
@@ -4477,6 +4512,15 @@ def _make_projection_dispatch_callback(
                 # handlers may use it as their durable idempotency key instead
                 # of inventing a fresh identity for every Kafka redelivery.
                 input_data["_envelope_id"] = envelope_id
+            envelope_timestamp = _extract_projection_envelope_timestamp(typed_envelope)
+            if envelope_timestamp is not None:
+                # OMN-18326 / OMN-15583. The producer-recorded event time, from
+                # the same typed envelope the id above comes from. Injected only
+                # when the producer actually recorded one: an absent key leaves a
+                # reader refusing, which is the correct terminal state for an
+                # un-timed event, whereas a defaulted one would silently write
+                # the runtime's own wall clock into an event-time column.
+                input_data["_envelope_timestamp"] = envelope_timestamp
 
             def _invoke_projection_handler() -> object:
                 # OMN-16874: the runtime does NOT pre-connect a handler-owned DB
