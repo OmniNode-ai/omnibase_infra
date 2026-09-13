@@ -60,7 +60,15 @@ from omnibase_infra.runtime.service_delegation_dispatch_port import (
     RuntimeDelegationDispatchPort,
 )
 
-pytestmark = pytest.mark.integration
+# Deselected from the generic test splits and selected by the job that owns it.
+# These tests FAIL CLOSED on an unresolvable consumer source -- which is the whole
+# point, and which makes them wrong to collect in a split that never checks that
+# source out: they would go red there for a reason that has nothing to do with the
+# parity they assert. Same shape as `live_github_api` (OMN-16096). Deselected in the
+# splits is NOT skipped: `consumer-kwarg-parity` in delegation-seam-gate.yml and the
+# always_run `onex-delegation-dispatch-consumer-kwarg-parity` pre-commit hook both
+# run them unconditionally, and both provide the source.
+pytestmark = [pytest.mark.integration, pytest.mark.cross_repo_consumer]
 
 _CONSUMER_RELPATH = Path(
     "src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers"
