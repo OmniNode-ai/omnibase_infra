@@ -64,6 +64,7 @@ import json
 import logging
 import subprocess
 import sys
+from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
@@ -71,7 +72,9 @@ from omnibase_infra.cli.workspace_reconcile import ReconcileFn
 
 __all__ = [
     "DRIFT_OVERRIDE_ENV",
+    "CanonicalCloneAttachment",
     "OmnimarketDriftError",
+    "canonical_clone_attachment",
     "canonical_local_omnimarket_commit",
     "check_omnimarket_drift",
     "installed_omnimarket_commit",
@@ -153,6 +156,63 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
     return sha if len(sha) == 40 else None
 
 
+class CanonicalCloneAttachment(StrEnum):
+    """Whether the canonical clone has a branch checked out.
+
+    Three states, kept distinct on purpose. Collapsing DETACHED into
+    UNDETERMINED is the exact defect this enum exists to prevent: the guard
+    fails OPEN on UNDETERMINED, so a detached clone folded into that value
+    would keep reporting clean -- which is the OMN-17313 bug, reintroduced one
+    layer down.
+    """
+
+    ATTACHED = "attached"
+    DETACHED = "detached"
+    UNDETERMINED = "undetermined"
+
+
+def canonical_clone_attachment(
+    omni_home: str | None = None,
+) -> CanonicalCloneAttachment:
+    """Report whether the canonical local omnimarket clone is on a branch.
+
+    ``git symbolic-ref --quiet HEAD`` is the probe: it succeeds with the full
+    ref name on an attached HEAD and exits non-zero on a detached one. That is
+    the only signal that distinguishes the two -- ``rev-parse HEAD``, which
+    :func:`canonical_local_omnimarket_commit` uses, returns a valid sha in both
+    states, which is precisely why detachment was invisible to this guard.
+
+    Returns :attr:`CanonicalCloneAttachment.UNDETERMINED` when the clone cannot
+    be reached at all (no ``$OMNI_HOME``, no clone, git unavailable, timeout).
+    Callers fail OPEN on that value for the same reason the rest of this module
+    does -- see the module docstring. A git invocation that RAN and reported
+    "not a symbolic ref" is not undetermined: it is DETACHED, and is reported
+    as such.
+    """
+    if not omni_home:
+        return CanonicalCloneAttachment.UNDETERMINED
+    omnimarket_root = Path(omni_home) / "omnimarket"
+    if not (omnimarket_root / ".git").exists():
+        return CanonicalCloneAttachment.UNDETERMINED
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(omnimarket_root), "symbolic-ref", "--quiet", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return CanonicalCloneAttachment.UNDETERMINED
+    if result.returncode == 0 and result.stdout.strip().startswith("refs/heads/"):
+        return CanonicalCloneAttachment.ATTACHED
+    # git ran and declined to resolve HEAD to a branch. Exit status 1 is the
+    # documented "not a symbolic ref" answer; anything else here is a repo git
+    # could not read as a branch either, and a canonical clone in that state is
+    # no more usable as a reference point than a detached one.
+    return CanonicalCloneAttachment.DETACHED
+
+
 def check_omnimarket_drift(
     omni_home: str | None = None,
     *,
@@ -208,6 +268,62 @@ def check_omnimarket_drift(
     canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
         return
+
+    # OMN-17313: a DETACHED canonical clone is drift in its own right, and it
+    # has to be judged BEFORE the commit comparison below -- because that
+    # comparison PASSES on exactly this fault. The venv is pinned to the local
+    # clone HEAD by reconcile-workspace-venvs.sh (OMN-16366), so when the clone
+    # detaches the venv faithfully reproduces the frozen commit and the two
+    # sides agree. Drift then reads as zero while both are arbitrarily stale
+    # relative to the upstream branch. Live case, 2026-08-31: the clone sat
+    # detached at a commit on an unmerged PR branch that existed on no remote
+    # for two days, this guard reported clean the whole time, and the routing
+    # authority resolved pre-fix content from that tree (OMN-6790 regression
+    # re-appearing on the client path).
+    #
+    # No `reconcile` is attempted on this branch. The bound reconciler installs
+    # packages into the venv; it cannot re-attach a git clone, so invoking it
+    # here would burn an install and then refuse anyway with a message about
+    # the wrong subsystem. The sanctioned repair is the converge script, which
+    # accepts a detached HEAD as of OMN-17313.
+    if canonical_clone_attachment(omni_home=omni_home) is (
+        CanonicalCloneAttachment.DETACHED
+    ):
+        converge_cmd = (
+            str(
+                Path(omni_home)
+                / "omniclaude"
+                / "scripts"
+                / "converge-canonical-clone.sh"
+            )
+            if omni_home
+            else "omniclaude/scripts/converge-canonical-clone.sh"
+        )
+        detached_detail = (
+            f"canonical $OMNI_HOME/omnimarket clone is on a DETACHED HEAD at "
+            f"{canonical[:12]} -- it tracks no branch, so it can no longer "
+            f"follow its upstream and every consumer pinned to it (this venv, "
+            f"BIFROST_CONTRACT_PATH, any contract path resolved from that tree) "
+            f"is frozen with it. The installed-commit comparison CANNOT see "
+            f"this: the venv is pinned to the clone HEAD, so both sides agree "
+            f"while both are stale. Repair with: {converge_cmd} omnimarket "
+            f"--execute (add --to-branch <name> if the re-attachment target "
+            f"cannot be derived from the reflog)."
+        )
+        if allow_drift:
+            logger.warning(
+                "%s DISPATCHING ANYWAY because %s is set -- results from "
+                "market-provided nodes come from an UNVERIFIED omnimarket build "
+                "and must not be treated as evidence.",
+                detached_detail,
+                DRIFT_OVERRIDE_ENV,
+            )
+        else:
+            raise OmnimarketDriftError(
+                f"{detached_detail} To dispatch anyway despite the drift "
+                f"(results are NOT evidence), set {DRIFT_OVERRIDE_ENV}=1."
+            )
+
     installed = installed_omnimarket_commit()
     if installed == canonical:
         return
