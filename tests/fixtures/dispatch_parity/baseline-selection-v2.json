@@ -408,6 +408,22 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e": {
+      "category": "event",
+      "contract_name": "node_delegation_chain_ledger_effect",
+      "event_model_module": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models",
+      "event_model_name": "ModelDelegationTerminalPayload",
+      "handler_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
+      "handler_module": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger",
+      "handler_name": "HandlerDelegationChainLedger",
+      "message_types": [
+        "ModelDelegationTerminalPayload",
+        "omnimarket.delegate-skill-completed",
+        "onex.evt.omnimarket.delegate-skill-completed.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_4314b56c": {
       "category": "event",
       "contract_name": "node_dlq_replay_effect",
@@ -2743,16 +2759,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 123,
+        "omnibase_infra": 124,
         "onex-change-control": 4
       },
-      "contracts_discovered": 142,
+      "contracts_discovered": 143,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 97,
-      "probe_count": 738,
-      "registered_dispatchers": 117,
-      "registered_routes": 112,
-      "type_scoped_dispatchers": 65
+      "distinct_subscribe_topics": 98,
+      "probe_count": 741,
+      "registered_dispatchers": 118,
+      "registered_routes": 113,
+      "type_scoped_dispatchers": 66
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -2792,10 +2808,10 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-09-07T10:36:29.563028+00:00",
+    "generated_at_utc": "2026-09-13T14:12:09.765588+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.5",
-      "omnibase-infra": "0.38.20",
+      "omnibase-core": "0.47.12",
+      "omnibase-infra": "0.38.24",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -3941,6 +3957,21 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
+    },
+    "P1a::onex.evt.omnimarket.delegate-skill-completed.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-completed",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnimarket.v1",
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-completed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
     "P1a::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5399,6 +5430,21 @@
       },
       "topic": "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
     },
+    "P1b::onex.evt.omnimarket.delegate-skill-completed.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
     "P1b::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6372,6 +6418,26 @@
         "status": "success"
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    },
+    "P4::dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e::onex.evt.omnimarket.delegate-skill-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
+      "event_model": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.ModelDelegationTerminalPayload",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-completed",
+        "payload": "ModelDelegationTerminalPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
     "P4::dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -16819,6 +16885,16 @@
       "topic": "onex.evt.omnibase-infra.db-error.v1",
       "topic_pattern": "*.evt.omnibase-infra.db-error.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_delegation_chain_ledger_effect",
+      "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
+      "handler_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
+      "message_category": "event",
+      "route_id": "route.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e.onex_evt_omnimarket_delegate_skill_completed_v1",
+      "topic": "onex.evt.omnimarket.delegate-skill-completed.v1",
+      "topic_pattern": "*.evt.omnimarket.delegate-skill-completed.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_dlq_replay_effect",
