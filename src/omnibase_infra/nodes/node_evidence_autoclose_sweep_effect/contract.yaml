@@ -388,14 +388,34 @@
 #     join is proven by fixture rather than by corpus. What is closed here is
 #     that the closer had no way to learn a criterion had moved; it now does,
 #     with no caller switch and no parameter a caller can forget.
+#   - OMN-18336 (node_version 1.14.0): A REVERT BECOMES A CORRECTION. The
+#     revert fence has fired sixteen times and nothing turned a revert into
+#     feedback: four of forty-seven flips were reverted by hand, an 8.5%
+#     false-positive rate absorbed rather than measured, and establishing what
+#     the closer believed at the moment of a wrong flip meant reading receipts
+#     back by hand. On detecting a revert of ITS OWN flip -- identified from
+#     the closer's own flip comment being on the ticket, never from the
+#     reversal alone -- the post-revert comment now names each acceptance
+#     criterion the flip counted as discharged paired with the check id that
+#     discharged it, and carries a verbatim countable marker line. The
+#     exact-fingerprint branch, which returned silently before, posts that
+#     comment too; it is the clearest revert of this mechanism's judgement
+#     there is. The receipt carries `closer_flip_reverted` per outcome and
+#     `tickets_closer_flip_reverted` per run, which is the series value the
+#     process panel reads. A reverted HAND flip sets neither and gets no
+#     feedback section: that is somebody else's judgement being undone, and
+#     counting it would inflate this mechanism's rate with an error it did not
+#     make. THE FLIP PREDICATE IS UNCHANGED -- OMN-18056 already prevents the
+#     failure class going forward and widening the hold further is explicitly
+#     not proposed. This is feedback on the predicate, not a change to it.
 #
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 8
+  minor: 9
   patch: 0
-node_version: "1.13.0"
+node_version: "1.14.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, and holds a criterion whose only declaring check marks it a proposal until a person accepts it, and holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 

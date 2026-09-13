@@ -73,6 +73,13 @@ class ModelEvidenceAutocloseSweepResult(BaseModel):
     tickets_gap_posted: int = Field(default=0, ge=0)
     tickets_skipped: int = Field(default=0, ge=0)
     tickets_errored: int = Field(default=0, ge=0)
+    # OMN-18336. How many of this run's candidates were candidates because a
+    # flip THIS CLOSER made had been reverted. The series value behind the
+    # false-positive rate: four of forty-seven flips were reverted by hand and
+    # nothing counted them, so the rate was absorbed rather than measured. A
+    # reverted hand flip is deliberately NOT counted here — see
+    # `ModelEvidenceAutocloseOutcome.closer_flip_reverted`.
+    tickets_closer_flip_reverted: int = Field(default=0, ge=0)
     outcomes: tuple[ModelEvidenceAutocloseOutcome, ...] = Field(
         default_factory=tuple,
         description="One entry per (companion, ticket) pair considered.",
