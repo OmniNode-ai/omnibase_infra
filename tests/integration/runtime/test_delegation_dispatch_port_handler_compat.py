@@ -10,6 +10,10 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.enums.enum_delegation_traffic_class import (
+    EnumDelegationTrafficClass,
+)
+from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
@@ -56,6 +60,13 @@ def test_runtime_port_exposes_consumer_handler_optional_parameters() -> None:
         assert parameters["system_prompt"].default is None
         assert parameters["temperature"].default is None
         assert parameters["response_format"].default is None
+        # OMN-18321: added by OMN-18172 on the consumer side (omnimarket#2494,
+        # squash 849fdae6) and not here, which took every dev-lane delegation to
+        # a failed terminal with no FSM row for a day. The name is asserted
+        # explicitly AND derived from the consumer's own declaration by
+        # test_delegation_dispatch_port_consumer_kwarg_parity.py -- this line
+        # pins the one that already cost an outage, that file catches the next.
+        assert parameters["provenance"].default is None
 
 
 @pytest.mark.asyncio
@@ -170,3 +181,126 @@ async def test_metered_terminal_cost_crosses_the_runtime_consumer_boundary(
     )
 
     assert result["cost_usd"] == pytest.approx(0.00182)
+
+
+@pytest.mark.asyncio
+async def test_provenance_reaches_the_published_dispatch_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18321/OMN-18172: provenance is carried onto the wire, not absorbed.
+
+    Accepting the keyword and dropping it would turn a loud TypeError into a
+    silent classification hole -- the exact silent-drop defect OMN-18172 exists
+    to close. The assertion is on the payload the bus path actually publishes.
+    """
+    route = _delegation_route()
+    captured_commands: list[ModelDispatchBusCommand] = []
+
+    class FakePatternBBroker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def dispatch_request(
+            self, command: ModelDispatchBusCommand
+        ) -> tuple[ModelRuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
+            captured_commands.append(command)
+            return route, ModelDispatchBusTerminalResult(
+                correlation_id=command.correlation_id,
+                status="completed",
+                payload={"content": "alive"},
+                completed_at=datetime.now(UTC),
+            )
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
+        FakePatternBBroker,
+    )
+    port = RuntimeDelegationDispatchPort(
+        event_bus=object(),  # type: ignore[arg-type]
+        routes={"delegation.orchestrate": route},
+    )
+
+    provenance = ModelDelegationProvenance(
+        source="external-client",
+        traffic_class=EnumDelegationTrafficClass.SYNTHETIC,
+        source_surface="scheduled-chain-canary",
+        requested_by="chain-canary",
+    )
+
+    result = await port.dispatch(
+        prompt="Reply with the single word: alive.",
+        task_type="test",
+        correlation_id=uuid4(),
+        max_tokens=32,
+        source_file_path=None,
+        source_session_id=None,
+        wait=True,
+        quality_contract_mode="extend_task_class",
+        acceptance_criteria=(),
+        tenant_id=None,
+        provenance=provenance,
+        backend_id=None,
+        response_contract=None,
+        system_prompt=None,
+        temperature=None,
+        response_format=None,
+    )
+
+    assert result["status"] == "completed"
+    published = captured_commands[0].payload["provenance"]
+    assert published == provenance.model_dump(mode="json")
+    assert published["traffic_class"] == EnumDelegationTrafficClass.SYNTHETIC.value
+    assert published["source_surface"] == "scheduled-chain-canary"
+
+
+@pytest.mark.asyncio
+async def test_absent_provenance_leaves_no_key_on_the_dispatch_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """None stays absent rather than becoming a synthetic default.
+
+    OMN-18172 is explicit that an absent provenance is unclassified, never
+    synthetic. A null on the wire invites a consumer to read it as a value.
+    """
+    route = _delegation_route()
+    captured_commands: list[ModelDispatchBusCommand] = []
+
+    class FakePatternBBroker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def dispatch_request(
+            self, command: ModelDispatchBusCommand
+        ) -> tuple[ModelRuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
+            captured_commands.append(command)
+            return route, ModelDispatchBusTerminalResult(
+                correlation_id=command.correlation_id,
+                status="completed",
+                payload={"content": "alive"},
+                completed_at=datetime.now(UTC),
+            )
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
+        FakePatternBBroker,
+    )
+    port = RuntimeDelegationDispatchPort(
+        event_bus=object(),  # type: ignore[arg-type]
+        routes={"delegation.orchestrate": route},
+    )
+
+    await port.dispatch(
+        prompt="unclassified probe",
+        task_type="test",
+        correlation_id=uuid4(),
+        max_tokens=None,
+        source_file_path=None,
+        source_session_id=None,
+        wait=True,
+        quality_contract_mode="extend_task_class",
+        acceptance_criteria=(),
+        tenant_id=None,
+        provenance=None,
+    )
+
+    assert "provenance" not in captured_commands[0].payload

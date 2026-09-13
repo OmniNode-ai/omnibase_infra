@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
+from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
@@ -247,6 +248,7 @@ class RuntimeDelegationDispatchPort:
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
         tenant_id: str | None = None,
+        provenance: ModelDelegationProvenance | None = None,
         backend_id: str | None = None,
         response_contract: dict[str, object] | None = None,
         system_prompt: str | None = None,
@@ -296,6 +298,17 @@ class RuntimeDelegationDispatchPort:
             "quality_contract_mode": quality_contract_mode,
             "acceptance_criteria": list(acceptance_criteria),
             "tenant_id": tenant_id,
+            # OMN-18321 / OMN-18172: carried ONTO THE WIRE, not merely accepted.
+            # Accepting the keyword and dropping it would trade a loud TypeError
+            # for a silent classification hole -- precisely the silent-drop
+            # defect OMN-18172 exists to close. `None` falls out of the
+            # comprehension below, so an unclassified delegation publishes no
+            # `provenance` key rather than a null a consumer could misread as a
+            # value; OMN-18172 is explicit that absent means unclassified and
+            # never synthetic.
+            "provenance": (
+                None if provenance is None else provenance.model_dump(mode="json")
+            ),
         }
 
         command = ModelDispatchBusCommand(
