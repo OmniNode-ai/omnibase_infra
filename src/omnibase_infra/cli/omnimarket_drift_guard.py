@@ -185,10 +185,8 @@ def canonical_clone_attachment(
 
     Returns :attr:`CanonicalCloneAttachment.UNDETERMINED` when the clone cannot
     be reached at all (no ``$OMNI_HOME``, no clone, git unavailable, timeout).
-    Callers fail OPEN on that value for the same reason the rest of this module
-    does -- see the module docstring. A git invocation that RAN and reported
-    "not a symbolic ref" is not undetermined: it is DETACHED, and is reported
-    as such.
+    A git invocation that RAN and reported "not a symbolic ref" is not
+    undetermined: it is DETACHED, and is reported as such.
     """
     if not omni_home:
         return CanonicalCloneAttachment.UNDETERMINED
@@ -205,7 +203,8 @@ def canonical_clone_attachment(
         )
     except (subprocess.TimeoutExpired, OSError):
         return CanonicalCloneAttachment.UNDETERMINED
-    if result.returncode == 0 and result.stdout.strip().startswith("refs/heads/"):
+    symbolic_ref = result.stdout.strip()
+    if result.returncode == 0 and symbolic_ref.startswith("refs/"):
         return CanonicalCloneAttachment.ATTACHED
     # git ran and declined to resolve HEAD to a branch. Exit status 1 is the
     # documented "not a symbolic ref" answer; anything else here is a repo git
@@ -295,27 +294,33 @@ def check_omnimarket_drift(
     # re-appearing on the client path).
     #
     # No `reconcile` is attempted on this branch. The bound reconciler installs
-    # packages into the venv; it cannot re-attach a git clone, so invoking it
-    # here would burn an install and then refuse anyway with a message about
-    # the wrong subsystem. The sanctioned repair is the converge script, which
-    # accepts a detached HEAD as of OMN-17313.
-    if canonical_clone_attachment(omni_home=omni_home) is (
-        CanonicalCloneAttachment.DETACHED
-    ):
-        converge_cmd = (
-            str(
-                Path(omni_home)
-                / "omniclaude"
-                / "scripts"
-                / "converge-canonical-clone.sh"
-            )
-            if omni_home
-            else "omniclaude/scripts/converge-canonical-clone.sh"
+    # packages into the venv; it cannot re-attach a git clone or make an
+    # unreadable clone trustworthy, so invoking it here would burn an install
+    # and then refuse anyway with a message about the wrong subsystem. The
+    # sanctioned repair is the converge script, which accepts a detached HEAD
+    # as of OMN-17313.
+    attachment = CanonicalCloneAttachment.ATTACHED
+    omni_home_path = Path(omni_home) if omni_home else None
+    if omni_home_path and (omni_home_path / "omnimarket" / ".git").exists():
+        attachment = canonical_clone_attachment(omni_home=omni_home)
+    if attachment is not CanonicalCloneAttachment.ATTACHED:
+        assert omni_home_path is not None
+        converge_cmd = str(
+            omni_home_path / "omniclaude" / "scripts" / "converge-canonical-clone.sh"
         )
-        detached_detail = (
-            f"canonical $OMNI_HOME/omnimarket clone is on a DETACHED HEAD at "
-            f"{canonical[:12]} -- it tracks no branch, so it can no longer "
-            f"follow its upstream and every consumer pinned to it (this venv, "
+        if attachment is CanonicalCloneAttachment.DETACHED:
+            clone_detail = (
+                f"canonical $OMNI_HOME/omnimarket clone is on a DETACHED HEAD "
+                f"at {canonical[:12]} -- it tracks no branch, so it can no "
+                f"longer follow its upstream"
+            )
+        else:
+            clone_detail = (
+                f"canonical $OMNI_HOME/omnimarket clone HEAD is {canonical[:12]}, "
+                "but the guard could not prove that HEAD is attached to a ref"
+            )
+        attachment_detail = (
+            f"{clone_detail}, and every consumer pinned to it (this venv, "
             f"BIFROST_CONTRACT_PATH, any contract path resolved from that tree) "
             f"is frozen with it. The installed-commit comparison CANNOT see "
             f"this: the venv is pinned to the clone HEAD, so both sides agree "
@@ -328,12 +333,13 @@ def check_omnimarket_drift(
                 "%s DISPATCHING ANYWAY because %s is set -- results from "
                 "market-provided nodes come from an UNVERIFIED omnimarket build "
                 "and must not be treated as evidence.",
-                detached_detail,
+                attachment_detail,
                 DRIFT_OVERRIDE_ENV,
             )
+            return
         else:
             raise OmnimarketDriftError(
-                f"{detached_detail} To dispatch anyway despite the drift "
+                f"{attachment_detail} To dispatch anyway despite the drift "
                 f"(results are NOT evidence), set {DRIFT_OVERRIDE_ENV}=1."
             )
 
