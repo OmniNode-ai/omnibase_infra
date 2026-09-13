@@ -10,9 +10,20 @@ dispatch-time wiring that loads the row before ``handle()`` and CAS-persists
 it after, gating publish on a successful persist.
 """
 
+from omnibase_infra.enums.enum_runtime_restart_policy import (
+    EnumRuntimeRestartPolicy,
+)
+from omnibase_infra.runtime.state_io.model_completion_bound import (
+    ModelCompletionBound,
+)
 from omnibase_infra.runtime.state_io.state_store_adapter import (
     CONTEXTVAR_STATE_IO_ROWS,
     StateStoreAdapter,
 )
 
-__all__ = ["CONTEXTVAR_STATE_IO_ROWS", "StateStoreAdapter"]
+__all__ = [
+    "CONTEXTVAR_STATE_IO_ROWS",
+    "EnumRuntimeRestartPolicy",
+    "ModelCompletionBound",
+    "StateStoreAdapter",
+]

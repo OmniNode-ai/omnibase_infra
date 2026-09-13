@@ -380,6 +380,66 @@ class StateStoreAdapter:
             )
         return recoverable
 
+    async def select_abandoned_rows(self, ttl_seconds: int) -> list[dict[str, object]]:
+        """Return genuinely abandoned in-flight rows past their completion bound.
+
+        The SELECT half of :meth:`recover_stale_rows`, split out so the caller
+        that OWNS THE BUS can emit a real terminal event for each row before the
+        row is closed (OMN-18296). The adapter still has no bus, and still must
+        not: the layering that keeps it out of the publish path is the same one
+        that made ``recover_stale_rows`` row-only in the first place. What
+        changes is that giving up is no longer expressible as a silent UPDATE —
+        the give-up now has to travel as an event, so the adapter's job is to
+        say WHICH rows, not to declare them failed by itself.
+
+        Predicate is byte-for-byte the one ``recover_stale_rows`` fails on:
+        non-terminal, ``in_flight``, no live ``pending_emissions`` batch (those
+        are RECOVERABLE and belong to ``select_recoverable_batches``), and
+        ``updated_at`` older than the bound. A row still being advanced by a
+        live leg pushes ``updated_at`` forward and is never selected.
+
+        Args:
+            ttl_seconds: The contract-declared completion bound, in seconds.
+
+        Returns:
+            One dict per abandoned row, carrying everything the caller needs to
+            build and publish a terminal without re-reading: key, tenant, state,
+            payload JSON and the CAS ``version`` to finalize against.
+        """
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"SELECT {self._key_column} AS correlation_id, "  # noqa: S608 — table + key column validated in __init__
+                    f"tenant_id, state, payload::text AS payload_json, version, "
+                    f"updated_at "
+                    f"FROM {self._table} "
+                    f"WHERE state NOT IN ('COMPLETED', 'FAILED') "
+                    f"  AND in_flight "
+                    f"  AND (pending_emissions IS NULL "
+                    f"       OR jsonb_array_length(pending_emissions) = 0) "
+                    f"  AND updated_at < NOW() - make_interval(secs => $1)",
+                    ttl_seconds,
+                )
+        except asyncpg.PostgresError as exc:
+            raise RepositoryExecutionError(
+                f"state_io select_abandoned_rows failed: {type(exc).__name__}",
+                op_name="select_abandoned_rows",
+                table=self._table,
+                context=self._context("select_abandoned_rows", None),
+            ) from exc
+        return [
+            {
+                "correlation_id": row["correlation_id"],
+                "tenant_id": row["tenant_id"],
+                "state": row["state"],
+                "payload_json": row["payload_json"],
+                "version": row["version"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     async def recover_stale_rows(self, ttl_seconds: int | None = None) -> int:
         """Fail closed on abandoned in-flight rows past their TTL.
 
