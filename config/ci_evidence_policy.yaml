@@ -118,3 +118,17 @@ evidence_artifacts:
       - /tmp/lab-overlay-receipt/receipt.json
     rationale: >-
       The k3s onex-lab overlay's half of rule 24(a), on its own lane name so it cannot supersede the boot gate's onex-lab receipt for the same sha.
+  # --- the non-required check failure-rate report (OMN-18254) --------------
+  #
+  # Declared because its ABSENCE is the failure it exists to prevent. This
+  # alerter watches for checks that fail while nothing blocks; an alerter that
+  # silently produced nothing would be exactly that defect, one level up.
+  - id: nonrequired-check-report
+    workflow: .github/workflows/pr-ci-zombie-detector.yml
+    job: nonrequired-check-failure-rate
+    producer_step: "Evaluate non-required check failure rates"
+    artifact_name: nonrequired-check-report
+    required_paths:
+      - nonrequired-check-report.json
+    rationale: >-
+      The per-repo record of which non-required checks were evaluated, which contexts counted as required, and which crossed the threshold. A silent alerter and a correct one look identical from a green run, so this record is how anyone tells them apart afterwards.

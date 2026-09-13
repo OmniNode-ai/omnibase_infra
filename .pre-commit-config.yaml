@@ -259,6 +259,17 @@ repos:
         files: ^(\.github/workflows/dev-lane-liveness\.yml|scripts/ci/probe_lab_load\.py|tests/ci/test_lab_load_probe_omn18253\.py|tests/fixtures/omn18253/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18254: the non-required check failure-rate alerter. Pins the
+      # above-threshold alert and the below-threshold control over four real
+      # captured check-run responses, because an alerter that is always silent
+      # and an alerter that is correct look identical from a green run.
+      - id: nonrequired-check-failure-rate
+        name: Non-required check failure-rate alert (OMN-18254)
+        entry: uv run --frozen pytest tests/ci/test_nonrequired_check_failure_rate_omn18254.py tests/ci/test_incident_replay_omn18254.py -q
+        language: system
+        files: ^(scripts/ci/nonrequired_check_failure_rate\.py|config/runner_routing_policy\.yaml|tests/ci/test_nonrequired_check_failure_rate_omn18254\.py|tests/ci/test_incident_replay_omn18254\.py|tests/fixtures/omn18254/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ci-evidence-policy
         name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
         entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q

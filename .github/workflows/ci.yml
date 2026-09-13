@@ -1845,6 +1845,16 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_lab_load_probe_omn18253.py -v --tb=short
 
+      - name: Check the non-required check failure-rate alert (OMN-18254)
+        run: |
+          echo "================================================================"
+          echo "Non-Required Check Failure-Rate Alert (OMN-18254)"
+          echo "A non-required check above threshold raises ONE alert naming the"
+          echo "check and its count, and a below-threshold control fires nothing."
+          echo "Both are driven over real captured check-run responses."
+          echo "================================================================"
+          uv run pytest tests/ci/test_nonrequired_check_failure_rate_omn18254.py tests/ci/test_incident_replay_omn18254.py -v --tb=short
+
       - name: Check CI evidence-artifact policy (OMN-18247)
         run: |
           echo "================================================================"
