@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Runs the idle auto-stop check every 10 minutes (OMN-16634).
+[Unit]
+Description=onex pre-push cloud host idle auto-stop timer
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
