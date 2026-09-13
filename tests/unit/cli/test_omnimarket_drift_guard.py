@@ -25,7 +25,9 @@ import pytest
 from omnibase_infra.cli import omnimarket_drift_guard as guard
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
+    CanonicalCloneAttachment,
     OmnimarketDriftError,
+    canonical_clone_attachment,
     canonical_local_omnimarket_commit,
     check_omnimarket_drift,
     installed_omnimarket_commit,
@@ -680,3 +682,253 @@ def test_missing_reconcile_script_is_a_failed_outcome_not_a_raise(
     assert outcome.ok is False
     assert "reconcile-workspace-venvs.sh" in outcome.command
     assert "not found" in outcome.detail
+
+
+# ---------------------------------------------------------------------------
+# canonical clone attachment (OMN-17313)
+#
+# The drift guard compares the venv-installed commit against the canonical
+# clone's HEAD. When the clone is DETACHED those two agree -- the venv is
+# faithfully reproducing the frozen clone -- so drift reads as ZERO while both
+# sides are arbitrarily stale relative to the upstream branch. The live case:
+# $OMNI_HOME/omnimarket sat detached at an unmerged PR-branch commit for two
+# days, the guard reported clean throughout, and every consumer downstream of
+# that clone served pre-fix content.
+# ---------------------------------------------------------------------------
+
+
+def _detach_head(root: Path) -> None:
+    """Detach ``root``'s HEAD at its current commit."""
+    subprocess.run(
+        ["git", "-C", str(root), "checkout", "--quiet", "--detach", "HEAD"], check=True
+    )
+
+
+def test_detached_canonical_clone_is_drift_even_when_commits_agree(
+    tmp_path: Path,
+) -> None:
+    """RED for OMN-17313: venv == clone HEAD, clone DETACHED -> must refuse."""
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    head_sha = _make_git_repo(omnimarket_root)
+    _detach_head(omnimarket_root)
+
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=head_sha,
+    ):
+        with pytest.raises(OmnimarketDriftError) as excinfo:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+
+    message = str(excinfo.value)
+    assert "DETACHED" in message
+    assert "converge-canonical-clone.sh" in message
+
+
+def test_attachment_probe_reads_attached_on_a_real_branch(tmp_path: Path) -> None:
+    # Positive control for the detached assertions below: the SAME probe, on
+    # the SAME kind of throwaway repo, returns ATTACHED when a branch is
+    # checked out. Without this, a probe that returned DETACHED unconditionally
+    # would make every detached test pass for the wrong reason.
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    _make_git_repo(omnimarket_root)
+    assert (
+        canonical_clone_attachment(omni_home=str(tmp_path))
+        is CanonicalCloneAttachment.ATTACHED
+    )
+
+
+def test_attachment_probe_accepts_remote_tracking_symbolic_ref(
+    tmp_path: Path,
+) -> None:
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    _make_git_repo(omnimarket_root)
+    with patch("omnibase_infra.cli.omnimarket_drift_guard.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=["git"],
+            returncode=0,
+            stdout="refs/remotes/origin/main\n",
+            stderr="",
+        )
+        assert (
+            canonical_clone_attachment(omni_home=str(tmp_path))
+            is CanonicalCloneAttachment.ATTACHED
+        )
+
+
+def test_attachment_probe_reads_detached_after_detaching(tmp_path: Path) -> None:
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    _make_git_repo(omnimarket_root)
+    _detach_head(omnimarket_root)
+    assert (
+        canonical_clone_attachment(omni_home=str(tmp_path))
+        is CanonicalCloneAttachment.DETACHED
+    )
+
+
+@pytest.mark.parametrize(
+    "side_effect",
+    [
+        subprocess.TimeoutExpired(["git"], timeout=2),
+        OSError("git unavailable"),
+    ],
+)
+def test_attachment_probe_failures_are_undetermined(
+    tmp_path: Path, side_effect: Exception
+) -> None:
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    _make_git_repo(omnimarket_root)
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.subprocess.run",
+        side_effect=side_effect,
+    ):
+        assert (
+            canonical_clone_attachment(omni_home=str(tmp_path))
+            is CanonicalCloneAttachment.UNDETERMINED
+        )
+
+
+@pytest.mark.parametrize("omni_home", ["", None])
+def test_attachment_undetermined_without_omni_home(omni_home: str | None) -> None:
+    assert (
+        canonical_clone_attachment(omni_home=omni_home)
+        is CanonicalCloneAttachment.UNDETERMINED
+    )
+
+
+def test_attachment_undetermined_when_clone_absent(tmp_path: Path) -> None:
+    assert (
+        canonical_clone_attachment(omni_home=str(tmp_path))
+        is CanonicalCloneAttachment.UNDETERMINED
+    )
+
+
+def test_undetermined_attachment_does_not_refuse(tmp_path: Path) -> None:
+    # No clone at all: the guard must stay silent, exactly as it does for an
+    # undeterminable canonical commit. A fail-CLOSED attachment probe would
+    # break every CI runner and fresh machine.
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=_FAKE_SHA_A,
+    ):
+        check_omnimarket_drift(omni_home=str(tmp_path))
+
+
+def test_attached_clone_with_matching_commit_still_passes(tmp_path: Path) -> None:
+    # The attachment assertion must not change the clean-path verdict.
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    head_sha = _make_git_repo(omnimarket_root)
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=head_sha,
+    ):
+        check_omnimarket_drift(omni_home=str(tmp_path))
+
+
+def test_detached_refusal_is_downgraded_by_the_override(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    head_sha = _make_git_repo(omnimarket_root)
+    _detach_head(omnimarket_root)
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=head_sha,
+        ),
+        caplog.at_level(logging.WARNING, logger=guard.__name__),
+    ):
+        check_omnimarket_drift(omni_home=str(tmp_path), allow_drift=True)
+    assert "DETACHED HEAD" in caplog.text
+    assert DRIFT_OVERRIDE_ENV in caplog.text
+
+
+def test_detachment_never_invokes_the_reconciler(tmp_path: Path) -> None:
+    # A venv reconcile cannot re-attach a git clone. Running it here would
+    # burn an install and refuse anyway, naming the wrong subsystem.
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    head_sha = _make_git_repo(omnimarket_root)
+    _detach_head(omnimarket_root)
+    reconciler = _Reconciler(ok=True)
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=head_sha,
+    ):
+        with pytest.raises(OmnimarketDriftError):
+            check_omnimarket_drift(omni_home=str(tmp_path), reconcile=reconciler)
+    assert reconciler.calls == 0
+
+
+@pytest.mark.parametrize(
+    "side_effect",
+    [
+        subprocess.TimeoutExpired(["git"], timeout=2),
+        OSError("git unavailable"),
+    ],
+)
+def test_undetermined_attachment_refuses_after_canonical_head_is_known(
+    tmp_path: Path, side_effect: Exception
+) -> None:
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    head_sha = _make_git_repo(omnimarket_root)
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=head_sha,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=head_sha,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.subprocess.run",
+            side_effect=side_effect,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as excinfo:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+    assert "could not prove that HEAD is attached" in str(excinfo.value)
+    assert DRIFT_OVERRIDE_ENV in str(excinfo.value)
+
+
+def test_unsafe_attachment_override_returns_before_commit_drift_check(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    head_sha = _make_git_repo(omnimarket_root)
+    _detach_head(omnimarket_root)
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit"
+        ) as installed,
+        caplog.at_level(logging.WARNING, logger=guard.__name__),
+    ):
+        check_omnimarket_drift(omni_home=str(tmp_path), allow_drift=True)
+    installed.assert_not_called()
+    assert "DETACHED HEAD" in caplog.text
+    assert DRIFT_OVERRIDE_ENV in caplog.text
+
+
+def test_detached_refusal_names_the_full_converge_path(tmp_path: Path) -> None:
+    omnimarket_root = tmp_path / "omnimarket"
+    omnimarket_root.mkdir()
+    head_sha = _make_git_repo(omnimarket_root)
+    _detach_head(omnimarket_root)
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=head_sha,
+    ):
+        with pytest.raises(OmnimarketDriftError) as excinfo:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+    expected = str(tmp_path / "omniclaude" / "scripts" / "converge-canonical-clone.sh")
+    assert expected in str(excinfo.value)
+    assert DRIFT_OVERRIDE_ENV in str(excinfo.value)
