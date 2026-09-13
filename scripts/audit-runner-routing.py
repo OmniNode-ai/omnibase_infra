@@ -307,6 +307,13 @@ def runner_variable_for_event(
 SCOPED_VARIABLE_KEYS = (
     "docker_ci_runner_variable",
     "security_scan_runner_variable",
+    # OMN-18291. The narrowest routing surface in the estate: one variable
+    # governing ONE job class, read ahead of the docker seam. It is audited on
+    # the same terms as the two above, and the ABSENCE half matters more here
+    # than anywhere else -- this variable points at a cloud fleet that BILLS
+    # per instance, so an undeclared shadow appearing on another repository is
+    # a shadow that spends money, not merely one that moves a job.
+    "cloud_canary_runner_variable",
 )
 
 

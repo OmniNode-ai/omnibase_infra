@@ -379,6 +379,53 @@ docker_ci_runner_variable:
   org_scope: absent
   revert_when: >-
     This value may go to '["self-hosted","omnibase-ci"]' only after a fleet run of "Customer Path Boundary (OMN-18012)" with the post-#3286 harness reports success on a named omninode-runner-*. Revert it if any docker-executing job reports a container it cannot reach from the test process, which is the 2026-09-07 signature, or if a registry push appears among the jobs it governs -- registry pushes are pinned hosted, not routed.
+cloud_canary_runner_variable:
+  name: OMNI_CLOUD_CANARY_RUNS_ON_JSON
+  # OMN-18291, 2026-09-13. THE FIRST ROUTING VARIABLE IN THIS ESTATE THAT POINTS
+  # AT THE AWS CLOUD FLEET, and the narrowest one: it governs exactly ONE job
+  # class, `rebuilt-postgres16-proof` in
+  # .github/workflows/application-acl-postgres16-proof.yml, and it is read
+  # AHEAD of the docker seam so that flipping it moves that job and nothing
+  # else.
+  #
+  # WHY NOT THE DOCKER SEAM, which is the surface a reader would reach for
+  # first. That variable governs FIFTEEN job definitions in this repository,
+  # measured from each job's parsed runs-on on dev rather than from a file
+  # grep. Several of them run on every pull request and one, "Customer Path
+  # Boundary (OMN-18012)", feeds the required CI Summary umbrella. The cloud
+  # fleet's maximum is FOUR ephemeral instances, each of which runs exactly one
+  # job and then terminates, and a boot costs minutes. Pointing fifteen job
+  # definitions at four single-job instances is not a canary; it is the
+  # saturation failure recorded in the trusted-seam entry above, repeated on a
+  # twentieth of the capacity. So the docker seam is left exactly where it is
+  # and the canary gets a variable of its own.
+  #
+  # WHY THIS JOB CLASS. It is a real job on a normal trigger, not a synthetic
+  # probe: it runs `docker compose up --build` against PostgreSQL 16 and proves
+  # an ACL matrix and its rollback. It is genuinely container-backed, which is
+  # the one capability this fleet has that the lab fleet does not -- a lab
+  # runner is itself a container reaching a shared daemon through a mounted
+  # socket, so a published port lands on the Docker host rather than the
+  # runner's own localhost. Its trigger is path-filtered rather than
+  # every-pull-request, it appears in no required-context list and in no
+  # EXPECTED_EXTERNAL_CONTEXTS tuple, and its fork guard already sends fork
+  # pull requests to hosted runners.
+  #
+  # THE HONEST COST, stated rather than left for someone to discover. This
+  # repository is PUBLIC, so its GitHub-hosted minutes are free and a cloud
+  # instance is not. This flip therefore costs money where the omnibase_core
+  # move recorded above saved it. That is accepted deliberately: the purpose is
+  # to prove the scale-up trigger and the routing path end to end on a real job
+  # with a small blast radius, not to save minutes on this particular job. The
+  # repositories where the fleet would pay for itself are the PRIVATE ones the
+  # runner group grants, and moving one of those is a separate claim with its
+  # own capacity measurement.
+  expected_json: '["self-hosted","omni-cloud-ci"]'
+  repositories:
+    - omnibase_infra
+  org_scope: absent
+  revert_when: >-
+    Revert to '["ubuntu-latest"]' if the routed job lands on the fleet and fails for a fleet-caused reason -- a container it cannot reach from the test process, a missing tool on the runner image, or a boot that never produces a runner -- or if the job is ever observed QUEUED rather than running, which means the capacity trigger did not fire. Revert also if this job class is ever added to a required-context list or to EXPECTED_EXTERNAL_CONTEXTS, because its blast radius is then no longer small. Widening this variable to a second job class is NOT a revert condition, it is a new claim: the group's maximum is four ephemeral single-job instances and a second class needs its own capacity measurement first.
 security_scan_runner_variable:
   name: OMNI_SECURITY_SCAN_RUNS_ON_JSON
   expected_json: '["ubuntu-latest"]'
@@ -460,6 +507,8 @@ repositories:
   # so the scoped-variable pass now asserts their ABSENCE here too.
   - omninode_infra
 hosted_runner_allowlist:
+  - path: .github/workflows/application-acl-postgres16-proof.yml
+    reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."
   - path: .github/workflows/ci.yml
     reason: "OMN-14127: CI Summary is a lightweight hosted fail-closed aggregator so required status always posts during self-hosted saturation."
   - path: .github/workflows/build-and-push-runtime.yml
