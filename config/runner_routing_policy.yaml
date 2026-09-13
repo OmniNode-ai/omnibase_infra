@@ -450,6 +450,25 @@ cloud_canary_runner_variable:
   # the only check that found either gap was running the real job. Both plugins
   # are now installed from pinned, digest-verified release binaries and the boot
   # asserts both before the instance registers.
+  #
+  # AND A THIRD, which is the one worth reading if you only read one. Run
+  # 34751054047, instance i-0298a739880307693: the image built, both containers
+  # started, PostgreSQL 16 initialised cleanly -- and the seed failed with
+  # "Permission denied" on a file the build had just copied in. Cause: the boot
+  # script sets a restrictive umask for credential hygiene, a umask is
+  # inherited, and it reached the runner process, so every checked-out file
+  # landed mode 0600. `COPY` preserves that faithfully, and any image that drops
+  # to a non-root user then cannot read what it was given. The official
+  # PostgreSQL image does exactly that.
+  #
+  # Blast radius: every container-backed job that copies a checked-out file into
+  # an image running as anything but root, which is most of them. Hosted runners
+  # use the ordinary mask, so a job that has only ever run hosted cannot have
+  # seen it. Fixed by running the job under the ordinary mask while the boot
+  # script's own credential handling keeps the restrictive one.
+  #
+  # Three capability gaps, none visible offline, all found by one real job of
+  # one real class. That is the argument for a canary of exactly this shape.
   expected_json: '["self-hosted","omni-cloud-ci"]'
   repositories:
     - omnibase_infra
