@@ -1385,3 +1385,174 @@ def test_projection_callback_routes_to_quarantine_when_no_dlq_topic_declared(
     assert dlq["correlation_id"] == "corr-nodlq-1"
     assert dlq["failure_class"] == "consumer_error"
     assert dlq["quarantine_fallback"] is True
+
+
+@pytest.mark.unit
+def test_projection_callback_preserves_envelope_timestamp() -> None:
+    """Projection handlers receive the producer-recorded envelope event time.
+
+    OMN-18326 / OMN-15583. A projection whose table carries a NOT NULL
+    event-time column has exactly one authoritative source for it: the time the
+    PRODUCER stamped on the envelope. For a payload model that carries no time
+    field of its own -- ``ModelQualityGateResult`` is one, ``extra="forbid"``
+    with no ``timestamp``/``evaluated_at``/``completed_at`` -- it is the ONLY
+    one, and a handler that cannot see it has to choose between inventing a
+    write clock (which then reads forever after as the moment the event
+    happened) and refusing every event.
+
+    It refused every event. ``omnimarket.projection.envelope
+    .envelope_event_timestamp`` reads the time off a ``_envelope`` key that only
+    the STANDALONE runner seam (``unwrap_envelope``) attaches; this kernel seam
+    injected ``_db``/``_event_type``/``_topic``/``_envelope_id`` and never the
+    envelope, so the reader returned ``None`` on every event and the
+    ``delegation_events`` write raised. Measured on BOTH planes: 146 refusals in
+    the last 3000 log lines of the onex-dev staging delegation writer, and a
+    continuous refusal loop on the onex-lab lane.
+
+    The envelope time is injected from the SAME typed envelope ``_envelope_id``
+    is taken from, for the same reason: it is transport identity the payload
+    materialization cannot carry. It is injected as the ``datetime`` the model
+    holds rather than an ISO string, so no reader has to re-parse a value the
+    kernel already has typed.
+    """
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    received: list[dict[str, object]] = []
+
+    class EnvelopeAwareHandler:
+        def handle(self, input_data: dict[str, object]) -> dict[str, int]:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope_timestamp = datetime(2026, 9, 13, 17, 44, 8, tzinfo=UTC)
+    envelope = ModelEventEnvelope[object](
+        payload={"service_name": "svc-a", "health_status": "healthy"},
+        envelope_id=uuid4(),
+        envelope_timestamp=envelope_timestamp,
+        event_type=derive_event_type_alias_for_topic(topic),
+    )
+    callback = _make_projection_dispatch_callback(
+        EnvelopeAwareHandler(),
+        projection_database_target("live_events", schema="omninode_internal"),
+        (topic,),
+    )
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert isinstance(received[0]["_envelope_timestamp"], datetime)
+    assert received[0]["_envelope_timestamp"] == envelope_timestamp
+
+
+@pytest.mark.unit
+def test_projection_callback_omits_envelope_timestamp_when_absent() -> None:
+    """An envelope with no recorded time injects no key -- never a wall clock.
+
+    OMN-18326. The refusal this fix removes is correct behaviour when the
+    producer really recorded no time; what was wrong was that the kernel made
+    every event look that way. So the key is ABSENT rather than defaulted: a
+    reader that finds nothing still refuses, and the runtime never becomes the
+    thing that stamps an event-time column with its own clock.
+    """
+    received: list[dict[str, object]] = []
+
+    class EnvelopeAwareHandler:
+        def handle(self, input_data: dict[str, object]) -> dict[str, int]:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope = MagicMock()
+    envelope.event_type = derive_event_type_alias_for_topic(topic)
+    envelope.topic = topic
+    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+    envelope.envelope_id = uuid4()
+    envelope.envelope_timestamp = None
+    callback = _make_projection_dispatch_callback(
+        EnvelopeAwareHandler(),
+        projection_database_target("live_events", schema="omninode_internal"),
+        (topic,),
+    )
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert "_envelope_timestamp" not in received[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        pytest.param(datetime(2026, 9, 13, 17, 44, 8), id="naive-datetime"),
+        pytest.param("2026-09-13T17:44:08Z", id="iso-string"),
+        pytest.param(1789000000, id="epoch-int"),
+        pytest.param({"envelope_timestamp": "2026-09-13T17:44:08Z"}, id="mapping"),
+    ],
+)
+def test_projection_callback_injects_no_event_time_it_cannot_trust(
+    recorded: object,
+) -> None:
+    """A present-but-unusable recorded time injects NO key, and never a guess.
+
+    OMN-18326, hostile-reviewer MAJOR findings 2 and 3. Two distinct ways a
+    value can be present and still not be an authoritative event time, and both
+    have to reach the reader as ABSENT rather than as something:
+
+    * a TIMEZONE-NAIVE datetime. A producer that stamps a local wall clock with
+      no ``tzinfo`` carries no instant at all -- only a reading on some clock
+      whose offset this process cannot know. Injecting it would put exactly the
+      write-clock ambiguity the OMN-15583 refusal exists to prevent into a NOT
+      NULL event-time column, and stamping it UTC to make it "valid" would be
+      this seam inventing the fact it is supposed to be transporting.
+    * a value of the wrong TYPE entirely -- an ISO string, an epoch int, a
+      mapping. Plausible producer serializations, none of which this extractor
+      may silently coerce: the key it injects is contracted to be the typed
+      ``datetime`` the runtime already holds, and a consumer that re-parses is
+      the drift this seam removes.
+
+    Absent is the correct outcome in every one of those cases, because the
+    reader's refusal is CORRECT for an event whose time is not knowable. What
+    OMN-18326 fixed was the seam making every event look that way; it must not
+    become the seam making an untrustworthy one look fine.
+    """
+    received: list[dict[str, object]] = []
+
+    class EnvelopeAwareHandler:
+        def handle(self, input_data: dict[str, object]) -> dict[str, int]:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope = MagicMock()
+    envelope.event_type = derive_event_type_alias_for_topic(topic)
+    envelope.topic = topic
+    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+    envelope.envelope_id = uuid4()
+    envelope.envelope_timestamp = recorded
+    callback = _make_projection_dispatch_callback(
+        EnvelopeAwareHandler(),
+        projection_database_target("live_events", schema="omninode_internal"),
+        (topic,),
+    )
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert "_envelope_timestamp" not in received[0]
