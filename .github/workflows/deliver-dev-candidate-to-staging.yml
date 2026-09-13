@@ -635,6 +635,32 @@ jobs:
             --namespace "${LAB_NAMESPACE}" \
             --timeout-seconds "${BOOT_WAIT_SECONDS}"
 
+      # OMN-18316. The lane's rollout-wedge invariant, asserted here because
+      # this is the job that has the manifests and emits a receipt.
+      #
+      # WHY IT IS NOT BOUNDED BY *THIS* JOB'S WAIT. The bound that matters is
+      # apply_lab_lane.sh's, on the PERSISTENT lab lane -- 900s per Deployment
+      # and 300s on the database barrier. This job waits 1800s and applies the
+      # render directly, so every deadline clears its own ceiling trivially and
+      # checking against BOOT_WAIT_SECONDS would assert nothing. The manifests
+      # are the same manifests, so the invariant is checked against the numbers
+      # it actually has to hold for.
+      #
+      # The authority is omninode_infra's own gate, run against omninode_infra's
+      # own checkout, rather than a second copy of the arithmetic here. Two
+      # implementations of one invariant in two repositories is how the two
+      # silently diverge; a rename there fails this step loudly, which is the
+      # failure mode to prefer.
+      - name: Assert the lab rollout deadlines are bounded under the applier wait
+        id: rollout-deadline
+        if: always()
+        run: |
+          set -euo pipefail
+          cd omninode_infra
+          uv run --no-project --with pytest --with pyyaml \
+            python3 -m pytest \
+            tests/k8s/test_onex_lab_rollout_wedge_omn18316.py -q
+
       - name: Collect diagnostics
         # always(): the failure case is the one the artifact exists for.
         if: always()
@@ -749,6 +775,7 @@ jobs:
             --check "strict_wiring_mode:${{ steps.apply.outcome == 'success' && 'ok' || 'fail' }}:ONEX_WIRING_STRICT_MODE read back off the applied omninode-runtime Deployment" \
             --check "migrations_applied:${{ steps.migrate.outcome == 'success' && 'ok' || 'fail' }}:${MIGRATE_JOB_NAME} Job on the candidate migration bundle" \
             --check "runtime_family_ready:${{ steps.boot-wait.outcome == 'success' && 'ok' || 'fail' }}:every runtime-family Deployment plus the projection snapshot topic, within ${BOOT_WAIT_SECONDS}s" \
+            --check "rollout_deadline_bounded:${{ steps.rollout-deadline.outcome == 'success' && 'ok' || 'fail' }}:every Deployment's progressDeadlineSeconds under apply_lab_lane.sh's own 900s/300s rollout waits, and every Recreate Deployment naming its single-writer resource, on omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
             --out /tmp/lab-pass-receipt/receipt.json
 
       # OMN-18247. `if-no-files-found: error` below fires only when the whole
