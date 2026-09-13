@@ -316,11 +316,39 @@ class TestTaskTypeVocabulary:
         assert "summarization" in cli_delegate.TASK_TYPE_CHOICES
         assert "planning" in cli_delegate.TASK_TYPE_CHOICES
 
-    def test_explicit_task_type_does_not_require_omnimarket_contract(self) -> None:
+    def test_explicit_task_type_fails_closed_when_the_contract_is_unresolvable(
+        self,
+    ) -> None:
+        """OMN-18342 AC(a)/regression guard.
+
+        An explicit ``--task-type`` must never be decided by ``TASK_TYPE_CHOICES``
+        alone. When the contract cannot be resolved (e.g. omnimarket absent), the
+        run fails closed naming the resolution failure -- it does NOT silently
+        fall back to validating against the mirror, even for a value the mirror
+        would accept.
+        """
         with patch.object(
             cli_delegate,
             "resolve_task_class_contract_path",
             side_effect=TaskClassContractError("omnimarket absent"),
+        ):
+            with pytest.raises(TaskClassContractError, match="omnimarket absent"):
+                cli_delegate.resolve_task_class(
+                    "summarise the ledger", explicit="summarization"
+                )
+
+    def test_explicit_task_type_present_in_contract_is_accepted(self) -> None:
+        """OMN-18342 AC(b): positive control.
+
+        An explicit value that IS present in the resolved contract is accepted,
+        and the resolution is recorded as EXPLICIT provenance.
+        """
+        from tests.unit.cli.conftest import STAND_IN_TASK_CLASS_CONTRACT
+
+        with patch.object(
+            cli_delegate,
+            "resolve_task_class_contract_path",
+            return_value=STAND_IN_TASK_CLASS_CONTRACT,
         ):
             resolved = cli_delegate.resolve_task_class(
                 "summarise the ledger", explicit="summarization"
@@ -329,9 +357,47 @@ class TestTaskTypeVocabulary:
         assert resolved.task_type == "summarization"
         assert resolved.resolution is EnumTaskTypeResolution.EXPLICIT
 
-    def test_unknown_explicit_task_type_is_rejected_without_contract(self) -> None:
-        with pytest.raises(TaskClassContractError, match="unknown task type"):
-            cli_delegate.resolve_task_class("summarise", explicit="bogus")
+    def test_explicit_task_type_absent_from_contract_is_refused_naming_the_contract(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-18342 AC(a): RED test.
+
+        A value present in the ``TASK_TYPE_CHOICES`` mirror but ABSENT from the
+        resolved contract must be refused, and the error names the contract's
+        own vocabulary -- never the mirror. This is the falsifier for the
+        regression introduced by ``0181d708d``: that commit's early-return
+        validated ``explicit`` against ``TASK_TYPE_CHOICES`` without ever
+        resolving the contract, so a mirror-only class would have been wrongly
+        accepted here.
+        """
+        assert "planning" in cli_delegate.TASK_TYPE_CHOICES  # present in the mirror
+
+        truncated_contract = tmp_path / "truncated_task_class_contract.yaml"
+        truncated_contract.write_text(
+            "\n".join(
+                [
+                    "task_classes:",
+                    "  research:",
+                    "    gateway_exposure: public",
+                    "    selection:",
+                    "      priority: 1",
+                    "      phrases: []",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(
+            cli_delegate,
+            "resolve_task_class_contract_path",
+            return_value=truncated_contract,
+        ):
+            with pytest.raises(
+                TaskClassContractError, match="the task-class contract exposes"
+            ):
+                cli_delegate.resolve_task_class(
+                    "plan the migration", explicit="planning"
+                )
 
 
 class TestReceiptEnvironmentIsolation:
