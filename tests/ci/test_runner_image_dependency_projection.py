@@ -357,6 +357,55 @@ def test_new_top_level_table_is_visible_to_the_binding(
     )
 
 
+def test_new_depth_three_table_is_visible_to_the_binding(
+    identity: Any, lock_data: dict[str, Any], tmp_path: Path
+) -> None:
+    """A nested future-installer table must not vanish from the tripwire."""
+    before = _tree(tmp_path / "before", BASE_PYPROJECT)
+    after = _tree(
+        tmp_path / "after",
+        BASE_PYPROJECT
+        + '\n[tool.some-future-installer.sources.internal]\npriority = "explicit"\n',
+    )
+    assert _digests(identity, lock_data, before) != _digests(
+        identity, lock_data, after
+    ), "a new depth-three table left the runner-image identity unchanged"
+
+
+def test_absent_dependency_path_cannot_collide_with_literal_string(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """Missing paths and attacker-controlled strings must serialize distinctly."""
+    absent = BASE_PYPROJECT.replace(
+        '\n[project.optional-dependencies]\ndev = ["pytest>=8.0.0"]\n',
+        "\n",
+    )
+    literal = BASE_PYPROJECT.replace(
+        'dev = ["pytest>=8.0.0"]',
+        'dev = "<absent>"',
+    )
+    a = _tree(tmp_path / "absent", absent)
+    b = _tree(tmp_path / "literal", literal)
+    assert env_digest.pyproject_dependency_projection(
+        a
+    ) != env_digest.pyproject_dependency_projection(b)
+
+
+def test_toml_datetime_dependency_value_fails_with_path_context(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """Non-JSON TOML values fail closed with the offending dependency path."""
+    root = _tree(
+        tmp_path / "datetime",
+        BASE_PYPROJECT.replace(
+            "[tool.uv]\npackage = true",
+            "[tool.uv]\npackage = true\ncache-until = 2026-09-13T12:00:00Z",
+        ),
+    )
+    with pytest.raises(TypeError, match="tool\\.uv\\.cache-until"):
+        env_digest.pyproject_dependency_projection(root)
+
+
 def test_projection_is_order_independent_across_tables(
     env_digest: Any, tmp_path: Path
 ) -> None:
