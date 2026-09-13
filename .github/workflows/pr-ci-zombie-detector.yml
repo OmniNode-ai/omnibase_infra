@@ -32,6 +32,24 @@
 # that is expected and documented here so an on-call is not surprised by a
 # red required-less scheduled job.
 
+#
+# SECOND JOB, OMN-18254: non-required check failure-rate alert.
+#
+# WHY HERE AND NOT IN A NEW WORKFLOW. The plan is explicit -- no new alert
+# channel and no new scheduler. This file is already the repository's scheduled
+# reader of PR CI state: same REST surface (check-runs on pull-request heads),
+# same GitHub-hosted requirement, same CROSS_REPO_PAT convention for repos that
+# are not this one. Adding a third scheduler to read the same API would be a
+# second thing to keep alive for no new capability.
+#
+# The workflow's name still says "Zombie Detector" and now carries a second,
+# adjacent concern. That is named here rather than papered over: both jobs
+# answer "what is wrong with PR CI that nobody is watching", one for wedged
+# concurrency groups and one for checks that fail without blocking.
+#
+# The two jobs are independent -- no `needs` -- so a zombie-detector skip (no
+# CROSS_REPO_PAT) does not silence the alerter, and an alerter failure does not
+# stop a wedge from being cleared.
 name: PR CI Zombie Detector
 
 on:
@@ -99,4 +117,70 @@ jobs:
         with:
           name: pr-ci-zombie-detector-report
           path: zombie-detector-report.json
+          retention-days: 30
+
+  # OMN-18254 -- a check that is not required can fail indefinitely and nobody
+  # learns. The web repository's companion-effect job failed 9 of 10 recent
+  # pull-request runs on missing broker credentials, and was reported red on
+  # three separate pull requests before anyone asked whether it meant companions
+  # were never publishing.
+  #
+  # GitHub-hosted for the same reason the job above is: a monitor must not share
+  # fate with the fleet whose CI it reports on.
+  nonrequired-check-failure-rate:
+    name: Non-required check failure rate (OMN-18254)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout (script and policy)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and PyYAML
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML (the policy reader's only dependency)
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Evaluate non-required check failure rates
+        env:
+          # Cross-repo reads (omniweb, omnimarket) need a token the default
+          # GITHUB_TOKEN cannot provide. Absent, the step fails loudly rather
+          # than reporting zero rows -- an empty result is not evidence of
+          # absence, and a sweep that cannot read must never read as clean.
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+          # Same channel the fleet canary and the saturation monitor already
+          # alert to -- inherited, not chosen here. Absent tokens degrade to
+          # annotation plus artifact.
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/nonrequired_check_failure_rate.py \
+            --owner OmniNode-ai \
+            --repo omnibase_infra \
+            --repo omniweb \
+            --repo omnimarket \
+            --policy config/runner_routing_policy.yaml \
+            --report nonrequired-check-report.json
+
+      - name: Assert the report is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact nonrequired-check-report \
+            --require nonrequired-check-report.json
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nonrequired-check-report
+          path: nonrequired-check-report.json
+          if-no-files-found: error
           retention-days: 30

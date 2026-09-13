@@ -67,6 +67,7 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-pass-receipt-compose-dev",
     "lab-pass-receipt-onex-lab",
     "lab-pass-receipt-onex-lab-k3s",
+    "nonrequired-check-report",
     "saturation-record",
 )
 
