@@ -1,3 +1,19 @@
+## v0.38.24 (2026-09-12)
+
+### Release
+- Cut omnibase_infra from dev at 0.38.24 for the OMN-18086 credential revocation path.
+- PyPI currently has 0.38.23 as the latest published omnibase-infra release; dev is already versioned at 0.38.24, so this release intentionally does not edit dependency pins or downgrade the package version.
+
+### Included Since v0.38.23
+- feat(OMN-18086): add delete_secret to AdapterInfisical and InfisicalSecretStore (#3468).
+- fix(OMN-18238): prevent proposed acceptance-criterion bindings from satisfying the closer (#3469).
+- fix(OMN-18253): report the lab-load probe conclusion and artifact honestly (#3470).
+- fix(OMN-18134): ensure the accepted command's pin reaches the gateway deploy script (#3471).
+- fix(OMN-18233): require verified-supersession proof before ignoring closed cascade bumps (#3465).
+- feat(OMN-18247): assert declared evidence artifacts are non-empty at upload (#3466).
+- feat(OMN-17426): vendor and scope the savings aggregate per-tenant migration (#3459, #3467).
+- fix(OMN-18031): report measured runner route reasons from the lab-load probe (#3461).
+
 ## v0.38.21 (2026-09-07)
 
 ### Release
