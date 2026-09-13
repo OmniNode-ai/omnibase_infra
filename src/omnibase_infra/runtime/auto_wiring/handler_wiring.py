@@ -159,6 +159,9 @@ from omnibase_infra.runtime.dispatch_envelope_context import (
     current_dispatch_envelope,
     current_projection_tenant_authority,
 )
+from omnibase_infra.runtime.health.projection_liveness import (
+    select_projection_contracts,
+)
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
@@ -8261,6 +8264,92 @@ def _wiring_strict_mode_enabled() -> bool:
     return os.environ.get("ONEX_WIRING_STRICT_MODE", "").lower() in ("1", "true")
 
 
+def assert_strict_projection_coverage(
+    manifest: ModelAutoWiringManifest,
+    report: ModelAutoWiringReport,
+) -> None:
+    """Refuse a strict boot that DECLARED projections and wired none (OMN-18324).
+
+    The second half of what ``ONEX_WIRING_STRICT_MODE`` has to mean. The first
+    half — the OMN-9126 arm above — reacts to FAILURES, and that is the shape
+    both writer pods on the lab happened to be in on 2026-09-13
+    (``wired=0 skipped=0 failed=1`` on the delegation writer,
+    ``wired=0 skipped=0 failed=8`` on the consolidated tenant writer, both
+    reporting ``READY 1`` because neither Deployment carried the flag at all).
+
+    It is not the only shape. A process whose declared projections all resolve
+    to ``SKIPPED`` reports ``wired=0 skipped=N failed=0``: it takes no message,
+    writes no row, raises nothing, and is indistinguishable on every existing
+    signal from a process that is working. There is no exception to catch and
+    no failure to count, so the failure arm cannot see it. This arm asks the
+    question the arm above cannot: *did this boot end with a way to write?*
+
+    The predicate is deliberately narrow, and each half of it is load-bearing:
+
+    * **At least one DECLARED projection.** ``wired == 0`` alone is not a
+      finding — a process legitimately filtered to an empty projection set
+      (``projection-api``, the contract resolver, the standalone runners that
+      never reach this function at all) boots correctly with nothing wired, and
+      converting that into a crash would be a gate about writers taking down
+      surfaces that are not writers.
+    * **ZERO wired, not "some unwired".** A partially-wired process is a real
+      but weaker finding, and ``projection_attachment`` already names it. If
+      this arm fired on any unwired contract it would crash every narrow
+      runtime profile on the fleet — ``workers`` boots at ``wired=4
+      skipped=1`` — which is how a fail-closed gate earns a permanent
+      exemption instead of a fix.
+
+    The projection set comes from :func:`select_projection_contracts`, the same
+    discriminator the ``projection_attachment`` health dimension reads and the
+    same one ``_choose_dispatch_callback`` reads to pick the projection arm. A
+    gate with its own private notion of "projection" would disagree with the
+    dimension that reports the defect, and the disagreement is where the next
+    gap hides.
+
+    Raising here rather than reporting is the whole point, and it is the
+    mechanism that already exists rather than a new one: the kernel binds its
+    health server AFTER ``wire_from_manifest`` returns, so a raise is a boot
+    crash, a boot crash is a pod that never answers ``/ready``, and a pod that
+    never answers ``/ready`` is NotReady. No readiness probe has to be taught
+    anything, and no second flag is introduced.
+
+    Args:
+        manifest: This process's manifest, already filtered to its runtime
+            profile — the same object ``wire_from_manifest`` wired.
+        report: The finished wiring report for that manifest.
+
+    Raises:
+        ModelOnexError: Strict mode is active, the manifest declares at least
+            one projection, and the report carries no ``WIRED`` row.
+    """
+    if not _wiring_strict_mode_enabled():
+        return
+
+    declared = select_projection_contracts(manifest)
+    if not declared:
+        return
+    if report.total_wired > 0:
+        return
+
+    logger.error(
+        "Auto-wiring wired NOTHING for a manifest declaring %d projection(s): "
+        "this process cannot write a row. wired=%d skipped=%d failed=%d "
+        "projections=%s",
+        len(declared),
+        report.total_wired,
+        report.total_skipped,
+        report.total_failed,
+        [ref.name for ref in declared],
+    )
+    raise ModelOnexError(
+        f"Auto-wiring completed with wired=0 for a manifest declaring "
+        f"{len(declared)} projection(s) "
+        f"(skipped={report.total_skipped} failed={report.total_failed}): "
+        f"this process persists nothing. Declared projections: "
+        + ", ".join(ref.name for ref in declared)
+    )
+
+
 def _boundary_dlq_enabled() -> bool:
     """Return True when the auto-wired consume boundary must not silently
     discard a handler exception (OMN-14507).
@@ -8944,6 +9033,11 @@ async def wire_from_manifest(
         report.total_quarantined,
         len(report.duplicates),
     )
+
+    # OMN-18324. AFTER the summary log, so the counts an operator reads in the
+    # crash's own log tail are the counts the refusal was computed from, and
+    # LAST, so a strict refusal can never mask an earlier, more specific one.
+    assert_strict_projection_coverage(manifest, report)
 
     return report
 
