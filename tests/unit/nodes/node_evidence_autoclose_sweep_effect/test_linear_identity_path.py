@@ -321,6 +321,33 @@ async def test_explicit_injected_key_bypasses_env_resolution_entirely(
 
 
 @pytest.mark.unit
+def test_operator_messages_name_the_variables_they_are_about() -> None:
+    """The messages spell the env names as literals; this is what pins them.
+
+    They are literals rather than interpolations of the module constants so that
+    `py/clear-text-logging-sensitive-data` sees no sensitive-named variable
+    reaching a logger — the taint that query reports is on the IDENTIFIER
+    `..._CLIENT_SECRET_ENV`, never on a value, and no credential is in the flow
+    at any of those sites. The cost of spelling them twice is that the two can
+    drift, so this test is the thing that stops them.
+    """
+    names = (
+        sweep_mod._LINEAR_CLOSER_CLIENT_ID_ENV,
+        sweep_mod._LINEAR_CLOSER_CLIENT_SECRET_ENV,
+        sweep_mod._LINEAR_API_KEY_ENV,
+    )
+    for message in (
+        sweep_mod._NO_LINEAR_IDENTITY_MESSAGE,
+        sweep_mod._PARTIAL_IDENTITY_MESSAGE_ID_SET,
+        sweep_mod._PARTIAL_IDENTITY_MESSAGE_SECRET_SET,
+    ):
+        for name in names:
+            assert name in message, f"{name!r} missing from {message!r}"
+    for name in names[:2]:
+        assert name in sweep_mod._PERSONAL_KEY_FALLBACK_MESSAGE
+
+
+@pytest.mark.unit
 def test_every_credential_env_name_is_self_declared() -> None:
     """OMN-14951 gap 2: this boundary file declares the names it reads."""
     declared = set(_LinearClient.required_secrets)

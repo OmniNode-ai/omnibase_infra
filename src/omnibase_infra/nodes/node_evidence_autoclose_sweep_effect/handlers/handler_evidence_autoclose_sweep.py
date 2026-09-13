@@ -355,11 +355,39 @@ _LINEAR_CLOSER_CLIENT_SECRET_ENV = "LINEAR_CLOSER_CLIENT_SECRET"
 # token in any case.
 _LINEAR_CLOSER_TOKEN_SCOPES = "read,write"
 _LINEAR_TOKEN_TYPE_BEARER = "bearer"
-_MISSING_LINEAR_CREDENTIAL_ERROR = (
-    f"No Linear credential is configured: set {_LINEAR_CLOSER_CLIENT_ID_ENV} and "
-    f"{_LINEAR_CLOSER_CLIENT_SECRET_ENV} (preferred -- writes attribute to the "
-    f"application), or {_LINEAR_API_KEY_ENV} (fallback -- writes attribute to a "
-    "person)."
+
+# The operator-facing messages below spell the environment variable names as
+# LITERALS rather than interpolating the constants above, and that is
+# deliberate. `py/clear-text-logging-sensitive-data` treats a variable whose
+# IDENTIFIER matches a sensitive pattern as a taint source, so interpolating
+# `_LINEAR_CLOSER_CLIENT_SECRET_ENV` into a string that is later logged reports
+# a clear-text-secret leak even though the value in play is the literal text
+# "LINEAR_CLOSER_CLIENT_SECRET" and no credential is ever in the flow. Spelling
+# the names as literals keeps the analyzer's source set empty here instead of
+# suppressing a finding, and the tests assert each message still names the
+# variables it is about, so the two cannot drift apart silently.
+_NO_LINEAR_IDENTITY_MESSAGE = (
+    "No Linear credential is configured: set LINEAR_CLOSER_CLIENT_ID and "
+    "LINEAR_CLOSER_CLIENT_SECRET (preferred -- writes attribute to the "
+    "application), or LINEAR_API_KEY (fallback -- writes attribute to a person)."
+)
+_PARTIAL_IDENTITY_MESSAGE_ID_SET = (
+    "Partial Linear application identity: LINEAR_CLOSER_CLIENT_ID is set and "
+    "LINEAR_CLOSER_CLIENT_SECRET is not. Refusing to fall back to "
+    "LINEAR_API_KEY -- a half-configured application identity is a deployment "
+    "error, not a reason to write as a person."
+)
+_PARTIAL_IDENTITY_MESSAGE_SECRET_SET = (
+    "Partial Linear application identity: LINEAR_CLOSER_CLIENT_SECRET is set "
+    "and LINEAR_CLOSER_CLIENT_ID is not. Refusing to fall back to "
+    "LINEAR_API_KEY -- a half-configured application identity is a deployment "
+    "error, not a reason to write as a person."
+)
+_PERSONAL_KEY_FALLBACK_MESSAGE = (
+    "Linear identity path: %s -- LINEAR_CLOSER_CLIENT_ID and "
+    "LINEAR_CLOSER_CLIENT_SECRET are both absent, so this run falls back to the "
+    "personal key and every write it makes is attributed on the ticket to the "
+    "person who minted that key."
 )
 
 # `description` is fetched for the AC-coverage guard below (OMN-16736): the
@@ -2824,7 +2852,7 @@ class _LinearClient:
 
         if self._explicit_api_key is not None:
             if not self._explicit_api_key:
-                self.last_error = _MISSING_LINEAR_CREDENTIAL_ERROR
+                self.last_error = _NO_LINEAR_IDENTITY_MESSAGE
                 logger.warning("%s", self.last_error)
                 return None
             self.identity_path = EnumLinearIdentityPath.PERSONAL_API_KEY
@@ -2851,17 +2879,11 @@ class _LinearClient:
         api_key = os.environ.get(_LINEAR_API_KEY_ENV, "").strip()
 
         if bool(client_id) != bool(client_secret):
-            set_name, unset_name = (
-                (_LINEAR_CLOSER_CLIENT_ID_ENV, _LINEAR_CLOSER_CLIENT_SECRET_ENV)
-                if client_id
-                else (_LINEAR_CLOSER_CLIENT_SECRET_ENV, _LINEAR_CLOSER_CLIENT_ID_ENV)
-            )
             self.identity_path = EnumLinearIdentityPath.MISCONFIGURED
             self.last_error = (
-                f"Partial Linear application identity: {set_name} is set and "
-                f"{unset_name} is not. Refusing to fall back to "
-                f"{_LINEAR_API_KEY_ENV} — a half-configured application identity "
-                "is a deployment error, not a reason to write as a person."
+                _PARTIAL_IDENTITY_MESSAGE_ID_SET
+                if client_id
+                else _PARTIAL_IDENTITY_MESSAGE_SECRET_SET
             )
             logger.error("%s", self.last_error)
             return None
@@ -2883,17 +2905,13 @@ class _LinearClient:
         if api_key:
             self.identity_path = EnumLinearIdentityPath.PERSONAL_API_KEY
             logger.warning(
-                "Linear identity path: %s — %s and %s are both absent, so this "
-                "run falls back to the personal key and every write it makes is "
-                "attributed on the ticket to the person who minted that key.",
+                _PERSONAL_KEY_FALLBACK_MESSAGE,
                 EnumLinearIdentityPath.PERSONAL_API_KEY.value,
-                _LINEAR_CLOSER_CLIENT_ID_ENV,
-                _LINEAR_CLOSER_CLIENT_SECRET_ENV,
             )
             self._auth_header = api_key
             return self._auth_header
 
-        self.last_error = _MISSING_LINEAR_CREDENTIAL_ERROR
+        self.last_error = _NO_LINEAR_IDENTITY_MESSAGE
         logger.warning("%s", self.last_error)
         return None
 
