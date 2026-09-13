@@ -420,6 +420,26 @@ cloud_canary_runner_variable:
   # repositories where the fleet would pay for itself are the PRIVATE ones the
   # runner group grants, and moving one of those is a separate claim with its
   # own capacity measurement.
+  #
+  # WHAT THE FIRST REAL ROUTED RUN FOUND, recorded here rather than only in the
+  # ticket, because it is the second instance of a class that has now forced one
+  # routing revert and nearly forced a second. Run 34750171624, instance
+  # i-03f7450c38317c468: the job landed on the fleet correctly, proved its own
+  # placement from the instance metadata service, ran `docker info` green
+  # against a healthy LOCAL daemon -- and then exited 125 on `docker compose`,
+  # because Amazon Linux 2023's `docker` package ships buildx as its only CLI
+  # plugin and compose was simply not a command. Fifty milliseconds separate the
+  # healthy daemon from the missing plugin in that log, and the CLI answers a
+  # missing plugin by printing its usage text, so the failure reads as neither
+  # "not found" nor a daemon error.
+  #
+  # THE GENERAL RULE, which is the part worth carrying forward: a routing change
+  # is not finished when the variable is set and the job lands. It is finished
+  # when a real job OF THAT CLASS has run to completion there. Placement and
+  # capability are different claims, and a green placement proof next to a red
+  # job is exactly what the difference looks like. Fixed by installing the
+  # plugin in the fleet's own bootstrap, pinned by version and verified by
+  # digest (omninode_infra, OMN-18291), not by narrowing this job.
   expected_json: '["self-hosted","omni-cloud-ci"]'
   repositories:
     - omnibase_infra
