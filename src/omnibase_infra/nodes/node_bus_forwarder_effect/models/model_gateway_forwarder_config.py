@@ -31,19 +31,19 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_tenant_
     ModelGatewayTenantIdentity,
 )
 
-# OMN-16979. Which omniclaude hook classes are treated as content-bearing is a
-# RULE, not a list -- deliberately.
+# OMN-16979. Which hook capture classes require redaction is a RULE, not a
+# topic registry -- deliberately.
 #
 # A list would have to be edited whenever a new hook class appears, and the
 # edit that forgets it is exactly the one that leaks. The rule instead presumes
-# EVERY omniclaude event class carries content, and carves out only the
-# session-lifecycle pair that operator ruling OD-9 (2026-08-18) established as
-# content-free and that OMN-16204 already mirrors outbound without a gate.
+# EVERY omniclaude event class carries enough session or user context to need
+# the upstream redaction provenance at this trust boundary. The metadata-only
+# tool-output capture has the omnimarket producer segment, so its one event
+# grammar segment is included too. Full topic literals remain in the contract.
 #
-# So a hook class that does not exist yet is content-bearing by default: adding
-# it to mirror_topics.outbound without also governing it fails config
-# validation, with no action required by whoever adds it. That is the
-# fail-closed direction.
+# So a new omniclaude class added to mirror_topics.outbound without governance
+# fails config validation, with no action required by whoever adds it. That is
+# the fail-closed direction.
 #
 # Matched on name segments rather than whole topic strings, so this stays a
 # predicate over the canonical topic grammar rather than a second topic
@@ -56,23 +56,23 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_tenant_
 # guard (OMN-12515) correctly rejected in the first revision of this change.
 _ONEX_NAMESPACE = "onex"
 _EVENT_KIND = "evt"
-_HOOK_PRODUCER = "omniclaude"
-_OD9_CONTENT_FREE_EVENTS = frozenset({"session-started", "session-ended"})
+_OMNICLAUDE_PRODUCER = "omniclaude"
+_HOOK_CAPTURE_PRODUCER = "omnimarket"
+_TOOL_OUTPUT_CAPTURE_EVENT = "tool-output-captured"
 
 
 def is_content_bearing_hook_topic(canonical_topic: str) -> bool:
-    """Whether ``canonical_topic`` is an omniclaude class presumed to carry content."""
+    """Whether ``canonical_topic`` must carry upstream redaction provenance."""
     segments = canonical_topic.split(".")
     if len(segments) < 5:
         return False
-    if (segments[0], segments[1], segments[2]) != (
-        _ONEX_NAMESPACE,
-        _EVENT_KIND,
-        _HOOK_PRODUCER,
-    ):
+    if (segments[0], segments[1]) != (_ONEX_NAMESPACE, _EVENT_KIND):
         return False
     event_name = ".".join(segments[3:-1])
-    return event_name not in _OD9_CONTENT_FREE_EVENTS
+    producer = segments[2]
+    return producer == _OMNICLAUDE_PRODUCER or (
+        producer == _HOOK_CAPTURE_PRODUCER and event_name == _TOOL_OUTPUT_CAPTURE_EVENT
+    )
 
 
 class ModelGatewayForwarderConfig(BaseModel):
