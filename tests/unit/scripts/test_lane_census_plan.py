@@ -12,6 +12,7 @@ hours before a human noticed.
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,50 @@ def _load_planner() -> Any:
 
 PLAN = _load_planner()
 MANIFEST = PLAN.load_manifest(_MANIFEST_PATH)
+
+# OMN-18320 — the `prod` lane fixture is FROZEN here instead of read from the live
+# manifest.
+#
+# The lab compose lane named `prod` was shut down on 2026-09-13 under an operator
+# consent row and removed from deploy/lane-census/lane-manifest.yaml, which broke
+# every test below: they all used that lane as the planner's representative
+# fixture. Repointing them at a lane that still exists would have silently
+# rewritten what the red fixture below REPLAYS — the 2026-06-11 outage was a prod
+# outage, and a stability-test-shaped replay of it is a different test wearing the
+# same docstring.
+#
+# So the spec is pinned here verbatim, exactly as it stood in the manifest at
+# origin/dev before removal. Every assertion in this module is unchanged. The
+# planner is lane-agnostic, so this costs nothing and removes a coupling that
+# should never have existed: a pure-planner unit test does not need a lane to be
+# live, or even to be declared, in order to pin the planner's behaviour.
+#
+# This is the lab compose lane only. Production is the AWS `onex-prod` namespace.
+_RETIRED_PROD_LANE: dict[str, Any] = {
+    "compose_file": "docker/docker-compose.prod.yml",
+    "compose_project": "omnibase-infra-prod",
+    "network": "omnibase-infra-prod-network",
+    "image_tag_pattern": ".+",
+    "services": [
+        {"name": "omnibase-infra-prod-postgres", "kind": "service", "replicas": 1},
+        {"name": "omnibase-infra-prod-redpanda", "kind": "service", "replicas": 1},
+        {"name": "omnibase-infra-prod-redpanda-partition-cap", "kind": "oneshot"},
+        {"name": "omnibase-infra-prod-valkey", "kind": "service", "replicas": 1},
+        {"name": "omnibase-infra-prod-forward-migration", "kind": "oneshot"},
+        {"name": "omnibase-infra-prod-migration-gate", "kind": "keepalive"},
+        {"name": "omnibase-infra-prod-intelligence-migration", "kind": "oneshot"},
+        {"name": "omninode-prod-runtime", "kind": "service", "replicas": 1},
+        {"name": "omninode-prod-runtime-effects", "kind": "service", "replicas": 1},
+        {"name": "omnimarket-prod-projection-api", "kind": "service", "replicas": 1},
+        {"name": "omninode-prod-runtime-worker", "kind": "service", "replicas": 1},
+        {"name": "omninode-prod-agent-actions-consumer", "kind": "profile_gated"},
+        {"name": "omninode-prod-skill-lifecycle-consumer", "kind": "profile_gated"},
+        {"name": "omnibase-prod-intelligence-api", "kind": "profile_gated"},
+        {"name": "omninode-prod-contract-resolver", "kind": "profile_gated"},
+    ],
+}
+
+MANIFEST["lanes"]["prod"] = _RETIRED_PROD_LANE
 
 
 def _container(
@@ -258,7 +303,11 @@ def test_migration_gate_is_keepalive_in_every_compose_lane() -> None:
     every healthy lane; flipping it to `service` would hard-require a
     container whose restart policy is `restart: "no"` on some lanes.
     """
-    for lane in ("stability-test", "prod", "judge"):
+    # OMN-18320: `prod` removed — this ratchet reads the LIVE manifest, and the lab
+    # compose prod lane was retired 2026-09-13 and is no longer declared there. The
+    # frozen fixture above is deliberately not consulted here: this test exists to
+    # catch a regression in a lane someone can still deploy.
+    for lane in ("stability-test", "judge"):
         gate = next(
             svc
             for svc in MANIFEST["lanes"][lane]["services"]
@@ -290,7 +339,12 @@ def test_unexpected_lane_labeled_container_is_drift() -> None:
 def test_image_tag_mismatch_is_drift() -> None:
     """A running container whose tag fails the lane pattern is drift."""
     # Pin a strict pattern lane manifest in-memory.
+    # OMN-18320: this test re-reads the manifest from disk rather than using the
+    # module-level MANIFEST, so it needs its own copy of the frozen retired-lane
+    # spec — and a DEEP copy, because it mutates image_tag_pattern and would
+    # otherwise corrupt the shared fixture for every test that runs after it.
     manifest = PLAN.load_manifest(_MANIFEST_PATH)
+    manifest["lanes"]["prod"] = copy.deepcopy(_RETIRED_PROD_LANE)
     manifest["lanes"]["prod"]["image_tag_pattern"] = r"0\.37\..+"
     containers = _healthy_prod_containers()
     for c in containers:

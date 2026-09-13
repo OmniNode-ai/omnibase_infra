@@ -15,6 +15,18 @@
 #   free and the lane is STILL unbuilt at the moment this PR declares its services. This PR is
 #   the REPO-side enablement only (compose file, lane Literal, topology profile, renderer);
 #   bring-up remains the lane owner's Task 0 and was deliberately not performed.
+# verified: 2026-09-13 via read-only ssh jonah@192.168.86.201 `docker compose -p omnibase-infra-prod ps -a`
+#   (zero rows), `docker network ls --filter name=omnibase-infra-prod` (zero) and a per-project
+#   `docker ps -a` count diff showing omnibase-infra 31, omnibase-infra-stability-test 19,
+#   omnibase-infra-judge 7 and omnibase-infra-lakshman 7 byte-unchanged across the window —
+#   OMN-18320. The `prod` lane block is REMOVED from this file because the compose project it
+#   described no longer exists on the host: it was shut down on 2026-09-13 under an operator
+#   consent row, releasing 249 GB. This is the lab compose lane only. Production is the AWS
+#   `onex-prod` namespace and is untouched, as are the OMN-13418 prod-promotion gate, the
+#   OMN-15243 no-raw-prod-bypass signature set and the OMN-15218 attribution interlock
+#   (`scripts/preflight_lane_deploy_attribution.py` GOVERNED_LANES), all of which stay exactly
+#   as committed. `docker/docker-compose.prod.yml` is also retained: this change removes the
+#   lane from the DESIRED-STATE census, not the ability to describe it.
 # verified: 2026-09-02 via read-only ssh jonah@192.168.86.201 `docker ps -a --filter
 #   label=com.docker.compose.project=omnibase-infra-lakshman --format '{{.Names}}|{{.Status}}|{{.Image}}|{{.Ports}}'`,
 #   `docker network ls | grep lakshman`, `ss -ltn` and `curl -s http://localhost:58085/health` — OMN-17532.
@@ -231,60 +243,6 @@ lanes:
         kind: profile_gated
       - name: omninode-stability-test-contract-resolver
         kind: profile_gated
-  prod:
-    compose_file: docker/docker-compose.prod.yml
-    compose_project: omnibase-infra-prod
-    network: omnibase-infra-prod-network
-    image_tag_pattern: '.+'
-    services:
-      - name: omnibase-infra-prod-postgres
-        kind: service
-        replicas: 1
-      - name: omnibase-infra-prod-redpanda
-        kind: service
-        replicas: 1
-      - name: omnibase-infra-prod-redpanda-partition-cap
-        kind: oneshot
-      - name: omnibase-infra-prod-valkey
-        kind: service
-        replicas: 1
-      - name: omnibase-infra-prod-forward-migration
-        kind: oneshot
-      - name: omnibase-infra-prod-migration-gate
-        kind: keepalive
-      - name: omnibase-infra-prod-intelligence-migration
-        kind: oneshot
-      # The four runtime services that were silently absent on 2026-06-11.
-      - name: omninode-prod-runtime
-        kind: service
-        replicas: 1
-      - name: omninode-prod-runtime-effects
-        kind: service
-        replicas: 1
-      - name: omnimarket-prod-projection-api
-        kind: service
-        replicas: 1
-      - name: omninode-prod-runtime-worker
-        kind: service
-        replicas: 1
-      # OMN-16803: `profile_gated` — EXPECTED ABSENT, same defect and same fix as
-      # the stability-test block above. docker-compose.prod.yml sets
-      # `profiles: !override ["prod-disabled"]` on all four, so they are not
-      # members of the prod `runtime` profile and no sanctioned `up` starts them.
-      # Live .201 evidence (2026-08-28): the prod lane runs 6 containers and none
-      # of these four exists. The OMN-13815 `kind: service` declaration was true
-      # only while deploy-runtime.sh's warm `--restart` named the full
-      # RUNTIME_SERVICES set explicitly (a CLI service name bypasses profile
-      # filtering); it has been producing four permanent false container_absent
-      # criticals on the prod census ever since that stopped.
-      - name: omninode-prod-agent-actions-consumer
-        kind: profile_gated
-      - name: omninode-prod-skill-lifecycle-consumer
-        kind: profile_gated
-      - name: omnibase-prod-intelligence-api
-        kind: profile_gated
-      - name: omninode-prod-contract-resolver
-        kind: profile_gated
   judge:
     compose_file: docker/docker-compose.judge.yml
     compose_project: omnibase-infra-judge
@@ -401,8 +359,10 @@ lanes:
   # exactly as written, with no ad-hoc port drift. The obvious-looking
   # 48085/48086 block is NOT free: it is the
   # judge lane's runtime main/effects (docker/runtime-policy.env
-  # JUDGE_RUNTIME_MAIN_PORT / JUDGE_RUNTIME_EFFECTS_PORT), and 49092 is the prod
-  # broker's external Kafka port. Do not reuse either.
+  # JUDGE_RUNTIME_MAIN_PORT / JUDGE_RUNTIME_EFFECTS_PORT). 49092 was the prod
+  # broker's external Kafka port until that lane was retired on 2026-09-13
+  # (OMN-18320); it is free now, but it stays listed here so nobody reuses it
+  # while stale references to the prod lane remain in the tree.
   #
   #   runtime main       58085
   #   runtime effects    58086

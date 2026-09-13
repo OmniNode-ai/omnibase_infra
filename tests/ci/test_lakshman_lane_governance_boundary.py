@@ -233,7 +233,24 @@ def test_collaborator_lane_declares_itself_optional_in_the_census() -> None:
     assert lane_spec["network"] == "omnibase-infra-lakshman-network"
     assert lane_spec["compose_file"] == "docker/docker-compose.lakshman.yml"
     # The governed lanes must NOT have become optional along the way.
-    for governed in ("stability-test", "prod", "judge"):
+    #
+    # OMN-18320: iterate GOVERNED_LANES intersected with what the manifest actually
+    # declares, rather than a hardcoded triple. `prod` is still a governed lane in
+    # scripts/preflight_lane_deploy_attribution.py — that constant is deliberately
+    # unchanged, because the interlock must keep refusing an unattributed prod
+    # mutation whether or not a compose lane happens to be running — but the lab
+    # compose prod lane was shut down on 2026-09-13 and removed from the manifest,
+    # so there is no longer a spec to read. A governed lane with no manifest entry
+    # is not "optional"; it is undeclared, which is the state this change created
+    # on purpose. The assertion still has teeth: re-declaring any governed lane as
+    # optional fails, and the guard below refuses the vacuous case where the
+    # intersection is empty because someone renamed a lane.
+    declared_governed = sorted(GOVERNED_LANES & manifest["lanes"].keys())
+    assert declared_governed, (
+        "no governed lane is declared in the census manifest — either every "
+        "governed lane was retired, or a rename silently emptied this check"
+    )
+    for governed in declared_governed:
         assert not manifest["lanes"][governed].get("optional", False), (
             f"lane {governed!r} became optional — an entirely-absent governed "
             "lane would stop being reported as drift"
