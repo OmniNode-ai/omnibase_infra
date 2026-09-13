@@ -69,3 +69,35 @@ def test_the_trigger_types_it_already_had_are_kept() -> None:
             f"{required!r} was dropped; the born path fires on it and this "
             "change is additive"
         )
+
+
+def _companion_effect_job_if() -> str:
+    doc: dict[Any, Any] = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict), f"unreadable jobs block: {jobs!r}"
+    job = jobs.get("occ-companion-effect")
+    assert isinstance(job, dict), f"missing companion-effect job: {job!r}"
+    condition = job.get("if")
+    assert isinstance(condition, str), f"missing companion-effect if: {condition!r}"
+    return condition
+
+
+def test_edited_trigger_is_scoped_to_description_changes() -> None:
+    condition = _companion_effect_job_if()
+
+    assert "github.event.action != 'edited'" in condition
+    assert "github.event.changes.body" in condition
+
+
+def test_companion_effect_runs_are_pr_keyed_and_cancel_superseded_metadata_runs() -> (
+    None
+):
+    doc: dict[Any, Any] = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    concurrency = doc.get("concurrency")
+    assert isinstance(concurrency, dict), f"missing concurrency block: {concurrency!r}"
+
+    assert concurrency.get("cancel-in-progress") is True
+    group = concurrency.get("group")
+    assert isinstance(group, str), f"missing concurrency group: {group!r}"
+    assert "github.event.pull_request.number" in group
+    assert "inputs.pr_number" in group
