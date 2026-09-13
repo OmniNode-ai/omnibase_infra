@@ -7243,10 +7243,38 @@ def _make_raw_event_projection_callback(
     result_applier: ProtocolDispatchResultApplier,
     *,
     allowed_dispatcher_ids: Collection[str] | None = None,
+    consumer_group: str | None = None,
 ) -> Callable[..., Awaitable[None]]:
-    """Create a callback for raw Kafka `ModelEventMessage` projection contracts."""
+    """Create a callback for raw Kafka `ModelEventMessage` projection contracts.
+
+    ``consumer_group`` (OMN-17214): the group id this subscription joined, wired
+    for exactly the reason and with exactly the semantics documented on
+    ``_make_event_bus_callback``. It is passed here because
+    ``_is_raw_event_projection_contract`` routes every contract declaring
+    ``consumer_purpose: audit`` or ``consumer_purpose: projection`` down THIS
+    branch, and that branch was never given a group — so those subscriptions
+    registered no counter and emitted no row at all. A missing row is read as
+    ``UNKNOWN``, not as observed-idle, so a whole node archetype (32 of the 57
+    unobserved live subscriptions measured 2026-08-30 were ``*_projection_compute``,
+    the epic's canonical ``node_gateway_link_health_projection_compute`` among
+    them at 33,971 in / 0 out) was invisible to the flow projection rather than
+    visibly stalled. ``None`` (the default) disables counting exactly as it does
+    on the sibling branch: it never fabricates a group id.
+    """
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+    from omnibase_infra.runtime.observability import (
+        active_flow_key,
+        get_consumer_flow_counters,
+    )
+
+    flow_counters = get_consumer_flow_counters() if consumer_group is not None else None
+    if flow_counters is not None and consumer_group is not None:
+        # Register before any traffic so a subscription that takes NOTHING still
+        # emits a zero row every window. Same seam, same ordering and the same
+        # reason as the sibling branch -- absent rows and zero rows mean
+        # different things and must not be conflated.
+        flow_counters.register(consumer_group, topic)
 
     dispatcher_scope = _require_contract_dispatcher_scope(
         allowed_dispatcher_ids,
@@ -7256,6 +7284,18 @@ def _make_raw_event_projection_callback(
         dispatch_engine,
         contract_name=topic,
     )
+
+    async def _dispatch_and_apply_raw_projection(
+        envelope: ModelEventEnvelope[object],
+    ) -> None:
+        result = await _dispatch_to_contract_scope(
+            scoped_dispatch_engine,
+            topic,
+            envelope,
+            dispatcher_scope,
+        )
+        if result is not None:
+            await result_applier.apply(result, envelope.correlation_id)
 
     async def callback(message: object) -> None:
         try:
@@ -7276,15 +7316,26 @@ def _make_raw_event_projection_callback(
                 ),
                 source_tool=raw_message.headers.source,
             )
-            result = await _dispatch_to_contract_scope(
-                scoped_dispatch_engine,
-                topic,
-                envelope,
-                dispatcher_scope,
-            )
-            if result is not None:
-                await result_applier.apply(result, envelope.correlation_id)
+            if flow_counters is None or consumer_group is None:
+                await _dispatch_and_apply_raw_projection(envelope)
+            else:
+                # OMN-17214: counted before the call for the same reason the
+                # sibling branch counts before its call -- an envelope reaching
+                # this line HAS been handed to dispatch, so a handler that hangs
+                # or dies still shows the message as taken in. Counting only
+                # completed dispatches would reproduce the "green because
+                # nothing was measured" defect this seam exists to close.
+                flow_counters.record_in(consumer_group, topic)
+                # The applier's publish loop records ``messages_out`` against
+                # this task-local key (``record_active_out``), so the apply()
+                # call has to run INSIDE the binding -- outside it, a projection
+                # that publishes is counted as producing nothing and reads
+                # STALLED while it is demonstrably producing.
+                with active_flow_key(consumer_group, topic):
+                    await _dispatch_and_apply_raw_projection(envelope)
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
+            if flow_counters is not None and consumer_group is not None:
+                flow_counters.record_error(consumer_group, topic)
             logger.error(
                 "Raw projection callback error: topic=%s error_type=%s error=%s",
                 topic,
@@ -10299,6 +10350,11 @@ async def _subscribe_contract_topics(
                 dispatch_engine,  # type: ignore[arg-type]
                 effective_result_applier,
                 allowed_dispatcher_ids=dispatcher_scope,
+                # OMN-17214: the SAME group id the sibling branch is given, from
+                # the same `compute_consumer_group_id` call above. Without it the
+                # audit/projection subscription kinds registered no flow counter
+                # and emitted no row at all.
+                consumer_group=consumer_group,
             )
         else:
             callback = _make_event_bus_callback(
