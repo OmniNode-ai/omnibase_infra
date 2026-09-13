@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -692,6 +693,12 @@ def _scoped_policy() -> dict[str, object]:
             "repositories": ["omnibase_infra", "omniclaude"],
             "org_scope": "absent",
         },
+        "cloud_canary_runner_variable": {
+            "name": "OMNI_CLOUD_CANARY_RUNS_ON_JSON",
+            "expected_json": '["self-hosted","omni-cloud-ci"]',
+            "repositories": ["omnibase_infra"],
+            "org_scope": "absent",
+        },
         "repositories": ["omnibase_infra", "omniclaude", "omnimarket"],
     }
 
@@ -721,6 +728,10 @@ def test_scoped_variable_audit_passes_on_the_declared_shape(
             "OmniNode-ai/omnibase_infra": [
                 ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["ubuntu-latest"]'),
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                (
+                    "OMNI_CLOUD_CANARY_RUNS_ON_JSON",
+                    '["self-hosted","omni-cloud-ci"]',
+                ),
             ],
             "OmniNode-ai/omniclaude": [
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
@@ -751,6 +762,10 @@ def test_scoped_variable_audit_catches_an_undeclared_shadow(
             "OmniNode-ai/omnibase_infra": [
                 ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["ubuntu-latest"]'),
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                (
+                    "OMNI_CLOUD_CANARY_RUNS_ON_JSON",
+                    '["self-hosted","omni-cloud-ci"]',
+                ),
             ],
             "OmniNode-ai/omniclaude": [
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
@@ -778,6 +793,10 @@ def test_scoped_variable_audit_catches_drift_in_a_declared_scope(
             "OmniNode-ai/omnibase_infra": [
                 ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["self-hosted","omnibase-ci"]'),
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                (
+                    "OMNI_CLOUD_CANARY_RUNS_ON_JSON",
+                    '["self-hosted","omni-cloud-ci"]',
+                ),
             ],
             "OmniNode-ai/omniclaude": [
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
@@ -802,7 +821,11 @@ def test_scoped_variable_audit_catches_a_missing_declared_shadow(
         {
             "OmniNode-ai": [],
             "OmniNode-ai/omnibase_infra": [
-                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
+                ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                (
+                    "OMNI_CLOUD_CANARY_RUNS_ON_JSON",
+                    '["self-hosted","omni-cloud-ci"]',
+                ),
             ],
             "OmniNode-ai/omniclaude": [
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
@@ -828,6 +851,10 @@ def test_scoped_variable_audit_catches_an_org_level_value(
             "OmniNode-ai/omnibase_infra": [
                 ("OMNI_DOCKER_CI_RUNS_ON_JSON", '["ubuntu-latest"]'),
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]'),
+                (
+                    "OMNI_CLOUD_CANARY_RUNS_ON_JSON",
+                    '["self-hosted","omni-cloud-ci"]',
+                ),
             ],
             "OmniNode-ai/omniclaude": [
                 ("OMNI_SECURITY_SCAN_RUNS_ON_JSON", '["ubuntu-latest"]')
@@ -857,12 +884,16 @@ def test_removing_a_scoped_declaration_is_itself_a_finding(
     assert any("is missing from the policy file" in f.message for f in findings)
 
 
-def test_the_live_policy_declares_both_scoped_variables() -> None:
-    """The shipped policy file must carry both declarations, machine-readable."""
+def test_the_live_policy_declares_every_scoped_variable() -> None:
+    """The shipped policy file must carry every declaration, machine-readable."""
     import yaml
 
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
-    for key in ("docker_ci_runner_variable", "security_scan_runner_variable"):
+    for key in (
+        "docker_ci_runner_variable",
+        "security_scan_runner_variable",
+        "cloud_canary_runner_variable",
+    ):
         declaration = policy[key]
         assert declaration["org_scope"] == "absent"
         assert isinstance(declaration["repositories"], list)
@@ -909,3 +940,118 @@ def test_the_policy_does_not_assert_the_withdrawn_exclusion_claims() -> None:
         "if it regresses, record the new evidence rather than restoring the old "
         "sentence."
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18291: the cloud canary variable
+# ---------------------------------------------------------------------------
+
+
+def test_every_scoped_key_in_the_script_is_declared_in_the_shipped_policy() -> None:
+    """The two lists must not drift apart, in either direction.
+
+    A key in the script with no declaration makes every audit run emit a
+    "missing from the policy file" finding. A declaration with no key in the
+    script is worse and silent: the variable looks audited to anyone reading
+    the policy file and is read by nothing.
+    """
+    import yaml
+
+    module = _load_script()
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+
+    for key in module.SCOPED_VARIABLE_KEYS:
+        assert key in policy, f"{key} is audited by the script and declared nowhere"
+
+    declared = {
+        key
+        for key, value in policy.items()
+        if isinstance(value, dict) and "org_scope" in value
+    }
+    assert declared == set(module.SCOPED_VARIABLE_KEYS), (
+        "a scoped declaration exists that the script never reads, so it is "
+        "documentation rather than an audit"
+    )
+
+
+def test_the_cloud_canary_variable_points_at_the_cloud_fleet_label() -> None:
+    """It is the only routing value in the estate that names the cloud fleet.
+
+    Asserted rather than assumed because the label is what makes this a routing
+    change AT ALL: the same variable holding a hosted or lab value would read as
+    a live canary in every surface while routing nothing.
+    """
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    declaration = policy["cloud_canary_runner_variable"]
+
+    assert declaration["name"] == "OMNI_CLOUD_CANARY_RUNS_ON_JSON"
+    assert json.loads(declaration["expected_json"]) == [
+        "self-hosted",
+        "omni-cloud-ci",
+    ]
+    assert declaration["repositories"] == ["omnibase_infra"]
+    assert declaration["org_scope"] == "absent", (
+        "an organization-level value would point EVERY repository's canary job "
+        "class at a fleet whose maximum is four instances"
+    )
+    assert declaration["revert_when"].strip()
+
+
+def test_the_canary_variable_is_read_ahead_of_the_docker_seam() -> None:
+    """Precedence is the whole design, and it is only true if it is written.
+
+    Read from the PARSED runs-on of the one job it governs, so a mention of the
+    variable in a comment elsewhere in the file cannot satisfy it.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (
+            REPO_ROOT / ".github" / "workflows" / "application-acl-postgres16-proof.yml"
+        ).read_text(encoding="utf-8")
+    )
+    runs_on = workflow["jobs"]["rebuilt-postgres16-proof"]["runs-on"]
+
+    canary = runs_on.index("OMNI_CLOUD_CANARY_RUNS_ON_JSON")
+    docker = runs_on.index("OMNI_DOCKER_CI_RUNS_ON_JSON")
+    trusted = runs_on.index("OMNI_TRUSTED_CI_RUNS_ON_JSON")
+    assert canary < docker < trusted
+
+    # NEGATIVE CONTROL for the ordering above: the fork branch must still come
+    # first of all, because this repository is public and a fork pull request
+    # must never reach a self-hosted runner of any kind.
+    assert runs_on.index("OMNI_PUBLIC_PR_RUNS_ON_JSON") < canary
+
+
+def test_the_capacity_requester_cannot_resolve_onto_the_fleet_it_requests() -> None:
+    """The requester is hosted by literal, and that is load-bearing.
+
+    A requester that resolved through any routing variable could be relocated
+    onto the scale-to-zero fleet it exists to start, which deadlocks: the job
+    that would ask for capacity is itself waiting for capacity.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (
+            REPO_ROOT / ".github" / "workflows" / "application-acl-postgres16-proof.yml"
+        ).read_text(encoding="utf-8")
+    )
+    requester = workflow["jobs"]["request-cloud-capacity"]
+
+    assert requester["runs-on"] == "ubuntu-latest"
+    assert "${{" not in str(requester["runs-on"])
+    assert workflow["jobs"]["rebuilt-postgres16-proof"]["needs"] == (
+        "request-cloud-capacity"
+    )
+
+
+def test_the_requester_file_is_allowlisted_for_its_bare_hosted_pin() -> None:
+    """Otherwise the local-workflow audit reports it as a routing violation."""
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    paths = {entry["path"] for entry in policy["hosted_runner_allowlist"]}
+    assert ".github/workflows/application-acl-postgres16-proof.yml" in paths

@@ -26,22 +26,143 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # OMN-18291. THE CAPACITY REQUEST, and it exists because the AWS cloud runner
+  # fleet is scale-to-zero: at rest it holds no instances, so a job routed there
+  # with nothing to start it simply queues. Scale-DOWN has been automatic since
+  # OMN-18224 (an exit trap, bounded by two guard alarms); this is the other
+  # half.
+  #
+  # WHY IT IS A JOB HERE RATHER THAN A WEBHOOK IN AWS. GitHub's queued-job
+  # webhook is gated on the fleet's App holding read access to Actions, and that
+  # App deliberately holds one permission and no active webhook. Widening an
+  # organisation-wide App to solve a capacity problem is the wrong trade, so the
+  # trust runs the other way: the workflow that wants a cloud runner asks for
+  # one over OIDC, before the routed job is scheduled. No credential is stored
+  # anywhere.
+  #
+  # SKIPPED FOR A FORK PULL REQUEST, and the routed job below is skipped with
+  # it -- this repository is public, and GitHub refuses a fork pull request the
+  # `id-token: write` permission, so no token is minted for untrusted code at
+  # all. The fork guard in the routed job's own expression sends it to hosted
+  # runners in that case, which is the behaviour it already had.
+  request-cloud-capacity:
+    name: Ask the cloud fleet for a runner
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    # Hosted by literal, necessarily and deliberately. This job is the thing
+    # that causes the fleet to exist for this run, so it cannot resolve through
+    # the routing variable it is serving -- and pinning it by literal means no
+    # future flip of any seam can relocate the requester onto the capacity it is
+    # trying to request. Allowlisted in config/runner_routing_policy.yaml for
+    # exactly that reason.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Assume the capacity-scaler invoker role
+        uses: aws-actions/configure-aws-credentials@d45db47bd94e3a7d50b9c36da4cfe07ceca89d74 # v6
+        with:
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ vars.AWS_CI_RUNNER_SCALER_ROLE_NAME }}
+          role-session-name: gha-acl-proof-capacity-${{ github.run_id }}
+
+      - name: Ask for one runner
+        run: |
+          set -euo pipefail
+
+          # This workflow has exactly one fleet-bound job, so it wants exactly
+          # one runner. The FUNCTION owns the decision: it reads the group's
+          # live maximum, clamps to it, and refuses to lower the dial, which is
+          # why this job holds no autoscaling permission at all.
+          aws lambda invoke \
+            --region us-east-1 \
+            --function-name omninode-ci-runner-scaler \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"action":"scale_up","requested_runners":1}' \
+            --query '{status:StatusCode,error:FunctionError}' \
+            --output json \
+            scaler-response.json
+
+          echo "scaler said:"
+          cat scaler-response.json
+          echo
+
+          # A function that RAISED and a function that THREW both return HTTP
+          # 200. Reading only the status code is how a failed scale-up reports
+          # success and the job below then sits queued with no explanation.
+          if grep -q '"errorMessage"' scaler-response.json; then
+            echo "::error::the capacity scaler refused the request"
+            exit 1
+          fi
+
   rebuilt-postgres16-proof:
     name: Rebuilt PostgreSQL 16 ACL and rollback proof
+    # Ordered behind the request, not alongside it. Without `needs:` both jobs
+    # start together, this one is offered to a fleet that has not been asked for
+    # capacity, and it queues.
+    needs: request-cloud-capacity
+    # `always()` rather than a bare dependency, because a fork pull request
+    # skips the requester and this job must still run -- on hosted runners,
+    # which is where its own fork guard already sends it.
+    if: >-
+      always() &&
+      needs.request-cloud-capacity.result != 'failure' &&
+      needs.request-cloud-capacity.result != 'cancelled'
     env:
       COMPOSE_PROJECT_NAME: application-acl-proof-${{ github.run_id }}-${{ github.run_attempt }}
     permissions:
       contents: read
+    # OMN-18291: the cloud canary variable sits AHEAD of the docker seam, which
+    # sits ahead of the trusted seam. Precedence is the whole point -- the
+    # narrower variable governs this ONE job class and leaves every other
+    # docker-executing job in this repository exactly where the docker seam puts
+    # it. Flipping the docker seam instead would have moved fifteen job
+    # definitions, several of them on every pull request, onto a fleet whose
+    # maximum is four ephemeral single-job instances.
+    #
+    # The fork branch is untouched and still comes first: a fork pull request
+    # never reaches a self-hosted runner of any kind.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_CLOUD_CANARY_RUNS_ON_JSON || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 30
 
     steps:
+      - name: Prove which runner this job landed on
+        # OMN-18291. A green check does not say WHERE a job ran, and the whole
+        # claim of this routing change is about where. The runner name is
+        # assigned by the fleet's bootstrap; the instance metadata service is a
+        # second, independent discriminator that a lab runner -- a container on
+        # a machine with no metadata service -- does not have.
+        #
+        # Deliberately NOT fatal. If this job is on a hosted or lab runner the
+        # routing did not take effect, and that is a finding to read in the log
+        # rather than a reason to fail a proof that is otherwise valid.
+        run: |
+          set -uo pipefail
+          echo "runner name: ${RUNNER_NAME:-<unset>}"
+          case "${RUNNER_NAME:-}" in
+            omni-cloud-i-*)
+              TOKEN="$(curl -sS -X PUT --max-time 5 \
+                -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+                http://169.254.169.254/latest/api/token)"
+              echo "instance: $(curl -sS --max-time 5 \
+                -H "X-aws-ec2-metadata-token: ${TOKEN}" \
+                http://169.254.169.254/latest/meta-data/instance-id)"
+              echo "PLACEMENT: cloud fleet"
+              ;;
+            *)
+              echo "PLACEMENT: not the cloud fleet"
+              ;;
+          esac
+
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
