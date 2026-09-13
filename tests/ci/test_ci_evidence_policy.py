@@ -246,6 +246,38 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
         return problems
 
     steps = _steps(job)
+
+    # --- OMN-18249: suppression, at EITHER level ---------------------------
+    #
+    # The motivating example used the JOB-level form, and the plan's first
+    # draft read step level only -- so that draft would have passed the very
+    # workflow it was written for. Both are read here, off parsed structure.
+    if job.get("continue-on-error"):
+        problems.append(
+            f"{artifact_id}: job {wf_rel}:{job_id} carries continue-on-error. "
+            f"Every step failure inside it becomes irrelevant to the run's "
+            f"conclusion, including the assertion that protects this artifact. "
+            f"This is the form the lab-load probe used while it was dead."
+        )
+
+    producer_step = str(entry.get("producer_step") or "")
+    if not producer_step:
+        problems.append(
+            f"{artifact_id}: declares no producer_step, so the gate cannot tell "
+            f"which step writes the evidence and cannot check it for suppression."
+        )
+    producer_indexes = [
+        idx
+        for idx, step in enumerate(steps)
+        if str(step.get("name") or "") == producer_step
+    ]
+    if producer_step and not producer_indexes:
+        problems.append(
+            f"{artifact_id}: no step in {wf_rel}:{job_id} is named "
+            f"{producer_step!r}. A producer declaration that resolves to nothing "
+            f"is a gate that checks nothing."
+        )
+
     uploader_indexes = [
         idx
         for idx, step in enumerate(steps)
@@ -323,6 +355,29 @@ def check_entry(entry: dict[str, Any], workflows_dir: Path) -> list[str]:
             f"{artifact_id}: the assertion step in {wf_rel}:{job_id} carries "
             f"continue-on-error, so it cannot fail the job it is asserting on."
         )
+
+    # OMN-18249, step level. THE CHAIN, NOT THE WHOLE JOB. Only the three steps
+    # that carry the evidence are checked: the producer that writes it, the
+    # assertion that proves it, and the uploader that publishes it. Other steps
+    # in the job may legitimately be best-effort -- `saturation-record`
+    # downloads this run's lab half, prior records, and the last route reason,
+    # and an ABSENT lab half is alert condition 4, the state that monitor most
+    # needs to record. A rule that forced those to fail the job would demand a
+    # wrong change, and a gate that demands a wrong change gets removed.
+    for label, index in (
+        ("producer", producer_indexes[0] if producer_indexes else None),
+        ("assertion", assertion_index),
+        ("uploader", uploader_index),
+    ):
+        if index is None:
+            continue
+        if steps[index].get("continue-on-error"):
+            problems.append(
+                f"{artifact_id}: the {label} step in {wf_rel}:{job_id} "
+                f"({steps[index].get('name') or steps[index].get('uses')!r}) carries "
+                f"continue-on-error. A suppressed evidence step reports green while "
+                f"producing nothing, which is the whole defect class."
+            )
 
     return problems
 
@@ -627,3 +682,104 @@ def test_assertion_fails_when_only_one_of_several_paths_is_empty(
         tmp_path,
     )
     assert result.returncode == 1, result.stdout + result.stderr
+
+
+# --------------------------------------------------------------------------
+# OMN-18249: suppression at either level, RED on the real trees
+# --------------------------------------------------------------------------
+JOB_SUPPRESSED_FIXTURE = (
+    Path(__file__).resolve().parent.parent
+    / "fixtures"
+    / "omn18253"
+    / "dev-lane-liveness.pre-repair.yml.captured"
+)
+
+
+def test_the_job_level_suppression_fixture_is_present() -> None:
+    assert JOB_SUPPRESSED_FIXTURE.is_file(), (
+        f"{JOB_SUPPRESSED_FIXTURE} is missing. It is the SHARP red case for the "
+        "suppression rule: a byte copy of the lab-lane workflow at b080d7eb, "
+        "where OMN-18247 had already fixed the artifact settings, so job-level "
+        "continue-on-error is the only remaining violation in it."
+    )
+
+
+def test_gate_is_red_on_job_level_suppression_in_the_real_workflow(
+    tmp_path: Path,
+) -> None:
+    """AC1, job-level half, on the real job rather than a synthetic one.
+
+    The plan's first draft read STEP-level suppression only, and this job's
+    suppression is on the JOB, so that draft would have passed the very workflow
+    it was written for. This fixture is what makes that impossible to repeat.
+    """
+    staged = tmp_path / "workflows"
+    staged.mkdir()
+    (staged / "dev-lane-liveness.yml").write_text(
+        JOB_SUPPRESSED_FIXTURE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    entry = next(e for e in load_policy() if str(e.get("id")) == "lab-load")
+    problems = check_entry(entry, staged)
+    assert problems, "the gate passed a workflow whose evidence job is suppressed"
+    joined = "\n".join(problems)
+    assert "carries continue-on-error" in joined
+    assert "lab-load-probe" in joined
+
+
+@pytest.mark.parametrize("suppressed", ["producer", "assertion", "uploader"])
+def test_gate_is_red_on_step_level_suppression_anywhere_in_the_chain(
+    suppressed: str, tmp_path: Path
+) -> None:
+    """AC1, step-level half, across all three steps that carry the evidence."""
+    staged = tmp_path / "workflows"
+    staged.mkdir()
+    doc = yaml.safe_load(
+        (WORKFLOWS_DIR / "dev-lane-liveness.yml").read_text(encoding="utf-8")
+    )
+    steps = doc["jobs"]["lab-load-probe"]["steps"]
+    index = {
+        "producer": next(
+            i
+            for i, s in enumerate(steps)
+            if str(s.get("name", "")).startswith("Probe the fleet")
+        ),
+        "assertion": next(
+            i
+            for i, s in enumerate(steps)
+            if ASSERTION_SCRIPT in str(s.get("run") or "")
+        ),
+        "uploader": next(i for i, s in enumerate(steps) if _is_uploader(s)),
+    }[suppressed]
+    steps[index]["continue-on-error"] = True
+    (staged / "dev-lane-liveness.yml").write_text(
+        yaml.safe_dump(doc, sort_keys=False), encoding="utf-8"
+    )
+
+    entry = next(e for e in load_policy() if str(e.get("id")) == "lab-load")
+    problems = check_entry(entry, staged)
+    assert problems, f"the gate passed a suppressed {suppressed} step"
+    assert f"the {suppressed} step" in "\n".join(problems)
+
+
+def test_gate_tolerates_suppression_on_a_best_effort_input_step() -> None:
+    """THE CONTROL. A gate that demands a wrong change gets removed.
+
+    `saturation-record` suppresses three genuinely best-effort input steps.
+    An ABSENT lab half is alert condition 4 -- the state the monitor most needs
+    to record -- so forcing those to fail the job would make the monitor unable
+    to report the very thing it watches for. Without this control, "reject every
+    suppressed step in the job" reads as the stricter and therefore better rule.
+    """
+    job = _jobs(_load_workflow(WORKFLOWS_DIR / "dev-lane-liveness.yml"))[
+        "saturation-record"
+    ]
+    suppressed = [str(s.get("name")) for s in _steps(job) if s.get("continue-on-error")]
+    assert suppressed, (
+        "the best-effort input steps this control exists for are gone; if that "
+        "was deliberate, delete this test with the reason, do not weaken it"
+    )
+    entry = next(e for e in load_policy() if str(e.get("id")) == "saturation-record")
+    assert not check_entry(entry, WORKFLOWS_DIR), (
+        f"the gate rejected best-effort input steps {suppressed}, which are not "
+        "part of the evidence chain"
+    )

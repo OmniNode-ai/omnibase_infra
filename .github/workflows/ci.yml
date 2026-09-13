@@ -1852,6 +1852,8 @@ jobs:
           echo "Every artifact declared in config/ci_evidence_policy.yaml is"
           echo "asserted present and non-empty at its uploader, and its uploader"
           echo "treats a missing file as an error rather than a warning."
+          echo "No continue-on-error on the evidence chain -- the producer, the"
+          echo "assertion or the uploader -- nor on the enclosing job (OMN-18249)."
           echo "Read from parsed workflow structure, never from file text."
           echo "================================================================"
           uv run pytest tests/ci/test_ci_evidence_policy.py -v --tb=short
