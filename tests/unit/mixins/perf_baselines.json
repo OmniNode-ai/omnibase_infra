@@ -1,0 +1,10 @@
+{
+  "cache_hit_p99_ms": {
+    "baseline_ms": 1.0,
+    "margin": 0.5,
+    "trials": 5,
+    "iterations_per_trial": 100,
+    "aggregate": "median_of_trial_p99",
+    "source": "OMN-18350: test_benchmark_warm_cache_hit failed twice on the omnibase-ci shared runner fleet with a raw p99-of-100 that was really a single noisy sample (max(sample) == p99 at n=100): run 34666515741 measured p99=36.004ms against avg=0.379ms, run 34782693843 measured p99=3.006ms against avg=0.043ms -- both single-iteration GC/scheduler pauses, not sustained regressions. Aggregating the p99 as the median across 5 independent 100-iteration trials removes a single noisy trial without hiding a regression present in every trial. baseline_ms=1.0 is the documented sub-millisecond cache-hit target from the mixin's own PERF_THRESHOLD_CACHE_HIT_MS; margin=0.5 (threshold = baseline * (1 + margin) = 1.5ms) is tight enough to catch a genuine 2x regression (2.0ms > 1.5ms) while clearing ordinary 5 percent wobble (1.05ms < 1.5ms)."
+  }
+}

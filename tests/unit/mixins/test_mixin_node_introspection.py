@@ -68,6 +68,11 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.topics import SUFFIX_NODE_HEARTBEAT, SUFFIX_NODE_INTROSPECTION
+from tests.unit.mixins.perf_threshold import (
+    load_baseline,
+    median_of_trial_percentiles,
+    threshold_ms,
+)
 
 # CI environments may be slower - apply multiplier for performance thresholds
 _CI_MODE: bool = os.environ.get("CI", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -2923,7 +2928,19 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
         Measures introspection performance when result is served from cache,
         which should be sub-millisecond.
 
-        Uses p99 percentile for cache hits since they should be very fast.
+        OMN-18350: runs several independent 100-iteration trials and compares
+        the MEDIAN of each trial's p99 against a baseline-derived threshold,
+        rather than a single trial's p99 against a magic-literal threshold. A
+        single trial's p99-of-100 degenerates to that trial's max sample, so a
+        lone GC-pause or scheduler-preemption sample on a shared CI runner
+        previously failed the gate outright (run 34666515741: p99=36.004ms:
+        run 34782693843: p99=3.006ms — both against a 3.0ms threshold, both
+        driven by exactly one noisy sample, avg was 0.379ms and 0.043ms
+        respectively). Taking the median across trials removes one noisy
+        trial without hiding a regression present in every trial. The
+        threshold itself comes from a committed, documented baseline
+        (`perf_baselines.json`) instead of the previous unexplained
+        `PERF_THRESHOLD_CACHE_HIT_MS * PERF_MULTIPLIER` literal.
         """
         node = MockNode()
         node.initialize_introspection(
@@ -2938,33 +2955,42 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
         # Warm the cache with initial call
         await node.get_introspection_data()
 
-        cache_hit_times: list[float] = []
+        baseline = load_baseline("cache_hit_p99_ms")
+        trial_count: int = baseline["trials"]
+        iterations_per_trial: int = baseline["iterations_per_trial"]
 
-        # Measure cache hits - use larger sample for cache hit measurement
-        for _ in range(100):
-            start = time.perf_counter()
-            await node.get_introspection_data()
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            cache_hit_times.append(elapsed_ms)
+        trials: list[list[float]] = []
+        for _ in range(trial_count):
+            cache_hit_times: list[float] = []
+            for _ in range(iterations_per_trial):
+                start = time.perf_counter()
+                await node.get_introspection_data()
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                cache_hit_times.append(elapsed_ms)
+            trials.append(cache_hit_times)
 
-        # Calculate statistics
-        avg_time = sum(cache_hit_times) / len(cache_hit_times)
-        p95_time = self._calculate_percentile(cache_hit_times, 95)
-        p99_time = self._calculate_percentile(cache_hit_times, 99)
-        min_time = min(cache_hit_times)
-        max_time = max(cache_hit_times)
+        all_samples = [sample for trial in trials for sample in trial]
+        avg_time = sum(all_samples) / len(all_samples)
+        min_time = min(all_samples)
+        max_time = max(all_samples)
+        median_p99 = median_of_trial_percentiles(trials, 99)
 
-        print("\nWarm cache hit (100 iterations):")
+        print(
+            f"\nWarm cache hit ({trial_count} trials x "
+            f"{iterations_per_trial} iterations):"
+        )
         print(
             f"  avg={avg_time:.3f}ms, min={min_time:.3f}ms, "
-            f"max={max_time:.3f}ms, p95={p95_time:.3f}ms, p99={p99_time:.3f}ms"
+            f"max={max_time:.3f}ms, median_of_trial_p99={median_p99:.3f}ms"
         )
 
-        # Cache hits should be very fast - use p99 for threshold
-        threshold_ms = PERF_THRESHOLD_CACHE_HIT_MS * PERF_MULTIPLIER
-        assert p99_time < threshold_ms, (
-            f"Cache hit p99 latency {p99_time:.3f}ms exceeds {threshold_ms:.1f}ms "
-            f"threshold (avg={avg_time:.3f}ms)"
+        # Cache hits should be very fast - median-of-trial-p99 against a
+        # baseline-derived threshold (see perf_baselines.json for the margin
+        # and its rationale).
+        threshold = threshold_ms("cache_hit_p99_ms")
+        assert median_p99 < threshold, (
+            f"Cache hit median-of-trial p99 latency {median_p99:.3f}ms exceeds "
+            f"{threshold:.3f}ms threshold (avg={avg_time:.3f}ms)"
         )
 
         # Verify cache hit was detected in metrics
