@@ -34,6 +34,15 @@ on:
       - "src/omnibase_infra/runtime/service_kernel.py"
       - "tests/integration/runtime/test_s8_delegation_fsm_seam.py"
       - ".github/workflows/delegation-seam-gate.yml"
+      # OMN-18321: the cross-repo dispatch-port surface. Listed for the local
+      # half only. The consumer-kwarg-parity job below deliberately does NOT
+      # depend on any of these paths being touched -- the drift it catches is
+      # introduced in the OTHER repo and changes no file here, which is exactly
+      # why a path filter cannot be the trigger that protects it.
+      - "src/omnibase_infra/runtime/service_delegation_dispatch_port.py"
+      - "src/omnibase_infra/runtime/protocols/protocol_delegation_dispatch_port.py"
+      - "tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py"
+      - "tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py"
   merge_group:
   workflow_dispatch:
 
@@ -95,3 +104,108 @@ jobs:
         if: github.event_name != 'merge_group'
         run: |
           uv run pytest tests/integration/runtime/test_s8_delegation_fsm_seam.py -v
+
+  # OMN-18321 -- the cross-repo half of this same seam.
+  #
+  # The job above drives the seam INSIDE this repo over InMemoryTransport, and
+  # it was green throughout the outage it could not see. OmniMarket declares its
+  # own ProtocolDelegationDispatchPort and its own class ALSO NAMED
+  # RuntimeDelegationDispatchPort; the in-memory seam drives that one. The
+  # deployed bus path injects THIS repo's class instead, and the two are held
+  # together by structural conformance alone -- repo layering puts omnimarket
+  # above omnibase_infra, so neither side's type checker ever sees both
+  # signatures.
+  #
+  # OMN-18172 (omnimarket#2494, squash 849fdae6) added a `provenance` keyword on
+  # the consumer side alone. The TypeError was swallowed by the consumer's own
+  # `except Exception` into a delegate-skill-failed terminal, so the .201 dev
+  # lane's delegation chain died silently: every scheduled Chain Canary run went
+  # RED with projection_row_absent from 2026-09-12T17:44Z and
+  # delegation_workflow_state took no row at all for a day.
+  #
+  # NO PATH FILTER OF ITS OWN, ON PURPOSE. This workflow's `paths:` list gates
+  # the whole file, but within it this job must run on every PR that reaches it:
+  # the drift originates in the other repo and touches nothing here, so a filter
+  # scoped to local paths is green precisely when the defect is present. That is
+  # the same lesson the node-migration vendor-sync hook records.
+  #
+  # The consumer source arrives by SPARSE CHECKOUT, the mechanism chain-canary.yml
+  # already uses to read config/ci_bus_lanes.yaml from that repo: one declaration,
+  # read live, rather than a copy here that drifts silently. `ref: dev` is the
+  # consumer's integration branch and therefore the shape the lane will serve next.
+  consumer-kwarg-parity:
+    name: consumer-kwarg-parity
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted; public forks use ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Skip on merge_group
+        if: github.event_name == 'merge_group'
+        run: |
+          echo "::notice::consumer-kwarg-parity short-circuits on merge_group (proven on the PR run)."
+          exit 0
+
+      - name: Checkout code
+        if: github.event_name != 'merge_group'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Only the one consumer file. A full clone of the consumer repo would make
+      # this job a network-heavy dependency of a merge gate, which is the failure
+      # the sibling-compat check (OMN-12563) was disabled for.
+      - name: Fetch the OmniMarket delegation consumer protocol
+        if: github.event_name != 'merge_group'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .delegation-consumer
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Python and uv
+        if: github.event_name != 'merge_group'
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # The checkout above either produced the file or it did not, and the test
+      # itself FAILS on an unresolvable source rather than skipping. This step
+      # exists so the failure names the missing checkout instead of surfacing as
+      # a puzzling assertion inside a test.
+      - name: Confirm the consumer source is present
+        if: github.event_name != 'merge_group'
+        run: |
+          set -euo pipefail
+          consumer=".delegation-consumer/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py"
+          if [ ! -f "$consumer" ]; then
+            echo "::error::the OmniMarket consumer sparse checkout produced no $consumer."
+            echo "This gate has NOT passed; it has not run. Fix the checkout rather than"
+            echo "relaxing the check — a parity gate that cannot see the consumer reports"
+            echo "green exactly where the drift lands."
+            exit 1
+          fi
+          wc -l "$consumer"
+
+      - name: Assert keyword parity with the deployed consumer
+        if: github.event_name != 'merge_group'
+        env:
+          ONEX_DELEGATION_CONSUMER_SOURCE: .delegation-consumer/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py
+        run: |
+          uv run pytest \
+            tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py \
+            tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -v
