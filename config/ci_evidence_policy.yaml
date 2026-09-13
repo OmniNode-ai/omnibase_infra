@@ -26,6 +26,21 @@
 #        author stating that absence is fatal, which is the definition above.
 #        You cannot escape the policy by deleting a line from this file.
 #
+# THE EVIDENCE CHAIN, and why it is three named steps rather than a whole job
+#   `producer_step` names the step that WRITES the required paths. Together with
+#   the assertion step and the uploader it forms this artifact's evidence chain,
+#   and OMN-18249 forbids `continue-on-error` on any of the three -- and on the
+#   enclosing job, which is the form the motivating example actually used.
+#
+#   It is deliberately NOT "every step in the job". `saturation-record` carries
+#   three genuinely best-effort input steps: downloading this run's lab half,
+#   downloading prior records for the sustain window, and fetching the most
+#   recent route reason. An ABSENT lab half is alert condition 4 -- the state
+#   the monitor most needs to record -- so a rule that forced those three to
+#   fail the job would have made the monitor unable to report the very thing it
+#   watches for. A gate that demands a wrong change gets removed, so the rule
+#   names the chain rather than the job.
+#
 # WHAT DECLARING AN ARTIFACT OBLIGES
 #   For every entry below, the gate requires, on parsed workflow structure:
 #     * the uploader sets `if-no-files-found: error` (never warn/ignore/default);
@@ -52,6 +67,7 @@ evidence_artifacts:
   - id: lab-load
     workflow: .github/workflows/dev-lane-liveness.yml
     job: lab-load-probe
+    producer_step: "Probe the fleet's org busy/idle counts as the lab saturation signal"
     artifact_name: lab-load
     required_paths:
       - lab-load.json
@@ -60,6 +76,7 @@ evidence_artifacts:
   - id: saturation-record
     workflow: .github/workflows/dev-lane-liveness.yml
     job: saturation-record
+    producer_step: "Build the record and evaluate sustained saturation"
     artifact_name: saturation-record
     required_paths:
       - runner-saturation-record.json
@@ -77,6 +94,7 @@ evidence_artifacts:
   - id: lab-pass-receipt-onex-lab
     workflow: .github/workflows/deliver-dev-candidate-to-staging.yml
     job: candidate-boot-gate
+    producer_step: "Emit the onex-lab lab-pass receipt"
     artifact_name: lab-pass-receipt-onex-lab-${{ github.sha }}
     required_paths:
       - /tmp/lab-pass-receipt/receipt.json
@@ -85,6 +103,7 @@ evidence_artifacts:
   - id: lab-pass-receipt-compose-dev
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lane-converged
+    producer_step: "Emit the compose-dev lab-pass receipt"
     artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
     required_paths:
       - /tmp/lab-pass-receipt/receipt.json
@@ -93,6 +112,7 @@ evidence_artifacts:
   - id: lab-pass-receipt-onex-lab-k3s
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lab-overlay-converged
+    producer_step: "Emit the onex-lab-k3s lab-pass receipt"
     artifact_name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
     required_paths:
       - /tmp/lab-overlay-receipt/receipt.json
