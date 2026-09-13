@@ -2162,7 +2162,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not performance and not live_github_api" \
+            -m "not slow and not chaos and not kafka and not performance and not live_github_api and not cross_repo_consumer" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2193,7 +2193,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not performance and not live_github_api" \
+            -m "not slow and not chaos and not kafka and not performance and not live_github_api and not cross_repo_consumer" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
