@@ -33,6 +33,17 @@ inventing a fact -- the same mistake the earlier "invent a principal" framing wa
 right to refuse. So the derivation is recorded and the topology entry is not
 written, and the reason is a named code constraint a reader can go and check.
 
+A lane row carrying NO principal is a derived finding, not an omission. Measured
+against the 2026-09-14 read-only pre-change ACL snapshot of the .201 dev lane and
+its `pg_stat_activity` sample: `omniclaude`, `omnimemory` and `omninode_cloud`
+exist there owned by the bootstrap superuser with no other grantee, their
+`role_*` logins do not exist on that lane at all, and nothing connected to any of
+them for the whole sample. `umami` is not present on that lane in any form.
+`keycloak` is, and the only identity observed reaching it is the superuser the
+compose file configures Keycloak with. The sample is a 5h22m window, not the
+full day the principal inventory needs, so "nothing observed" here bounds what
+was seen and is never read as proof a database is unused.
+
 What this module enforces:
 
 * a CONNECT allowlist cannot WIDEN silently. Every allowlist the topology does
@@ -159,8 +170,14 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
         connecting_principals=(
             # The compose lanes point Keycloak at the bootstrap superuser; the
             # cloud plane gives it a dedicated owning role of the same name.
-            ("compose (.201 dev, stability-test, judge, lakshman)", ("postgres",)),
-            ("cloud (RDS omninode-dev-postgres, auth namespace)", ("keycloak",)),
+            (
+                "compose (.201 dev): configured carrier, observed connecting",
+                ("postgres",),
+            ),
+            (
+                "cloud (RDS omninode-dev-postgres, auth namespace): declared",
+                ("keycloak",),
+            ),
         ),
         absent_from_lanes=("onex-lab",),
         migration_ledger="vendor-owned: Keycloak Liquibase (databasechangelog)",
@@ -181,8 +198,11 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
         physical_name="omniclaude",
         owner_service="omniclaude",
         connecting_principals=(
-            ("compose (.201 dev)", ("postgres",)),
-            ("public-cluster dev namespace", ("role_omniclaude",)),
+            (
+                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
+                (),
+            ),
+            ("public-cluster dev namespace: declared", ("role_omniclaude",)),
         ),
         absent_from_lanes=("onex-lab", "onex-dev", "onex-prod"),
         migration_ledger="public.schema_migrations(filename, applied_at)",
@@ -200,8 +220,11 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
         physical_name="omnimemory",
         owner_service="omnimemory",
         connecting_principals=(
-            ("compose (.201 dev)", ("postgres",)),
-            ("public-cluster dev namespace", ("role_omnimemory",)),
+            (
+                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
+                (),
+            ),
+            ("public-cluster dev namespace: declared", ("role_omnimemory",)),
         ),
         absent_from_lanes=("onex-lab", "onex-dev", "onex-prod"),
         migration_ledger="none -- flat .sql corpus with no ledger relation",
@@ -219,9 +242,15 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
         physical_name="omninode_cloud",
         owner_service="onex_api (cloud control plane)",
         connecting_principals=(
-            ("compose (.201 dev)", ("postgres",)),
-            ("onex-lab", ("role_omninode_cloud",)),
-            ("public-cluster dev namespace", ("role_omninode_cloud",)),
+            (
+                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
+                (),
+            ),
+            ("onex-lab: declared and owning", ("role_omninode_cloud",)),
+            (
+                "public-cluster dev namespace: declared",
+                ("role_omninode_cloud",),
+            ),
         ),
         absent_from_lanes=(),
         migration_ledger="public.schema_migrations(version, applied_at, checksum)",
@@ -239,7 +268,9 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
     UndeclaredDeploymentDatabase(
         physical_name="umami",
         owner_service="umami (vendored web analytics, Prisma-managed)",
-        connecting_principals=(("onex-dev, onex-prod, onex-public", ("umami",)),),
+        connecting_principals=(
+            ("onex-dev, onex-prod, onex-public: declared and owning", ("umami",)),
+        ),
         # Measured, not assumed: the 2026-09-14 pre-change ACL snapshot of the
         # .201 dev lane enumerates every non-template database and umami is not
         # among them, so a compose-lane CONNECT proof cannot cover it.
