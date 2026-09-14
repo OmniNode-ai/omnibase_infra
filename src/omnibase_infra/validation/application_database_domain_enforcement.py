@@ -498,6 +498,47 @@ def _skip_whitespace(value: str, index: int) -> int:
     return index
 
 
+def _normalized_routine_signature(signature_body: str) -> str:
+    """Return one routine argument list with layout whitespace collapsed.
+
+    A routine's catalog identity is its argument list, and the whitespace
+    between those tokens is layout rather than identity: a CREATE FUNCTION
+    written across several lines names the same routine as the same signature
+    written on one. Without this, a multi-line signature could not be
+    catalogued at all — ``ApplicationDatabaseFunctionSignature`` refuses a
+    newline outright, by design, because that type is what keeps a target list
+    from carrying an escape.
+
+    Both the CREATE site and the GRANT/REVOKE target site normalize through
+    here. They have to agree byte for byte or a multi-line CREATE and its
+    multi-line GRANT resolve to two different identities, and the gate would
+    then be quietly wrong rather than loudly red.
+
+    Whitespace INSIDE a quoted identifier is significant and is copied through
+    untouched; ``""`` closes and reopens the quoted span with nothing between,
+    so an escaped quote survives unchanged.
+    """
+    normalized: list[str] = []
+    quoted = False
+    pending_space = False
+    for character in signature_body:
+        if quoted:
+            normalized.append(character)
+            if character == '"':
+                quoted = False
+            continue
+        if character.isspace():
+            pending_space = True
+            continue
+        if pending_space and normalized:
+            normalized.append(" ")
+        pending_space = False
+        normalized.append(character)
+        if character == '"':
+            quoted = True
+    return "".join(normalized)
+
+
 def _balanced_parenthesized(
     value: str,
     start: int,
@@ -1828,7 +1869,9 @@ def application_database_created_catalog_identities(
             signature = _balanced_parenthesized(remainder, remainder_offset)
             if signature is not None:
                 signature_body, _ = signature
-                function_signature = f"({signature_body.strip()})"
+                function_signature = (
+                    f"({_normalized_routine_signature(signature_body)})"
+                )
             if (
                 kind is EnumApplicationInventoryObjectKind.FUNCTION
                 and _contains_unquoted_keyword(remainder, "window")
@@ -2429,7 +2472,7 @@ def _target_requirement(
         parenthesized = _balanced_parenthesized(target, offset)
         if parenthesized is not None:
             signature_body, _ = parenthesized
-            signature = f"({signature_body.strip()})"
+            signature = f"({_normalized_routine_signature(signature_body)})"
     return ApplicationDatabaseSqlTargetRequirement(
         schema=schema,
         name=name,

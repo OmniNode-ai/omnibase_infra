@@ -1452,3 +1452,70 @@ def test_relation_outside_both_families_does_not_bridge_to_public(
     }
     assert ("omninode_internal", name) in located
     assert ("public", name) not in located
+
+
+# ---------------------------------------------------------------------------
+# OMN-17486: a routine signature written across several lines is still one
+# identity. Until migration 107 no migration in the repo declared a multi-line
+# CREATE FUNCTION, so this path had never been exercised: the extractor kept
+# the newlines, and ApplicationDatabaseFunctionSignature refuses a newline by
+# design, so the catalog could not be built at all. Normalizing at the two
+# extraction sites is what makes the signature catalogable, and both sites have
+# to agree or a multi-line CREATE and its multi-line GRANT resolve to two
+# different identities.
+# ---------------------------------------------------------------------------
+
+_MULTILINE_ROUTINE_SQL = """
+CREATE SCHEMA app_domain_probe;
+
+CREATE FUNCTION app_domain_probe.probe_routine(
+    p_first TEXT,
+    p_second BOOLEAN,
+    p_third TIMESTAMPTZ
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+AS $probe$
+BEGIN
+    RETURN TRUE;
+END;
+$probe$;
+"""
+
+_SINGLE_LINE_ROUTINE_SQL = """
+CREATE SCHEMA app_domain_probe;
+
+CREATE FUNCTION app_domain_probe.probe_routine(p_first TEXT, p_second BOOLEAN, p_third TIMESTAMPTZ)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+AS $probe$
+BEGIN
+    RETURN TRUE;
+END;
+$probe$;
+"""
+
+
+@pytest.mark.unit
+def test_multiline_routine_signature_is_catalogued_as_one_identity() -> None:
+    identities = application_database_created_catalog_identities(_MULTILINE_ROUTINE_SQL)
+    routines = [identity for identity in identities if identity.name == "probe_routine"]
+    assert len(routines) == 1
+    signature = routines[0].function_signature
+    assert signature is not None
+    assert "\n" not in signature
+    assert signature == "(p_first TEXT, p_second BOOLEAN, p_third TIMESTAMPTZ)"
+
+
+@pytest.mark.unit
+def test_multiline_and_single_line_routine_signatures_are_the_same_identity() -> None:
+    """Layout may not change what a routine is called in the catalog."""
+    multiline = application_database_created_catalog_identities(_MULTILINE_ROUTINE_SQL)
+    single = application_database_created_catalog_identities(_SINGLE_LINE_ROUTINE_SQL)
+    assert [
+        (identity.schema, identity.name, identity.kind, identity.function_signature)
+        for identity in multiline
+    ] == [
+        (identity.schema, identity.name, identity.kind, identity.function_signature)
+        for identity in single
+    ]
