@@ -11,8 +11,44 @@ sets `execute_enabled` and never authorizes an action by itself.
 The only runtime operation is the atomic
 `action_authorization_claim.claim_action_authorization` function. It receives
 the exact canonical fields, persists only the nonce digest (never the raw
-nonce), locks/replays an existing identity when present, and returns one of
-`CLAIMED`, `ALREADY_CONSUMED`, `EXPIRED`, `MISMATCH`, or `ERROR`.
+nonce), and returns one of `CLAIMED`, `ALREADY_CONSUMED`, `EXPIRED`,
+`MISMATCH`, or `ERROR`.
+
+## How one claim wins
+
+The function validates, then runs exactly one write: an `INSERT ... ON CONFLICT
+DO NOTHING ... RETURNING`. The winner is decided by the three unique indexes on
+`authorization_id`, `nonce_digest` and `request_digest`, not by a lock the
+function takes or a snapshot it reads. One returned row means this caller wrote
+the claim, and its state is its outcome. Zero returned rows means a conflicting
+claim exists and is already committed, because `ON CONFLICT DO NOTHING` waits
+out an in-flight inserter before it yields; the function then reads that row
+once and classifies it as `MISMATCH`, `EXPIRED` or `ALREADY_CONSUMED`.
+
+There is no retry loop. An earlier revision of this function looped: the
+conflict branch answered `ALREADY_CONSUMED`, fell through to the insert, caught
+its own `unique_violation` and went round again, so every repeat claim of a
+request spun forever with no wait event and no lock to attribute it to. That is
+the whole reason the shape above is one statement — a loop inside a
+`SECURITY DEFINER` function that every lane's migration runner applies is a
+liveness hazard for every caller, not only for concurrent ones.
+
+If the conflicting row cannot be read after a conflict, the function raises
+`40001` rather than guessing. That is reachable only above `READ COMMITTED`,
+where the caller's snapshot predates the winner's commit, and a retry in a new
+transaction resolves it.
+
+## Rights posture
+
+`claim_action_authorization` is `SECURITY DEFINER` and owned by the role that
+applies the migration; the restricted principal never holds table rights. The
+migration revokes everything on the schema, the table and both functions from
+`PUBLIC` and from `rsd_action_authorization_claim`, then grants that role
+`USAGE` on the schema and `EXECUTE` on the claim function alone.
+`rsd_action_authorization_claim` is created `NOLOGIN NOSUPERUSER NOCREATEDB
+NOCREATEROLE NOINHERIT NOBYPASSRLS NOREPLICATION`, and the migration refuses to
+proceed if a role of that name already exists with any of those attributes. A
+`BEFORE UPDATE OR DELETE` trigger makes every claim row immutable once written.
 
 ## OMN-17462 integration seam
 
@@ -49,13 +85,17 @@ proof can be asserted.
 
 ## Migration evidence
 
-The forward runner calculates the migration file's SHA-256 immediately before
-execution, verifies that the bytes did not change before or during application,
-and records that exact digest in `public.schema_migrations`. A later replay of
-a 64-hex recorded digest must match the current bytes or fail closed. Historical
-non-digest runner markers preserve their prior skip semantics and are not
-silently reclassified as content evidence.
+The existing forward runner records this migration in
+`public.schema_migrations` with the file's SHA-256 as its checksum. This
+migration relies on that runner as it already stands and changes none of it.
+The separate runner checksum hardening that an earlier draft of this work
+carried is deliberately not in this change: it alters how every migration on
+every lane is recorded and belongs to its own ticket.
 
-PostgreSQL 16 concurrency/restart/ACL tests are included but remain unverified
-in this offline sandbox; no local database or Unix-domain-socket integration
-test was attempted here.
+The PostgreSQL 16 concurrency, restart and ACL proofs under
+`tests/integration/runtime/action_authorization_claim/` run against a throwaway
+cluster built by the shared `ephemeral_postgres` fixture, and they were run.
+Every pool in those files sets `statement_timeout`, so a liveness defect in the
+claim function fails the run instead of hanging it. An earlier revision of this
+document recorded these proofs as unverifiable in an offline sandbox; that was
+wrong, and it hid the livelock described above for thirteen days.

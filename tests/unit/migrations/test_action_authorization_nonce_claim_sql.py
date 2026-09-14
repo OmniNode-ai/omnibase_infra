@@ -65,8 +65,18 @@ def test_nonce_claim_migration_is_atomic_default_deny_and_acl_restricted() -> No
     assert "CHECK (one_time_use IS TRUE)" in sql
     assert "claim_time := clock_timestamp()" in sql
     assert "claim_time >= p_expires_at" in sql
-    assert "FOR UPDATE" in sql
     assert "SECURITY DEFINER" in sql
+
+    # The claim is settled by one statement against the unique indexes. A
+    # retry loop here is what produced the OMN-17486 livelock: the conflict
+    # branch answered, fell through to the insert, caught its own unique
+    # violation and went round again, so a second claim of the same request
+    # spun forever with no wait event and no lock to point at. A loop that
+    # cannot be seen to terminate by reading it does not belong in a SECURITY
+    # DEFINER function every lane's migration runner applies.
+    assert "ON CONFLICT DO NOTHING" in sql
+    assert "LOOP" not in sql
+    assert "unique_violation" not in sql
     assert "claim_action_authorization(" in sql
     assert "register_action_authorization" not in sql
     assert "NOT_FOUND" not in sql

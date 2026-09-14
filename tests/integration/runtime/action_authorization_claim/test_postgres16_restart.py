@@ -32,8 +32,20 @@ def _apply(ephemeral_postgres: EphemeralPostgres) -> None:
 
 
 def _request(
-    identity: int, *, expires_at: datetime | None = None, reason: str | None = None
+    identity: int,
+    *,
+    issued_at: datetime | None = None,
+    expires_at: datetime | None = None,
+    reason: str | None = None,
 ) -> ModelActionAuthorizationClaimRequest:
+    """Build one canonical request.
+
+    ``issued_at`` moves with ``expires_at`` because the model requires the two
+    to stay ordered. Overriding only the expiry to reach the expired-on-arrival
+    branch builds a request that is rejected before it ever reaches PostgreSQL,
+    which is what this file did until OMN-17486: the expiry leg asserted an
+    outcome the database was never asked for.
+    """
     return ModelActionAuthorizationClaimRequest(
         authorization_id=(f"action-auth-12345678-1234-1234-1234-{identity:012x}"),
         ticket_id="OMN-17462",
@@ -50,7 +62,7 @@ def _request(
         execute_enabled=False,
         issuer="operator-governance",
         nonce=f"{identity:064x}",
-        issued_at=datetime(2040, 1, 1, 10, tzinfo=UTC),
+        issued_at=issued_at or datetime(2040, 1, 1, 10, tzinfo=UTC),
         expires_at=expires_at or datetime(2040, 1, 1, 11, tzinfo=UTC),
         one_time_use=True,
         reason=reason or "bounded execute-disabled bootstrap verification",
@@ -124,6 +136,7 @@ def test_postgres16_returns_closed_expired_and_mismatch_outcomes_without_fallbac
         adapter = PostgresActionAuthorizationClaim(pool_factory=factory)
         expired_request = _request(
             3,
+            issued_at=datetime(2001, 1, 1, 10, tzinfo=UTC),
             expires_at=datetime(2001, 1, 1, 11, tzinfo=UTC),
         )
         expired = await adapter.claim(expired_request)

@@ -1,6 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Real PostgreSQL proof that one canonical nonce has exactly one claimant."""
+"""Real PostgreSQL proof that one canonical nonce has exactly one claimant.
+
+Every pool here sets ``statement_timeout``. The claim function is reached by
+concurrent callers and by repeat callers, and a defect in its conflict path
+shows up as a call that never returns rather than as a wrong answer. Without
+a server-side bound such a defect hangs the test run instead of failing it,
+and a hung run is indistinguishable from a slow one until someone kills it.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +28,14 @@ from tests.integration.migrations.conftest import EphemeralPostgres
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
+_STATEMENT_TIMEOUT_MS = "10000"
+_CLAIM_SQL = """
+SELECT outcome, state, version, redacted_receipt_digest
+  FROM action_authorization_claim.claim_action_authorization(
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $16, $17, $18, $19, $20, $21
+  )
+"""
 _ROOT = Path(__file__).resolve().parents[4]
 _MIGRATION = (
     _ROOT / "docker/migrations/forward/107_create_action_authorization_nonce_claim.sql"
@@ -53,6 +68,16 @@ def _request(identity: int = 1) -> ModelActionAuthorizationClaimRequest:
         expires_at=datetime(2040, 1, 1, 11, tzinfo=UTC),
         one_time_use=True,
         reason="bounded execute-disabled bootstrap verification",
+    )
+
+
+def _expired_request(identity: int) -> ModelActionAuthorizationClaimRequest:
+    """The same canonical request, already past its expiry on arrival."""
+    return _request(identity).model_copy(
+        update={
+            "issued_at": datetime(2001, 1, 1, 10, tzinfo=UTC),
+            "expires_at": datetime(2001, 1, 1, 11, tzinfo=UTC),
+        }
     )
 
 
@@ -105,6 +130,7 @@ def test_postgres16_concurrent_claims_have_one_winner(
                 database="postgres",
                 min_size=1,
                 max_size=1,
+                server_settings={"statement_timeout": _STATEMENT_TIMEOUT_MS},
             )
 
         request = _request()
@@ -147,5 +173,55 @@ def test_postgres16_concurrent_claims_have_one_winner(
         assert persisted is not None
         assert dict(persisted) == {"state": "CLAIMED", "version": 1, "claimed": True}
         await verification_pool.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.integration
+def test_postgres16_repeat_claim_is_bounded_and_returns_exactly_one_row(
+    ephemeral_postgres: EphemeralPostgres,
+) -> None:
+    """A second claim of the same canonical request answers once and stops.
+
+    This is the sequential form of the concurrent case and needs no second
+    session: whatever decides that a conflicting claim already exists has to
+    reach a terminal answer on the first look at it. Row COUNT is asserted, not
+    just the outcome, because a conflict path that answers and then carries on
+    still answers correctly on its first row while never returning.
+    """
+    _apply(ephemeral_postgres)
+
+    async def scenario() -> None:
+        pool = await asyncpg.create_pool(
+            host=ephemeral_postgres.socket_dir,
+            port=ephemeral_postgres.port,
+            user="postgres",
+            database="postgres",
+            min_size=1,
+            max_size=1,
+            server_settings={"statement_timeout": _STATEMENT_TIMEOUT_MS},
+        )
+        try:
+            async with pool.acquire() as connection:
+                live = _request(7)
+                first = await connection.fetch(_CLAIM_SQL, *live.sql_arguments())
+                assert [row["outcome"] for row in first] == ["CLAIMED"]
+                second = await connection.fetch(_CLAIM_SQL, *live.sql_arguments())
+                assert [row["outcome"] for row in second] == ["ALREADY_CONSUMED"]
+                assert second[0]["state"] == "CLAIMED"
+                assert second[0]["version"] == 1
+
+                expired = _expired_request(8)
+                first_expired = await connection.fetch(
+                    _CLAIM_SQL, *expired.sql_arguments()
+                )
+                assert [row["outcome"] for row in first_expired] == ["EXPIRED"]
+                second_expired = await connection.fetch(
+                    _CLAIM_SQL, *expired.sql_arguments()
+                )
+                assert [row["outcome"] for row in second_expired] == ["EXPIRED"]
+                assert second_expired[0]["state"] == "EXPIRED"
+        finally:
+            await pool.close()
 
     asyncio.run(scenario())
