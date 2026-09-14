@@ -200,6 +200,12 @@ pg_target = _advisory_lock.pg_target
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+# `pytester` is a first-party pytest plugin that is opt-in per module. It backs
+# the behavioural proof that a marked runner budget really does outrank the
+# governed `--timeout=60` CLI default. Same declaration shape as
+# `tests/unit/runtime/test_rsd_postgres_acceptance_overlay.py`.
+pytest_plugins = ("pytester",)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 FENCE_BEGIN = "# ---- BEGIN operator fence — node migration ids (OMN-15336) ----"
@@ -1510,7 +1516,7 @@ def test_fence_matches_omninode_infra_k8s_runner() -> None:
     # hook_event_capture hold and the OMN-16493/16930/17288 delegation UUID
     # conversion holds, so the assertion could not have passed on any recent
     # tree. It is opt-in, which is why nobody saw it go red. Repaired here.
-    expected_effective_k8s_fence = (
+    expected_effective_k8s_fence: tuple[str, ...] = (
         FENCED_DELEGATION_IDS
         + FENCED_REGISTRATION_IDS
         + FENCED_PR_REVIEW_BOT_IDS
@@ -1812,6 +1818,15 @@ _RUN_BUDGET_FLOOR_SECONDS = 180.0
 # Above every measured row's derived budget, so no measured row is capped here;
 # past this the probe is describing a hang, not a slow host.
 _RUN_BUDGET_CEILING_SECONDS = 2400.0
+# OMN-17949 -- the outer bound must exceed the cost of the work, not equal it.
+# The ceiling plus the probe is exactly what a maximally slow, still-healthy
+# invocation is allowed to spend. Setting the outer limit to that sum leaves
+# nothing for the final poll, the pipe drain and fixture teardown, so a run
+# that used its whole measured budget is killed during cleanup and reads as
+# the very false red the inner derivation exists to prevent. Finite and small
+# on purpose: wide enough to cover scheduling and teardown, far too narrow to
+# rescue a hang, which still fails on the ceiling.
+_PYTEST_TIMEOUT_SCHEDULING_MARGIN_SECONDS = 60.0
 # OMN-17923 -- the OUTER half of the OMN-17639 repair.
 #
 # OMN-17639 made the runner invocation's budget host-measured (above) precisely
@@ -1835,11 +1850,14 @@ _RUN_BUDGET_CEILING_SECONDS = 2400.0
 # take ~63s each, i.e. they straddle the 60s line.
 #
 # Derived, never guessed, for the same reason the inner budget is: the largest
-# budget an invocation may consume, plus the probe that measures it. It is an
-# upper bound a healthy run never approaches -- a genuine hang still fails, it
-# just fails on the runner's own ceiling instead of below its floor.
-_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS = _RUN_BUDGET_CEILING_SECONDS + (
-    _BUDGET_PROBE_ROUND_TRIPS * _BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS
+# budget an invocation may consume, the probe that measures it, and a finite
+# scheduling/teardown margin. It is an upper bound a healthy run never
+# approaches -- a genuine hang still fails, it just fails on the runner's own
+# ceiling instead of below its floor.
+_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS = (
+    _RUN_BUDGET_CEILING_SECONDS
+    + (_BUDGET_PROBE_ROUND_TRIPS * _BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS)
+    + _PYTEST_TIMEOUT_SCHEDULING_MARGIN_SECONDS
 )
 
 
@@ -2195,6 +2213,71 @@ def test_no_runner_invocation_carries_a_bare_wall_clock_timeout() -> None:
     )
 
 
+@pytest.mark.unit
+def test_runner_proof_pytest_timeout_covers_probe_runner_and_teardown() -> None:
+    """The outer timeout must outlive one complete, bounded ``_run`` call.
+
+    The bare sum of the inner ceiling and the probe is the cost of the work
+    itself. It leaves nothing for the interpreter to schedule the last poll,
+    drain the pipes and tear the fixture down, so a run that consumed its
+    whole measured budget is killed by the outer limit during cleanup -- the
+    OMN-17639 false red, one layer out. A finite, positive margin is what
+    makes the outer bound a ceiling rather than a tie.
+    """
+    bare_bound = _RUN_BUDGET_CEILING_SECONDS + (
+        _BUDGET_PROBE_ROUND_TRIPS * _BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS
+    )
+    assert math.isfinite(_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS)
+    assert _PYTEST_TIMEOUT_SCHEDULING_MARGIN_SECONDS > 0.0
+    assert math.isfinite(_PYTEST_TIMEOUT_SCHEDULING_MARGIN_SECONDS)
+    assert (
+        bare_bound + _PYTEST_TIMEOUT_SCHEDULING_MARGIN_SECONDS
+        == _RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS
+    )
+    assert bare_bound < _RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS
+
+
+@pytest.mark.unit
+def test_runner_proof_timeout_marker_overrides_only_the_cli_default(
+    pytester: pytest.Pytester,
+) -> None:
+    """A marked runner proof must outlive the governed ``--timeout=60`` leg.
+
+    Behavioural, not structural: it runs pytest-timeout for real and reads the
+    resolved per-item setting back, so the ratchet above is proven to buy the
+    thing it claims. The unmarked companion is the positive control -- without
+    it, a build of pytest-timeout that ignored the CLI default entirely would
+    pass this test while leaving every unmarked test unbounded.
+    """
+    pytester.makeconftest(
+        """
+def pytest_timeout_set_timer(item, settings):
+    print(f"RESOLVED {item.name} {settings.timeout}")
+    return True
+"""
+    )
+    pytester.makepyfile(
+        f"""
+import pytest
+
+@pytest.mark.timeout({_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS})
+def test_runner_proof_shape():
+    pass
+
+def test_ordinary_shape():
+    pass
+"""
+    )
+    result = pytester.runpytest("--timeout=60", "--timeout-method=signal", "-s")
+    result.assert_outcomes(passed=2)
+    output = result.stdout.str()
+    assert (
+        "RESOLVED test_runner_proof_shape "
+        f"{_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS}" in output
+    )
+    assert "RESOLVED test_ordinary_shape 60.0" in output
+
+
 def _timeout_marker_arg(func_node: ast.FunctionDef) -> ast.expr | None:
     """The single argument of ``@pytest.mark.timeout(...)`` on ``func_node``,
     or None when the decorator is absent or carries no positional argument."""
@@ -2226,11 +2309,15 @@ def test_every_runner_proof_outlives_the_suite_wide_pytest_timeout() -> None:
     three runs in a row on h105 while passing on the same host earlier the same
     day against a byte-identical corpus.
 
-    Rule: a test that calls ``_run`` carries an explicit ``pytest.mark.timeout``
-    of at least ``_RUN_BUDGET_CEILING_SECONDS``, so the outer limit can never be
-    the binding one. Dropping the marker, or shrinking it back under the
-    ceiling, fails HERE -- deterministically, on every host -- instead of as a
-    false red on whichever host happens to be loaded that night.
+    Rule: a test that calls ``_run`` carries the full explicit
+    ``pytest.mark.timeout`` outer bound. Dropping the marker, shrinking it back
+    under the ceiling, or dropping the finite teardown margin fails HERE --
+    deterministically, on every host -- instead of as a false red on whichever
+    host happens to be loaded that night.
+
+    Exact equality, not a lower bound (OMN-17949): a marker set ABOVE the
+    derived bound is just as much a defect, because it re-introduces a
+    hand-picked wall clock that no longer tracks the measured budget.
 
     The eight proofs against small synthetic trees are in scope with the two
     live ones deliberately: they carry the identical structural defect and are
@@ -2243,6 +2330,9 @@ def test_every_runner_proof_outlives_the_suite_wide_pytest_timeout() -> None:
         "_BUDGET_PROBE_ROUND_TRIPS": _BUDGET_PROBE_ROUND_TRIPS,
         "_BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS": (
             _BUDGET_PROBE_ROUND_TRIP_TIMEOUT_SECONDS
+        ),
+        "_PYTEST_TIMEOUT_SCHEDULING_MARGIN_SECONDS": (
+            _PYTEST_TIMEOUT_SCHEDULING_MARGIN_SECONDS
         ),
         "_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS": (_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS),
     }
@@ -2289,12 +2379,13 @@ def test_every_runner_proof_outlives_the_suite_wide_pytest_timeout() -> None:
             )
             continue
 
-        if marked < _RUN_BUDGET_CEILING_SECONDS:
+        if marked != _RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS:
             offenders.append(
                 f"line {node.lineno}: {node.name} carries "
-                f"pytest.mark.timeout({marked:.0f}), under the runner budget "
-                f"ceiling {_RUN_BUDGET_CEILING_SECONDS:.0f} -- the outer limit "
-                "can still bind before the measured budget does"
+                f"pytest.mark.timeout({marked:.0f}), not the full runner-proof "
+                f"outer bound {_RUNNER_PROOF_PYTEST_TIMEOUT_SECONDS:.0f} -- the "
+                "outer limit can still bind before the measured budget and its "
+                "teardown complete"
             )
 
     assert proofs, "no _run proofs found; this ratchet has stopped watching anything"
