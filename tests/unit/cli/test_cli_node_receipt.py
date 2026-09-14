@@ -26,12 +26,14 @@ fixture handler (no mocked runtime).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import socket
 import tempfile
 import threading
 import uuid
+import warnings
 from pathlib import Path
 
 import pytest
@@ -39,6 +41,7 @@ from click.testing import CliRunner, Result
 from pydantic import JsonValue
 
 from omnibase_core.artifacts.artifact_store import ArtifactStore
+from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli.cli_node import run_node_by_name
@@ -478,7 +481,11 @@ class TestArtifactStoreRootDefault:
         # Artifacts physically landed under the defaulted <state_root>/artifacts.
         default_store_root = state_root / "artifacts"
         assert default_store_root.is_dir()
-        store = ArtifactStore()  # reads the env var the CLI just defaulted
+        # The CLI defaults this env only for its own operation; receipt mode
+        # must not retain process-global configuration after it returns.
+        assert os.environ.get("ONEX_ARTIFACT_STORE_ROOT") is None
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(default_store_root))
+        store = ArtifactStore()
         assert store.root == default_store_root.resolve()
         artifact_refs = payload["artifact_refs"]
         assert isinstance(artifact_refs, list)
@@ -903,6 +910,366 @@ class TestReceiptCorrelationJoin:
         assert str(run_one_correlation) in error_text
         # The other run's prompt text never reaches stdout.
         assert "reply with the single word: ok" not in stdout
+
+
+class TestReceiptModeInProcessIsolation:
+    """OMN-14872: concurrent receipt calls cannot share process-global state."""
+
+    def test_shared_socket_concurrent_runs_are_serialized_and_isolated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Prove every global receipt boundary belongs to exactly one caller.
+
+        The first fake runtime blocks after entering the receipt critical
+        section.  The second caller starts concurrently but cannot reach its
+        runtime until the first is explicitly released; this is a causal
+        assertion, not a timing-based race probe.
+        """
+        from omnibase_core.artifacts.artifact_store import ARTIFACT_STORE_ROOT_ENV
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        socket_dir = Path(tempfile.mkdtemp(prefix="omn14872-"))
+        socket_path = socket_dir / "emit.sock"
+        if len(str(socket_path)) > 100:
+            pytest.skip("temp dir too long for a Unix domain socket")
+
+        monkeypatch.delenv("ONEX_STATE_DIR", raising=False)
+        monkeypatch.delenv(ARTIFACT_STORE_ROOT_ENV, raising=False)
+        original_handlers = tuple(logging.getLogger().handlers)
+        original_level = logging.getLogger().level
+        original_disabled = logging.getLogger().disabled
+        first_runtime_entered = threading.Event()
+        release_first_runtime = threading.Event()
+        runtime_entries: list[str] = []
+        runtime_entries_lock = threading.Lock()
+        received: list[dict[str, object]] = []
+        received_condition = threading.Condition()
+        stop_server = threading.Event()
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(socket_path))
+        server.listen(16)
+        server.settimeout(0.1)
+
+        def serve() -> None:
+            while not stop_server.is_set():
+                try:
+                    connection, _ = server.accept()
+                except TimeoutError:
+                    continue
+                except OSError:
+                    return
+                with connection:
+                    data = b""
+                    while not data.endswith(b"\n"):
+                        chunk = connection.recv(4096)
+                        if not chunk:
+                            break
+                        data += chunk
+                    if data:
+                        with received_condition:
+                            received.append(json.loads(data.decode("utf-8")))
+                            received_condition.notify_all()
+                    connection.sendall(b'{"status": "queued", "event_id": "test"}\n')
+
+        server_thread = threading.Thread(target=serve, daemon=True)
+        server_thread.start()
+
+        correlations = {"first": uuid.uuid4(), "second": uuid.uuid4()}
+        state_roots = {marker: tmp_path / f"state-{marker}" for marker in correlations}
+        callbacks: dict[str, ModelSkillResult[object]] = {}
+        stdout_by_thread: dict[int, list[str]] = {}
+        worker_threads: dict[str, int] = {}
+        worker_errors: list[BaseException] = []
+        worker_exit_codes: dict[str, int] = {}
+        start_barrier = threading.Barrier(3)
+
+        class BlockingRuntime:
+            def __init__(
+                self,
+                *,
+                state_root: Path,
+                input_path: Path | None,
+                run_id: uuid.UUID,
+                **_: object,
+            ) -> None:
+                assert input_path is not None
+                self._state_root = state_root
+                self._input_path = input_path
+                self._run_id = run_id
+                self.exit_code = 0
+                self.handler_result: object | None = None
+
+            def run(self) -> EnumWorkflowResult:
+                payload = json.loads(self._input_path.read_text(encoding="utf-8"))
+                marker = str(payload["marker"])
+                correlation_id = str(payload["correlation_id"])
+                with runtime_entries_lock:
+                    runtime_entries.append(marker)
+                    first_entry = len(runtime_entries) == 1
+                logging.getLogger("omn14872").info("capture-%s", marker)
+                if first_entry:
+                    first_runtime_entered.set()
+                    assert release_first_runtime.wait(5), (
+                        "test did not release first run"
+                    )
+                self.handler_result = {
+                    "marker": marker,
+                    "correlation_id": correlation_id,
+                    "content": f"only-{marker}",
+                }
+                self._state_root.mkdir(parents=True, exist_ok=True)
+                (self._state_root / WORKFLOW_RESULT_FILENAME).write_text(
+                    json.dumps(
+                        {
+                            "run_id": str(self._run_id),
+                            "handler_result": self.handler_result,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return EnumWorkflowResult.COMPLETED
+
+        def record_echo(
+            message: object = "", *, err: bool = False, **_: object
+        ) -> None:
+            if not err:
+                stdout_by_thread.setdefault(threading.get_ident(), []).append(
+                    str(message)
+                )
+
+        monkeypatch.setattr(receipt_mode_module, "RuntimeLocal", BlockingRuntime)
+        monkeypatch.setattr(receipt_mode_module.click, "echo", record_echo)
+
+        def worker(marker: str) -> None:
+            worker_threads[marker] = threading.get_ident()
+            contract_path = tmp_path / f"{marker}.yaml"
+            input_path = tmp_path / f"{marker}.json"
+            contract_path.write_text("name: test\n", encoding="utf-8")
+            input_path.write_text(
+                json.dumps(
+                    {"marker": marker, "correlation_id": str(correlations[marker])}
+                ),
+                encoding="utf-8",
+            )
+            try:
+                start_barrier.wait()
+                worker_exit_codes[marker] = run_receipt_mode(
+                    node_name=f"receipt_{marker}",
+                    contract_path=contract_path,
+                    input_path=input_path,
+                    state_root=state_roots[marker],
+                    backend_overrides={"event_bus": "inmemory"},
+                    timeout=30,
+                    verbose=False,
+                    emit_socket=socket_path,
+                    expected_correlation_id=correlations[marker],
+                    receipt_callback=lambda receipt: callbacks.__setitem__(
+                        marker, receipt
+                    ),
+                )
+            except (AssertionError, OSError, RuntimeError, ValueError) as exc:
+                worker_errors.append(exc)
+
+        threads: list[threading.Thread] = []
+        try:
+            threads = [
+                threading.Thread(target=worker, args=(marker,))
+                for marker in correlations
+            ]
+            for thread in threads:
+                thread.start()
+            start_barrier.wait()
+            assert first_runtime_entered.wait(5), "no receipt runtime entered"
+            with runtime_entries_lock:
+                assert len(runtime_entries) == 1, "second runtime bypassed receipt lock"
+            release_first_runtime.set()
+            for thread in threads:
+                thread.join(timeout=10)
+                assert not thread.is_alive(), "receipt worker did not complete"
+            with received_condition:
+                assert received_condition.wait_for(
+                    lambda: len(received) == 10, timeout=5
+                )
+        finally:
+            release_first_runtime.set()
+            for thread in threads:
+                thread.join(timeout=5)
+            stop_server.set()
+            server.close()
+            server_thread.join(timeout=5)
+            shutil.rmtree(socket_dir, ignore_errors=True)
+
+        assert not worker_errors
+        assert worker_exit_codes == {"first": 0, "second": 0}
+        assert set(runtime_entries) == set(correlations)
+        assert tuple(logging.getLogger().handlers) == original_handlers
+        assert logging.getLogger().level == original_level
+        assert logging.getLogger().disabled is original_disabled
+        assert os.environ.get("ONEX_STATE_DIR") is None
+        assert os.environ.get(ARTIFACT_STORE_ROOT_ENV) is None
+
+        for marker, correlation_id in correlations.items():
+            callback = callbacks[marker]
+            assert str(callback.correlation_id) == str(correlation_id)
+            assert isinstance(callback.result, dict)
+            assert callback.result["marker"] == marker
+            stdout_lines = stdout_by_thread[worker_threads[marker]]
+            assert len(stdout_lines) == 1
+            stdout_receipt = json.loads(stdout_lines[0])
+            assert stdout_receipt["correlation_id"] == str(correlation_id)
+            assert stdout_receipt["result"]["marker"] == marker
+
+            capture_files = list((state_roots[marker] / CAPTURE_DIR_NAME).glob("*.log"))
+            assert len(capture_files) == 1
+            capture_text = capture_files[0].read_text(encoding="utf-8")
+            assert f"capture-{marker}" in capture_text
+            other_marker = "second" if marker == "first" else "first"
+            assert f"capture-{other_marker}" not in capture_text
+            artifact_text = "".join(
+                path.read_text(encoding="utf-8", errors="ignore")
+                for path in (state_roots[marker] / "artifacts").rglob("*")
+                if path.is_file()
+            )
+            assert f"only-{marker}" in artifact_text
+            assert f"only-{other_marker}" not in artifact_text
+            spool_dir = state_roots[marker] / SPOOL_DIR_NAME
+            assert not spool_dir.exists() or not list(spool_dir.iterdir())
+
+        event_correlation_ids = {
+            str(record["payload"].get("correlation_id"))
+            for record in received
+            if isinstance(record.get("payload"), dict)
+            and record["payload"].get("correlation_id")
+            in {str(correlation) for correlation in correlations.values()}
+        }
+        assert event_correlation_ids == {
+            str(correlation) for correlation in correlations.values()
+        }
+
+
+class TestReceiptModeProcessState:
+    """Receipt-mode global state is restored on every operation outcome."""
+
+    @staticmethod
+    def _run_with_stubbed_operation() -> int:
+        return run_receipt_mode(
+            node_name="test",
+            contract_path=Path("test.yaml"),
+            input_path=None,
+            state_root=Path("state"),
+            backend_overrides={},
+            timeout=1,
+            verbose=False,
+            emit_socket=Path("emit.sock"),
+        )
+
+    def test_cleanup_failure_after_success_is_visible_and_restores_both_envs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_core.artifacts.artifact_store import ARTIFACT_STORE_ROOT_ENV
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        monkeypatch.setenv("ONEX_STATE_DIR", "before-state")
+        monkeypatch.setenv(ARTIFACT_STORE_ROOT_ENV, "before-artifacts")
+
+        def mutate_then_succeed(**_: object) -> int:
+            os.environ["ONEX_STATE_DIR"] = "during-state"
+            os.environ[ARTIFACT_STORE_ROOT_ENV] = "during-artifacts"
+            return 0
+
+        def fail_logging_restore(*_: object) -> None:
+            raise OSError("logging restore failed")
+
+        monkeypatch.setattr(
+            receipt_mode_module, "_run_receipt_mode", mutate_then_succeed
+        )
+        monkeypatch.setattr(
+            receipt_mode_module, "_restore_root_logging_state", fail_logging_restore
+        )
+
+        with pytest.raises(OSError, match="logging restore failed"):
+            self._run_with_stubbed_operation()
+        assert os.environ["ONEX_STATE_DIR"] == "before-state"
+        assert os.environ[ARTIFACT_STORE_ROOT_ENV] == "before-artifacts"
+
+    def test_cleanup_failure_never_masks_the_original_operation_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_core.artifacts.artifact_store import ARTIFACT_STORE_ROOT_ENV
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        monkeypatch.setenv("ONEX_STATE_DIR", "before-state")
+        monkeypatch.setenv(ARTIFACT_STORE_ROOT_ENV, "before-artifacts")
+
+        def mutate_then_fail(**_: object) -> int:
+            os.environ["ONEX_STATE_DIR"] = "during-state"
+            os.environ[ARTIFACT_STORE_ROOT_ENV] = "during-artifacts"
+            raise RuntimeError("operation failed")
+
+        def fail_logging_restore(*_: object) -> None:
+            raise OSError("logging restore failed")
+
+        monkeypatch.setattr(receipt_mode_module, "_run_receipt_mode", mutate_then_fail)
+        monkeypatch.setattr(
+            receipt_mode_module, "_restore_root_logging_state", fail_logging_restore
+        )
+
+        with pytest.raises(RuntimeError, match="operation failed") as raised:
+            self._run_with_stubbed_operation()
+        assert any("logging restore failed" in note for note in raised.value.__notes__)
+        assert os.environ["ONEX_STATE_DIR"] == "before-state"
+        assert os.environ[ARTIFACT_STORE_ROOT_ENV] == "before-artifacts"
+
+    def test_register_at_fork_capability_guard_is_portable(self) -> None:
+        """No-fork platforms skip registration without touching global state."""
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        registrations: list[object] = []
+
+        def fake_registrar(**kwargs: object) -> None:
+            registrations.append(kwargs["after_in_child"])
+
+        receipt_mode_module._register_receipt_mode_lock_at_fork(None)
+        receipt_mode_module._register_receipt_mode_lock_at_fork(object())
+        assert registrations == []
+        receipt_mode_module._register_receipt_mode_lock_at_fork(fake_registrar)
+        assert registrations == [
+            receipt_mode_module._reset_receipt_mode_lock_after_fork
+        ]
+
+    def test_fork_child_reinitializes_a_parent_held_receipt_lock(self) -> None:
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        if not hasattr(os, "fork"):
+            pytest.skip("requires POSIX fork")
+
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+
+        def hold_lock() -> None:
+            with receipt_mode_module._RECEIPT_MODE_LOCK_STATE.lock:
+                lock_held.set()
+                assert release_lock.wait(5), "test did not release parent lock"
+
+        holder = threading.Thread(target=hold_lock)
+        holder.start()
+        assert lock_held.wait(5), "parent thread did not acquire receipt lock"
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                child_pid = os.fork()
+            if child_pid == 0:
+                acquired = receipt_mode_module._RECEIPT_MODE_LOCK_STATE.lock.acquire(
+                    blocking=False
+                )
+                os._exit(0 if acquired else 1)
+            _, status = os.waitpid(child_pid, 0)
+            assert os.WIFEXITED(status)
+            assert os.WEXITSTATUS(status) == 0, "child inherited a held receipt lock"
+        finally:
+            release_lock.set()
+            holder.join(timeout=5)
+            assert not holder.is_alive()
 
 
 @pytest.mark.unit

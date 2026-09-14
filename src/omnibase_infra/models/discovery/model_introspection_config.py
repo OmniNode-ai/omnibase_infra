@@ -39,10 +39,12 @@ from omnibase_infra.topics import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+    from omnibase_infra.protocols.protocol_introspection_event_bus import (
+        ProtocolIntrospectionEventBus,
+    )
 
     # Type alias for event_bus field - provides proper type during static analysis
-    type _EventBusType = ProtocolEventBus | None
+    type _EventBusType = ProtocolIntrospectionEventBus | None
 else:
     # At runtime, use object | None for duck typing compatibility with Pydantic
     # Pydantic cannot resolve TYPE_CHECKING-only imports, so we use object
@@ -87,7 +89,7 @@ class ModelIntrospectionConfig(BaseModel):
         node_type: Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
             Cannot be empty.
         event_bus: Optional event bus for publishing introspection events.
-            Must implement ``ProtocolEventBus`` protocol.
+            Must implement ``ProtocolIntrospectionEventBus`` protocol.
         version: Node version string. Defaults to "1.0.0".
         cache_ttl: Cache time-to-live in seconds. Defaults to 300.0 (5 minutes).
         operation_keywords: Optional frozenset of keywords to identify operation methods.
@@ -189,14 +191,14 @@ class ModelIntrospectionConfig(BaseModel):
 
     # Event bus for publishing introspection events.
     # Uses _EventBusType which provides:
-    # - ProtocolEventBus | None during static analysis (TYPE_CHECKING)
+    # - ProtocolIntrospectionEventBus | None during static analysis (TYPE_CHECKING)
     # - object | None at runtime for Pydantic compatibility
     # Duck typing is enforced by the mixin at initialization.
     # The model config has arbitrary_types_allowed=True to support arbitrary objects.
     event_bus: _EventBusType = Field(
         default=None,
         description="Optional event bus for publishing introspection events. "
-        "Must implement ProtocolEventBus protocol (duck typed).",
+        "Must implement ProtocolIntrospectionEventBus protocol (duck typed).",
     )
 
     version: str = Field(

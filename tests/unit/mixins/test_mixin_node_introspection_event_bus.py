@@ -19,11 +19,23 @@ import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
+from omnibase_infra.protocols import ProtocolIntrospectionEventBus
 
 # Test UUIDs - use deterministic values for reproducible tests
 TEST_NODE_UUID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+def test_concrete_event_buses_conform_to_introspection_boundary() -> None:
+    """The mixin boundary accepts both canonical event-bus implementations."""
+    kafka_bus: ProtocolIntrospectionEventBus = EventBusKafka.default()
+    inmemory_bus: ProtocolIntrospectionEventBus = EventBusInmemory()
+
+    assert isinstance(kafka_bus, ProtocolIntrospectionEventBus)
+    assert isinstance(inmemory_bus, ProtocolIntrospectionEventBus)
 
 
 class MockEventBusSubcontract:
