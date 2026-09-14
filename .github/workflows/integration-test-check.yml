@@ -55,7 +55,9 @@ jobs:
           set -euo pipefail
 
           # Get changed files in this PR
-          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+          BASE_REF="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD")
 
           # Check if this is an exempt PR type
           DOCS_ONLY=true
@@ -140,4 +142,6 @@ jobs:
           # against synthetic git diff outputs. See
           # tests/ci/test_validate_test_removal_gate.py for the hardened
           # rename/modify coverage (CR thread on PR #1336).
-          python scripts/validation/validate_test_removal_gate.py --base origin/main
+          BASE_REF="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          python scripts/validation/validate_test_removal_gate.py --base "origin/${BASE_REF}"
