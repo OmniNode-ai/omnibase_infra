@@ -107,14 +107,11 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      # `\.captured$`: verbatim incident-replay artifacts (OMN-15547). These
-      # hooks are `types: [text]`, so they match on content and would append a
-      # newline to a captured HTTP body or API response -- silently voiding the
-      # sha256 that makes it evidence. Observed, not hypothetical: it happened
-      # to all three captures on their first commit and R1 rejected them.
-      - id: trailing-whitespace
-        args: [--markdown-linebreak-ext=md]
-        exclude: ^\.github/workflows/|\.captured$
+      # `\.captured$`: verbatim incident-replay artifacts (OMN-15547). This hook
+      # is `types: [text]`, so it matches on content and would append a newline
+      # to a captured HTTP body or API response -- silently voiding the sha256
+      # that makes it evidence. Observed, not hypothetical: it happened to all
+      # three captures on their first commit and R1 rejected them.
       - id: end-of-file-fixer
         exclude: ^\.github/workflows/|\.captured$
       - id: check-merge-conflict
