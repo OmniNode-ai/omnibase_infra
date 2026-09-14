@@ -13,6 +13,7 @@ harness, because both fail silently in the direction of a clean result.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -236,11 +237,28 @@ repos:
 
 @pytest.mark.unit
 def test_classify_fire_names_a_broken_machine_as_environment() -> None:
-    """The web repo's `type-check` fired 83/83 on a missing toolchain."""
+    """The web repo's `type-check` fired 83/83 on a missing toolchain.
+
+    The second assertion changed with OMN-17474: an import error in a hook's
+    output is no longer environmental on the strength of the words alone. A
+    hook that CATCHES a missing import in the code under test prints the same
+    sentence, so the text cannot separate the two. It is environmental only
+    when the interpreter the hook names does not resolve, which the tool-
+    presence rule decides and the assertion below exercises.
+    """
     classify_fire = replay_hook_history.classify_fire
     assert classify_fire("Executable `pnpm` not found") == "environment"
     assert classify_fire("ModuleNotFoundError: No module named 'omnibase_core'") == (
-        "environment"
+        "finding"
+    )
+    assert (
+        classify_fire(
+            "ModuleNotFoundError: No module named 'omnibase_core'",
+            exit_code=1,
+            entry="definitely-not-a-real-interpreter-omn17474 -m check",
+            language="system",
+        )
+        == "environment"
     )
 
 
@@ -250,3 +268,182 @@ def test_classify_fire_defaults_to_finding() -> None:
     classify_fire = replay_hook_history.classify_fire
     assert classify_fire("src/x.py:3: hardcoded absolute path") == "finding"
     assert classify_fire("") == "finding"
+
+
+# Captured verbatim from the OMN-17474 replay artifact for `omniclaude`,
+# hook `onex-validate-links`, commit 0dacfbd9. This is a REAL CATCH: the hook
+# found five broken relative documentation links. The substring classifier read
+# `not found` inside the hook's own finding text and labelled it environmental,
+# which excluded a live gate from both populations silently.
+REAL_CATCH_BROKEN_LINKS = """Validating markdown links in: /clones/omniclaude
+Check external: False
+  BROKEN: [Skill Lifecycle](docs/architecture/skill-lifecycle.md) - Target file not found: docs/architecture/skill-lifecycle.md
+  BROKEN: [QUICKSTART.md](QUICKSTART.md) - Target file not found: QUICKSTART.md
+  OK: [CLAUDE.md](CLAUDE.md)
+"""
+
+# Captured verbatim from the same run, `omniweb` hook `type-check`. This is a
+# MISSING TOOLCHAIN: pre-commit itself could not execute the hook's entry, and
+# said so in its own words rather than the hook's.
+REAL_MISSING_TOOLCHAIN = "Executable `pnpm` not found"
+
+
+@pytest.mark.unit
+def test_classify_fire_keeps_a_real_catch_that_says_not_found() -> None:
+    """A finding whose own text contains `not found` is still a finding.
+
+    This is the OMN-17474 classifier defect in one assertion: broken-link and
+    missing-file findings describe themselves with the same words a broken
+    machine does, so message text cannot separate them.
+    """
+    classify_fire = replay_hook_history.classify_fire
+    assert (
+        classify_fire(
+            REAL_CATCH_BROKEN_LINKS,
+            exit_code=1,
+            entry="bash scripts/validate_links.sh",
+            language="system",
+            repo=Path(__file__).resolve().parents[3],
+        )
+        == "finding"
+    )
+
+
+@pytest.mark.unit
+def test_classify_fire_keeps_a_missing_toolchain_environmental() -> None:
+    """pre-commit's own non-execution report still classifies as environment."""
+    classify_fire = replay_hook_history.classify_fire
+    assert classify_fire(REAL_MISSING_TOOLCHAIN, exit_code=1) == "environment"
+
+
+@pytest.mark.unit
+def test_classify_fire_reads_exit_shape_not_text() -> None:
+    """126/127 are the shell's reserved `could not execute` codes."""
+    classify_fire = replay_hook_history.classify_fire
+    assert classify_fire("anything at all", exit_code=127) == "environment"
+    assert classify_fire("anything at all", exit_code=126) == "environment"
+    assert classify_fire("anything at all", exit_code=1) == "finding"
+
+
+@pytest.mark.unit
+def test_classify_fire_reads_entry_tool_presence(tmp_path: Path) -> None:
+    """An entry whose binary does not resolve means the hook never ran."""
+    classify_fire = replay_hook_history.classify_fire
+    assert (
+        classify_fire(
+            "src/x.py:3: hardcoded absolute path",
+            exit_code=1,
+            entry="definitely-not-a-real-binary-omn17474 --check",
+            language="system",
+            repo=tmp_path,
+        )
+        == "environment"
+    )
+    # A repo-relative script that is present resolves, so the fire is the code.
+    (tmp_path / "check.sh").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    assert (
+        classify_fire(
+            "src/x.py:3: hardcoded absolute path",
+            exit_code=1,
+            entry="./check.sh",
+            language="script",
+            repo=tmp_path,
+        )
+        == "finding"
+    )
+
+
+@pytest.mark.unit
+def test_classify_fire_ignores_entry_for_managed_languages(tmp_path: Path) -> None:
+    """pre-commit installs `language: python` entries into its own env.
+
+    `ruff` not being on the ambient PATH proves nothing about whether the hook
+    ran, so the entry rule must not apply -- classifying it environmental would
+    delete a live gate on no evidence.
+    """
+    classify_fire = replay_hook_history.classify_fire
+    assert (
+        classify_fire(
+            "src/x.py:1:1: F401 unused import",
+            exit_code=1,
+            entry="ruff check --force-exclude",
+            language="python",
+            repo=tmp_path,
+        )
+        == "finding"
+    )
+
+
+@pytest.mark.unit
+def test_load_hook_specs_carries_entry_and_language(tmp_path: Path) -> None:
+    """Classification needs the hook's entry, which `stages` alone never had."""
+    config = tmp_path / ".pre-commit-config.yaml"
+    config.write_text(
+        """
+repos:
+  - repo: local
+    hooks:
+      - id: local-check
+        entry: bash scripts/check.sh
+        language: system
+        stages: [pre-commit]
+  - repo: https://example.invalid/remote
+    rev: v1
+    hooks:
+      - id: remote-check
+        stages: [pre-commit]
+""",
+        encoding="utf-8",
+    )
+    specs = replay_hook_history.load_hook_specs(config)
+    assert specs["local-check"].entry == "bash scripts/check.sh"
+    assert specs["local-check"].language == "system"
+    assert specs["local-check"].stage == "pre-commit"
+    # A remote hook declares its entry in the remote repo, not here.
+    assert specs["remote-check"].entry is None
+
+
+@pytest.mark.unit
+def test_reclassify_artifact_reports_class_changes(tmp_path: Path) -> None:
+    """The classification step re-runs over an artifact without replaying."""
+    artifact = tmp_path / "omniclaude.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema": "omn17474.hook_replay.v1",
+                "repo": "omniclaude",
+                "environment_suspect_fire_hooks": ["onex-validate-links"],
+                "fire_samples": {
+                    "onex-validate-links": [
+                        {
+                            "commit": "0dacfbd9",
+                            "exit_code": 1,
+                            "output": REAL_CATCH_BROKEN_LINKS,
+                        }
+                    ],
+                    "type-check": [
+                        {
+                            "commit": "a9b5153f",
+                            "exit_code": 1,
+                            "output": REAL_MISSING_TOOLCHAIN,
+                        }
+                    ],
+                },
+                "summaries": [
+                    {"hook_id": "onex-validate-links", "runs": 111, "fires": 1},
+                    {"hook_id": "type-check", "runs": 83, "fires": 83},
+                    {"hook_id": "trailing-whitespace", "runs": 111, "fires": 0},
+                ],
+                "zero_fire_hooks": ["trailing-whitespace"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = replay_hook_history.reclassify_artifact(artifact)
+    assert result["environment_suspect_before"] == ["onex-validate-links"]
+    assert result["environment_suspect_after"] == ["type-check"]
+    assert result["became_finding"] == ["onex-validate-links"]
+    assert result["became_environment"] == ["type-check"]
+    # A hook that never fired has nothing to classify, so no zero-fire
+    # candidate can change class. This is what makes the delete list stable.
+    assert result["zero_fire_hooks_changed"] == []
