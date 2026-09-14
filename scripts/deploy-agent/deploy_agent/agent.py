@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import signal
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ from deploy_agent.events import (
     Scope,
 )
 from deploy_agent.executor import (
+    DEPLOY_AGENT_DIR,
     REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
@@ -41,6 +43,7 @@ from deploy_agent.lab_overlay import (
     LabOverlayApplier,
 )
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
+from deploy_agent.loaded_code import record_loaded_code_sha
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
     PublishCircuitBreaker,
@@ -55,6 +58,23 @@ STATE_DIR = Path(
 )
 HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
 PUBLISH_RETRY_INTERVAL = 30
+
+#: OMN-18200. How often an IDLE agent re-checks whether the code it loaded is
+#: still the code in its clone.
+#:
+#: The two OMN-16442 boundaries are both job-driven, so an agent that nobody
+#: sends a job to cannot pick up a fix to itself -- and on 2026-09-14 the fix
+#: that needed picking up WAS the fix to this agent, whose merge published no
+#: rebuild command at all. Five minutes is a git fetch against one branch, far
+#: below the cadence of the external reconciler that moves this clone, and well
+#: inside the window in which a merged agent fix should start running.
+#:
+#: A cadence is a tuning knob, not a deployment identity, so unlike the tracking
+#: ref and the lane fence it carries a declared default rather than refusing to
+#: start without one.
+SELF_UPDATE_IDLE_INTERVAL_SECONDS = int(
+    os.environ.get("DEPLOY_AGENT_SELF_UPDATE_IDLE_INTERVAL", "300")
+)
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
 #:
@@ -93,6 +113,19 @@ class DeployAgent:
         self._current_git_sha = ""
         self._skip_self_update = skip_self_update
         self._publish_cb = PublishCircuitBreaker()
+        # Stamped at the top of the poll loop so the first idle check happens
+        # one interval AFTER startup -- a process that has just recorded its own
+        # identity has nothing to compare yet.
+        #
+        # ``None`` means "never checked, due now", and it is None rather than
+        # 0.0 because ``time.monotonic()``'s zero is an arbitrary reference
+        # point, not a time. On Linux it is the boot instant, so on a runner
+        # that has been up for less than the interval a 0.0 sentinel reads as
+        # "checked recently" and the check never fires -- which is exactly what
+        # happened to this file's own tests in CI while they passed on a
+        # long-running workstation. A sentinel that means "never" must not be
+        # a value the clock can produce.
+        self._last_idle_self_update: float | None = None
         self._kafka_config = load_deploy_agent_kafka_config_from_env()
         # OMN-16939: fail closed at process construction, before the health
         # port binds and long before a command is polled. An agent that has
@@ -113,6 +146,18 @@ class DeployAgent:
             self._kafka_config.bootstrap_servers,
             ",".join(sorted(lane.value for lane in self._allowed_lanes)),
         )
+
+        # Step 0: record which code this process actually loaded, before
+        # anything can move the clone underneath it, and NAME IT IN THE JOURNAL
+        # (OMN-18200). Until this line existed there was no artifact anywhere --
+        # not the journal, not the health payload, not a job record -- that said
+        # which commit a running agent was executing, which is why a process
+        # four days stale beside a fixed clone looked exactly like a healthy
+        # one. self_update compares against this value, not against the remote.
+        loaded_sha = record_loaded_code_sha(
+            os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
+        )
+        logger.info("Deploy agent loaded code sha: %s", loaded_sha)
 
         # Step 1: Recover crashed jobs
         recovered = self.job_store.recover_crashed_jobs()
@@ -158,6 +203,7 @@ class DeployAgent:
             loop.add_signal_handler(sig, self._handle_shutdown)
 
         publish_retry_task = asyncio.create_task(self._publish_retry_loop())
+        self._last_idle_self_update = time.monotonic()
 
         try:
             while not self._shutdown:
@@ -167,6 +213,7 @@ class DeployAgent:
                 elif reason:
                     logger.info("Rejected command: %s", reason)
                 else:
+                    self._maybe_self_update_idle()
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
@@ -208,6 +255,70 @@ class DeployAgent:
         except Exception as e:  # noqa: BLE001
             logger.error(  # noqa: TRY400
                 "Self-update at the post-terminal boundary failed, "
+                "staying on the current image: %s "
+                "friction_type=self_update_boundary_failed",
+                e,
+            )
+
+    def _maybe_self_update_idle(self) -> None:
+        """Self-update boundary on the poll loop's idle branch (OMN-18200).
+
+        The third boundary, and the only one that is not job-driven. Both
+        OMN-16442 boundaries fire inside the handling of a command, so an agent
+        with no traffic can never pick up a fix -- including, and especially, a
+        fix to itself. That is not hypothetical: on 2026-09-14 the change that
+        needed to reach this process was the change to this process, and the
+        only merge that would have published a rebuild command was that same
+        merge.
+
+        Two guards, both asserted rather than assumed, because "the poll
+        returned nothing" is not the same fact as "nothing is in flight":
+
+        * an accepted or in-progress job means a deploy is running and a
+          re-exec would abort it -- the OMN-16442 defect, arrived at from a
+          different direction;
+        * a job awaiting its terminal publish means a result is owed to the
+          bus. It IS durable (``result_publish_pending`` on disk, replayed by
+          ``_retry_pending_publishes`` at startup), so a re-exec here would not
+          lose it -- but it would delay it by a process restart for no reason,
+          and the next idle tick is one interval away.
+
+        The interval is stamped whether or not the guards let the check through,
+        so a guarded agent re-checks on the next interval rather than probing
+        the job store on every one-second poll.
+        """
+        now = time.monotonic()
+        if (
+            self._last_idle_self_update is not None
+            and now - self._last_idle_self_update < SELF_UPDATE_IDLE_INTERVAL_SECONDS
+        ):
+            return
+        self._last_idle_self_update = now
+
+        if self.job_store.has_active_job():
+            logger.info(
+                "self_update[boundary=%s]: a job is in flight, deferring",
+                EnumSelfUpdateBoundary.IDLE_HEARTBEAT.value,
+            )
+            return
+        pending = self.job_store.get_pending_publish()
+        if pending:
+            logger.info(
+                "self_update[boundary=%s]: %d result(s) still awaiting publish, "
+                "deferring",
+                EnumSelfUpdateBoundary.IDLE_HEARTBEAT.value,
+                len(pending),
+            )
+            return
+
+        try:
+            self.executor.self_update(
+                boundary=EnumSelfUpdateBoundary.IDLE_HEARTBEAT,
+                skip=self._skip_self_update,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(  # noqa: TRY400
+                "Self-update at the idle boundary failed, "
                 "staying on the current image: %s "
                 "friction_type=self_update_boundary_failed",
                 e,
