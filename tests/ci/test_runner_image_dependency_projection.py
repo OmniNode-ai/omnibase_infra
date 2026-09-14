@@ -357,6 +357,123 @@ def test_new_top_level_table_is_visible_to_the_binding(
     )
 
 
+def test_new_depth_three_table_is_visible_to_the_binding(
+    identity: Any, lock_data: dict[str, Any], tmp_path: Path
+) -> None:
+    """A nested future-installer table must not vanish from the tripwire."""
+    before = _tree(tmp_path / "before", BASE_PYPROJECT)
+    after = _tree(
+        tmp_path / "after",
+        BASE_PYPROJECT
+        + '\n[tool.some-future-installer.sources.internal]\npriority = "explicit"\n',
+    )
+    assert _digests(identity, lock_data, before) != _digests(
+        identity, lock_data, after
+    ), "a new depth-three table left the runner-image identity unchanged"
+
+
+def test_absent_dependency_path_cannot_collide_with_literal_string(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """Missing paths and attacker-controlled strings use different envelopes."""
+    absent = BASE_PYPROJECT.replace(
+        '\n[project.optional-dependencies]\ndev = ["pytest>=8.0.0"]\n',
+        "\n",
+    )
+    literal = BASE_PYPROJECT.replace(
+        'dev = ["pytest>=8.0.0"]',
+        'dev = "<absent>"',
+    )
+    a = _tree(tmp_path / "absent", absent)
+    b = _tree(tmp_path / "literal", literal)
+    absent_projection = json.loads(
+        env_digest.pyproject_dependency_projection(a).decode("utf-8")
+    )
+    literal_projection = json.loads(
+        env_digest.pyproject_dependency_projection(b).decode("utf-8")
+    )
+    path = "project.optional-dependencies"
+    assert absent_projection["values"][path] == {"present": False}
+    assert literal_projection["values"][path] == {
+        "present": True,
+        "value": {
+            "type": "table",
+            "value": {"dev": {"type": "str", "value": "<absent>"}},
+        },
+    }
+    assert absent_projection != literal_projection
+
+
+def test_toml_datetime_dependency_value_fails_with_path_context(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """Non-JSON TOML values fail closed with the offending dependency path."""
+    root = _tree(
+        tmp_path / "datetime",
+        BASE_PYPROJECT.replace(
+            "[tool.uv]\npackage = true",
+            "[tool.uv]\npackage = true\ncache-until = 2026-09-13T12:00:00Z",
+        ),
+    )
+    with pytest.raises(TypeError, match="tool\\.uv\\.cache-until"):
+        env_digest.pyproject_dependency_projection(root)
+
+
+@pytest.mark.parametrize(
+    ("case", "toml_value"),
+    [
+        ("datetime", "2026-09-13T12:00:00Z"),
+        ("date", "2026-09-13"),
+        ("time", "12:00:00"),
+        ("list", "[2026-09-13T12:00:00Z]"),
+    ],
+)
+def test_non_json_toml_dependency_values_fail_with_path_context(
+    env_digest: Any, tmp_path: Path, case: str, toml_value: str
+) -> None:
+    """Non-JSON TOML scalars fail closed, including inside lists."""
+    root = _tree(
+        tmp_path / case,
+        BASE_PYPROJECT.replace(
+            "[tool.uv]\npackage = true",
+            f"[tool.uv]\npackage = true\ncache-until = {toml_value}",
+        ),
+    )
+    with pytest.raises(TypeError, match="tool\\.uv\\.cache-until"):
+        env_digest.pyproject_dependency_projection(root)
+
+
+def test_non_finite_float_dependency_value_fails_with_path_context(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """NaN/Infinity are rejected instead of serialized as non-canonical JSON."""
+    root = _tree(
+        tmp_path / "nan",
+        BASE_PYPROJECT.replace(
+            "[tool.uv]\npackage = true",
+            "[tool.uv]\npackage = true\nresolution-weight = nan",
+        ),
+    )
+    with pytest.raises(TypeError, match="tool\\.uv\\.resolution-weight"):
+        env_digest.pyproject_dependency_projection(root)
+
+
+def test_table_tripwire_is_bounded_after_depth_three(
+    env_digest: Any, tmp_path: Path
+) -> None:
+    """Deep tool-internal nesting does not become an unbounded digest surface."""
+    root = _tree(
+        tmp_path / "deep",
+        BASE_PYPROJECT
+        + '\n[tool.some-future-installer.sources.internal.extra]\nmode = "ignored"\n',
+    )
+    projection = json.loads(
+        env_digest.pyproject_dependency_projection(root).decode("utf-8")
+    )
+    assert "tool.some-future-installer.sources" in projection["tables"]
+    assert "tool.some-future-installer.sources.internal" not in projection["tables"]
+
+
 def test_projection_is_order_independent_across_tables(
     env_digest: Any, tmp_path: Path
 ) -> None:
