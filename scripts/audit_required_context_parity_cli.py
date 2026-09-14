@@ -21,7 +21,7 @@ REPORT-ONLY (report-then-enforce rollout discipline):
   * It ALWAYS exits 0, even with findings, unless `--fail-on-findings` is passed
     (reserved for the future enforcing follow-up; default OFF).
 
-The pure assertion logic lives in audit_branch_protection_lib.py; this module is
+The pure assertion logic lives in audit_required_context_parity_lib.py; this module is
 the thin I/O shell (manifest + `gh api` + workflow YAML parse) so that logic
 stays unit-testable without network.
 
@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from audit_branch_protection_lib import (
+from audit_required_context_parity_lib import (
     PARITY_MISSING,
     PARITY_QUEUE_DRIFT,
     PARITY_STRICT_DRIFT,

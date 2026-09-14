@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the required-context parity ratchet (OMN-14288).
 
-Exercises the PURE assertion logic in scripts/audit_branch_protection_lib.py
+Exercises the PURE assertion logic in scripts/audit_required_context_parity_lib.py
 (normalize / direct-required / needs-closure / gate + manifest evaluation) with
 synthetic inputs. No `gh`/network/subprocess — mirrors the extraction pattern of
 test_branch_protection_audit.py.
@@ -23,9 +23,13 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _LIB_PATH = (
-    Path(__file__).resolve().parents[2] / "scripts" / "audit_branch_protection_lib.py"
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "audit_required_context_parity_lib.py"
 )
-_spec = importlib.util.spec_from_file_location("audit_branch_protection_lib", _LIB_PATH)
+_spec = importlib.util.spec_from_file_location(
+    "audit_required_context_parity_lib", _LIB_PATH
+)
 assert _spec is not None and _spec.loader is not None, f"cannot load {_LIB_PATH}"
 lib = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(lib)
