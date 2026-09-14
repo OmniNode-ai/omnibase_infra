@@ -79,7 +79,7 @@ _RETIRED_PROD_LANE: dict[str, Any] = {
     ],
 }
 
-MANIFEST["lanes"]["prod"] = _RETIRED_PROD_LANE
+MANIFEST["lanes"]["prod"] = copy.deepcopy(_RETIRED_PROD_LANE)
 
 
 def _container(

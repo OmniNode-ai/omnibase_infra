@@ -15,7 +15,7 @@
 #   free and the lane is STILL unbuilt at the moment this PR declares its services. This PR is
 #   the REPO-side enablement only (compose file, lane Literal, topology profile, renderer);
 #   bring-up remains the lane owner's Task 0 and was deliberately not performed.
-# verified: 2026-09-13 via read-only ssh jonah@192.168.86.201 `docker compose -p omnibase-infra-prod ps -a`
+# verified: 2026-09-13 via read-only host diagnostics `docker compose -p omnibase-infra-prod ps -a`
 #   (zero rows), `docker network ls --filter name=omnibase-infra-prod` (zero) and a per-project
 #   `docker ps -a` count diff showing omnibase-infra 31, omnibase-infra-stability-test 19,
 #   omnibase-infra-judge 7 and omnibase-infra-lakshman 7 byte-unchanged across the window —
@@ -361,8 +361,8 @@ lanes:
   # judge lane's runtime main/effects (docker/runtime-policy.env
   # JUDGE_RUNTIME_MAIN_PORT / JUDGE_RUNTIME_EFFECTS_PORT). 49092 was the prod
   # broker's external Kafka port until that lane was retired on 2026-09-13
-  # (OMN-18320); it is free now, but it stays listed here so nobody reuses it
-  # while stale references to the prod lane remain in the tree.
+  # (OMN-18320); keep it reserved until stale references to the removed lab
+  # compose lane are gone from the tree.
   #
   #   runtime main       58085
   #   runtime effects    58086

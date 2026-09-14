@@ -223,7 +223,9 @@ def test_runtime_worker_declared_in_every_runtime_lane() -> None:
     # OMN-18320: `prod` removed — the lab compose prod lane was retired 2026-09-13 and
     # no longer exists in the manifest. `stability-test` is now the only compose runtime
     # lane that must declare a worker, and it still carries the OMN-12988 guarantee.
-    for lane in ("stability-test",):
+    runtime_lanes = ("stability-test",)
+    assert runtime_lanes, "runtime-worker ratchet must cover at least one lane"
+    for lane in runtime_lanes:
         names = {s["name"] for s in manifest["lanes"][lane]["services"]}
         worker = next((n for n in names if n.endswith("runtime-worker")), None)
         assert worker is not None, f"lane {lane!r} missing a runtime-worker service"
