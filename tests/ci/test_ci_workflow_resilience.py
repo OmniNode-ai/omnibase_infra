@@ -33,6 +33,10 @@ PR_MERGED_EVENT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-merged-even
 RUNTIME_REBUILD_TRIGGER_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
 )
+# OMN-18268: the sibling half of the same publisher, held to the same invariant.
+RUNTIME_REBUILD_SIBLING_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger-reusable.yml"
+)
 PROD_PROMOTION_LINEAGE_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "prod-promotion-lineage.yml"
 )
@@ -860,6 +864,7 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
         ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW,
         PR_MERGED_EVENT_WORKFLOW,
         RUNTIME_REBUILD_TRIGGER_WORKFLOW,
+        RUNTIME_REBUILD_SIBLING_WORKFLOW,
     )
 
     for workflow_path in workflow_paths:

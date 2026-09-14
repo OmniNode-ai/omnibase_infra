@@ -1,0 +1,337 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# runtime-rebuild-trigger-reusable.yml
+#
+# The sibling half of rule 24(a). Called by a repository whose sources the
+# runtime image VENDORS -- today omnimarket -- when one of its PRs merges to dev
+# or main, so that merge rebuilds the .201 compose dev lane instead of waiting
+# for an unrelated omnibase_infra merge to carry it.
+#
+# THE DEFECT, MEASURED 2026-09-14
+# -------------------------------
+# The lane's effects container reported
+# org.opencontainers.image.revision=732fd291 (omnibase_infra) and, in the image's
+# own /app/build-provenance.json, omnimarket at 65c237cd -- omnimarket#2538,
+# merged 07:53:57Z. omnimarket#2537 (09:11:34Z) and #2540 (10:09:57Z) had merged
+# since and were not on the lane. Nothing was broken: the omnimarket revision was
+# never CHOSEN. It is whatever origin/dev resolved to at the moment some
+# unrelated omnibase_infra merge fired a rebuild and stage_workspace.sh staged
+# the siblings (DEPLOY_SIBLING_FALLBACK_REF, OMN-17135). omnimarket's own
+# runtime-rebuild-trigger.yml had been workflow_dispatch-only since 2026-07-21
+# (omnimarket#1858, OMN-14702), disabled because the repo had no SASL/HMAC
+# secrets; the SASL pair is now an org secret with ALL visibility and the HMAC
+# secret is not a precondition of this publisher at all -- CI publishes a typed
+# start command and node_redeploy's deploy effect is the sole signer downstream.
+#
+# WHY THE CALLER DOES NOT PUBLISH ITS OWN
+# ---------------------------------------
+# There were already two divergent copies of trigger_rebuild_on_merge.py in the
+# org (omnibase_infra 1257 lines, omnimarket 552). A third caller running its own
+# copy is how the first two happened. This workflow is the ONE publisher; the
+# caller supplies facts and holds no logic.
+#
+# THE ref THIS PUBLISHES, AND WHY IT IS NOT THE CALLER'S SHA
+# ----------------------------------------------------------
+# The deploy agent resets its BUILD-CONTEXT clone -- omnibase_infra -- with
+# `git reset --hard <git_ref>`. A sibling merge SHA names no commit there, so
+# publishing it would fail every sibling-triggered job at the git phase. The
+# publish job resolves omnibase_infra dev HEAD and passes it as --primary-ref;
+# the caller's own SHA rides along as --source-sha and is what the convergence
+# guard asserts. See resolve_publish_ref() in scripts/trigger_rebuild_on_merge.py.
+#
+# WHERE THE RECEIPT LANDS, STATED RATHER THAN IMPLIED
+# ---------------------------------------------------
+# A GitHub Actions artifact belongs to the run that created it, and a called
+# reusable workflow runs inside the CALLER's repository. So the compose-dev
+# lab-pass receipt this emits lives on the omnimarket run and is keyed by the
+# OMNIMARKET sha. That is the right key -- it is the sha the lane was proven to
+# carry -- but it is deliberately NOT visible to omnibase_infra's
+# deliver-dev-candidate-to-staging lab-pass gate, which queries omnibase_infra
+# artifacts for an omnibase_infra sha. Those are different claims about different
+# commits; neither supersedes the other, and no artifact name collides.
+#
+# Tickets: OMN-18268 (this), OMN-17530 rule 24(a), OMN-17135 (per-sibling refs),
+#          OMN-18200 (the compose-dev receipt), OMN-14702 (the dormant caller).
+
+name: Runtime Rebuild Trigger (sibling repository)
+
+on:
+  workflow_call:
+    inputs:
+      source_repo:
+        description: "Sibling repository name vendored into the runtime image, e.g. omnimarket"
+        required: true
+        type: string
+      repo_slug:
+        description: "owner/name of the sibling repository, for the compare API"
+        required: true
+        type: string
+      source_sha:
+        description: "Merge commit SHA of the caller's PR"
+        required: true
+        type: string
+      base_branch:
+        description: "Merged PR base branch (dev | main) — decides the runtime lane"
+        required: true
+        type: string
+      changed_files:
+        description: "Comma-separated changed file paths of the merged PR"
+        required: true
+        type: string
+      labels:
+        description: "Comma-separated PR label names"
+        required: false
+        default: ""
+        type: string
+      pr_number:
+        description: "Merged PR number, recorded in requested_by"
+        required: true
+        type: string
+    secrets:
+      KAFKA_SASL_USERNAME:
+        required: true
+      KAFKA_SASL_PASSWORD:
+        required: true
+
+jobs:
+  trigger-rebuild:
+    name: Trigger node_redeploy Start (sibling)
+    # Fork PRs route to hosted compute — untrusted code never reaches the fleet —
+    # and the publisher then refuses the LAN publish by NAME rather than timing
+    # out against an unresolvable bootstrap host (OMN-17888). `github.repository`
+    # in a called workflow is the CALLER's repository, which is what this must
+    # compare against.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Matches the omnibase_infra trigger's own ceiling and for the same measured
+    # reason (OMN-18200 AC3): the shared CI env is bimodal, and a cold build
+    # after a lockfile bump cost 4m01s on a run whose 5-minute ceiling cancelled
+    # a sibling run mid-step.
+    timeout-minutes: 15
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      git_ref: ${{ steps.publish.outputs.source_sha }}
+      runtime_lane: ${{ steps.publish.outputs.runtime_lane }}
+      source_repo: ${{ steps.publish.outputs.source_repo }}
+      sibling_sha: ${{ steps.publish.outputs.sibling_sha }}
+
+    steps:
+      # Into the workspace ROOT, so `./.github/actions/setup-python-uv` below
+      # resolves against omnibase_infra rather than the caller's tree, and so
+      # the primary ref is read from a real clone instead of an API call.
+      - name: Checkout omnibase_infra (the build-context repository)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: dev
+          persist-credentials: false
+
+      - name: Resolve the omnibase_infra ref the lane rebuilds at
+        id: primary
+        run: echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch authoritative CI bus lane overlay
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+            src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py
+          sparse-checkout-cone-mode: false
+
+      - name: Fetch canonical deploy-path classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-runtime-rebuild-trigger
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      - name: Trigger node_redeploy if runtime change detected
+        id: publish
+        env:
+          # The dev control-bus lane declares SASL_PLAINTEXT / SCRAM-SHA-256 in
+          # omnimarket's config/ci_bus_lanes.yaml, sparse-checked-out above. The
+          # publisher READS that declaration and refuses to downgrade it, so a
+          # SASL lane with no credentials is a hard failure, never a silent
+          # plaintext publish (OMN-18012). These are org secrets with ALL
+          # visibility — the dev-lane SCRAM principal.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          PR_CHANGED_FILES: ${{ inputs.changed_files }}
+          PR_LABELS: ${{ inputs.labels }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_BASE_BRANCH: ${{ inputs.base_branch }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PRIMARY_REF: ${{ steps.primary.outputs.ref }}
+          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          uv run python scripts/trigger_rebuild_on_merge.py \
+            --changed-files "$PR_CHANGED_FILES" \
+            --labels "$PR_LABELS" \
+            --base-branch "$PR_BASE_BRANCH" \
+            --source-repo "$SOURCE_REPO" \
+            --source-sha "$SOURCE_SHA" \
+            --primary-ref "$PRIMARY_REF" \
+            --bus-lane "dev" \
+            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml" \
+            --consumer-model ".ci-bus-overlay/src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py" \
+            --runtime-path-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
+            --runner-environment "$CI_RUNNER_ENVIRONMENT" \
+            --requested-by "gha/${{ inputs.source_repo }}/pr-$PR_NUMBER"
+
+  # Publication is not application (OMN-17888 AC4), and for a sibling trigger the
+  # usual convergence read cannot answer the question at all: the infra revision
+  # label does not move when only a sibling changes, so
+  # check_dev_lane_staleness.py would report converged on its first poll having
+  # proven nothing. This job asserts the SIBLING revision out of the image's own
+  # build-provenance manifest instead.
+  verify-sibling-converged:
+    name: Verify the dev lane vendors the merged sibling revision
+    needs: trigger-rebuild
+    if: >-
+      needs.trigger-rebuild.outputs.published == 'true' &&
+      needs.trigger-rebuild.outputs.runtime_lane == 'dev'
+    # The lane's docker daemon is on the LAN; hosted compute cannot see it. The
+    # checkout below is pinned to omnibase_infra dev, so no caller-authored code
+    # executes on the fleet.
+    runs-on: [self-hosted, omnibase-deploy]
+    # 25-minute convergence wait plus a tail for the probe, the emit and the
+    # upload. A job killed by timeout uploads NO receipt, which is the one
+    # outcome worse than a failing one.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout omnibase_infra (the guard's own repository)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: dev
+          persist-credentials: false
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-lane-sibling-revision
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      # The receipt carries the window it measured, so the start is recorded
+      # before the convergence wait, not after it.
+      - name: Record the lab-pass window start
+        run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Wait for the dev lane to vendor the merged sibling revision
+        id: converge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_REPO: ${{ needs.trigger-rebuild.outputs.source_repo }}
+          REPO_SLUG: ${{ inputs.repo_slug }}
+          SIBLING_SHA: ${{ needs.trigger-rebuild.outputs.sibling_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/check_lane_sibling_revision.py \
+            --repo "$SOURCE_REPO" \
+            --repo-slug "$REPO_SLUG" \
+            --expect-revision "$SIBLING_SHA" \
+            --wait-timeout 25m \
+            --poll-interval 60s
+
+      # The readiness and health-dimension reads an integration pass makes by
+      # hand. What a compose-dev receipt does NOT cover is named in
+      # scripts/ci/lab_pass_receipt.py's PROBES_NOT_YET_WIRED (migrations,
+      # consumer-group lag, delegation golden chain), and rule 24(d) applies
+      # unchanged: this lane has no onex-api and no RLS, so no check below
+      # claims a tenant-scoped path was exercised.
+      - name: Probe the dev lane
+        id: probe
+        if: always()
+        env:
+          JOB_TIMEOUT_MINUTES: 30
+          RESERVED_TAIL_SECONDS: 120
+          # host.docker.internal, NOT localhost: this job runs in the
+          # omninode-deploy-runner container against the host's docker daemon,
+          # not in the host's network namespace (OMN-18200).
+          DEV_LANE_MAIN_URL: http://host.docker.internal:8085
+          DEV_LANE_EFFECTS_URL: http://host.docker.internal:8086
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lab-pass-receipt
+          CEILING_SECONDS=$(( ${JOB_TIMEOUT_MINUTES} * 60 ))
+          STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
+            || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
+          ELAPSED=$(( $(date -u +%s) - STARTED_EPOCH ))
+          SETTLE=$(( CEILING_SECONDS - ELAPSED - RESERVED_TAIL_SECONDS ))
+          [ "$SETTLE" -lt 0 ] && SETTLE=0
+          echo "settle budget: ${SETTLE}s (ceiling ${CEILING_SECONDS}s, elapsed ${ELAPSED}s, tail ${RESERVED_TAIL_SECONDS}s)"
+          uv run python scripts/ci/lab_pass_receipt.py probe-lane \
+            --lane compose-dev \
+            --main-url "$DEV_LANE_MAIN_URL" \
+            --effects-url "$DEV_LANE_EFFECTS_URL" \
+            --settle-timeout-seconds "$SETTLE" \
+            > /tmp/lab-pass-checks.json
+          cat /tmp/lab-pass-checks.json
+
+      # `always()` on emit and upload: a FAILED lab pass is the record that tells
+      # "it failed" apart from "nobody ran it", and telling those apart is the
+      # receipt's whole job. The emit step exits non-zero on a FAIL receipt, so
+      # the failure stays visible on this run.
+      - name: Emit the compose-dev lab-pass receipt for the sibling sha
+        if: always()
+        env:
+          SIBLING_SHA: ${{ needs.trigger-rebuild.outputs.sibling_sha }}
+          SOURCE_REPO: ${{ needs.trigger-rebuild.outputs.source_repo }}
+          GIT_REF: ${{ needs.trigger-rebuild.outputs.git_ref }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py emit \
+            --sha "$SIBLING_SHA" \
+            --lane compose-dev \
+            --started-at "${LAB_PASS_STARTED_AT}" \
+            --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --check "sibling_revision:${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}:check_lane_sibling_revision.py --repo $SOURCE_REPO --expect-revision $SIBLING_SHA against the omnibase-infra compose project, rebuilt at omnibase_infra $GIT_REF" \
+            --checks-json /tmp/lab-pass-checks.json \
+            --out /tmp/lab-pass-receipt/receipt.json
+
+      # The zero-byte case `if-no-files-found: error` cannot see, since the
+      # directory matches whether or not the receipt carries bytes (OMN-18247).
+      - name: Assert the compose-dev lab-pass receipt is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-pass-receipt-compose-dev-sibling \
+            --require /tmp/lab-pass-receipt/receipt.json
+
+      - name: Upload the compose-dev lab-pass receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # Must match scripts/ci/lab_pass_receipt.py artifact_name() exactly.
+          name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.sibling_sha }}
+          path: /tmp/lab-pass-receipt
+          retention-days: 90
+          if-no-files-found: error
