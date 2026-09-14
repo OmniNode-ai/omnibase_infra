@@ -12,6 +12,8 @@ the old needs-based ci-summary pass/fail condition.
 from __future__ import annotations
 
 import json
+import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,18 +22,23 @@ import yaml
 
 from scripts.ci.ci_summary_gate import (
     ACTOR_CONDITIONAL_CONTEXTS,
+    CANCELLED_SUPERSESSION_GRACE_S,
     DOCS_ONLY_MARKER_JOB,
     DOCS_ONLY_SKIPPABLE_GATE_JOBS,
     EXIT_FAILURE,
     EXIT_PENDING,
     EXIT_SUCCESS,
     EXPECTED_EXTERNAL_CONTEXTS,
+    EXTERNAL_GOOD_CONCLUSIONS,
     MEASURED_NOT_ENFORCED_CONTEXTS,
+    NON_VERDICT_CONCLUSIONS,
     POST_FIXTURE_WINDOW_CONTEXTS,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
+    JobState,
     applicable_external_contexts,
-    drop_superseded_skips,
+    cancellation_is_provisional,
+    drop_superseded_non_verdicts,
     evaluate,
     evaluate_external_contexts,
     latest_check_run_by_name,
@@ -1582,13 +1589,13 @@ class TestSupersededSkipOnUnchangedHead:
                 "id": 2,
             },
         ]
-        assert drop_superseded_skips(rows) == rows
+        assert drop_superseded_non_verdicts(rows) == rows
 
 
 class TestSupersededSkipIsPartitionedByHeadSha:
     """OMN-18062 follow-up — the head SHA partitions supersession.
 
-    The original fix keyed :func:`drop_superseded_skips` on the context NAME
+    The original fix keyed :func:`drop_superseded_non_verdicts` on the context NAME
     alone. A ``success`` recorded on head A would then clear a ``skipped``
     recorded on head B, re-opening the skip-as-pass vector (OMN-15057 /
     OMN-14854) on the head actually being gated. That is unreachable through
@@ -1619,7 +1626,7 @@ class TestSupersededSkipIsPartitionedByHeadSha:
     def test_skip_on_a_different_head_is_not_superseded(self) -> None:
         """RED: success@headA + skipped@headB must FAIL, not read success."""
         rows = self._rows_on_heads(self.HEAD_A, self.HEAD_B)
-        assert len(drop_superseded_skips(rows)) == len(rows)
+        assert len(drop_superseded_non_verdicts(rows)) == len(rows)
         assert latest_check_run_by_name(rows)[self.VICTIM].conclusion == "skipped"
         code, report = evaluate(
             _all_gates("success"),
@@ -1648,4 +1655,90 @@ class TestSupersededSkipIsPartitionedByHeadSha:
             {"name": "x", "status": "completed", "conclusion": "success"},
             {"name": "x", "status": "completed", "conclusion": "skipped"},
         ]
-        assert [r["conclusion"] for r in drop_superseded_skips(rows)] == ["success"]
+        assert [r["conclusion"] for r in drop_superseded_non_verdicts(rows)] == [
+            "success"
+        ]
+
+
+class TestCancellationGraceFailsClosedOmn18355:
+    """OMN-18355 — the bounded wait a cancelled external context earns.
+
+    The live shape is replayed over real captured bytes in
+    ``tests/ci/test_incident_replay_omn18355.py``. What is pinned HERE is the
+    part a capture cannot show: every uncertain input still fails NOW. A grace
+    window that swallowed a malformed timestamp, or that a caller could open by
+    omitting an argument, would be a bypass wearing a fix's clothes.
+    """
+
+    NOW = datetime(2026, 9, 14, 0, 1, 32, tzinfo=UTC)
+
+    def _cancelled(self, completed_at: str | None) -> JobState:
+        return JobState(
+            name="CodeQL",
+            status="completed",
+            conclusion="cancelled",
+            run_attempt=1,
+            completed_at=completed_at,
+        )
+
+    def test_a_fresh_cancellation_is_provisional(self) -> None:
+        assert cancellation_is_provisional(
+            self._cancelled("2026-09-14T00:01:03Z"), self.NOW
+        )
+
+    def test_no_clock_is_not_provisional(self) -> None:
+        """A caller that forgets the time enforces the older, stricter rule."""
+        assert not cancellation_is_provisional(
+            self._cancelled("2026-09-14T00:01:03Z"), None
+        )
+
+    @pytest.mark.parametrize(
+        "completed_at", [None, "", "not-a-timestamp", "2026-13-45"]
+    )
+    def test_an_unreadable_completion_time_is_not_provisional(
+        self, completed_at: str | None
+    ) -> None:
+        assert not cancellation_is_provisional(self._cancelled(completed_at), self.NOW)
+
+    def test_a_cancellation_past_the_grace_is_not_provisional(self) -> None:
+        stale = self.NOW - timedelta(seconds=CANCELLED_SUPERSESSION_GRACE_S + 1)
+        assert not cancellation_is_provisional(
+            self._cancelled(stale.strftime("%Y-%m-%dT%H:%M:%SZ")), self.NOW
+        )
+
+    def test_a_wildly_future_completion_time_is_not_provisional(self) -> None:
+        """A clock so wrong the row cannot be reasoned about fails, not waits."""
+        skewed = self.NOW + timedelta(seconds=CANCELLED_SUPERSESSION_GRACE_S + 1)
+        assert not cancellation_is_provisional(
+            self._cancelled(skewed.strftime("%Y-%m-%dT%H:%M:%SZ")), self.NOW
+        )
+
+    @pytest.mark.parametrize(
+        "conclusion", ["failure", "timed_out", "action_required", "skipped", "neutral"]
+    )
+    def test_only_a_cancellation_waits(self, conclusion: str) -> None:
+        """No other conclusion earns the grace, whatever its timestamp."""
+        state = JobState(
+            name="CodeQL",
+            status="completed",
+            conclusion=conclusion,
+            run_attempt=1,
+            completed_at="2026-09-14T00:01:03Z",
+        )
+        assert not cancellation_is_provisional(state, self.NOW)
+
+    def test_the_grace_is_one_declared_constant(self) -> None:
+        """AC-4: the number lives once, in the module, beside its rationale."""
+        source = (REPO_ROOT / "scripts" / "ci" / "ci_summary_gate.py").read_text(
+            encoding="utf-8"
+        )
+        assert source.count("CANCELLED_SUPERSESSION_GRACE_S: int = 600") == 1
+        # No second bare literal of the window anywhere in the checker: the
+        # cap must be read from the constant, never re-typed at a use site.
+        assert len(re.findall(r"(?<![\w.])600(?![\w.])", source)) == 1
+
+    def test_the_non_verdict_vocabulary_excludes_cancelled(self) -> None:
+        """Dropping a cancellation would let an older success green the head."""
+        assert frozenset({"skipped", "neutral"}) == NON_VERDICT_CONCLUSIONS
+        assert "cancelled" not in NON_VERDICT_CONCLUSIONS
+        assert not (NON_VERDICT_CONCLUSIONS & EXTERNAL_GOOD_CONCLUSIONS)
