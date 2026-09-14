@@ -609,7 +609,17 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # projection_cost_savings_overview, which 088 above left behind because that
     # view read only savings_estimates at the time and reads delegation_events
     # as of this migration.
-    assert len(result.declarations) == 180
+    #
+    # 180 -> 181 for OMN-18353's
+    # nodes/node_projection_consumer_flow/0004_grant_omninode_runtime_consumer_
+    # flow_cursor_sequence.sql, which grants USAGE on the standalone sequence
+    # OMN-18043's `projection_cursor BIGSERIAL` created. A BIGSERIAL column is a
+    # nextval() DEFAULT over a sequence whose own ACL Postgres checks on every
+    # INSERT, and GRANT INSERT ON TABLE does not reach it -- so the table grant
+    # 0003 delivers was complete and the writer still failed every write. It is
+    # declared here, and therefore resident in this repo rather than omnimarket,
+    # under the same OMN-15717 exemption its sibling 0003 already uses.
+    assert len(result.declarations) == 181
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
