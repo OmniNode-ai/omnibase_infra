@@ -109,6 +109,15 @@ evidence_artifacts:
       - /tmp/lab-pass-receipt/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for the merged sha (rule 24(a)).
+  - id: lab-pass-receipt-compose-dev-sibling
+    workflow: .github/workflows/runtime-rebuild-trigger-reusable.yml
+    job: verify-sibling-converged
+    producer_step: "Emit the compose-dev lab-pass receipt for the sibling sha"
+    artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.sibling_sha }}
+    required_paths:
+      - /tmp/lab-pass-receipt/receipt.json
+    rationale: >-
+      The .201 compose dev lane's lab pass for a SIBLING repository's merged sha (rule 24(a), OMN-18268). Keyed by the sibling sha, not the omnibase_infra one, because that is the revision the lane was proven to vendor; the two never collide on one artifact name.
   - id: lab-pass-receipt-onex-lab-k3s
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lab-overlay-converged

@@ -1,0 +1,163 @@
+{
+  "build_source": "workspace",
+  "build_time": "2026-09-14T08:56:47Z",
+  "infra_vcs_ref": "732fd291a98afeac849a4904670b210096649529",
+  "proofs": [
+    {
+      "repo": "omnibase_core",
+      "package": "omnibase-core",
+      "source_root": "/workspace/sibling-repos/omnibase_core",
+      "workspace_digest": "a0013a6e1af6aa4e5269773cd48931f2b75f8bfe10e0a677fe54398d47518208",
+      "install_url": "file:///workspace/sibling-repos/omnibase_core",
+      "installed_dir": "/app/.venv/lib/python3.12/site-packages/omnibase_core",
+      "staged_package_digest": "9b1cd37456acbfc03b1d0364a83835c48a067b0382ab0c2fd63477abe0f4a13b",
+      "installed_package_digest": "9b1cd37456acbfc03b1d0364a83835c48a067b0382ab0c2fd63477abe0f4a13b",
+      "status": "verified"
+    },
+    {
+      "repo": "omnibase_compat",
+      "package": "omnibase-compat",
+      "source_root": "/workspace/sibling-repos/omnibase_compat",
+      "workspace_digest": "c0f158a8371697f3ebc9724ecf73d6079a1168bad116903781db426763f54602",
+      "install_url": "file:///workspace/sibling-repos/omnibase_compat",
+      "installed_dir": "/app/.venv/lib/python3.12/site-packages/omnibase_compat",
+      "staged_package_digest": "1daac03dd4334d1cc5c62e74ad135e3298666dc10ad8e3838173dbdcec71d2ed",
+      "installed_package_digest": "1daac03dd4334d1cc5c62e74ad135e3298666dc10ad8e3838173dbdcec71d2ed",
+      "status": "verified"
+    },
+    {
+      "repo": "omnimarket",
+      "package": "omnimarket",
+      "source_root": "/workspace/sibling-repos/omnimarket",
+      "workspace_digest": "1da6f86d59eaebace2f5af71b3ff6c1f93b1bd4643f188873feb389a1a8657f3",
+      "install_url": "file:///workspace/sibling-repos/omnimarket",
+      "installed_dir": "/app/.venv/lib/python3.12/site-packages/omnimarket",
+      "staged_package_digest": "15ab51c267c23f753be467ab1ca126e52fff02a90a324e68fcdeabb5920d04ca",
+      "installed_package_digest": "15ab51c267c23f753be467ab1ca126e52fff02a90a324e68fcdeabb5920d04ca",
+      "status": "verified"
+    }
+  ],
+  "per_repo_vcs_provenance": {
+    "siblings": {
+      "omnibase_core": {
+        "vcs_ref": "cde3aaa3281e47cc9c062b154460157ea5e8f93c",
+        "vcs_dirty": false,
+        "vcs_branch": "HEAD"
+      },
+      "omnibase_compat": {
+        "vcs_ref": "3b6f801d5d02bc57b4ca71440f71878dc1eb98ab",
+        "vcs_dirty": false,
+        "vcs_branch": "HEAD"
+      },
+      "omnimarket": {
+        "vcs_ref": "65c237cdc914a6c7c1e15de308986ec65c24f309",
+        "vcs_dirty": false,
+        "vcs_branch": "HEAD"
+      }
+    }
+  },
+  "pin_comparison": [
+    {
+      "package": "omnibase-compat",
+      "expected_version": "0.5.7",
+      "expected_rev": null,
+      "actual_version": "0.5.7",
+      "actual_rev": null,
+      "match": true,
+      "status": "exact"
+    },
+    {
+      "package": "omnimarket",
+      "expected_version": "0.4.81",
+      "expected_rev": null,
+      "actual_version": "0.4.81",
+      "actual_rev": null,
+      "match": true,
+      "status": "exact"
+    },
+    {
+      "package": "omnibase-infra",
+      "expected_version": "0.38.22",
+      "expected_rev": null,
+      "actual_version": "0.38.25",
+      "actual_rev": null,
+      "match": true,
+      "status": "ahead"
+    }
+  ],
+  "sibling_pin_comparison": {
+    "lock_source": "/data/omninode/omni_home/omnimarket/uv.lock",
+    "workspace_mode": true,
+    "allow_drift": false,
+    "drift_count": 0,
+    "clone_ahead_count": 0,
+    "forward_drift_allowed_count": 1,
+    "comparisons": [
+      {
+        "package": "omnibase-infra",
+        "expected_version": "0.38.22",
+        "actual_version": "0.38.25",
+        "expected_git_rev": null,
+        "actual_git_sha": "732fd291a98afeac849a4904670b210096649529",
+        "matches": true,
+        "drift_direction": "forward",
+        "clone_ahead": false,
+        "forward_drift_allowed": true,
+        "note": "forward-drift allowed (OMN-13902): workspace build vendors clone 0.38.25, which is forward of the registry-sourced lock pin 0.38.22 (OMN-13929 disarm-bump / unreleased-dev steady state). Recorded, non-fatal.",
+        "mismatch_reason": ""
+      },
+      {
+        "package": "omnibase-core",
+        "expected_version": "0.47.13",
+        "actual_version": "0.47.13",
+        "expected_git_rev": null,
+        "actual_git_sha": "cde3aaa3281e47cc9c062b154460157ea5e8f93c",
+        "matches": true,
+        "drift_direction": "none",
+        "clone_ahead": false,
+        "forward_drift_allowed": false,
+        "note": "",
+        "mismatch_reason": ""
+      },
+      {
+        "package": "omnibase-spi",
+        "expected_version": "0.23.3",
+        "actual_version": "0.23.3",
+        "expected_git_rev": null,
+        "actual_git_sha": "c6aa159f3ddecc075477eb9b41b74168f8c1a586",
+        "matches": true,
+        "drift_direction": "none",
+        "clone_ahead": false,
+        "forward_drift_allowed": false,
+        "note": "",
+        "mismatch_reason": ""
+      },
+      {
+        "package": "omnibase-compat",
+        "expected_version": "0.5.7",
+        "actual_version": "0.5.7",
+        "expected_git_rev": null,
+        "actual_git_sha": "3b6f801d5d02bc57b4ca71440f71878dc1eb98ab",
+        "matches": true,
+        "drift_direction": "none",
+        "clone_ahead": false,
+        "forward_drift_allowed": false,
+        "note": "",
+        "mismatch_reason": ""
+      },
+      {
+        "package": "omnimarket",
+        "expected_version": "0.4.81",
+        "actual_version": "0.4.81",
+        "expected_git_rev": null,
+        "actual_git_sha": "65c237cdc914a6c7c1e15de308986ec65c24f309",
+        "matches": true,
+        "drift_direction": "none",
+        "clone_ahead": false,
+        "forward_drift_allowed": false,
+        "note": "",
+        "mismatch_reason": ""
+      }
+    ]
+  }
+}

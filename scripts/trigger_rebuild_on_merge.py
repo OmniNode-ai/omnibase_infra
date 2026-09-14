@@ -842,6 +842,80 @@ def should_trigger(runtime_paths: list[str], labels: list[str]) -> bool:
     return _RUNTIME_LABEL in labels or bool(runtime_paths)
 
 
+#: The repository whose working tree IS the runtime image's build context. The
+#: deploy agent resets THIS clone with ``git reset --hard <git_ref>``
+#: (``deploy_agent/executor.py`` ``_git_pull_locked``), so ``git_ref`` is only
+#: ever a commit of this repository.
+OWN_REPO = "omnibase_infra"
+
+
+def resolve_publish_ref(
+    *,
+    source_repo: str,
+    source_sha: str,
+    primary_ref: str,
+) -> str:
+    """Decide the ``git_ref`` this publisher puts on the start command (OMN-18268).
+
+    Two facts are in play and they are NOT interchangeable.
+
+    ``source_sha`` is the merge commit of the repository whose PR fired the
+    trigger. ``git_ref`` is the ref the deploy agent resets its BUILD-CONTEXT
+    clone to, and that clone is always ``omnibase_infra``.
+
+    For an ``omnibase_infra`` merge the two coincide, which is why the shape went
+    unnoticed for as long as there was only one publisher. For a sibling
+    repository -- omnimarket, whose sources the runtime image vendors through
+    ``stage_workspace.sh`` -- they do not: the sibling's merge SHA names no
+    commit in ``omnibase_infra``, so publishing it would fail every
+    sibling-triggered job at the git phase. That is the same failure OMN-17135
+    measured from the other direction, where an ``omnibase_infra`` SHA was handed
+    to the siblings (``ERROR: omnibase_core: cannot resolve ref '<infra sha>'``,
+    exit 4) and every CI-triggered rebuild failed by construction.
+
+    So a sibling trigger supplies ``--primary-ref``: the ``omnibase_infra`` commit
+    the lane is rebuilt at. The sibling's own revision is resolved at staging
+    time by ``DEPLOY_SIBLING_FALLBACK_REF`` and recorded per repo in the image's
+    ``build-provenance.json``; the convergence guard asserts it there.
+
+    Every ambiguous combination is refused rather than defaulted:
+
+    * a sibling with no primary ref has no ref the deploy clone could reset to;
+    * ``omnibase_infra`` WITH a primary ref offers two candidates for one slot;
+    * a primary ref that is a branch ALIAS rather than a SHA is the OMN-18122
+      defect class (``origin/main`` silently resolving somewhere stale), refused
+      at the producer so it can never reach the agent's fence at all.
+    """
+    repo = source_repo.strip()
+    ref = primary_ref.strip()
+    if not repo:
+        raise ValueError("--source-repo must name the repository the PR merged in")
+    if repo == OWN_REPO:
+        if ref:
+            raise ValueError(
+                f"--primary-ref is only meaningful for a sibling repository; "
+                f"--source-repo={OWN_REPO} already carries its own merge SHA as "
+                "the build-context ref. Two candidate refs for one slot is "
+                "ambiguity, not a convenience."
+            )
+        return source_sha
+    if not ref:
+        raise ValueError(
+            f"--primary-ref is required when --source-repo={repo!r}: the deploy "
+            f"agent resets its {OWN_REPO} build-context clone to the published "
+            "git_ref, and a sibling merge SHA names no commit there. Pass the "
+            f"{OWN_REPO} commit the lane should be rebuilt at."
+        )
+    is_hex = all(character in "0123456789abcdef" for character in ref)
+    if not (7 <= len(ref) <= 64) or not is_hex:
+        raise ValueError(
+            f"--primary-ref={ref!r} is not a lowercase hex commit SHA. A branch "
+            "alias silently resolves somewhere stale (OMN-18122); resolve it to "
+            "a commit before publishing."
+        )
+    return ref
+
+
 def lane_for_base_branch(base_branch: str) -> str:
     """Map a merged PR's base branch to a node_redeploy_orchestrator runtime lane.
 
@@ -953,7 +1027,14 @@ def publish_redeploy_start_event(
     return 1, delivery_coordinates
 
 
-def emit_github_output(published: bool, source_sha: str, runtime_lane: str) -> None:
+def emit_github_output(
+    published: bool,
+    source_sha: str,
+    runtime_lane: str,
+    *,
+    source_repo: str = OWN_REPO,
+    sibling_sha: str = "",
+) -> None:
     """Record the publish DECISION where a downstream job can read it (OMN-17888 AC4).
 
     AC4 asks that a delivered-but-not-applied redeploy surface as lane staleness.
@@ -972,6 +1053,14 @@ def emit_github_output(published: bool, source_sha: str, runtime_lane: str) -> N
         handle.write(f"published={str(published).lower()}\n")
         handle.write(f"source_sha={source_sha}\n")
         handle.write(f"runtime_lane={runtime_lane}\n")
+        # OMN-18268: which repository's merge this was, and that repository's own
+        # merge SHA. ``source_sha`` is the BUILD-CONTEXT ref and for a sibling
+        # trigger it is an omnibase_infra commit, so it cannot answer "did the
+        # lane pick up the omnimarket change" -- the convergence guard asserts
+        # the sibling revision out of the image's build-provenance manifest and
+        # needs to be told which repo and which SHA.
+        handle.write(f"source_repo={source_repo}\n")
+        handle.write(f"sibling_sha={sibling_sha}\n")
 
 
 @click.command()
@@ -994,6 +1083,23 @@ def emit_github_output(published: bool, source_sha: str, runtime_lane: str) -> N
     "--source-sha",
     required=True,
     help="Merge commit SHA of the triggering PR (the ref node_redeploy_orchestrator rebuilds)",
+)
+@click.option(
+    "--source-repo",
+    default=OWN_REPO,
+    help=(
+        "Repository whose merged PR fired this trigger. Anything other than "
+        f"{OWN_REPO} is a sibling vendored into the runtime image and requires "
+        "--primary-ref (OMN-18268)."
+    ),
+)
+@click.option(
+    "--primary-ref",
+    default="",
+    help=(
+        f"The {OWN_REPO} commit SHA the lane is rebuilt at. Required for a "
+        "sibling --source-repo, refused for this repo's own merges."
+    ),
 )
 @click.option(
     "--requested-by",
@@ -1048,6 +1154,8 @@ def main(
     labels: str,
     base_branch: str,
     source_sha: str,
+    source_repo: str,
+    primary_ref: str,
     requested_by: str,
     correlation_id: str,
     bus_lane: str,
@@ -1077,6 +1185,20 @@ def main(
     runtime_lane = lane_for_base_branch(base_branch)
     build_source = build_source_for_base_branch(base_branch)
 
+    # OMN-18268: for this repo's own merge these are the same string; for a
+    # sibling they are not, and conflating them publishes a ref the deploy
+    # clone cannot resolve.
+    try:
+        publish_ref = resolve_publish_ref(
+            source_repo=source_repo,
+            source_sha=source_sha,
+            primary_ref=primary_ref,
+        )
+    except ValueError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
+    sibling_sha = "" if source_repo.strip() == OWN_REPO else source_sha
+
     try:
         classifier = load_runtime_path_classifier(runtime_path_validator)
         runtime_paths = classify_runtime_paths(files, classifier)
@@ -1088,7 +1210,13 @@ def main(
         click.echo(
             "No rebuild trigger: no runtime_change label or runtime path changes detected."
         )
-        emit_github_output(False, source_sha, runtime_lane)
+        emit_github_output(
+            False,
+            publish_ref,
+            runtime_lane,
+            source_repo=source_repo,
+            sibling_sha=sibling_sha,
+        )
         # OMN-18060 — fail closed on overlay skew even with nothing to publish.
         # This run is otherwise non-probative: see assert_declared_overlay_loads.
         try:
@@ -1106,13 +1234,20 @@ def main(
     click.echo(
         f"Runtime change detected (delivery NOT yet confirmed): "
         f"runtime_lane={runtime_lane} source_branch={base_branch} "
-        f"source_sha={source_sha} correlation_id={corr_id} labels={label_list} "
+        f"source_repo={source_repo} source_sha={source_sha} "
+        f"git_ref={publish_ref} correlation_id={corr_id} labels={label_list} "
         f"files_matched={runtime_paths}"
     )
 
     if dry_run:
         click.echo("(dry-run: skipping Kafka publish)")
-        emit_github_output(False, source_sha, runtime_lane)
+        emit_github_output(
+            False,
+            publish_ref,
+            runtime_lane,
+            source_repo=source_repo,
+            sibling_sha=sibling_sha,
+        )
         # OMN-18060 — --dry-run is the local skew check, so it reads the
         # overlay for the same reason the no-trigger exit above does. Without
         # this, the one invocation a person reaches for to ask "would this
@@ -1177,7 +1312,7 @@ def main(
         candidate_payload = build_redeploy_start_payload(
             runtime_lane=runtime_lane,
             build_source=build_source,
-            source_sha=source_sha,
+            source_sha=publish_ref,
             correlation_id=corr_id,
             requested_by=requested_by,
         )
@@ -1223,7 +1358,7 @@ def main(
             sasl_mechanism=sasl_mechanism,
             runtime_lane=runtime_lane,
             build_source=build_source,
-            source_sha=source_sha,
+            source_sha=publish_ref,
             correlation_id=corr_id,
             requested_by=requested_by,
         )
@@ -1250,7 +1385,13 @@ def main(
     # Only reached once the broker has ACKed the command. Publication is the
     # ONLY thing this records; whether the lane then applies it is the question
     # the downstream convergence job answers (OMN-17888 AC4).
-    emit_github_output(True, source_sha, runtime_lane)
+    emit_github_output(
+        True,
+        publish_ref,
+        runtime_lane,
+        source_repo=source_repo,
+        sibling_sha=sibling_sha,
+    )
 
 
 if __name__ == "__main__":
