@@ -242,9 +242,11 @@ from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED, TopicResolver
 
 if TYPE_CHECKING:
     from omnibase_core.models.contracts import ModelContractBase
-    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
-    from omnibase_core.protocols.event_bus.protocol_event_message import (
-        ProtocolEventMessage,
+    from omnibase_infra.event_bus.models.model_event_message import (
+        ModelEventMessage,
+    )
+    from omnibase_infra.protocols.protocol_introspection_event_bus import (
+        ProtocolIntrospectionEventBus,
     )
 
 logger = logging.getLogger(__name__)
@@ -473,7 +475,7 @@ class MixinNodeIntrospection:
     # Configuration attributes
     _introspection_node_id: UUID | None
     _introspection_node_type: EnumNodeKind | None
-    _introspection_event_bus: ProtocolEventBus | None
+    _introspection_event_bus: ProtocolIntrospectionEventBus | None
     _introspection_version: str
     _introspection_node_name: str
     _introspection_env: str
@@ -2263,7 +2265,7 @@ class MixinNodeIntrospection:
 
         return True  # Continue retrying
 
-    async def _on_registration_accepted(self, message: ProtocolEventMessage) -> None:
+    async def _on_registration_accepted(self, message: ModelEventMessage) -> None:
         """Handle registration-accepted event by emitting an ACK command.
 
         Only responds to events matching this node's entity_id / node_id.
@@ -2272,7 +2274,7 @@ class MixinNodeIntrospection:
         and publishes a ``ModelNodeRegistrationAcked`` command.
 
         Args:
-            message: The incoming event message (implements ProtocolEventMessage).
+            message: The incoming event message from the canonical infra bus.
         """
         # Initialize correlation_id before try block so it is available in except
         correlation_id: UUID = uuid4()
@@ -2408,9 +2410,7 @@ class MixinNodeIntrospection:
                 )
             self._ack_unsubscribe = None
 
-    async def _handle_introspection_request(
-        self, message: ProtocolEventMessage
-    ) -> None:
+    async def _handle_introspection_request(self, message: ModelEventMessage) -> None:
         """Handle incoming introspection request.
 
         Includes error recovery with rate-limited logging to prevent
@@ -2418,7 +2418,7 @@ class MixinNodeIntrospection:
         non-fatal errors to maintain graceful degradation.
 
         Args:
-            message: The incoming event message (implements ProtocolEventMessage protocol)
+            message: The incoming event message from the canonical infra bus.
         """
         # Generate correlation_id for this request for traceability
         request_correlation_id = uuid4()
@@ -2429,9 +2429,7 @@ class MixinNodeIntrospection:
         except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             self._handle_request_error(e, request_correlation_id)
 
-    async def _process_introspection_request(
-        self, message: ProtocolEventMessage
-    ) -> None:
+    async def _process_introspection_request(self, message: ModelEventMessage) -> None:
         """Process the introspection request message.
 
         Args:

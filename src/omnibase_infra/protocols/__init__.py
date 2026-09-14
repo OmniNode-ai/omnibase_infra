@@ -9,6 +9,7 @@ Protocols:
     - ProtocolCapabilityProjection: Interface for capability-based projection queries
     - ProtocolCapabilityQuery: Interface for capability-based node discovery service
     - ProtocolEventBusLike: Interface for event bus abstraction (used by introspection)
+    - ProtocolIntrospectionEventBus: Event bus operations used by node introspection
     - ProtocolIdempotencyStore: Interface for idempotency checking and deduplication
     - ProtocolMessageDispatcher: Interface for message dispatchers
     - ProtocolMessageTypeRegistry: Interface for message type registries
@@ -77,6 +78,9 @@ from omnibase_infra.protocols.protocol_event_projector import ProtocolEventProje
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
+from omnibase_infra.protocols.protocol_introspection_event_bus import (
+    ProtocolIntrospectionEventBus,
+)
 from omnibase_infra.protocols.protocol_kafka_admin_like import ProtocolKafkaAdminLike
 from omnibase_infra.protocols.protocol_ledger_sink import ProtocolLedgerSink
 from omnibase_infra.protocols.protocol_message_dispatcher import (
@@ -115,6 +119,7 @@ __all__: list[str] = [
     "ProtocolContainerAware",
     "ProtocolDispatchResultApplier",
     "ProtocolEventBusLike",
+    "ProtocolIntrospectionEventBus",
     "ProtocolEventProjector",
     "ProtocolIdempotencyStore",
     "ProtocolKafkaAdminLike",
