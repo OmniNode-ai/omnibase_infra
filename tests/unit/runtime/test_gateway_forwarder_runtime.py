@@ -543,17 +543,14 @@ def test_staging_canary_resolves_topics_from_node_contract(tmp_path: Path) -> No
     )
 
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
-    # 8 after OMN-16204's OD-9 pair; 10 after OMN-16979's two governed hook
-    # classes. The governance half is asserted in
+    # 8 after OMN-16204's OD-9 pair; 13 after OMN-16979's governed hook
+    # classes, including the three capture egress topics. The governance half is asserted in
     # tests/unit/nodes/node_bus_forwarder_effect/test_egress_redaction_omn16979.py.
-    assert len(loaded.forwarder.mirror_topics.outbound) == 10
-    # OMN-16204: the bare omniclaude session-lifecycle pair, and only that
-    # pair, must resolve from the real node contract.yaml -- per-topic proof
-    # that config.gateway_forwarder.mirror_topics.outbound is correctly
-    # declared, not just a count check. Operator OD-9 ruling 2026-08-18
-    # ~12:40Z allows exactly session-started/session-ended (session id +
-    # timestamps, content-free) to cross; every other omniclaude topic must
-    # stay absent.
+    assert len(loaded.forwarder.mirror_topics.outbound) == 13
+    # OMN-16204's session-lifecycle pair must resolve from the real node
+    # contract.yaml. This remains per-topic proof that the deployed config
+    # carries the content-free lifecycle topics; OMN-16979 separately governs
+    # the capture classes asserted below.
     assert (
         "onex.evt.omniclaude.session-started.v1"
         in loaded.forwarder.mirror_topics.outbound
@@ -562,12 +559,14 @@ def test_staging_canary_resolves_topics_from_node_contract(tmp_path: Path) -> No
         "onex.evt.omniclaude.session-ended.v1"
         in loaded.forwarder.mirror_topics.outbound
     )
-    # OMN-16979 admitted two of the five previously-denied classes, and ONLY
-    # behind the egress_redaction gate -- so the resolved deployment is asserted
-    # on both halves. The remaining three stay denied outright.
+    # OMN-16979 admits all capture classes only behind the egress_redaction
+    # gate, so the resolved deployment is asserted on both halves.
     governed_omniclaude_topics = (
         "onex.evt.omniclaude.prompt-submitted.v1",
         "onex.evt.omniclaude.tool-executed.v1",
+        "onex.evt.omniclaude.skill-started.v1",
+        "onex.evt.omniclaude.skill-completed.v1",
+        "onex.evt.omnimarket.tool-output-captured.v1",
     )
     egress = loaded.forwarder.egress_redaction
     assert egress is not None
@@ -576,13 +575,6 @@ def test_staging_canary_resolves_topics_from_node_contract(tmp_path: Path) -> No
         assert egress.governs(governed_topic)
     assert "raw" not in egress.admitted_states
 
-    denied_omniclaude_topics = (
-        "onex.evt.omniclaude.skill-started.v1",
-        "onex.evt.omniclaude.skill-completed.v1",
-        "onex.evt.omniclaude.tool-output-captured.v1",
-    )
-    for denied_topic in denied_omniclaude_topics:
-        assert denied_topic not in loaded.forwarder.mirror_topics.outbound
     assert loaded.local_bus.bootstrap_servers == "redpanda:9092"
     # OMN-15781: deployed config must resolve to "earliest" on both legs, not
     # the model default -- a "latest" resolved leg here silently drops any
