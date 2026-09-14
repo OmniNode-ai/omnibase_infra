@@ -201,6 +201,41 @@ def test_mode_a_selection_parity_against_committed_oracle(
 
 
 @pytest.mark.integration
+def test_omn_16964_delegation_chain_topics_select_ledger_projection(
+    live_snapshot: dict[str, Any],
+) -> None:
+    """Every chain-canary hop selects the ledger projection dispatcher."""
+    chain_topics = (
+        "onex.cmd.omnimarket.delegate-skill.v1",
+        "onex.cmd.omnibase-infra.delegation-routing-request.v1",
+        "onex.evt.omnibase-infra.routing-decision.v1",
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+    )
+
+    for topic in chain_topics:
+        successful_p4_probes = [
+            probe
+            for probe in live_snapshot["probes"].values()
+            if probe["family"] == "P4_payload_type_scoping"
+            and probe["topic"] == topic
+            and probe["selection"]["status"] == "success"
+            and any(
+                "node_ledger_projection_compute.HandlerLedgerProjection"
+                in dispatcher_id
+                for dispatcher_id in probe["selection"]["dispatcher_ids"]
+            )
+        ]
+
+        assert successful_p4_probes, (
+            f"Delegation-chain topic {topic} did not select the ledger projection"
+        )
+        assert all(
+            len(probe["selection"]["dispatcher_ids"]) == 1
+            for probe in successful_p4_probes
+        ), f"Delegation-chain topic {topic} selected multiple dispatchers"
+
+
+@pytest.mark.integration
 def test_p0_1_guard_tripped_orchestrators_now_route(
     committed_fixture: dict[str, Any],
 ) -> None:
