@@ -89,6 +89,10 @@ from uuid import uuid4
 
 import httpx
 
+from omnibase_core.enums.enum_delegation_traffic_class import (
+    EnumDelegationTrafficClass,
+)
+from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
     dsn_shaped_argv_flags,
@@ -1025,6 +1029,12 @@ class HandlerChainCanary:
         canary is evidence about the path real callers take rather than
         about a bespoke probe-only path that could drift away from it.
         """
+        provenance = ModelDelegationProvenance(
+            source="external-client",
+            traffic_class=EnumDelegationTrafficClass.SYNTHETIC,
+            source_surface="scheduled-chain-canary",
+            requested_by="chain-canary",
+        )
         return {
             "command_name": request.runtime_command,
             "correlation_id": probe_correlation_id,
@@ -1033,6 +1043,7 @@ class HandlerChainCanary:
                 "prompt": request.prompt,
                 "task_type": request.task_type,
                 "source": "external-client",
+                "provenance": provenance.model_dump(mode="json"),
                 "wait": True,
                 "correlation_id": probe_correlation_id,
                 "max_tokens": request.max_tokens,

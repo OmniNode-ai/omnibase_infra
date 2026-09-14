@@ -289,6 +289,12 @@ async def test_posts_the_recorded_delegation_recipe() -> None:
     assert isinstance(payload, dict)
     assert payload["prompt"] == "ping"
     assert payload["task_type"] == "test"
+    assert payload["provenance"] == {
+        "source": "external-client",
+        "traffic_class": "synthetic",
+        "source_surface": "scheduled-chain-canary",
+        "requested_by": "chain-canary",
+    }
     assert payload["wait"] is True
     assert payload["max_tokens"] == 32
     # The client budget must exceed the runtime budget or the canary times
