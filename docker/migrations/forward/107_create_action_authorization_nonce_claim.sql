@@ -13,6 +13,7 @@
 DO $role$
 DECLARE
     claim_role pg_catalog.pg_roles%ROWTYPE;
+    executing_role TEXT := current_user;
 BEGIN
     SELECT *
       INTO claim_role
@@ -20,9 +21,25 @@ BEGIN
      WHERE rolname = 'rsd_action_authorization_claim';
 
     IF NOT FOUND THEN
-        CREATE ROLE rsd_action_authorization_claim
-            NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
-            NOBYPASSRLS NOREPLICATION;
+        BEGIN
+            CREATE ROLE rsd_action_authorization_claim
+                NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
+                NOBYPASSRLS NOREPLICATION;
+        EXCEPTION
+            WHEN duplicate_object THEN
+                NULL;
+            WHEN insufficient_privilege THEN
+                RAISE EXCEPTION USING
+                    ERRCODE = 'insufficient_privilege',
+                    MESSAGE = format(
+                        'rsd_action_authorization_claim does not exist on this cluster and the executing role %I cannot create it',
+                        executing_role
+                    ),
+                    DETAIL =
+                        'CREATE ROLE requires the CREATEROLE attribute. The managed migration identities are deliberately NOCREATEROLE, so this migration cannot honestly provision the cluster-scoped restricted principal itself.',
+                    HINT =
+                        'Provision rsd_action_authorization_claim once through the privileged application-database provisioning seam, then rerun this migration.';
+        END;
     ELSIF claim_role.rolsuper
        OR claim_role.rolcreatedb
        OR claim_role.rolcreaterole
@@ -36,7 +53,26 @@ BEGIN
 END;
 $role$;
 
-CREATE SCHEMA action_authorization_claim;
+DO $schema$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_catalog.pg_namespace
+         WHERE nspname = 'action_authorization_claim'
+    ) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = 'invalid_schema_name',
+            MESSAGE = 'action_authorization_claim schema must be provisioned before migration 107',
+            DETAIL = format(
+                'migration runs as %I in database %I and cannot create schemas on the managed lane',
+                current_user,
+                current_database()
+            ),
+            HINT =
+                'Provision the schema through the application-database provisioning seam before applying 107_create_action_authorization_nonce_claim.sql.';
+    END IF;
+END;
+$schema$;
 
 REVOKE ALL ON SCHEMA action_authorization_claim FROM PUBLIC;
 REVOKE ALL ON SCHEMA action_authorization_claim FROM rsd_action_authorization_claim;
