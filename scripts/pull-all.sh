@@ -312,14 +312,28 @@ fi
 
 # Switch to a branch, creating it from origin/<branch> when needed, then
 # fast-forward it to the fetched remote branch.
+#
+# OMN-18358: the branch switch takes the sanctioned `ONEX_CANONICAL_CONVERGE`
+# door, per-command rather than exported for the whole script. Moving `main`
+# <-> `dev` inside the canonical clone IS this script's ordinary job, and it is
+# the one thing the OMN-16497 reference-transaction guard refuses; without the
+# door every registry sync on a guarded host failed outright (measured
+# 2026-09-14T07:0xZ). The preservation guarantee the door assumes is already
+# met above this call: `_pull_one` refuses a dirty worktree BEFORE any switch,
+# and the only targets are the two long-lived tracking branches.
+#
+# The `merge --ff-only` below is deliberately left UNDER the guard. The guard
+# permits a fast-forward on its own terms, so opening the door for it would
+# widen the bypass to cover a ref move this script should never be making if
+# the guard would refuse it.
 _checkout_and_ff() {
   local dir="$1"
   local branch="$2"
 
   if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
-    git -C "$dir" switch "$branch"
+    ONEX_CANONICAL_CONVERGE=1 git -C "$dir" switch "$branch"
   else
-    git -C "$dir" switch --track -c "$branch" "origin/$branch"
+    ONEX_CANONICAL_CONVERGE=1 git -C "$dir" switch --track -c "$branch" "origin/$branch"
   fi
 
   git -C "$dir" merge --ff-only "origin/$branch"
@@ -346,10 +360,12 @@ _branch_summary() {
 _leave_on_dev() {
   local dir="$1"
 
+  # Same sanctioned door as _checkout_and_ff, for the same reason (OMN-18358):
+  # returning the clone to dev is this script's own job, not drift.
   if git -C "$dir" show-ref --verify --quiet "refs/heads/dev"; then
-    git -C "$dir" switch dev >/dev/null 2>&1
+    ONEX_CANONICAL_CONVERGE=1 git -C "$dir" switch dev >/dev/null 2>&1
   elif git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/dev"; then
-    git -C "$dir" switch --track -c dev origin/dev >/dev/null 2>&1
+    ONEX_CANONICAL_CONVERGE=1 git -C "$dir" switch --track -c dev origin/dev >/dev/null 2>&1
   else
     return 1
   fi

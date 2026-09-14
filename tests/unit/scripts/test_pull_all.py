@@ -419,6 +419,67 @@ class TestPullAllScript:
         assert main_sha == origin_main_sha
         assert dev_sha == origin_dev_sha
 
+    def test_script_syncs_a_clone_with_the_canonical_clone_guard_installed(
+        self, tmp_path: Path
+    ) -> None:
+        """The sanctioned sync must pass the guard that landed over it.
+
+        `pull-all.sh` switches `main` <-> `dev` INSIDE the canonical clone as
+        its ordinary job. The OMN-16497 reference-transaction guard refuses a
+        HEAD symref move, and `pull-all.sh` never opened the sanctioned
+        `ONEX_CANONICAL_CONVERGE` door, so from the guard's merge onward every
+        run of the registry sync on a guarded host FAILED -- measured
+        2026-09-14T07:0xZ as `FAILED omniclaude (fast-forward main; could not
+        return to dev to converge)`.
+
+        The test above is blind to this: its fixture clone has no
+        `core.hooksPath`, so it exercises a repository no host actually has.
+        This one installs the guard exactly as `install-canonical-clone-git-
+        hooks.sh` does.
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omniclaude = _make_omniclaude_source(omni_home)
+        hooks_dir = (
+            Path(__file__).resolve().parents[3]
+            / "scripts"
+            / "git-hooks"
+            / "canonical-clone"
+        )
+        _git(["config", "core.hooksPath", str(hooks_dir)], cwd=omniclaude)
+
+        upstream = omni_home / "omniclaude.git"
+        writer = tmp_path / "writer"
+        _git(["clone", "-q", str(upstream), str(writer)], cwd=tmp_path)
+        _commit_file(writer, "main-only.txt", "main\n", "main update")
+        _git(["push", "-q", "origin", "main"], cwd=writer)
+        _git(["switch", "-q", "dev"], cwd=writer)
+        _commit_file(writer, "dev-only.txt", "dev\n", "dev update")
+        _git(["push", "-q", "origin", "dev"], cwd=writer)
+
+        result = _run_pull_all(omni_home, fake_home)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "left on dev" in result.stdout
+        current_branch = subprocess.check_output(
+            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+        ).strip()
+        assert current_branch == "dev"
+        # And the sanctioned path refused nothing, so it recorded nothing: a
+        # refusal log that fills up with permitted commands stops being read.
+        assert not (omniclaude / ".git" / "onex-canonical-clone-refusals.log").exists()
+        # The clone is clean -- the half-apply this guard used to leave behind
+        # (OMN-18358) would show here as staged paths.
+        assert (
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=omniclaude, text=True
+            )
+            == ""
+        )
+
     def test_script_refuses_dirty_repo_before_branch_switch(
         self, tmp_path: Path
     ) -> None:

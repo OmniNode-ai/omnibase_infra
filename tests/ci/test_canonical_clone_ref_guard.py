@@ -567,8 +567,14 @@ def test_an_unparseable_transaction_line_fails_closed(
 def test_after_the_fact_stages_are_a_no_op(
     registry: Path, clone: Path, stage: str
 ) -> None:
-    """Only `prepared` can abort a transaction. Reading stdin on the others buys
-    nothing and costs a git invocation per ref of every fetch."""
+    """Only `prepared` can abort a transaction, so neither of these may ever
+    write to stderr or fail a command.
+
+    `committed` reads nothing at all: doing so would cost a git invocation per
+    ref of every fetch. `aborted` is no longer inert -- it is where the
+    OMN-18358 restore runs -- but it stays silent and successful whenever no
+    marker from this hook's own refusal is present, which is every abort with
+    another cause."""
     env = _base_env(registry)
     result = subprocess.run(
         [str(REF_GUARD), stage],
@@ -581,3 +587,216 @@ def test_after_the_fact_stages_are_a_no_op(
     )
     assert result.returncode == 0
     assert result.stderr == ""
+
+
+# ---------------------------------------------------------------------------
+# The half-apply (OMN-18358)
+#
+# git updates the working tree and the index BEFORE it opens the ref
+# transaction that carries the HEAD symref move, so aborting at `prepared`
+# refuses the LAST step of a checkout and keeps the rest. Measured on the
+# canonical omniclaude clone 2026-09-14T07:0xZ: HEAD on dev, 420 staged paths,
+# 0 worktree-modified, 0 untracked, and `git diff --cached --name-only
+# origin/main` returning zero paths -- the index was byte-identical to the
+# target while HEAD said otherwise. omnidash (149 staged) and omninode_infra
+# (858 staged) carried the same signature.
+#
+# Every test below asserts the clone is BYTE-IDENTICAL after the refusal, not
+# merely that the ref did not move. The suite above asserted only the ref, which
+# is why the corruption shipped.
+# ---------------------------------------------------------------------------
+
+
+def _fingerprint(repo: Path, env: dict[str, str]) -> tuple[str, str, str]:
+    """HEAD symref, HEAD oid, and the porcelain status -- the three facts a
+    refusal must leave untouched.
+
+    The status is included verbatim rather than as a count: `A  side.txt` and
+    `?? side.txt` are different outcomes and a count cannot tell them apart.
+    """
+    return (
+        _head_symref(repo, env),
+        _ref(repo, env, "HEAD"),
+        _git("status", "--porcelain", cwd=repo, env=env).stdout,
+    )
+
+
+def _refusal_log(repo: Path) -> Path:
+    return repo / ".git" / "onex-canonical-clone-refusals.log"
+
+
+@pytest.mark.parametrize(
+    ("setup", "verb"),
+    [
+        (["branch", "sidebranch", "origin/sidebranch"], ["checkout", "sidebranch"]),
+        (None, ["checkout", "sidebranch"]),  # the DWIM form pull-all.sh takes
+        (["branch", "sidebranch", "origin/sidebranch"], ["switch", "sidebranch"]),
+        (None, ["checkout", "-b", "brand-new", "origin/sidebranch"]),
+        (None, ["checkout", "--detach", "origin/sidebranch"]),
+    ],
+    ids=["checkout-branch", "checkout-dwim", "switch", "checkout-b-start", "detach"],
+)
+def test_a_refused_switch_leaves_the_clone_byte_identical(
+    registry: Path, clone: Path, setup: list[str] | None, verb: list[str]
+) -> None:
+    env = _base_env(registry)
+    if setup:
+        assert _git(*setup, cwd=clone, env=env).returncode == 0
+    before = _fingerprint(clone, env)
+    assert before[2] == "", "fixture clone is not clean; this test would be vacuous"
+
+    result = _git(*verb, cwd=clone, env=env)
+
+    assert result.returncode != 0, "the guard must still refuse"
+    assert _fingerprint(clone, env) == before, (
+        "a refusal that leaves the clone on the target tree is not a refusal; "
+        "it is a checkout with its last step removed"
+    )
+
+
+def test_the_control_shows_the_verb_really_does_move_the_tree(
+    registry: Path, unguarded_clone: Path
+) -> None:
+    """Positive control for the suite above.
+
+    Without it, a fixture that silently produced a no-op checkout would make
+    every byte-identical assertion pass for the wrong reason.
+    """
+    env = _base_env(registry)
+    before = _fingerprint(unguarded_clone, env)
+
+    result = _git("checkout", "-q", "sidebranch", cwd=unguarded_clone, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert _fingerprint(unguarded_clone, env) != before
+
+
+def test_a_refused_reset_hard_leaves_the_clone_byte_identical(
+    registry: Path, clone: Path
+) -> None:
+    """`reset --hard` backwards rewrites the tree before the branch-ref
+    transaction, so it half-applies the same way a checkout does."""
+    env = _base_env(registry)
+    before = _fingerprint(clone, env)
+
+    result = _git("reset", "--hard", "HEAD~1", cwd=clone, env=env)
+
+    assert result.returncode != 0
+    assert _fingerprint(clone, env) == before
+
+
+def test_a_refusal_writes_a_durable_record(registry: Path, clone: Path) -> None:
+    """A refusal that leaves no artifact is indistinguishable from a command
+    nobody ran. git writes no reflog entry for an aborted transaction, so if
+    this hook writes nothing, nothing anywhere records that the clone was
+    touched -- which is how the half-apply stayed invisible for a day."""
+    env = _base_env(registry)
+    assert not _refusal_log(clone).exists()
+    assert (
+        _git("branch", "sidebranch", "origin/sidebranch", cwd=clone, env=env).returncode
+        == 0
+    )
+
+    assert _git("checkout", "-q", "sidebranch", cwd=clone, env=env).returncode != 0
+
+    log = _refusal_log(clone)
+    assert log.is_file(), f"{log} must exist after a refusal"
+    text = log.read_text(encoding="utf-8")
+    assert "REFUSED" in text
+    assert "HEAD" in text
+    assert str(clone) in text
+    assert "actor=" in text
+    # The outcome of the restore is recorded too: a record that says a refusal
+    # happened but not what became of the tree cannot answer the only question
+    # anyone asks it. Matched as a delimited field, because "NOT_RESTORED"
+    # contains "RESTORED" and a substring test would read a refusal to restore
+    # as a successful one.
+    verdicts = [line.split(" | ")[1] for line in text.splitlines() if " | " in line]
+    assert verdicts == ["REFUSED", "RESTORED"], verdicts
+
+
+def test_an_unknown_local_edit_is_preserved_rather_than_restored_over(
+    registry: Path, clone: Path
+) -> None:
+    """The restore exists because canonical clones carry no uncommitted work by
+    rule. When that premise is false, the safe move is to leave the tree alone
+    and say so -- a guard that destroys a lane's in-flight work to tidy up is
+    worse than the corruption it repairs."""
+    env = _base_env(registry)
+    assert (
+        _git("branch", "sidebranch", "origin/sidebranch", cwd=clone, env=env).returncode
+        == 0
+    )
+    (clone / "one.txt").write_text("locally edited\n", encoding="utf-8")
+    assert _git("add", "one.txt", cwd=clone, env=env).returncode == 0
+
+    result = _git("checkout", "-q", "sidebranch", cwd=clone, env=env)
+
+    assert result.returncode != 0
+    assert (clone / "one.txt").read_text(encoding="utf-8") == "locally edited\n", (
+        "the guard destroyed content it could not account for"
+    )
+    text = _refusal_log(clone).read_text(encoding="utf-8")
+    verdicts = [line.split(" | ")[1] for line in text.splitlines() if " | " in line]
+    assert verdicts == ["REFUSED", "NOT_RESTORED"], verdicts
+    assert "does not match the refused target" in text
+
+
+def test_an_abort_this_guard_did_not_cause_does_not_trigger_a_restore(
+    registry: Path, clone: Path
+) -> None:
+    """`aborted` fires for aborts with other causes -- measured on git 2.50.1,
+    `reset --hard` emits two `AUTO_MERGE` aborts of its own. Restoring on every
+    abort would make this hook reach into trees it never refused anything in."""
+    env = _base_env(registry)
+    worktree = registry / "omni_worktrees" / "OMN-18358" / "some_repo"
+    assert (
+        _git(
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "jonah/omn-18358-scratch",
+            str(worktree),
+            "HEAD",
+            cwd=clone,
+            env=env,
+        ).returncode
+        == 0
+    )
+    (worktree / "one.txt").write_text("work in progress\n", encoding="utf-8")
+
+    # A real abort in the worktree, with no refusal from this guard behind it.
+    result = subprocess.run(
+        [str(REF_GUARD), "aborted"],
+        cwd=worktree,
+        env=env,
+        input="0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 AUTO_MERGE\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (worktree / "one.txt").read_text(encoding="utf-8") == "work in progress\n"
+
+
+def test_the_converge_door_still_leaves_no_refusal_record(
+    registry: Path, clone: Path
+) -> None:
+    """The sanctioned path refuses nothing, so it must record nothing: a log
+    that fills up with entries for permitted commands stops being read."""
+    env = _base_env(registry)
+    assert (
+        _git("branch", "sidebranch", "origin/sidebranch", cwd=clone, env=env).returncode
+        == 0
+    )
+    converge_env = dict(env)
+    converge_env["ONEX_CANONICAL_CONVERGE"] = "1"
+
+    assert (
+        _git("checkout", "-q", "sidebranch", cwd=clone, env=converge_env).returncode
+        == 0
+    )
+
+    assert not _refusal_log(clone).exists()
