@@ -755,6 +755,21 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     "docker/docker-compose*.yml",
     "docker/docker-compose*.yaml",
     "docker/runtime-policy.env",
+    # The deploy agent's own source and launcher (OMN-18200). The process that
+    # builds, recreates and verifies the lane is lane state by the same argument
+    # the migration runner is. Without this, a fix to the agent cannot reach the
+    # agent: no command is published, so it takes no job, and self_update has
+    # only PRE_ACCEPT and POST_TERMINAL boundaries -- both job-driven, neither
+    # reached at startup. Measured on omnibase_infra#3520 (``ead1f59b``), the
+    # fix to the agent's own lab_overlay build: run 34815067432 declined, and
+    # the lab host's clone stayed at ``8fd25217``, behind that fix. Restarting
+    # the unit does not help, because it re-execs the same stale clone.
+    #
+    # Deliberately the package and the launcher, not ``scripts/deploy-agent/**``:
+    # the agent's own tests change no lane behaviour, and every match here costs
+    # a full dev-lane rebuild.
+    "scripts/deploy-agent/deploy_agent/**",
+    "scripts/deploy-agent/deploy/**",
 )
 
 
