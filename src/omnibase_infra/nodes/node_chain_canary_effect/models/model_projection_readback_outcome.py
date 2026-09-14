@@ -20,10 +20,17 @@ There is deliberately no field on this model that could carry a DSN.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readback_status import (
     EnumProjectionReadbackStatus,
+)
+
+TypeDelegationTrafficClass = Literal["unclassified", "organic", "synthetic"]
+DELEGATION_TRAFFIC_CLASSES: frozenset[str] = frozenset(
+    ("unclassified", "organic", "synthetic")
 )
 
 
@@ -42,6 +49,13 @@ class ModelProjectionReadbackOutcome(BaseModel):
             "Non-empty only for TERMINAL and STRANDED."
         ),
     )
+    traffic_class: TypeDelegationTrafficClass = Field(
+        default="unclassified",
+        description=(
+            "The typed traffic classification stored beside the projection row. "
+            "Unclassified includes legacy rows whose provenance was omitted."
+        ),
+    )
     error: str = Field(
         default="",
         description=(
@@ -51,4 +65,8 @@ class ModelProjectionReadbackOutcome(BaseModel):
     )
 
 
-__all__ = ["ModelProjectionReadbackOutcome"]
+__all__ = [
+    "DELEGATION_TRAFFIC_CLASSES",
+    "ModelProjectionReadbackOutcome",
+    "TypeDelegationTrafficClass",
+]

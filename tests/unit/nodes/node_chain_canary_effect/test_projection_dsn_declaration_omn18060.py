@@ -377,8 +377,10 @@ class _FakeConnection:
         self._role_row = role_row
         self._row = row
         self.state_queries = 0
+        self.queries: list[str] = []
 
     async def fetchrow(self, query: str, *args: object) -> object:
+        self.queries.append(query)
         if "pg_roles" in query:
             return self._role_row
         self.state_queries += 1
@@ -426,7 +428,10 @@ async def test_a_privileged_dsn_is_refused_before_it_reads_anything(
     with the wrong identity, and on a lane with RLS it would have read rows the
     role was never supposed to see.
     """
-    connection = _FakeConnection(role_row=role_row, row={"state": "COMPLETED"})
+    connection = _FakeConnection(
+        role_row=role_row,
+        row={"state": "COMPLETED", "traffic_class": "unclassified"},
+    )
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
 
     outcome = await _readback_projection_via_asyncpg(_DSN, str(uuid4()), 5.0)
@@ -452,7 +457,7 @@ async def test_a_least_privilege_reader_is_accepted(
             "rolsuper": False,
             "rolbypassrls": False,
         },
-        row={"state": "COMPLETED"},
+        row={"state": "COMPLETED", "traffic_class": "unclassified"},
     )
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
 
@@ -461,6 +466,30 @@ async def test_a_least_privilege_reader_is_accepted(
     assert outcome.status is EnumProjectionReadbackStatus.TERMINAL
     assert outcome.state == "COMPLETED"
     assert connection.state_queries == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("traffic_class", ["synthetic", "organic"])
+async def test_reader_fetches_the_stored_traffic_class_without_payload_access(
+    monkeypatch: pytest.MonkeyPatch,
+    traffic_class: str,
+) -> None:
+    connection = _FakeConnection(
+        role_row={
+            "rolname": "chain_canary_reader",
+            "rolsuper": False,
+            "rolbypassrls": False,
+        },
+        row={"state": "COMPLETED", "traffic_class": traffic_class},
+    )
+    monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
+
+    outcome = await _readback_projection_via_asyncpg(_DSN, str(uuid4()), 5.0)
+
+    assert outcome.traffic_class == traffic_class
+    state_query = next(query for query in connection.queries if "pg_roles" not in query)
+    assert "SELECT state, traffic_class" in state_query
+    assert "payload" not in state_query
 
 
 @pytest.mark.asyncio
@@ -473,7 +502,10 @@ async def test_an_unresolvable_identity_is_refused_not_assumed(
     least-privilege -- is the shape of every gate that reports green because it
     could not run.
     """
-    connection = _FakeConnection(role_row=None, row={"state": "COMPLETED"})
+    connection = _FakeConnection(
+        role_row=None,
+        row={"state": "COMPLETED", "traffic_class": "unclassified"},
+    )
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
 
     outcome = await _readback_projection_via_asyncpg(_DSN, str(uuid4()), 5.0)

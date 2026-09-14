@@ -124,7 +124,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_link_verdi
     ModelChainLinkVerdict,
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    DELEGATION_TRAFFIC_CLASSES,
     ModelProjectionReadbackOutcome,
+    TypeDelegationTrafficClass,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -215,6 +217,20 @@ _TERMINAL_FSM_STATES: frozenset[str] = frozenset({"COMPLETED", "FAILED"})
 _CURRENT_ROLE_PRIVILEGE_QUERY = (
     "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
 )
+
+
+def _delegation_traffic_class_from_row(
+    value: object,
+) -> TypeDelegationTrafficClass | None:
+    if value is None:
+        return "unclassified"
+    if value == "unclassified":
+        return "unclassified"
+    if value == "organic":
+        return "organic"
+    if value == "synthetic":
+        return "synthetic"
+    return None
 
 
 def _terminal_topics(request: ModelChainCanaryRequest) -> tuple[str, ...]:
@@ -577,7 +593,8 @@ async def _readback_projection_via_asyncpg(
             )
         row = await asyncio.wait_for(
             connection.fetchrow(
-                "SELECT state FROM delegation_workflow_state WHERE correlation_id = $1",
+                "SELECT state, traffic_class FROM delegation_workflow_state "
+                "WHERE correlation_id = $1",
                 correlation_id,
             ),
             timeout=_remaining(),
@@ -607,16 +624,29 @@ async def _readback_projection_via_asyncpg(
             status=EnumProjectionReadbackStatus.ROW_ABSENT
         )
     state = str(row["state"] or "")
+    traffic_class = _delegation_traffic_class_from_row(row["traffic_class"])
+    if traffic_class is None:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ERROR,
+            error=(
+                "delegation_workflow_state.traffic_class carried a value outside "
+                "the canonical OMN-18172 traffic-class enum"
+            ),
+        )
     if not state:
         return ModelProjectionReadbackOutcome(
             status=EnumProjectionReadbackStatus.ROW_ABSENT
         )
     if state.strip().upper() in _TERMINAL_FSM_STATES:
         return ModelProjectionReadbackOutcome(
-            status=EnumProjectionReadbackStatus.TERMINAL, state=state
+            status=EnumProjectionReadbackStatus.TERMINAL,
+            state=state,
+            traffic_class=traffic_class,
         )
     return ModelProjectionReadbackOutcome(
-        status=EnumProjectionReadbackStatus.STRANDED, state=state
+        status=EnumProjectionReadbackStatus.STRANDED,
+        state=state,
+        traffic_class=traffic_class,
     )
 
 
@@ -862,6 +892,7 @@ class HandlerChainCanary:
                     quarantine_status=EnumQuarantineCheckStatus.SKIPPED_NOT_CONFIGURED,
                     projection_readback_status=EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED,
                     projection_state="",
+                    projection_traffic_class="unclassified",
                     projection_error="",
                     ledger_status=EnumLedgerReplayStatus.SKIPPED_NOT_CONFIGURED,
                     ledger_detail="",
@@ -897,6 +928,7 @@ class HandlerChainCanary:
             (
                 projection_readback_status,
                 projection_state,
+                projection_traffic_class,
                 projection_error,
             ),
             (
@@ -942,6 +974,7 @@ class HandlerChainCanary:
             quarantine_status=quarantine_status,
             projection_readback_status=projection_readback_status,
             projection_state=projection_state,
+            projection_traffic_class=projection_traffic_class,
             projection_error=projection_error,
             ledger_status=ledger_status,
             ledger_detail=ledger_detail,
@@ -970,6 +1003,7 @@ class HandlerChainCanary:
             terminal_readback_records_scanned=terminal_scanned,
             terminal_readback_window_seconds=readback_window_s,
             terminal_readback_error=terminal_error,
+            projection_traffic_class=projection_traffic_class,
             quarantine_status=quarantine_status,
             quarantine_records_scanned=scanned,
             quarantine_error=quarantine_error,
@@ -1086,7 +1120,12 @@ class HandlerChainCanary:
         request: ModelChainCanaryRequest,
         probe_correlation_id: str,
         window_s: float,
-    ) -> tuple[EnumProjectionReadbackStatus, str, str]:
+    ) -> tuple[
+        EnumProjectionReadbackStatus,
+        str,
+        TypeDelegationTrafficClass,
+        str,
+    ]:
         """Read delegation_workflow_state for this run's correlation id.
 
         Never consults the bus terminal. That separation is the point of the
@@ -1108,7 +1147,12 @@ class HandlerChainCanary:
         """
         declared_name = request.projection_dsn_env.strip()
         if not declared_name:
-            return EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED, "", ""
+            return (
+                EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED,
+                "",
+                "unclassified",
+                "",
+            )
 
         # A DSN on the command line is refused whatever flag carried it. The
         # model validator already refuses one passed as this field's own
@@ -1119,6 +1163,7 @@ class HandlerChainCanary:
             return (
                 EnumProjectionReadbackStatus.REFUSED,
                 "",
+                "unclassified",
                 (
                     "a Postgres connection string was passed on the command "
                     f"line ({', '.join(offending_flags)}). argv is readable "
@@ -1134,6 +1179,7 @@ class HandlerChainCanary:
             return (
                 EnumProjectionReadbackStatus.SKIPPED_NOT_CONFIGURED,
                 "",
+                "unclassified",
                 (
                     f"the lane declares its projection DSN under {declared_name}, "
                     "and that variable is unset or empty in this process. No "
@@ -1146,7 +1192,7 @@ class HandlerChainCanary:
             probe_correlation_id,
             window_s,
         )
-        return outcome.status, outcome.state, outcome.error
+        return outcome.status, outcome.state, outcome.traffic_class, outcome.error
 
     async def _readback_terminal(
         self,
@@ -1525,6 +1571,7 @@ def _build_link_verdicts(
     quarantine_status: EnumQuarantineCheckStatus,
     projection_readback_status: EnumProjectionReadbackStatus,
     projection_state: str,
+    projection_traffic_class: TypeDelegationTrafficClass,
     projection_error: str,
     ledger_status: EnumLedgerReplayStatus,
     ledger_detail: str,
@@ -1537,7 +1584,10 @@ def _build_link_verdicts(
     """
     link5, link5_detail = _link_five(ledger_status, ledger_detail)
     link2, link2_detail = _link_two(
-        projection_readback_status, projection_state, projection_error
+        projection_readback_status,
+        projection_state,
+        projection_traffic_class,
+        projection_error,
     )
     link4, link4_detail = _link_four(terminal_readback_status, terminal_topic)
     link3, link3_detail = _link_three(
@@ -1646,6 +1696,7 @@ def _link_five(
 def _link_two(
     projection_readback_status: EnumProjectionReadbackStatus,
     projection_state: str,
+    projection_traffic_class: TypeDelegationTrafficClass,
     projection_error: str,
 ) -> tuple[EnumChainLinkStatus, str]:
     """Link 2: routing decision PUBLISHED and PROJECTED.
@@ -1660,7 +1711,8 @@ def _link_two(
         return (
             EnumChainLinkStatus.PASS,
             f"delegation_workflow_state reached {projection_state} for this "
-            "run's own correlation id — projection evidence, not logs",
+            "run's own correlation id with stored traffic_class="
+            f"{projection_traffic_class} — projection evidence, not logs",
         )
     if projection_readback_status is EnumProjectionReadbackStatus.STRANDED:
         return (
