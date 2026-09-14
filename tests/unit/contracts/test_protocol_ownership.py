@@ -52,6 +52,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
     # ProtocolDispatchEngine relocated to omnibase_spi.protocols.runtime (OMN-12549).
     "ProtocolEventBusLike": "protocols/protocol_event_bus_like.py",
+    "ProtocolIntrospectionEventBus": "protocols/protocol_introspection_event_bus.py",  # [RUNTIME] OMN-16979 consumer-owned Pattern B publish/subscribe contract plus envelope publishing, kept infra-local because it uses infra event-header and receipt models.
     "ProtocolConfirmationStrategy": "protocols/protocol_confirmation_strategy.py",  # [RUNTIME] OMN-15861 durability verdict layer; decides whether a publish receipt authorises a durable claim. Infra-local because it is bound to the infra bus/transport surface (ModelPublishReceipt, EnumInfraTransportType), not a cross-repo contract
     "ProtocolReadbackSource": "protocols/protocol_readback_source.py",  # [RUNTIME] OMN-15861 fact-reporting half of the confirmation seam; one authoritative surface answering "is the record at this coordinate there?"
     "ProtocolInmemoryHistorySource": "event_bus/confirmation/readback_source_inmemory.py",  # [RUNTIME] OMN-15861 one-method narrowing of the in-memory bus so the zero-infra readback source does not depend on the whole bus surface

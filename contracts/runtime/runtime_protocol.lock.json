@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.38.4",
-  "protocol_count": 22,
+  "package_version": "0.38.26",
+  "protocol_count": 23,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
       "runtime_checkable": false,
@@ -522,6 +522,105 @@
             }
           ],
           "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolIntrospectionEventBus": {
+      "runtime_checkable": true,
+      "method_count": 3,
+      "methods": {
+        "publish": {
+          "parameters": [
+            {
+              "name": "topic",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "key",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "bytes | None",
+              "default": null
+            },
+            {
+              "name": "value",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "bytes",
+              "default": null
+            },
+            {
+              "name": "headers",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelEventHeaders | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "ModelPublishReceipt | None"
+        },
+        "publish_envelope": {
+          "parameters": [
+            {
+              "name": "envelope",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "object",
+              "default": null
+            },
+            {
+              "name": "topic",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "key",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "bytes | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "subscribe": {
+          "parameters": [
+            {
+              "name": "topic",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "node_identity",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelNodeIdentity | None",
+              "default": "None"
+            },
+            {
+              "name": "on_message",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "Callable[[ModelEventMessage], Awaitable[None]] | None",
+              "default": "None"
+            },
+            {
+              "name": "group_id",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str | None",
+              "default": "None"
+            },
+            {
+              "name": "purpose",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "EnumConsumerGroupPurpose",
+              "default": "<EnumConsumerGroupPurpose.CONSUME: 'consume'>"
+            },
+            {
+              "name": "required_for_readiness",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "bool",
+              "default": "False"
+            }
+          ],
+          "return_annotation": "Callable[[], Awaitable[None]]"
         }
       }
     },
