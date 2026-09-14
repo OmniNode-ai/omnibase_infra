@@ -220,12 +220,29 @@ def test_no_service_declares_replicas_zero() -> None:
 def test_runtime_worker_declared_in_every_runtime_lane() -> None:
     """The worker that silently dropped (OMN-12988) must be a required service."""
     manifest = _load_manifest()
-    # OMN-18320: `prod` removed — the lab compose prod lane was retired 2026-09-13 and
-    # no longer exists in the manifest. `stability-test` is now the only compose runtime
-    # lane that must declare a worker, and it still carries the OMN-12988 guarantee.
-    runtime_lanes = ("stability-test",)
+    runtime_lanes = tuple(
+        lane
+        for lane, spec in manifest["lanes"].items()
+        if any(s["name"].endswith("-runtime") for s in spec["services"])
+    )
     assert runtime_lanes, "runtime-worker ratchet must cover at least one lane"
+    no_worker_lanes: set[str] = set()
     for lane in runtime_lanes:
         names = {s["name"] for s in manifest["lanes"][lane]["services"]}
         worker = next((n for n in names if n.endswith("runtime-worker")), None)
-        assert worker is not None, f"lane {lane!r} missing a runtime-worker service"
+        if worker is None:
+            no_worker_lanes.add(lane)
+            continue
+        worker_spec = next(
+            s for s in manifest["lanes"][lane]["services"] if s["name"] == worker
+        )
+        assert worker_spec.get("kind", "service") == "service", (
+            f"lane {lane!r} runtime-worker is not a required service: {worker_spec}"
+        )
+        assert worker_spec.get("replicas", 1) >= 1, (
+            f"lane {lane!r} runtime-worker must require at least one replica"
+        )
+    assert no_worker_lanes == {"dev", "judge", "lakshman"}, (
+        "a runtime lane without a runtime-worker must be explicitly accounted "
+        f"for; got {sorted(no_worker_lanes)}"
+    )
