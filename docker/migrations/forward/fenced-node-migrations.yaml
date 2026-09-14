@@ -758,3 +758,39 @@ fenced_node_migrations:
   # id it names is now 0037.
   - id: "node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
     ticket: "OMN-15683"
+  # 0041 is NEW (OMN-14894, 2026-09-14) and is 0023's orphaned second half.
+  # 0023 put ENABLE + FORCE RLS on delegation_events AND delegation_budget_state
+  # in one file; delegation_events recovered its posture from the operative
+  # 0037 after the uuid conversion, delegation_budget_state recovered nothing,
+  # and 0023 stays fenced as a SUPERSEDED id that now aborts. Measured
+  # 2026-09-14 on both surfaces: relrowsecurity=f, relforcerowsecurity=f, 0
+  # policies on the .201 compose dev lane and on the onex-dev RDS on the
+  # dev-system cluster — a TENANT-classified relation with no tenant boundary
+  # anywhere.
+  #
+  # IT IS FENCED ON ARRIVAL, AND THAT IS NOT A HOLD ON ITS OWN MERITS. 0041
+  # enables FORCE ROW LEVEL SECURITY and cannot be grandfathered — that
+  # snapshot does not grow, and a 2026-authored migration was never in the
+  # pre-guard tree it snapshots — so an id landing UNFENCED goes straight to
+  # the OMN-15336 item-4 guard (migration_declares_unclassified_force_rls),
+  # which is FATAL for a FORCE-enabling id that is neither fenced nor
+  # grandfathered and has never applied on that database. Landing it unfenced
+  # would break the migration run on every lane. The fence entry is the shape
+  # the guard's own message prescribes; the release is the separate,
+  # operator-sequenced step, exactly as recorded for 0036/0037 above.
+  #
+  # WHY THE 0026 HAZARD DOES NOT TRANSFER, since the sibling one row up is the
+  # reason a reader will be suspicious of this one: 0026 was released, applied
+  # and then MEASURED to refuse every write its async writer issued, because
+  # that writer called the adapter with no `tenant=` and the GUC fell back to
+  # the table-less house slug while the column held a uuid. Both of
+  # delegation_budget_state's write paths derive the GUC from the row they are
+  # writing — the sync adapter's `resolve_write_tenant(row.get("tenant_id"))`
+  # and the async `_dynamic_upsert`, which mirrors it byte-for-byte under the
+  # OMN-15919 seam — so GUC and column agree by construction. The table also
+  # holds ZERO rows on both surfaces (positive control on the same onex-dev
+  # connection: tenant_registry_mirror = 112), so no existing row can be
+  # locked out. The release is still a live operator decision and this entry
+  # is not it.
+  - id: "node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
+    ticket: "OMN-14894"
