@@ -43,17 +43,16 @@ on:
 
 # Pinned canonical auditor. A floating ref would let a sibling repo's merge
 # change this gate with no PR here; bump it deliberately, citing the OCC commit.
-# 3209f6d854 is `fix(OMN-18346): narrow review-gated carve-out back to
-# main-only (onex_change_control#9451)` — OMN-18287 (886264540572) widened the
-# carve-out from main-only to every audited branch of onex_change_control on
-# the premise that dev carried the identical codeowner-only review model as
-# main; that premise stopped holding on 2026-09-13 when
-# required_pull_request_reviews was removed from onex_change_control@dev under
-# the operator ruling at docs/tracking/ROLLING_WORK_LEDGER.md:7452 ("OCC
-# tickets are mechanical, like they're supposed to be"). #9451 reverts the
-# carve-out to main-only so dev is judged by the ordinary solo-dev invariant
-# it actually satisfies; the revision proved green at 0 failures across 9
-# checks for onex_change_control (102 checks across the full audited fleet).
+# 3209f6d854 is the verified merge commit for onex_change_control#9451
+# (https://github.com/OmniNode-ai/onex_change_control/pull/9451), which narrows
+# the OMN-18287 review-gated carve-out back to onex_change_control@main only.
+# The broader 886264540572 carve-out covered every audited branch because main
+# and dev both had a codeowner-only review model then; onex_change_control@dev
+# no longer has required_pull_request_reviews, so dev and other non-main
+# branches must use the ordinary solo-dev invariant instead of a review-model
+# exception. Post-merge proof for the pinned commit is the verified commit
+# object plus green onex_change_control runs 34795903923, 34795903932, and
+# 34796444365 for 3209f6d854.
 env:
   ONEX_CHANGE_CONTROL_REF: 3209f6d854d6723347a35b65e2fc11a0651de807
 
