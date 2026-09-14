@@ -294,6 +294,16 @@ jobs:
       - name: Check shared enum ownership
         run: python scripts/check_shared_enum_ownership.py src/
 
+      # OMN-18364. A hosted-runner step that invokes `uv` before its job
+      # installs it exits 127, and where that step's outcome feeds a receipt
+      # check the receipt records the missing interpreter as a substantive
+      # verdict. That is how candidate-boot-gate's OMN-18316 step stopped every
+      # candidate reaching staging for seventeen hours. Same checker as the
+      # `workflow-uv-available` pre-commit hook, so the local and CI verdicts
+      # cannot diverge.
+      - name: Check hosted-runner steps install uv before invoking it (OMN-18364)
+        run: python scripts/ci/check_workflow_uv_available.py
+
       - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
         run: uv run python scripts/ci_check_kafka_no_localhost_default.py
 
