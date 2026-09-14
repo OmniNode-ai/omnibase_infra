@@ -104,12 +104,45 @@ _GIT_TIMEOUT_SECONDS = 2
 
 @dataclass(frozen=True)
 class PathOnexIdentity:
-    executable: str
+    status: PathOnexResolutionStatus
+    executable: str | None = None
     identity: Path | None = None
     resolution_error: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.status is PathOnexResolutionStatus.RESOLVED:
+            if self.executable is None or self.identity is None:
+                raise ValueError(
+                    "resolved PATH onex identity requires executable and identity"
+                )
+            if self.resolution_error is not None:
+                raise ValueError("resolved PATH onex identity cannot carry an error")
+        elif self.status is PathOnexResolutionStatus.LOOKUP_FAILED:
+            if self.executable is not None or self.identity is not None:
+                raise ValueError(
+                    "failed PATH lookup cannot carry an executable identity"
+                )
+            if self.resolution_error is None:
+                raise ValueError("failed PATH lookup requires an error")
+        elif self.status is PathOnexResolutionStatus.RESOLVE_FAILED:
+            if self.executable is None or self.resolution_error is None:
+                raise ValueError(
+                    "failed PATH onex resolution requires executable and error"
+                )
+            if self.identity is not None:
+                raise ValueError("failed PATH onex resolution cannot carry identity")
 
-def _diagnostic_error(exc: OSError) -> str:
+
+class PathOnexResolutionStatus(StrEnum):
+    RESOLVED = "resolved"
+    LOOKUP_FAILED = "lookup_failed"
+    RESOLVE_FAILED = "resolve_failed"
+
+
+_DIAGNOSTIC_EXCEPTIONS = (OSError, RuntimeError, ValueError)
+
+
+def _diagnostic_error(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
@@ -181,20 +214,22 @@ def _path_onex_identity() -> PathOnexIdentity | None:
     """
     try:
         path_onex = shutil.which("onex")
-    except OSError as exc:
+    except _DIAGNOSTIC_EXCEPTIONS as exc:
         return PathOnexIdentity(
-            executable="<PATH lookup failed>",
+            status=PathOnexResolutionStatus.LOOKUP_FAILED,
             resolution_error=_diagnostic_error(exc),
         )
     if not path_onex:
         return None
     try:
         return PathOnexIdentity(
+            status=PathOnexResolutionStatus.RESOLVED,
             executable=path_onex,
             identity=Path(path_onex).resolve(),
         )
-    except OSError as exc:
+    except _DIAGNOSTIC_EXCEPTIONS as exc:
         return PathOnexIdentity(
+            status=PathOnexResolutionStatus.RESOLVE_FAILED,
             executable=path_onex,
             resolution_error=_diagnostic_error(exc),
         )
@@ -421,7 +456,7 @@ def check_omnimarket_drift(
                 if canonical_wrapper_path is not None
                 else None
             )
-        except OSError as exc:
+        except _DIAGNOSTIC_EXCEPTIONS as exc:
             canonical_wrapper_identity = None
             canonical_wrapper_resolution_error = _diagnostic_error(exc)
 
@@ -430,12 +465,13 @@ def check_omnimarket_drift(
                 "PATH did not resolve an 'onex' executable for this process."
             )
         elif path_onex_identity.resolution_error is not None:
-            if path_onex_identity.executable == "<PATH lookup failed>":
+            if path_onex_identity.status is PathOnexResolutionStatus.LOOKUP_FAILED:
                 path_diagnosis = (
                     "PATH lookup for 'onex' failed before a candidate could be "
                     f"resolved: {path_onex_identity.resolution_error}."
                 )
             else:
+                assert path_onex_identity.executable is not None
                 path_diagnosis = (
                     "PATH resolves 'onex' to "
                     f"{path_onex_identity.executable}, but that entry's "
@@ -450,6 +486,7 @@ def check_omnimarket_drift(
                     "canonical wrapper resolution failed: "
                     f"{canonical_wrapper_resolution_error}"
                 )
+            assert path_onex_identity.executable is not None
             path_diagnosis = (
                 "PATH resolves 'onex' to "
                 f"{path_onex_identity.executable}, but the canonical wrapper's "
@@ -461,6 +498,7 @@ def check_omnimarket_drift(
                 f"{path_onex_identity.executable}."
             )
         else:
+            assert path_onex_identity.executable is not None
             path_diagnosis = (
                 "PATH resolves 'onex' to an entry that is not the canonical "
                 f"wrapper by filesystem identity: {path_onex_identity.executable}. "

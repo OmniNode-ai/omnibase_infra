@@ -382,6 +382,42 @@ def test_not_installed_refusal_names_path_onex_resolution_error(
     assert "PATH did not resolve an 'onex' executable" not in message
 
 
+def test_not_installed_refusal_names_path_onex_runtime_resolution_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: symlink-loop style RuntimeErrors stay diagnostic-only."""
+    path_bin = tmp_path / "path-bin"
+    path_onex = path_bin / "onex"
+    path_bin.mkdir()
+    path_onex.write_text("#!/bin/sh\n", encoding="utf-8")
+    path_onex.chmod(0o755)
+    monkeypatch.setenv("PATH", str(path_bin))
+
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.Path.resolve",
+            side_effect=RuntimeError("symlink loop"),
+            autospec=True,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert str(path_onex) in message
+    assert "that entry's filesystem identity cannot be compared" in message
+    assert "RuntimeError: symlink loop" in message
+
+
 def test_not_installed_refusal_names_canonical_wrapper_resolution_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -428,6 +464,51 @@ def test_not_installed_refusal_names_canonical_wrapper_resolution_error(
     assert "canonical wrapper resolution failed: PermissionError" in message
     assert "blocked canonical wrapper" in message
     assert "PATH did not resolve an 'onex' executable" not in message
+
+
+def test_not_installed_refusal_names_canonical_wrapper_value_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: malformed canonical paths stay diagnostic-only."""
+    path_bin = tmp_path / "path-bin"
+    path_onex = path_bin / "onex"
+    canonical_wrapper = tmp_path / "omnibase_infra" / "scripts" / "onex"
+    path_bin.mkdir()
+    canonical_wrapper.parent.mkdir(parents=True)
+    path_onex.write_text("#!/bin/sh\n", encoding="utf-8")
+    path_onex.chmod(0o755)
+    canonical_wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+    canonical_wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(path_bin))
+    original_resolve = Path.resolve
+
+    def resolve_or_raise(path: Path) -> Path:
+        if path == canonical_wrapper:
+            raise ValueError("embedded null")
+        return original_resolve(path)
+
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.Path.resolve",
+            side_effect=resolve_or_raise,
+            autospec=True,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert "canonical wrapper's filesystem identity cannot be compared" in message
+    assert "ValueError: embedded null" in message
 
 
 def test_not_installed_refusal_names_missing_path_onex(
@@ -478,6 +559,11 @@ def test_not_installed_refusal_ignores_path_resolution_errors() -> None:
     )
     assert "OSError: bad PATH" in message
     assert "PATH did not resolve an 'onex' executable" not in message
+
+
+def test_path_onex_identity_rejects_impossible_state() -> None:
+    with pytest.raises(ValueError, match="requires executable and identity"):
+        guard.PathOnexIdentity(status=guard.PathOnexResolutionStatus.RESOLVED)
 
 
 def test_drift_check_fails_open_when_no_canonical_clone() -> None:
