@@ -745,3 +745,72 @@ def test_the_deployed_image_check_compares_the_reference_not_the_digest(
     assert "not compared" in deployed["evidence"]
     assert "sha256:" + "f" * 12 in deployed["evidence"]
     assert "sha256:" + "d" * 12 in deployed["evidence"]
+
+
+# ---------------------------------------------------------------------------
+# OMN-18354 -- the api build must NAME the runtime image it derives from.
+#
+# These pin the condition that took the lab lane out of service on 2026-09-14.
+# omninode_infra#1443 made stage 0 of ``docker/onex-api/Dockerfile`` a
+# ``FROM ${RUNTIME_IMAGE}`` with NO default -- deliberately, so a build cannot
+# silently certify a package closure nobody deployed. This caller passed no
+# build argument, so from that merge onward every api build exited 1 and the
+# whole run failed at ``images_pinned``: deploy-agent records be80676c
+# (02:56Z), 3f59b19c (03:21Z) and 8fd25217 (03:42Z), three consecutive runs,
+# each with the runtime family rebuilt and the api image NOT rebuilt.
+#
+# That is exactly the state OMN-18354 AC4 names -- a runtime repin that leaves
+# the previously built api image deployed against it -- reached through the
+# build rather than through the pin. The lane sat at onex-api 0.4.75 against
+# runtime 0.4.79 until a hand-run build supplied the argument.
+# ---------------------------------------------------------------------------
+
+
+def _api_build(runner: FakeRunner) -> list[str]:
+    return next(
+        b
+        for b in runner.argv_containing("docker build")
+        if API_IMAGE_NAME in " ".join(b)
+    )
+
+
+def test_the_api_build_names_the_runtime_image_it_derives_from(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """The api build carries --build-arg RUNTIME_IMAGE=<the runtime pin>.
+
+    Asserted against the pin THIS run promoted, not merely against the flag
+    being present: an api image derived from some other runtime image is the
+    same skew with a build argument attached.
+    """
+    runner = FakeRunner()
+    applier = _applier(tmp_path, overlay_source, runner)
+    applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
+
+    api = _api_build(runner)
+    runtime_image = f"{RUNTIME_IMAGE_NAME}:{STAMP}-{SHA[:8]}"
+    assert "--build-arg" in api, api
+    assert api[api.index("--build-arg") + 1] == f"RUNTIME_IMAGE={runtime_image}"
+    # The context stays last, where docker requires it.
+    assert api[-1] == "docker/onex-api"
+
+
+def test_the_runtime_build_arg_is_not_sprayed_across_the_other_builds(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """Only the api build takes it. The two migrate bundles have no such stage,
+    and a build argument a Dockerfile never declares is a warning on every run
+    that teaches a reader to ignore warnings."""
+    runner = FakeRunner()
+    applier = _applier(tmp_path, overlay_source, runner)
+    applier.apply(sha=SHA, stamp=STAMP, correlation_id=None)
+
+    migrate_builds = [
+        b
+        for b in runner.argv_containing("docker build")
+        if INFRA_MIGRATE_IMAGE_NAME in " ".join(b)
+        or CLOUD_MIGRATE_IMAGE_NAME in " ".join(b)
+    ]
+    assert len(migrate_builds) == 2, migrate_builds
+    for build in migrate_builds:
+        assert "--build-arg" not in build, build
