@@ -223,6 +223,11 @@ MIGRATE_CONTEXT = "."
 API_DOCKERFILE = "docker/onex-api/Dockerfile"
 API_CONTEXT = "docker/onex-api"
 
+#: OMN-18354. The build argument ``docker/onex-api/Dockerfile`` stage 0 requires
+#: and gives no default to. Named here rather than spelled at the call site so
+#: the string that must equal the Dockerfile's own ``ARG`` has one home.
+API_RUNTIME_IMAGE_BUILD_ARG = "RUNTIME_IMAGE"
+
 #: The five bootstrap keys ``k8s/onex-lab/lab_secret_store.py`` demands, minus
 #: the environment slug, which ``apply_lab_lane.sh`` passes as its own flag.
 #: Verbatim from that module's ``REQUIRED_KEYS``; the two halves of the chain
@@ -782,18 +787,24 @@ class LabOverlayApplier:
         context: str,
         target: str,
         timeout: int,
+        build_args: Mapping[str, str] | None = None,
     ) -> None:
         """Build one image from source and import it into the k3s content store.
 
         Every image this caller pins goes through here, and every one is rebuilt
         on every run. That is not thrift-blindness; it is the only shape in which
         a pin is guaranteed pullable. See ``_derive_pins``.
+
+        ``build_args`` is passed through verbatim, and only where a Dockerfile
+        declares the argument -- a build argument nothing declares is a warning
+        on every run, which teaches a reader to ignore warnings.
         """
-        self._run(
-            ["docker", "build", "-f", dockerfile, "-t", target, context],
-            timeout=timeout,
-            cwd=tree,
-        )
+        argv = ["docker", "build", "-f", dockerfile, "-t", target]
+        for name, value in (build_args or {}).items():
+            argv += ["--build-arg", f"{name}={value}"]
+        # The context is last because docker requires it there.
+        argv.append(context)
+        self._run(argv, timeout=timeout, cwd=tree)
         self._import_into_containerd(target)
 
     # -- prune -------------------------------------------------------------
@@ -1151,12 +1162,32 @@ class LabOverlayApplier:
             target=cloud_migrate_image,
             timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
         )
+        # OMN-18354. THE API BUILD NAMES THE RUNTIME IMAGE IT DERIVES FROM.
+        #
+        # Stage 0 of ``docker/onex-api/Dockerfile`` is ``FROM ${RUNTIME_IMAGE}``
+        # with NO default, deliberately: onex-api no longer asserts an
+        # omnimarket version of its own, it reads the one the runtime family
+        # installed. A default would be a third place a runtime image is named
+        # and a build that fell back to it would certify a closure nobody
+        # deployed.
+        #
+        # The value is the pin this run just promoted, so the two images on the
+        # lane resolve the same omnimarket by construction -- which is what
+        # ``apply_lab_lane.sh``'s zero-tolerance live comparator then checks
+        # from the running pods.
+        #
+        # Passing nothing here is not a missing nicety: from omninode_infra#1443
+        # onward it exits 1, and the whole run fails at ``images_pinned`` with
+        # the runtime family rebuilt and the api image not. Three consecutive
+        # records on 2026-09-14 (02:56Z, 03:21Z, 03:42Z) failed exactly there,
+        # leaving the lane at onex-api 0.4.75 against runtime 0.4.79.
         self.build_and_import(
             tree=overlay_tree,
             dockerfile=API_DOCKERFILE,
             context=API_CONTEXT,
             target=api_image,
             timeout=API_BUILD_TIMEOUT_SECONDS,
+            build_args={API_RUNTIME_IMAGE_BUILD_ARG: runtime_image},
         )
 
         resident = self.resident_images()
