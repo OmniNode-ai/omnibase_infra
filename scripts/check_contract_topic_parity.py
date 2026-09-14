@@ -404,6 +404,20 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.routing-decision.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.delegation-completed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.delegation-failed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    # --- delegation v2 terminal topics (OMN-15622, plan Task 1.2) ---
+    # Three topics because the v2 terminal family is three wire classes
+    # (omnibase_core#1653): completed, failed-routed, failed-unrouted. Both
+    # failure classes on one delegation-failed.v2 topic is a non-injective
+    # class -> topic map and is refused by assert_published_events_injective.
+    # Registered in omnibase_core contracts/topic_registry.yaml with a
+    # durability tier and a schema ref. Allowlisted here because the publisher
+    # contract is omnimarket-side and has not landed yet, and because this
+    # scanner reads only omnibase_infra's own nodes/ — same disposition as the
+    # v1 delegation entries above. Remove each entry when the omnimarket
+    # node_delegation_orchestrator contract declares the topic.
+    "onex.evt.omnibase-infra.delegation-completed.v2": "delegation v2 terminal; publisher contract (omnimarket node_delegation_orchestrator) not yet landed, so the topic suffix is declared ahead of its producer; registered in omnibase_core topic_registry.yaml | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omnibase-infra.delegation-failed-routed.v2": "delegation v2 terminal; publisher contract (omnimarket node_delegation_orchestrator) not yet landed, so the topic suffix is declared ahead of its producer; registered in omnibase_core topic_registry.yaml | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omnibase-infra.delegation-failed-unrouted.v2": "delegation v2 terminal; publisher contract (omnimarket node_delegation_orchestrator) not yet landed, so the topic suffix is declared ahead of its producer; registered in omnibase_core topic_registry.yaml | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omnibase-infra.quality-gate-result.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_quality_gate_reducer | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.delegation-routing-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.invocation.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
