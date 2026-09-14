@@ -669,14 +669,14 @@ def test_alter_table_add_quoted_serial_column_is_derived_as_sequence_backed(
 
     columns = sequence_backed_columns(tmp_path)
 
-    assert columns.get(("omninode_internal", "example")) == {"projection_cursor"}
+    assert columns.get(("omninode_internal", "example")) == {"Projection_Cursor"}
 
 
 @pytest.mark.unit
-def test_create_after_alter_preserves_accumulated_serial_columns(
+def test_create_if_not_exists_after_alter_preserves_accumulated_serial_columns(
     tmp_path: Path,
 ) -> None:
-    """A later CREATE must not erase an earlier ALTER-derived serial column."""
+    """A reconcile-pattern CREATE must not erase an earlier ALTER-derived column."""
     node = tmp_path / "nodes" / "node_example"
     node.mkdir(parents=True)
     (node / "0000_add_cursor_then_create.sql").write_text(
@@ -694,6 +694,49 @@ def test_create_after_alter_preserves_accumulated_serial_columns(
         "id",
         "projection_cursor",
     }
+
+
+@pytest.mark.unit
+def test_plain_create_after_create_replaces_serial_columns(tmp_path: Path) -> None:
+    """A second plain CREATE keeps replacement semantics rather than accumulating."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create_twice.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n"
+        "  id SERIAL PRIMARY KEY\n"
+        ");\n"
+        "CREATE TABLE omninode_internal.example (\n"
+        "  name TEXT PRIMARY KEY\n"
+        ");\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == set()
+
+
+@pytest.mark.unit
+def test_multi_clause_alter_table_derives_later_serial_column(
+    tmp_path: Path,
+) -> None:
+    """A comma-separated ALTER body still exposes a later SERIAL column."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_columns.sql").write_text(
+        "ALTER TABLE omninode_internal.example\n"
+        "    ADD COLUMN display_name TEXT,\n"
+        "    ADD COLUMN projection_cursor BIGSERIAL;\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {"projection_cursor"}
 
 
 @pytest.mark.unit

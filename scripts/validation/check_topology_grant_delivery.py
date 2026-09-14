@@ -195,7 +195,7 @@ CORPUS_RELPATH = "docker/migrations/forward"
 # ``CREATE TABLE [IF NOT EXISTS] [schema.]name (`` -- the opening paren is
 # required so the column body can be paren-matched from it.
 _CREATE_TABLE_RE = re.compile(
-    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"CREATE\s+TABLE\s+(?P<if_not_exists>IF\s+NOT\s+EXISTS\s+)?"
     r"(?P<relation>[A-Za-z0-9_.\"]+)\s*\(",
     re.IGNORECASE,
 )
@@ -330,6 +330,12 @@ def _unquote(identifier: str) -> str:
     return identifier.replace('"', "")
 
 
+def _postgres_identifier(identifier: str) -> str:
+    if identifier.startswith('"') and identifier.endswith('"'):
+        return _unquote(identifier)
+    return identifier.lower()
+
+
 def _corpus_files_in_apply_order(corpus_root: Path) -> list[Path]:
     """Corpus files in the order a lane applies them.
 
@@ -392,17 +398,31 @@ def sequence_backed_columns(corpus_root: Path) -> dict[tuple[str, str], set[str]
     for sql_path in _corpus_files_in_apply_order(corpus_root):
         text = sql_path.read_text(encoding="utf-8", errors="replace")
 
-        events: list[tuple[int, str, str, str]] = []
+        events: list[tuple[int, str, str, str, bool]] = []
         for match in _DROP_TABLE_RE.finditer(text):
-            events.append((match.start(), "drop", match.group("relation"), ""))
+            events.append((match.start(), "drop", match.group("relation"), "", False))
         for match in _CREATE_TABLE_RE.finditer(text):
-            events.append((match.start(), "create", match.group("relation"), ""))
+            events.append(
+                (
+                    match.start(),
+                    "create",
+                    match.group("relation"),
+                    "",
+                    bool(match.group("if_not_exists")),
+                )
+            )
         for match in _ALTER_TABLE_RE.finditer(text):
             events.append(
-                (match.start(), "alter", match.group("relation"), match.group("body"))
+                (
+                    match.start(),
+                    "alter",
+                    match.group("relation"),
+                    match.group("body"),
+                    False,
+                )
             )
 
-        for position, kind, relation, body in sorted(events):
+        for position, kind, relation, body, if_not_exists in sorted(events):
             key = _split_relation(relation)
             if kind == "drop":
                 definitions.pop(key, None)
@@ -415,14 +435,17 @@ def sequence_backed_columns(corpus_root: Path) -> dict[tuple[str, str], set[str]
             open_paren = text.index("(", position)
             column_body = _column_body(text, open_paren)
             serial = {
-                _unquote(m.group("column")).lower()
+                _postgres_identifier(m.group("column"))
                 for m in _SERIAL_COLUMN_RE.finditer(column_body)
             }
             identity = {
-                _unquote(m.group("column")).lower()
+                _postgres_identifier(m.group("column"))
                 for m in _IDENTITY_COLUMN_RE.finditer(column_body)
             }
-            definitions.setdefault(key, set()).update(serial - identity)
+            if if_not_exists:
+                definitions.setdefault(key, set()).update(serial - identity)
+            else:
+                definitions[key] = serial - identity
     return definitions
 
 
@@ -446,7 +469,7 @@ def _added_serial_columns(alter_body: str) -> set[str]:
         if _IDENTITY_DEFINITION_RE.search(definition):
             continue
         if _SERIAL_TYPE_RE.match(definition):
-            added.add(_unquote(match.group("column")).lower())
+            added.add(_postgres_identifier(match.group("column")))
     return added
 
 
