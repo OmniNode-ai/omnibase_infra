@@ -309,7 +309,158 @@ trusted_runner_variable:
   # target repository's default branch -- never from whether a file mentions the
   # variable -- because that enumeration is exactly the step this attempt
   # skipped.
-  repository_overrides: {}
+  # OMN-18205 PHASE 4, 2026-09-14. THE MAP IS NO LONGER EMPTY, AND THE REASON IS
+  # NOT THAT THE ARGUMENT ABOVE WAS WRONG. Every measurement recorded above
+  # stands. What changed is that GitHub-hosted compute STOPPED BEING AN
+  # AVAILABLE PLACEMENT in the private repositories. Read live at
+  # 2026-09-14T11:29:39Z, every `ubuntu-latest` job in omninode_infra completes
+  # in about four seconds with no runner assigned and the annotation "The job
+  # was not started because recent account payments have failed or your spending
+  # limit needs to be increased". Public repositories are unaffected because
+  # their hosted minutes are free. So the sequencing note that closes the phase-2
+  # entry above -- "pin those 13 previously-hosted jobs to a hosted literal, OR
+  # install yq and kustomize in the fleet runner image, BEFORE the shadow goes
+  # back" -- now has only one live branch: a hosted pin is a pin to a placement
+  # that cannot run at all.
+  #
+  # WHAT THE FLIP MOVES, enumerated from each job's parsed `runs-on` on
+  # omninode_infra's default branch (`dev`), which is the step the phase-2
+  # attempt skipped. 109 job definitions: 42 already read
+  # OMNI_INFRA_FLEET_RUNS_ON_JSON (fleet default, unset everywhere, so already on
+  # the fleet), 5 are fleet literals, 8 are reusable calls, 41 are hosted
+  # literals, and THIRTEEN read this seam. Those 13 are exactly the population
+  # this override governs:
+  #   build-and-push-omniweb.yml::report-public-surface-drift
+  #   ci.yml::repo_scripts_tests
+  #   contract-validation.yml::contract-validation
+  #   deploy-gate.yml::deploy-gate
+  #   host-sysctls-gate.yml::host-sysctls
+  #   infra-consistency-check.yml::infra-consistency
+  #   k8s-validate.yml::validate-onex-manifest-hygiene
+  #   lab-store-mirror-parity.yml::lab-store-mirror-parity
+  #   main-target-guard.yml::main-target-guard
+  #   stale-todo-gate.yml::stale-todo-gate
+  #   test-composite-actions.yml::test-install-kubeconform
+  #   test-composite-actions.yml::test-install-kustomize
+  #   todo-audit-on-merge.yml::todo-audit
+  #
+  # CORRECTION, made against live placement rather than against the expression,
+  # because the two disagree and the difference matters to anyone reading this
+  # to predict what a flip does. Those 13 do NOT all move on a pull request.
+  # Nine of them use the fork-guard shape (`head.repo != repository` chooses the
+  # public class) or read the seam unconditionally, so on a same-repository pull
+  # request they resolve to the seam and land on the fleet. The other FOUR --
+  # contract-validation, deploy-gate, infra-consistency-check and
+  # stale-todo-gate -- use the `github.event_name != 'pull_request'` shape, which
+  # sends every pull-request event to the PUBLIC class by construction. Those
+  # four move only on push and schedule events and stay hosted on pull requests.
+  # Measured, not inferred: after the write, `main-target-guard` ran on
+  # omninode-runner-74 and `lab-store-mirror-parity` on omninode-runner-2, while
+  # re-runs of contract-validation, deploy-gate, infra-consistency and
+  # stale-todo-gate in the same window all reported `labels=ubuntu-latest` with
+  # no runner assigned.
+  # It moves NOTHING ELSE. The 41 hosted literals stay hosted (they are AWS/ECR/
+  # SSM/kubectl deploy paths and two service-container test jobs), and the seam
+  # cannot reach them because a literal answers to no variable.
+  #
+  # THE TWO KNOWN FLEET BREAKS ARE NAMED RATHER THAN REDISCOVERED, and they are
+  # the same two the phase-2 revert found. `validate-onex-manifest-hygiene`
+  # installs yq with `sudo wget`; the fleet runner image has NEITHER -- probed
+  # live in omninode-runner-9 and -56, /etc/sudoers.d grants `runner` exactly one
+  # command (`rm -rf` of the work directory) and `wget` is absent. `repo_scripts_tests`
+  # runs `pytest tests/ --ignore=tests/scripts`, whose tests/k8s modules shell out
+  # to `kubectl kustomize`, and kubectl is on the hosted image and not on the
+  # fleet image, which is where `renderer 'kustomize' not found` came from.
+  # omninode_infra PR (OMN-18205) fixes both at cause -- a checksum-verified,
+  # sudo-free, curl-based install-yq composite action modelled on the existing
+  # install-kustomize, plus a pinned azure/setup-kubectl step -- and that PR is
+  # open. It cannot merge until the billing block clears, which is why the
+  # shadow is not sequenced behind it: leaving those two jobs on hosted is a
+  # guaranteed failure, moving them is a failure that is no worse and that the
+  # open PR converts into a pass. The other ELEVEN are checked and clean: none of
+  # the ten remaining workflows contains `sudo`, `apt-get`, `wget` or any other
+  # image-dependent install, and the two test-composite-actions jobs install
+  # their tools through the fleet-proven composites.
+  #
+  # WHAT THIS FLIP DOES NOT FIX, stated rather than left for someone to discover.
+  # THREE of the six required contexts on omninode_infra's `dev` branch --
+  # `verify / verify`, `kb-doc-gate / kb-doc-gate` and
+  # `call-reject-skip-token / scan / reject-skip-gate-token` -- route every
+  # pull-request event to OMNI_PUBLIC_PR_RUNS_ON_JSON, the untrusted class, by
+  # deliberate design in their reusable definitions. This seam cannot move them
+  # and MUST NOT: flipping the public-PR variable would put untrusted pull-request
+  # code on the lab fleet, which is the exact fork-isolation inversion OMN-16683
+  # exists to prevent. So merges in that repository stay blocked until the
+  # account-level billing failure is cleared by an operator. Routing reduces the
+  # bill and unbreaks the thirteen; it is not a substitute for paying the bill.
+  #
+  # `vars` RESOLUTION IN REUSABLE WORKFLOWS IS PROVEN, NOT ASSUMED, because the
+  # paragraph above depends on it. omniweb run 34780281040: `pr-title / check-title`,
+  # whose definition lives in onex_change_control (whose own shadow is hosted),
+  # executed on `omninode-runner-20` because the CALLER's shadow is the fleet
+  # pair. The control is in the same repository minutes earlier: run 34780242070,
+  # `kb-doc-gate / kb-doc-gate`, hosted on `GitHub Actions 1000000036`, because
+  # that definition sends dev-targeting pull requests to the public class. Same
+  # caller, same variables, opposite placements, explained entirely by the two
+  # expressions.
+  #
+  # omniweb IS DECLARED HERE FOR THE FIRST TIME AND NOTHING ABOUT IT CHANGES.
+  # Its shadow was set to the fleet pair on 2026-09-01T12:39:22Z and has been
+  # live ever since; it was the "one scope still on the fleet" the cloud-migration
+  # entry above records as a known gap folded into phase 4. This entry closes
+  # that gap by DECLARING the value and adding the repository to the audited
+  # `repositories` list below, so a future edit to it becomes a reported drift
+  # instead of an invisible one. No variable is written for omniweb by this
+  # change.
+  repository_overrides:
+    omninode_infra:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        Revert to '["ubuntu-latest"]' the moment GitHub-hosted compute is a working placement again AND any of the following is observed: the fleet busy fraction sustains above the saturation threshold in `route` below with omninode_infra jobs among the waiting set; a maintenance roll cannot converge because too few runners are idle to recreate; or any of the thirteen seam-driven jobs fails on a named fleet runner for a fleet-caused reason -- a missing tool on the runner image, a container it cannot reach from the test process, or a job that is QUEUED rather than running. A hosted pin is NOT a valid revert target while the billing annotation persists, because that placement does not execute.
+      activation_gate:
+        sustained_samples: >-
+          Four job-level samples of fleet busy/idle and org-wide queue depth, taken at least fifteen minutes apart across the first ninety minutes after the write. A single quiet-moment snapshot is explicitly NOT acceptance: that is the +11min mistake recorded in the entry above.
+        sustained_min_span_seconds: 5400
+        capacity_budget: >-
+          Thirteen job definitions, against the 88-runner omnibase-ci group. Baseline read immediately before the write on 2026-09-14: 88 online, 11 busy, 77 idle. This repository already places 47 job definitions on the fleet (42 via OMNI_INFRA_FLEET_RUNS_ON_JSON plus 5 fleet literals), so this is a roughly 28 percent increase in its own fleet footprint, not a new tenant. Budget: the group must keep at least the `min_idle_runners` of `route` below free at every sample; breaching it on two consecutive samples is a revert, not a discussion.
+        maintenance_roll_convergence: >-
+          The runner auto-bounce roller refuses to recreate a BUSY runner, so a fleet at 87/88 busy cannot converge -- the harm measured at 2026-09-12T01:54Z. Convergence is proven by one completed maintenance roll, or by the busy fraction returning below the budget above, within the sampling window.
+        evidence_companion_fate_isolation: >-
+          The 2026-09-12 flip starved the evidence companion of the pull request that recorded it. The OCC autobind and companion-effect publishers in this repository read the dedicated OMNI_OCC_AUTOBIND_RUNS_ON_JSON knob, which stays UNSET and is therefore untouched by this override; both publisher jobs were observed SUCCESS on omninode_infra run 34838472657 and 34838472516 while every hosted job in the same push failed, so the companion path is already isolated from this seam by construction.
+        positive_control_acceptance: >-
+          Acceptance is a named fleet runner on a previously-hosted job, not an absence of red. Accept when at least one of the eleven clean seam-driven jobs reports conclusion success with a populated `runner_name` matching `omninode-runner-*` and labels self-hosted,omnibase-ci. The positive control that the fleet itself is healthy is a fleet-literal job in the SAME run staying green -- the discriminator the phase-2 diagnosis used.
+    omni_home:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        Revert to '["ubuntu-latest"]' only once omni_home is no longer a private repository. This shadow is what places the repository's ONE required check on main, `kb-doc-gate / kb-doc-gate`, on the fleet; reverting it re-wedges every pull request there, which is the state it was set to fix.
+      activation_gate:
+        sustained_samples: >-
+          Set 2026-09-14T13:28:02Z to unwedge a repository whose required check had been QUEUED with no runner for over half an hour. The sustained sample is the repository's own pull-request traffic from that timestamp forward; this is one seam-driven job definition, not a load change.
+        sustained_min_span_seconds: 5400
+        capacity_budget: >-
+          ONE seam-driven job definition, a markdown doc-placement check that completes in seconds. Every other workflow in this repository is already pinned to the fleet label directly -- 18 of its 19 job definitions -- so this shadow adds a single short job to a group whose floor is the `min_idle_runners` of `route` below.
+        maintenance_roll_convergence: >-
+          Unchanged by one short-lived job. Convergence is proven by the busy fraction staying inside the budget above, the same measure as the omninode_infra entry.
+        evidence_companion_fate_isolation: >-
+          This repository publishes no OCC companion and calls neither publisher reusable, so there is no companion whose fate this shadow could share. It is the only audited repository for which that is true, and it is stated rather than left absent.
+        positive_control_acceptance: >-
+          Acceptance is the next `kb-doc-gate / kb-doc-gate` run on a pull request here reporting a populated `runner_name` matching `omninode-runner-*`. The negative state this replaces is on the record: that job QUEUED with no runner assigned, while sibling jobs in the same repository pinned to [self-hosted, omnibase-ci] finished in seconds.
+    omniweb:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        Revert to '["ubuntu-latest"]' only once omniweb is no longer a private repository, or if a job routed by this shadow fails on a named fleet runner for a fleet-caused reason. This entry DECLARES a value that has been live since 2026-09-01T12:39:22Z; it does not create one, so there is nothing to revert to a prior state.
+      activation_gate:
+        sustained_samples: >-
+          Not applicable prospectively: the value has been live for thirteen days. The sustained sample is the historical record -- omniweb's workflow runs over that window, 833 in the last seven days alone, with no fleet-attributed failure and no saturation event traced to this repository.
+        sustained_min_span_seconds: 1123200
+        capacity_budget: >-
+          Twelve seam-driven job definitions plus two fleet literals. Same 88-runner group and the same `min_idle_runners` floor as the omninode_infra entry above; this repository has never been a named contributor to a saturation reading.
+        maintenance_roll_convergence: >-
+          Unchanged by this entry. No roll has failed to converge for a reason attributed to omniweb in the thirteen days the value has been live.
+        evidence_companion_fate_isolation: >-
+          This repository's OCC autobind and companion-effect publishers read OMNI_OCC_AUTOBIND_RUNS_ON_JSON, which stays UNSET, so they are isolated from this seam by the same construction as omninode_infra above. Observed live: omniweb run 34780241951 companion path SUCCESS.
+        positive_control_acceptance: >-
+          Already satisfied and cited rather than promised: omniweb run 34780281040, `pr-title / check-title`, conclusion success on `omninode-runner-20` with labels self-hosted,omnibase-ci, against the control of run 34780242070 in the same repository landing hosted on `GitHub Actions 1000000036` because its definition routes dev-targeting pull requests to the public class.
 # OMN-18205, 2026-09-12: THE EXCLUSION ABOVE RESTS ON PRE-FIX EVIDENCE, and
 # this entry is the correction. The 5-of-5 self-hosted failures of "Customer
 # Path Boundary (OMN-18012)" recorded above all predate commit
@@ -555,6 +706,27 @@ repositories:
   # It declares no docker-CI or security-scan scope and carries neither shadow,
   # so the scoped-variable pass now asserts their ABSENCE here too.
   - omninode_infra
+  # OMN-18205 phase 4, 2026-09-14: added so omniweb is audited at all. Its
+  # trusted-seam shadow has read '["self-hosted","omnibase-ci"]' since
+  # 2026-09-01T12:39:22Z and was, until this line, the only self-hosted routing
+  # value at any scope in the organization that no audit surface ever looked at
+  # -- recorded as a known gap in the cloud-migration entry above. It is a
+  # PRIVATE repository, so its hosted minutes bill and the fleet is the cheaper
+  # placement; the value is not changed here, only declared and brought under
+  # audit. It declares no docker-CI or security-scan scope and carries neither
+  # shadow, so the scoped-variable pass now asserts their ABSENCE here too.
+  - omniweb
+  # OMN-18205 phase 4, 2026-09-14: added under the operator ruling that private
+  # repositories never run CI on GitHub-hosted runners. This repository is
+  # PRIVATE and carried NO routing shadow at all, so its ONE required check on
+  # `main` -- kb-doc-gate, implemented by a cross-repo reusable whose selector
+  # takes the TRUSTED branch for a same-repo pull request based on `main` --
+  # inherited the organisation value and sat QUEUED with no runner while every
+  # other job in the repository, all of them pinned to the fleet label
+  # directly, finished in seconds. The shadow declared above is what moved it.
+  # It declares no docker-CI or security-scan scope and carries neither shadow,
+  # so the scoped-variable pass now asserts their ABSENCE here too.
+  - omni_home
 hosted_runner_allowlist:
   - path: .github/workflows/application-acl-postgres16-proof.yml
     reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."
