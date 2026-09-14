@@ -1769,3 +1769,102 @@ class TestGuardManagedHooksPath:
         )
         fields = _parse_result_line(result.stdout)
         assert fields.get("precommit_hooks") == "WARN", f"fields={fields!r}"
+
+
+@pytest.mark.unit
+class TestRegistryWideBareScan:
+    """OMN-7600's bare-repo detector only ever scanned the repos NAMED on the
+    invocation (OMN-16497).
+
+    ``REPOS`` is the full registry list until an argument overrides it
+    wholesale, and the bare scan iterates ``REPOS``. So every targeted pull --
+    ``pull-all.sh omnidash omninode_infra``, which is what a lane actually
+    types -- silently skipped the corruption scan for every other clone.
+
+    Measured 2026-09-14: ``$OMNI_HOME/omniclaude`` carried ``core.bare=true``
+    and had not fast-forwarded since 2026-09-11, fifteen commits behind
+    ``origin/dev``. It is the symlink target of the plugin every live
+    PreToolUse hook executes from, so every guard merged in that window was
+    dark on every running session. Nothing reported it, because no invocation
+    in that window happened to name ``omniclaude``.
+
+    OMN-7600's own prevention requirement is "check core.bare on each repo and
+    fail loudly if ANY are bare". Registry-wide is what that says.
+    """
+
+    def _registry(self, omni_home: Path, names: list[str]) -> None:
+        for name in names:
+            _make_simple_repo_source(omni_home, name)
+
+    def test_bare_clone_outside_the_named_repos_is_still_detected(
+        self, tmp_path: Path
+    ) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        self._registry(omni_home, ["omnidash"])
+
+        # The corruption is in omniclaude; the invocation names only omnidash.
+        _git(["config", "core.bare", "true"], cwd=omni_home / "omniclaude")
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnidash"])
+
+        assert result.returncode != 0, (
+            "a bare clone anywhere in the registry must fail the run loudly; "
+            f"stdout={result.stdout!r}"
+        )
+        assert "omniclaude" in result.stdout, result.stdout
+        assert "core.bare" in result.stdout, result.stdout
+        assert "core.bare false" in result.stdout, result.stdout
+
+    def test_a_named_bare_clone_is_still_detected(self, tmp_path: Path) -> None:
+        """The pre-existing behaviour must not regress."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        _git(["config", "core.bare", "true"], cwd=omni_home / "omniclaude")
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omniclaude"])
+        assert result.returncode != 0, result.stdout
+        assert "omniclaude" in result.stdout, result.stdout
+
+    def test_a_clean_registry_is_not_reported_as_corrupt(self, tmp_path: Path) -> None:
+        """Permanent positive control.
+
+        Without it, a scan that reported every clone as bare would pass the two
+        tests above.
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        self._registry(omni_home, ["omnidash"])
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnidash"])
+        assert "Bare repo corruption" not in result.stdout, result.stdout
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_the_report_says_which_bare_clones_were_in_scope(
+        self, tmp_path: Path
+    ) -> None:
+        """A registry-wide abort on a targeted pull has to say WHY it aborted
+        on a repo the caller did not ask for, or it reads as a bug."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        self._registry(omni_home, ["omnidash"])
+        _git(["config", "core.bare", "true"], cwd=omni_home / "omniclaude")
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omnidash"])
+        assert "not named on this invocation" in result.stdout, result.stdout

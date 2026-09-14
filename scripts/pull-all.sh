@@ -28,6 +28,10 @@ REPOS=(
   onex_change_control
 )
 
+# The full registry, captured BEFORE any caller override. The bare-clone scan
+# below reads this, never the possibly-narrowed REPOS -- see OMN-16497 there.
+ALL_REGISTRY_REPOS=("${REPOS[@]}")
+
 # Allow caller to override which repos to pull
 if [[ $# -gt 0 ]]; then
   REPOS=("$@")
@@ -230,8 +234,25 @@ _kill_descendants_leaf_first() {
 # === Pre-pull validation: detect bare repo corruption (OMN-7600) ===
 # If core.bare=true, git pull updates refs but NOT the working tree, causing
 # stale files. This is corruption in omni_home — repos must be non-bare clones.
+#
+# SCANS THE WHOLE REGISTRY, never the narrowed REPOS (OMN-16497). The original
+# scan iterated REPOS, which a caller argument overwrites wholesale -- so every
+# targeted pull, which is what a lane actually types, silently skipped the
+# corruption scan for every clone it did not name.
+#
+# Measured 2026-09-14: $OMNI_HOME/omniclaude carried core.bare=true and had not
+# fast-forwarded since 2026-09-11, fifteen commits behind origin/dev. It is the
+# symlink target of the plugin every live PreToolUse hook executes from, so
+# every guard merged in that window existed in git history and was dark on
+# every running session, fleet-wide, for at least three days. Nothing reported
+# it, because no invocation in that window happened to name `omniclaude`.
+#
+# OMN-7600's own prevention requirement reads "check core.bare on each repo and
+# fail loudly if ANY are bare". Registry-wide is what that says, and a bare
+# clone outside the requested set still aborts: it is silent corruption whose
+# whole danger is that it is never the repo you were looking at.
 BARE_REPOS=()
-for repo in "${REPOS[@]}"; do
+for repo in "${ALL_REGISTRY_REPOS[@]}"; do
   dir="$OMNI_HOME/$repo"
   [[ -d "$dir" ]] || continue
   is_bare=$(git -C "$dir" rev-parse --is-bare-repository 2>/dev/null || echo "unknown")
@@ -248,7 +269,19 @@ if [[ ${#BARE_REPOS[@]} -gt 0 ]]; then
   echo "updates refs but NOT the working tree — files go stale silently."
   echo ""
   for repo in "${BARE_REPOS[@]}"; do
-    echo "  CORRUPT  $repo"
+    in_scope="no"
+    for named in "${REPOS[@]}"; do
+      [[ "$named" == "$repo" ]] && { in_scope="yes"; break; }
+    done
+    if [[ "$in_scope" == "yes" ]]; then
+      echo "  CORRUPT  $repo"
+    else
+      # Say why the run aborted on a repo the caller did not ask for, or the
+      # abort reads as a bug in the script rather than a fact about the host.
+      echo "  CORRUPT  $repo (not named on this invocation — the registry-wide"
+      echo "           scan found it; silent bare corruption is never the repo"
+      echo "           you were looking at)"
+    fi
     echo "           Fix: git -C $OMNI_HOME/$repo config core.bare false"
     echo "           Then: git -C $OMNI_HOME/$repo reset --hard HEAD"
   done
