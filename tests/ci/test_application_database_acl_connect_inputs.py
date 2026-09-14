@@ -12,13 +12,37 @@ cross-checks them against the typed deployment topology, and blocks when the two
 disagree -- but the deployment CONNECT universe is a frozenset of eight physical
 databases while the typed topology declares only three.
 
-The five it cannot declare are not a bug to be fixed by writing them down. There
-is no authority that says which principal connects to ``keycloak``,
-``omniclaude``, ``omnimemory``, ``omninode_cloud`` or ``umami``; inventing one
-would encode a guess as live privilege, which is the precise mistake the whole
-matrix exists to prevent. So they are recorded here, by name, as the open
-question -- and the gap becomes a named red line rather than five entries buried
-in a 300-plus blocker wall that nobody reads to the end.
+The five it cannot declare were first recorded here as five open operator
+questions. That framing was WRONG and OMN-15418 retires it. Which service owns
+each of those databases, which identity connects to it, and on which lanes it
+exists are all recorded in committed deployment sources -- compose files, k8s
+overlays, provisioning scripts and service ownership manifests -- so they are
+DERIVED below, each carrying the file and line it was read from. An operator
+question is what remains when no source answers; none of these five is that.
+
+What the derivation found, and it is the same answer for all five: every one of
+them is blocked from becoming a ``ModelDeploymentTopology`` database entry by a
+MODEL constraint, not by a missing decision. ``ModelDeploymentTopologyDatabase``
+requires a ``checksum_ledgers`` entry whose ``stream_column``, ``domain_column``,
+``version_column`` and ``checksum_column`` are four DISTINCT columns
+(``omnibase_core`` ``model_deployment_topology_database_migration_ledger.py``,
+``ledger_columns_are_distinct``). Two of the five are vendored databases carrying
+a vendor's own ledger, and the other three carry an OmniNode ledger with at most
+two of the four columns. Writing a conforming ledger for any of them would be
+inventing a fact -- the same mistake the earlier "invent a principal" framing was
+right to refuse. So the derivation is recorded and the topology entry is not
+written, and the reason is a named code constraint a reader can go and check.
+
+A lane row carrying NO principal is a derived finding, not an omission. Measured
+against the 2026-09-14 read-only pre-change ACL snapshot of the .201 dev lane and
+its `pg_stat_activity` sample: `omniclaude`, `omnimemory` and `omninode_cloud`
+exist there owned by the bootstrap superuser with no other grantee, their
+`role_*` logins do not exist on that lane at all, and nothing connected to any of
+them for the whole sample. `umami` is not present on that lane in any form.
+`keycloak` is, and the only identity observed reaching it is the superuser the
+compose file configures Keycloak with. The sample is a 5h22m window, not the
+full day the principal inventory needs, so "nothing observed" here bounds what
+was seen and is never read as proof a database is unused.
 
 What this module enforces:
 
@@ -40,6 +64,7 @@ returned nothing would read exactly like a gap that had been closed.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +78,7 @@ from omnibase_core.enums.enum_database_privilege import EnumDatabasePrivilege
 from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
 from omnibase_infra.validation.application_database_acl import (
     _DEPLOYMENT_CONNECT_DATABASES,
+    _SQL_IDENTIFIER,
 )
 from omnibase_infra.validation.models.model_application_database_acl_matrix import (
     ModelApplicationDatabaseAclMatrix,
@@ -89,19 +115,189 @@ _DECLARED_CONNECT: dict[str, tuple[str, tuple[str, ...]]] = {
     "omniintelligence": ("omniintelligence", ("role_omniintelligence",)),
 }
 
-# The open question, stated as data. These five are inside the approved
-# eight-database deployment CONNECT scope and NO typed topology instance carries
-# a ModelDeploymentTopology entry for them, so no expected CONNECT set can be
-# derived for any of them. Each needs an operator answer naming the service
-# identity that connects; until then the matrix is correctly BLOCKED on them.
+
+@dataclass(frozen=True)
+class UndeclaredDeploymentDatabase:
+    """One in-scope physical database the typed topology does not declare.
+
+    Every field is DERIVED from a committed deployment source, never asserted.
+    ``provenance`` carries the exact ``repo:path:line`` each fact was read from,
+    and ``blocked_by`` names the model constraint that stops the derivation from
+    becoming a ``ModelDeploymentTopology`` entry.
+    """
+
+    physical_name: str
+    owner_service: str
+    # Lane -> the role names declared or observed to connect there. Role NAMES
+    # only; no credential, DSN or secret reference appears anywhere in here.
+    connecting_principals: tuple[tuple[str, tuple[str, ...]], ...]
+    absent_from_lanes: tuple[str, ...]
+    migration_ledger: str
+    blocked_by: str
+    provenance: tuple[str, ...]
+
+    @property
+    def principal_names(self) -> frozenset[str]:
+        """Return every role name this database is derived to be reached by."""
+        return frozenset(
+            role for _, roles in self.connecting_principals for role in roles
+        )
+
+
+# Repositories a provenance citation may name. A citation into anything else is
+# a typo or a source this repo has no business reading, and fails structurally.
+_PROVENANCE_REPOS = frozenset(
+    {"omnibase_infra", "omnibase_core", "omninode_infra", "omniclaude", "omnimemory"}
+)
+
+# Provenance citations that live in THIS repository, so the test can open the
+# file and prove the cited line still says what the derivation claims. A
+# cross-repo citation cannot be read from omnibase_infra CI and is pinned by its
+# quoted text instead -- stated plainly rather than dressed up as an assertion.
+_IN_REPO_PROVENANCE: dict[str, str] = {
+    "omnibase_infra:docker/docker-compose.infra.yml:854": "KC_DB_USERNAME: postgres",
+    "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
+        "CREATE DATABASE keycloak"
+    ),
+}
+
+# The five, derived. This table REPLACES the five operator questions that stood
+# here. Every entry is falsifiable: open the cited file at the cited line.
+_UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
+    UndeclaredDeploymentDatabase(
+        physical_name="keycloak",
+        owner_service="keycloak (vendored identity provider, Liquibase-managed)",
+        connecting_principals=(
+            # The compose lanes point Keycloak at the bootstrap superuser; the
+            # cloud plane gives it a dedicated owning role of the same name.
+            (
+                "compose (.201 dev): configured carrier, observed connecting",
+                ("postgres",),
+            ),
+            (
+                "cloud (RDS omninode-dev-postgres, auth namespace): declared",
+                ("keycloak",),
+            ),
+        ),
+        absent_from_lanes=("onex-lab",),
+        migration_ledger="vendor-owned: Keycloak Liquibase (databasechangelog)",
+        blocked_by=(
+            "vendored database -- create-shared-owner-role.sh excludes it from "
+            "OmniNode DDL ownership by name, and it carries no OmniNode "
+            "four-column checksum ledger"
+        ),
+        provenance=(
+            "omnibase_infra:docker/docker-compose.infra.yml:854",
+            "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
+            "omninode_infra:k8s/auth/keycloak-values.yaml:32",
+            "omninode_infra:scripts/init-databases.sh:603",
+            "omninode_infra:scripts/create-shared-owner-role.sh:24",
+        ),
+    ),
+    UndeclaredDeploymentDatabase(
+        physical_name="omniclaude",
+        owner_service="omniclaude",
+        connecting_principals=(
+            (
+                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
+                (),
+            ),
+            ("public-cluster dev namespace: declared", ("role_omniclaude",)),
+        ),
+        absent_from_lanes=("onex-lab", "onex-dev", "onex-prod"),
+        migration_ledger="public.schema_migrations(filename, applied_at)",
+        blocked_by=(
+            "ledger carries neither a stream, domain, version nor checksum "
+            "column, so no conforming checksum_ledgers entry exists"
+        ),
+        provenance=(
+            "omninode_infra:k8s/dev/postgres/init-databases-cm.yaml:90",
+            "omninode_infra:scripts/create-shared-owner-role.sh:114",
+            "omniclaude:scripts/init-db.sh:77",
+        ),
+    ),
+    UndeclaredDeploymentDatabase(
+        physical_name="omnimemory",
+        owner_service="omnimemory",
+        connecting_principals=(
+            (
+                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
+                (),
+            ),
+            ("public-cluster dev namespace: declared", ("role_omnimemory",)),
+        ),
+        absent_from_lanes=("onex-lab", "onex-dev", "onex-prod"),
+        migration_ledger="none -- flat .sql corpus with no ledger relation",
+        blocked_by=(
+            "the service applies raw migration files and records nothing, so "
+            "there is no ledger relation to declare at all"
+        ),
+        provenance=(
+            "omninode_infra:k8s/dev/postgres/init-databases-cm.yaml:91",
+            "omninode_infra:scripts/create-shared-owner-role.sh:114",
+            "omnimemory:deployment/database/migrations/001_create_subscription_tables.sql:1",
+        ),
+    ),
+    UndeclaredDeploymentDatabase(
+        physical_name="omninode_cloud",
+        owner_service="onex_api (cloud control plane)",
+        connecting_principals=(
+            (
+                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
+                (),
+            ),
+            ("onex-lab: declared and owning", ("role_omninode_cloud",)),
+            (
+                "public-cluster dev namespace: declared",
+                ("role_omninode_cloud",),
+            ),
+        ),
+        absent_from_lanes=(),
+        migration_ledger="public.schema_migrations(version, applied_at, checksum)",
+        blocked_by=(
+            "ledger carries two of the four required columns -- no stream and "
+            "no domain column -- so ledger_columns_are_distinct cannot be met"
+        ),
+        provenance=(
+            "omninode_infra:db/migrations/application-relation-ownership.yaml:6",
+            "omninode_infra:k8s/migrations/omninode-cloud-migrate.yaml:354",
+            "omninode_infra:k8s/onex-lab/substitutions/postgres.yaml:355",
+            "omninode_infra:db/migrations/00000000_migrations_tracking.sql:70",
+        ),
+    ),
+    UndeclaredDeploymentDatabase(
+        physical_name="umami",
+        owner_service="umami (vendored web analytics, Prisma-managed)",
+        connecting_principals=(
+            ("onex-dev, onex-prod, onex-public: declared and owning", ("umami",)),
+        ),
+        # Measured, not assumed: the 2026-09-14 pre-change ACL snapshot of the
+        # .201 dev lane enumerates every non-template database and umami is not
+        # among them, so a compose-lane CONNECT proof cannot cover it.
+        absent_from_lanes=(
+            "compose (.201 dev)",
+            "onex-lab",
+            "public-cluster dev namespace",
+        ),
+        migration_ledger="vendor-owned: Prisma (_prisma_migrations)",
+        blocked_by=(
+            "vendored database -- create-shared-owner-role.sh excludes it from "
+            "OmniNode DDL ownership by name, and it carries no OmniNode "
+            "four-column checksum ledger"
+        ),
+        provenance=(
+            "omninode_infra:k8s/onex-dev/umami/deployment.yaml:88",
+            "omninode_infra:k8s/onex-prod/umami/deployment.yaml:81",
+            "omninode_infra:scripts/create-shared-owner-role.sh:24",
+        ),
+    ),
+)
+
+# Derived from the table above, never written twice: a database can only leave
+# the undeclared set by gaining a topology declaration, and it can only enter by
+# someone adding a derivation row that says why it has none.
 _UNDECLARED_DEPLOYMENT_DATABASES = frozenset(
-    {
-        "keycloak",
-        "omniclaude",
-        "omnimemory",
-        "omninode_cloud",
-        "umami",
-    }
+    entry.physical_name for entry in _UNDECLARED_DERIVATION
 )
 
 
@@ -272,3 +468,174 @@ def test_committed_candidate_still_carries_no_connect_expectation() -> None:
         "matrix requires a typed principal_inventory source for every database"
         in matrix.blockers
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-15418: the derivation that retired the five operator questions.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("entry", _UNDECLARED_DERIVATION, ids=lambda e: e.physical_name)
+def test_every_undeclared_database_carries_a_complete_derivation(
+    entry: UndeclaredDeploymentDatabase,
+) -> None:
+    """No entry may be a name with a shrug attached.
+
+    An entry that named the database and nothing else is exactly the open
+    question this table replaced, so each of the four derived facts -- owner
+    service, connecting principals, ledger, and the reason the topology cannot
+    hold it -- is required rather than optional.
+    """
+    assert entry.owner_service, f"{entry.physical_name}: no owner service derived"
+    assert entry.connecting_principals, (
+        f"{entry.physical_name}: no connecting principal derived. A database "
+        "nothing connects to is a finding in its own right and must be recorded "
+        "as one, not left empty."
+    )
+    assert entry.migration_ledger, f"{entry.physical_name}: no ledger recorded"
+    assert entry.blocked_by, (
+        f"{entry.physical_name}: no reason recorded for why this derivation is "
+        "not a ModelDeploymentTopology entry. Without it the row reads as an "
+        "unanswered question again."
+    )
+    assert entry.provenance, f"{entry.physical_name}: no provenance cited"
+
+
+@pytest.mark.parametrize("entry", _UNDECLARED_DERIVATION, ids=lambda e: e.physical_name)
+def test_every_derived_principal_is_a_plain_role_name(
+    entry: UndeclaredDeploymentDatabase,
+) -> None:
+    """Role names only: this table must never become a place a DSN can hide."""
+    for principal in entry.principal_names:
+        assert _SQL_IDENTIFIER.fullmatch(principal), (
+            f"{entry.physical_name}: derived principal {principal!r} is not a "
+            "bare SQL role name. A URL, host or credential must never appear in "
+            "this table."
+        )
+
+
+@pytest.mark.parametrize("entry", _UNDECLARED_DERIVATION, ids=lambda e: e.physical_name)
+def test_every_provenance_citation_is_resolvable(
+    entry: UndeclaredDeploymentDatabase,
+) -> None:
+    """Each citation names an allowlisted repo, a relative path, and a line.
+
+    A citation is the whole value of this table -- it is what makes a derived
+    fact checkable instead of asserted -- so a malformed one fails here rather
+    than misleading the next reader.
+    """
+    for citation in entry.provenance:
+        repo, _, remainder = citation.partition(":")
+        path, _, line = remainder.rpartition(":")
+        assert repo in _PROVENANCE_REPOS, (
+            f"{entry.physical_name}: citation {citation!r} names repository "
+            f"{repo!r}, which is not one of {sorted(_PROVENANCE_REPOS)}"
+        )
+        assert path and not path.startswith("/"), (
+            f"{entry.physical_name}: citation {citation!r} must carry a "
+            "repository-relative path, never an absolute one"
+        )
+        assert line.isdigit() and int(line) > 0, (
+            f"{entry.physical_name}: citation {citation!r} must end in a line number"
+        )
+
+
+def test_in_repo_provenance_still_says_what_the_derivation_claims() -> None:
+    """Open the in-repo cited lines and read them.
+
+    This is the only half of the provenance that omnibase_infra CI can actually
+    verify; the cross-repo citations are recorded text, checked by a reader, and
+    the next test pins that limit rather than leaving it implied.
+    """
+    assert _IN_REPO_PROVENANCE, "the in-repo provenance pin cannot be empty"
+
+    cited = {
+        citation
+        for entry in _UNDECLARED_DERIVATION
+        for citation in entry.provenance
+        if citation.startswith("omnibase_infra:")
+    }
+    assert cited == set(_IN_REPO_PROVENANCE), (
+        "every omnibase_infra citation must be pinned to its expected text, and "
+        "every pin must be cited by a derivation entry; drifted="
+        f"{sorted(cited ^ set(_IN_REPO_PROVENANCE))!r}"
+    )
+
+    for citation, expected in _IN_REPO_PROVENANCE.items():
+        _, _, remainder = citation.partition(":")
+        path, _, line = remainder.rpartition(":")
+        lines = (_ROOT / path).read_text(encoding="utf-8").splitlines()
+        assert int(line) <= len(lines), (
+            f"{citation}: file has only {len(lines)} lines, so the citation has rotted"
+        )
+        assert expected in lines[int(line) - 1], (
+            f"{citation}: line {line} no longer contains {expected!r}. Either "
+            "the source moved and the citation needs updating, or the derived "
+            f"fact changed. Line reads: {lines[int(line) - 1]!r}"
+        )
+
+
+def test_positive_control_the_provenance_reader_can_fail() -> None:
+    """The zero above is real: the same read, given a wrong line, disagrees.
+
+    Without this, a reader that silently matched everything would make the pin
+    above pass for a citation that had rotted completely.
+    """
+    citation, expected = next(iter(_IN_REPO_PROVENANCE.items()))
+    _, _, remainder = citation.partition(":")
+    path, _, line = remainder.rpartition(":")
+    lines = (_ROOT / path).read_text(encoding="utf-8").splitlines()
+
+    wrong = [text for text in lines if expected not in text]
+    assert wrong, (
+        f"positive control cannot run: every line of {path} contains "
+        f"{expected!r}, so a passing pin proves nothing"
+    )
+
+    # The pin must be LINE-sensitive, not merely file-sensitive: the neighbour
+    # of the cited line must not satisfy it. A pin that any line could satisfy
+    # would pass for a citation whose line number was wrong by a hundred.
+    neighbour = lines[int(line) - 2]
+    assert expected not in neighbour, (
+        f"positive control failed: line {int(line) - 1} of {path} also contains "
+        f"{expected!r}, so the pin does not discriminate between lines"
+    )
+
+
+@pytest.mark.parametrize("entry", _UNDECLARED_DERIVATION, ids=lambda e: e.physical_name)
+def test_a_derived_database_is_still_absent_from_every_topology_instance(
+    entry: UndeclaredDeploymentDatabase,
+) -> None:
+    """The derivation is a record of a gap, so the gap must still be open.
+
+    The day a database here gains a real topology declaration, its row stops
+    being true and has to be deleted rather than left to contradict the
+    topology. That deletion is what shrinking the undeclared set means.
+    """
+    for instance in _TOPOLOGY_INSTANCES:
+        declared = {
+            database.physical_name
+            for database in _load_topology(instance).databases.values()
+        }
+        assert entry.physical_name not in declared, (
+            f"{instance}: {entry.physical_name} now HAS a topology declaration, "
+            "so its derivation row is stale. Delete the row and pin its CONNECT "
+            "allowlist in _DECLARED_CONNECT instead."
+        )
+
+
+def test_the_derivation_covers_the_undeclared_set_exactly() -> None:
+    """The table and the gap are the same set, in both directions.
+
+    A derivation row for a database that is not in the deployment scope is dead
+    weight; a scope database with no row is the unanswered question returning.
+    """
+    derived = {entry.physical_name for entry in _UNDECLARED_DERIVATION}
+    assert derived == set(_UNDECLARED_DEPLOYMENT_DATABASES)
+    assert derived <= set(_DEPLOYMENT_CONNECT_DATABASES), (
+        "a derivation row names a database outside the approved deployment "
+        f"CONNECT scope: {sorted(derived - set(_DEPLOYMENT_CONNECT_DATABASES))!r}"
+    )
+    assert len({entry.physical_name for entry in _UNDECLARED_DERIVATION}) == len(
+        _UNDECLARED_DERIVATION
+    ), "a database is derived twice"
