@@ -42,8 +42,9 @@ For every ``(principal, schema, table)`` the topology declares under
 <principal>`` statement somewhere in the vendored forward-migration corpus. It
 does NOT check privilege sets, ordering, or whether the migration has been
 applied on any particular lane -- a live-lane assertion belongs in the migration
-itself, and every grant migration in this corpus already carries one
-(``SELECT 1 / count(*) ... FROM information_schema.role_table_grants``).
+itself, and every grant migration in this corpus already carries one through
+``has_table_privilege`` or the older
+``information_schema.role_table_grants``-based assertion form.
 
 WHY A RATCHET AND NOT A CLEAN ZERO
 ----------------------------------
@@ -194,7 +195,7 @@ CORPUS_RELPATH = "docker/migrations/forward"
 # ``CREATE TABLE [IF NOT EXISTS] [schema.]name (`` -- the opening paren is
 # required so the column body can be paren-matched from it.
 _CREATE_TABLE_RE = re.compile(
-    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"CREATE\s+TABLE\s+(?P<if_not_exists>IF\s+NOT\s+EXISTS\s+)?"
     r"(?P<relation>[A-Za-z0-9_.\"]+)\s*\(",
     re.IGNORECASE,
 )
@@ -208,9 +209,56 @@ _DROP_TABLE_RE = re.compile(
 # rewrites these into a plain ``nextval()`` DEFAULT over a STANDALONE sequence
 # whose own ACL it checks on every INSERT -- which is exactly the privilege
 # ``GRANT INSERT ON TABLE`` does not reach.
+_IDENTIFIER_RE = r'(?:[A-Za-z_][A-Za-z0-9_]*|"[^"]+")'
+
 _SERIAL_COLUMN_RE = re.compile(
-    r"^\s*(?P<column>[A-Za-z_][A-Za-z0-9_]*)\s+(?:BIG|SMALL)?SERIAL\b",
+    rf"^\s*(?P<column>{_IDENTIFIER_RE})\s+"
+    r"(?:BIGSERIAL|SMALLSERIAL|SERIAL[248]?|SERIAL)\b",
     re.IGNORECASE | re.MULTILINE,
+)
+
+# OMN-18353: the SAME column shape, added to an existing relation instead of
+# declared in a CREATE body:
+#
+#     ALTER TABLE omninode_internal.consumer_flow_windows
+#         ADD COLUMN IF NOT EXISTS projection_cursor BIGSERIAL;
+#
+# PostgreSQL creates exactly the same standalone sequence either way, so the
+# grant requirement is identical -- but the derivation below read CREATE bodies
+# ONLY, and an ALTER-added SERIAL was therefore invisible to this gate.
+#
+# It stayed invisible because every ALTER of this shape already in the corpus
+# sits in the same file as a CREATE declaring the same column (the idempotent
+# reconcile pattern: create-if-absent, then add-column-if-absent for a lane that
+# predates it). The CREATE covered the ALTER by accident in every case that
+# existed -- until OMN-18043 landed a file carrying the ALTER and nothing else.
+#
+# The statement is matched to its terminating semicolon rather than clause by
+# clause, so a multi-clause ``ALTER TABLE t ADD COLUMN a INT, ADD COLUMN b
+# BIGSERIAL;`` yields both columns. Deliberately NOT handled, and named rather
+# than left silent: ``ALTER COLUMN ... TYPE``, which cannot introduce a serial
+# in PostgreSQL (there is no ``SET DATA TYPE SERIAL``), and a ``DEFAULT
+# nextval(...)`` attached by hand to an already-created column, which no file in
+# this corpus does and which would need the sequence to be CREATEd separately
+# and would therefore be visible as its own statement.
+_ALTER_TABLE_RE = re.compile(
+    r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?"
+    r"(?P<relation>[A-Za-z0-9_.\"]+)(?P<body>[^;]*);",
+    re.IGNORECASE,
+)
+
+_ADD_COLUMN_RE = re.compile(
+    rf"ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
+    rf"(?P<column>{_IDENTIFIER_RE})\s+(?P<definition>[^,;]+)",
+    re.IGNORECASE,
+)
+
+_SERIAL_TYPE_RE = re.compile(
+    r"^\s*(?:BIGSERIAL|SMALLSERIAL|SERIAL[248]?|SERIAL)\b", re.IGNORECASE
+)
+
+_IDENTITY_DEFINITION_RE = re.compile(
+    r"GENERATED\s+(?:ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY", re.IGNORECASE
 )
 
 # ``GENERATED ... AS IDENTITY`` is deliberately NOT matched above. An identity
@@ -282,6 +330,12 @@ def _unquote(identifier: str) -> str:
     return identifier.replace('"', "")
 
 
+def _postgres_identifier(identifier: str) -> str:
+    if identifier.startswith('"') and identifier.endswith('"'):
+        return _unquote(identifier)
+    return identifier.lower()
+
+
 def _corpus_files_in_apply_order(corpus_root: Path) -> list[Path]:
     """Corpus files in the order a lane applies them.
 
@@ -344,27 +398,79 @@ def sequence_backed_columns(corpus_root: Path) -> dict[tuple[str, str], set[str]
     for sql_path in _corpus_files_in_apply_order(corpus_root):
         text = sql_path.read_text(encoding="utf-8", errors="replace")
 
-        events: list[tuple[int, str, str]] = []
+        events: list[tuple[int, str, str, str, bool]] = []
         for match in _DROP_TABLE_RE.finditer(text):
-            events.append((match.start(), "drop", match.group("relation")))
+            events.append((match.start(), "drop", match.group("relation"), "", False))
         for match in _CREATE_TABLE_RE.finditer(text):
-            events.append((match.start(), "create", match.group("relation")))
+            events.append(
+                (
+                    match.start(),
+                    "create",
+                    match.group("relation"),
+                    "",
+                    bool(match.group("if_not_exists")),
+                )
+            )
+        for match in _ALTER_TABLE_RE.finditer(text):
+            events.append(
+                (
+                    match.start(),
+                    "alter",
+                    match.group("relation"),
+                    match.group("body"),
+                    False,
+                )
+            )
 
-        for position, kind, relation in sorted(events):
+        for position, kind, relation, body, if_not_exists in sorted(events):
             key = _split_relation(relation)
             if kind == "drop":
                 definitions.pop(key, None)
                 continue
+            if kind == "alter":
+                added = _added_serial_columns(body)
+                if added:
+                    definitions.setdefault(key, set()).update(added)
+                continue
             open_paren = text.index("(", position)
-            body = _column_body(text, open_paren)
+            column_body = _column_body(text, open_paren)
             serial = {
-                m.group("column").lower() for m in _SERIAL_COLUMN_RE.finditer(body)
+                _postgres_identifier(m.group("column"))
+                for m in _SERIAL_COLUMN_RE.finditer(column_body)
             }
             identity = {
-                m.group("column").lower() for m in _IDENTITY_COLUMN_RE.finditer(body)
+                _postgres_identifier(m.group("column"))
+                for m in _IDENTITY_COLUMN_RE.finditer(column_body)
             }
-            definitions[key] = serial - identity
+            if if_not_exists:
+                definitions.setdefault(key, set()).update(serial - identity)
+            else:
+                definitions[key] = serial - identity
     return definitions
+
+
+def _added_serial_columns(alter_body: str) -> set[str]:
+    """Sequence-backed columns an ``ALTER TABLE`` body ADDs (OMN-18353).
+
+    ``ALTER`` accumulates onto whatever the relation already holds, so unlike a
+    ``CREATE`` it never REPLACES the derived column set -- an ALTER-added
+    ``BIGSERIAL`` on a table whose CREATE declared none must add to it, and an
+    ALTER that adds no serial column must leave it untouched rather than clear
+    it.
+
+    ``GENERATED ... AS IDENTITY`` is excluded here for the same reason it is in
+    a CREATE body: that sequence is owned by the column and rides the table's
+    own INSERT privilege, so requiring a separate USAGE grant would make the
+    delivering migration RAISE on a NULL ``pg_get_serial_sequence``.
+    """
+    added: set[str] = set()
+    for match in _ADD_COLUMN_RE.finditer(alter_body):
+        definition = match.group("definition")
+        if _IDENTITY_DEFINITION_RE.search(definition):
+            continue
+        if _SERIAL_TYPE_RE.match(definition):
+            added.add(_postgres_identifier(match.group("column")))
+    return added
 
 
 def _split_relation(relation: str) -> tuple[str, str]:
