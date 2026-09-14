@@ -19,6 +19,7 @@ MIGRATION = (
 def test_traffic_class_is_stored_from_authoritative_provenance() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
 
+    assert "ALTER TABLE delegation_workflow_state" in sql
     assert "traffic_class TEXT" in sql
     assert "GENERATED ALWAYS AS" in sql
     assert "payload #>> '{request,provenance,traffic_class}'" in sql

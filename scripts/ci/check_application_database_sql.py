@@ -196,6 +196,19 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         # qualification scanner only; the created-object ownership check still
         # applies unconditionally.
         Path("docker/migrations/forward/102_create_session_phase_state.sql"),
+        # OMN-18172: 106 alters the existing delegation_workflow_state relation
+        # created by 090 in the omnibase_infra SERVICE database. That database
+        # has exactly one declared schema, public, while StateStoreAdapter and
+        # the migration runner intentionally resolve this table through the
+        # connection search_path. The application-database scanner therefore
+        # has no valid qualification form here: public is prohibited for an
+        # application relation and omninode_internal does not exist in this
+        # service database. The separate, unconditional ownership check still
+        # requires the canonical OMNINODE_INTERNAL declaration for this table.
+        Path(
+            "docker/migrations/forward/"
+            "106_add_delegation_workflow_state_traffic_class.sql"
+        ),
         # OMN-15359: 099 performs the governed physical-schema cutover itself --
         # it creates NEW omninode_internal-domain authority
         # (omninode_internal.live_events, ownership declared in omnimarket's
