@@ -34,7 +34,7 @@ def test_node_cli_keeps_drift_refusal_when_path_resolution_fails(
             side_effect=OSError("unreadable PATH"),
         ),
     ):
-        with pytest.raises(click.ClickException, match="PATH did not resolve"):
+        with pytest.raises(click.ClickException, match=r"PATH lookup.*failed"):
             run_node_by_name.callback(
                 "not-reached",
                 contract_path=None,

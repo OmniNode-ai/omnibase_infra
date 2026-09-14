@@ -331,7 +331,103 @@ def test_not_installed_refusal_without_omni_home_does_not_resolve_placeholder(
     message = str(exc_info.value)
     assert str(path_onex) in message
     assert "filesystem identity cannot be compared" in message
+    assert "no OMNI_HOME was provided" in message
     assert "not the canonical wrapper" not in message
+
+
+def test_not_installed_refusal_names_path_onex_resolution_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: a PATH entry can exist while its identity cannot be compared."""
+    path_bin = tmp_path / "path-bin"
+    path_onex = path_bin / "onex"
+    canonical_wrapper = tmp_path / "omnibase_infra" / "scripts" / "onex"
+    path_bin.mkdir()
+    canonical_wrapper.parent.mkdir(parents=True)
+    path_onex.write_text("#!/bin/sh\n", encoding="utf-8")
+    path_onex.chmod(0o755)
+    canonical_wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+    canonical_wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(path_bin))
+    original_resolve = Path.resolve
+
+    def resolve_or_raise(path: Path) -> Path:
+        if path == path_onex:
+            raise PermissionError("blocked path entry")
+        return original_resolve(path)
+
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.Path.resolve",
+            side_effect=resolve_or_raise,
+            autospec=True,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert str(path_onex) in message
+    assert "that entry's filesystem identity cannot be compared" in message
+    assert "PermissionError: blocked path entry" in message
+    assert "PATH did not resolve an 'onex' executable" not in message
+
+
+def test_not_installed_refusal_names_canonical_wrapper_resolution_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: canonical wrapper resolve failures get their own diagnosis."""
+    path_bin = tmp_path / "path-bin"
+    path_onex = path_bin / "onex"
+    canonical_wrapper = tmp_path / "omnibase_infra" / "scripts" / "onex"
+    path_bin.mkdir()
+    canonical_wrapper.parent.mkdir(parents=True)
+    path_onex.write_text("#!/bin/sh\n", encoding="utf-8")
+    path_onex.chmod(0o755)
+    canonical_wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+    canonical_wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(path_bin))
+    original_resolve = Path.resolve
+
+    def resolve_or_raise(path: Path) -> Path:
+        if path == canonical_wrapper:
+            raise PermissionError("blocked canonical wrapper")
+        return original_resolve(path)
+
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.Path.resolve",
+            side_effect=resolve_or_raise,
+            autospec=True,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert str(path_onex) in message
+    assert "canonical wrapper's filesystem identity cannot be compared" in message
+    assert "canonical wrapper resolution failed: PermissionError" in message
+    assert "blocked canonical wrapper" in message
+    assert "PATH did not resolve an 'onex' executable" not in message
 
 
 def test_not_installed_refusal_names_missing_path_onex(
@@ -352,7 +448,9 @@ def test_not_installed_refusal_names_missing_path_onex(
         with pytest.raises(OmnimarketDriftError) as exc_info:
             check_omnimarket_drift(omni_home="/workspace")
 
-    assert "PATH did not resolve an 'onex' executable" in str(exc_info.value)
+    message = str(exc_info.value)
+    assert "PATH did not resolve an 'onex' executable" in message
+    assert "PATH lookup for 'onex' failed" not in message
 
 
 def test_not_installed_refusal_ignores_path_resolution_errors() -> None:
@@ -374,7 +472,12 @@ def test_not_installed_refusal_ignores_path_resolution_errors() -> None:
         with pytest.raises(OmnimarketDriftError) as exc_info:
             check_omnimarket_drift(omni_home="/workspace")
 
-    assert "PATH did not resolve an 'onex' executable" in str(exc_info.value)
+    message = str(exc_info.value)
+    assert (
+        "PATH lookup for 'onex' failed before a candidate could be resolved" in message
+    )
+    assert "OSError: bad PATH" in message
+    assert "PATH did not resolve an 'onex' executable" not in message
 
 
 def test_drift_check_fails_open_when_no_canonical_clone() -> None:

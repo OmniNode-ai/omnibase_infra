@@ -65,6 +65,7 @@ import logging
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -99,6 +100,17 @@ DRIFT_OVERRIDE_ENV = "ONEX_ALLOW_OMNIMARKET_DRIFT"
 # Local `git rev-parse HEAD` only -- this never touches the network, so a
 # generous timeout still keeps the hot path fast.
 _GIT_TIMEOUT_SECONDS = 2
+
+
+@dataclass(frozen=True)
+class PathOnexIdentity:
+    executable: str
+    identity: Path | None = None
+    resolution_error: str | None = None
+
+
+def _diagnostic_error(exc: OSError) -> str:
+    return f"{type(exc).__name__}: {exc}"
 
 
 class OmnimarketDriftError(RuntimeError):
@@ -157,7 +169,7 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
     return sha if len(sha) == 40 else None
 
 
-def _path_onex_identity() -> tuple[str, Path] | None:
+def _path_onex_identity() -> PathOnexIdentity | None:
     """Return PATH's ``onex`` entry and its normalized filesystem identity.
 
     A drift refusal from a foreign interpreter is usually caused by a second
@@ -169,9 +181,23 @@ def _path_onex_identity() -> tuple[str, Path] | None:
     """
     try:
         path_onex = shutil.which("onex")
-        return (path_onex, Path(path_onex).resolve()) if path_onex else None
-    except OSError:
+    except OSError as exc:
+        return PathOnexIdentity(
+            executable="<PATH lookup failed>",
+            resolution_error=_diagnostic_error(exc),
+        )
+    if not path_onex:
         return None
+    try:
+        return PathOnexIdentity(
+            executable=path_onex,
+            identity=Path(path_onex).resolve(),
+        )
+    except OSError as exc:
+        return PathOnexIdentity(
+            executable=path_onex,
+            resolution_error=_diagnostic_error(exc),
+        )
 
 
 class CanonicalCloneAttachment(StrEnum):
@@ -388,34 +414,56 @@ def check_omnimarket_drift(
             else "$OMNI_HOME/omnibase_infra/scripts/onex"
         )
         path_onex_identity = _path_onex_identity()
+        canonical_wrapper_resolution_error = None
         try:
             canonical_wrapper_identity = (
                 canonical_wrapper_path.resolve()
                 if canonical_wrapper_path is not None
                 else None
             )
-        except OSError:
+        except OSError as exc:
             canonical_wrapper_identity = None
+            canonical_wrapper_resolution_error = _diagnostic_error(exc)
 
         if path_onex_identity is None:
             path_diagnosis = (
                 "PATH did not resolve an 'onex' executable for this process."
             )
+        elif path_onex_identity.resolution_error is not None:
+            if path_onex_identity.executable == "<PATH lookup failed>":
+                path_diagnosis = (
+                    "PATH lookup for 'onex' failed before a candidate could be "
+                    f"resolved: {path_onex_identity.resolution_error}."
+                )
+            else:
+                path_diagnosis = (
+                    "PATH resolves 'onex' to "
+                    f"{path_onex_identity.executable}, but that entry's "
+                    "filesystem identity cannot be compared: "
+                    f"{path_onex_identity.resolution_error}."
+                )
         elif canonical_wrapper_identity is None:
+            if canonical_wrapper_path is None:
+                canonical_detail = "no OMNI_HOME was provided"
+            else:
+                canonical_detail = (
+                    "canonical wrapper resolution failed: "
+                    f"{canonical_wrapper_resolution_error}"
+                )
             path_diagnosis = (
                 "PATH resolves 'onex' to "
-                f"{path_onex_identity[0]}, but the canonical wrapper's "
-                "filesystem identity cannot be compared."
+                f"{path_onex_identity.executable}, but the canonical wrapper's "
+                f"filesystem identity cannot be compared ({canonical_detail})."
             )
-        elif path_onex_identity[1] == canonical_wrapper_identity:
+        elif path_onex_identity.identity == canonical_wrapper_identity:
             path_diagnosis = (
                 "PATH resolves 'onex' through the canonical wrapper: "
-                f"{path_onex_identity[0]}."
+                f"{path_onex_identity.executable}."
             )
         else:
             path_diagnosis = (
                 "PATH resolves 'onex' to an entry that is not the canonical "
-                f"wrapper by filesystem identity: {path_onex_identity[0]}. "
+                f"wrapper by filesystem identity: {path_onex_identity.executable}. "
                 f"Canonical wrapper: {canonical_wrapper}."
             )
         detail = (
