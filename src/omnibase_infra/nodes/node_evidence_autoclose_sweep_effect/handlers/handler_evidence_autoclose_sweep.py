@@ -187,6 +187,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
     EnumEvidenceAutocloseTrigger,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_linear_identity_path import (
+    EnumLinearIdentityPath,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_binding_row import (
     ModelAcBindingRow,
 )
@@ -324,6 +327,84 @@ _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
 _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
 
 _LINEAR_API_URL = "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
+
+# OMN-17664. THE IDENTITY THE CLOSER WRITES AS.
+#
+# `LINEAR_API_KEY` is a PERSONAL api key. Linear attributes its writes to the
+# person who minted it, so until now every flip and every audit comment this
+# closer wrote was, on the ticket own history, indistinguishable from a human
+# edit -- measured 2026-09-05T20:33Z on OMN-17957, where the sweep own
+# 19:36:02.430Z flip carried `actorId 7a850ce1-f95e-431f-b4e3-62f7449f04c0`,
+# the same uuid `viewer` resolves to for that key. That is the premise the
+# `actorId`-null half of `_prior_revert_reason` fence rested on, and it is why
+# that half was structurally dead for the population it exists to protect.
+#
+# Linear client-credentials grant answers with an APP ACTOR token: writes made
+# with it attribute to the application rather than to any person. The exchange
+# is per run, not per request, and the token is never persisted -- Linear own
+# guidance is to request a new client credentials token at the start of each
+# run and use it only for that run, and a 30-day token copied into a secret
+# store is just a second long-lived key with worse properties.
+_LINEAR_OAUTH_TOKEN_URL = "https://api.linear.app/oauth/token"  # url-authority-ok: fixed public OAuth token endpoint, no ONEX routing authority
+_LINEAR_API_KEY_ENV = "LINEAR_API_KEY"
+_LINEAR_CLOSER_CLIENT_ID_ENV = "LINEAR_CLOSER_CLIENT_ID"
+_LINEAR_CLOSER_CLIENT_SECRET_ENV = "LINEAR_CLOSER_CLIENT_SECRET"
+# Comma separated, per Linear OAuth documentation -- a space-separated list is
+# rejected. Exactly the three the closer's surfaces need and no more:
+#
+#   read            -- the issue, its team states, its history, its comments;
+#   write           -- the issue STATE transition (the flip itself). `write` is
+#                      what a state change needs; `issues:create` is a
+#                      different, narrower grant and the closer creates nothing;
+#   comments:create -- the audit comment. Implied by `write`, and named anyway,
+#                      because the two write surfaces are a flip and a comment
+#                      and a grant that says so is one a reviewer can check.
+#
+# `admin` is deliberately absent and is not grantable to an app actor token in
+# any case. The set is written once and not varied per call: Linear revokes
+# every existing app actor token for an application when a token is requested
+# with a DIFFERENT scope set, so a varying request would silently invalidate a
+# concurrent run's token.
+#
+# `actor=app` is deliberately NOT sent. That parameter belongs to the
+# authorization-code flow's authorize URL; a client-credentials token is an app
+# actor token by construction, and passing it here is not part of this grant.
+_LINEAR_CLOSER_TOKEN_SCOPES = "read,write,comments:create"
+_LINEAR_TOKEN_TYPE_BEARER = "bearer"
+
+# The operator-facing messages below spell the environment variable names as
+# LITERALS rather than interpolating the constants above, and that is
+# deliberate. `py/clear-text-logging-sensitive-data` treats a variable whose
+# IDENTIFIER matches a sensitive pattern as a taint source, so interpolating
+# `_LINEAR_CLOSER_CLIENT_SECRET_ENV` into a string that is later logged reports
+# a clear-text-secret leak even though the value in play is the literal text
+# "LINEAR_CLOSER_CLIENT_SECRET" and no credential is ever in the flow. Spelling
+# the names as literals keeps the analyzer's source set empty here instead of
+# suppressing a finding, and the tests assert each message still names the
+# variables it is about, so the two cannot drift apart silently.
+_NO_LINEAR_IDENTITY_MESSAGE = (
+    "No Linear credential is configured: set LINEAR_CLOSER_CLIENT_ID and "
+    "LINEAR_CLOSER_CLIENT_SECRET (preferred -- writes attribute to the "
+    "application), or LINEAR_API_KEY (fallback -- writes attribute to a person)."
+)
+_PARTIAL_IDENTITY_MESSAGE_WHEN_ID_PRESENT = (
+    "Partial Linear application identity: LINEAR_CLOSER_CLIENT_ID is set and "
+    "LINEAR_CLOSER_CLIENT_SECRET is not. Refusing to fall back to "
+    "LINEAR_API_KEY -- a half-configured application identity is a deployment "
+    "error, not a reason to write as a person."
+)
+_PARTIAL_IDENTITY_MESSAGE_WHEN_ID_ABSENT = (
+    "Partial Linear application identity: LINEAR_CLOSER_CLIENT_SECRET is set "
+    "and LINEAR_CLOSER_CLIENT_ID is not. Refusing to fall back to "
+    "LINEAR_API_KEY -- a half-configured application identity is a deployment "
+    "error, not a reason to write as a person."
+)
+_PERSONAL_IDENTITY_FALLBACK_MESSAGE = (
+    "Linear identity path: %s -- LINEAR_CLOSER_CLIENT_ID and "
+    "LINEAR_CLOSER_CLIENT_SECRET are both absent, so this run falls back to the "
+    "personal key and every write it makes is attributed on the ticket to the "
+    "person who minted that key."
+)
 
 # `description` is fetched for the AC-coverage guard below (OMN-16736): the
 # acceptance criteria dod_verify CANNOT see are exactly the ones that live only
@@ -600,6 +681,18 @@ _CHECK_BINDS_AC_KEY = "binds_ac"
 #: `binds_ac`; it can never add to it.
 _CHECK_DRAFT_BINDS_AC_KEY = "draft_binds_ac"
 
+#: OMN-18330. WHICH REVISION OF EACH CRITERION THIS CHECK'S BINDINGS WERE
+#: ACCEPTED AGAINST: `{label: criterion_hash}`, carried from the contract's
+#: `dod_evidence[].ac_bindings[]` records (`onex_change_control`'s
+#: `ModelAcBinding`) onto the per-check record, the same route `binds_ac` and
+#: `draft_binds_ac` take and for the same reason -- the verifier is the only
+#: component that resolves and reads the contract.
+#:
+#: ABSENT means this check declares no pin, which is 67 of the 68 contracts
+#: that declare a binding at all. Those are hand-authored and bind exactly as
+#: they did; the key can demote a criterion and can never introduce one.
+_CHECK_AC_BINDING_HASHES_KEY = "ac_binding_hashes"
+
 #: Per-check statuses, as `EnumEvidenceCheckStatus` spells them.
 _CHECK_STATUS_VERIFIED = "verified"
 #: OMN-18135 AC4. A check that read live state and asserted on it. It
@@ -619,7 +712,7 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.12.3"
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.14.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
@@ -642,6 +735,7 @@ _LINEAR_RATE_LIMIT_TOKENS: tuple[str, ...] = (
     "rate limit",
     "too many requests",
 )
+_HTTP_OK = 200
 _HTTP_TOO_MANY_REQUESTS = 429
 _HTTP_SERVER_ERROR = 500
 
@@ -1879,6 +1973,125 @@ def _canonical_ac_label(text: str) -> str:
     return f"{match.group(1).upper()}{int(match.group(2))}"
 
 
+# -- OMN-18330: the criterion-revision pin, and validating it -----------------
+#
+# OMN-18236 gave a binding a `criterion_hash`: the sha256 of the criterion text
+# the binding was derived or accepted against. Nothing in THIS module read it.
+# So a binding accepted against one sentence stayed "bound" after the sentence
+# was rewritten into something its check does not prove, and the closer flipped.
+# That is a false-close path, and it is the one this leg closes.
+#
+# THE HASH IS A PORT, NOT A SECOND HASH. The authority is `onex_change_control`
+# `src/onex_change_control/validation/ac_criteria.py`
+# (`normalise_criterion`, `criterion_hash`, `MAX_CRITERION_HASH_INPUT_CHARS`).
+# It is ported rather than imported because that package is a DEV-group
+# dependency of this repository, pinned to an immutable rev that predates the
+# module, so importing it would make a production predicate depend on a
+# test-time install and on a pin bump. The coupling runs the other way too and
+# is already stated on that side: OCC's criterion READER is itself a verbatim
+# port of `_is_ac_heading` / `_acceptance_criteria_items` / `_canonical_ac_label`
+# above. `TestTheHashIsTheChangeControlHash` in
+# `tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18330_criterion_hash.py`
+# pins the shared digest vectors that OCC's own tests pin, so a change on either
+# side fails with a test naming the other.
+#
+# WHICH TEXT IS HASHED. The item string `_acceptance_criteria_items` returns,
+# which is what `_ac_binding_gap` already iterates. OCC's `item_text` is the
+# same function over the same regexes, so a criterion BOTH readers see yields
+# the identical string and the identical digest. The two readers disagree about
+# WHICH criteria they see (OCC re-opens at a second criteria section; this one
+# stops at the first non-criteria heading), and that disagreement cannot produce
+# a spurious mismatch here: a criterion this reader never reads is one this leg
+# never asks about.
+_CRITERION_WHITESPACE_RUN_RE = re.compile(r"\s+")
+#: Ceiling on the text fed to the hash, so a pathological body cannot make the
+#: digest depend on how much of it somebody pasted. Must equal OCC's
+#: `MAX_CRITERION_HASH_INPUT_CHARS`; the shared-vector test pins that.
+_MAX_CRITERION_HASH_INPUT_CHARS = 4000
+
+
+def _normalise_criterion(text: str) -> str:
+    """The criterion text the pin hash is taken over.
+
+    Whitespace runs collapse to one space and the ends are stripped, so
+    re-wrapping a paragraph or re-indenting a bullet is NOT a rewrite. Nothing
+    else is normalised — not case, not punctuation, not markdown emphasis —
+    because each of those can change what a criterion requires. A negation, a
+    changed threshold and a changed modal verb all produce a different digest,
+    which is the entire point.
+    """
+    return _CRITERION_WHITESPACE_RUN_RE.sub(" ", text).strip()[
+        :_MAX_CRITERION_HASH_INPUT_CHARS
+    ]
+
+
+def _criterion_pin_hash(text: str) -> str:
+    """The sha256 hex digest identifying this criterion's current revision."""
+    return hashlib.sha256(_normalise_criterion(text).encode("utf-8")).hexdigest()
+
+
+def _pinned_criterion_hashes(verdict: dict[str, object]) -> dict[str, tuple[str, ...]]:
+    """``{label: (pinned criterion hash, ...)}`` from the verdict's check records.
+
+    A label ABSENT from the returned mapping carries no pin. That is 67 of the
+    68 contracts that declare ``binds_ac`` as of 2026-09-13, and it keeps
+    today's behaviour exactly: a hand-authored ``binds_ac`` is the evidence
+    author speaking, which is the acceptance the rule asks for, and this leg
+    does not widen the hold onto it. Widening there is named Out of scope on
+    OMN-18330 and would hold the entire corpus on a pin that does not exist yet.
+
+    A label PRESENT with an EMPTY tuple carries a binding record whose
+    ``criterion_hash`` is missing or unreadable. That is a different fact and it
+    does not release: a record asserting an acceptance while declining to say
+    which revision was accepted is unvalidated, and unvalidated holds.
+
+    Several records may pin one label -- a re-acceptance appended beside the
+    original, which is the only shape the OCC append-only validator permits, and
+    two evidence items may each bind the same criterion. Every pin is collected
+    and ANY match releases, because "this criterion's current text was accepted"
+    is the fact being asked about.
+
+    WHY THE VERDICT AND NOT THE CONTRACT. The pin lives on the contract's
+    ``dod_evidence[].ac_bindings[]``, and this node could fetch it. It does not,
+    for the reason omnimarket states where it carries ``binds_ac`` itself: this
+    sweep runs on a runner with no contract checkout, and a second contract
+    parser would be a second truth that drifts from the verifier's. The verifier
+    already resolves, pins and reads the contract, so it is the only place the
+    pin can be reported from without adding a second reader. Reading it here
+    would also put a network call on the flip path of an armed closer, where a
+    transient failure has to choose between a false hold and a false flip.
+
+    CONSEQUENCE, STATED RATHER THAN IMPLIED: this half of the join is live only
+    once the verifier carries the key. `node_dod_verify` reads ``ac_bindings``
+    today to compute ``draft_binds_ac`` and discards the hashes; carrying them
+    forward is a one-field omnimarket change in the same surface, and it belongs
+    with the autobinder work that will start producing accepted bindings at
+    volume. Until it lands, one live contract records a pin and the predicate
+    below is proven by fixture rather than by corpus. What this closes is the
+    design hole -- the closer had no way to learn a criterion had moved, and now
+    it does, unskippably, before the binding counts.
+    """
+    checks = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+    if not isinstance(checks, list):
+        return {}
+    pinned: dict[str, list[str]] = {}
+    for entry in checks:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get(_CHECK_AC_BINDING_HASHES_KEY)
+        if not isinstance(raw, dict):
+            continue
+        for declared, digest in raw.items():
+            label = _canonical_ac_label(str(declared))
+            if not label:
+                continue
+            slot = pinned.setdefault(label, [])
+            value = str(digest or "").strip().lower()
+            if value and value not in slot:
+                slot.append(value)
+    return {label: tuple(digests) for label, digests in pinned.items()}
+
+
 def _declared_ac_bindings(
     verdict: dict[str, object],
 ) -> tuple[
@@ -2178,7 +2391,25 @@ def _ac_binding_gap(
     verdict but not a proof (OMN-15391), ``skipped`` never ran, ``failed``
     would have been refused upstream -- none of them discharges a criterion,
     and each appears in the table with its status so the near-miss is legible.
+
+    OMN-18330 -- THE PIN IS VALIDATED BEFORE THE BINDING COUNTS.
+    -----------------------------------------------------------
+    The pins come off the verdict's own check records, via
+    :func:`_pinned_criterion_hashes`, and are resolved INSIDE this function
+    rather than handed in. There is deliberately no parameter and no caller
+    switch: a pin validation a caller can forget to pass is one that gets
+    skipped, which is the exact failure this leg exists to remove.
+
+    A label that carries a pin must have one matching the criterion's text AS
+    THE TICKET READS NOW, or it does not discharge -- the binding was accepted
+    against a sentence that no longer exists.
+
+    It NARROWS and never widens. A label carrying NO pin binds exactly as it
+    did before: 68 live contracts declare ``binds_ac``, 67 of them carry no
+    binding record at all, every one hand-authored, and holding them on a pin
+    that does not exist yet is named Out of scope on OMN-18330.
     """
+    pinned_hashes = _pinned_criterion_hashes(verdict)
     contract = f"contracts/{ticket_id}.yaml"
     field_present, bindings, drafts = _declared_ac_bindings(verdict)
     items = tuple(_acceptance_criteria_items(description))
@@ -2204,10 +2435,31 @@ def _ac_binding_gap(
     #: the hold can name the bar rather than say "declared by nothing", which
     #: would be false and would send the author to fix the wrong thing.
     readback_blocked: list[str] = []
+    #: OMN-18330. Criteria whose binding record pins a DIFFERENT revision of
+    #: the criterion text than the ticket carries now, and criteria whose
+    #: record declines to say which revision it pinned at all. Tracked apart
+    #: from `unbound` and from each other because the three repairs differ:
+    #: write a binding, re-accept the existing one against the new wording, or
+    #: record the hash the acceptance was taken against.
+    stale_pinned: list[str] = []
+    unpinned: list[str] = []
     for item in items:
         text = item[:_MAX_AC_TEXT_CHARS]
         label = _canonical_ac_label(item)
         declared = bindings.get(label, ()) if label else ()
+        # OMN-18330. The pin is validated against the criterion AS IT READS
+        # NOW, before any status or proof-class question, because a binding
+        # accepted against a sentence that no longer exists is not evidence
+        # about this criterion whatever its check did. A label absent from
+        # `pinned_hashes` carries no record and is not touched here.
+        pin_stale = False
+        pin_absent = False
+        if label and label in pinned_hashes:
+            pins = pinned_hashes[label]
+            if not pins:
+                pin_absent = True
+            elif _criterion_pin_hash(item) not in pins:
+                pin_stale = True
         verified_rows = tuple(
             row for row in declared if row[1] == _CHECK_STATUS_VERIFIED
         )
@@ -2225,7 +2477,14 @@ def _ac_binding_gap(
             row[2] == _CHECK_PROOF_CLASS_READBACK for row in verified_rows
         )
         proving: tuple[tuple[str, str, str], ...]
-        if readback_only and not _criterion_is_state_shaped(item):
+        if pin_stale or pin_absent:
+            # OMN-18330. Named FIRST among the disqualifications: when the pin
+            # is stale the readback question is moot, and reporting "no
+            # behaviour check" about a criterion whose text moved sends the
+            # author to bind a check to a sentence nobody has re-read.
+            (stale_pinned if pin_stale else unpinned).append(label or text)
+            proving = ()
+        elif readback_only and not _criterion_is_state_shaped(item):
             readback_blocked.append(_canonical_ac_label(item) or text)
             proving = ()
         else:
@@ -2324,6 +2583,43 @@ def _ac_binding_gap(
         if proposed
         else ""
     )
+    # OMN-18330. A criterion whose text CHANGED after its binding was accepted,
+    # and one whose record never said which revision it was accepted against.
+    # Both are named apart from "declared by nothing" and from each other,
+    # because the repair differs in each case and a hold that conflates them
+    # sends the author to fix something that is not broken.
+    more_stale = len(stale_pinned) - _MAX_UNCOVERED_LISTED
+    stale_note = (
+        (
+            " OMN-18330: "
+            + ", ".join(stale_pinned[:_MAX_UNCOVERED_LISTED])
+            + (f" and {more_stale} more" if more_stale > 0 else "")
+            + " IS declared by a binding, but the binding was accepted against "
+            "a DIFFERENT revision of this criterion — the criterion's text on "
+            "this ticket has changed since, so its pinned `criterion_hash` no "
+            "longer matches what the criterion now says. A check that proved "
+            "the old wording is not evidence about the new one. Re-read the "
+            f"criterion, and re-accept the binding in `{contract}` against its "
+            "current text (a fresh `criterion_hash`, acceptor and timestamp)."
+        )
+        if stale_pinned
+        else ""
+    )
+    more_unpinned = len(unpinned) - _MAX_UNCOVERED_LISTED
+    unpinned_note = (
+        (
+            " OMN-18330: "
+            + ", ".join(unpinned[:_MAX_UNCOVERED_LISTED])
+            + (f" and {more_unpinned} more" if more_unpinned > 0 else "")
+            + " carries a binding record with NO readable `criterion_hash`, so "
+            "which revision of the criterion it was accepted against cannot be "
+            "established at all. That is unvalidated rather than stale, and it "
+            "does not discharge the criterion. Record the hash of the criterion "
+            "text the acceptance was taken against on that binding record."
+        )
+        if unpinned
+        else ""
+    )
     unlabelled = sum(1 for text in unbound if not _canonical_ac_label(text))
     labelling = (
         f" {unlabelled} of them carry no `AC<n>`/`DoD<n>` label at all, so "
@@ -2352,8 +2648,8 @@ def _ac_binding_gap(
     return (
         f"{len(unbound)} of {len(items)} acceptance criterion(s) in this "
         f"ticket's description are bound to NO verified probative check in "
-        f"`{contract}`: {named}. {why}{proposal_note}{readback_note}"
-        f"{labelling}{fallback}",
+        f"`{contract}`: {named}. {why}{proposal_note}{stale_note}"
+        f"{unpinned_note}{readback_note}{labelling}{fallback}",
         tuple(unbound),
         tuple(rows),
     )
@@ -2384,6 +2680,83 @@ def _format_ac_binding_table(rows: tuple[ModelAcBindingRow, ...]) -> str:
     if remaining > 0:
         lines.append(f"| ... and {remaining} more (truncated) | | | |")
     return "\n".join(lines)
+
+
+# -- OMN-18336: turning a revert into a correction --------------------------
+#
+# A revert fence exists and has fired sixteen times. Nothing turned a revert
+# into a correction. Four of forty-seven flips were reverted by hand — an 8.5%
+# false-positive rate being ABSORBED rather than measured — and all four shared
+# one failure class: a guard was proven and its remediation was not.
+#
+# Finding out what the closer BELIEVED at the moment of a wrong flip was an
+# archaeology exercise across receipts. These two surfaces end that: the
+# post-revert comment names the criterion labels the flip counted as bound and
+# the check id that discharged each one, and the receipt carries the revert as
+# a boolean a series can be built from.
+#
+# WHAT THIS IS NOT. It does not change the flip predicate — OMN-18056 already
+# prevents this failure class going forward, and widening the hold further is
+# explicitly not proposed. This is feedback ON the predicate.
+#: A line every post-revert feedback comment carries verbatim, so the reverts
+#: of this closer's own flips are countable by grep over the ticket surface as
+#: well as from the receipt counter. Stable text, never reworded: a panel that
+#: counts it would silently return zero if this string moved.
+_CLOSER_FLIP_REVERTED_MARKER = "closer-flip-reverted: 1"
+
+
+def _counted_ac_bindings(rows: tuple[ModelAcBindingRow, ...]) -> tuple[str, ...]:
+    """``("AC1 -> check-a", ...)`` for the criteria a flip counted as bound.
+
+    Pairs, never a bare list. Which criterion was judged wrongly is only half
+    the question a revert raises; the other half is which check the closer
+    accepted as proving it, and a list of labels leaves that to archaeology.
+
+    An unlabelled criterion cannot appear: nothing in a contract can point at
+    it, so no binding ever discharged it and it is not in the bound set. A
+    bound row with no check id is impossible by construction — the row is built
+    FROM the discharging check — but it is rendered defensively rather than
+    dropped, because a criterion counted as bound by nothing nameable is the
+    single most interesting row a revert could produce.
+    """
+    return tuple(
+        f"{row.label or row.acceptance_criterion[:60]} -> "
+        f"{row.evidence_check or '<no check id recorded>'}"
+        for row in rows
+        if row.bound
+    )
+
+
+def _format_post_revert_feedback(rows: tuple[ModelAcBindingRow, ...]) -> str:
+    """The feedback section of a post-revert comment, marker included.
+
+    Emitted ONLY where a flip of this closer's own was reverted. A reverted
+    HAND flip gets no such section and no marker: that is somebody else's
+    judgement being undone, and claiming it as this mechanism's error would
+    inflate the very rate the marker exists to measure.
+    """
+    counted = _counted_ac_bindings(rows)
+    body = (
+        "\n".join(f"- {pair}" for pair in counted[:_MAX_UNCOVERED_LISTED])
+        if counted
+        else (
+            "- _(this flip counted no labelled criterion as bound — it "
+            "predates the OMN-18056 binding leg)_"
+        )
+    )
+    more = len(counted) - _MAX_UNCOVERED_LISTED
+    tail = f"\n- ... and {more} more (truncated)" if more > 0 else ""
+    return (
+        "**This closer flipped this ticket and the flip was reverted.**\n\n"
+        "It counted these acceptance criteria as discharged, by these "
+        "checks:\n\n"
+        f"{body}{tail}\n\n"
+        "One of them is the criterion that was judged wrongly. Recording the "
+        "pairing here is what lets the next change to the flip predicate be "
+        "argued from cases rather than from guesses — the predicate itself is "
+        "not changed by this comment.\n\n"
+        f"{_CLOSER_FLIP_REVERTED_MARKER}\n"
+    )
 
 
 # -- comment idempotency marker (OMN-16808) --------------------------------
@@ -2710,7 +3083,14 @@ class _LinearClient:
 
     # OMN-14951 gap 2: self-declared secret-ish env-var names read by this
     # boundary file (see scripts/check-env-reads.sh's check_secret_name_declarations).
-    required_secrets: tuple[str, ...] = ("LINEAR_API_KEY",)
+    # OMN-17664 adds the application-identity pair. The literals are spelled
+    # here rather than referenced through the module constants because the
+    # checker matches a quoted occurrence of the NAME in this file.
+    required_secrets: tuple[str, ...] = (
+        "LINEAR_API_KEY",
+        "LINEAR_CLOSER_CLIENT_ID",
+        "LINEAR_CLOSER_CLIENT_SECRET",
+    )
 
     def __init__(
         self,
@@ -2719,9 +3099,18 @@ class _LinearClient:
         max_attempts: int = _LINEAR_RETRY_DEFAULT_MAX_ATTEMPTS,
         base_delay_seconds: float = _LINEAR_RETRY_DEFAULT_BASE_DELAY_SECONDS,
     ) -> None:
-        self._api_key = (
-            api_key if api_key is not None else os.environ.get("LINEAR_API_KEY", "")
-        )
+        # OMN-17664. Credential resolution is DEFERRED to the first call rather
+        # than done here, because the application path exchanges credentials
+        # over HTTP and ``__init__`` is sync. An explicitly passed ``api_key``
+        # stays an explicit injection — including an explicitly EMPTY one,
+        # which means "no credential" and never "read the environment". That is
+        # the pre-existing constructor contract the retry tests rely on and it
+        # is deliberately unchanged.
+        self._explicit_api_key = api_key
+        self._auth_header: str | None = None
+        #: Which credential this client resolved, and therefore whose name a
+        #: write it makes will carry. ``None`` until the first call.
+        self.identity_path: EnumLinearIdentityPath | None = None
         self._timeout = timeout
         self._max_attempts = max(1, max_attempts)
         self._base_delay_seconds = max(0.0, base_delay_seconds)
@@ -2740,6 +3129,165 @@ class _LinearClient:
         """
         self._max_attempts = max(1, max_attempts)
         self._base_delay_seconds = max(0.0, base_delay_seconds)
+
+    async def _resolve_auth_header(self) -> str | None:
+        """Resolve this run's ``Authorization`` value once. None means refuse.
+
+        Three states and one refusal, in the order they are checked:
+
+        * an explicitly injected key — used verbatim, no exchange, no env read;
+        * both application secrets present — exchanged for an app actor token,
+          so every write attributes to the application rather than to a person;
+        * exactly one application secret present — REFUSED. The fall-through to
+          the personal key is deliberately NOT taken: an operator who set one of
+          the two believes the application path is live, and a run that quietly
+          wrote as a person under that belief is worse than a run that wrote
+          nothing. This is the same silent-degradation class OMN-16832 removed
+          from this workflow's GitHub credential, where a ``||`` fallback read
+          as "a stronger token, if configured" and had in fact always been a
+          dead branch over a weaker one;
+        * neither present, a personal key present — the documented fallback,
+          taken LOUDLY, because the run log is the only place that can say the
+          writes about to be made will carry a person's name.
+
+        The resolved header is cached for the life of the client, which is one
+        per run: Linear's guidance is one client-credentials token per run, not
+        one per request.
+        """
+        if self._auth_header is not None:
+            return self._auth_header
+
+        if self._explicit_api_key is not None:
+            if not self._explicit_api_key:
+                self.last_error = _NO_LINEAR_IDENTITY_MESSAGE
+                logger.warning("%s", self.last_error)
+                return None
+            self.identity_path = EnumLinearIdentityPath.PERSONAL_API_KEY
+            self._auth_header = self._explicit_api_key
+            return self._auth_header
+
+        # ONEX_EXCLUDE: the application-identity pair is this node's OWN
+        # credential, and the sweep dispatches through RuntimeLocal's
+        # single-shot compute path, which injects only state_root/event_bus
+        # into a handler's constructor. There is no config-prefetch or overlay
+        # seam reachable from it, and in a GitHub Actions job there is no
+        # overlay to resolve one from — the same reason already recorded for
+        # this file in scripts/check-env-reads.sh, which allowlists it and
+        # requires the names to be self-declared in `required_secrets` above.
+        # The pre-existing LINEAR_API_KEY read below stays counted; only the
+        # two names this change adds carry the marker, so the ratchet ceiling
+        # is unchanged rather than raised.
+        client_id = os.environ.get(  # ONEX_EXCLUDE: see above
+            _LINEAR_CLOSER_CLIENT_ID_ENV, ""
+        ).strip()
+        client_secret = os.environ.get(  # ONEX_EXCLUDE: see above
+            _LINEAR_CLOSER_CLIENT_SECRET_ENV, ""
+        ).strip()
+        api_key = os.environ.get(_LINEAR_API_KEY_ENV, "").strip()
+
+        if bool(client_id) != bool(client_secret):
+            self.identity_path = EnumLinearIdentityPath.MISCONFIGURED
+            self.last_error = (
+                _PARTIAL_IDENTITY_MESSAGE_WHEN_ID_PRESENT
+                if client_id
+                else _PARTIAL_IDENTITY_MESSAGE_WHEN_ID_ABSENT
+            )
+            logger.error("%s", self.last_error)
+            return None
+
+        if client_id and client_secret:
+            token = await self._fetch_application_token(client_id, client_secret)
+            if token is None:
+                return None
+            self.identity_path = EnumLinearIdentityPath.OAUTH_APPLICATION
+            self._auth_header = f"Bearer {token}"
+            logger.info(
+                "Linear identity path: %s — client id %s; every write this run "
+                "makes attributes to the application, not to a person.",
+                EnumLinearIdentityPath.OAUTH_APPLICATION.value,
+                client_id,
+            )
+            return self._auth_header
+
+        if api_key:
+            self.identity_path = EnumLinearIdentityPath.PERSONAL_API_KEY
+            logger.warning(
+                _PERSONAL_IDENTITY_FALLBACK_MESSAGE,
+                EnumLinearIdentityPath.PERSONAL_API_KEY.value,
+            )
+            self._auth_header = api_key
+            return self._auth_header
+
+        self.last_error = _NO_LINEAR_IDENTITY_MESSAGE
+        logger.warning("%s", self.last_error)
+        return None
+
+    async def _fetch_application_token(
+        self, client_id: str, client_secret: str
+    ) -> str | None:
+        """Exchange the application secrets for an app actor token.
+
+        Fails CLOSED on every fault: a rejected or unreadable exchange returns
+        None and the caller makes no Linear call at all, rather than degrading
+        to the personal key. The credentials are sent form-encoded (Linear also
+        accepts HTTP basic; the form is the documented default and keeps the
+        value out of a header that intermediaries log more readily).
+
+        Deliberately NOT retried through ``_backoff_seconds``: the failures this
+        call can have are a wrong client id, a wrong secret, or a revoked
+        application, all of which a retry reproduces exactly — the same split
+        ``_query`` already encodes for a 4xx.
+
+        Neither the secret nor the returned token is ever logged or placed in
+        ``last_error``.
+        """
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": _LINEAR_CLOSER_TOKEN_SCOPES,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(_LINEAR_OAUTH_TOKEN_URL, data=payload)
+            if response.status_code != _HTTP_OK:
+                self.last_error = (
+                    "Linear client-credentials exchange returned HTTP "
+                    f"{response.status_code}."
+                )
+                logger.error("%s", self.last_error)
+                return None
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            self.last_error = (
+                "Linear client-credentials exchange failed: "
+                f"{sanitize_error_message(exc)}"
+            )
+            # `exception` rather than `error`: the traceback is the diagnostic
+            # for an exchange that never reached a status code, and it carries
+            # no secret — Python renders frames, never frame locals, so the
+            # form payload holding the client secret is not in it.
+            logger.exception("%s", self.last_error)
+            return None
+
+        token = data.get("access_token") if isinstance(data, dict) else None
+        token_type = str(data.get("token_type", "")) if isinstance(data, dict) else ""
+        if not isinstance(token, str) or not token:
+            self.last_error = (
+                "Linear client-credentials exchange returned no access token."
+            )
+            logger.error("%s", self.last_error)
+            return None
+        if token_type.strip().lower() != _LINEAR_TOKEN_TYPE_BEARER:
+            # A token this code would send as a bearer but the vendor did not
+            # call one is a shape change, not a credential this run may use.
+            self.last_error = (
+                "Linear client-credentials exchange returned unexpected "
+                f"token_type {token_type!r}."
+            )
+            logger.error("%s", self.last_error)
+            return None
+        return token
 
     @staticmethod
     def _retry_after_seconds(response: httpx.Response) -> float | None:
@@ -2792,12 +3340,14 @@ class _LinearClient:
     async def _query(
         self, query: str, variables: dict[str, object]
     ) -> dict[str, object] | None:
-        if not self._api_key:
-            self.last_error = "LINEAR_API_KEY is not set."
-            logger.warning("LINEAR_API_KEY is not set — cannot call Linear API.")
+        # OMN-17664. Resolved once per client (one client per run), before the
+        # retry loop: an unresolvable credential is not a lost attempt and must
+        # not be re-tried, and a resolution failure must not reach the network.
+        auth_header = await self._resolve_auth_header()
+        if auth_header is None:
             return None
         headers = {
-            "Authorization": self._api_key,
+            "Authorization": auth_header,
             "Content-Type": "application/json",
         }
         payload = {"query": query, "variables": variables}
@@ -3939,6 +4489,11 @@ class HandlerEvidenceAutocloseSweep:
                 EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING,
             )
         )
+        # OMN-18336. The false-positive rate as a series value. Counted from
+        # the outcome flag, which is set only where the closer's OWN flip
+        # comment is on the ticket -- a reverted hand flip is a revert of
+        # somebody else's judgement and is deliberately not in this number.
+        closer_flips_reverted = sum(1 for o in outcomes if o.closer_flip_reverted)
         errored = sum(
             1
             for o in outcomes
@@ -4006,6 +4561,7 @@ class HandlerEvidenceAutocloseSweep:
             tickets_gap_posted=gap_posted,
             tickets_skipped=skipped,
             tickets_errored=errored,
+            tickets_closer_flip_reverted=closer_flips_reverted,
             outcomes=tuple(outcomes),
         )
 
@@ -5193,30 +5749,69 @@ class HandlerEvidenceAutocloseSweep:
                         verdict_fingerprint=fingerprint,
                         pre_write_head_entry_id=pre_write_head_entry_id,
                     )
+                # OMN-18336. The closer's OWN flip is identified here and
+                # nowhere else in this block: `_prior_flip_fingerprints` reads
+                # the flip comments this mechanism wrote. A reverted HAND flip
+                # leaves none, so it is False below and gets no feedback
+                # comment — counting it would inflate this mechanism's error
+                # rate with an error it did not make.
+                own_flip_reverted = bool(_prior_flip_fingerprints(prior_bodies))
+                counted_bindings = (
+                    _counted_ac_bindings(ac_binding_rows) if own_flip_reverted else ()
+                )
                 if fingerprint in _prior_flip_fingerprints(prior_bodies):
-                    return ModelEvidenceAutocloseOutcome(
-                        ticket_id=ticket_id,
-                        companion_pr_number=companion_pr_number,
-                        companion_pr_url=companion_pr_url,
-                        decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
-                        reason=(
-                            "this closer already flipped this ticket Done on "
-                            f"verdict fingerprint {fingerprint} — its own audit "
-                            "comment carrying that fingerprint is on the ticket "
-                            "— and the ticket has since been moved back out of "
-                            "a completed state. The evidence has not changed, "
-                            "so re-applying the identical verdict would "
-                            "overrule that reversal with a cron tick. A "
-                            "different verdict gets a different fingerprint and "
-                            "is free to close."
+                    # OMN-18336. This branch used to return SILENTLY. It is the
+                    # clearest revert of this closer's own judgement there is —
+                    # the identical verdict, already written and already undone
+                    # — and it produced no record of what the closer had
+                    # believed. It now posts the feedback comment.
+                    return await self._emit_gap_comment(
+                        base=ModelEvidenceAutocloseOutcome(
+                            ticket_id=ticket_id,
+                            companion_pr_number=companion_pr_number,
+                            companion_pr_url=companion_pr_url,
+                            decision=EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            reason=(
+                                "this closer already flipped this ticket Done on "
+                                f"verdict fingerprint {fingerprint} — its own audit "
+                                "comment carrying that fingerprint is on the ticket "
+                                "— and the ticket has since been moved back out of "
+                                "a completed state. The evidence has not changed, "
+                                "so re-applying the identical verdict would "
+                                "overrule that reversal with a cron tick. A "
+                                "different verdict gets a different fingerprint and "
+                                "is free to close."
+                            ),
+                            dod_verify_total_checks=total_checks,
+                            dod_verify_verified_count=verified_count,
+                            dod_verify_failed_count=failed_count,
+                            dod_verify_non_probative_count=non_probative_count,
+                            dod_verify_behavior_proving_count=behavior_proving_count,
+                            verdict_fingerprint=fingerprint,
+                            pre_write_head_entry_id=pre_write_head_entry_id,
+                            ac_binding_rows=ac_binding_rows,
+                            closer_flip_reverted=True,
+                            counted_ac_bindings=counted_bindings,
                         ),
-                        dod_verify_total_checks=total_checks,
-                        dod_verify_verified_count=verified_count,
-                        dod_verify_failed_count=failed_count,
-                        dod_verify_non_probative_count=non_probative_count,
-                        dod_verify_behavior_proving_count=behavior_proving_count,
-                        verdict_fingerprint=fingerprint,
-                        pre_write_head_entry_id=pre_write_head_entry_id,
+                        apply=apply_writes,
+                        issue_id=issue_id,
+                        marker=_sweep_comment_marker(
+                            EnumEvidenceAutocloseDecision.SKIPPED_PRIOR_REVERT,
+                            ("post-revert-feedback", fingerprint),
+                        ),
+                        comment_body=(
+                            "Prior-revert hold (OMN-18336 evidence autoclose "
+                            "sweep) — NOT re-flipped.\n\n"
+                            f"Merged evidence companion: {companion_pr_url}\n"
+                            f"dod_verify: {verified_count}/{total_checks} "
+                            f"verified ({non_probative_count} non-probative), "
+                            f"{failed_count} failed, {behavior_proving_count} "
+                            "behaviour-proving — the same verdict, fingerprint "
+                            f"{fingerprint}.\n\n"
+                            f"{_format_post_revert_feedback(ac_binding_rows)}\n"
+                            "**Acceptance criterion → evidence check**\n\n"
+                            f"{_format_ac_binding_table(ac_binding_rows)}"
+                        ),
                     )
 
                 # OMN-18056 item 7. THE SAME FENCE, MADE POSITIVE.
@@ -5406,6 +6001,8 @@ class HandlerEvidenceAutocloseSweep:
                         verdict_fingerprint=fingerprint,
                         pre_write_head_entry_id=pre_write_head_entry_id,
                         ac_binding_rows=ac_binding_rows,
+                        closer_flip_reverted=own_flip_reverted,
+                        counted_ac_bindings=counted_bindings,
                     )
                     return await self._emit_gap_comment(
                         base=baseline_base,
@@ -5428,7 +6025,16 @@ class HandlerEvidenceAutocloseSweep:
                             "than it does now, closing it again would overrule "
                             "that reversal with a cron tick.\n\n"
                             f"Post-revert baseline fingerprint {fingerprint}\n\n"
-                            "**Acceptance criterion \u2192 evidence check**\n\n"
+                            # OMN-18336. Present only when the reverted flip
+                            # was this closer's own. A reverted hand flip keeps
+                            # today's comment exactly, marker included \u2014 which
+                            # is to say, excluded.
+                            + (
+                                _format_post_revert_feedback(ac_binding_rows) + "\n"
+                                if own_flip_reverted
+                                else ""
+                            )
+                            + "**Acceptance criterion \u2192 evidence check**\n\n"
                             f"{_format_ac_binding_table(ac_binding_rows)}"
                         ),
                     )

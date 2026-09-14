@@ -41,8 +41,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runner_image_identity
 
 # Inputs whose bytes must always come from the trusted base checkout, never
-# from a PR branch -- mirrors ci_env_digest.DEFAULT_ENV_INPUTS minus the two
-# manifest files, which are the only PR-authored inputs.
+# from a PR branch -- ci_env_digest.DEFAULT_ENV_INPUTS minus `uv.lock`, which
+# together with `pyproject.toml` are the only PR-authored inputs. (OMN-18351
+# moved `pyproject.toml` out of DEFAULT_ENV_INPUTS: it now participates through
+# ci_env_digest.pyproject_dependency_projection, but it is still read from the
+# PR ref here, so it stays in PR_MANIFEST_INPUTS below.)
 TRUSTED_ENV_INPUTS: tuple[str, ...] = (
     ".github/actions/setup-python-uv/action.yml",
     "scripts/ci/ci_env_digest.py",

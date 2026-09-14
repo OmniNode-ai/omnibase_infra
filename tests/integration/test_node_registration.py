@@ -18,10 +18,11 @@ Related:
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 
 import pytest
+
+from tests.integration.lane_presence import require_lane
 
 # Runtime container name — configurable via env for flexibility.
 RUNTIME_CONTAINER: str = os.environ.get("ONEX_RUNTIME_CONTAINER", "omninode-runtime")
@@ -47,8 +48,10 @@ def _get_runtime_logs(since: str = "5m") -> str:
     Returns:
         Combined stdout + stderr from the container.
     """
-    if shutil.which("docker") is None:
-        pytest.skip("docker is required to inspect runtime container logs")
+    # OMN-18345: skip where the dev lane is absent (no docker, or the runtime
+    # container does not exist). A container that EXISTS but logs nothing is
+    # a finding and reaches the caller's assertions unchanged.
+    require_lane([RUNTIME_CONTAINER])
 
     result = subprocess.run(
         ["docker", "logs", "--since", since, RUNTIME_CONTAINER],

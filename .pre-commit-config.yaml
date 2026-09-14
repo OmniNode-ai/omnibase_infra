@@ -283,6 +283,18 @@ repos:
         files: ^(scripts/ci/nonrequired_check_failure_rate\.py|config/runner_routing_policy\.yaml|tests/ci/test_nonrequired_check_failure_rate_omn18254\.py|tests/ci/test_incident_replay_omn18254\.py|tests/fixtures/omn18254/.*|tests/ci/test_scheduled_run_failure_rate_omn18322\.py|tests/fixtures/omn18322/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18345: the lane-presence guard. Pins BOTH directions -- a lane that
+      # is absent skips, a lane that is present and unwell still FAILS -- because
+      # a guard that only skipped would turn every real lane defect green, which
+      # is worse than the constant red it replaces. The policy half keeps the
+      # next container-inspecting test from re-creating that red.
+      - id: lane-presence-guard
+        name: Lane-presence guard for container-inspecting tests (OMN-18345)
+        entry: uv run --frozen pytest tests/ci/test_lane_presence_guard_omn18345.py -q
+        language: system
+        files: ^(tests/integration/lane_presence\.py|tests/integration/.*test_.*\.py|tests/ci/test_lane_presence_guard_omn18345\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ci-evidence-policy
         name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
         entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q
@@ -436,6 +448,24 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_gate_runner_detached_entrypoint.py -q
         language: system
         files: ^(scripts/ci/(run_on_gate_runner|gate_runner_supervisor)\.sh|scripts/hooks/prepush_smart_tests\.sh|tests/ci/test_gate_runner_detached_entrypoint\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-17214: every subscription path the auto-wiring loop can select must
+      # register a consumer-flow counter. `_make_event_bus_callback` got that
+      # seam from OMN-16777; `_make_raw_event_projection_callback` -- the branch
+      # every `consumer_purpose: audit|projection` contract takes -- did not, so
+      # 57 live Stable subscriptions emitted NO row at all. A missing row reads
+      # as UNKNOWN rather than as observed-idle, so a whole node archetype was
+      # invisible to the flow projection instead of visibly stalled. The gate
+      # enumerates the branches from the source, so a third one added later is
+      # covered without editing the test. It runs BOTH here and in CI (the file
+      # is under `testpaths`, which the required full-suite job inherits
+      # verbatim) so local and merge enforcement cannot drift.
+      - id: subscription-flow-counter-gate
+        name: subscription flow-counter registration gate (OMN-17214)
+        entry: uv run --frozen pytest tests/ci/test_omn17214_subscription_flow_counter_gate.py -q
+        language: system
+        files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|tests/ci/test_omn17214_subscription_flow_counter_gate\.py)$
         pass_filenames: false
         stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor

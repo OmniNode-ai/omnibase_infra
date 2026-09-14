@@ -675,18 +675,15 @@ def resolve_task_class(
     explicit: str | None,
     classes: tuple[ModelSelectableTaskClass, ...] | None = None,
 ) -> ModelTaskTypeResolution:
-    """Resolve this run's task class and carry HOW it was resolved with it."""
-    if explicit is not None and classes is None:
-        if explicit not in TASK_TYPE_CHOICES:
-            raise TaskClassContractError(
-                f"unknown task type {explicit!r}; known task types: "
-                + ", ".join(TASK_TYPE_CHOICES)
-            )
-        return ModelTaskTypeResolution(
-            task_type=explicit,
-            resolution=EnumTaskTypeResolution.EXPLICIT,
-            reason="explicitly selected with --task-type",
-        )
+    """Resolve this run's task class and carry HOW it was resolved with it.
+
+    An explicit ``--task-type`` is validated against the RESOLVED contract, never
+    against ``TASK_TYPE_CHOICES`` alone (OMN-18342). ``TASK_TYPE_CHOICES`` is a
+    documentation/help-text mirror pinned equal to the contract by
+    ``TestTaskTypeVocabulary`` -- it must never decide a live path. When the
+    contract cannot be resolved, this fails closed (propagates
+    ``TaskClassContractError``) rather than falling back to the mirror.
+    """
     resolved = (
         classes
         if classes is not None

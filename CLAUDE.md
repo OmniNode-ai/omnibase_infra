@@ -413,24 +413,40 @@ The runtime uses plugin-based handler loading from YAML contracts
 
 ## Branch Protection
 
-Never assert branch-protection state from memory or docs — probe it. Before any
-`gh api --method PUT .../branches/<branch>/protection` mutation, dry-run the audit:
+Never assert branch-protection state from memory or docs — probe it.
+
+**There is ONE auditor of record for the shared checks, and it is not in this repo**
+(OMN-18346). `onex_change_control/scripts/audit_branch_protection.sh` owns review
+enforcement (with the OMN-18287 code-owner carve-out), the release-synced-main pair,
+`enforce_admins`, the Receipt Gate, `delete_branch_on_merge` and the Merge Queue ruleset.
+This repo used to run a diverged second copy of the same checks; it never received the
+carve-out and failed 47 of 47 scheduled runs in seven days. Extend the canonical script,
+never re-add a local copy — `tests/ci/test_branch_protection_single_auditor.py` fails if
+one reappears.
 
 ```bash
-bash scripts/audit-branch-protection.sh --repo <repo> --dry-run
+bash <onex_change_control clone>/scripts/audit_branch_protection.sh
 ```
 
-For enforcement + merge-policy parity (MISSING gates, needs-closure, queue/strict drift):
+Two checks the canonical auditor does NOT carry live here, both read-only:
 
 ```bash
+# ORPHANED direction — a required context no check-run reports any more.
+python3 scripts/audit_orphan_required_contexts.py --owner OmniNode-ai
+
+# MISSING direction + needs-closure + queue/strict drift (report-only).
 uv run python scripts/audit_required_context_parity_cli.py report --owner OmniNode-ai
 ```
 
-The declared policy lives in `scripts/enforcement_parity_manifest.yaml` (config-as-data:
-`{repo → branch → {load_bearing_gates[], merge_policy}}`); assertion logic is in
-`scripts/audit_branch_protection_lib.py`. Both audits run on a schedule via
-`.github/workflows/branch-protection-audit.yml` (the parity ratchet is report-only and
-never mutates protection).
+The orphan audit resolves required contexts against check-runs on merged PR head SHAs
+as well as default-branch pushes — a PR-time gate binds its check-run to a PR head SHA
+and can never appear on a post-merge push, which was the whole of the OMN-18346 defect.
+The declared parity policy lives in `scripts/enforcement_parity_manifest.yaml`
+(config-as-data: `{repo → branch → {load_bearing_gates[], merge_policy}}`); its assertion
+logic is `scripts/audit_required_context_parity_lib.py`. All three run on a schedule via
+`.github/workflows/branch-protection-audit.yml`, which pins the canonical auditor to a
+commit sha. Nothing in that workflow mutates protection, and the orphan auditor has no
+`--fix` path: removing a stale required context is a deliberate operator change.
 
 ---
 

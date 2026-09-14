@@ -17,9 +17,10 @@ Related:
 from __future__ import annotations
 
 import os
-import subprocess
 
 import pytest
+
+from tests.integration.lane_presence import require_lane
 
 # Container names are read from environment or use defaults matching
 # the canonical docker-compose.infra.yml service names.
@@ -33,34 +34,16 @@ REQUIRED_CONTAINERS: list[str] = [
 ]
 
 
-def _get_container_statuses() -> dict[str, str]:
-    """Query Docker for all container names and statuses.
-
-    Uses ``docker ps -a`` (not ``docker ps``) to catch stopped/exited
-    containers that would be invisible to the default listing.
-    """
-    result = subprocess.run(
-        ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    statuses: dict[str, str] = {}
-    for line in result.stdout.strip().split("\n"):
-        if "\t" in line:
-            name, status = line.split("\t", 1)
-            statuses[name] = status
-    return statuses
-
-
 @pytest.mark.slow
 class TestRuntimeHealth:
     """Prove all runtime containers boot to healthy state."""
 
     def test_all_containers_healthy(self) -> None:
         """Every required container must report healthy or Up (not unhealthy/starting)."""
-        container_status = _get_container_statuses()
+        # OMN-18345: skip where the lane is absent, FAIL where it is present
+        # and unwell. `require_lane` returns the same mapping this test used
+        # to fetch itself, so there is no second `docker ps`.
+        container_status = require_lane(REQUIRED_CONTAINERS)
 
         for container in REQUIRED_CONTAINERS:
             assert container in container_status, (
@@ -91,7 +74,10 @@ class TestRuntimeHealth:
         This catches the runtime-worker-1 regression where a container
         enters health-check starting state and never transitions to healthy.
         """
-        container_status = _get_container_statuses()
+        # OMN-18345: without the guard this test passes VACUOUSLY where the
+        # lane is absent — it iterates containers that exist, and none do.
+        # A skip states that; a green did not.
+        container_status = require_lane(REQUIRED_CONTAINERS)
 
         for name, status in container_status.items():
             # Only flag REQUIRED containers — other containers on the host

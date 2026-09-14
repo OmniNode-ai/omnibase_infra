@@ -363,15 +363,61 @@
 #     introduce one. Absent means nothing is a proposal, which is what every
 #     hand-authored binding in the corpus is.
 #
+#   - OMN-18330 (node_version 1.13.0): AN ACCEPTED BINDING IS PROOF ABOUT THE
+#     CRITERION IT WAS ACCEPTED AGAINST, AND NO OTHER. OMN-18236 gave a binding
+#     record a `criterion_hash` -- the sha256 of the criterion text it was
+#     derived or accepted against -- and nothing in this node read it, so a
+#     criterion could be rewritten under a still-passing check and its binding
+#     went on reading as proof of a sentence that no longer existed. The binding
+#     leg now recomputes each criterion's hash from the ticket text as it reads
+#     NOW and compares it to the pin the check carries. A pinned label whose
+#     hash no longer matches does not discharge its criterion, and the hold
+#     names the label and says the text changed after acceptance. A pinned label
+#     whose record carries no readable hash does not discharge either, and is
+#     named apart from the stale case because the repair differs. A label with
+#     NO pin is untouched: 67 of the 68 contracts declaring `binds_ac` carry no
+#     binding record, every one hand-authored, and holding them on a pin that
+#     does not exist yet is out of scope. The pin arrives on the per-check
+#     record (`ac_binding_hashes`), the same route `binds_ac` and
+#     `draft_binds_ac` take, because the verifier is the only component that
+#     resolves and reads the contract and a second parser here would be a second
+#     truth -- and because a contract fetch on an armed closer's flip path would
+#     make a transient GitHub failure choose between a false hold and a false
+#     flip. STATED LIMIT: the verifier reads `ac_bindings` today only to derive
+#     `draft_binds_ac` and discards the hashes, so until it carries them this
+#     join is proven by fixture rather than by corpus. What is closed here is
+#     that the closer had no way to learn a criterion had moved; it now does,
+#     with no caller switch and no parameter a caller can forget.
+#   - OMN-18336 (node_version 1.14.0): A REVERT BECOMES A CORRECTION. The
+#     revert fence has fired sixteen times and nothing turned a revert into
+#     feedback: four of forty-seven flips were reverted by hand, an 8.5%
+#     false-positive rate absorbed rather than measured, and establishing what
+#     the closer believed at the moment of a wrong flip meant reading receipts
+#     back by hand. On detecting a revert of ITS OWN flip -- identified from
+#     the closer's own flip comment being on the ticket, never from the
+#     reversal alone -- the post-revert comment now names each acceptance
+#     criterion the flip counted as discharged paired with the check id that
+#     discharged it, and carries a verbatim countable marker line. The
+#     exact-fingerprint branch, which returned silently before, posts that
+#     comment too; it is the clearest revert of this mechanism's judgement
+#     there is. The receipt carries `closer_flip_reverted` per outcome and
+#     `tickets_closer_flip_reverted` per run, which is the series value the
+#     process panel reads. A reverted HAND flip sets neither and gets no
+#     feedback section: that is somebody else's judgement being undone, and
+#     counting it would inflate this mechanism's rate with an error it did not
+#     make. THE FLIP PREDICATE IS UNCHANGED -- OMN-18056 already prevents the
+#     failure class going forward and widening the hold further is explicitly
+#     not proposed. This is feedback on the predicate, not a change to it.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 7
-  patch: 1
-node_version: "1.12.3"
+  minor: 9
+  patch: 0
+node_version: "1.14.0"
 description: >
-  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, and holds a criterion whose only declaring check marks it a proposal until a person accepts it. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
+  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, and holds a criterion whose only declaring check marks it a proposal until a person accepts it, and holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
 input_model:
   name: "ModelEvidenceAutocloseSweepRequest"
@@ -425,7 +471,9 @@ error_handling:
       recoverable: true
       retry_strategy: "none"
     - name: "LINEAR_NOT_CONFIGURED"
-      description: "LINEAR_API_KEY not set — every ticket fails closed as ERROR_LINEAR_API."
+      description: >
+        No usable Linear identity — neither the LINEAR_CLOSER_CLIENT_ID / LINEAR_CLOSER_CLIENT_SECRET pair nor the LINEAR_API_KEY fallback resolved, or exactly one half of the pair was set (refused, never degraded to the personal key), or the client-credentials exchange was rejected. Every ticket fails closed as ERROR_LINEAR_API.
+
       recoverable: false
       retry_strategy: "none"
     - name: "DOD_VERIFY_NONZERO_EXIT"
@@ -622,11 +670,32 @@ io_operations:
 #     omnimarket (see omnimarket_drift_guard /
 #     scripts/install-node-skill-package.sh).
 dependencies:
+  # OMN-17664. THE IDENTITY THE CLOSER WRITES AS. Exactly one of two shapes is
+  # valid and the handler refuses anything else: the application pair below
+  # (preferred), or the personal key alone (fallback). Exactly one half of the
+  # pair is a deployment error and is refused rather than silently degraded,
+  # because whoever set that half believes the application path is live.
+  - name: "linear_closer_client_id"
+    type: "environment"
+    env_var: "LINEAR_CLOSER_CLIENT_ID"
+    description: >
+      OAuth client id of the closer application. With its secret, exchanged per run for an app actor token, so a flip carries the application as its actor instead of a person. Required together with LINEAR_CLOSER_CLIENT_SECRET.
+
+    required: false
+  - name: "linear_closer_client_secret"
+    type: "environment"
+    env_var: "LINEAR_CLOSER_CLIENT_SECRET"
+    description: >
+      OAuth client secret of the closer application. Never persisted as a token: the client-credentials exchange runs once at the start of each run. Required together with LINEAR_CLOSER_CLIENT_ID.
+
+    required: false
   - name: "linear_api_key"
     type: "environment"
     env_var: "LINEAR_API_KEY"
-    description: "Linear API key for issue read + issueUpdate/commentCreate mutations."
-    required: true
+    description: >
+      PERSONAL Linear API key for issue read + issueUpdate/commentCreate mutations. The FALLBACK identity, used only when neither application secret is set, and taken loudly: Linear attributes its writes to the person who minted it, so a flip made with it is indistinguishable on the ticket history from a human edit (measured on OMN-17957, where the sweep own 19:36:02.430Z flip carried the same actorId a person edit would).
+
+    required: false
   - name: "autoclose_kill_switch"
     type: "environment"
     env_var: "ONEX_AUTOCLOSE_DISABLED"
@@ -642,10 +711,18 @@ health_check:
   endpoint: "/health"
   interval_seconds: 300
   checks:
+    - name: "linear_application_identity_configured"
+      check_type: "environment"
+      env_var: "LINEAR_CLOSER_CLIENT_ID"
+      description: >
+        Verify the preferred identity is configured: the closer application client id, whose secret pairs with it to yield an app actor token.
+
     - name: "linear_configured"
       check_type: "environment"
       env_var: "LINEAR_API_KEY"
-      description: "Verify LINEAR_API_KEY is set."
+      description: >
+        Verify the FALLBACK personal key is set. Absent is not a fault when the application pair above is configured.
+
 metadata:
   description: "Evidence autoclose sweep: companion-merge -> dod_verify -> governed Done flip (OMN-16106 first slice)"
   author: "OmniNode Team"
