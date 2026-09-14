@@ -343,6 +343,22 @@ trusted_runner_variable:
   #   test-composite-actions.yml::test-install-kubeconform
   #   test-composite-actions.yml::test-install-kustomize
   #   todo-audit-on-merge.yml::todo-audit
+  #
+  # CORRECTION, made against live placement rather than against the expression,
+  # because the two disagree and the difference matters to anyone reading this
+  # to predict what a flip does. Those 13 do NOT all move on a pull request.
+  # Nine of them use the fork-guard shape (`head.repo != repository` chooses the
+  # public class) or read the seam unconditionally, so on a same-repository pull
+  # request they resolve to the seam and land on the fleet. The other FOUR --
+  # contract-validation, deploy-gate, infra-consistency-check and
+  # stale-todo-gate -- use the `github.event_name != 'pull_request'` shape, which
+  # sends every pull-request event to the PUBLIC class by construction. Those
+  # four move only on push and schedule events and stay hosted on pull requests.
+  # Measured, not inferred: after the write, `main-target-guard` ran on
+  # omninode-runner-74 and `lab-store-mirror-parity` on omninode-runner-2, while
+  # re-runs of contract-validation, deploy-gate, infra-consistency and
+  # stale-todo-gate in the same window all reported `labels=ubuntu-latest` with
+  # no runner assigned.
   # It moves NOTHING ELSE. The 41 hosted literals stay hosted (they are AWS/ECR/
   # SSM/kubectl deploy paths and two service-container test jobs), and the seam
   # cannot reach them because a literal answers to no variable.
