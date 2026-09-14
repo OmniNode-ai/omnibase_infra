@@ -619,7 +619,20 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 0003 delivers was complete and the writer still failed every write. It is
     # declared here, and therefore resident in this repo rather than omnimarket,
     # under the same OMN-15717 exemption its sibling 0003 already uses.
-    assert len(result.declarations) == 181
+    #
+    # 181 -> 182 for OMN-14894's
+    # nodes/node_projection_delegation/0041_delegation_budget_state_rls_tenant_
+    # isolation.sql. 0023 put ENABLE + FORCE ROW LEVEL SECURITY and a
+    # tenant_isolation policy on delegation_events AND delegation_budget_state
+    # in one file. delegation_events was converted to a uuid tenant_id and
+    # recovered its posture from the operative 0037; 0023 is fenced as a
+    # superseded id that now aborts against that column, and
+    # delegation_budget_state recovered nothing -- measured 2026-09-14 as
+    # relrowsecurity=f, relforcerowsecurity=f, 0 policies on both the .201
+    # compose dev lane and the onex-dev RDS. 0041 is 0023's second half
+    # re-landed alone. It is declared here, and fenced on arrival, because it
+    # enables FORCE ROW LEVEL SECURITY and cannot be grandfathered.
+    assert len(result.declarations) == 182
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

@@ -479,6 +479,26 @@ FENCED_DELEGATION_UUID_CONVERSION_IDS = (
 # exact and in order. A manifest edit that moves this must update the pin in
 # the same PR — same change-control friction the pre-OMN-15349 shell-literal
 # pin gave, now pointed at the actual single source instead of a copy of it.
+# OMN-14894, 2026-09-14. 0023 put ENABLE + FORCE ROW LEVEL SECURITY and a
+# tenant_isolation policy on delegation_events AND delegation_budget_state in
+# one file. delegation_events was converted to a uuid tenant_id and recovered
+# its posture from the operative 0037; 0023 is fenced above as a superseded id
+# that now aborts against that column. delegation_budget_state recovered
+# nothing -- measured 2026-09-14 as relrowsecurity=f, relforcerowsecurity=f and
+# zero policies on BOTH the .201 compose dev lane and the onex-dev RDS, a
+# TENANT-classified relation with no tenant boundary anywhere. 0041 is 0023's
+# second half re-landed alone.
+#
+# It is FENCED ON ARRIVAL and that is not a hold on its own merits: it enables
+# FORCE ROW LEVEL SECURITY and cannot be grandfathered (that snapshot does not
+# grow), so an id landing unfenced goes to the OMN-15336 item-4 guard, which is
+# FATAL for a FORCE-enabling id that is neither fenced nor grandfathered and has
+# never applied on that database. It carries NO lane release: releasing it is a
+# live operator decision, the same shape 0036/0037 took.
+FENCED_BUDGET_STATE_RLS_IDS = (
+    "node:node_projection_delegation:"
+    "0041_delegation_budget_state_rls_tenant_isolation.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -486,6 +506,7 @@ EXPECTED_FENCE = (
     + FENCED_INFERENCE_RESPONSE_IDS
     + FENCED_HOOK_EVENT_CAPTURE_IDS
     + FENCED_DELEGATION_UUID_CONVERSION_IDS
+    + FENCED_BUDGET_STATE_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -820,8 +841,15 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         found[inference_response_end:hook_event_capture_end]
         == FENCED_HOOK_EVENT_CAPTURE_IDS
     ), "the OMN-16090 hook_event_capture hold is not the expected id"
-    assert found[hook_event_capture_end:] == FENCED_DELEGATION_UUID_CONVERSION_IDS, (
-        "the OMN-16493 delegation-0031 hold is not the expected id"
+    uuid_conversion_end = hook_event_capture_end + len(
+        FENCED_DELEGATION_UUID_CONVERSION_IDS
+    )
+    assert (
+        found[hook_event_capture_end:uuid_conversion_end]
+        == FENCED_DELEGATION_UUID_CONVERSION_IDS
+    ), "the OMN-16493 delegation-0031 hold is not the expected id"
+    assert found[uuid_conversion_end:] == FENCED_BUDGET_STATE_RLS_IDS, (
+        "the OMN-14894 delegation_budget_state RLS hold is not the expected id"
     )
 
 
