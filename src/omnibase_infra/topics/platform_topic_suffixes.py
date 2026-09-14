@@ -755,6 +755,35 @@ SUFFIX_DELEGATION_COMPLETED: str = "onex.evt.omnibase-infra.delegation-completed
 SUFFIX_DELEGATION_FAILED: str = "onex.evt.omnibase-infra.delegation-failed.v1"
 """Event topic for failed delegation attempts."""
 
+# Delegation v2 terminal topics (OMN-15622). Registered in omnibase_core
+# contracts/topic_registry.yaml with a durability tier and a schema ref, and
+# declared as TopicBase constants there. The v2 terminal family is THREE wire
+# classes (OMN-17841, omnibase_core#1653), so it is three topics: putting both
+# failure classes on one delegation-failed.v2 topic is a non-injective
+# class -> topic map and is refused by assert_published_events_injective.
+
+SUFFIX_DELEGATION_COMPLETED_V2: str = "onex.evt.omnibase-infra.delegation-completed.v2"
+"""Event topic for a ROUTED delegation that completed and passed the quality bar.
+
+Wire model: ModelDelegationTerminalCompletedV2 (omnibase_core).
+"""
+
+SUFFIX_DELEGATION_FAILED_ROUTED_V2: str = (
+    "onex.evt.omnibase-infra.delegation-failed-routed.v2"
+)
+"""Event topic for a delegation that reached a backend and then failed.
+
+Wire model: ModelDelegationTerminalFailedRoutedV2 (omnibase_core).
+"""
+
+SUFFIX_DELEGATION_FAILED_UNROUTED_V2: str = (
+    "onex.evt.omnibase-infra.delegation-failed-unrouted.v2"
+)
+"""Event topic for a delegation that never reached a backend.
+
+Wire model: ModelDelegationTerminalFailedUnroutedV2 (omnibase_core).
+"""
+
 SUFFIX_DELEGATION_QUALITY_GATE_RESULT: str = (
     "onex.evt.omnibase-infra.quality-gate-result.v1"
 )
@@ -1310,6 +1339,24 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(
         suffix=SUFFIX_DELEGATION_FAILED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    # Delegation v2 terminal event topics (OMN-15622). Partition count and
+    # retention mirror the v1 terminal pair above; pinned by
+    # tests/unit/topics/test_delegation_terminal_v2_provisioning.py.
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_COMPLETED_V2,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_FAILED_ROUTED_V2,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_FAILED_UNROUTED_V2,
         partitions=3,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
