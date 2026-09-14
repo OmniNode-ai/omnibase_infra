@@ -233,7 +233,23 @@ def test_collaborator_lane_declares_itself_optional_in_the_census() -> None:
     assert lane_spec["network"] == "omnibase-infra-lakshman-network"
     assert lane_spec["compose_file"] == "docker/docker-compose.lakshman.yml"
     # The governed lanes must NOT have become optional along the way.
-    for governed in ("stability-test", "prod", "judge"):
+    #
+    # OMN-18320 retired exactly one lab compose lane: `prod`. The governance
+    # constant stays wider than the manifest on purpose so unattributed prod
+    # mutations still refuse. This pins the split exactly, so a future partial
+    # erosion of stability-test or judge cannot hide behind a non-empty
+    # intersection.
+    declared_governed = GOVERNED_LANES & manifest["lanes"].keys()
+    retired_from_manifest = GOVERNED_LANES - manifest["lanes"].keys()
+    assert declared_governed == frozenset({"stability-test", "judge"}), (
+        "only the retired lab compose prod lane may be absent from the census "
+        f"manifest; declared governed lanes are {sorted(declared_governed)}"
+    )
+    assert retired_from_manifest == frozenset({"prod"}), (
+        "the only governed lane missing from the census manifest must be the "
+        f"retired lab compose prod lane; got {sorted(retired_from_manifest)}"
+    )
+    for governed in declared_governed:
         assert not manifest["lanes"][governed].get("optional", False), (
             f"lane {governed!r} became optional — an entirely-absent governed "
             "lane would stop being reported as drift"

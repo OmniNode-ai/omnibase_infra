@@ -39,7 +39,13 @@ _MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
 # ungoverned, fully-mutable collaborator lane changes nothing here — parity is
 # about the manifest describing the compose file truthfully, not about who may
 # deploy the lane.
-_COMPOSE_LANES = ("stability-test", "prod", "judge", "lakshman")
+# OMN-18320: `prod` left this tuple on 2026-09-13 because the compose project it
+# named was shut down on the lab host under an operator consent row and the lane was
+# removed from lane-manifest.yaml. docker/docker-compose.prod.yml is still in the tree,
+# so the scrape below would still find container_name values — but there is no manifest
+# lane to diff them against, and re-adding one would re-declare a lane that does not
+# exist. This is the lab compose lane only; production is the AWS `onex-prod` namespace.
+_COMPOSE_LANES = ("stability-test", "judge", "lakshman")
 
 
 def _load_manifest() -> dict:
@@ -214,7 +220,29 @@ def test_no_service_declares_replicas_zero() -> None:
 def test_runtime_worker_declared_in_every_runtime_lane() -> None:
     """The worker that silently dropped (OMN-12988) must be a required service."""
     manifest = _load_manifest()
-    for lane in ("stability-test", "prod"):
+    runtime_lanes = tuple(
+        lane
+        for lane, spec in manifest["lanes"].items()
+        if any(s["name"].endswith("-runtime") for s in spec["services"])
+    )
+    assert runtime_lanes, "runtime-worker ratchet must cover at least one lane"
+    no_worker_lanes: set[str] = set()
+    for lane in runtime_lanes:
         names = {s["name"] for s in manifest["lanes"][lane]["services"]}
         worker = next((n for n in names if n.endswith("runtime-worker")), None)
-        assert worker is not None, f"lane {lane!r} missing a runtime-worker service"
+        if worker is None:
+            no_worker_lanes.add(lane)
+            continue
+        worker_spec = next(
+            s for s in manifest["lanes"][lane]["services"] if s["name"] == worker
+        )
+        assert worker_spec.get("kind", "service") == "service", (
+            f"lane {lane!r} runtime-worker is not a required service: {worker_spec}"
+        )
+        assert worker_spec.get("replicas", 1) >= 1, (
+            f"lane {lane!r} runtime-worker must require at least one replica"
+        )
+    assert no_worker_lanes == {"dev", "judge", "lakshman"}, (
+        "a runtime lane without a runtime-worker must be explicitly accounted "
+        f"for; got {sorted(no_worker_lanes)}"
+    )

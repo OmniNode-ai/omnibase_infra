@@ -90,23 +90,35 @@ def _run(
     return proc, calllog.read_text()
 
 
-# A prod lane with the runtime containers absent + network detached (tonight's
-# outage), so every live run here MUST detect drift.
+# A lane with its runtime containers absent + network detached, so every live run
+# here MUST detect drift.
 # Tab-delimited rows: Names \t State \t Status \t Image \t Labels. OMN-15466
 # replaced the `{{json .}}` inventory format, which silently requested per-
 # container size (90.363 s vs 0.150 s on .201's 111 containers).
-_PROD_OUTAGE_PS = (
-    "omnibase-infra-prod-postgres\trunning\tUp 2 hours\tpostgres:16"
-    "\tcom.omninode.lane=prod\n"
+#
+# OMN-18320: this fixture was shaped on the `prod` lane until 2026-09-13, when the
+# lab compose prod lane was shut down under an operator consent row and removed
+# from the manifest. These four tests drive the real script as a subprocess
+# against the real manifest file, so unlike the pure-planner tests they cannot
+# pin a frozen lane — the lane has to be one the script can still resolve. `judge`
+# is used because the assertions here are about CLI behaviour (exit codes and
+# whether anything is published), never about which lane it is; the 2026-06-11
+# prod incident replay lives in test_lane_census_plan.py and keeps its own frozen
+# prod fixture. This is the lab compose lane only; production is the AWS
+# `onex-prod` namespace.
+_LANE = "judge"
+_LANE_OUTAGE_PS = (
+    "omnibase-infra-judge-postgres\trunning\tUp 2 hours\tpostgres:16"
+    "\tcom.omninode.lane=judge\n"
 )
 _NO_NETWORKS = "bridge\nhost\n"
 
 
 def test_dry_run_does_not_publish(tmp_path: Path) -> None:
     proc, calls = _run(
-        ["--lane", "prod", "--dry-run"],
+        ["--lane", _LANE, "--dry-run"],
         tmp_path,
-        ps_rows=_PROD_OUTAGE_PS,
+        ps_rows=_LANE_OUTAGE_PS,
         networks=_NO_NETWORKS,
         broker="redpanda:9092",
     )
@@ -116,9 +128,9 @@ def test_dry_run_does_not_publish(tmp_path: Path) -> None:
 
 def test_drift_exits_30(tmp_path: Path) -> None:
     proc, _ = _run(
-        ["--lane", "prod"],
+        ["--lane", _LANE],
         tmp_path,
-        ps_rows=_PROD_OUTAGE_PS,
+        ps_rows=_LANE_OUTAGE_PS,
         networks=_NO_NETWORKS,
         broker="redpanda:9092",
     )
@@ -128,9 +140,9 @@ def test_drift_exits_30(tmp_path: Path) -> None:
 def test_live_without_broker_does_not_publish(tmp_path: Path) -> None:
     """No KAFKA_BOOTSTRAP_SERVERS => no publish (fail-fast, no localhost default)."""
     proc, calls = _run(
-        ["--lane", "prod"],
+        ["--lane", _LANE],
         tmp_path,
-        ps_rows=_PROD_OUTAGE_PS,
+        ps_rows=_LANE_OUTAGE_PS,
         networks=_NO_NETWORKS,
         broker=None,
     )
@@ -139,15 +151,15 @@ def test_live_without_broker_does_not_publish(tmp_path: Path) -> None:
 
 
 def test_clean_lane_exits_zero(tmp_path: Path) -> None:
-    """A fully-running prod lane with its network present exits 0 (no drift)."""
-    # Build a healthy prod inventory from the manifest.
+    """A fully-running lane with its network present exits 0 (no drift)."""
+    # Build a healthy inventory for the lane from the manifest.
     import yaml
 
     manifest = yaml.safe_load(
         (_REPO / "deploy" / "lane-census" / "lane-manifest.yaml").read_text()
     )
     rows = []
-    for svc in manifest["lanes"]["prod"]["services"]:
+    for svc in manifest["lanes"][_LANE]["services"]:
         name = svc["name"]
         if svc.get("kind") == "profile_gated":
             # OMN-16803: the lane's compose file disables these via a profile
@@ -157,14 +169,14 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
             continue
         if svc.get("kind") == "oneshot":
             rows.append(
-                f"{name}\texited\tExited (0) 1 hour ago\tx:1\tcom.omninode.lane=prod"
+                f"{name}\texited\tExited (0) 1 hour ago\tx:1\tcom.omninode.lane={_LANE}"
             )
         else:
-            rows.append(f"{name}\trunning\tUp 1 hour\tx:1\tcom.omninode.lane=prod")
+            rows.append(f"{name}\trunning\tUp 1 hour\tx:1\tcom.omninode.lane={_LANE}")
     ps = "\n".join(rows) + "\n"
-    networks = "omnibase-infra-prod-network\nbridge\n"
+    networks = "omnibase-infra-judge-network\nbridge\n"
     proc, calls = _run(
-        ["--lane", "prod"],
+        ["--lane", _LANE],
         tmp_path,
         ps_rows=ps,
         networks=networks,
