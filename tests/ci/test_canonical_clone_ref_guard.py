@@ -800,3 +800,69 @@ def test_the_converge_door_still_leaves_no_refusal_record(
     )
 
     assert not _refusal_log(clone).exists()
+
+
+def test_the_guard_does_not_shell_out_to_stat() -> None:
+    """`stat` is the one portability trap on this path, and it fails SILENTLY.
+
+    `-f` means "use this format" on BSD and "file SYSTEM status" on GNU, so the
+    obvious `stat -f %m || stat -c %Y` fallback does not fail over on Linux: GNU
+    accepts `-f`, prints something else, and exits 0. Under `set -e` the
+    arithmetic on that value then aborted the hook before it could restore
+    anything.
+
+    Measured: every restore assertion in this file passed on macOS (git 2.50.1)
+    and the whole restore was dead on the Linux CI runner (git 2.55.0), with the
+    refusal still recorded -- the shape hardest to notice, because the guard
+    still looked like it was working. The marker carries its own epoch instead.
+
+    The behaviour tests above are the real proof and they run on Linux in CI.
+    This one names the specific regression so a reintroduction fails with its
+    reason attached rather than as six mysterious assertion errors.
+    """
+    text = REF_GUARD.read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "stat " not in code, (
+        "the ref guard must not shell out to `stat`: its -f flag means opposite "
+        "things on BSD and GNU and the wrong one exits 0 with garbage"
+    )
+
+
+def test_the_restore_survives_a_stat_that_behaves_like_gnu(
+    registry: Path, clone: Path, tmp_path: Path
+) -> None:
+    """Behavioural proof of the portability fix, runnable on macOS.
+
+    A `stat` earlier on PATH that exits 0 and prints something useless is
+    exactly what GNU `stat -f %m` does. The restore must be unaffected, because
+    it no longer consults `stat` at all. Without this, the regression is only
+    catchable on a Linux runner, and the local suite would keep reporting green
+    against a guard whose restore is dead everywhere else.
+    """
+    env = _base_env(registry)
+    sabotage = tmp_path / "sabotage"
+    sabotage.mkdir()
+    stub = sabotage / "stat"
+    stub.write_text('#!/bin/sh\necho "  File: nonsense"\nexit 0\n', encoding="utf-8")
+    stub.chmod(0o755)
+    env["PATH"] = f"{sabotage}:{env['PATH']}"
+
+    assert (
+        _git("branch", "sidebranch", "origin/sidebranch", cwd=clone, env=env).returncode
+        == 0
+    )
+    before = _fingerprint(clone, env)
+    assert before[2] == ""
+
+    result = _git("checkout", "-q", "sidebranch", cwd=clone, env=env)
+
+    assert result.returncode != 0
+    assert _fingerprint(clone, env) == before
+    verdicts = [
+        line.split(" | ")[1]
+        for line in _refusal_log(clone).read_text(encoding="utf-8").splitlines()
+        if " | " in line
+    ]
+    assert verdicts == ["REFUSED", "RESTORED"], verdicts

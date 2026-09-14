@@ -222,7 +222,15 @@ deny() {
     *) target="$_deny_new" ;;
   esac
   record "REFUSED" "$ref" "what=$what new=$_deny_new target=${target:-none}"
-  printf '%s\n%s\n%s\n' "$_deny_new" "$ref" "${target:-}" >"$_refusal_marker" 2>/dev/null || true
+  # The marker carries its own creation epoch on line 4. Reading the mtime back
+  # with `stat` instead would be a portability trap: `stat -f` means "format" on
+  # BSD and "file SYSTEM status" on GNU, so the obvious BSD-first-GNU-fallback
+  # spelling silently produces garbage on Linux rather than failing over, and
+  # under `set -e` the arithmetic on that garbage aborts the hook before it can
+  # restore anything. Measured: the whole restore was dead on the Linux CI
+  # runner (git 2.55.0) while passing on macOS.
+  printf '%s\n%s\n%s\n%s\n' "$_deny_new" "$ref" "${target:-}" "$(date -u +%s)" \
+    >"$_refusal_marker" 2>/dev/null || true
 
   cat >&2 <<EOF
 ERROR: refused $what in canonical clone:
@@ -282,20 +290,28 @@ worktree_is_initializing() {
 # `<new> <ref>` pair git is now reporting as aborted. Every other abort, and
 # every abort in a repository this hook refused nothing in, returns untouched.
 restore_after_refusal() {
-  local marker_new marker_ref marker_target matched=0 old new ref marker_age now_epoch
+  local marker_new marker_ref marker_target marker_epoch matched=0 old new ref now_epoch
 
   [[ -f "$_refusal_marker" ]] || return 0
 
-  # Sweep a marker whose `aborted` never arrived before reading it, so it can
-  # never be honoured during an unrelated command minutes later.
+  marker_new=""; marker_ref=""; marker_target=""; marker_epoch=""
+  {
+    read -r marker_new || true
+    read -r marker_ref || true
+    read -r marker_target || true
+    read -r marker_epoch || true
+  } <"$_refusal_marker" 2>/dev/null || return 0
+  [[ -n "$marker_ref" ]] || return 0
+
+  # Sweep a marker whose `aborted` never arrived, so it can never be honoured
+  # during an unrelated command minutes later. The epoch comes from the marker's
+  # own line 4 rather than from `stat` -- see the note at the write site.
   now_epoch="$(date -u +%s)"
-  marker_age="$(( now_epoch - $(stat -f %m "$_refusal_marker" 2>/dev/null || stat -c %Y "$_refusal_marker" 2>/dev/null || echo "$now_epoch") ))"
-  if [[ "$marker_age" -gt "$_marker_max_age_seconds" ]]; then
+  if [[ ! "$marker_epoch" =~ ^[0-9]+$ ]] ||
+    [[ "$(( now_epoch - marker_epoch ))" -gt "$_marker_max_age_seconds" ]]; then
     rm -f "$_refusal_marker"
     return 0
   fi
-
-  { read -r marker_new; read -r marker_ref; read -r marker_target; } <"$_refusal_marker" 2>/dev/null || return 0
   while read -r old new ref; do
     [[ -n "${ref:-}" ]] || continue
     if [[ "$new" == "$marker_new" && "$ref" == "$marker_ref" ]]; then
