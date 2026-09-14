@@ -335,7 +335,12 @@ class TestTheIdleHeartbeatBoundary:
             seen.append(boundary)
 
         agent.executor.self_update = fake_self_update  # type: ignore[method-assign]
-        agent._last_idle_self_update = 0.0
+        # None is the "never checked" sentinel, so the check is due. Not 0.0:
+        # time.monotonic()'s zero is the boot instant on Linux, so on a
+        # freshly-booted CI runner 0.0 reads as "checked seconds ago" and the
+        # check is skipped -- which is how these two cases passed on a
+        # workstation and failed on a runner.
+        agent._last_idle_self_update = None
 
         agent._maybe_self_update_idle()
 
@@ -353,7 +358,12 @@ class TestTheIdleHeartbeatBoundary:
         agent.job_store = JobStore(state_dir=tmp_path / "jobs")
         calls: list[object] = []
         agent.executor.self_update = lambda **kw: calls.append(kw)  # type: ignore[method-assign]
-        agent._last_idle_self_update = 0.0
+        # None is the "never checked" sentinel, so the check is due. Not 0.0:
+        # time.monotonic()'s zero is the boot instant on Linux, so on a
+        # freshly-booted CI runner 0.0 reads as "checked seconds ago" and the
+        # check is skipped -- which is how these two cases passed on a
+        # workstation and failed on a runner.
+        agent._last_idle_self_update = None
 
         agent._maybe_self_update_idle()
         agent._maybe_self_update_idle()
@@ -376,11 +386,49 @@ class TestTheIdleHeartbeatBoundary:
         agent.job_store.accept(correlation_id=uuid.uuid4(), command={})
         calls: list[object] = []
         agent.executor.self_update = lambda **kw: calls.append(kw)  # type: ignore[method-assign]
-        agent._last_idle_self_update = 0.0
+        # None is the "never checked" sentinel, so the check is due. Not 0.0:
+        # time.monotonic()'s zero is the boot instant on Linux, so on a
+        # freshly-booted CI runner 0.0 reads as "checked seconds ago" and the
+        # check is skipped -- which is how these two cases passed on a
+        # workstation and failed on a runner.
+        agent._last_idle_self_update = None
 
         agent._maybe_self_update_idle()
 
         assert calls == [], "an accepted job was in flight and must have blocked it"
+
+    def test_a_freshly_booted_host_does_not_suppress_the_first_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The "never checked" sentinel must not be a value the clock produces.
+
+        ``time.monotonic()``'s zero is an arbitrary reference point -- on Linux
+        the boot instant -- so a ``0.0`` sentinel means "checked at boot", and
+        on a host that has been up for less than the interval the check is
+        suppressed forever. This is not hypothetical: the two cases above passed
+        on a workstation with days of uptime and failed on a CI runner minutes
+        old, which is the only reason it was found before shipping.
+        """
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+        monkeypatch.setattr("deploy_agent.agent.STATE_DIR", tmp_path / "jobs")
+        monkeypatch.setattr("deploy_agent.agent.time.monotonic", lambda: 5.0)
+        from deploy_agent.agent import DeployAgent
+
+        agent = DeployAgent()
+        agent.job_store = JobStore(state_dir=tmp_path / "jobs")
+        calls: list[object] = []
+        agent.executor.self_update = lambda **kw: calls.append(kw)  # type: ignore[method-assign]
+
+        assert agent._last_idle_self_update is None, (
+            "a fresh agent must be due, and must say so with a sentinel the "
+            "clock cannot produce"
+        )
+        agent._maybe_self_update_idle()
+
+        assert len(calls) == 1, (
+            "five seconds of host uptime suppressed the first idle check: the "
+            "sentinel is being compared as if it were a timestamp"
+        )
 
     def test_the_idle_branch_of_the_poll_loop_calls_it(self) -> None:
         import inspect

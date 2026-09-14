@@ -116,7 +116,16 @@ class DeployAgent:
         # Stamped at the top of the poll loop so the first idle check happens
         # one interval AFTER startup -- a process that has just recorded its own
         # identity has nothing to compare yet.
-        self._last_idle_self_update = 0.0
+        #
+        # ``None`` means "never checked, due now", and it is None rather than
+        # 0.0 because ``time.monotonic()``'s zero is an arbitrary reference
+        # point, not a time. On Linux it is the boot instant, so on a runner
+        # that has been up for less than the interval a 0.0 sentinel reads as
+        # "checked recently" and the check never fires -- which is exactly what
+        # happened to this file's own tests in CI while they passed on a
+        # long-running workstation. A sentinel that means "never" must not be
+        # a value the clock can produce.
+        self._last_idle_self_update: float | None = None
         self._kafka_config = load_deploy_agent_kafka_config_from_env()
         # OMN-16939: fail closed at process construction, before the health
         # port binds and long before a command is polled. An agent that has
@@ -279,7 +288,10 @@ class DeployAgent:
         the job store on every one-second poll.
         """
         now = time.monotonic()
-        if now - self._last_idle_self_update < SELF_UPDATE_IDLE_INTERVAL_SECONDS:
+        if (
+            self._last_idle_self_update is not None
+            and now - self._last_idle_self_update < SELF_UPDATE_IDLE_INTERVAL_SECONDS
+        ):
             return
         self._last_idle_self_update = now
 
