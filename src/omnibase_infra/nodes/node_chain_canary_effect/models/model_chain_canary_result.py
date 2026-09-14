@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -122,6 +123,14 @@ class ModelChainCanaryResult(BaseModel):
     )
     terminal_readback_error: str = Field(
         default="", description="Sanitized error from the terminal readback, if any."
+    )
+
+    projection_traffic_class: Literal["unclassified", "organic", "synthetic"] = Field(
+        default="unclassified",
+        description=(
+            "Typed traffic classification read from delegation_workflow_state "
+            "by the existing link-2 projection instrument."
+        ),
     )
 
     quarantine_status: EnumQuarantineCheckStatus = Field(

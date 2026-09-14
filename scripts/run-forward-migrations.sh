@@ -1854,7 +1854,7 @@ echo "[forward-migration] Re-asserting deployment-owned least-privilege grants..
 # this deployment does not own is authorization without provenance, and
 # tests/unit/infra/test_login_only_role_grants_omn18060.py pins the subset.
 for grant_role_entry in \
-  "chain_canary_reader:public.delegation_workflow_state:correlation_id,state" \
+  "chain_canary_reader:public.delegation_workflow_state:correlation_id,state,traffic_class" \
   "chain_canary_reader:public.ledger_chain:correlation_id,hop,hop_index,replay_green,verifier_verdict" \
 ; do
   entry_grant_role=${grant_role_entry%%:*}
