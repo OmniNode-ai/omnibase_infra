@@ -63,8 +63,14 @@ def _invoke_in_subprocess(
 
     env = dict(os.environ)
     env["ONEX_ARTIFACT_STORE_ROOT"] = str(workspace / "artifacts")
-    # The fixture handler is importable only from the repo root.
-    env["PYTHONPATH"] = str(_REPO_ROOT)
+    # The fixture handler is importable only from the repo root, so the repo
+    # root is PREPENDED rather than assigned: CI resolves `omnibase_infra`
+    # itself through the inherited PYTHONPATH, and replacing the value made
+    # the child process unable to import the package under test.
+    inherited_path = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(_REPO_ROOT), inherited_path) if part
+    )
     # The omnimarket co-install drift guard (OMN-13930) binds to $OMNI_HOME and
     # governs dispatch of MARKET-provided nodes. This test dispatches a fixture
     # contract written moments ago in tmp_path — no market node is reachable
