@@ -375,7 +375,7 @@ def test_new_depth_three_table_is_visible_to_the_binding(
 def test_absent_dependency_path_cannot_collide_with_literal_string(
     env_digest: Any, tmp_path: Path
 ) -> None:
-    """Missing paths and attacker-controlled strings must serialize distinctly."""
+    """Missing paths and attacker-controlled strings use different envelopes."""
     absent = BASE_PYPROJECT.replace(
         '\n[project.optional-dependencies]\ndev = ["pytest>=8.0.0"]\n',
         "\n",
@@ -386,9 +386,22 @@ def test_absent_dependency_path_cannot_collide_with_literal_string(
     )
     a = _tree(tmp_path / "absent", absent)
     b = _tree(tmp_path / "literal", literal)
-    assert env_digest.pyproject_dependency_projection(
-        a
-    ) != env_digest.pyproject_dependency_projection(b)
+    absent_projection = json.loads(
+        env_digest.pyproject_dependency_projection(a).decode("utf-8")
+    )
+    literal_projection = json.loads(
+        env_digest.pyproject_dependency_projection(b).decode("utf-8")
+    )
+    path = "project.optional-dependencies"
+    assert absent_projection["values"][path] == {"present": False}
+    assert literal_projection["values"][path] == {
+        "present": True,
+        "value": {
+            "type": "table",
+            "value": {"dev": {"type": "str", "value": "<absent>"}},
+        },
+    }
+    assert absent_projection != literal_projection
 
 
 def test_toml_datetime_dependency_value_fails_with_path_context(
@@ -400,6 +413,30 @@ def test_toml_datetime_dependency_value_fails_with_path_context(
         BASE_PYPROJECT.replace(
             "[tool.uv]\npackage = true",
             "[tool.uv]\npackage = true\ncache-until = 2026-09-13T12:00:00Z",
+        ),
+    )
+    with pytest.raises(TypeError, match="tool\\.uv\\.cache-until"):
+        env_digest.pyproject_dependency_projection(root)
+
+
+@pytest.mark.parametrize(
+    ("case", "toml_value"),
+    [
+        ("datetime", "2026-09-13T12:00:00Z"),
+        ("date", "2026-09-13"),
+        ("time", "12:00:00"),
+        ("list", "[2026-09-13T12:00:00Z]"),
+    ],
+)
+def test_non_json_toml_dependency_values_fail_with_path_context(
+    env_digest: Any, tmp_path: Path, case: str, toml_value: str
+) -> None:
+    """Non-JSON TOML scalars fail closed, including inside lists."""
+    root = _tree(
+        tmp_path / case,
+        BASE_PYPROJECT.replace(
+            "[tool.uv]\npackage = true",
+            f"[tool.uv]\npackage = true\ncache-until = {toml_value}",
         ),
     )
     with pytest.raises(TypeError, match="tool\\.uv\\.cache-until"):
