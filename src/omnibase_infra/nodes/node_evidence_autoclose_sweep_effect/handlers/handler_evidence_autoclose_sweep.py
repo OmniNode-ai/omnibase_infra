@@ -1722,6 +1722,99 @@ def _acceptance_criteria_items(description: str) -> list[str]:
     return items
 
 
+# -- OMN-18362: a criterion a later revision REPLACED is not a live one -------
+#
+# `_acceptance_criteria_items` reads the CURRENT description text and has no
+# notion of revision. House style, when a criterion is re-ruled, is to write the
+# replacement and keep the old text in the body under an explicit
+# `(superseded ...)` qualifier so the history stays legible. Both carry the same
+# `AC<n>` label, so the reader returned BOTH and every consumer below counted a
+# replaced declaration as one the ticket still has to satisfy.
+#
+# Measured on OMN-18035: five items parsed, labels AC1 AC2 AC3 AC3 AC4. Two
+# consequences, and neither is clearable by any action the author can take.
+# `_ac_coverage_gap` compares five listed items against the verified-probative
+# count, so a ticket with four criteria and four verified checks reads as one
+# criterion short. And in `_ac_binding_gap` the replaced item's
+# `_criterion_pin_hash` can never match the pin its binding was accepted
+# against, so AC3 reports stale-pinned or unbound for as long as the ticket
+# exists. `documentContentHistory` settles that this is a REPLACEMENT and not an
+# authoring slip: the creation revision carries one AC3 and no marker; both the
+# duplicate and the marker appear only in the 2026-09-09 revision. That is the
+# case the closeout plan's section 6 already names, read from the sweep's side.
+#
+# THE RULE NARROWS AND CANNOT WIDEN. An item leaves the live set only when BOTH
+# halves hold: its own text carries a supersession qualifier ON ITS LABEL, and
+# another item carrying the same canonical label is present and is NOT itself so
+# marked. So the exclusion can only ever drop a DUPLICATE. It can never drop the
+# sole declaration of a label, it can never shrink the set of labels the sweep
+# sees, and an unrecognised spelling keeps both items. Dropping a criterion is
+# the RELEASING direction -- the one this module refuses everywhere else -- so
+# every ambiguous case counts both and holds, exactly as an over-count does.
+#
+# NOT AN EDIT TO THE READER. `_acceptance_criteria_items` stays byte-equivalent:
+# its item strings are the hash input `_criterion_pin_hash` takes, and the
+# change-control criterion reader pins the same shared digest vectors against
+# them (`TestTheHashIsTheChangeControlHash`). The exclusion is a named filter
+# over its output, so a criterion both readers see still yields one digest.
+#
+# The qualifier must be ATTACHED TO THE LABEL -- a parenthesised or bracketed
+# run opening immediately after it, which is where house style puts it. The word
+# appearing in the criterion's body is a criterion that TALKS about supersession
+# (this module's own tests are full of them) and is not a claim about itself.
+_SUPERSEDED_QUALIFIER_RE = re.compile(
+    r"^[ \t]*[(\[][^)\]]*\bsupersed(?:e|es|ed|ing)\b[^)\]]*[)\]]",
+    re.IGNORECASE,
+)
+
+
+def _declares_supersession(item: str) -> bool:
+    """True when ``item``'s own label qualifier says a later revision replaced it.
+
+    Scoped to the qualifier that opens immediately after the label, never the
+    body: `AC1 (superseded 2026-09-09 -- replaced by the AC1 above)` declares
+    itself replaced; `AC1 -- falsified by a superseded receipt being counted`
+    does not, and reading the second as the first would drop a live criterion.
+    """
+    text = item.strip()
+    match = _AC_LABEL_RE.match(text)
+    if not match:
+        return False
+    return _SUPERSEDED_QUALIFIER_RE.match(text[match.end() :]) is not None
+
+
+def _live_acceptance_criteria_items(description: str) -> list[str]:
+    """The criteria this ticket still has to satisfy, in description order.
+
+    :func:`_acceptance_criteria_items` with replaced declarations removed. See
+    the block comment above for why the removal takes two conditions and why it
+    is a filter over that function rather than a change to it.
+    """
+    items = _acceptance_criteria_items(description)
+    superseded = [
+        index for index, item in enumerate(items) if _declares_supersession(item)
+    ]
+    if not superseded:
+        return items
+    superseded_at = set(superseded)
+    # The labels a LIVE item claims. A label absent from this set has no
+    # replacement in the body, so its marked item is the only declaration there
+    # is and it stays -- holding the ticket rather than releasing it.
+    replaced_labels = {
+        label
+        for index, item in enumerate(items)
+        if index not in superseded_at
+        for label in (_canonical_ac_label(item),)
+        if label
+    }
+    live: list[str] = []
+    for index, item in enumerate(items):
+        if index in superseded_at and _canonical_ac_label(item) in replaced_labels:
+            continue
+        live.append(item)
+    return live
+
+
 # -- the gate probe a ticket names for itself (OMN-16106) -------------------
 #
 # A `Gate:` line in the Linear description is the ticket telling this mechanism
@@ -1895,7 +1988,7 @@ def _ac_coverage_gap(
             unchecked,
         )
 
-    items = tuple(_acceptance_criteria_items(description))
+    items = tuple(_live_acceptance_criteria_items(description))
     if not items:
         return "", ()
     if len(items) > verified_count:
@@ -2234,7 +2327,7 @@ def _coverage_corpus_counts(
         label
         for label in (
             _canonical_ac_label(item)
-            for item in _acceptance_criteria_items(description)
+            for item in _live_acceptance_criteria_items(description)
         )
         if label
     }
@@ -2355,7 +2448,7 @@ def _every_criterion_is_state_shaped(description: str) -> bool:
     conjunct later, and this returning True would have let it past the
     behaviour conjunct on a body nobody can check.
     """
-    items = _acceptance_criteria_items(description)
+    items = _live_acceptance_criteria_items(description)
     if not items:
         return False
     return all(_criterion_is_state_shaped(item) for item in items)
@@ -2412,7 +2505,7 @@ def _ac_binding_gap(
     pinned_hashes = _pinned_criterion_hashes(verdict)
     contract = f"contracts/{ticket_id}.yaml"
     field_present, bindings, drafts = _declared_ac_bindings(verdict)
-    items = tuple(_acceptance_criteria_items(description))
+    items = tuple(_live_acceptance_criteria_items(description))
 
     if not items:
         return (
