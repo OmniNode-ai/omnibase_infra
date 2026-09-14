@@ -73,14 +73,18 @@ def _invoke_in_subprocess(
     # does rather than depending on whose workspace the suite runs in.
     env.pop("OMNI_HOME", None)
 
-    onex = Path(sys.executable).parent / "onex"
-    if not onex.exists():
-        pytest.skip(f"onex console script not installed beside {sys.executable}")
-
+    # The click command is invoked by import rather than through the `onex`
+    # console script on purpose: which package's `onex` wins the PATH differs
+    # between a developer venv and the CI environment, and a test that spawns
+    # a real process should fail on the behaviour under test, never on which
+    # script happened to be installed. This is still a real process — its own
+    # interpreter, its own working directory, its own filesystem view.
     completed = subprocess.run(
         [
-            str(onex),
-            "node",
+            sys.executable,
+            "-c",
+            "from omnibase_infra.cli.cli_node import run_node_by_name; "
+            "run_node_by_name()",
             "proof_noop",
             "--contract",
             str(contract_path),
