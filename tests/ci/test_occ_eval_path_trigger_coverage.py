@@ -20,6 +20,17 @@ types and is now healed by `occ-preflight-heal.yml`, which re-runs the failed
 jobs of the EXISTING run in place. Both mechanisms are accepted below; a
 workflow with NEITHER is still the failure this module exists to catch.
 
+AMENDED AGAIN BY OMN-18352 -- the healer's `edited` trigger was its ONLY
+invocation point, and its guard requires the target CI run to already read
+`completed`. The autobind stamp lands about a minute after the push, while the
+matrix is still in flight, so the heal fired, no-opped, and concluded `success`
+meaning "the guard ran" (live on infra#3503 and #3505; a human `gh run rerun
+--failed` cleared it 28 minutes later). The healer now also fires on the CI
+run's own `workflow_run: completed`, and its guard moved into
+`scripts/ci/occ_preflight_heal.py` so it is testable. This module keeps
+asserting the `edited` half; the completion half and the guard's verdict table
+are pinned by ``tests/ci/test_occ_preflight_heal_omn18352.py``.
+
 Note on the alternative that was rejected: skipping the heavy jobs on an
 edited-triggered run does not work, because a job skipped by an `if:` still
 publishes a `skipped` check run, which branch protection counts as passing --
@@ -108,6 +119,8 @@ EVAL_PATH_WORKFLOWS: tuple[str, ...] = (
 # does cover the workflow -- the tests below check the healer's shape and its
 # name/job pins against the live files rather than taking this tuple's word.
 HEAL_WORKFLOW = "occ-preflight-heal.yml"
+# OMN-18352: the healer's guard now lives here, not in the workflow's shell.
+HEAL_GUARD_SCRIPT = "scripts/ci/occ_preflight_heal.py"
 HEALER_COVERED_WORKFLOWS: tuple[str, ...] = ("ci.yml",)
 
 
@@ -229,23 +242,41 @@ def test_healer_fires_on_edited_and_reruns_only_failed_jobs() -> None:
     """The healer is the mechanism `ci.yml` now depends on; pin its shape.
 
     Three properties matter. It must fire on `edited` (nothing else clears a
-    body-only stamp). It must re-run the failed jobs of the EXISTING run rather
-    than dispatch a new one -- a new run would recreate the full-matrix cost the
-    healer exists to avoid, and would not update the run `CI Summary` polls. And
-    it must gate on occ-preflight specifically, so an unrelated body edit does
-    not re-queue genuine test failures.
+    body-only stamp landing after the run has finished). It must re-run the
+    failed jobs of the EXISTING run rather than dispatch a new one -- a new run
+    would recreate the full-matrix cost the healer exists to avoid, and would
+    not update the run `CI Summary` polls. And it must gate on occ-preflight
+    specifically, so an unrelated body edit does not re-queue genuine test
+    failures.
+
+    OMN-18352 moved the guard out of this file's inline shell and into
+    ``scripts/ci/occ_preflight_heal.py`` (it was untestable as YAML, which is
+    how the completion race shipped). So the rerun mechanism is asserted
+    against the SCRIPT the workflow delegates to, not against the workflow's
+    own text -- this file's header quotes ``gh run rerun --failed`` in prose
+    several times, and a substring check over the whole file would now pass on
+    a comment while the healer did nothing at all.
     """
     heal_path = WORKFLOWS_DIR / HEAL_WORKFLOW
     assert heal_path.is_file(), f"expected the healer at {heal_path}"
     assert _pull_request_trigger_types(heal_path) == {"edited"}, (
         f"{HEAL_WORKFLOW} must fire on exactly `edited` -- broadening it "
-        f"reintroduces per-push cost, narrowing it disables the heal"
+        f"reintroduces per-push cost, narrowing it disables the edited half "
+        f"of the heal (the completion half is the workflow_run trigger, "
+        f"pinned in tests/ci/test_occ_preflight_heal_omn18352.py)"
     )
     body = heal_path.read_text(encoding="utf-8")
-    assert "--failed" in body and "gh run rerun" in body, (
-        f"{HEAL_WORKFLOW} must heal via `gh run rerun ... --failed` (same run "
-        f"id, failed jobs only). A fresh dispatch reintroduces the full-matrix "
-        f"cost and leaves the run CI Summary polls untouched."
+    assert HEAL_GUARD_SCRIPT in body, (
+        f"{HEAL_WORKFLOW} must delegate its guard to {HEAL_GUARD_SCRIPT}; an "
+        f"inlined shell guard is unreachable by any test"
+    )
+    guard_path = REPO_ROOT / HEAL_GUARD_SCRIPT
+    assert guard_path.is_file(), f"expected the extracted guard at {guard_path}"
+    guard_source = guard_path.read_text(encoding="utf-8")
+    assert '"rerun"' in guard_source and '"--failed"' in guard_source, (
+        f"{HEAL_GUARD_SCRIPT} must heal via `gh run rerun ... --failed` (same "
+        f"run id, failed jobs only). A fresh dispatch reintroduces the "
+        f"full-matrix cost and leaves the run CI Summary polls untouched."
     )
     assert "PREFLIGHT_JOB_PREFIX: occ-preflight" in body, (
         f"{HEAL_WORKFLOW} must gate the rerun on a failed occ-preflight job"
