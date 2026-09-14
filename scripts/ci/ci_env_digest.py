@@ -7,8 +7,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import platform
 import tomllib
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -39,9 +41,8 @@ PYPROJECT_RELATIVE = "pyproject.toml"
 # unknowable from any single branch. A merge that combines dev's pyproject edit
 # with the PR's produces a manifest neither parent hashed, so whichever side of
 # the lock file the merge resolves to is wrong. Binding parsed values instead of
-# file layout makes the projection of a merge equal to the merge of the
-# projections whenever the two sides touched different tables, which is the
-# case that was costing a regenerate-merge-regenerate loop per PR.
+# file layout makes whole-table ordering irrelevant for independent edits; list
+# ordering inside dependency tables still remains part of the binding.
 DEPENDENCY_PATHS: tuple[tuple[str, ...], ...] = (
     ("build-system",),
     ("project", "requires-python"),
@@ -50,38 +51,79 @@ DEPENDENCY_PATHS: tuple[tuple[str, ...], ...] = (
     ("dependency-groups",),
     ("tool", "uv"),
 )
-
-# Absence and emptiness must not hash alike: a missing ``dependencies`` key is
-# a different manifest from ``dependencies = []``.
-_ABSENT = "<absent>"
+TABLE_TRIPWIRE_MAX_DEPTH = 3
 
 
-def _lookup(document: dict[str, Any], path: tuple[str, ...]) -> Any:
+def _json_ready(value: Any, path: tuple[str, ...]) -> Any:
+    """Return ``value`` in canonical JSON form, or fail closed with context."""
+    if value is None:
+        return {"type": "null", "value": None}
+    if isinstance(value, bool):
+        return {"type": "bool", "value": value}
+    if isinstance(value, int):
+        return {"type": "int", "value": value}
+    if isinstance(value, float):
+        dotted = ".".join(path)
+        if not math.isfinite(value):
+            raise TypeError(
+                f"pyproject.toml value at {dotted} is not JSON-canonical: {value!r}"
+            )
+        return {"type": "float", "value": value}
+    if isinstance(value, str):
+        return {"type": "str", "value": value}
+    if isinstance(value, list):
+        return {"type": "list", "value": [_json_ready(item, path) for item in value]}
+    if isinstance(value, dict):
+        return {
+            "type": "table",
+            "value": {
+                str(key): _json_ready(item, (*path, str(key)))
+                for key, item in value.items()
+            },
+        }
+    dotted = ".".join(path)
+    if isinstance(value, datetime | date | time):
+        raise TypeError(
+            f"pyproject.toml value at {dotted} is not JSON-canonical: {value!r}"
+        )
+    raise TypeError(
+        f"pyproject.toml value at {dotted} is not JSON-canonical: "
+        f"{type(value).__name__}"
+    )
+
+
+def _lookup(document: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
     cursor: Any = document
     for key in path:
         if not isinstance(cursor, dict) or key not in cursor:
-            return _ABSENT
+            return {"present": False}
         cursor = cursor[key]
-    return cursor
+    return {"present": True, "value": _json_ready(cursor, path)}
 
 
 def _table_names(document: dict[str, Any]) -> list[str]:
-    """Return every table name at depth one and two, sorted.
+    """Return every TOML table name, sorted.
 
     This is the tripwire that keeps the allowlist above honest. A future table
     that shapes the environment would otherwise be dropped in silence; carrying
     the names means its arrival moves the digest and forces someone to decide
-    whether it belongs in ``DEPENDENCY_PATHS``. Depth stops at two so that
-    adding an entry to an existing table -- a pytest marker, an entry point --
-    stays invisible, which is the churn this exists to remove.
+    whether it belongs in ``DEPENDENCY_PATHS``. Values inside existing tables
+    stay governed by the path allowlist. The tripwire descends to depth three,
+    enough to expose nested installer source tables without making arbitrary
+    tool-internal nesting part of the runner image contract.
     """
     names: list[str] = []
-    for key, value in document.items():
-        names.append(key)
-        if isinstance(value, dict):
-            names.extend(
-                f"{key}.{sub}" for sub, item in value.items() if isinstance(item, dict)
-            )
+
+    def visit(table: dict[str, Any], prefix: tuple[str, ...] = ()) -> None:
+        for key, value in table.items():
+            current = (*prefix, key)
+            if not isinstance(value, dict):
+                continue
+            names.append(".".join(current))
+            if len(current) < TABLE_TRIPWIRE_MAX_DEPTH:
+                visit(value, current)
+
+    visit(document)
     return sorted(names)
 
 
