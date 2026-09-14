@@ -157,6 +157,23 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn15355-blocked-acl-matrix-had-no-live-apply-gate
+    guard: scripts/apply_application_database_acl.py
+    incident: OMN-15355
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn15355.py::test_the_same_gate_accepts_a_ready_deployment_matrix
+    artifact:
+      fixture: tests/fixtures/omn15355/candidate-matrix.yaml.captured
+      sha256: 8c61d33acdbe02bff8ade90465e99f571fe331543f534d273f7129515b685650
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@3863623e4844dc9b0db69ceb4e77942737fbca32:docker/application-acl-proof/generated/candidate-matrix.yaml
+      captured_at: '2026-09-14T12:52:00Z'
+      captured_by: lane replay (OMN-15355)
+    test: tests/ci/test_incident_replay_omn15355.py::test_the_real_gate_refuses_the_matrix_that_has_never_been_appliable
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the ABSENCE of any gate between a generated ACL matrix and a live database. The renderer render_application_database_acl_sql had exactly one consumer outside the unit tests -- the ephemeral PostgreSQL 16 proof container, which calls it with allow_synthetic_proof=True -- so nothing anywhere read a matrix's status before privilege reached a real server, because nothing anywhere put privilege on a real server through a sanctioned path at all. The only remaining route was hand-run psql, which is ungated by construction, writes no pre-change snapshot, and therefore leaves the ticket's own rollback requirement (the durable pre-change ACL matrix, never a handwritten approximation) unsatisfiable after the fact. NOT A RECONSTRUCTION -- the artifact is the byte-for-byte git object of the generated matrix as omnibase_infra#2548 committed it on 2026-07-31, taken with git cat-file and re-fetchable at the recorded locator. It has never once been appliable: status BLOCKED, 332 policy blockers, 34 scaffold blockers, verified_evidence_source_keys empty, and both allowed_connect_principals and observed_connect_principals empty maps, which is the measured reason the change window has no input rather than an opinion about one. Applying it by the unsanctioned route would have written its blockers into live ACLs -- app_dashboard and onex_api reaching tenant and platform_catalog, omninode_runtime reaching omninode_internal -- the precise inverse of the separation the ticket exists to enforce, and the replay requires the refusal to NAME that cross-domain reach rather than refusing anonymously. THE DISCRIMINATOR IS LOAD-BEARING: a gate that refused every matrix would satisfy the rejection trivially and would wall off the change window permanently, so the same function is driven over a READY, deployment-scoped matrix built by the same shared builder the real generator calls and is required to accept. THE ACCEPT CONTROL CANNOT BE MADE FROM THE CAPTURED BYTES, and the reason is measured rather than asserted: test_the_captured_bytes_cannot_even_be_flipped_to_ready_by_hand edits status to READY on the captured payload and the model's own validator refuses it, naming the P0 prerequisite itself -- a READY deployment matrix requires every locked catalog and activity result source to be semantically verified, and this artifact locks neither. That second line of defence is worth pinning, because a reader of the gate alone would reasonably assume a hand-edited YAML could walk past it. NO MODIFICATIONS: the fixture is the git object verbatim, 272628 bytes; it is generated from public contract and topology declarations and carries no credential, host, account or identifier value, so unlike other cases in this registry it needed no redaction.
   - id: omn18346-branch-protection-audit-red-on-56-green-gates
     guard: scripts/audit_orphan_required_contexts.py
     incident: OMN-18346
