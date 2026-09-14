@@ -155,7 +155,9 @@ def test_self_update_requires_its_caller_to_name_the_boundary() -> None:
 
 
 @pytest.mark.unit
-def test_behind_at_poll_updates_before_the_job_is_marked_started(tmp_path) -> None:
+def test_behind_at_poll_updates_before_the_job_is_marked_started(
+    tmp_path, declare_loaded_code_sha
+) -> None:
     """A command arriving while behind triggers update-then-process.
 
     ``os.execv`` is patched to raise ``SystemExit`` because that is what the
@@ -164,6 +166,9 @@ def test_behind_at_poll_updates_before_the_job_is_marked_started(tmp_path) -> No
     to this message rather than committed past it.
     """
     job_store = JobStore(state_dir=tmp_path / "jobs")
+    # OMN-18200: this process loaded the clone's current code; the clone is what
+    # is behind the remote.
+    declare_loaded_code_sha(SHA_LOCAL)
     executor = DeployExecutor()
     consumer = _consumer(
         job_store,
@@ -196,9 +201,12 @@ def test_behind_at_poll_updates_before_the_job_is_marked_started(tmp_path) -> No
 
 
 @pytest.mark.unit
-def test_the_same_command_is_processed_exactly_once_across_the_reexec(tmp_path) -> None:
+def test_the_same_command_is_processed_exactly_once_across_the_reexec(
+    tmp_path, declare_loaded_code_sha
+) -> None:
     """Redelivery after the update accepts the command once, not twice."""
     job_store = JobStore(state_dir=tmp_path / "jobs")
+    declare_loaded_code_sha(SHA_LOCAL)
     executor = DeployExecutor()
     correlation_id = str(uuid.uuid4())
     msg = _message(_payload(correlation_id), offset=7)
@@ -220,7 +228,12 @@ def test_the_same_command_is_processed_exactly_once_across_the_reexec(tmp_path) 
     ):
         behind._process_message(msg)
 
-    # The replacement process re-reads the same offset, now up to date.
+    # The replacement process re-reads the same offset, now up to date -- and
+    # it recorded ITS OWN loaded sha at ITS OWN startup, which is the pulled
+    # commit. That re-record is the fact that makes the second pass a no-op
+    # (OMN-18200); before it, the second pass agreed only because the clone
+    # happened to match the remote.
+    declare_loaded_code_sha(SHA_REMOTE)
     restarted = _consumer(
         job_store,
         lambda rewind: executor.self_update(
@@ -246,8 +259,11 @@ def test_the_same_command_is_processed_exactly_once_across_the_reexec(tmp_path) 
 
 
 @pytest.mark.unit
-def test_up_to_date_at_poll_does_not_reexec_and_accepts_normally(tmp_path) -> None:
+def test_up_to_date_at_poll_does_not_reexec_and_accepts_normally(
+    tmp_path, declare_loaded_code_sha
+) -> None:
     job_store = JobStore(state_dir=tmp_path / "jobs")
+    declare_loaded_code_sha(SHA_LOCAL)
     executor = DeployExecutor()
     consumer = _consumer(
         job_store,
@@ -349,7 +365,10 @@ async def test_behind_during_deploy_completes_the_deploy_then_updates(
     "boundary",
     [EnumSelfUpdateBoundary.PRE_ACCEPT, EnumSelfUpdateBoundary.POST_TERMINAL],
 )
-def test_journal_line_names_the_boundary(caplog, boundary) -> None:
+def test_journal_line_names_the_boundary(
+    caplog, boundary, declare_loaded_code_sha
+) -> None:
+    declare_loaded_code_sha(SHA_LOCAL)
     executor = DeployExecutor()
     with (
         caplog.at_level("INFO", logger="deploy_agent.executor"),

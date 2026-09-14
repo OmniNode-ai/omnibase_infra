@@ -26,6 +26,7 @@ import pytest
 from deploy_agent.events import EnumSelfUpdateBoundary
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.executor import _run as real_run
+from deploy_agent.loaded_code import record_loaded_code_sha
 
 TRACKING_BRANCH = "dev"
 
@@ -87,6 +88,9 @@ def test_untracked_byproduct_does_not_block_and_agent_reports_current(
     clone = _make_clone(tmp_path, extra_commit=False)
     byproduct = _drop_untracked_byproduct(clone)
     monkeypatch.setenv("DEPLOY_AGENT_DIR", str(clone))
+    # OMN-18200: this process is running the clone's code, which is the other
+    # half of "current" now that the re-exec decision is made against it.
+    record_loaded_code_sha(str(clone))
 
     executor = DeployExecutor()
     with caplog.at_level("INFO"), patch("os.execv") as mock_execv:
@@ -109,6 +113,7 @@ def test_untracked_byproduct_does_not_block_the_pull(
     _drop_untracked_byproduct(clone)
     monkeypatch.setenv("DEPLOY_AGENT_DIR", str(clone))
     before = _git(clone, "rev-parse", "HEAD")
+    record_loaded_code_sha(str(clone))
 
     def _run_git_for_real(
         cmd: list[str], timeout: int, **kwargs: object
@@ -143,6 +148,7 @@ def test_tracked_modification_still_skips_the_update(
     (clone / "agent.py").write_text("print('local edit')\n", encoding="utf-8")
     monkeypatch.setenv("DEPLOY_AGENT_DIR", str(clone))
     before = _git(clone, "rev-parse", "HEAD")
+    record_loaded_code_sha(str(clone))
 
     executor = DeployExecutor()
     with caplog.at_level("INFO"), patch("os.execv") as mock_execv:
@@ -165,6 +171,7 @@ def test_staged_addition_still_skips_the_update(
     _git(clone, "add", "new_module.py")
     monkeypatch.setenv("DEPLOY_AGENT_DIR", str(clone))
     before = _git(clone, "rev-parse", "HEAD")
+    record_loaded_code_sha(str(clone))
 
     executor = DeployExecutor()
     with caplog.at_level("INFO"), patch("os.execv") as mock_execv:

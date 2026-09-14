@@ -55,9 +55,10 @@ def _behind_git(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedP
 
 
 def test_re_execs_the_launcher_when_the_launcher_started_the_process(
-    monkeypatch,
+    monkeypatch, declare_loaded_code_sha
 ) -> None:
     """GREEN: DEPLOY_AGENT_LAUNCHER is set, so the launcher is what gets exec'd."""
+    declare_loaded_code_sha(_SHA_LOCAL)
     monkeypatch.setenv("DEPLOY_AGENT_LAUNCHER", _LAUNCHER)
     monkeypatch.delenv("DEPLOY_AGENT_NO_SELF_UPDATE", raising=False)
     monkeypatch.setattr(sys, "argv", ["/path/to/deploy_agent/__main__.py", "--verbose"])
@@ -75,7 +76,9 @@ def test_re_execs_the_launcher_when_the_launcher_started_the_process(
     assert "__main__.py" not in mock_execv.call_args.args[1]
 
 
-def test_re_execs_the_interpreter_when_no_launcher_is_declared(monkeypatch) -> None:
+def test_re_execs_the_interpreter_when_no_launcher_is_declared(
+    monkeypatch, declare_loaded_code_sha
+) -> None:
     """Negative control: the pre-existing path is unchanged off the unit.
 
     A developer running ``python -m deploy_agent`` directly, and the container
@@ -83,6 +86,7 @@ def test_re_execs_the_interpreter_when_no_launcher_is_declared(monkeypatch) -> N
     control the test above would pass on a build that simply always re-execs
     that one hardcoded path.
     """
+    declare_loaded_code_sha(_SHA_LOCAL)
     monkeypatch.delenv("DEPLOY_AGENT_LAUNCHER", raising=False)
     monkeypatch.delenv("DEPLOY_AGENT_NO_SELF_UPDATE", raising=False)
     monkeypatch.setattr(sys, "argv", ["/path/to/deploy_agent/__main__.py", "--verbose"])
@@ -100,13 +104,20 @@ def test_re_execs_the_interpreter_when_no_launcher_is_declared(monkeypatch) -> N
     )
 
 
-def test_up_to_date_never_re_execs_the_launcher(monkeypatch) -> None:
+def test_up_to_date_never_re_execs_the_launcher(
+    monkeypatch, declare_loaded_code_sha
+) -> None:
     """The boundary contract is unchanged: no head change, no re-exec.
 
     Re-execing on every boundary would re-read the env store more eagerly but
     would also restart the process on every polled command, which is the
     mid-deploy re-exec failure OMN-16442 removed.
+
+    OMN-18200: "up to date" is now the two-sided fact -- the clone agrees with
+    the remote AND the process is running the clone's code -- so the loaded sha
+    is declared to match.
     """
+    declare_loaded_code_sha(_SHA_LOCAL)
     monkeypatch.setenv("DEPLOY_AGENT_LAUNCHER", _LAUNCHER)
     monkeypatch.delenv("DEPLOY_AGENT_NO_SELF_UPDATE", raising=False)
 
