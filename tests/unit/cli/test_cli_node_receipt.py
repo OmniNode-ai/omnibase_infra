@@ -189,7 +189,14 @@ class TestReceiptModeSuccess:
         result, state_root = _invoke_receipt(tmp_path, monkeypatch)
 
         assert result.exit_code == 0, result.output
-        env_record = json.loads((state_root / "env.json").read_text(encoding="utf-8"))
+        # OMN-16533: the fixture handler is injected with the RUN's own root,
+        # so its record lands under ``runs/<run_id>/``. What this test pins is
+        # unchanged and is the point: the env var the handler reads still
+        # names the CALLER's state root, not the per-run subtree, so a handler
+        # that wants the shared root still has one.
+        env_records = sorted(state_root.rglob("env.json"))
+        assert len(env_records) == 1, env_records
+        env_record = json.loads(env_records[0].read_text(encoding="utf-8"))
         assert env_record["ONEX_STATE_DIR"] == str(state_root.resolve())
         assert os.environ["ONEX_STATE_DIR"] == str(previous_state_dir)
 

@@ -100,6 +100,7 @@ from omnibase_infra.topics import (
 
 __all__ = [
     "CAPTURE_DIR_NAME",
+    "RUNS_DIR_NAME",
     "SPOOL_DIR_NAME",
     "default_emit_socket_path",
     "run_receipt_mode",
@@ -111,6 +112,16 @@ logger = logging.getLogger(__name__)
 # (matching the workflow_result.json convention — plan Open Question 4).
 CAPTURE_DIR_NAME = "captures"
 SPOOL_DIR_NAME = "emit_spool"
+
+# Per-invocation subtree of the state root (OMN-16533). ``RuntimeLocal``
+# serialises its workflow result to ``<its state_root>/workflow_result.json``
+# — one fixed filename — so every invocation handed the SAME state root was
+# handed the same file, and the default state root is the relative string
+# ``.onex_state``, which resolves against whatever working directory the
+# process happens to be in. Unrelated invocations collided by accident rather
+# than by choice. Giving the runtime a root private to this run makes the
+# collision unaddressable instead of merely detectable.
+RUNS_DIR_NAME = "runs"
 
 # Artifact store root is a sub-directory of the node's state root by default.
 # The receipt's durable captures (capture log + handler result) belong with the
@@ -462,6 +473,29 @@ def _extract_correlation_id(
 
 
 WORKFLOW_RESULT_FILENAME = "workflow_result.json"
+
+
+def resolve_run_state_root(state_root: Path, run_id: uuid.UUID) -> Path:
+    """The subtree of ``state_root`` that belongs to THIS invocation alone.
+
+    ``--state-root`` names where a caller's state lives; it has never named
+    *whose* state, and ``workflow_result.json`` has one fixed name under it.
+    Two invocations sharing a state root therefore shared one result file:
+    the second overwrote the first, and a run whose file was overwritten
+    before it read it back lost the result it had genuinely produced (the
+    OMN-15449 / OMN-17295 joins correctly refuse the foreign content, so the
+    loss surfaces as an explicit "no receipt found" rather than as a wrong
+    answer — fail-closed, but still a lost result).
+
+    Keying the runtime's root by ``run_id`` removes the shared address. A
+    peer invocation cannot name this path, so there is nothing to serialise,
+    nothing to lock, and no window between the write and the read.
+
+    The caller's own ``state_root`` is unchanged for everything the CLI owns
+    — captures, the emission spool, the artifact store, ``ONEX_STATE_DIR`` —
+    so a caller still finds one place to look.
+    """
+    return state_root / RUNS_DIR_NAME / str(run_id)
 
 
 def _load_workflow_data(state_root: Path) -> dict[str, JsonValue]:
@@ -824,6 +858,9 @@ def _run_receipt_mode(
     session_id = os.environ.get(_SESSION_ID_ENV) or None
     capture_path = state_root / CAPTURE_DIR_NAME / f"{node_name}-{run_id}.log"
     spool_dir = state_root / SPOOL_DIR_NAME
+    # OMN-16533: the root the RUNTIME writes into is this run's own, so its
+    # fixed-name workflow result is keyed by the run that produced it.
+    run_state_root = resolve_run_state_root(state_root, run_id)
     capture_handler = _configure_capture_logging(capture_path, verbose=verbose)
 
     # --- Skill lifecycle: skill-started (before the body runs) -------------
@@ -871,7 +908,14 @@ def _run_receipt_mode(
     try:
         runtime = RuntimeLocal(
             workflow_path=contract_path,
-            state_root=state_root,
+            # OMN-16533: private to this run. RuntimeLocal writes its workflow
+            # result to a FIXED filename under whatever root it is given, and
+            # also injects that root into any handler declaring a ``state_root``
+            # parameter — both are now per-invocation, which is the isolation
+            # a handler writing run evidence wants anyway. A handler that needs
+            # the caller's shared root still reads ``ONEX_STATE_DIR``, set just
+            # above to exactly that.
+            state_root=run_state_root,
             backend_overrides=backend_overrides,
             input_path=input_path,
             timeout=timeout,
@@ -905,7 +949,11 @@ def _run_receipt_mode(
     capture_text = (
         capture_path.read_text(encoding="utf-8") if capture_path.exists() else ""
     )
-    workflow_data = _load_workflow_data(state_root)
+    # OMN-16533: read back from THIS run's own root. A peer invocation cannot
+    # write here, so the joins below can no longer be tripped by a stranger's
+    # file — they stay as defence in depth against a writer that stamps the
+    # wrong identity into a file it did own.
+    workflow_data = _load_workflow_data(run_state_root)
     workflow_data, identity_refusal = _verify_workflow_data_identity(
         workflow_data, run_id
     )
