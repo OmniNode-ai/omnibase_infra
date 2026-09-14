@@ -86,6 +86,7 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 # The poller's own job — excluded to avoid self-deadlock.
 SELF_JOB_NAME = "CI Summary"
@@ -673,11 +674,66 @@ GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success", "skipped"})
 # OMN-14854 exist to prevent.
 #
 # OMN-18062 narrows that bar by exactly one case, before resolution rather than
-# here: a `skipped` row for a name that ALSO carries a non-skipped row on the
-# same head is a re-trigger artifact and is dropped by
-# `drop_superseded_skips()`. A `skipped` with no non-skipped row on that head
-# still reaches this frozenset and still fails closed.
+# here: a `skipped` row for a name that ALSO carries a real row on the same head
+# is a re-trigger artifact and is dropped by `drop_superseded_non_verdicts()`. A
+# `skipped` with no such row on that head still reaches this frozenset and still
+# fails closed. OMN-18355 extends that drop to `neutral` and adds the bounded
+# cancellation grace below; neither admits a conclusion here.
 EXTERNAL_GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success"})
+
+# OMN-18355 -- conclusions that are NOT a verdict about the head, and which a
+# real row for the same name on the same head therefore supersedes.
+#
+# `skipped` is the OMN-18062 case: a job whose own `if:` was false for a
+# re-trigger run says nothing about the commit.
+#
+# `neutral` is the code-scanning placeholder, measured live on
+# `omnibase_infra#3511` (head `45e9d4d8`, 2026-09-14T01:03-01:09Z): the context
+# name `CodeQL` is emitted by TWO producers -- the `github-actions` analysis job
+# inside `security-scan.yml`, and the `github-advanced-security` app's results
+# check. GHAS writes its row seconds after the head appears, concludes `neutral`
+# with the title "1 configuration not found", and only updates that same row to
+# `success` once the analysis uploads minutes later. Because the placeholder
+# STARTS later than the analysis job, latest-wins resolution picks it over the
+# live producer and a `neutral` fails the sole required context on a head whose
+# analysis is still running. That is not a defect in either producer: the
+# placeholder is a promise of a verdict, not a verdict.
+#
+# `cancelled` is deliberately NOT here -- see CANCELLED_SUPERSESSION_GRACE_S.
+# Dropping it would let an older `success` resolve the context green while the
+# replacement run is still in flight, which is a stale-green this module must
+# never manufacture. A cancellation is handled by waiting, never by ignoring.
+NON_VERDICT_CONCLUSIONS: frozenset[str] = frozenset({"skipped", "neutral"})
+
+# OMN-18355 -- how long a `cancelled` external context is treated as "no verdict
+# yet" rather than as a failure.
+#
+# MECHANISM, measured on `omnibase_infra#3512` (head `689344f8`): the OCC
+# autobind stamp edits the PR body, every workflow whose `types:` include
+# `edited` starts a fresh run, and GitHub cancels the in-flight one. The
+# cancelled run's check-run is written AT ONCE; the replacement run's check-run
+# for the same context does not exist yet, so for about a minute the
+# cancellation is the ONLY row for that name and latest-wins has nothing else to
+# pick. `CI Summary` polled 29 seconds into that window, listed
+# `call-reject-skip-token / scan / reject-skip-gate-token` under
+# external-context failures and exited FAILURE 55 seconds into a run with 27
+# in-run gates still pending; the replacement row appeared at 00:02:00Z, 57
+# seconds after the cancellation, and concluded `success`. Only a human
+# `gh run rerun --failed` cleared it.
+#
+# A cancellation means the producer was STOPPED BEFORE IT COULD DECIDE. It is
+# the absence of a verdict, and this module already has the right response to an
+# absent verdict: keep polling. The grace bounds that wait so a cancellation
+# nobody replaces still fails closed rather than burning the poller's whole
+# 90-minute deadline -- 10 minutes is an order of magnitude above the 57 seconds
+# measured, and short against that deadline.
+#
+# This RELAXES NOTHING that was ever a verdict: `failure`, `timed_out` and
+# `action_required` still fail on the poll that observes them, a cancellation
+# older than the grace still fails, and the deadline still converts PENDING to
+# FAILURE. The only behaviour removed is the terminal verdict issued inside the
+# window where a replacement is demonstrably on its way.
+CANCELLED_SUPERSESSION_GRACE_S: int = 600
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -692,6 +748,10 @@ class JobState:
     status: str  # queued | in_progress | completed | waiting | ...
     conclusion: str | None  # success | failure | cancelled | skipped | timed_out | None
     run_attempt: int
+    # Only a check-run carries this; in-run jobs leave it None. It is the clock
+    # the OMN-18355 cancellation grace is measured from, so it is read from the
+    # row rather than assumed from poll order.
+    completed_at: str | None = None
 
 
 def _state_severity(job: JobState) -> int:
@@ -749,17 +809,23 @@ def dedup_latest(
     return latest
 
 
-def _is_skipped_row(raw: dict[str, object]) -> bool:
-    """True for a completed check-run whose conclusion is ``skipped``."""
+def _is_non_verdict_row(raw: dict[str, object]) -> bool:
+    """True for a completed check-run carrying no verdict about the head.
+
+    :data:`NON_VERDICT_CONCLUSIONS` -- ``skipped`` (the job's own ``if:`` was
+    false for that run) and ``neutral`` (the code-scanning placeholder). A row
+    that is still running is NOT a non-verdict row: it is a verdict in progress,
+    and treating it as one would let a placeholder suppress PENDING.
+    """
 
     return (
         str(raw.get("status") or "") == "completed"
-        and str(raw.get("conclusion") or "") == "skipped"
+        and str(raw.get("conclusion") or "") in NON_VERDICT_CONCLUSIONS
     )
 
 
-def _skip_partition_key(raw: dict[str, object]) -> tuple[str, str]:
-    """Partition key for skip supersession: ``(context name, head SHA)``.
+def _supersession_partition_key(raw: dict[str, object]) -> tuple[str, str]:
+    """Partition key for supersession: ``(context name, head SHA)``.
 
     The head SHA is load-bearing, not decoration. A ``skipped`` row is only a
     re-trigger artifact when a non-skipped row exists for the same name ON THE
@@ -780,10 +846,10 @@ def _skip_partition_key(raw: dict[str, object]) -> tuple[str, str]:
     return (str(raw.get("name") or ""), str(raw.get("head_sha") or ""))
 
 
-def drop_superseded_skips(
+def drop_superseded_non_verdicts(
     check_runs: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Drop ``skipped`` rows for names that also carry a non-skipped row (OMN-18062).
+    """Drop non-verdict rows for names that also carry a real row (OMN-18062/OMN-18355).
 
     MECHANISM this closes, measured on onex_change_control#8709 (2026-09-08): a
     ``gh pr edit`` of the PR body fires a SECOND ``pull_request`` run of a
@@ -816,18 +882,30 @@ def drop_superseded_skips(
       PENDING into a stale green.
     * A skip on a DIFFERENT head SHA. Supersession is partitioned by
       ``(name, head_sha)``, not by name alone — see
-      :func:`_skip_partition_key`.
+      :func:`_supersession_partition_key`.
+
+    OMN-18355 widens the dropped set from ``skipped`` alone to
+    :data:`NON_VERDICT_CONCLUSIONS`, which adds the code-scanning ``neutral``
+    placeholder. Every clause above holds unchanged for it: a lone ``neutral``
+    still fails closed, a real verdict still wins on recency, and a still-
+    running row still holds the context at PENDING. It does NOT add
+    ``cancelled`` — that row is handled by waiting
+    (:func:`cancellation_is_provisional`), because dropping it would let an
+    older ``success`` green a context whose replacement run is still in flight.
     """
 
-    non_skipped_keys = {
-        _skip_partition_key(raw)
+    verdict_keys = {
+        _supersession_partition_key(raw)
         for raw in check_runs
-        if str(raw.get("name") or "") and not _is_skipped_row(raw)
+        if str(raw.get("name") or "") and not _is_non_verdict_row(raw)
     }
     return [
         raw
         for raw in check_runs
-        if not (_is_skipped_row(raw) and _skip_partition_key(raw) in non_skipped_keys)
+        if not (
+            _is_non_verdict_row(raw)
+            and _supersession_partition_key(raw) in verdict_keys
+        )
     ]
 
 
@@ -853,14 +931,15 @@ def latest_check_run_by_name(
     ``occ-preflight / eligibility`` — the one name observed on both sides — is
     excluded here (see :data:`MEASURED_NOT_ENFORCED_CONTEXTS`).
 
-    Resolution runs over the rows that survive :func:`drop_superseded_skips`, so
-    a re-trigger skip cannot supersede a real conclusion already recorded for
-    that name on this head (OMN-18062).
+    Resolution runs over the rows that survive
+    :func:`drop_superseded_non_verdicts`, so a re-trigger skip or a code-scanning
+    placeholder cannot supersede a real conclusion, or a run still in progress,
+    already recorded for that name on this head (OMN-18062 / OMN-18355).
     """
 
     latest: dict[str, JobState] = {}
     ordering: dict[str, tuple[str, int]] = {}
-    for raw in drop_superseded_skips(check_runs):
+    for raw in drop_superseded_non_verdicts(check_runs):
         name = str(raw.get("name") or "")
         if not name:
             continue
@@ -873,13 +952,61 @@ def latest_check_run_by_name(
             continue
         conclusion = raw.get("conclusion")
         ordering[name] = key
+        completed_at = raw.get("completed_at")
         latest[name] = JobState(
             name=name,
             status=str(raw.get("status") or ""),
             conclusion=None if conclusion is None else str(conclusion),
             run_attempt=1,
+            completed_at=None if completed_at is None else str(completed_at),
         )
     return latest
+
+
+def _parse_timestamp(raw: str | None) -> datetime | None:
+    """Parse a GitHub ISO-8601 ``Z`` timestamp, or ``None`` if unreadable."""
+
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def cancellation_is_provisional(state: JobState, now: datetime | None) -> bool:
+    """True while a ``cancelled`` external context is still awaiting its replacement.
+
+    OMN-18355. A cancellation is not a verdict: the producer was stopped before
+    it could decide, and in the measured shape (a body edit re-triggering a
+    workflow whose ``types:`` include ``edited``) the replacement run's check-run
+    lands under a minute later. Inside
+    :data:`CANCELLED_SUPERSESSION_GRACE_S` of the cancellation, the right answer
+    is "no verdict yet, poll again" — not FAILURE.
+
+    FAIL-CLOSED IN EVERY UNCERTAIN CASE, which is the half that keeps this from
+    becoming a bypass:
+
+    * ``now is None`` (no clock supplied) → not provisional → fails now. A
+      caller that forgets to pass the time enforces the OLD, stricter behaviour.
+    * an absent or unparseable ``completed_at`` → not provisional → fails now.
+    * a cancellation older than the grace → not provisional → fails now.
+    * a ``completed_at`` further in the FUTURE than the grace (a clock so wrong
+      the row cannot be reasoned about) → not provisional → fails now, rather
+      than waiting forever on a skewed timestamp.
+
+    And the poller's own deadline still converts a sustained PENDING into
+    FAILURE, so nothing here can make the required context green or absent.
+    """
+
+    if state.conclusion != "cancelled" or now is None:
+        return False
+    completed = _parse_timestamp(state.completed_at)
+    if completed is None:
+        return False
+    age_s = (now - completed).total_seconds()
+    return -CANCELLED_SUPERSESSION_GRACE_S <= age_s <= CANCELLED_SUPERSESSION_GRACE_S
 
 
 def applicable_external_contexts(
@@ -905,6 +1032,8 @@ def applicable_external_contexts(
 def evaluate_external_contexts(
     check_runs: list[dict[str, object]] | None,
     expected: tuple[str, ...],
+    *,
+    now: datetime | None = None,
 ) -> tuple[list[str], list[str]]:
     """Return ``(failures, missing_or_pending)`` for the declared external contexts.
 
@@ -912,6 +1041,10 @@ def evaluate_external_contexts(
     check-runs. That is treated as **every** expected context being unobserved —
     PENDING, never success — so a transient API failure retries and a permanent
     one fails closed at the deadline. It must never read as green.
+
+    ``now`` is the observation time the OMN-18355 cancellation grace is measured
+    against. Omitting it is the strict, pre-OMN-18355 behaviour: a ``cancelled``
+    context fails on the poll that observes it.
     """
 
     if not expected:
@@ -923,9 +1056,38 @@ def evaluate_external_contexts(
         state = latest.get(context)
         if state is None or state.status != "completed":
             unresolved.append(context)
-        elif state.conclusion not in EXTERNAL_GOOD_CONCLUSIONS:
+        elif state.conclusion in EXTERNAL_GOOD_CONCLUSIONS:
+            continue
+        elif cancellation_is_provisional(state, now):
+            unresolved.append(context)
+        else:
             failures.append(context)
     return sorted(failures), sorted(unresolved)
+
+
+def provisional_cancellations(
+    check_runs: list[dict[str, object]] | None,
+    expected: tuple[str, ...],
+    now: datetime | None,
+) -> list[str]:
+    """The subset of ``expected`` held PENDING by a provisional cancellation.
+
+    Reporting only. The poller's log is the diagnostic surface for a wedged PR,
+    and "pending because a superseded run was cancelled 20s ago" and "pending
+    because nothing has started" are different situations that must not read the
+    same.
+    """
+
+    if not expected:
+        return []
+    latest = latest_check_run_by_name(check_runs or [])
+    return sorted(
+        context
+        for context in expected
+        if (state := latest.get(context)) is not None
+        and state.status == "completed"
+        and cancellation_is_provisional(state, now)
+    )
 
 
 def _is_allowlisted(name: str, allowlist: frozenset[str]) -> bool:
@@ -955,6 +1117,7 @@ def evaluate(
     pr_author: str | None = None,
     docs_only_marker: str = DOCS_ONLY_MARKER_JOB,
     docs_only_gates: tuple[str, ...] = DOCS_ONLY_SKIPPABLE_GATE_JOBS,
+    now: datetime | None = None,
 ) -> tuple[int, str]:
     """Return ``(exit_code, human_report)`` for the current job snapshot.
 
@@ -966,6 +1129,10 @@ def evaluate(
 
     ``pr_author`` drops only the contexts that :data:`ACTOR_CONDITIONAL_CONTEXTS`
     marks unreportable for that author (OMN-15532). ``None`` drops nothing.
+
+    ``now`` is the observation time for the OMN-18355 cancellation grace.
+    ``None`` is the strict, pre-OMN-18355 reading: a cancelled external context
+    fails on the poll that observes it.
     """
 
     external_contexts = applicable_external_contexts(external_contexts, pr_author)
@@ -1040,8 +1207,9 @@ def evaluate(
 
     # (4) OMN-15496 external contexts: cross-workflow checks on the PR head.
     external_failures, external_unresolved = evaluate_external_contexts(
-        check_runs, external_contexts
+        check_runs, external_contexts, now=now
     )
+    external_provisional = provisional_cancellations(check_runs, external_contexts, now)
 
     all_failures = (
         strict_failures + skippable_failures + sweep_failures + external_failures
@@ -1061,6 +1229,7 @@ def evaluate(
             external_contexts,
             external_failures,
             external_unresolved,
+            external_provisional,
             docs_only=docs_only,
             relaxed=relaxed,
         )
@@ -1084,6 +1253,7 @@ def _report(
     external_contexts: tuple[str, ...] = (),
     external_failures: list[str] | None = None,
     external_unresolved: list[str] | None = None,
+    external_provisional: list[str] | None = None,
     *,
     docs_only: bool = False,
     relaxed: frozenset[str] = frozenset(),
@@ -1140,6 +1310,14 @@ def _report(
         if external_unresolved:
             lines.append(
                 f"  external contexts missing/pending: {', '.join(external_unresolved)}"
+            )
+        if external_provisional:
+            # OMN-18355: distinguish "nothing has started" from "a superseded
+            # run was cancelled and its replacement has not written a check-run
+            # yet". Both are PENDING; only one of them resolves on its own.
+            lines.append(
+                "  external contexts awaiting a replacement after cancellation: "
+                + ", ".join(external_provisional)
             )
     return "\n".join(lines)
 
@@ -1244,6 +1422,11 @@ def main(argv: list[str] | None = None) -> int:
         check_runs=_load_check_runs(args.check_runs_file),
         external_contexts=external_contexts,
         pr_author=args.pr_author,
+        # The poller runs this module once per poll, so wall-clock IS the
+        # observation time for the OMN-18355 cancellation grace. It is not a
+        # caller-supplied input: there is no flag for it, so it cannot be
+        # backdated to keep a stale cancellation provisional.
+        now=datetime.now(UTC),
     )
     print(report)
     if args.report_only:
