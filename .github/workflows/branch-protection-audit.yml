@@ -3,23 +3,35 @@
 #
 # Periodic audit of branch protection settings across all OmniNode-ai repos.
 #
-# Audits BOTH `main` and `dev` per repo, with per-branch attribution (OMN-14696):
-#   A) reviews enforced (both branches) — GraphQL requiresApprovingReviews must be
-#      false (blocks solo-dev workflow); the phantom-prone REST count is NOT used.
-#   B) orphaned required status-check contexts (main only) — a required context
-#      that no longer matches any recent default-branch check-run.
+# ONE AUDITOR OF RECORD (OMN-18346). The shared branch-protection checks are the
+# canonical `onex_change_control/scripts/audit_branch_protection.sh` -- the same
+# script omni_home's branch-protection-guard.yml and scheduled-gap-detect.yml
+# run -- fetched read-only at a pinned commit sha below. This repo used to carry
+# a second, diverged copy of the same audit; OMN-18287 added a code-owner review
+# carve-out to the canonical copy and proved it green (0 failures across 102
+# checks) while the local copy, which never received it, kept reporting
+# onex_change_control as a review violation on both branches. That disagreement
+# is why this workflow failed 47 of 47 scheduled runs in seven days.
 #
-# This step runs in --dry-run (report-only). It NEVER passes --fix, so it performs
-# zero mutation; --fix is main-only remediation for interactive/operator use.
+# WHAT THIS REPO STILL OWNS: the ORPHANED-CONTEXT check (the old "Check B"). The
+# canonical auditor has no equivalent, so retiring this workflow would lose the
+# observation entirely. It runs here as scripts/audit_orphan_required_contexts.py,
+# corrected by OMN-18346 to resolve required contexts against check-runs on merged
+# PR head SHAs -- the only surface a PR-time gate ever reports on -- rather than
+# against default-branch push check-runs, which structurally cannot carry them.
 #
-# OMN-9034 (original gate), OMN-14696 (dev coverage), OMN-14683 —
-# references overnight-failure-retrospective §4.1 and §7 P0
+# Every audit step is read-only. Nothing here mutates branch protection, and the
+# orphan auditor has no --fix path at all: removing a stale required context is an
+# operator branch-protection change, not something a scheduled job should do.
 #
-# Token: uses CROSS_REPO_PAT if configured (required for cross-repo audit of 9
-# sibling repos). Falls back to GITHUB_TOKEN with a warning, in which case
-# only the current repo is audited and all other repos will [SKIP] with
-# "branch protection not enabled or inaccessible" — that is expected and
-# documented here so an on-call does not get confused.
+# OMN-9034 (original gate), OMN-14696 (dev coverage), OMN-14683, OMN-14288
+# (parity ratchet), OMN-18287 (review-gated carve-out), OMN-18346 (this dedupe)
+#
+# Token: uses CROSS_REPO_PAT if configured (required for cross-repo audit of the
+# sibling repos). Falls back to GITHUB_TOKEN with a warning, in which case only
+# the current repo is audited and all other repos SKIP with "branch protection
+# not enabled or inaccessible" — that is expected and documented here so an
+# on-call does not get confused.
 
 name: Branch Protection Audit
 
@@ -28,6 +40,13 @@ on:
     # Every 4 hours at minute 23 (offset to avoid thundering herd)
     - cron: "23 */4 * * *"
   workflow_dispatch:
+
+# Pinned canonical auditor. A floating ref would let a sibling repo's merge
+# change this gate with no PR here; bump it deliberately, citing the OCC commit.
+# 8862645405 is `fix(OMN-18287): extend review-gated carve-out from main-only to
+# dev (#9318)` — the revision proved green at 0 failures across 102 checks.
+env:
+  ONEX_CHANGE_CONTROL_REF: 886264540572fc60cb186e2d1388aff1ddc39d47
 
 jobs:
   audit:
@@ -39,7 +58,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     permissions:
       contents: read
@@ -54,28 +73,82 @@ jobs:
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
           if [ -z "$CROSS_REPO_PAT" ]; then
-            echo "::warning::CROSS_REPO_PAT is not set — audit will SKIP 9 sibling repos."
+            echo "::warning::CROSS_REPO_PAT is not set — audit will SKIP sibling repos."
             echo "To audit across the org, set CROSS_REPO_PAT to a PAT with repo scope."
             echo "has_pat=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_pat=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run branch protection audit (report-only)
+      # Read-only fetch of the canonical auditor at the pinned sha. Same shape as
+      # omni_home's branch-protection-guard.yml, deliberately: one clone recipe.
+      # onex_change_control is a public repo, so this fetch carries no credential
+      # — same recipe as omni_home's branch-protection-guard.yml, deliberately.
+      - name: Fetch canonical auditor (onex_change_control @ pinned sha)
+        run: |
+          OCC_DIR="${RUNNER_TEMP}/onex_change_control"
+          rm -rf "$OCC_DIR"
+          git init "$OCC_DIR"
+          git -C "$OCC_DIR" remote add origin \
+            "https://github.com/OmniNode-ai/onex_change_control.git"
+          git -C "$OCC_DIR" fetch --depth 1 origin "${ONEX_CHANGE_CONTROL_REF}"
+          git -C "$OCC_DIR" checkout --detach FETCH_HEAD
+          test -x "$OCC_DIR/scripts/audit_branch_protection.sh" \
+            || test -f "$OCC_DIR/scripts/audit_branch_protection.sh"
+
+      # Shared checks: review enforcement (with the OMN-18287 review-gated
+      # carve-out), the release-synced-main pair, enforce_admins, the Receipt
+      # Gate, delete_branch_on_merge, and the Merge Queue ruleset.
+      - name: Canonical branch-protection audit
+        id: canonical
         env:
-          # CROSS_REPO_PAT has repo scope across the org; GITHUB_TOKEN is
-          # scoped to this repo only and will cause SKIPs on siblings.
           GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          bash scripts/audit-branch-protection.sh --owner OmniNode-ai --dry-run
+          rc=0
+          bash "${RUNNER_TEMP}/onex_change_control/scripts/audit_branch_protection.sh" || rc=$?
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          echo "canonical auditor exit=${rc}"
+
+      # The one check the canonical auditor does not carry. Read-only, no --fix.
+      - name: Orphaned required-context audit (this repo's only local check)
+        id: orphans
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          rc=0
+          python3 scripts/audit_orphan_required_contexts.py --owner OmniNode-ai || rc=$?
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          echo "orphan auditor exit=${rc}"
+
+      # Both audits run to completion before the job is judged, so one set of
+      # findings never hides the other. This is NOT a softening: the step below
+      # hard-fails on either non-zero exit, and neither audit step carries
+      # continue-on-error. tests/ci/test_branch_protection_single_auditor.py
+      # pins that, so re-adding one is a red test rather than a review catch.
+      - name: Fail if either audit reported violations
+        run: |
+          canonical="${{ steps.canonical.outputs.rc }}"
+          orphans="${{ steps.orphans.outputs.rc }}"
+          echo "canonical=${canonical} orphans=${orphans}"
+          failed=0
+          if [ "$canonical" != "0" ]; then
+            echo "::error::canonical branch-protection audit reported violations"
+            failed=1
+          fi
+          if [ "$orphans" != "0" ]; then
+            echo "::error::orphaned required-context audit reported violations"
+            failed=1
+          fi
+          exit "$failed"
 
       # OMN-14288 — required-context parity ratchet, REPORT-ONLY.
       # Checks the MISSING direction (a claimed load-bearing gate absent from
-      # required_status_checks) and needs:-closure coverage — the hole the
-      # branch-protection auditor above does NOT cover (it only checks the
-      # ORPHANED direction). Non-blocking: report-then-enforce rollout; the
-      # enforcing per-PR gate lands separately. NEVER mutates branch protection.
+      # required_status_checks) and needs:-closure coverage — the hole neither
+      # audit above covers (they only check the ORPHANED direction). Non-blocking:
+      # report-then-enforce rollout; the enforcing per-PR gate lands separately.
+      # NEVER mutates branch protection.
       - name: Required-context parity report (REPORT-ONLY, non-blocking)
+        if: always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
