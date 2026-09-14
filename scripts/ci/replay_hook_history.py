@@ -94,6 +94,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -123,23 +124,39 @@ _HOOK_ID_RE = re.compile(r"^- hook id:\s*(?P<hook_id>\S+)\s*$")
 _DURATION_RE = re.compile(r"^- duration:\s*(?P<seconds>[0-9.]+)s?\s*$")
 _EXIT_CODE_RE = re.compile(r"^- exit code:\s*(?P<code>-?\d+)\s*$")
 
-# Text a hook emits when it failed because the MACHINE was wrong rather than the
-# code. This distinction is the whole reason fire output is captured: on the web
-# repository `type-check` fired on 83 of 83 commits with "Executable `pnpm` not
-# found", which is a missing toolchain, not 83 caught defects. Classifying it as
-# a catch would promote an unmeasured hook to "keep" on no evidence at all.
-ENVIRONMENT_FAILURE_MARKERS: tuple[str, ...] = (
-    "not found",
-    "No such file or directory",
-    "command not found",
-    "ModuleNotFoundError",
-    "ImportError",
-    "Permission denied",
-    "was not found in the environment",
-    "Failed to spawn",
-    "error: Distribution not found",
-    "Executable `",
-)
+# A fire is a CATCH or a BROKEN MACHINE, and the two are separated by how the
+# hook terminated, not by what it said. Message text cannot do this job: a
+# broken-link checker, a missing-fixture assertion and a missing interpreter all
+# describe themselves with the words "not found", so the substring rule this
+# replaced labelled a real `onex-validate-links` catch -- five genuinely broken
+# relative documentation links -- as environmental and dropped a live gate out
+# of both populations silently (OMN-17474).
+#
+# Three structural signals replace it, in order:
+#   1. exit shape -- 126 and 127 are the shell's reserved codes for "found but
+#      not executable" and "not found". No hook chooses them to report a finding.
+#   2. pre-commit's OWN non-execution report, which the runner emits (not the
+#      hook) when it could not execute the entry at all.
+#   3. tool presence -- the interpreter or binary the hook's entry names does
+#      not resolve, so the hook never ran and its non-zero exit is the machine.
+#
+# The bias is deliberate and one-directional: anything unrecognised stays a
+# `finding`. Over-classifying as environment DELETES a live gate; under-
+# classifying only keeps a hook that may not have earned keeping.
+_NON_EXECUTION_EXIT_CODES: frozenset[int] = frozenset({126, 127})
+
+# pre-commit prints this itself, verbatim, when the entry's executable cannot be
+# resolved. It is the runner's structured verdict about execution, not the
+# hook's prose about the code, which is why it is read here and hook text is not.
+_RUNNER_NOT_EXECUTED_RE = re.compile(r"^Executable `[^`]+` not found\s*$", re.MULTILINE)
+
+# Languages whose entry pre-commit resolves from the AMBIENT environment. For
+# every other language pre-commit builds and activates its own isolated env, so
+# the entry failing to resolve on this PATH proves nothing about whether the
+# hook ran -- applying the tool-presence rule there would be the exact
+# over-classification this function exists to avoid.
+_AMBIENT_ENTRY_LANGUAGES: frozenset[str] = frozenset({"system", "script"})
+
 
 # Appended to a REAL tracked file to make the control. A standalone file at the
 # repository root is a weaker control than it looks: most hooks scope themselves
@@ -207,8 +224,24 @@ class HookSummary:
     total_duration_s: float
 
 
-def load_hook_stages(config_path: Path) -> dict[str, str]:
-    """Map every declared hook id to the measured stage it runs in.
+@dataclass(frozen=True)
+class HookSpec:
+    """One declared hook, as the config describes it.
+
+    `entry` and `language` are None for a hook pulled from a remote repository,
+    which declares them in its own `.pre-commit-hooks.yaml` rather than here.
+    Absent is absent: the classifier skips its tool-presence rule rather than
+    guessing.
+    """
+
+    hook_id: str
+    stage: str
+    entry: str | None
+    language: str | None
+
+
+def load_hook_specs(config_path: Path) -> dict[str, HookSpec]:
+    """Read every declared hook that runs in a measured stage.
 
     A hook-level `stages` beats the file's `default_stages`; that asymmetry is
     why the pre-push tier measured 41 against 29 declared in OMN-17468. Hooks
@@ -217,7 +250,7 @@ def load_hook_stages(config_path: Path) -> dict[str, str]:
     """
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     default_stages = set(raw.get("default_stages") or ["pre-commit"])
-    out: dict[str, str] = {}
+    out: dict[str, HookSpec] = {}
     for repo in raw.get("repos") or []:
         for hook in repo.get("hooks") or []:
             hook_id = hook.get("id")
@@ -227,10 +260,22 @@ def load_hook_stages(config_path: Path) -> dict[str, str]:
             measured = stages & MEASURED_STAGES
             if not measured:
                 continue
-            # A hook declared in both tiers is attributed to the commit tier,
-            # which is the one whose per-firing cost dominates.
-            out[hook_id] = "pre-commit" if measured & COMMIT_STAGES else "pre-push"
+            entry = hook.get("entry")
+            language = hook.get("language")
+            out[hook_id] = HookSpec(
+                hook_id=hook_id,
+                # A hook declared in both tiers is attributed to the commit
+                # tier, which is the one whose per-firing cost dominates.
+                stage="pre-commit" if measured & COMMIT_STAGES else "pre-push",
+                entry=str(entry) if entry is not None else None,
+                language=str(language) if language is not None else None,
+            )
     return out
+
+
+def load_hook_stages(config_path: Path) -> dict[str, str]:
+    """Every declared hook id mapped to the measured stage it runs in."""
+    return {spec.hook_id: spec.stage for spec in load_hook_specs(config_path).values()}
 
 
 def parse_precommit_output(text: str, output_chars: int = 2000) -> list[HookRun]:
@@ -299,20 +344,115 @@ def parse_precommit_output(text: str, output_chars: int = 2000) -> list[HookRun]
     return runs
 
 
-def classify_fire(output: str) -> str:
-    """`environment` when a fire names a broken machine, else `finding`.
+def _entry_executable(entry: str) -> str | None:
+    """The program a hook's `entry` actually invokes, or None if unreadable."""
+    try:
+        tokens = shlex.split(entry)
+    except ValueError:
+        return None
+    for token in tokens:
+        # `FOO=bar cmd ...` -- skip leading environment assignments.
+        if "=" in token and "/" not in token.split("=", 1)[0]:
+            continue
+        return token
+    return None
 
-    Conservative by design: a fire whose text is empty or unrecognised stays a
-    `finding`, because over-classifying as environment would delete a real gate,
-    while under-classifying only keeps a hook that may not deserve keeping.
+
+def _executable_resolves(name: str, repo: Path | None) -> bool:
+    """True when `name` is a runnable program on this machine or in this repo."""
+    if not name:
+        return False
+    if "/" in name:
+        candidate = Path(name)
+        if candidate.is_absolute():
+            return candidate.exists()
+        if repo is None:
+            # A relative script with no repo to resolve against is unknowable,
+            # and unknowable must not become an environment verdict.
+            return True
+        return (repo / candidate).exists()
+    return shutil.which(name) is not None
+
+
+def classify_fire(
+    output: str,
+    *,
+    exit_code: int | None = None,
+    entry: str | None = None,
+    language: str | None = None,
+    repo: Path | None = None,
+) -> str:
+    """`environment` when a fire proves the hook could not run, else `finding`.
+
+    Judged on structure -- exit shape, the runner's own non-execution report,
+    and whether the entry's program resolves -- never on the hook's message
+    text. See the block comment above `_NON_EXECUTION_EXIT_CODES` for why.
     """
-    if not output:
-        return "finding"
-    lowered = output.lower()
-    for marker in ENVIRONMENT_FAILURE_MARKERS:
-        if marker.lower() in lowered:
+    if exit_code in _NON_EXECUTION_EXIT_CODES:
+        return "environment"
+    if output and _RUNNER_NOT_EXECUTED_RE.search(output):
+        return "environment"
+    if entry and (language or "").strip().lower() in _AMBIENT_ENTRY_LANGUAGES:
+        executable = _entry_executable(entry)
+        if executable and not _executable_resolves(executable, repo):
             return "environment"
     return "finding"
+
+
+def reclassify_artifact(
+    artifact_path: Path, repo_path: Path | None = None
+) -> dict[str, Any]:
+    """Re-run ONLY the classification step over an existing replay artifact.
+
+    No replay, no hook execution: the artifact already carries every fire's
+    exit code and output. `repo_path`, when given, supplies each hook's `entry`
+    and `language` from its `.pre-commit-config.yaml` so the tool-presence rule
+    can apply; without it only the exit-shape and runner-report rules run, and
+    the result says so rather than implying a fuller check than it made.
+    """
+    report = json.loads(artifact_path.read_text(encoding="utf-8"))
+    specs: dict[str, HookSpec] = {}
+    if repo_path is not None:
+        config = repo_path / ".pre-commit-config.yaml"
+        if config.is_file():
+            specs = load_hook_specs(config)
+
+    def verdict(hook_id: str, samples: list[dict[str, Any]]) -> str:
+        spec = specs.get(hook_id)
+        classes = {
+            classify_fire(
+                sample.get("output") or "",
+                exit_code=sample.get("exit_code"),
+                entry=spec.entry if spec else None,
+                language=spec.language if spec else None,
+                repo=repo_path,
+            )
+            for sample in samples
+        }
+        return "environment" if classes == {"environment"} else "finding"
+
+    fire_samples: dict[str, list[dict[str, Any]]] = report.get("fire_samples") or {}
+    before = sorted(report.get("environment_suspect_fire_hooks") or [])
+    after = sorted(
+        hook_id
+        for hook_id, samples in fire_samples.items()
+        if samples and verdict(hook_id, samples) == "environment"
+    )
+    zero_fire = set(report.get("zero_fire_hooks") or [])
+    changed = set(before) ^ set(after)
+    return {
+        "artifact": str(artifact_path),
+        "repo": report.get("repo"),
+        "entry_rule_applied": bool(specs),
+        "environment_suspect_before": before,
+        "environment_suspect_after": after,
+        "became_finding": sorted(set(before) - set(after)),
+        "became_environment": sorted(set(after) - set(before)),
+        # A hook that never fired has no fire to classify, so no zero-fire
+        # deletion candidate can change class here. Asserted rather than
+        # assumed: this is what makes the candidate list stable under the fix.
+        "zero_fire_hooks_changed": sorted(changed & zero_fire),
+    }
 
 
 def summarise(
@@ -508,7 +648,24 @@ def pick_control_file(repo: Path) -> str | None:
     return None
 
 
-def positive_control(repo: Path, env: dict[str, str], timeout_s: int) -> dict[str, Any]:
+def _classify_run(run: HookRun, specs: dict[str, HookSpec], repo: Path | None) -> str:
+    """Classify one parsed hook run using that hook's own declared entry."""
+    spec = specs.get(run.hook_id)
+    return classify_fire(
+        run.output,
+        exit_code=run.exit_code,
+        entry=spec.entry if spec else None,
+        language=spec.language if spec else None,
+        repo=repo,
+    )
+
+
+def positive_control(
+    repo: Path,
+    env: dict[str, str],
+    timeout_s: int,
+    specs: dict[str, HookSpec],
+) -> dict[str, Any]:
     """Plant known violations in a real tracked file and require a real fire.
 
     The bar is at least one fire that classifies as a `finding`. A control whose
@@ -534,10 +691,18 @@ def positive_control(repo: Path, env: dict[str, str], timeout_s: int) -> dict[st
         runs = parse_precommit_output(text)
         fired = [run for run in runs if run.fired]
         findings = sorted(
-            {run.hook_id for run in fired if classify_fire(run.output) == "finding"}
+            {
+                run.hook_id
+                for run in fired
+                if _classify_run(run, specs, repo) == "finding"
+            }
         )
         environment = sorted(
-            {run.hook_id for run in fired if classify_fire(run.output) == "environment"}
+            {
+                run.hook_id
+                for run in fired
+                if _classify_run(run, specs, repo) == "environment"
+            }
         )
         return {
             "fired": bool(findings),
@@ -566,9 +731,10 @@ def replay(
     config_path = repo / ".pre-commit-config.yaml"
     if not config_path.is_file():
         raise RuntimeError(f"{repo_name}: no .pre-commit-config.yaml at {ref}")
-    hook_stages = load_hook_stages(config_path)
+    hook_specs = load_hook_specs(config_path)
+    hook_stages = {i: spec.stage for i, spec in hook_specs.items()}
 
-    control = positive_control(repo, env, per_commit_timeout_s)
+    control = positive_control(repo, env, per_commit_timeout_s, hook_specs)
 
     commits = list_commits(repo, ref, window_days, cap)
     records: list[CommitRecord] = []
@@ -644,7 +810,19 @@ def replay(
         hook_id
         for hook_id, samples in fire_samples.items()
         if samples
-        and all(classify_fire(sample["output"]) == "environment" for sample in samples)
+        and all(
+            classify_fire(
+                sample["output"],
+                exit_code=sample["exit_code"],
+                entry=hook_specs[hook_id].entry if hook_id in hook_specs else None,
+                language=(
+                    hook_specs[hook_id].language if hook_id in hook_specs else None
+                ),
+                repo=repo,
+            )
+            == "environment"
+            for sample in samples
+        )
     )
 
     summaries = summarise(records, hook_stages)
@@ -753,9 +931,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Replay a repository's pre-commit hook stack over merged history (OMN-17474)."
     )
-    parser.add_argument("--repo-path", required=True, type=Path)
+    parser.add_argument("--repo-path", type=Path)
+    parser.add_argument("--repo", help="repository name for the artifact")
     parser.add_argument(
-        "--repo", required=True, help="repository name for the artifact"
+        "--reclassify",
+        nargs="+",
+        type=Path,
+        default=[],
+        metavar="ARTIFACT",
+        help=(
+            "re-run ONLY the fire classification over existing artifacts and "
+            "print what changed class; replays nothing and runs no hook. Pass "
+            "--repo-path as well to apply the entry tool-presence rule."
+        ),
     )
     parser.add_argument("--ref", default="origin/dev")
     parser.add_argument("--window-days", type=int, default=30)
@@ -768,7 +956,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--per-commit-timeout", type=int, default=900)
     parser.add_argument("--hook-source", choices=("tip", "as-of"), default="tip")
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--path-prepend",
         action="append",
@@ -777,6 +965,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--pre-commit-home", default=None)
     args = parser.parse_args(argv)
+
+    if args.reclassify:
+        changed_any = False
+        for artifact in args.reclassify:
+            if not artifact.is_file():
+                print(f"error: no artifact at {artifact}", file=sys.stderr)
+                return 1
+            result = reclassify_artifact(
+                artifact, args.repo_path.resolve() if args.repo_path else None
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+            if result["became_finding"] or result["became_environment"]:
+                changed_any = True
+            if result["zero_fire_hooks_changed"]:
+                print(
+                    "error: a zero-fire hook changed class, which is impossible "
+                    "unless the artifact is inconsistent",
+                    file=sys.stderr,
+                )
+                return 1
+        print(
+            "\nclassification changed at least one hook"
+            if changed_any
+            else "\nno hook changed class"
+        )
+        return 0
+
+    if args.repo_path is None or args.repo is None or args.out is None:
+        parser.error("--repo-path, --repo and --out are required unless --reclassify")
 
     repo = args.repo_path.resolve()
     if not (repo / ".git").exists():
