@@ -47,6 +47,7 @@ from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
 )
+from deploy_agent.loaded_code import loaded_code_sha
 from deploy_agent.ref_fence import (
     ModelRefLineageFacts,
     assert_ref_not_stale_branch,
@@ -538,6 +539,28 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
         check=False,
         **kwargs,
     )
+
+
+def _uv_sync_after_pull(agent_dir: str, boundary: EnumSelfUpdateBoundary) -> None:
+    """Sync deps so imports added by the pulled commit resolve after the re-exec.
+
+    Deliberately non-fatal, and deliberately its own function. Non-fatal
+    because refusing to re-exec on a dependency-resolution failure would strand
+    the agent on the code it already has -- which is the condition this whole
+    path exists to end -- and the failure is journalled rather than swallowed.
+    Its own function because it is the one step in ``self_update`` that is not
+    git: a test driving the method against a real clone can replace this single
+    seam without also replacing the git calls whose comparison is under test.
+    """
+    result = _run(["uv", "sync", "--project", agent_dir], timeout=120)
+    if result.returncode != 0:
+        logger.warning(
+            "self_update[boundary=%s]: uv sync failed (exit=%d), proceeding with "
+            "re-exec anyway: %s",
+            boundary.value,
+            result.returncode,
+            result.stderr[:200],
+        )
 
 
 def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
@@ -1142,12 +1165,34 @@ class DeployExecutor:
         skip: bool = False,
         on_before_reexec: Callable[[], None] | None = None,
     ) -> None:
-        """Pull and re-exec deploy-agent itself if behind its tracking ref.
+        """Pull the clone when it is behind, and re-exec when the LOADED code is not the clone's.
 
-        Called ONLY at a job boundary, never between the phases of a deploy
-        (OMN-16442). ``boundary`` is required and has no default: every call
-        site names where it fired, the journal line carries that name, and a
-        future mid-deploy caller cannot quietly omit it.
+        Two comparisons, not one, and they answer different questions
+        (OMN-18200):
+
+        * clone HEAD versus ``origin/<tracking ref>`` decides whether to PULL;
+        * the sha recorded at startup by ``deploy_agent.loaded_code`` versus the
+          clone's HEAD decides whether to RE-EXEC.
+
+        Collapsing them into the first is what this method did until now, and
+        it is wrong in one direction that matters. Something other than this
+        method can advance the clone -- on the lab host an hourly reconciler
+        resets it to ``origin/dev`` at :19 past -- and past each of those ticks
+        the clone is current, so the method reported ``already at origin/dev,
+        nothing to do`` and skipped the re-exec while the process went on
+        executing the code it had imported days earlier. Measured
+        2026-09-14T08:00Z: the ``#3520`` fix to this agent's own lab-overlay
+        build sat on disk at ``ead1f59b1`` while a process from 2026-09-09
+        14:06 EDT kept failing ``images_pinned`` on every automated api build.
+
+        A fix to the deploy agent could not reach the deploy agent, which is
+        the same sentence ``#3522`` had to write about the rebuild trigger one
+        step upstream.
+
+        Called ONLY at a boundary where nothing is in flight, never between the
+        phases of a deploy (OMN-16442). ``boundary`` is required and has no
+        default: every call site names where it fired, the journal line carries
+        that name, and a future mid-deploy caller cannot quietly omit it.
 
         Why the boundary is the whole contract. This method replaces the
         process image. Until 2026-09-08 it was invoked as the first statement
@@ -1161,17 +1206,25 @@ class DeployExecutor:
         cannot finish the deploy it is executing, so a deploy that starts on
         version X must be allowed to complete on version X.
 
-        The two legal boundaries are declared in
-        ``EnumSelfUpdateBoundary``: ``PRE_ACCEPT`` (before a polled command is
-        marked started) and ``POST_TERMINAL`` (after a job's terminal status is
-        published and the single-flight lock is released).
+        The legal boundaries are declared in ``EnumSelfUpdateBoundary``:
+        ``PRE_ACCEPT`` (before a polled command is marked started),
+        ``POST_TERMINAL`` (after a job's terminal status is published and the
+        single-flight lock is released), and ``IDLE_HEARTBEAT`` (the poll
+        loop's no-command branch, at a bounded cadence, with the in-flight
+        checks asserted by the caller). The third exists because the first two
+        are job-driven and an agent that nobody sends a job to could otherwise
+        never pick up a fix to itself.
 
-        ``on_before_reexec`` is invoked once the decision to update has been
-        made and immediately before the pull, and only then. The ``PRE_ACCEPT``
-        caller passes a callback that rewinds its committed consumer offset to
-        the un-accepted command, so the replacement process re-reads that
-        command instead of skipping it -- update-then-process, not
-        process-then-die. Callers with nothing to hand off pass nothing.
+        ``on_before_reexec`` is invoked once the decision to re-exec has been
+        made and immediately before the process image is replaced, and only
+        then. The ``PRE_ACCEPT`` caller passes a callback that rewinds its
+        committed consumer offset to the un-accepted command, so the
+        replacement process re-reads that command instead of skipping it --
+        update-then-process, not process-then-die. Callers with nothing to hand
+        off pass nothing. It fires AFTER the pull rather than before it,
+        because a pull is no longer the same event as a re-exec: rewinding for
+        an update that then does not replace the process would hand the command
+        back to a process that never went away.
 
         The branch is DECLARED, never hardcoded: ``DEPLOY_AGENT_TRACKING_REF``
         is required and has no default (OMN-16442, see
@@ -1206,6 +1259,12 @@ class DeployExecutor:
           code-and-env-in-process.
 
         Raises:
+            LoadedCodeShaNotRecordedError: when no loaded-code identity was
+                recorded at startup. Refused rather than defaulted: a fallback
+                to the clone-versus-remote comparison would restore the defect
+                under a new name and would read as healthy. Both call sites
+                catch this and journal
+                ``friction_type=self_update_boundary_failed``.
             RuntimeError: when ``DEPLOY_AGENT_TRACKING_REF`` is unset. The
                 kill-switch and ``skip=True`` are checked first, so a
                 deliberately disabled self-update never needs the variable.
@@ -1217,6 +1276,21 @@ class DeployExecutor:
             return
 
         branch = load_tracking_ref_from_env()
+
+        # The identity of the code THIS process imported, recorded at startup
+        # before anything could move the clone underneath it. Read before any
+        # git runs, and allowed to raise: a self-update that cannot tell what it
+        # is running must refuse rather than fall back to comparing the clone to
+        # the remote, which is the defect (OMN-18200). Both call sites catch and
+        # journal friction_type=self_update_boundary_failed.
+        #
+        # After the tracking ref, not before it: an undeclared tracking ref is
+        # the older of the two required declarations and
+        # ``test_tracking_ref.py`` pins that it refuses first, so that a
+        # deployment missing BOTH is told about the one it has always had to
+        # declare.
+        loaded_sha = loaded_code_sha()
+
         remote_ref = f"origin/{branch}"
         agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         timeout = 60
@@ -1274,60 +1348,76 @@ class DeployExecutor:
             )
             return
 
-        local_sha = head_result.stdout.strip()
+        disk_sha = head_result.stdout.strip()
         remote_sha = remote_result.stdout.strip()
 
-        if local_sha == remote_sha:
+        # STEP 1 -- bring the CLONE up to the remote. This is the only thing the
+        # clone-versus-remote comparison decides, and the only thing it ever
+        # should have decided.
+        if disk_sha == remote_sha:
             logger.info(
-                "self_update[boundary=%s]: already at %s (%s), nothing to do",
+                "self_update[boundary=%s]: already at %s (%s), nothing to pull",
                 boundary.value,
                 remote_ref,
-                local_sha[:12],
+                disk_sha[:12],
+            )
+        else:
+            logger.info(
+                "self_update[boundary=%s]: behind %s (local=%s remote=%s), pulling",
+                boundary.value,
+                remote_ref,
+                disk_sha[:12],
+                remote_sha[:12],
+            )
+            pull_result = _run(
+                ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
+                timeout=timeout,
+            )
+            if pull_result.returncode != 0:
+                logger.warning(
+                    "self_update[boundary=%s]: git pull failed (exit=%d), skipping re-exec: %s",
+                    boundary.value,
+                    pull_result.returncode,
+                    pull_result.stderr[:200],
+                )
+                return
+            # --ff-only onto origin/<branch> lands exactly there, so the
+            # post-pull HEAD is known without a second rev-parse.
+            disk_sha = remote_sha
+
+        # STEP 2 -- decide whether to RE-EXEC, and decide it against the code
+        # this process actually loaded. The clone being current with the remote
+        # says nothing about that: an external reconciler resets this clone to
+        # origin/dev every hour at :19 past on the lab host, so past each tick
+        # the old comparison read "nothing to do" while the process went on
+        # executing the code it had imported days earlier (OMN-18200).
+        if loaded_sha == disk_sha:
+            logger.info(
+                "self_update[boundary=%s]: running the clone's code (%s), nothing to do",
+                boundary.value,
+                loaded_sha[:12],
             )
             return
 
         logger.info(
-            "self_update[boundary=%s]: behind %s (local=%s remote=%s), pulling and "
-            "re-execing",
+            "self_update[boundary=%s]: loaded code is not the clone's code "
+            "(loaded=%s clone=%s), re-execing",
             boundary.value,
-            remote_ref,
-            local_sha[:12],
-            remote_sha[:12],
+            loaded_sha[:12],
+            disk_sha[:12],
         )
-
-        # Hand off before the process image is replaced. The PRE_ACCEPT caller
-        # rewinds its committed consumer offset here so the replacement process
-        # re-reads the command that triggered this update rather than skipping
-        # past it.
-        if on_before_reexec is not None:
-            on_before_reexec()
-
-        pull_result = _run(
-            ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
-            timeout=timeout,
-        )
-        if pull_result.returncode != 0:
-            logger.warning(
-                "self_update[boundary=%s]: git pull failed (exit=%d), skipping re-exec: %s",
-                boundary.value,
-                pull_result.returncode,
-                pull_result.stderr[:200],
-            )
-            return
 
         # Sync deps so new imports are available after re-exec.
-        uv_result = _run(
-            ["uv", "sync", "--project", agent_dir],
-            timeout=120,
-        )
-        if uv_result.returncode != 0:
-            logger.warning(
-                "self_update[boundary=%s]: uv sync failed (exit=%d), proceeding with "
-                "re-exec anyway: %s",
-                boundary.value,
-                uv_result.returncode,
-                uv_result.stderr[:200],
-            )
+        _uv_sync_after_pull(agent_dir, boundary)
+
+        # Hand off immediately before the process image is replaced, and ONLY
+        # when it is about to be. The PRE_ACCEPT caller rewinds its committed
+        # consumer offset here so the replacement process re-reads the command
+        # that triggered this update rather than skipping past it; a rewind
+        # followed by no re-exec would hand the same command to a process that
+        # never went away.
+        if on_before_reexec is not None:
+            on_before_reexec()
 
         mode = os.environ.get("DEPLOY_AGENT_MODE", "host")
         if mode == "container":
@@ -2120,6 +2210,20 @@ class DeployExecutor:
                 f"{result.returncode}. stderr: {result.stderr[-2000:]}"
             )
         logger.info("_deploy_gateway_lane: %s deployed", GATEWAY_COMPOSE_PROJECT)
+        # Close the phase this step reopened, or the job record contradicts
+        # itself (OMN-18200). This step runs AFTER _compose_up has already
+        # marked Phase.RUNTIME SUCCESS; reopening it as IN_PROGRESS and leaving
+        # it there means JobStore.complete -- which calls
+        # reconcile_terminal_phase_results unconditionally, on success as well
+        # as on failure -- rewrites it to FAILED. Every successful DEV rebuild
+        # between 2026-09-12T23:41Z and 2026-09-14T03:22Z recorded
+        # "runtime: failed" beside "status: success" for exactly this reason:
+        # 14 job records, no runtime-phase error anywhere in the journal, and a
+        # terminal event on the bus asserting a failure that did not happen.
+        #
+        # A failure here raises above instead, and IS the phase that failed, so
+        # the reconciler's own rule settles it correctly.
+        on_phase_update(Phase.RUNTIME, PhaseStatus.SUCCESS)
 
     def _build_dev_lane_only_services(
         self,

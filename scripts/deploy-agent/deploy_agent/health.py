@@ -13,6 +13,7 @@ from aiohttp import web
 
 from deploy_agent.job_state import JobStore
 from deploy_agent.lab_overlay import load_record
+from deploy_agent.loaded_code import loaded_code_sha_if_recorded
 
 _start_time = time.monotonic()
 
@@ -85,6 +86,13 @@ async def _health_handler(request: web.Request) -> web.Response:
         {
             "state": state,
             "version": "0.1.0",
+            # OMN-18200. ``version`` is a static string that names no commit, so
+            # until this field existed the health payload could not answer "which
+            # code is this process running" -- and on 2026-09-14 the answer was
+            # four days older than the clone on the same disk. ``null`` here is a
+            # real finding (the process never reached its startup step), not a
+            # formatting quirk, so it is reported rather than defaulted.
+            "loaded_code_sha": loaded_code_sha_if_recorded(),
             "uptime_seconds": int(time.monotonic() - _start_time),
             "active_job": active_job,
             "last_result": last_result,

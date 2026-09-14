@@ -270,3 +270,47 @@ def _resolve_gateway_lane_from_this_checkout(
         "_deploy_gateway_lane",
         lambda self, *args, **kwargs: None,
     )
+
+
+@pytest.fixture(autouse=True)
+def _reset_loaded_code_identity() -> object:
+    """OMN-18200: the loaded-code identity is per PROCESS, so clear it per test.
+
+    ``deploy_agent.loaded_code`` holds one module-level sha, recorded once at
+    agent startup, because that is exactly what it models: the commit whose tree
+    THIS process imported. A pytest session is one process running many tests,
+    so without this reset the first test to record one would silently supply it
+    to every later test -- and a self-update test that passes on a neighbour's
+    value is proving nothing.
+
+    Reset on both sides of the yield so a test that records one does not leak it
+    forwards, and a test that expects the unrecorded refusal is not defeated by
+    a value left behind.
+    """
+    from deploy_agent import loaded_code
+
+    loaded_code.reset_loaded_code_sha()
+    yield
+    loaded_code.reset_loaded_code_sha()
+
+
+@pytest.fixture
+def declare_loaded_code_sha(monkeypatch: pytest.MonkeyPatch):
+    """Declare the sha of the code the process under test loaded (OMN-18200).
+
+    ``self_update`` now compares the LOADED code to the clone rather than the
+    clone to the remote, so every test that reaches that comparison has to say
+    which code it is pretending to run. Tests driving a real clone can call
+    ``record_loaded_code_sha`` directly; tests that stub ``_run`` have no clone
+    to read, so the resolver is repointed and the real recording path still runs
+    -- a repoint, not a bypass, and ``loaded_code``'s own behaviour (including
+    that an unrecorded read raises) is asserted in
+    ``test_self_update_loaded_code_omn18200.py``.
+    """
+    from deploy_agent import loaded_code
+
+    def _declare(sha: str) -> str:
+        monkeypatch.setattr(loaded_code, "resolve_clone_sha", lambda _agent_dir: sha)
+        return loaded_code.record_loaded_code_sha("<declared by test>")
+
+    return _declare

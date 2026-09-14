@@ -11,6 +11,14 @@ The ref self_update compares against is the DECLARED tracking ref
 fixture), not a hardcoded ``origin/main`` -- these tests therefore match any
 ``origin/*`` rev-parse. That the ref is honoured, is required, and never
 resolves ``main`` is asserted in ``test_tracking_ref.py`` (OMN-16442).
+
+OMN-18200 moved what "current" MEANS in this file. The clone-versus-remote
+comparison these cases drive now decides only whether to PULL; whether to
+RE-EXEC is decided against the sha of the code the process loaded. So each case
+below declares that sha via ``declare_loaded_code_sha``, and "already current"
+means the process is running the clone's code -- not merely that the clone
+agrees with the remote, which was true on the lab host for four days while the
+process ran something else entirely.
 """
 
 from __future__ import annotations
@@ -87,7 +95,10 @@ class TestSelfUpdateSkip:
 
 
 class TestSelfUpdateDirtyTree:
-    def test_dirty_tree_skips_update_without_execv(self) -> None:
+    def test_dirty_tree_skips_update_without_execv(
+        self, declare_loaded_code_sha
+    ) -> None:
+        declare_loaded_code_sha(SHA_LOCAL)
         executor = DeployExecutor()
         with (
             patch(
@@ -101,7 +112,9 @@ class TestSelfUpdateDirtyTree:
 
 
 class TestSelfUpdateCurrent:
-    def test_already_current_does_not_execv(self) -> None:
+    def test_already_current_does_not_execv(self, declare_loaded_code_sha) -> None:
+        """Clone current with the remote AND the process running that code."""
+        declare_loaded_code_sha(SHA_LOCAL)
         executor = DeployExecutor()
         with (
             patch(
@@ -115,7 +128,8 @@ class TestSelfUpdateCurrent:
 
 
 class TestSelfUpdateBehind:
-    def test_behind_calls_execv(self) -> None:
+    def test_behind_calls_execv(self, declare_loaded_code_sha) -> None:
+        declare_loaded_code_sha(SHA_LOCAL)
         executor = DeployExecutor()
         with (
             patch("deploy_agent.executor._run", side_effect=_make_git_responses()),
@@ -124,8 +138,11 @@ class TestSelfUpdateBehind:
             executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
 
-    def test_behind_container_mode_exits_42(self, monkeypatch) -> None:
+    def test_behind_container_mode_exits_42(
+        self, monkeypatch, declare_loaded_code_sha
+    ) -> None:
         monkeypatch.setenv("DEPLOY_AGENT_MODE", "container")
+        declare_loaded_code_sha(SHA_LOCAL)
         executor = DeployExecutor()
         with (
             patch("deploy_agent.executor._run", side_effect=_make_git_responses()),
@@ -134,7 +151,8 @@ class TestSelfUpdateBehind:
             executor.self_update(boundary=_BOUNDARY)
         mock_exit.assert_called_once_with(42)
 
-    def test_behind_fetch_failure_skips_execv(self) -> None:
+    def test_behind_fetch_failure_skips_execv(self, declare_loaded_code_sha) -> None:
+        declare_loaded_code_sha(SHA_LOCAL)
         executor = DeployExecutor()
 
         def side_effect(
@@ -153,7 +171,8 @@ class TestSelfUpdateBehind:
             executor.self_update(boundary=_BOUNDARY)
         mock_execv.assert_not_called()
 
-    def test_behind_pull_failure_skips_execv(self) -> None:
+    def test_behind_pull_failure_skips_execv(self, declare_loaded_code_sha) -> None:
+        declare_loaded_code_sha(SHA_LOCAL)
         executor = DeployExecutor()
 
         def side_effect(

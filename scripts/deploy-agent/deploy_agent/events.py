@@ -69,10 +69,31 @@ class EnumSelfUpdateBoundary(StrEnum):
         In the agent, after the single-flight lock is released and the job's
         terminal status has been published. Deferring to here is what lets a
         deploy that starts on version X complete on version X.
+
+    ``IDLE_HEARTBEAT``
+        In the agent's poll loop, on the branch where no command arrived, at a
+        bounded cadence and only when the job store reports nothing accepted,
+        in progress, or awaiting a terminal publish (OMN-18200).
+
+        The two boundaries above are both JOB-DRIVEN, and that is a
+        circularity when the change to be picked up is a change to this agent.
+        On 2026-09-14 the only merge that would have published a rebuild
+        command was ``omnibase_infra#3520``, the fix to the agent's own lab
+        overlay build -- and until ``#3522`` made ``scripts/deploy-agent/**`` a
+        lane-state path, that merge published nothing, so no job arrived, so
+        neither boundary was ever reached. An agent that nobody sends a job to
+        could not pick up its own fix at all.
+
+        The idle branch is not a job boundary in the OMN-16442 sense; it is the
+        absence of one, which is the same guarantee arrived at from the other
+        side. The in-flight checks are asserted rather than assumed because
+        "the poll returned nothing" and "nothing is in flight" are different
+        facts: a terminal result can still be queued for publish.
     """
 
     PRE_ACCEPT = "pre_accept"
     POST_TERMINAL = "post_terminal"
+    IDLE_HEARTBEAT = "idle_heartbeat"
 
 
 class BuildSource(StrEnum):

@@ -122,9 +122,10 @@ class TestSelfUpdateUsesTrackingRef:
         return side_effect
 
     def test_fetch_rev_parse_and_pull_all_use_the_declared_branch(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, declare_loaded_code_sha
     ) -> None:
         monkeypatch.setenv(ENV_TRACKING_REF, "dev")
+        declare_loaded_code_sha(SHA_LOCAL)
         calls: list[list[str]] = []
         executor = DeployExecutor()
         with (
@@ -146,9 +147,10 @@ class TestSelfUpdateUsesTrackingRef:
         mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
 
     def test_a_different_declared_branch_is_honoured(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, declare_loaded_code_sha
     ) -> None:
         monkeypatch.setenv(ENV_TRACKING_REF, "staging")
+        declare_loaded_code_sha(SHA_LOCAL)
         calls: list[list[str]] = []
         executor = DeployExecutor()
         with (
@@ -159,9 +161,12 @@ class TestSelfUpdateUsesTrackingRef:
         assert any(c[-2:] == ["origin", "staging"] for c in calls), calls
 
     def test_already_at_the_tracking_ref_does_not_reexec(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, declare_loaded_code_sha
     ) -> None:
         monkeypatch.setenv(ENV_TRACKING_REF, "dev")
+        # OMN-18200: no pull is owed AND this process is running the clone's
+        # code, so neither comparison asks for a re-exec.
+        declare_loaded_code_sha(SHA_LOCAL)
         calls: list[list[str]] = []
         executor = DeployExecutor()
         with (
