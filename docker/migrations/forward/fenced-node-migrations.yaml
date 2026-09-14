@@ -792,5 +792,18 @@ fenced_node_migrations:
   # connection: tenant_registry_mirror = 112), so no existing row can be
   # locked out. The release is still a live operator decision and this entry
   # is not it.
+  #
+  # THE VENDORED COPY LANDS BEFORE ITS OMNIMARKET SOURCE, AND THAT IS THE ONLY
+  # ORDER THE TWO GATES PERMIT. omnimarket's node-migration-vendor-parity-gate
+  # refuses any omnimarket PR touching src/omnimarket/nodes/*/migrations/*.sql
+  # unless omnibase_infra@dev ALREADY carries a byte-identical vendored copy;
+  # scripts/resolve_node_migration_source_ref.py here refuses a declared
+  # Omnimarket source ref that is not yet reachable from omnimarket/dev, so an
+  # unlanded feature-branch head cannot be named. The bridge is the declaration
+  # row in _ledger/application-migrations.tsv: sync-node-migrations.sh treats an
+  # extra vendored file that carries such a row as "legacy-declared, not stale"
+  # rather than drift (OMN-15717), which is what lets this half land first. The
+  # omnimarket source follows in its own PR and is byte-identical by
+  # construction -- the vendored bytes here were copied from it.
   - id: "node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ticket: "OMN-14894"
