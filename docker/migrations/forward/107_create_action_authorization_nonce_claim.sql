@@ -181,6 +181,9 @@ AS $function$
 DECLARE
     existing action_authorization_claim.nonce_claims%ROWTYPE;
     claim_time TIMESTAMPTZ;
+    inserted_state TEXT;
+    inserted_version BIGINT;
+    inserted_receipt_digest TEXT;
 BEGIN
     IF p_authorization_id IS NULL
        OR p_ticket_id IS NULL
@@ -230,98 +233,103 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    LOOP
-        SELECT *
-          INTO existing
-          FROM action_authorization_claim.nonce_claims
-         WHERE authorization_id = p_authorization_id
-            OR nonce_digest = p_nonce_digest
-            OR request_digest = p_request_digest
-         FOR UPDATE;
+    -- One statement decides the winner, and it is the only write this function
+    -- makes. The three unique indexes -- authorization_id, nonce_digest and
+    -- request_digest -- are the arbiter; no snapshot, lock order or retry is
+    -- involved. ON CONFLICT DO NOTHING waits out an in-flight inserter before
+    -- it yields, so a zero-row result means a conflicting claim exists and is
+    -- committed, and a one-row result means this caller wrote the claim.
+    --
+    -- A CLAIMED row and an EXPIRED-on-arrival row are the same insert with a
+    -- different state, so an authorization that expires between validation and
+    -- insertion is recorded once rather than raced for.
+    claim_time := clock_timestamp();
 
-        IF FOUND THEN
-            IF existing.authorization_id <> p_authorization_id
-               OR existing.nonce_digest <> p_nonce_digest
-               OR existing.ticket_id <> p_ticket_id
-               OR existing.contract_path <> p_contract_path
-               OR existing.contract_commit_sha <> p_contract_commit_sha
-               OR existing.contract_sha256 <> p_contract_sha256
-               OR existing.action_id <> p_action_id
-               OR existing.source_sha <> p_source_sha
-               OR existing.artifact_sha256 <> p_artifact_sha256
-               OR existing.target_database <> p_target_database
-               OR existing.target_schema <> p_target_schema
-               OR existing.target_service <> p_target_service
-               OR existing.target_principal <> p_target_principal
-               OR existing.execute_enabled <> p_execute_enabled
-               OR existing.issuer <> p_issuer
-               OR existing.issued_at <> p_issued_at
-               OR existing.expires_at <> p_expires_at
-               OR existing.one_time_use <> p_one_time_use
-               OR existing.reason <> p_reason
-               OR existing.request_digest <> p_request_digest
-               OR existing.redacted_receipt_digest <> p_redacted_receipt_digest THEN
-                RETURN QUERY SELECT 'MISMATCH', existing.state, existing.version,
-                    existing.redacted_receipt_digest;
-                RETURN;
-            END IF;
-            IF existing.state = 'EXPIRED' THEN
-                RETURN QUERY SELECT 'EXPIRED', existing.state, existing.version,
-                    existing.redacted_receipt_digest;
-            ELSE
-                RETURN QUERY SELECT 'ALREADY_CONSUMED', existing.state, existing.version,
-                    existing.redacted_receipt_digest;
-            END IF;
-        END IF;
+    INSERT INTO action_authorization_claim.nonce_claims (
+        authorization_id, ticket_id, contract_path, contract_commit_sha,
+        contract_sha256, action_id, source_sha, artifact_sha256,
+        target_database, target_schema, target_service, target_principal,
+        execute_enabled, issuer, nonce_digest, issued_at, expires_at,
+        one_time_use, reason, request_digest, state,
+        redacted_receipt_digest, claimed_at, expired_at
+    ) VALUES (
+        p_authorization_id, p_ticket_id, p_contract_path, p_contract_commit_sha,
+        p_contract_sha256, p_action_id, p_source_sha, p_artifact_sha256,
+        p_target_database, p_target_schema, p_target_service, p_target_principal,
+        p_execute_enabled, p_issuer, p_nonce_digest, p_issued_at, p_expires_at,
+        p_one_time_use, p_reason, p_request_digest,
+        CASE WHEN claim_time >= p_expires_at THEN 'EXPIRED' ELSE 'CLAIMED' END,
+        p_redacted_receipt_digest,
+        CASE WHEN claim_time >= p_expires_at THEN NULL ELSE claim_time END,
+        CASE WHEN claim_time >= p_expires_at THEN claim_time ELSE NULL END
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING nonce_claims.state, nonce_claims.version,
+              nonce_claims.redacted_receipt_digest
+         INTO inserted_state, inserted_version, inserted_receipt_digest;
 
-        claim_time := clock_timestamp();
-        BEGIN
-            IF claim_time >= p_expires_at THEN
-                INSERT INTO action_authorization_claim.nonce_claims (
-                    authorization_id, ticket_id, contract_path, contract_commit_sha,
-                    contract_sha256, action_id, source_sha, artifact_sha256,
-                    target_database, target_schema, target_service, target_principal,
-                    execute_enabled, issuer, nonce_digest, issued_at, expires_at,
-                    one_time_use, reason, request_digest, state,
-                    redacted_receipt_digest, expired_at
-                ) VALUES (
-                    p_authorization_id, p_ticket_id, p_contract_path, p_contract_commit_sha,
-                    p_contract_sha256, p_action_id, p_source_sha, p_artifact_sha256,
-                    p_target_database, p_target_schema, p_target_service, p_target_principal,
-                    p_execute_enabled, p_issuer, p_nonce_digest, p_issued_at, p_expires_at,
-                    p_one_time_use, p_reason, p_request_digest, 'EXPIRED',
-                    p_redacted_receipt_digest, claim_time
-                );
-                RETURN QUERY SELECT 'EXPIRED', 'EXPIRED', 1::BIGINT,
-                    p_redacted_receipt_digest;
-                RETURN;
-            END IF;
+    IF FOUND THEN
+        -- The outcome of a successful insert is its own state: this caller
+        -- either claimed the authorization or recorded it as already expired.
+        RETURN QUERY SELECT inserted_state, inserted_state, inserted_version,
+            inserted_receipt_digest;
+        RETURN;
+    END IF;
 
-            INSERT INTO action_authorization_claim.nonce_claims (
-                authorization_id, ticket_id, contract_path, contract_commit_sha,
-                contract_sha256, action_id, source_sha, artifact_sha256,
-                target_database, target_schema, target_service, target_principal,
-                execute_enabled, issuer, nonce_digest, issued_at, expires_at,
-                one_time_use, reason, request_digest, state,
-                redacted_receipt_digest, claimed_at
-            ) VALUES (
-                p_authorization_id, p_ticket_id, p_contract_path, p_contract_commit_sha,
-                p_contract_sha256, p_action_id, p_source_sha, p_artifact_sha256,
-                p_target_database, p_target_schema, p_target_service, p_target_principal,
-                p_execute_enabled, p_issuer, p_nonce_digest, p_issued_at, p_expires_at,
-                p_one_time_use, p_reason, p_request_digest, 'CLAIMED',
-                p_redacted_receipt_digest, claim_time
-            );
-            RETURN QUERY SELECT 'CLAIMED', 'CLAIMED', 1::BIGINT,
-                p_redacted_receipt_digest;
-            RETURN;
-        EXCEPTION
-            WHEN unique_violation THEN
-                -- A concurrent winner committed the same nonce, authorization,
-                -- or request identity. Loop back to lock and classify its row.
-                NULL;
-        END;
-    END LOOP;
+    SELECT *
+      INTO existing
+      FROM action_authorization_claim.nonce_claims
+     WHERE authorization_id = p_authorization_id
+        OR nonce_digest = p_nonce_digest
+        OR request_digest = p_request_digest;
+
+    IF NOT FOUND THEN
+        -- The insert conflicted, so a committed conflicting claim exists, but
+        -- this transaction cannot read it. That is only reachable above READ
+        -- COMMITTED, where the snapshot predates the winner's commit. Refuse
+        -- rather than answer: a retry in a new transaction resolves it, and
+        -- guessing at a row this transaction cannot see is how a MISMATCH
+        -- would get reported as a consumed claim.
+        RAISE EXCEPTION
+            'conflicting action authorization claim is not visible to this transaction'
+            USING ERRCODE = '40001';
+    END IF;
+
+    IF existing.authorization_id <> p_authorization_id
+       OR existing.nonce_digest <> p_nonce_digest
+       OR existing.ticket_id <> p_ticket_id
+       OR existing.contract_path <> p_contract_path
+       OR existing.contract_commit_sha <> p_contract_commit_sha
+       OR existing.contract_sha256 <> p_contract_sha256
+       OR existing.action_id <> p_action_id
+       OR existing.source_sha <> p_source_sha
+       OR existing.artifact_sha256 <> p_artifact_sha256
+       OR existing.target_database <> p_target_database
+       OR existing.target_schema <> p_target_schema
+       OR existing.target_service <> p_target_service
+       OR existing.target_principal <> p_target_principal
+       OR existing.execute_enabled <> p_execute_enabled
+       OR existing.issuer <> p_issuer
+       OR existing.issued_at <> p_issued_at
+       OR existing.expires_at <> p_expires_at
+       OR existing.one_time_use <> p_one_time_use
+       OR existing.reason <> p_reason
+       OR existing.request_digest <> p_request_digest
+       OR existing.redacted_receipt_digest <> p_redacted_receipt_digest THEN
+        RETURN QUERY SELECT 'MISMATCH', existing.state, existing.version,
+            existing.redacted_receipt_digest;
+        RETURN;
+    END IF;
+
+    IF existing.state = 'EXPIRED' THEN
+        RETURN QUERY SELECT 'EXPIRED', existing.state, existing.version,
+            existing.redacted_receipt_digest;
+        RETURN;
+    END IF;
+
+    RETURN QUERY SELECT 'ALREADY_CONSUMED', existing.state, existing.version,
+        existing.redacted_receipt_digest;
+    RETURN;
 END;
 $function$;
 
