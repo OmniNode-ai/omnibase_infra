@@ -574,3 +574,228 @@ def test_checker_fails_when_the_sequence_residual_grows() -> None:
     )
     assert completed.returncode == 1
     assert "sequence grant delivery" in completed.stdout
+
+
+# ---------------------------------------------------------------------------
+# OMN-18353 -- a sequence-backed column added by ALTER, not by CREATE.
+# ---------------------------------------------------------------------------
+
+# `sequence_backed_columns` replayed only CREATE TABLE bodies, so a column added
+# to an existing relation by
+#
+#     ALTER TABLE <relation> ADD COLUMN IF NOT EXISTS <col> BIGSERIAL;
+#
+# created a standalone sequence this gate could not see. Every ALTER of that
+# shape already in the corpus sits beside a CREATE in the same file that
+# declares the same column (the idempotent reconcile pattern), so the blind spot
+# was covered by accident everywhere it existed -- until OMN-18043 added
+# `consumer_flow_windows.projection_cursor` in a file that carries the ALTER and
+# nothing else. The lane's writer then failed EVERY insert with
+# `InsufficientPrivilege: permission denied for sequence
+# consumer_flow_windows_projection_cursor_seq`, the OMN-17379
+# ProjectionNotMaterializedError correctly refused to advance the offset, and
+# `consumer_flow_windows` froze at 2026-09-10T19:48:02Z with 19,078,405 rows
+# while this gate reported `0 undelivered` the whole time.
+OMN_18353_CONSUMER_FLOW_CURSOR = SequenceKey(
+    "omninode_runtime",
+    "omninode_internal",
+    "consumer_flow_windows",
+    "projection_cursor",
+)
+
+
+@pytest.mark.unit
+def test_alter_table_add_column_serial_is_derived_as_sequence_backed(
+    tmp_path: Path,
+) -> None:
+    """A SERIAL column added by ALTER creates a sequence just as CREATE does.
+
+    RED before this change: the derivation read CREATE TABLE bodies only, so
+    this corpus reported no sequence-backed column at all.
+    """
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_cursor.sql").write_text(
+        "ALTER TABLE omninode_internal.example\n"
+        "    ADD COLUMN IF NOT EXISTS projection_cursor BIGSERIAL;\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {"projection_cursor"}
+
+
+@pytest.mark.unit
+def test_alter_table_add_without_column_keyword_is_derived_as_sequence_backed(
+    tmp_path: Path,
+) -> None:
+    """PostgreSQL accepts ADD without the optional COLUMN keyword."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_cursor.sql").write_text(
+        "ALTER TABLE omninode_internal.example\n    ADD projection_cursor BIGSERIAL;\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {"projection_cursor"}
+
+
+@pytest.mark.unit
+def test_alter_table_add_quoted_serial_column_is_derived_as_sequence_backed(
+    tmp_path: Path,
+) -> None:
+    """Quoted column names are still real sequence-backed columns."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_cursor.sql").write_text(
+        'ALTER TABLE omninode_internal.example ADD COLUMN "Projection_Cursor" SERIAL8;\n',
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {"Projection_Cursor"}
+
+
+@pytest.mark.unit
+def test_create_if_not_exists_after_alter_preserves_accumulated_serial_columns(
+    tmp_path: Path,
+) -> None:
+    """A reconcile-pattern CREATE must not erase an earlier ALTER-derived column."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_add_cursor_then_create.sql").write_text(
+        "ALTER TABLE IF EXISTS omninode_internal.example\n"
+        "    ADD COLUMN projection_cursor BIGSERIAL;\n"
+        "CREATE TABLE IF NOT EXISTS omninode_internal.example (\n"
+        "  id SERIAL PRIMARY KEY\n"
+        ");\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {
+        "id",
+        "projection_cursor",
+    }
+
+
+@pytest.mark.unit
+def test_plain_create_after_create_replaces_serial_columns(tmp_path: Path) -> None:
+    """A second plain CREATE keeps replacement semantics rather than accumulating."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create_twice.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n"
+        "  id SERIAL PRIMARY KEY\n"
+        ");\n"
+        "CREATE TABLE omninode_internal.example (\n"
+        "  name TEXT PRIMARY KEY\n"
+        ");\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == set()
+
+
+@pytest.mark.unit
+def test_multi_clause_alter_table_derives_later_serial_column(
+    tmp_path: Path,
+) -> None:
+    """A comma-separated ALTER body still exposes a later SERIAL column."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_columns.sql").write_text(
+        "ALTER TABLE omninode_internal.example\n"
+        "    ADD COLUMN display_name TEXT,\n"
+        "    ADD COLUMN projection_cursor BIGSERIAL;\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {"projection_cursor"}
+
+
+@pytest.mark.unit
+def test_alter_table_add_column_identity_is_not_sequence_backed(
+    tmp_path: Path,
+) -> None:
+    """The IDENTITY carve-out survives the ALTER shape.
+
+    An identity column's sequence is owned by the column and rides the table's
+    own INSERT privilege. Demanding a USAGE grant for one would make the
+    delivering migration RAISE on a NULL pg_get_serial_sequence -- a broken
+    deploy rather than a correct gate. This is the positive control for the
+    case above.
+    """
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_identity.sql").write_text(
+        "ALTER TABLE omninode_internal.example\n"
+        "    ADD COLUMN IF NOT EXISTS row_id BIGINT GENERATED ALWAYS AS IDENTITY;\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert not columns.get(("omninode_internal", "example"))
+
+
+@pytest.mark.unit
+def test_consumer_flow_projection_cursor_is_derived_as_sequence_backed() -> None:
+    """The real corpus, not a fixture: the column OMN-18043 added by ALTER."""
+    columns = sequence_backed_columns(REPO_ROOT / "docker/migrations/forward")
+
+    assert "projection_cursor" in columns.get(
+        ("omninode_internal", "consumer_flow_windows"), set()
+    ), (
+        "consumer_flow_windows.projection_cursor is not derived as "
+        "sequence-backed. It is declared BIGSERIAL by "
+        "node_projection_consumer_flow/0001_add_projection_cursor.sql, in an "
+        "ALTER with no accompanying CREATE."
+    )
+
+
+@pytest.mark.unit
+def test_omn_18353_consumer_flow_sequence_is_delivered_by_a_migration() -> None:
+    """The grant the frozen lane was missing.
+
+    RED before this change on both halves: the requirement was not derived, and
+    no migration delivered it.
+    """
+    delivered = delivered_sequences(REPO_ROOT / "docker/migrations/forward")
+
+    assert OMN_18353_CONSUMER_FLOW_CURSOR in delivered, (
+        f"{OMN_18353_CONSUMER_FLOW_CURSOR} has a delivered TABLE grant "
+        "(node_projection_consumer_flow/0003, OMN-17440) and no delivering "
+        "GRANT USAGE ON SEQUENCE. A TABLE grant alone does not make it "
+        "writable, and the lane proved it: the projection froze on "
+        "2026-09-10."
+    )
