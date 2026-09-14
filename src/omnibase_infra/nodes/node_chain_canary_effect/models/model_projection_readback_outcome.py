@@ -29,6 +29,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_projection_readba
 )
 
 TypeDelegationTrafficClass = Literal["unclassified", "organic", "synthetic"]
+DELEGATION_TRAFFIC_CLASSES: frozenset[str] = frozenset(
+    ("unclassified", "organic", "synthetic")
+)
 
 
 class ModelProjectionReadbackOutcome(BaseModel):
@@ -62,4 +65,8 @@ class ModelProjectionReadbackOutcome(BaseModel):
     )
 
 
-__all__ = ["ModelProjectionReadbackOutcome", "TypeDelegationTrafficClass"]
+__all__ = [
+    "DELEGATION_TRAFFIC_CLASSES",
+    "ModelProjectionReadbackOutcome",
+    "TypeDelegationTrafficClass",
+]

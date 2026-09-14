@@ -124,6 +124,7 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_link_verdi
     ModelChainLinkVerdict,
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    DELEGATION_TRAFFIC_CLASSES,
     ModelProjectionReadbackOutcome,
     TypeDelegationTrafficClass,
 )
@@ -216,6 +217,20 @@ _TERMINAL_FSM_STATES: frozenset[str] = frozenset({"COMPLETED", "FAILED"})
 _CURRENT_ROLE_PRIVILEGE_QUERY = (
     "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
 )
+
+
+def _delegation_traffic_class_from_row(
+    value: object,
+) -> TypeDelegationTrafficClass | None:
+    if value is None:
+        return "unclassified"
+    if value == "unclassified":
+        return "unclassified"
+    if value == "organic":
+        return "organic"
+    if value == "synthetic":
+        return "synthetic"
+    return None
 
 
 def _terminal_topics(request: ModelChainCanaryRequest) -> tuple[str, ...]:
@@ -609,7 +624,15 @@ async def _readback_projection_via_asyncpg(
             status=EnumProjectionReadbackStatus.ROW_ABSENT
         )
     state = str(row["state"] or "")
-    traffic_class = str(row["traffic_class"] or "unclassified")
+    traffic_class = _delegation_traffic_class_from_row(row["traffic_class"])
+    if traffic_class is None:
+        return ModelProjectionReadbackOutcome(
+            status=EnumProjectionReadbackStatus.ERROR,
+            error=(
+                "delegation_workflow_state.traffic_class carried a value outside "
+                "the canonical OMN-18172 traffic-class enum"
+            ),
+        )
     if not state:
         return ModelProjectionReadbackOutcome(
             status=EnumProjectionReadbackStatus.ROW_ABSENT
