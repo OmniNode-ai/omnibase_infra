@@ -631,6 +631,72 @@ def test_alter_table_add_column_serial_is_derived_as_sequence_backed(
 
 
 @pytest.mark.unit
+def test_alter_table_add_without_column_keyword_is_derived_as_sequence_backed(
+    tmp_path: Path,
+) -> None:
+    """PostgreSQL accepts ADD without the optional COLUMN keyword."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_cursor.sql").write_text(
+        "ALTER TABLE omninode_internal.example\n    ADD projection_cursor BIGSERIAL;\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {"projection_cursor"}
+
+
+@pytest.mark.unit
+def test_alter_table_add_quoted_serial_column_is_derived_as_sequence_backed(
+    tmp_path: Path,
+) -> None:
+    """Quoted column names are still real sequence-backed columns."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_create.sql").write_text(
+        "CREATE TABLE omninode_internal.example (\n  name TEXT PRIMARY KEY\n);\n",
+        encoding="utf-8",
+    )
+    (node / "0001_add_cursor.sql").write_text(
+        'ALTER TABLE omninode_internal.example ADD COLUMN "Projection_Cursor" SERIAL8;\n',
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {"projection_cursor"}
+
+
+@pytest.mark.unit
+def test_create_after_alter_preserves_accumulated_serial_columns(
+    tmp_path: Path,
+) -> None:
+    """A later CREATE must not erase an earlier ALTER-derived serial column."""
+    node = tmp_path / "nodes" / "node_example"
+    node.mkdir(parents=True)
+    (node / "0000_add_cursor_then_create.sql").write_text(
+        "ALTER TABLE IF EXISTS omninode_internal.example\n"
+        "    ADD COLUMN projection_cursor BIGSERIAL;\n"
+        "CREATE TABLE IF NOT EXISTS omninode_internal.example (\n"
+        "  id SERIAL PRIMARY KEY\n"
+        ");\n",
+        encoding="utf-8",
+    )
+
+    columns = sequence_backed_columns(tmp_path)
+
+    assert columns.get(("omninode_internal", "example")) == {
+        "id",
+        "projection_cursor",
+    }
+
+
+@pytest.mark.unit
 def test_alter_table_add_column_identity_is_not_sequence_backed(
     tmp_path: Path,
 ) -> None:

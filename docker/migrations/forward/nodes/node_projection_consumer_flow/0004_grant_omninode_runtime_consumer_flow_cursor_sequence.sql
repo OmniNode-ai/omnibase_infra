@@ -135,12 +135,15 @@ WHERE pg_get_serial_sequence(
           'omninode_internal.consumer_flow_windows', 'projection_cursor'
       ) = 'omninode_internal.consumer_flow_windows_projection_cursor_seq';
 
-SELECT 1 / count(*) AS consumer_flow_windows_insert_grant_assertion
-FROM information_schema.role_table_grants
-WHERE table_schema = 'omninode_internal'
-  AND table_name = 'consumer_flow_windows'
-  AND grantee = 'omninode_runtime'
-  AND privilege_type = 'INSERT';
+SELECT 1 / CASE
+    WHEN has_table_privilege(
+        'omninode_runtime',
+        'omninode_internal.consumer_flow_windows',
+        'INSERT'
+    )
+    THEN 1
+    ELSE 0
+END AS consumer_flow_windows_insert_grant_assertion;
 
 SELECT 1 / count(*) AS consumer_flow_windows_sequence_usage_assertion
 WHERE has_sequence_privilege(

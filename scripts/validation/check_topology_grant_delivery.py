@@ -42,8 +42,9 @@ For every ``(principal, schema, table)`` the topology declares under
 <principal>`` statement somewhere in the vendored forward-migration corpus. It
 does NOT check privilege sets, ordering, or whether the migration has been
 applied on any particular lane -- a live-lane assertion belongs in the migration
-itself, and every grant migration in this corpus already carries one
-(``SELECT 1 / count(*) ... FROM information_schema.role_table_grants``).
+itself, and every grant migration in this corpus already carries one through
+``has_table_privilege`` or the older
+``information_schema.role_table_grants``-based assertion form.
 
 WHY A RATCHET AND NOT A CLEAN ZERO
 ----------------------------------
@@ -208,8 +209,11 @@ _DROP_TABLE_RE = re.compile(
 # rewrites these into a plain ``nextval()`` DEFAULT over a STANDALONE sequence
 # whose own ACL it checks on every INSERT -- which is exactly the privilege
 # ``GRANT INSERT ON TABLE`` does not reach.
+_IDENTIFIER_RE = r'(?:[A-Za-z_][A-Za-z0-9_]*|"[^"]+")'
+
 _SERIAL_COLUMN_RE = re.compile(
-    r"^\s*(?P<column>[A-Za-z_][A-Za-z0-9_]*)\s+(?:BIG|SMALL)?SERIAL\b",
+    rf"^\s*(?P<column>{_IDENTIFIER_RE})\s+"
+    r"(?:BIGSERIAL|SMALLSERIAL|SERIAL[248]?|SERIAL)\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -244,12 +248,14 @@ _ALTER_TABLE_RE = re.compile(
 )
 
 _ADD_COLUMN_RE = re.compile(
-    r"ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"(?P<column>[A-Za-z_][A-Za-z0-9_]*)\s+(?P<definition>[^,;]+)",
+    rf"ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
+    rf"(?P<column>{_IDENTIFIER_RE})\s+(?P<definition>[^,;]+)",
     re.IGNORECASE,
 )
 
-_SERIAL_TYPE_RE = re.compile(r"^\s*(?:BIG|SMALL)?SERIAL\b", re.IGNORECASE)
+_SERIAL_TYPE_RE = re.compile(
+    r"^\s*(?:BIGSERIAL|SMALLSERIAL|SERIAL[248]?|SERIAL)\b", re.IGNORECASE
+)
 
 _IDENTITY_DEFINITION_RE = re.compile(
     r"GENERATED\s+(?:ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY", re.IGNORECASE
@@ -409,14 +415,14 @@ def sequence_backed_columns(corpus_root: Path) -> dict[tuple[str, str], set[str]
             open_paren = text.index("(", position)
             column_body = _column_body(text, open_paren)
             serial = {
-                m.group("column").lower()
+                _unquote(m.group("column")).lower()
                 for m in _SERIAL_COLUMN_RE.finditer(column_body)
             }
             identity = {
-                m.group("column").lower()
+                _unquote(m.group("column")).lower()
                 for m in _IDENTITY_COLUMN_RE.finditer(column_body)
             }
-            definitions[key] = serial - identity
+            definitions.setdefault(key, set()).update(serial - identity)
     return definitions
 
 
@@ -440,7 +446,7 @@ def _added_serial_columns(alter_body: str) -> set[str]:
         if _IDENTITY_DEFINITION_RE.search(definition):
             continue
         if _SERIAL_TYPE_RE.match(definition):
-            added.add(match.group("column").lower())
+            added.add(_unquote(match.group("column")).lower())
     return added
 
 
