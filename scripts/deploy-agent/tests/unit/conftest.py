@@ -218,6 +218,51 @@ def _resolve_preflight_script_from_this_checkout(
 
 
 @pytest.fixture(autouse=True)
+def _derive_gateway_deploy_budget_from_this_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18200: derive the gateway deploy ceiling from THIS checkout.
+
+    ``_deploy_gateway_lane`` now reads the gateway compose file, the
+    Dockerfiles it names, and the gateway systemd unit's own
+    ``ExecReload --wait-timeout`` to derive its ceiling
+    (``deploy_agent.gateway_budget``) and refuses fail-closed when it cannot --
+    a ceiling that silently reverted to a floor because the model was
+    unreadable would be the same undetectable wrongness as the flat
+    floor-plus-300 this replaced. ``REPO_DIR`` is a deploy-HOST path absent
+    from the unit-test sandbox, so both files are repointed at the repository
+    under test -- the same visible path repoint the compose-up and
+    image-build budget fixtures above take.
+
+    This is a repoint, not a stub: the real derivation runs against the real
+    ``docker/docker-compose.gateway.yml`` and
+    ``docker/gateway/onex-gateway-forwarder.service``, so a compose or unit
+    change moves what these tests observe. The derivation's own behaviour is
+    asserted directly in ``test_gateway_budget_omn18200.py``.
+    """
+    from deploy_agent import executor as executor_mod
+    from deploy_agent import gateway_budget
+
+    docker_dir = Path(__file__).resolve().parents[4] / "docker"
+    compose_file = str(docker_dir / "docker-compose.gateway.yml")
+    service_unit = str(docker_dir / "gateway" / "onex-gateway-forwarder.service")
+
+    def _budget() -> gateway_budget.ModelGatewayDeployBudget:
+        return gateway_budget.derive_gateway_deploy_budget(
+            (compose_file,),
+            executor_mod.GATEWAY_BUILD_PROFILE,
+            service_unit,
+            per_step_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
+            per_image_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
+            build_floor_seconds=executor_mod.RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
+            reload_margin_seconds=executor_mod.GATEWAY_RECREATE_MARGIN_SECONDS,
+            reload_floor_seconds=executor_mod.GATEWAY_RECREATE_FLOOR_SECONDS,
+        )
+
+    monkeypatch.setattr(executor_mod, "gateway_deploy_budget", _budget)
+
+
+@pytest.fixture(autouse=True)
 def _resolve_gateway_lane_from_this_checkout(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,

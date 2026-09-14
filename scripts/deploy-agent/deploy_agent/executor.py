@@ -43,6 +43,10 @@ from deploy_agent.events import (
     services_for_scope,
     without_gateway_services,
 )
+from deploy_agent.gateway_budget import (
+    ModelGatewayDeployBudget,
+    derive_gateway_deploy_budget,
+)
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
@@ -1014,13 +1018,56 @@ GATEWAY_ENV_PASSTHROUGH_VARS: frozenset[str] = frozenset(
     }
 )
 
-# The gateway deploy runs ONE BuildKit solve over the same
-# ``docker/Dockerfile.runtime`` the runtime family builds -- a strict subset of
-# that work, two images rather than nine -- so the runtime image-build FLOOR
-# bounds the build half with room. The remaining margin covers the sync, the
-# digest pin, the registry write, the systemd reload (whose own unit bounds
-# compose at ``--wait-timeout 120``) and the post-reload digest verification.
-GATEWAY_DEPLOY_TIMEOUT_SECONDS = RUNTIME_IMAGE_BUILD_FLOOR_SECONDS + 300
+# OMN-18200: the gateway deploy ceiling is DERIVED from the gateway's own
+# compose/Dockerfile/systemd-unit model, the same way OMN-18057/OMN-18072
+# derive the runtime family's -- never a floor plus a flat constant again. See
+# ``deploy_agent.gateway_budget`` for the full derivation and the incident it
+# replaces (the one live rebuild since #3524 merged was killed at exactly the
+# old flat 900s, ~780s of it spent on a cold build that left the recreate half
+# nothing).
+GATEWAY_COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.gateway.yml"
+GATEWAY_SERVICE_UNIT = f"{REPO_DIR}/docker/gateway/onex-gateway-forwarder.service"
+# A label only: neither gateway service declares a compose ``profiles:`` key,
+# so ``derive_image_build_budget`` selects both regardless of this value (see
+# ``build_budget._buildable_services``) -- named for a readable ``describe()``.
+GATEWAY_BUILD_PROFILE = "gateway"
+
+# The build half reuses the runtime family's own per-step/per-image rates and
+# floor unchanged (OMN-18072): the gateway builds ONE BuildKit solve over the
+# SAME ``docker/Dockerfile.runtime``, so the identical model applies.
+#
+# The recreate half's margin covers everything in ``deploy-gateway.sh``
+# AFTER the build that is not the ``ExecReload --wait-timeout`` itself:
+# resolve+retain the previous digest, sync + diff two host files, rewrite
+# ``gateway.env``'s digest line, write ``registry.json``, and
+# ``verify_deployment``'s one ``docker inspect`` + two ``docker exec`` calls.
+# None of these loop; sized the same as ``CONTAINER_VERIFY_TIMEOUT_SECONDS``
+# above, the other "generous window for local settle" constant in this file.
+GATEWAY_RECREATE_MARGIN_SECONDS = CONTAINER_VERIFY_TIMEOUT_SECONDS
+# Never derive a recreate ceiling at or below what the unit's OWN
+# ``--wait-timeout`` (120s today) already enforces, even if the unit is edited
+# to declare something smaller -- the same "floor guards a small model reading"
+# contract OMN-18057/OMN-18072 hold.
+GATEWAY_RECREATE_FLOOR_SECONDS = 180
+
+
+def gateway_deploy_budget() -> ModelGatewayDeployBudget:
+    """Derive the ``scripts/deploy-gateway.sh --execute`` ceiling (OMN-18200).
+
+    Reads the SAME compose file, Dockerfiles, and systemd unit the deploy is
+    about to invoke, so a change to any of them moves the ceiling with it
+    instead of silently re-opening this failure one number later.
+    """
+    return derive_gateway_deploy_budget(
+        (GATEWAY_COMPOSE_FILE,),
+        GATEWAY_BUILD_PROFILE,
+        GATEWAY_SERVICE_UNIT,
+        per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
+        per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
+        build_floor_seconds=RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
+        reload_margin_seconds=GATEWAY_RECREATE_MARGIN_SECONDS,
+        reload_floor_seconds=GATEWAY_RECREATE_FLOOR_SECONDS,
+    )
 
 
 class GatewayDeployScriptUnavailableError(RuntimeError):
@@ -2189,6 +2236,14 @@ class DeployExecutor:
             )
         env_file = self._assert_gateway_lane_config()
 
+        # OMN-18200: derived from the gateway's own build+reload model, never
+        # a bare constant. The old floor-plus-300 killed the only live rebuild
+        # since #3524 merged at exactly 900s, ~780s of it spent on a cold
+        # build that left the recreate half nothing.
+        budget = gateway_deploy_budget()
+        timeout = budget.timeout_seconds
+        logger.info("Gateway deploy ceiling %s", budget.describe())
+
         on_phase_update(Phase.RUNTIME, PhaseStatus.IN_PROGRESS)
         logger.info(
             "_deploy_gateway_lane: deploying %s via %s (env file %s, targets: %s)",
@@ -2198,12 +2253,19 @@ class DeployExecutor:
             ", ".join(targets),
         )
         cmd = ["bash", script, "--execute"]
-        result = _run(
-            cmd,
-            timeout=GATEWAY_DEPLOY_TIMEOUT_SECONDS,
-            cwd=REPO_DIR,
-            env=self._gateway_child_env(build_source, git_ref=git_ref),
-        )
+        try:
+            result = _run(
+                cmd,
+                timeout=timeout,
+                cwd=REPO_DIR,
+                env=self._gateway_child_env(build_source, git_ref=git_ref),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"GATEWAY_DEPLOY_TIMED_OUT: {' '.join(cmd)} exceeded its "
+                f"{timeout}s ceiling and was killed. Ceiling derivation: "
+                f"{budget.describe()}."
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(
                 f"GATEWAY_DEPLOY_FAILED: {' '.join(cmd)} exited "
