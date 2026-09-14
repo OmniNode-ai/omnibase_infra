@@ -24,7 +24,9 @@ def test_nonce_claim_migration_owns_only_its_dedicated_boundary() -> None:
     sql = _MIGRATION.read_text(encoding="utf-8")
     table_definition = sql.split("CREATE FUNCTION", maxsplit=1)[0]
 
-    assert "CREATE SCHEMA action_authorization_claim" in sql
+    assert "FROM pg_catalog.pg_namespace" in sql
+    assert "WHERE nspname = 'action_authorization_claim'" in sql
+    assert "CREATE SCHEMA action_authorization_claim" not in sql
     assert "CREATE TABLE action_authorization_claim.nonce_claims" in sql
     assert "first_effect" not in sql
     assert "CASCADE" not in sql
