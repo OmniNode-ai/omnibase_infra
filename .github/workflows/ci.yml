@@ -302,7 +302,7 @@ jobs:
       # `workflow-uv-available` pre-commit hook, so the local and CI verdicts
       # cannot diverge.
       - name: Check hosted-runner steps install uv before invoking it (OMN-18364)
-        run: python scripts/ci/check_workflow_uv_available.py
+        run: uv run python scripts/ci/check_workflow_uv_available.py
 
       - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
         run: uv run python scripts/ci_check_kafka_no_localhost_default.py
