@@ -429,6 +429,22 @@ trusted_runner_variable:
           The 2026-09-12 flip starved the evidence companion of the pull request that recorded it. The OCC autobind and companion-effect publishers in this repository read the dedicated OMNI_OCC_AUTOBIND_RUNS_ON_JSON knob, which stays UNSET and is therefore untouched by this override; both publisher jobs were observed SUCCESS on omninode_infra run 34838472657 and 34838472516 while every hosted job in the same push failed, so the companion path is already isolated from this seam by construction.
         positive_control_acceptance: >-
           Acceptance is a named fleet runner on a previously-hosted job, not an absence of red. Accept when at least one of the eleven clean seam-driven jobs reports conclusion success with a populated `runner_name` matching `omninode-runner-*` and labels self-hosted,omnibase-ci. The positive control that the fleet itself is healthy is a fleet-literal job in the SAME run staying green -- the discriminator the phase-2 diagnosis used.
+    omni_home:
+      expected_json: '["self-hosted","omnibase-ci"]'
+      revert_when: >-
+        Revert to '["ubuntu-latest"]' only once omni_home is no longer a private repository. This shadow is what places the repository's ONE required check on main, `kb-doc-gate / kb-doc-gate`, on the fleet; reverting it re-wedges every pull request there, which is the state it was set to fix.
+      activation_gate:
+        sustained_samples: >-
+          Set 2026-09-14T13:28:02Z to unwedge a repository whose required check had been QUEUED with no runner for over half an hour. The sustained sample is the repository's own pull-request traffic from that timestamp forward; this is one seam-driven job definition, not a load change.
+        sustained_min_span_seconds: 5400
+        capacity_budget: >-
+          ONE seam-driven job definition, a markdown doc-placement check that completes in seconds. Every other workflow in this repository is already pinned to the fleet label directly -- 18 of its 19 job definitions -- so this shadow adds a single short job to a group whose floor is the `min_idle_runners` of `route` below.
+        maintenance_roll_convergence: >-
+          Unchanged by one short-lived job. Convergence is proven by the busy fraction staying inside the budget above, the same measure as the omninode_infra entry.
+        evidence_companion_fate_isolation: >-
+          This repository publishes no OCC companion and calls neither publisher reusable, so there is no companion whose fate this shadow could share. It is the only audited repository for which that is true, and it is stated rather than left absent.
+        positive_control_acceptance: >-
+          Acceptance is the next `kb-doc-gate / kb-doc-gate` run on a pull request here reporting a populated `runner_name` matching `omninode-runner-*`. The negative state this replaces is on the record: that job QUEUED with no runner assigned, while sibling jobs in the same repository pinned to [self-hosted, omnibase-ci] finished in seconds.
     omniweb:
       expected_json: '["self-hosted","omnibase-ci"]'
       revert_when: >-
@@ -700,6 +716,17 @@ repositories:
   # audit. It declares no docker-CI or security-scan scope and carries neither
   # shadow, so the scoped-variable pass now asserts their ABSENCE here too.
   - omniweb
+  # OMN-18205 phase 4, 2026-09-14: added under the operator ruling that private
+  # repositories never run CI on GitHub-hosted runners. This repository is
+  # PRIVATE and carried NO routing shadow at all, so its ONE required check on
+  # `main` -- kb-doc-gate, implemented by a cross-repo reusable whose selector
+  # takes the TRUSTED branch for a same-repo pull request based on `main` --
+  # inherited the organisation value and sat QUEUED with no runner while every
+  # other job in the repository, all of them pinned to the fleet label
+  # directly, finished in seconds. The shadow declared above is what moved it.
+  # It declares no docker-CI or security-scan scope and carries neither shadow,
+  # so the scoped-variable pass now asserts their ABSENCE here too.
+  - omni_home
 hosted_runner_allowlist:
   - path: .github/workflows/application-acl-postgres16-proof.yml
     reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."
