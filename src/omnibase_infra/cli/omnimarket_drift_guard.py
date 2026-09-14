@@ -161,12 +161,17 @@ def _path_onex_identity() -> tuple[str, Path] | None:
     """Return PATH's ``onex`` entry and its normalized filesystem identity.
 
     A drift refusal from a foreign interpreter is usually caused by a second
-    ``onex`` entrypoint preceding the sanctioned wrapper. The raw PATH entry
-    is the actionable location to repair; the resolved path is only for a
-    symlink-safe identity comparison with the canonical wrapper.
+    ``onex`` entrypoint preceding the sanctioned wrapper. The raw PATH entry is
+    the actionable location to inspect; the resolved path is only for a
+    symlink-safe filesystem identity comparison with the canonical wrapper. A
+    diagnostic helper must not replace the drift error with an unrelated PATH
+    or filesystem exception.
     """
-    path_onex = shutil.which("onex")
-    return (path_onex, Path(path_onex).resolve()) if path_onex else None
+    try:
+        path_onex = shutil.which("onex")
+        return (path_onex, Path(path_onex).resolve()) if path_onex else None
+    except OSError:
+        return None
 
 
 class CanonicalCloneAttachment(StrEnum):
@@ -372,24 +377,47 @@ def check_omnimarket_drift(
         # not resolvable, and that other interpreter refuses identically
         # regardless of the real venv's state. Printing sys.executable turns
         # the next occurrence into a one-line diagnosis instead of a session.
-        canonical_wrapper = (
-            str(Path(omni_home) / "omnibase_infra" / "scripts" / "onex")
+        canonical_wrapper_path = (
+            Path(omni_home) / "omnibase_infra" / "scripts" / "onex"
             if omni_home
+            else None
+        )
+        canonical_wrapper = (
+            str(canonical_wrapper_path)
+            if canonical_wrapper_path is not None
             else "$OMNI_HOME/omnibase_infra/scripts/onex"
         )
         path_onex_identity = _path_onex_identity()
-        path_diagnosis = (
-            "PATH did not resolve an 'onex' executable for this process."
-            if path_onex_identity is None
-            else (
+        try:
+            canonical_wrapper_identity = (
+                canonical_wrapper_path.resolve()
+                if canonical_wrapper_path is not None
+                else None
+            )
+        except OSError:
+            canonical_wrapper_identity = None
+
+        if path_onex_identity is None:
+            path_diagnosis = (
+                "PATH did not resolve an 'onex' executable for this process."
+            )
+        elif canonical_wrapper_identity is None:
+            path_diagnosis = (
+                "PATH resolves 'onex' to "
+                f"{path_onex_identity[0]}, but the canonical wrapper's "
+                "filesystem identity cannot be compared."
+            )
+        elif path_onex_identity[1] == canonical_wrapper_identity:
+            path_diagnosis = (
                 "PATH resolves 'onex' through the canonical wrapper: "
                 f"{path_onex_identity[0]}."
-                if omni_home
-                and path_onex_identity[1] == Path(canonical_wrapper).resolve()
-                else "PATH resolves 'onex' to a shadowing binary: "
-                f"{path_onex_identity[0]}. Canonical wrapper: {canonical_wrapper}."
             )
-        )
+        else:
+            path_diagnosis = (
+                "PATH resolves 'onex' to an entry that is not the canonical "
+                f"wrapper by filesystem identity: {path_onex_identity[0]}. "
+                f"Canonical wrapper: {canonical_wrapper}."
+            )
         detail = (
             "omnimarket is NOT INSTALLED from git in this interpreter "
             f"({sys.executable}) (absent, or installed from PyPI/a non-VCS "

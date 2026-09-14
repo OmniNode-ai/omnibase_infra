@@ -239,7 +239,7 @@ def test_not_installed_refusal_names_shadowing_onex_and_canonical_wrapper(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """OMN-18280: a shadow symlink reports its PATH entry and the wrapper."""
+    """OMN-18280: a non-wrapper PATH entry reports the compared paths."""
     path_bin = tmp_path / "path-bin"
     shadowing_onex = path_bin / "onex"
     shadow_target = tmp_path / "user-local" / "bin" / "onex"
@@ -264,7 +264,7 @@ def test_not_installed_refusal_names_shadowing_onex_and_canonical_wrapper(
             check_omnimarket_drift(omni_home=str(tmp_path))
 
     message = str(exc_info.value)
-    assert "shadowing binary" in message
+    assert "not the canonical wrapper by filesystem identity" in message
     assert "Canonical wrapper" in message
     assert str(shadowing_onex) in message
     assert str(canonical_wrapper) in message
@@ -299,8 +299,82 @@ def test_not_installed_refusal_recognizes_canonical_onex_symlink(
 
     message = str(exc_info.value)
     assert "through the canonical wrapper" in message
-    assert "shadowing binary" not in message
+    assert "not the canonical wrapper" not in message
     assert str(path_onex) in message
+
+
+def test_not_installed_refusal_without_omni_home_does_not_resolve_placeholder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: diagnostics never resolve literal $OMNI_HOME against CWD."""
+    path_bin = tmp_path / "path-bin"
+    path_onex = path_bin / "onex"
+    path_bin.mkdir()
+    path_onex.write_text("#!/bin/sh\n", encoding="utf-8")
+    path_onex.chmod(0o755)
+    monkeypatch.setenv("PATH", str(path_bin))
+
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift()
+
+    message = str(exc_info.value)
+    assert str(path_onex) in message
+    assert "filesystem identity cannot be compared" in message
+    assert "not the canonical wrapper" not in message
+
+
+def test_not_installed_refusal_names_missing_path_onex(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18280: a missing PATH entry is diagnostic context, not a traceback."""
+    monkeypatch.setenv("PATH", "")
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home="/workspace")
+
+    assert "PATH did not resolve an 'onex' executable" in str(exc_info.value)
+
+
+def test_not_installed_refusal_ignores_path_resolution_errors() -> None:
+    """OMN-18280: PATH diagnostic errors must not mask the drift refusal."""
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.shutil.which",
+            side_effect=OSError("bad PATH"),
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift(omni_home="/workspace")
+
+    assert "PATH did not resolve an 'onex' executable" in str(exc_info.value)
 
 
 def test_drift_check_fails_open_when_no_canonical_clone() -> None:
