@@ -24,7 +24,7 @@ Controls, because a privilege assertion with no control is unfalsifiable:
   the thing it controls for.
 * **NEGATIVE** — the granted role must NOT be able to read ``payload`` or
   ``tenant_id``. A column-scoped grant that is silently relation-wide reads
-  identical to a correct one on the two columns it is supposed to cover.
+  identical to a correct one on the three columns it is supposed to cover.
 * **POSITIVE** — the superuser CAN read ``payload`` on the same relation in the
   same cluster, so a ``False`` from the negative control is a privilege fact
   and not a broken probe or a missing column.
@@ -63,7 +63,7 @@ END_MARKER = "# ---- END login-only role grant seam (OMN-18060) ----"
 
 ROLE = "chain_canary_reader"
 RELATION = "public.delegation_workflow_state"
-GRANTED_COLUMNS = ("correlation_id", "state")
+GRANTED_COLUMNS = ("correlation_id", "state", "traffic_class")
 # Deliberately NOT granted: the delegation's own request/response material and
 # the tenant discriminator. A CI liveness probe needs one enum-ish string.
 WITHHELD_COLUMNS = ("payload", "tenant_id")
@@ -76,12 +76,13 @@ WITHHELD_COLUMNS = ("payload", "tenant_id")
 FIXTURE_ROLE_PASSWORD = "00" * 32
 
 # The relation the flat stream owns. Reproduced here at its minimum shape --
-# the two granted columns plus the two withheld ones -- because the frozen flat
+# the three granted columns plus the two withheld ones -- because the frozen flat
 # stream may not be imported into a fixture and must not be edited.
 RELATION_DDL = """\
 CREATE TABLE public.delegation_workflow_state (
   correlation_id TEXT PRIMARY KEY,
   state          TEXT NOT NULL,
+  traffic_class  TEXT NOT NULL DEFAULT 'unclassified',
   tenant_id      TEXT,
   payload        JSONB
 );
@@ -258,14 +259,14 @@ def test_runner_without_the_grant_seam_leaves_the_reader_unable_to_read(
 
 
 @pytest.mark.integration
-def test_runner_grants_the_reader_exactly_its_two_columns(
+def test_runner_grants_the_reader_exactly_its_declared_columns(
     pg_target: PgTarget,
     migrations_dir: Path,
 ) -> None:
     """GREEN + negative + positive control, in one cluster.
 
     The negative control is the point of the whole ticket: a relation-wide
-    ``GRANT SELECT`` would satisfy the two GREEN assertions identically while
+    ``GRANT SELECT`` would satisfy the three GREEN assertions identically while
     handing a scheduled CI probe every tenant's delegation payloads.
     """
     result = _run_runner(RUNNER, pg_target, migrations_dir)

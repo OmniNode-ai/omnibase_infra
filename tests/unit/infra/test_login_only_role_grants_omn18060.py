@@ -33,7 +33,7 @@ END_MARKER = "# ---- END login-only role grant seam (OMN-18060) ----"
 
 CANARY_ROLE = "chain_canary_reader"
 CANARY_RELATION = "public.delegation_workflow_state"
-CANARY_COLUMNS = ("correlation_id", "state")
+CANARY_COLUMNS = ("correlation_id", "state", "traffic_class")
 CANARY_LEDGER_RELATION = "public.ledger_chain"
 CANARY_LEDGER_COLUMNS = (
     "correlation_id",

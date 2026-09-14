@@ -21,6 +21,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_terminal_readback
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_link_verdict import (
     ModelChainLinkVerdict,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
+    TypeDelegationTrafficClass,
+)
 
 
 class ModelChainCanaryResult(BaseModel):
@@ -122,6 +125,14 @@ class ModelChainCanaryResult(BaseModel):
     )
     terminal_readback_error: str = Field(
         default="", description="Sanitized error from the terminal readback, if any."
+    )
+
+    projection_traffic_class: TypeDelegationTrafficClass = Field(
+        default="unclassified",
+        description=(
+            "Typed traffic classification read from delegation_workflow_state "
+            "by the existing link-2 projection instrument."
+        ),
     )
 
     quarantine_status: EnumQuarantineCheckStatus = Field(

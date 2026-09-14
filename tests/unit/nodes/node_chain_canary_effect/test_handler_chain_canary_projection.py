@@ -70,6 +70,7 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_res
 )
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
     ModelProjectionReadbackOutcome,
+    TypeDelegationTrafficClass,
 )
 
 # Endpoints use the RFC 2606 reserved `.invalid` TLD, matching the sibling
@@ -176,9 +177,15 @@ class _ProjectionReadback:
     the handler's and not the fixture's.
     """
 
-    def __init__(self, state: str | None = "COMPLETED", error: str = "") -> None:
+    def __init__(
+        self,
+        state: str | None = "COMPLETED",
+        error: str = "",
+        traffic_class: TypeDelegationTrafficClass = "unclassified",
+    ) -> None:
         self.state = state
         self.error = error
+        self.traffic_class = traffic_class
         self.calls: list[tuple[str, str, float]] = []
 
     async def __call__(
@@ -196,10 +203,14 @@ class _ProjectionReadback:
             )
         if self.state.strip().upper() in ("COMPLETED", "FAILED"):
             return ModelProjectionReadbackOutcome(
-                status=EnumProjectionReadbackStatus.TERMINAL, state=self.state
+                status=EnumProjectionReadbackStatus.TERMINAL,
+                state=self.state,
+                traffic_class=self.traffic_class,
             )
         return ModelProjectionReadbackOutcome(
-            status=EnumProjectionReadbackStatus.STRANDED, state=self.state
+            status=EnumProjectionReadbackStatus.STRANDED,
+            state=self.state,
+            traffic_class=self.traffic_class,
         )
 
 
@@ -263,6 +274,49 @@ async def test_terminal_projection_passes_link_two(terminal_state: str) -> None:
     result = await handler.handle(_request())
 
     assert _link(result, EnumChainLink.ROUTING_PROJECTED) is EnumChainLinkStatus.PASS
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("traffic_class", ["synthetic", "organic"])
+async def test_existing_link_two_reports_the_stored_traffic_class(
+    traffic_class: TypeDelegationTrafficClass,
+) -> None:
+    """Canary and non-canary rows stay distinguishable in the same receipt path."""
+    handler = _handler(
+        projection=_ProjectionReadback(
+            state="COMPLETED",
+            traffic_class=traffic_class,
+        )
+    )
+
+    result = await handler.handle(_request())
+
+    assert result.projection_traffic_class == traffic_class
+    link_two = next(
+        verdict
+        for verdict in result.link_verdicts
+        if verdict.link is EnumChainLink.ROUTING_PROJECTED
+    )
+    assert f"traffic_class={traffic_class}" in link_two.detail
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("traffic_class", ["organic ", "Organic", 7])
+async def test_projection_readback_reports_unexpected_traffic_class_as_error(
+    monkeypatch: pytest.MonkeyPatch,
+    traffic_class: object,
+) -> None:
+    connection = _FakeConnection(
+        row={"state": "COMPLETED", "traffic_class": traffic_class}
+    )
+    monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
+
+    outcome = await _readback_projection_via_asyncpg(_PROJECTION_DSN, str(uuid4()), 5.0)
+
+    assert outcome.status is EnumProjectionReadbackStatus.ERROR
+    assert "traffic-class enum" in outcome.error
 
 
 @pytest.mark.unit
@@ -575,7 +629,10 @@ async def test_close_failure_does_not_replace_the_read_result(
     and took the terminal and quarantine legs down with it. The connection is
     discarded either way; the read outcome is the only fact worth reporting.
     """
-    connection = _FakeConnection(row={"state": "COMPLETED"}, close_raises=True)
+    connection = _FakeConnection(
+        row={"state": "COMPLETED", "traffic_class": "unclassified"},
+        close_raises=True,
+    )
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
 
     outcome = await _readback_projection_via_asyncpg(_PROJECTION_DSN, str(uuid4()), 5.0)
@@ -600,7 +657,10 @@ async def test_connect_and_query_share_one_deadline(
     Here connect and fetch each fit inside the window individually and do not
     fit together, so this passes only if one deadline spans both.
     """
-    connection = _FakeConnection(row={"state": "COMPLETED"}, fetch_delay_s=0.25)
+    connection = _FakeConnection(
+        row={"state": "COMPLETED", "traffic_class": "unclassified"},
+        fetch_delay_s=0.25,
+    )
     monkeypatch.setitem(
         sys.modules, "asyncpg", _FakeAsyncpg(connection, connect_delay_s=0.25)
     )
