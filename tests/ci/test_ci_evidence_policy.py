@@ -65,6 +65,8 @@ ASSERTION_SCRIPT = "assert_evidence_artifact.py"
 EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-load",
     "lab-pass-receipt-compose-dev",
+    # OMN-18268: the same lane, keyed by a SIBLING repository's merged sha.
+    "lab-pass-receipt-compose-dev-sibling",
     "lab-pass-receipt-onex-lab",
     "lab-pass-receipt-onex-lab-k3s",
     "nonrequired-check-report",
