@@ -21,6 +21,8 @@ on:
       - "tests/unit/validation/test_application_database_acl.py"
       - "tests/unit/validation/test_application_database_acl_apply.py"
       - "tests/ci/test_application_database_acl_contract.py"
+      - "tests/ci/test_application_database_acl_connect_inputs.py"
+      - "src/omnibase_infra/topology/instances/**"
       - "tests/integration/test_application_acl_postgres16_proof.py"
   workflow_dispatch:
 
