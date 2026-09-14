@@ -409,15 +409,27 @@
 #     failure class going forward and widening the hold further is explicitly
 #     not proposed. This is feedback on the predicate, not a change to it.
 #
+#   - OMN-18362 (node_version 1.14.1): A SUPERSEDED DUPLICATE CRITERION IS
+#     HISTORY, NOT A LIVE ACCEPTANCE CRITERION. Linear ticket house style keeps
+#     replaced criteria in the description under a qualifier such as
+#     "AC3 (superseded ...)" after a later revision writes the replacement.
+#     The raw AC reader still returns both strings, because its output is also
+#     the digest input shared with change-control binding. The sweep now
+#     filters that raw list before coverage, binding, and state-shape decisions:
+#     a marked item is removed only when another unmarked item with the same
+#     canonical label is present. Ambiguous cases keep both items and hold the
+#     ticket. This can only remove a duplicate declaration, never the sole
+#     declaration of a criterion.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 9
-  patch: 0
-node_version: "1.14.0"
+  patch: 1
+node_version: "1.14.1"
 description: >
-  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, and holds a criterion whose only declaring check marks it a proposal until a person accepts it, and holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
+  Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, holds a criterion whose only declaring check marks it a proposal until a person accepts it, holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries, and excludes explicitly superseded duplicate criteria from the live criteria set only when an unmarked replacement with the same label is present. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
 input_model:
   name: "ModelEvidenceAutocloseSweepRequest"
