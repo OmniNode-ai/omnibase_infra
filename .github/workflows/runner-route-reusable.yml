@@ -116,6 +116,14 @@ jobs:
           # returns `missing_token` and the decision is hosted.
           RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          # OMN-18412: the module reads this repository's visibility itself, so
+          # a private repository is never downgraded onto a hosted runner by a
+          # capacity signal. The JOB TOKEN is sufficient -- repository metadata
+          # is readable under the `metadata: read` every Actions token carries --
+          # so this adds no new credential and no new scope. Visibility is read
+          # live rather than declared anywhere, because a declared list of
+          # private repositories goes stale silently.
+          GITHUB_TOKEN: ${{ github.token }}
           RUNNER_ROUTE_ARTIFACT: runner-route-decision.json
           # EVERY VALUE THE COMMAND READS ARRIVES HERE, NOT INLINE IN THE BODY.
           # Actions substitutes an expression into the run script as RAW TEXT
@@ -143,6 +151,7 @@ jobs:
           LAB_RECORD: ${{ steps.lab.outputs.path }}
         run: |
           set -uo pipefail
+          rc=0
           args=(
             --event-name "${EVENT_NAME}"
             --head-repo "${HEAD_REPO}"
@@ -163,6 +172,19 @@ jobs:
             echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
             echo 'decision=hosted' >> "${GITHUB_OUTPUT}"
             echo 'reason=probe_error:module_unavailable' >> "${GITHUB_OUTPUT}"
+          fi
+          # OMN-18412 REFUSAL. Exit 3 means the module decided this placement is
+          # forbidden -- a PRIVATE repository whose only allowed placement is a
+          # GitHub-hosted runner. It is NOT a crash, and the floor above must not
+          # convert it into one: the module has already written a `labels=` line
+          # and its decision record, so the floor is a no-op on this path by
+          # construction. Failing here is the point. A refused run stops, loudly,
+          # with the reason in the record, rather than scheduling jobs onto a
+          # runner class the 2026-09-14 operator ruling forbids -- where they
+          # would sit queued against capacity the repository may not use.
+          if [ "${rc}" = "3" ]; then
+            echo "::error title=Runner route refused::the decision record names the reason; this run is not placed"
+            exit 1
           fi
 
       - name: Upload the decision record

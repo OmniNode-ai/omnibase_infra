@@ -98,6 +98,9 @@ def _decide_ci_yml(hosted_list: list[str]) -> Any:
             "hosts": [{"label": "omninode-pc", "ratio": 0.40, "free_mem_mib": 49000}],
         },
         policy=_live_policy(),
+        # omnibase_infra is public; the OMN-18412 visibility rule is a no-op
+        # here and the replay's expectations are unchanged by it.
+        visibility="public",
         allowlist=hosted_list,
     )
 
