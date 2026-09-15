@@ -236,8 +236,15 @@ class HandlerGatewayHeartbeat:
             # against a JWKS we DID fetch is a rejection, not an outage.
             await self._enter_degraded(session, reason="jwks_unavailable")
             raise
+        # OMN-18385: the SINGLE unwrap point for the credential in this
+        # handler. ``request.access_token`` is a ``SecretStr`` so that no
+        # log line, error context or dead-letter envelope built from the
+        # request model can carry it; token verification needs the real
+        # bytes, so it is read out once, here, into a local that never
+        # leaves this function.
+        raw_access_token = request.access_token.get_secret_value()
         claims = token_validator.verify_and_decode_claims(
-            request.access_token,
+            raw_access_token,
             jwks_keys,
             self._config,
             expected_issuer=issuer_secret.get_secret_value(),
@@ -257,7 +264,7 @@ class HandlerGatewayHeartbeat:
                 config=self._config,
                 secret_resolver=self._secret_resolver,
                 circuit=self._introspection_circuit,
-                access_token=request.access_token,
+                access_token=raw_access_token,
                 client_id=session.keycloak_client_id,
                 correlation_id=session.session_id,
             )

@@ -60,6 +60,9 @@ from omnibase_infra.event_bus.topic_constants import (
 )
 from omnibase_infra.topics import SUFFIX_PLATFORM_DLQ_MESSAGE
 from omnibase_infra.utils import sanitize_error_message
+from omnibase_infra.utils.util_dlq_credential_redaction import (
+    redact_credential_fields_in_text,
+)
 
 if TYPE_CHECKING:
     from aiokafka import AIOKafkaProducer
@@ -437,6 +440,14 @@ class MixinKafkaDlq:
         except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             value_str = "<decode_failed>"
 
+        # OMN-18385: the original body goes onto a DURABLE topic. Strip
+        # credential-named fields out of it before it is written, and record
+        # WHICH field names were stripped so a reader can tell a record that
+        # never had a token from one whose token was removed. See
+        # util_dlq_credential_redaction for why this is name-based and what
+        # it deliberately does not cover.
+        value_str, redacted_fields = redact_credential_fields_in_text(value_str)
+
         # Build DLQ message with failure metadata
         dlq_payload: dict[str, object] = {
             "original_topic": original_topic,
@@ -452,6 +463,8 @@ class MixinKafkaDlq:
             "retry_count": failed_message.headers.retry_count,
             "error_type": error_type,
         }
+        if redacted_fields:
+            dlq_payload["redacted_fields"] = list(redacted_fields)
         # OMN-14492: structured classification fields — only present when the
         # caller supplied them.
         if failure_class:
@@ -498,6 +511,11 @@ class MixinKafkaDlq:
                 "error_type": error_type,
                 "serialization_fallback": True,
             }
+            # OMN-18385: carry the redaction record onto the fallback shape too,
+            # so "no redacted_fields key" never silently means "the redaction
+            # step did not run on this record".
+            if redacted_fields:
+                fallback_payload["redacted_fields"] = list(redacted_fields)
             dlq_value = json.dumps(fallback_payload).encode("utf-8")
 
         # Variables for event creation
@@ -919,6 +937,15 @@ class MixinKafkaDlq:
             except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 value_str = "<decode_failed>"
 
+        # OMN-18385: this is the path that produced offsets 137/138 on
+        # onex.dlq.omnibase-infra.commands.v1 -- it copies the raw inbound
+        # record body verbatim, so it never constructs the model whose
+        # SecretStr typing would have masked the token. Redact by field name
+        # here, and record the field NAMES (never the values) on the
+        # envelope. The redaction is what the replay engine reads to refuse
+        # republishing an incomplete body.
+        value_str, redacted_fields = redact_credential_fields_in_text(value_str)
+
         # Build DLQ message with failure metadata
         dlq_payload: dict[str, object] = {
             "original_topic": original_topic,
@@ -935,6 +962,8 @@ class MixinKafkaDlq:
             "retry_count": replay_count,
             "error_type": error_type,
         }
+        if redacted_fields:
+            dlq_payload["redacted_fields"] = list(redacted_fields)
         # OMN-14492: structured classification fields — only present when the
         # caller supplied them, so an unclassified DLQ record (legacy callers)
         # is unchanged.
@@ -984,6 +1013,11 @@ class MixinKafkaDlq:
                 "error_type": error_type,
                 "serialization_fallback": True,
             }
+            # OMN-18385: carry the redaction record onto the fallback shape too,
+            # so "no redacted_fields key" never silently means "the redaction
+            # step did not run on this record".
+            if redacted_fields:
+                fallback_payload["redacted_fields"] = list(redacted_fields)
             dlq_value = json.dumps(fallback_payload).encode("utf-8")
         dlq_key = raw_key if isinstance(raw_key, bytes) else None
 

@@ -25,6 +25,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     field_validator,
     model_validator,
 )
@@ -184,7 +185,14 @@ class ModelLlmInferenceRequest(BaseModel):
 
     # -- Auth --
 
-    api_key: str | None = Field(
+    # OMN-18385: ``SecretStr``, not ``str``. This model crosses the runtime
+    # boundary, so it is reachable by the dead-letter path that copied two
+    # customer bearer tokens onto a durable topic in cleartext. The single
+    # unwrap point is the handler that builds the outbound HTTP auth header.
+    # NOTE: ``provider_config`` can also carry a key under a free-form dict
+    # entry, which no type can cover -- the dead-letter publisher's
+    # field-name redaction is what catches that case.
+    api_key: SecretStr | None = Field(
         default=None,
         description="API key for authenticated endpoints (GLM, cloud APIs). "
         "When set, handler injects Authorization: Bearer header.",
