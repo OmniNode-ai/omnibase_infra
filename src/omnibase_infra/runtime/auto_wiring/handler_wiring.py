@@ -7317,7 +7317,22 @@ def _stamp_tenant_id_from_topic_prefix(
     # OMN-14367: route through the single canonical stamp so this producer and
     # the gateway forwarder's consume_inbound cannot diverge on the shape again.
     stamped_payload = stamp_verified_tenant_slug(envelope.payload, slug)
-    return envelope.model_copy(update={"payload": stamped_payload})
+    # OMN-16831: the verified slug is written to the envelope's tenant DIMENSION
+    # as well as into the payload, because those were two different fields and
+    # the fleet's only reader of a tenant reads the envelope one.
+    #
+    # `ModelEventEnvelope.tenant_id` is the canonical envelope-side stamp, and
+    # omnimarket's `envelope_tenant_identity` reads it -- its docstring already
+    # named THIS function as one of the two writers of that field. It was not:
+    # it wrote `payload["tenant_id"]` only, so a producer and a consumer were
+    # split across two fields with the consumer asserting they were one, and
+    # every tenant-classified projection write was refused as unattributed.
+    #
+    # Payload and envelope carry the same verified value rather than one
+    # replacing the other: the payload copy is what the OMN-14367 gateway seam
+    # and the OMN-14058 downstream flow already read, and dropping it would
+    # trade this defect for that one.
+    return envelope.model_copy(update={"payload": stamped_payload, "tenant_id": slug})
 
 
 def _make_raw_event_projection_callback(
