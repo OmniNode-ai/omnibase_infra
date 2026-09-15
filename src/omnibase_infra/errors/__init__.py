@@ -166,6 +166,7 @@ from omnibase_infra.errors.error_projection import (
     ProjectionNotMaterializedError,
     ProjectionQueryRowBudgetError,
     ProjectionTenantContextError,
+    ProjectionWedgeExhaustedError,
     QuarantinePublishUnconfirmedError,
 )
 from omnibase_infra.errors.error_schema_fingerprint import (
@@ -195,6 +196,7 @@ __all__: list[str] = [
     # Projection errors (OMN-2510)
     "ProjectionError",
     "ProjectionNotMaterializedError",
+    "ProjectionWedgeExhaustedError",
     "ProjectionQueryRowBudgetError",
     "ProjectionTenantContextError",
     "QuarantinePublishUnconfirmedError",
