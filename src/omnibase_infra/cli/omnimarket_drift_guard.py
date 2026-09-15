@@ -65,6 +65,7 @@ import logging
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -101,8 +102,59 @@ DRIFT_OVERRIDE_ENV = "ONEX_ALLOW_OMNIMARKET_DRIFT"
 _GIT_TIMEOUT_SECONDS = 2
 
 
+@dataclass(frozen=True)
+class PathOnexIdentity:
+    status: PathOnexResolutionStatus
+    executable: str | None = None
+    identity: Path | None = None
+    resolution_error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status is PathOnexResolutionStatus.RESOLVED:
+            if self.executable is None or self.identity is None:
+                raise ValueError(
+                    "resolved PATH onex identity requires executable and identity"
+                )
+            if self.resolution_error is not None:
+                raise ValueError("resolved PATH onex identity cannot carry an error")
+        elif self.status is PathOnexResolutionStatus.LOOKUP_FAILED:
+            if self.executable is not None or self.identity is not None:
+                raise ValueError(
+                    "failed PATH lookup cannot carry an executable identity"
+                )
+            if self.resolution_error is None:
+                raise ValueError("failed PATH lookup requires an error")
+        elif self.status is PathOnexResolutionStatus.RESOLVE_FAILED:
+            if self.executable is None or self.resolution_error is None:
+                raise ValueError(
+                    "failed PATH onex resolution requires executable and error"
+                )
+            if self.identity is not None:
+                raise ValueError("failed PATH onex resolution cannot carry identity")
+
+
+class PathOnexResolutionStatus(StrEnum):
+    RESOLVED = "resolved"
+    LOOKUP_FAILED = "lookup_failed"
+    RESOLVE_FAILED = "resolve_failed"
+
+
+_DIAGNOSTIC_EXCEPTIONS = (OSError, ValueError)
+
+
+def _diagnostic_error(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
 class OmnimarketDriftError(RuntimeError):
     """Raised when the installed omnimarket commit diverges from canonical."""
+
+
+def _path_onex_executable(identity: PathOnexIdentity) -> str:
+    """Return the PATH executable without relying on optimisable assertions."""
+    if identity.executable is None:
+        return "<invalid-path-onex-identity>"
+    return identity.executable
 
 
 def installed_omnimarket_commit() -> str | None:
@@ -157,16 +209,40 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
     return sha if len(sha) == 40 else None
 
 
-def _path_onex_identity() -> tuple[str, Path] | None:
+def _path_onex_identity() -> PathOnexIdentity | None:
     """Return PATH's ``onex`` entry and its normalized filesystem identity.
 
     A drift refusal from a foreign interpreter is usually caused by a second
-    ``onex`` entrypoint preceding the sanctioned wrapper. The raw PATH entry
-    is the actionable location to repair; the resolved path is only for a
-    symlink-safe identity comparison with the canonical wrapper.
+    ``onex`` entrypoint preceding the sanctioned wrapper. The raw PATH entry is
+    the actionable location to inspect; the resolved path is only for a
+    symlink-safe filesystem identity comparison with the canonical wrapper. A
+    diagnostic helper must not replace the drift error with an unrelated PATH
+    or filesystem exception.
     """
-    path_onex = shutil.which("onex")
-    return (path_onex, Path(path_onex).resolve()) if path_onex else None
+    try:
+        path_onex = shutil.which("onex")
+    except _DIAGNOSTIC_EXCEPTIONS as exc:
+        return PathOnexIdentity(
+            status=PathOnexResolutionStatus.LOOKUP_FAILED,
+            resolution_error=_diagnostic_error(exc),
+        )
+    if not path_onex:
+        return None
+    try:
+        # shutil.which() and resolve() cannot be atomic: PATH entries can be
+        # replaced between lookup and identity comparison. The result is used
+        # only for operator diagnosis and never to authorize execution.
+        return PathOnexIdentity(
+            status=PathOnexResolutionStatus.RESOLVED,
+            executable=path_onex,
+            identity=Path(path_onex).resolve(),
+        )
+    except _DIAGNOSTIC_EXCEPTIONS as exc:
+        return PathOnexIdentity(
+            status=PathOnexResolutionStatus.RESOLVE_FAILED,
+            executable=path_onex,
+            resolution_error=_diagnostic_error(exc),
+        )
 
 
 class CanonicalCloneAttachment(StrEnum):
@@ -372,24 +448,73 @@ def check_omnimarket_drift(
         # not resolvable, and that other interpreter refuses identically
         # regardless of the real venv's state. Printing sys.executable turns
         # the next occurrence into a one-line diagnosis instead of a session.
-        canonical_wrapper = (
-            str(Path(omni_home) / "omnibase_infra" / "scripts" / "onex")
+        canonical_wrapper_path = (
+            Path(omni_home) / "omnibase_infra" / "scripts" / "onex"
             if omni_home
+            else None
+        )
+        canonical_wrapper = (
+            str(canonical_wrapper_path)
+            if canonical_wrapper_path is not None
             else "$OMNI_HOME/omnibase_infra/scripts/onex"
         )
         path_onex_identity = _path_onex_identity()
-        path_diagnosis = (
-            "PATH did not resolve an 'onex' executable for this process."
-            if path_onex_identity is None
-            else (
-                "PATH resolves 'onex' through the canonical wrapper: "
-                f"{path_onex_identity[0]}."
-                if omni_home
-                and path_onex_identity[1] == Path(canonical_wrapper).resolve()
-                else "PATH resolves 'onex' to a shadowing binary: "
-                f"{path_onex_identity[0]}. Canonical wrapper: {canonical_wrapper}."
+        canonical_wrapper_resolution_error = None
+        try:
+            canonical_wrapper_identity = (
+                canonical_wrapper_path.resolve()
+                if canonical_wrapper_path is not None
+                else None
             )
-        )
+        except _DIAGNOSTIC_EXCEPTIONS as exc:
+            canonical_wrapper_identity = None
+            canonical_wrapper_resolution_error = _diagnostic_error(exc)
+
+        if path_onex_identity is None:
+            path_diagnosis = (
+                "PATH did not resolve an 'onex' executable for this process."
+            )
+        elif path_onex_identity.resolution_error is not None:
+            if path_onex_identity.status is PathOnexResolutionStatus.LOOKUP_FAILED:
+                path_diagnosis = (
+                    "PATH lookup for 'onex' failed before a candidate could be "
+                    f"resolved: {path_onex_identity.resolution_error}."
+                )
+            else:
+                path_onex_executable = _path_onex_executable(path_onex_identity)
+                path_diagnosis = (
+                    "PATH resolves 'onex' to "
+                    f"{path_onex_executable}, but that entry's "
+                    "filesystem identity cannot be compared: "
+                    f"{path_onex_identity.resolution_error}."
+                )
+        elif canonical_wrapper_identity is None:
+            if canonical_wrapper_path is None:
+                canonical_detail = "no OMNI_HOME was provided"
+            else:
+                canonical_detail = (
+                    "canonical wrapper resolution failed: "
+                    f"{canonical_wrapper_resolution_error}"
+                )
+            path_onex_executable = _path_onex_executable(path_onex_identity)
+            path_diagnosis = (
+                "PATH resolves 'onex' to "
+                f"{path_onex_executable}, but the canonical wrapper's "
+                f"filesystem identity cannot be compared ({canonical_detail})."
+            )
+        elif path_onex_identity.identity == canonical_wrapper_identity:
+            path_onex_executable = _path_onex_executable(path_onex_identity)
+            path_diagnosis = (
+                "PATH resolves 'onex' through the canonical wrapper: "
+                f"{path_onex_executable}."
+            )
+        else:
+            path_onex_executable = _path_onex_executable(path_onex_identity)
+            path_diagnosis = (
+                "PATH resolves 'onex' to an entry that is not the canonical "
+                f"wrapper by filesystem identity: {path_onex_executable}. "
+                f"Canonical wrapper: {canonical_wrapper}."
+            )
         detail = (
             "omnimarket is NOT INSTALLED from git in this interpreter "
             f"({sys.executable}) (absent, or installed from PyPI/a non-VCS "

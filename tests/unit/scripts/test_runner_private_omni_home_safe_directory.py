@@ -312,32 +312,33 @@ def test_compose_deploy_runner_mounts_private_omni_home_only() -> None:
     assert container.startswith("DEPLOY_RUNNER_OMNI_HOME"), private[0]
 
 
-def test_compose_deploy_runner_env_is_fail_fast_and_repo_scoped() -> None:
+def test_compose_deploy_runner_env_is_fail_fast_and_org_scoped() -> None:
     """The committed env must carry the live-verified reality so a recreate
-    from THIS file cannot silently drop it: repo-scoped GITHUB_ORG_URL (creds
-    volume was seeded repo-scoped), empty RUNNER_GROUP (repo-scoped
-    registration rejects --runnergroup), fail-fast OMNI_HOME interpolation,
-    and the defense-in-depth GIT_CONFIG_* safe.directory entries for the 5
-    clones this env currently covers. (OMN-15137: this container-level list
-    is also missing omnibase_spi -- tracked as a known residual, out of
-    scope here since it requires a deploy-runner container recreate to take
-    effect; the load-bearing per-op `-c safe.directory=` scoping in the
-    scripts themselves already covers every real git operation against
-    omnibase_spi.)
+    from THIS file cannot silently drop it: org-scoped GITHUB_ORG_URL in the
+    `omnibase-deploy` runner group (OMN-18386 -- a reusable workflow's jobs run
+    in the CALLER's repository, so a repo-scoped registration on omnibase_infra
+    left omnimarket's verify job permanently unschedulable), fail-fast
+    OMNI_HOME interpolation, and the defense-in-depth GIT_CONFIG_*
+    safe.directory entries for the 5 clones this env currently covers.
+    (OMN-15137: this container-level list is also missing omnibase_spi --
+    tracked as a known residual, out of scope here since it requires a
+    deploy-runner container recreate to take effect; the load-bearing per-op
+    `-c safe.directory=` scoping in the scripts themselves already covers every
+    real git operation against omnibase_spi.)
     """
     svc = _deploy_runner_service()
     env = svc["environment"]
     assert isinstance(env, dict)
-    assert env["GITHUB_ORG_URL"] == "https://github.com/OmniNode-ai/omnibase_infra", (
-        "GITHUB_ORG_URL must be repo-scoped: the live runner registration and "
-        "the seeded omninode-deploy-runner-creds volume are repository-level; "
-        "an org-level URL invalidates the credential cache key and re-registers "
-        "into the wrong scope on recreate"
+    assert env["GITHUB_ORG_URL"] == "https://github.com/OmniNode-ai", (
+        "GITHUB_ORG_URL must be ORG-scoped (OMN-18386): a reusable workflow's "
+        "jobs run in the CALLER's repository, so a repository-level "
+        "registration on omnibase_infra makes the omnibase-deploy label "
+        "invisible to omnimarket and its verify job queues forever"
     )
-    assert env.get("RUNNER_GROUP", None) == "", (
-        "RUNNER_GROUP must be present-and-empty: repo-scoped config.sh "
-        "hard-fails on --runnergroup, and the entrypoint only omits the flag "
-        "for an explicitly empty value"
+    assert env.get("RUNNER_GROUP", None) == "omnibase-deploy", (
+        "RUNNER_GROUP must name the org runner group whose repository access "
+        "list bounds the blast radius; an empty value would register into the "
+        "org Default group, which every repository can see"
     )
     omni_home = str(env["OMNI_HOME"])
     assert omni_home.startswith("${DEPLOY_RUNNER_OMNI_HOME:?"), (

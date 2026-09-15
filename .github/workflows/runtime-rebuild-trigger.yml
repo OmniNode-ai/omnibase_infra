@@ -356,6 +356,12 @@ jobs:
           # where the lane's ports are published.
           DEV_LANE_MAIN_URL: http://host.docker.internal:8085
           DEV_LANE_EFFECTS_URL: http://host.docker.internal:8086
+          # OMN-18387: the omnimarket-projection-api container, published on
+          # the same host as main/effects above via the same mechanism.
+          # Reachability confirmed live 2026-09-15 from inside this same
+          # runner image with the same positive control used above:
+          # `curl http://host.docker.internal:3002/projections` -> HTTP_200.
+          DEV_LANE_PROJECTION_URL: http://host.docker.internal:3002
         run: |
           set -euo pipefail
           mkdir -p /tmp/lab-pass-receipt
@@ -392,6 +398,7 @@ jobs:
             --lane compose-dev \
             --main-url "$DEV_LANE_MAIN_URL" \
             --effects-url "$DEV_LANE_EFFECTS_URL" \
+            --projection-url "$DEV_LANE_PROJECTION_URL" \
             --settle-timeout-seconds "$SETTLE" \
             > /tmp/lab-pass-checks.json
           cat /tmp/lab-pass-checks.json

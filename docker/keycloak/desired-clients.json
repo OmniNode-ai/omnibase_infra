@@ -81,7 +81,8 @@
       "clientId": "onex-api",
       "publicClient": false,
       "fullScopeAllowed": false,
-      "bearerOnly": true,
+      "bearerOnly": false,
+      "serviceAccountsEnabled": true,
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
     },
     {
