@@ -29,6 +29,7 @@ from deploy_agent.lab_overlay import (
     LabOverlayApplier,
     LabOverlayRefusalError,
     ModelLabOverlayCheck,
+    load_latest_record,
     load_record,
     normalise_image_ref,
     record_path,
@@ -633,6 +634,64 @@ def test_load_record_distinguishes_absent_from_malformed(tmp_path: Path) -> None
     path.write_text("[]")
     with pytest.raises(ValueError, match="must be a JSON object"):
         load_record(state, SHA)
+
+
+def test_load_latest_record_returns_none_when_nothing_was_ever_written(
+    tmp_path: Path,
+) -> None:
+    # OMN-18399. Directory doesn't exist yet -- no apply has ever run.
+    assert load_latest_record(tmp_path / "state") is None
+
+
+def test_load_latest_record_picks_the_newest_finished_at_not_filename_order(
+    tmp_path: Path,
+) -> None:
+    """OMN-18399. Sorted by ``finished_at``, not by sha or mtime -- a record
+    written earlier in wall-clock time for a numerically-larger sha must not
+    read as latest."""
+    state = tmp_path / "state"
+    directory = state / "lab-overlay"
+    directory.mkdir(parents=True)
+    older_sha = "a" * 40
+    newer_sha = "0" * 40  # sorts BEFORE older_sha as a filename
+    (directory / f"{older_sha}.json").write_text(
+        json.dumps(
+            {"sha": older_sha, "finished_at": "2026-09-15T08:00:00Z", "checks": []}
+        )
+    )
+    (directory / f"{newer_sha}.json").write_text(
+        json.dumps(
+            {"sha": newer_sha, "finished_at": "2026-09-15T09:00:00Z", "checks": []}
+        )
+    )
+    latest = load_latest_record(state)
+    assert latest is not None
+    assert latest["sha"] == newer_sha
+
+
+def test_load_latest_record_raises_on_a_malformed_record(tmp_path: Path) -> None:
+    """OMN-18399. Same contract as ``load_record``: unreadable is a finding, not
+    an absence, and must not be papered over as "just skip the bad one" -- that
+    could silently report a stale record as the latest."""
+    state = tmp_path / "state"
+    directory = state / "lab-overlay"
+    directory.mkdir(parents=True)
+    (directory / f"{SHA}.json").write_text("[]")
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        load_latest_record(state)
+
+
+def test_load_latest_record_does_not_descend_into_the_work_subdirectory(
+    tmp_path: Path,
+) -> None:
+    """OMN-18399. ``lab-overlay/work/`` holds the applier's own scratch files
+    during an in-flight apply; it must never be mistaken for a record."""
+    state = tmp_path / "state"
+    directory = state / "lab-overlay"
+    work = directory / "work"
+    work.mkdir(parents=True)
+    (work / "stray.json").write_text("not a record")
+    assert load_latest_record(state) is None
 
 
 def test_a_check_without_evidence_is_refused() -> None:

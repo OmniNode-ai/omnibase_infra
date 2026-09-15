@@ -131,6 +131,7 @@ def test_the_real_reader_fails_the_sha_whose_lab_lane_was_never_applied(
     checks = reader.poll(
         base_url=replay_server,
         sha=INCIDENT_SHA,
+        repo="OmniNode-ai/omnibase_infra",
         wait_seconds=0,
         poll_interval_seconds=1,
         request_timeout_seconds=5.0,
@@ -155,6 +156,7 @@ def test_the_receipt_built_from_that_check_is_a_FAIL(replay_server: str) -> None
     checks = reader.poll(
         base_url=replay_server,
         sha=INCIDENT_SHA,
+        repo="OmniNode-ai/omnibase_infra",
         wait_seconds=0,
         poll_interval_seconds=1,
         request_timeout_seconds=5.0,

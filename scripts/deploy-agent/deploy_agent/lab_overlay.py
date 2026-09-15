@@ -446,6 +446,49 @@ def load_record(state_dir: Path, sha: str) -> dict[str, Any] | None:
     return payload
 
 
+def load_latest_record(state_dir: Path) -> dict[str, Any] | None:
+    """Read the most recently written lab-overlay record, across all shas.
+
+    OMN-18399. ``load_record`` answers "what is the record for THIS sha", which
+    is the fast path and stays unchanged. Under a busy ``dev`` branch this
+    agent's own ``_current_git_sha`` can resolve to a LATER head than the
+    command that triggered a given run (``agent.py`` pulls whatever ``dev``
+    HEAD is current when it reaches the job, not the triggering command's sha),
+    so an intermediate merge sha's exact record is never written at all -- the
+    same coalescing ``check_dev_lane_staleness.py`` already tolerates for the
+    compose lane (OMN-18388). This function gives the CI reader something to
+    compare the requested sha against: "is the requested sha an ancestor of the
+    most recently applied one", resolved by the caller via GitHub's compare
+    API, because the CI job's own checkout is depth-1 and cannot answer that
+    locally.
+
+    A directory listing, not an index: every ``*.json`` file directly under
+    ``lab-overlay/`` (the ``work/`` subdirectory used during an apply is a
+    directory, not a ``.json`` file at this level, so a non-recursive glob
+    never descends into it), sorted by ``finished_at`` (ISO-8601 UTC, and
+    therefore string-sortable) ascending, returning the last one.
+
+    A malformed record among them raises, same contract as ``load_record``:
+    "a record exists and is unreadable" and "no record exists" are different
+    facts, and silently skipping a malformed file could report an OLDER
+    record as the latest one -- the opposite of what this function is for.
+    """
+    directory = Path(state_dir) / "lab-overlay"
+    if not directory.is_dir():
+        return None
+    candidates: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            msg = f"{path}: a record must be a JSON object"
+            raise ValueError(msg)
+        candidates.append(payload)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda record: str(record.get("finished_at", "")))
+    return candidates[-1]
+
+
 def write_store_binding(path: Path, env: Mapping[str, str]) -> None:
     """Write the OMN-18168 store binding file, by redirect only.
 
