@@ -127,6 +127,12 @@ def test_migration_integration_resolves_reachable_postgres_host() -> None:
         apply_step["env"]["OMNIBASE_INFRA_DB_URL"]
         == "postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra"
     )
+    apply_steps = [
+        step
+        for step in workflow["jobs"]["integration-guard"]["steps"]
+        if step.get("name") == "Apply all migrations"
+    ]
+    assert len(apply_steps) == 1
 
     assert_step = next(
         step for step in steps if step.get("name") == "Assert manifest tables exist"
