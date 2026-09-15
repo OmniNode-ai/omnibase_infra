@@ -14,7 +14,7 @@ happens to tick a box is a manual triage sweep wearing a cron trigger.
 So the property this file pins has INVERTED, deliberately, and the inversion
 is the whole point of reading it:
 
-1. **The 30-minute schedule applies.** ``schedule`` is the unattended path and
+1. **The schedule applies.** ``schedule`` is the unattended path and
    it is now the one that writes. What bounds it is not the trigger — it is
    the flip predicate (untouched by this change and not this file's to set),
    the per-candidate exclusion fence (OMN-17891), and the
@@ -170,8 +170,31 @@ def test_apply_is_an_explicit_dispatch_input_defaulting_to_false() -> None:
     )
 
 
-def test_the_schedule_still_fires_every_thirty_minutes() -> None:
-    """The unattended trigger is the closer. It has to exist to be one."""
+def test_the_schedule_still_fires_unattended_every_two_hours() -> None:
+    """The unattended trigger is the closer. It has to exist to be one.
+
+    RENAMED, and the rename is the assertion. This test was
+    ``test_the_schedule_still_fires_every_thirty_minutes`` and it pinned
+    ``*/30 * * * *``.
+
+    The property this test actually protects is that an unattended trigger
+    EXISTS — a closer with no schedule is a manual triage sweep, which is the
+    thing the 2026-09-04 ruling rejected. The 30-minute INTERVAL was never
+    that property; it was a cost knob that happened to be written in the same
+    string, and pinning it here made a cost decision look like a safety one.
+
+    The interval is now two hours, on the operator ruling of 2026-09-15
+    (~17:47Z): "OK that's fine", approving the drop from every 30 minutes to
+    every 2 hours until the ``binds_ac`` unblock proves one closer flip, then
+    restore. The reason is measured, not aesthetic: since 2026-09-10 every
+    candidate holds on AC binding, so the sweep flips nothing, and each run
+    still costs ~24-28 minutes of runner time. See the workflow's own comment
+    at the ``schedule:`` key for the restore condition.
+
+    ``lookback_hours`` (6h, below) already exceeds the new interval by 3x, so
+    a missed or failed tick still cannot drop a companion merge — which is
+    what makes the interval a free variable rather than a correctness one.
+    """
     schedule = _triggers().get("schedule")
     assert isinstance(schedule, list) and schedule, (
         "the scheduled sweep is the closer's only unattended path — without it "
@@ -179,8 +202,10 @@ def test_the_schedule_still_fires_every_thirty_minutes() -> None:
         "2026-09-04)"
     )
     crons = [entry.get("cron") for entry in schedule]
-    assert "*/30 * * * *" in crons, (
-        f"the 30-minute cadence must survive this change; got {crons!r}"
+    assert "0 */2 * * *" in crons, (
+        "the reduced 2-hourly cadence is an operator ruling (2026-09-15, "
+        "restore to */30 once the binds_ac unblock proves one closer flip); "
+        f"got {crons!r}"
     )
 
 

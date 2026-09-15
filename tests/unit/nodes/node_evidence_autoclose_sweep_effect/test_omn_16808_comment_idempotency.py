@@ -8,9 +8,12 @@ window and keeps no cross-run state: ``seen_tickets`` is a local discarded when
 unconditionally under ``apply=True`` through a bare ``commentCreate`` mutation
 that never read what was already on the ticket.
 
-Under the shipped schedule (``cron: '*/30'``, lookback 2h) one merged companion
-sits inside four consecutive windows, so a ticket that stays gapped accrues an
-identical comment per run, forever. Proven empirically before this fix: OMN-16037
+Under the schedule shipped at the time (``cron: '*/30'``, lookback 2h) one
+merged companion sat inside four consecutive windows, so a ticket that stayed
+gapped accrued an identical comment per run, forever. The cadence has since
+moved to 2-hourly and the lookback to 6h (2026-09-15), which changes the
+multiplier and nothing else: the defect is the absent cross-run state, not the
+interval, and a lookback that exceeds the interval always overlaps windows. Proven empirically before this fix: OMN-16037
 / OMN-16373 / OMN-16757 / OMN-16759 were classified gap in BOTH run 33098307405
 and run 33128661860.
 
