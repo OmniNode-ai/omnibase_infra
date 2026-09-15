@@ -14,19 +14,29 @@ import yaml
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_infra.enums import EnumResponseStatus
+from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPayload
+from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger import (
     HandlerDelegationChainLedger,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
     EnumTierTwoVerdict,
     ModelDelegationTerminalPayload,
+    ModelLedgerChainRow,
     ModelObservedHop,
 )
 
 _CHAIN = ("command", "route-request", "route-decision", "completed")
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _CONTRACT_PATH = (
-    Path(__file__).resolve().parents[4]
+    _REPO_ROOT
     / "src/omnibase_infra/nodes/node_delegation_chain_ledger_effect/contract.yaml"
+)
+_LEDGER_PROJECTION_CONTRACT_PATH = (
+    _REPO_ROOT / "src/omnibase_infra/nodes/node_ledger_projection_compute/contract.yaml"
 )
 
 
@@ -276,4 +286,156 @@ async def test_missing_hop_is_persisted_as_incomplete_not_filled() -> None:
         "command",
         "route-request",
         "completed",
+    )
+
+
+# --- OMN-18398: a write that cannot happen is never reported as success ---
+#
+# `_persist_rows` is a `for row in rows:` loop, so over an empty row set it
+# executes no statement at all, and `handle()` returned
+# `ModelHandlerOutput.for_effect(...)` unconditionally afterwards. Zero rows
+# written was therefore indistinguishable from four rows written, and on the
+# .201 compose dev lane that is the state every dispatch was in: the evidence
+# read is structurally empty because `node_ledger_projection_compute` (the only
+# writer of `public.event_ledger`) subscribed to none of this contract's four
+# `chain_topology` topics, so `public.ledger_chain` held zero rows while the
+# handler reported success on every dispatch.
+
+
+@pytest.mark.asyncio
+async def test_absent_evidence_is_a_typed_refusal_not_a_silent_success() -> None:
+    """AC2: zero observed hops must refuse, naming the topics it looked for."""
+    correlation_id = uuid4()
+    handler = _handler()
+    handler._read_observed = AsyncMock(return_value=())  # type: ignore[method-assign]
+    persisted = AsyncMock()
+    handler._persist_rows = persisted  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeHostError) as excinfo:
+        await handler.handle(_request(correlation_id))
+
+    message = str(excinfo.value)
+    assert str(correlation_id) in message
+    for topic in _CHAIN:
+        assert topic in message
+    persisted.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_partial_evidence_still_persists_rather_than_refusing() -> None:
+    """Scope control: absence of a HOP is honest evidence, absence of a CHAIN is not.
+
+    A partial observation is written as-is -- `chain_replay` deliberately fills
+    no gap, and the canary reports the shortfall as CHAIN_INCOMPLETE. Only an
+    entirely empty write set is refused, because that is the case where a
+    success verdict rests on nothing at all.
+    """
+    correlation_id = uuid4()
+    observed = _complete_observation(correlation_id)
+    handler = _handler()
+    handler._read_observed = AsyncMock(return_value=observed[:1])  # type: ignore[method-assign]
+    persisted = AsyncMock()
+    handler._persist_rows = persisted  # type: ignore[method-assign]
+
+    output = await handler.handle(_request(correlation_id))
+
+    assert output.result is None
+    assert len(persisted.await_args.args[0]) == 1
+
+
+@pytest.mark.asyncio
+async def test_upsert_that_changes_no_row_is_a_typed_refusal() -> None:
+    """AC2: a statement that ran but wrote nothing is not a successful write."""
+    correlation_id = uuid4()
+    handler = _handler()
+    row = ModelLedgerChainRow(
+        correlation_id=correlation_id,
+        hop_index=0,
+        hop=_CHAIN[0],
+        replay_green=True,
+        verifier_verdict=EnumTierTwoVerdict.PASS,
+        observed_topic=_CHAIN[0],
+        envelope_id=uuid4(),
+        parent_envelope_id=None,
+        replay_detail="",
+        verifier_detail="",
+    )
+    handler._db_handler.execute = AsyncMock(  # type: ignore[method-assign]
+        return_value=ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=correlation_id,
+            handler_id="fixture-db",
+            result=ModelDbQueryResponse(
+                status=EnumResponseStatus.SUCCESS,
+                payload=ModelDbQueryPayload(rows=[], row_count=0),
+                correlation_id=correlation_id,
+            ),
+        )
+    )
+
+    with pytest.raises(RuntimeHostError, match="affected no row"):
+        await handler._persist_rows((row,))
+
+
+@pytest.mark.asyncio
+async def test_upsert_that_changes_a_row_is_accepted() -> None:
+    """Positive control for the guard above: row_count 1 passes."""
+    correlation_id = uuid4()
+    handler = _handler()
+    row = ModelLedgerChainRow(
+        correlation_id=correlation_id,
+        hop_index=0,
+        hop=_CHAIN[0],
+        replay_green=True,
+        verifier_verdict=EnumTierTwoVerdict.PASS,
+        observed_topic=_CHAIN[0],
+        envelope_id=uuid4(),
+        parent_envelope_id=None,
+        replay_detail="",
+        verifier_detail="",
+    )
+    handler._db_handler.execute = AsyncMock(  # type: ignore[method-assign]
+        return_value=ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=correlation_id,
+            handler_id="fixture-db",
+            result=ModelDbQueryResponse(
+                status=EnumResponseStatus.SUCCESS,
+                payload=ModelDbQueryPayload(rows=[], row_count=1),
+                correlation_id=correlation_id,
+            ),
+        )
+    )
+
+    await handler._persist_rows((row,))
+
+
+def test_ledger_projection_records_every_declared_chain_topic() -> None:
+    """AC3: the evidence surface this writer reads must carry its own topology.
+
+    `_read_observed` selects from `public.event_ledger`, which only
+    `node_ledger_projection_compute` writes. A `chain_topology` topic absent
+    from that node's subscription can never appear in the relation, so the
+    writer's read is empty by construction and no ledger_chain row is reachable
+    however the writer behaves.
+    """
+    chain_contract = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
+    projection_contract = yaml.safe_load(
+        _LEDGER_PROJECTION_CONTRACT_PATH.read_text(encoding="utf-8")
+    )
+    recorded = set(projection_contract["event_bus"]["subscribe_topics"])
+    dispatched = {
+        entry["topic"] for entry in projection_contract["handler_routing"]["handlers"]
+    }
+
+    missing = [t for t in chain_contract["chain_topology"] if t not in recorded]
+    assert not missing, (
+        f"node_ledger_projection_compute does not record {missing!r}, so "
+        "public.event_ledger can never carry the evidence "
+        "node_delegation_chain_ledger_effect reads (OMN-18398)"
+    )
+    undispatched = [t for t in chain_contract["chain_topology"] if t not in dispatched]
+    assert not undispatched, (
+        f"{undispatched!r} are subscribed but have no handler_routing entry, "
+        "which is subscribed-but-never-dispatched (OMN-14594 pairing rule)"
     )
