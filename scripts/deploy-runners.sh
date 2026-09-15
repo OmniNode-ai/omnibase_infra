@@ -57,10 +57,15 @@
 #   - DEPLOY_RUNNER_OMNI_HOME       Private, runner-uid-owned OMNI_HOME clone
 #                                   tree (e.g. /data/omninode/runner_omni_home).
 #                                   Fail-fast `:?` in compose.
-#   - DEPLOY_RUNNER_TOKEN           Repo registration token for
-#                                   OmniNode-ai/omnibase_infra (mint via
-#                                   `gh api -X POST repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token`,
-#                                   valid 1h). NOT `:?`-guarded in compose --
+#   - DEPLOY_RUNNER_TOKEN           ORG registration token for OmniNode-ai
+#                                   (mint via
+#                                   `gh api -X POST orgs/OmniNode-ai/actions/runners/registration-token`,
+#                                   valid 1h). OMN-18386 moved this runner from
+#                                   a repository-scoped registration on
+#                                   omnibase_infra to an org-scoped one in the
+#                                   `omnibase-deploy` runner group, so a REPO
+#                                   token no longer works here.
+#                                   NOT `:?`-guarded in compose --
 #                                   an unset value silently becomes an empty
 #                                   RUNNER_TOKEN and fails later at container
 #                                   registration, not at `up -d` interpolation
