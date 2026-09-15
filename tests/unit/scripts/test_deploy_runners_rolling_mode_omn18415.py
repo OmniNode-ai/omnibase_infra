@@ -224,3 +224,23 @@ def test_the_fleet_list_comes_from_compose_and_is_cross_checked(
     assert "RUNNER_COUNT" in body and "err " in body, (
         "a disagreement between compose and runner_fleet.yaml must fail closed"
     )
+
+
+def test_the_canary_limit_defaults_to_the_whole_fleet(script_text: str) -> None:
+    """--limit=N is the canary step. Its default must be "no limit", so
+    omitting it never silently rolls a subset and reports a completed roll.
+    """
+    assert "ROLL_LIMIT=0" in script_text
+    assert '--limit=*)    ROLL_LIMIT="${arg#*=}" ;;' in script_text
+
+
+def test_the_canary_limit_stops_the_roll_and_says_so(rolling_block: str) -> None:
+    assert '[[ "${ROLL_LIMIT}" -gt 0 ]]' in rolling_block, (
+        "a zero limit must mean unlimited, not stop-immediately"
+    )
+    assert '[[ "${done_count}" -ge "${ROLL_LIMIT}" ]]' in rolling_block
+    assert "Reached --limit=" in rolling_block, (
+        "a partial roll must announce itself; a silent early return reads as a "
+        "completed fleet roll"
+    )
+    assert "keeps its previous container env" in rolling_block

@@ -7,7 +7,7 @@
 # Ticket: OMN-3277 / Epic: OMN-3273
 #
 # Usage:
-#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling]
+#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N]]
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
@@ -41,6 +41,8 @@
 #   container creation, so a recreate is the only way; --soft cannot carry one.
 #   Cost: roughly 60-100s per runner, serial by nature (see the mode's own
 #   comment block below).
+#   --limit=N stops after N successful recreates: --limit=1 is the canary
+#   step, proven before the rest of the fleet is touched.
 #   With --dry-run the READ-ONLY busy probes still run -- a rolling dry run is
 #   how you see which runners are executing jobs -- but nothing is recreated.
 #
@@ -200,6 +202,8 @@ DRY_RUN=false
 SKIP_BUILD=false
 SOFT_DEPLOY=false
 ROLLING_DEPLOY=false
+# 0 means the whole fleet; --limit=N stops after N successful recreates.
+ROLL_LIMIT=0
 
 for arg in "$@"; do
     case "${arg}" in
@@ -207,6 +211,7 @@ for arg in "$@"; do
         --skip-build) SKIP_BUILD=true ;;
         --soft)       SOFT_DEPLOY=true ;;
         --rolling)    ROLLING_DEPLOY=true ;;
+        --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
         --help|-h)
             echo "Usage: $0 [--dry-run] [--skip-build] [--soft] [--rolling]"
             echo "  --dry-run     Print actions without executing remote commands"
@@ -216,6 +221,8 @@ for arg in "$@"; do
             echo "  --rolling     Recreate the fleet ONE runner at a time, skipping any"
             echo "                runner executing a job. The only supported way to apply"
             echo "                a container-env change (env is frozen at creation)."
+            echo "  --limit=N     With --rolling: stop after N successful recreates."
+            echo "                --limit=1 is the canary step of a fleet roll."
             exit 0
             ;;
         *)
@@ -929,7 +936,14 @@ rolling_deploy() {
             roll_one_runner "${name}" || rc=$?
             case "${rc}" in
                 0) done_count=$((done_count + 1))
-                   log "  [${done_count}/${total}] ${name} done." ;;
+                   log "  [${done_count}/${total}] ${name} done."
+                   # --limit=N is the canary step: stop after N successful
+                   # recreates so the change can be proven on one runner before
+                   # the remaining 59 are touched.
+                   if [[ "${ROLL_LIMIT}" -gt 0 ]] && [[ "${done_count}" -ge "${ROLL_LIMIT}" ]]; then
+                       log "Reached --limit=${ROLL_LIMIT}; stopping. The rest of the fleet keeps its previous container env until the next roll."
+                       return 0
+                   fi ;;
                 2) next+=("${name}") ;;
                 *) failed="${name}"; break ;;
             esac
