@@ -11,6 +11,9 @@
 #   2. Pin-parity check — fails closed if the pre-commit `rev:` pin for a shared
 #      omnibase_core validator diverges from the SHA that validator's dedicated
 #      CI gate workflow pins (DRIFT-3).
+#   3. Interpreter-resolution gate (OMN-16958, ported from omnimarket's
+#      OMN-17219) — fails closed on a hook `entry:` that shells out to a bare
+#      `python`/`python3` instead of `uv run python`.
 #
 # UNCONDITIONAL BY DESIGN (OMN-14666 canary lesson). This is a STANDALONE
 # workflow, NOT a job inside ci.yml, because in omnibase_infra EVERY ci.yml job
@@ -72,6 +75,13 @@ jobs:
         run: |
           uv run --no-project --with pyyaml \
             python3 scripts/validation/validate_precommit_fail_loud.py
+
+      # OMN-16958: port of omnimarket's OMN-17219 interpreter-resolution gate,
+      # the CI half of the precommit-interpreter-resolution pre-commit hook.
+      - name: Interpreter-resolution gate (no bare `python` in hook entries)
+        run: |
+          uv run --no-project --with pyyaml \
+            python3 scripts/validation/validate_precommit_interpreter.py
 
       - name: Pin-parity check (pre-commit rev vs CI-pinned SHA)
         run: |
