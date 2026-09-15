@@ -237,6 +237,7 @@ EOF
 MODE="dry-run"
 PRINT_COMPOSE_CMD=false
 SKIP_RELOAD=false
+HTTPS_RESOLVER_STAGE=""
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -252,6 +253,11 @@ parse_args() {
             --skip-reload)
                 SKIP_RELOAD=true
                 shift
+                ;;
+            --https-resolver-stage)
+                [[ $# -ge 2 ]] || { log_error "--https-resolver-stage requires a directory"; exit 64; }
+                HTTPS_RESOLVER_STAGE="$2"
+                shift 2
                 ;;
             --help | -h)
                 usage
@@ -658,6 +664,92 @@ verify_host_files_match() {
 }
 
 # =============================================================================
+# HTTPS resolver artifact installation
+# =============================================================================
+
+resolver_pair_is_private() {
+    local directory="$1" gid="$2"
+    [[ "$(sudo stat -c '%a:%u:%g' "${directory}")" == "750:0:${gid}" ]] || return 1
+    local filename
+    for filename in infisical-bootstrap.json secret-resolver.json; do
+        [[ "$(sudo stat -c '%a:%u:%g' "${directory}/${filename}")" == "440:0:${gid}" ]] || return 1
+    done
+}
+
+validate_https_resolver_install_inputs() {
+    local stage_dir="$1" secret_dir="$2" gid="$3"
+    local bootstrap="${stage_dir}/infisical-bootstrap.json"
+    local resolver="${stage_dir}/secret-resolver.json"
+    local gateway_env_parent
+
+    [[ -n "${GATEWAY_INFISICAL_SOURCE_PATH:-}" ]] || {
+        log_error "HTTPS resolver stage requires declared GATEWAY_INFISICAL_SOURCE_PATH"
+        return 1
+    }
+    [[ "${stage_dir}" == /* && -d "${stage_dir}" && ! -L "${stage_dir}" ]] || {
+        log_error "HTTPS resolver stage must be an absolute non-symlink directory"
+        return 1
+    }
+    gateway_env_parent="$(cd "$(dirname "${GATEWAY_ENV_FILE}")" && pwd -P)"
+    [[ "${secret_dir}" == "${gateway_env_parent}/secrets" ]] || {
+        log_error "GATEWAY_INFISICAL_SECRET_DIR must be the fixed dedicated secrets child of the gateway env directory"
+        return 1
+    }
+    [[ "${gid}" =~ ^[0-9]+$ ]] || {
+        log_error "GATEWAY_CONTAINER_GID must be numeric for HTTPS resolver artifacts"
+        return 1
+    }
+    [[ -f "${bootstrap}" && ! -L "${bootstrap}" && -f "${resolver}" && ! -L "${resolver}" ]] || {
+        log_error "HTTPS resolver stage lacks the required regular artifact pair"
+        return 1
+    }
+    if [[ -e "${secret_dir}" || -L "${secret_dir}" ]]; then
+        [[ -d "${secret_dir}" && ! -L "${secret_dir}" ]] || {
+            log_error "GATEWAY_INFISICAL_SECRET_DIR is not a dedicated directory"
+            return 1
+        }
+    fi
+}
+
+install_https_resolver_pair() {
+    local stage_dir="$1" secret_dir="$2" gid="$3"
+    local bootstrap="${stage_dir}/infisical-bootstrap.json"
+    local resolver="${stage_dir}/secret-resolver.json"
+    local secret_parent
+    secret_parent="$(dirname "${secret_dir}")"
+    local candidate="${secret_parent}/.secrets.candidate.$$"
+    local backup="${secret_parent}/.secrets.previous.$$"
+    local moved_old=false
+
+    validate_https_resolver_install_inputs "${stage_dir}" "${secret_dir}" "${gid}" || return 1
+
+    sudo install -d -m 0750 -o root -g "${gid}" "${candidate}"
+    if ! sudo install -m 0440 -o root -g "${gid}" "${bootstrap}" "${candidate}/infisical-bootstrap.json" \
+        || ! sudo install -m 0440 -o root -g "${gid}" "${resolver}" "${candidate}/secret-resolver.json" \
+        || ! resolver_pair_is_private "${candidate}" "${gid}"; then
+        sudo rm -rf "${candidate}"
+        log_error "HTTPS resolver artifact installation failed before activation"
+        return 1
+    fi
+
+    if [[ -e "${secret_dir}" ]]; then
+        sudo mv "${secret_dir}" "${backup}"
+        moved_old=true
+    fi
+    if ! sudo mv "${candidate}" "${secret_dir}" || ! resolver_pair_is_private "${secret_dir}" "${gid}"; then
+        sudo rm -rf "${candidate}" "${secret_dir}"
+        if [[ "${moved_old}" == true ]]; then
+            sudo mv "${backup}" "${secret_dir}"
+        fi
+        log_error "HTTPS resolver artifact activation failed; previous pair restored"
+        return 1
+    fi
+    if [[ "${moved_old}" == true ]]; then
+        sudo rm -rf "${backup}"
+    fi
+}
+
+# =============================================================================
 # Rollback target retention (AC6) -- OMN-15521 remediation.
 #
 # The rollback target must be derived from what the CONTAINER is actually
@@ -892,17 +984,24 @@ main() {
         exit 64
     fi
 
+    set -a
+    # shellcheck source=/dev/null
+    source "${GATEWAY_ENV_FILE}"
+    set +a
+
+    if [[ -n "${HTTPS_RESOLVER_STAGE}" ]]; then
+        validate_https_resolver_install_inputs \
+            "${HTTPS_RESOLVER_STAGE}" \
+            "${GATEWAY_INFISICAL_SECRET_DIR:-/etc/omninode/gateway/secrets}" \
+            "${GATEWAY_CONTAINER_GID}"
+    fi
+
     local previous_digest
     previous_digest="$(resolve_running_container_image)"
     if ! retain_previous_image "${previous_digest}"; then
         previous_digest=""
     fi
     log_info "Previous running image (rollback target): ${previous_digest:-<none recorded -- first deploy or image no longer resolvable>}"
-
-    set -a
-    # shellcheck source=/dev/null
-    source "${GATEWAY_ENV_FILE}"
-    set +a
 
     stage_workspace_if_needed "${repo_root}"
 
@@ -915,6 +1014,13 @@ main() {
 
     sync_host_files "${repo_root}" "${GATEWAY_HOST_DIR}"
     verify_host_files_match "${repo_root}" "${GATEWAY_HOST_DIR}"
+
+    if [[ -n "${HTTPS_RESOLVER_STAGE}" ]]; then
+        install_https_resolver_pair \
+            "${HTTPS_RESOLVER_STAGE}" \
+            "${GATEWAY_INFISICAL_SECRET_DIR:-/etc/omninode/gateway/secrets}" \
+            "${GATEWAY_CONTAINER_GID}"
+    fi
 
     update_gateway_env_digest "${GATEWAY_ENV_FILE}" "${new_digest}"
     write_registry "${version}" "${git_sha}" "${new_digest}" "${previous_digest}" "${repo_root}"

@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import logging
 import random
@@ -25,12 +26,15 @@ from aiokafka.errors import (
     TopicAuthorizationFailedError,
 )
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
 )
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models import ModelEventHeaders
+from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.idempotency import StoreIdempotencySqlite
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
@@ -60,6 +64,10 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror import (
     NodeLaneMirror,
 )
+from omnibase_infra.runtime.models.model_secret_resolver_config import (
+    ModelSecretResolverConfig,
+)
+from omnibase_infra.runtime.secret_resolver import SecretResolver
 from omnibase_infra.secret_stores.adapter_env_secret_store import (
     AdapterEnvSecretStore,
 )
@@ -70,6 +78,82 @@ _GATEWAY_CONTRACT_NAME = "node_bus_forwarder_effect"
 _DEFAULT_GATEWAY_CONTRACT_PATH = (
     Path(__file__).parents[1] / "nodes" / _GATEWAY_CONTRACT_NAME / "contract.yaml"
 )
+
+
+async def build_gateway_https_secret_resolver(
+    *,
+    bootstrap_path: Path,
+    resolver_config_path: Path,
+    required_ref: str,
+) -> SecretResolver:
+    """Build the HTTPS-only strict Infisical resolver from mounted artifacts.
+
+    The gateway does not inherit bootstrap credentials through its environment.
+    The deploy agent writes the two root-owned artifacts atomically and compose
+    mounts them read-only. A direct-MSK deployment never calls this function.
+    """
+    try:
+        bootstrap_raw = json.loads(bootstrap_path.read_text(encoding="utf-8"))
+        resolver_raw = json.loads(resolver_config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "gateway HTTPS ingest requires valid mounted Infisical bootstrap and "
+            "secret-resolver configuration"
+        ) from exc
+    if (
+        not isinstance(bootstrap_raw, dict)
+        or bootstrap_raw.get("environment_slug") != "dev"
+    ):
+        raise ValueError(
+            "gateway HTTPS ingest bootstrap must explicitly select the dev environment"
+        )
+    try:
+        ModelInfisicalHandlerConfig.model_validate(bootstrap_raw)
+        resolver_config = ModelSecretResolverConfig.model_validate(resolver_raw)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            "gateway HTTPS ingest requires valid mounted Infisical bootstrap and "
+            "secret-resolver configuration"
+        ) from exc
+
+    expected_mapping = next(
+        (
+            mapping
+            for mapping in resolver_config.mappings
+            if mapping.logical_name == required_ref
+        ),
+        None,
+    )
+    if (
+        resolver_config.required_secrets != [required_ref]
+        or resolver_config.enable_convention_fallback
+        or expected_mapping is None
+        or expected_mapping.source.source_type != "infisical"
+    ):
+        raise ValueError(
+            "gateway HTTPS ingest resolver must strictly declare its required "
+            "Infisical credential reference"
+        )
+
+    # HandlerInfisical validates this same parsed JSON mapping again. Passing the
+    # original mapping preserves the two SecretStr source values for its auth
+    # boundary; serializing the typed model in JSON mode would mask both values.
+    handler_config = {str(key): value for key, value in bootstrap_raw.items()}
+    handler = HandlerInfisical(ModelONEXContainer())
+    await handler.initialize(handler_config)
+    resolver = SecretResolver(config=resolver_config, infisical_handler=handler)
+    resolver.validate_required_secrets()
+    return resolver
+
+
+async def resolve_gateway_https_secret(
+    resolver: SecretResolver, logical_name: str
+) -> str | None:
+    """Expose the strict resolver's secret value only at the HTTP auth boundary."""
+    resolved = await resolver.get_secret_async(logical_name)
+    if resolved is None:
+        return None
+    return resolved.get_secret_value()
 
 
 def load_gateway_forwarder_runtime_config(
@@ -683,23 +767,48 @@ class TransportGatewayHttpsIngest:
         coordinate, and OMN-17201's contract is that a publisher which cannot
         report where the record landed says so rather than inventing one.
         """
-        idempotency_key = self._idempotency_key(value)
-        record: dict[str, object] = {
-            "topic": topic,
-            "key": base64.b64encode(key).decode("ascii") if key is not None else None,
-            "value": base64.b64encode(value).decode("ascii"),
-            "envelope_id": idempotency_key,
-        }
-        encoded_headers = self._encode_headers(headers)
-        if encoded_headers:
-            record["headers"] = encoded_headers
+        await self.publish_batch([(topic, key, value, headers)])
+        return None
+
+    async def publish_batch(
+        self,
+        records: list[tuple[str, bytes | None, bytes, object | None]],
+    ) -> None:
+        """POST one real record batch and acknowledge only its whole result."""
+        if not records:
+            return
+        encoded_records: list[dict[str, object]] = []
+        for topic, key, value, headers in records:
+            event_id, envelope_id = self._event_identity(value)
+            record: dict[str, object] = {
+                "topic": topic,
+                "key": base64.b64encode(key).decode("ascii")
+                if key is not None
+                else None,
+                "value": base64.b64encode(value).decode("ascii"),
+                "event_id": event_id,
+                "envelope_id": envelope_id,
+            }
+            encoded_headers = self._encode_headers(headers)
+            if encoded_headers:
+                record["headers"] = encoded_headers
+            encoded_records.append(record)
+        batch_key = (
+            str(encoded_records[0]["event_id"])
+            if len(encoded_records) == 1
+            else hashlib.sha256(
+                ",".join(str(record["event_id"]) for record in encoded_records).encode(
+                    "ascii"
+                )
+            ).hexdigest()
+        )
         try:
             response = await self._client.post(
                 self._config.ingest_url,
-                json={"tenant_slug": self._tenant_slug, "records": [record]},
+                json={"records": encoded_records},
                 headers={
                     "authorization": f"Bearer {self._auth_token}",
-                    "idempotency-key": idempotency_key,
+                    "idempotency-key": batch_key,
                     "content-type": "application/json",
                 },
                 timeout=self._config.request_timeout_seconds,
@@ -711,40 +820,46 @@ class TransportGatewayHttpsIngest:
             ) from exc
         if response.status_code >= 500:
             raise InfraUnavailableError(
-                f"gateway https ingest route returned {response.status_code} for "
-                f"topic {topic}; retaining the source message"
+                f"gateway https ingest route returned {response.status_code}; "
+                "retaining the source batch"
             )
         if response.status_code >= 400:
             raise RuntimeError(
-                f"gateway https ingest route rejected the record for topic {topic} "
+                "gateway https ingest route rejected the batch "
                 f"with status {response.status_code}; retrying a rejection cannot "
                 "succeed, so this is not raised as the retryable class"
             )
         # The route answers with an HTTP status, not a broker coordinate. A
         # publisher that cannot say where the record landed says so.
-        return None
+        return
 
-    def _idempotency_key(self, value: bytes) -> str:
-        """Read the content-addressed envelope id the route deduplicates on."""
+    def _event_identity(self, value: bytes) -> tuple[str, str]:
+        """Read the content identity and legacy envelope coordinate from wire."""
         try:
             decoded: object = json.loads(value.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(
                 "gateway https ingest requires a JSON envelope carrying "
-                "envelope_id; the record could not be decoded"
+                "event_id; the record could not be decoded"
             ) from exc
         if not isinstance(decoded, dict):
             raise ValueError(
-                "gateway https ingest requires a JSON object carrying envelope_id"
+                "gateway https ingest requires a JSON object carrying event_id"
             )
         envelope_id = decoded.get("envelope_id")
         if not isinstance(envelope_id, str) or not envelope_id.strip():
             raise ValueError(
-                "gateway https ingest record carries no envelope_id; without the "
-                "content-addressed id the ingest route cannot deduplicate a "
-                "redelivery, so the record is refused rather than sent unkeyed"
+                "gateway https ingest record carries no envelope_id; the standard "
+                "envelope coordinate is required for traceability"
             )
-        return envelope_id.strip()
+        metadata = decoded.get("metadata")
+        tags = metadata.get("tags") if isinstance(metadata, dict) else None
+        event_id = tags.get("event_id") if isinstance(tags, dict) else None
+        if not isinstance(event_id, str) or len(event_id) != 64:
+            raise ValueError(
+                "gateway https ingest record carries no content-addressed event_id"
+            )
+        return event_id, envelope_id.strip()
 
     @staticmethod
     def _encode_headers(headers: object | None) -> dict[str, str]:
@@ -1391,6 +1506,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--infisical-bootstrap",
+        type=Path,
+        default=Path("/run/gateway/secrets/infisical-bootstrap.json"),
+        help="Root-owned Infisical bootstrap artifact mounted read-only for HTTPS ingest",
+    )
+    parser.add_argument(
+        "--secret-resolver-config",
+        type=Path,
+        default=Path("/run/gateway/secrets/secret-resolver.json"),
+        help="Typed strict resolver artifact mounted read-only for HTTPS ingest",
+    )
+    parser.add_argument(
         "--egress-health-file",
         type=Path,
         default=Path(DEFAULT_EGRESS_HEALTH_PATH),
@@ -1421,6 +1548,20 @@ async def _async_main(args: argparse.Namespace) -> None:
         broker_ref_map_path=args.broker_ref_map,
         lane_credential_map_path=args.lane_credential_map,
     )
+    resolve_secret: Callable[[str], Awaitable[str | None]] = (
+        AdapterEnvSecretStore().get_secret
+    )
+    if config.forwarder.https_ingest is not None:
+        resolver = await build_gateway_https_secret_resolver(
+            bootstrap_path=args.infisical_bootstrap,
+            resolver_config_path=args.secret_resolver_config,
+            required_ref=config.forwarder.https_ingest.ingest_auth_ref,
+        )
+
+        async def resolve_https_secret(logical_name: str) -> str | None:
+            return await resolve_gateway_https_secret(resolver, logical_name)
+
+        resolve_secret = resolve_https_secret
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -1428,7 +1569,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     await run_gateway_forwarder(
         config,
         shutdown_event=shutdown_event,
-        resolve_secret=AdapterEnvSecretStore().get_secret,
+        resolve_secret=resolve_secret,
         ready_path=args.ready_file,
         # OMN-17201: both health surfaces were argparse-only until now.
         # ``--egress-health-file`` was parsed, documented in compose, read

@@ -81,6 +81,8 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_del
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
+    content_addressed_event_id,
+    synthesize_outbound_envelope,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -377,6 +379,124 @@ async def test_captured_flat_hook_record_is_delivered_and_acknowledged() -> None
     assert tags["gateway_synthesized_source_topic"] == SESSION_STARTED_TOPIC
     assert tags["gateway_synthesized_source_partition"] == "0"
     assert tags["gateway_synthesized_source_offset"] == "63816330"
+    # Older flat records carry no content header. The relay derives the same
+    # content identity at the standard-envelope boundary.
+    assert tags["event_id"] == content_addressed_event_id(
+        published, SESSION_STARTED_TOPIC
+    )
+
+
+async def test_synthesis_carries_content_event_id_from_idempotency_header() -> None:
+    """The flat-wire adapter preserves the producer content identity."""
+    headers = {
+        **_SESSION_STARTED_HEADERS,
+        "idempotency_key": b"a" * 64,
+    }
+    envelope = synthesize_outbound_envelope(
+        _session_started_record(headers=headers),
+        _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
+    )
+
+    assert envelope is not None
+    assert envelope.metadata.tags["event_id"] == "a" * 64
+
+
+async def test_matching_content_event_id_is_forwarded_unchanged() -> None:
+    """The claimed post-redaction content ID survives flat-record synthesis."""
+    baseline = synthesize_outbound_envelope(
+        _admitted_session_started_record(),
+        _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
+    )
+    assert baseline is not None
+    event_id = content_addressed_event_id(baseline, SESSION_STARTED_TOPIC)
+    source = _Source()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={
+            **_SESSION_STARTED_HEADERS,
+            "idempotency_key": event_id.encode("utf-8"),
+        }
+    )
+
+    await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert source.committed == [message]
+    published = ModelEventEnvelope[dict[str, object]].model_validate_json(
+        cloud_bus.sent[0][1]
+    )
+    assert published.metadata.tags["event_id"] == event_id
+
+
+async def test_mismatched_content_event_id_is_quarantined() -> None:
+    """A producer assertion that disagrees with redacted content cannot cross."""
+    source = _Source()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
+    )
+
+    await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.nacked == []
+    assert source.committed == [message]
+
+
+async def test_malformed_content_event_id_is_quarantined() -> None:
+    """A supplied but undecodable content assertion is not a legacy absence."""
+    source = _Source()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"\xff"}
+    )
+
+    await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.committed == [message]
+    assert source.dlq != []
+
+
+async def test_refusal_without_dlq_sender_is_not_committed() -> None:
+    """A permanent refusal awaits a durable quarantine before its ACK."""
+    source = _Source()
+    source.send = None  # type: ignore[method-assign]
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
+    )
+
+    with pytest.raises(RuntimeError, match="quarantine was not durable"):
+        await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.committed == []
+
+
+class _FailingDlqSource(_Source):
+    async def send(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: Mapping[str, bytes],
+    ) -> None:
+        raise RuntimeError("DLQ unavailable")
+
+
+async def test_refusal_with_failed_dlq_is_not_committed() -> None:
+    """A failed durable quarantine must retain the source offset."""
+    source = _FailingDlqSource()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
+    )
+
+    with pytest.raises(RuntimeError, match="quarantine was not durable"):
+        await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.committed == []
 
 
 async def test_synthesized_envelope_carries_the_attach_config_tenant() -> None:

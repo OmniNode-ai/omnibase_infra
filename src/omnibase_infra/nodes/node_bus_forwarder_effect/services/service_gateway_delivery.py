@@ -313,6 +313,72 @@ class NodeGatewayDelivery:
         async with self._delivery_lock:
             await self._deliver_message_locked(direction, source, message)
 
+    async def deliver_messages(
+        self,
+        direction: Literal["outbound", "inbound"],
+        source: ProtocolGatewayConsumer,
+        messages: Sequence[ModelTransportMessage],
+    ) -> None:
+        """Use one HTTPS request for an all-valid outbound poll batch.
+
+        A batch with a malformed, refused, or already-marked record falls back
+        to the established record path so a permanent poison pill is
+        quarantined without blocking its valid neighbours.
+        """
+        if (
+            direction != "outbound"
+            or self._config.https_ingest is None
+            or len(messages) <= 1
+        ):
+            for message in messages:
+                await self.deliver_message(direction, source, message)
+            return
+        async with self._delivery_lock:
+            try:
+                envelopes = [
+                    self._forwarder.decode_outbound_message(message)
+                    for message in messages
+                ]
+                for message in messages:
+                    self._forwarder.validate_outbound_message(message)
+                domain = f"gateway:{self._config.tenant_identity.tenant_slug}"
+                batch_envelope_ids: set[object] = set()
+                for envelope in envelopes:
+                    if envelope.envelope_id in batch_envelope_ids:
+                        # The persistent marker only sees completed deliveries.
+                        # Refuse the batch before it can publish two records with
+                        # the same local envelope identity, then use the existing
+                        # sequential path: it marks and commits the first record,
+                        # and commits the redelivery of the second without a
+                        # second destination publish.
+                        raise GatewayRecordRefusedError(
+                            "batch contains duplicate envelope_id"
+                        )
+                    batch_envelope_ids.add(envelope.envelope_id)
+                    if await self._idempotency_store.is_processed(
+                        envelope.envelope_id, domain=domain
+                    ):
+                        raise GatewayRecordRefusedError("batch contains prior delivery")
+                await self._forwarder.forward_outbound_messages(list(messages))
+                for message, envelope in zip(messages, envelopes, strict=True):
+                    await self._idempotency_store.mark_processed(
+                        envelope.envelope_id,
+                        domain=domain,
+                        correlation_id=envelope.correlation_id,
+                    )
+                    await source.commit(message)
+                    self._egress_health = record_delivery(
+                        self._egress_health, now=datetime.now(UTC)
+                    )
+                publish_egress_health(self._egress_health, self._egress_health_path)
+            except GatewayRecordRefusedError:
+                for message in messages:
+                    await self._deliver_message_locked(direction, source, message)
+            except Exception:
+                for message in messages:
+                    await source.nack(message)
+                raise
+
     async def _deliver_message_locked(
         self,
         direction: Literal["outbound", "inbound"],
@@ -332,15 +398,19 @@ class NodeGatewayDelivery:
             )
         except asyncio.CancelledError:
             raise
-        except Exception as decode_error:  # noqa: BLE001 — boundary: any decode failure is quarantined, never a bare swallow
+        except Exception as decode_error:
             # A permanently malformed record can never decode no matter how
             # many times it is redelivered -- routing it through the nack
             # path below would seek back to the same offset and re-crash
             # forever (OMN-15748 poison-pill DoS). Quarantine instead: log,
             # best-effort dead-letter, commit past it, keep the loop alive.
-            await self._quarantine_undecodable_message(
+            quarantined = await self._quarantine_undecodable_message(
                 direction, source, message, decode_error
             )
+            if not quarantined:
+                raise RuntimeError(
+                    "gateway quarantine was not durable; retaining source offset"
+                ) from decode_error
             return
         domain = f"gateway:{self._config.tenant_identity.tenant_slug}"
         try:
@@ -411,7 +481,7 @@ class NodeGatewayDelivery:
                 now=datetime.now(UTC),
             )
             publish_egress_health(self._egress_health, self._egress_health_path)
-            await self._quarantine_undecodable_message(
+            quarantined = await self._quarantine_undecodable_message(
                 direction,
                 source,
                 message,
@@ -423,6 +493,10 @@ class NodeGatewayDelivery:
                     "denied_principal_id": denial.principal_id,
                 },
             )
+            if not quarantined:
+                raise RuntimeError(
+                    "gateway quarantine was not durable; retaining source offset"
+                ) from denial
             return
         except GatewayRecordRefusedError as refusal:
             # OMN-17382: a per-record trust-boundary refusal is PERMANENT for
@@ -440,9 +514,13 @@ class NodeGatewayDelivery:
             # committing past THOSE is data loss. A per-topic authorization
             # DENIAL is not one of those -- it is the subclass handled just
             # above (OMN-17201).
-            await self._quarantine_undecodable_message(
+            quarantined = await self._quarantine_undecodable_message(
                 direction, source, message, refusal, classification="refused"
             )
+            if not quarantined:
+                raise RuntimeError(
+                    "gateway quarantine was not durable; retaining source offset"
+                ) from refusal
             return
         except Exception:
             try:
@@ -466,8 +544,8 @@ class NodeGatewayDelivery:
         error: Exception,
         classification: str = "undecodable",
         context: Mapping[str, str] | None = None,
-    ) -> None:
-        """Dead-letter a permanently-undeliverable record and commit past it.
+    ) -> bool:
+        """Dead-letter a permanently-undeliverable record before committing it.
 
         Three callers, one path, because the three failure classes are the same
         shape: a record that cannot decode, a record this gateway refuses to
@@ -526,7 +604,18 @@ class NodeGatewayDelivery:
                         message.partition,
                         message.offset,
                     )
-        await source.commit(message)
+                    return False
+                await source.commit(message)
+                return True
+        logger.error(
+            "Gateway quarantine could not durably dead-letter direction=%s "
+            "source_topic=%s source_partition=%s source_offset=%s; retaining offset",
+            direction,
+            message.topic,
+            message.partition,
+            message.offset,
+        )
+        return False
 
     async def _run_direction(
         self,
@@ -536,13 +625,16 @@ class NodeGatewayDelivery:
         try:
             while True:
                 messages = await source.poll(
-                    max_messages=1,
+                    max_messages=(
+                        self._config.https_ingest.max_batch_records
+                        if direction == "outbound" and self._config.https_ingest
+                        else 1
+                    ),
                     timeout_ms=self._poll_timeout_ms,
                 )
                 self._last_progress_monotonic[direction] = time.monotonic()
-                for message in messages:
-                    await self.deliver_message(direction, source, message)
-                    self._last_progress_monotonic[direction] = time.monotonic()
+                await self.deliver_messages(direction, source, messages)
+                self._last_progress_monotonic[direction] = time.monotonic()
         except asyncio.CancelledError:
             if direction in self._watchdog_recovering:
                 # Watchdog-initiated: ``_recover_stalled_direction`` cancelled

@@ -9,8 +9,10 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from collections.abc import Callable, Mapping
@@ -1003,6 +1005,105 @@ GATEWAY_REQUIRED_MAP_VARS: frozenset[str] = frozenset(
         "GATEWAY_LANE_CREDENTIAL_MAP_FILE",
     }
 )
+
+GATEWAY_HTTPS_SOURCE_PATH_VAR = "GATEWAY_INFISICAL_SOURCE_PATH"
+GATEWAY_HTTPS_SECRET_DIR_VAR = "GATEWAY_INFISICAL_SECRET_DIR"
+GATEWAY_HTTPS_REQUIRED_REF = "gateway.cloud.https.gateway_token"
+GATEWAY_INFISICAL_BOOTSTRAP_ENV_VARS: tuple[str, ...] = (
+    "INFISICAL_ADDR",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_ID",
+)
+
+
+def _atomic_write_private_json(path: Path, document: dict[str, object]) -> None:
+    """Replace one resolver artifact without exposing a partial JSON document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        os.fchmod(fd, 0o400)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+        Path(temporary).replace(path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def materialize_gateway_https_resolver_artifacts(
+    gateway_env: Mapping[str, str],
+    *,
+    process_env: Mapping[str, str] | None = None,
+    stage_parent: Path | None = None,
+) -> Path | None:
+    """Materialize strict gateway store artifacts only when source-path is declared.
+
+    The empty declaration is the normal direct-MSK state. HTTPS cannot become
+    active until an operator provides the authoritative Infisical source path;
+    this function never invents one from a logical name.
+    """
+    source_path = gateway_env.get(GATEWAY_HTTPS_SOURCE_PATH_VAR, "").strip()
+    if not source_path:
+        return None
+    secret_dir = Path(
+        gateway_env.get(
+            GATEWAY_HTTPS_SECRET_DIR_VAR, "/etc/omninode/gateway/secrets"
+        ).strip()
+    )
+    if not secret_dir.is_absolute():
+        raise GatewayLaneConfigError(
+            f"{GATEWAY_HTTPS_SECRET_DIR_VAR} must be an absolute path"
+        )
+    environment = os.environ if process_env is None else process_env
+    missing = [
+        name
+        for name in GATEWAY_INFISICAL_BOOTSTRAP_ENV_VARS
+        if not environment.get(name, "").strip()
+    ]
+    if missing:
+        raise GatewayLaneConfigError(
+            "gateway HTTPS bootstrap is incomplete; missing names: "
+            + ", ".join(sorted(missing))
+        )
+    stage_dir = Path(
+        tempfile.mkdtemp(
+            prefix="gateway-infisical-",
+            dir=None if stage_parent is None else str(stage_parent),
+        )
+    )
+    stage_dir.chmod(0o700)
+    bootstrap_path = stage_dir / "infisical-bootstrap.json"
+    resolver_path = stage_dir / "secret-resolver.json"
+    bootstrap: dict[str, object] = {
+        "host": environment["INFISICAL_ADDR"].strip(),
+        "client_id": environment["INFISICAL_CLIENT_ID"].strip(),
+        "client_secret": environment["INFISICAL_CLIENT_SECRET"].strip(),
+        "project_id": environment["INFISICAL_PROJECT_ID"].strip(),
+        "environment_slug": "dev",
+    }
+    resolver: dict[str, object] = {
+        "enable_convention_fallback": False,
+        "required_secrets": [GATEWAY_HTTPS_REQUIRED_REF],
+        "mappings": [
+            {
+                "logical_name": GATEWAY_HTTPS_REQUIRED_REF,
+                "source": {
+                    "source_type": "infisical",
+                    "source_path": source_path,
+                },
+            }
+        ],
+    }
+    try:
+        _atomic_write_private_json(bootstrap_path, bootstrap)
+        _atomic_write_private_json(resolver_path, resolver)
+    except BaseException:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        raise
+    return stage_dir
+
 
 # The only ``GATEWAY_``-prefixed variables allowed to reach the script from this
 # agent's own environment. They select WHERE the lane's files live; they are not
@@ -2235,6 +2336,9 @@ class DeployExecutor:
                 "stale image with nothing reporting it."
             )
         env_file = self._assert_gateway_lane_config()
+        artifact_stage = materialize_gateway_https_resolver_artifacts(
+            _load_dotenv_file(Path(env_file))
+        )
 
         # OMN-18200: derived from the gateway's own build+reload model, never
         # a bare constant. The old floor-plus-300 killed the only live rebuild
@@ -2253,19 +2357,25 @@ class DeployExecutor:
             ", ".join(targets),
         )
         cmd = ["bash", script, "--execute"]
+        if artifact_stage is not None:
+            cmd.extend(["--https-resolver-stage", str(artifact_stage)])
         try:
-            result = _run(
-                cmd,
-                timeout=timeout,
-                cwd=REPO_DIR,
-                env=self._gateway_child_env(build_source, git_ref=git_ref),
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"GATEWAY_DEPLOY_TIMED_OUT: {' '.join(cmd)} exceeded its "
-                f"{timeout}s ceiling and was killed. Ceiling derivation: "
-                f"{budget.describe()}."
-            ) from exc
+            try:
+                result = _run(
+                    cmd,
+                    timeout=timeout,
+                    cwd=REPO_DIR,
+                    env=self._gateway_child_env(build_source, git_ref=git_ref),
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"GATEWAY_DEPLOY_TIMED_OUT: {' '.join(cmd)} exceeded its "
+                    f"{timeout}s ceiling and was killed. Ceiling derivation: "
+                    f"{budget.describe()}."
+                ) from exc
+        finally:
+            if artifact_stage is not None:
+                shutil.rmtree(artifact_stage, ignore_errors=True)
         if result.returncode != 0:
             raise RuntimeError(
                 f"GATEWAY_DEPLOY_FAILED: {' '.join(cmd)} exited "
