@@ -12,7 +12,7 @@ from uuid import UUID
 from aiohttp import web
 
 from deploy_agent.job_state import JobStore
-from deploy_agent.lab_overlay import load_record
+from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
 
 _start_time = time.monotonic()
@@ -40,6 +40,14 @@ def create_health_app(
     # names, verdicts and evidence, never a credential — the store binding is
     # written to a 0600 file and shredded, and no value from it reaches here.
     app.router.add_get("/lab-overlay/{sha}", _lab_overlay_handler)
+    # OMN-18399. The most recently written record, any sha. Exists so the CI
+    # reader can ask "what did the agent last apply" when the exact sha it
+    # requested was never written -- the deploy agent keys its record by
+    # whatever `dev` HEAD it resolved to when it reached the job, which on a
+    # busy branch can be a later descendant of the triggering merge. The
+    # reader compares the requested sha against this one via GitHub's compare
+    # API, never locally: this endpoint carries no ancestry logic itself.
+    app.router.add_get("/lab-overlay-latest", _lab_overlay_latest_handler)
     return app
 
 
@@ -159,4 +167,27 @@ async def _lab_overlay_handler(request: web.Request) -> web.Response:
         )
     if record is None:
         return web.json_response({"error": "no record", "sha": sha}, status=404)
+    return web.json_response(record)
+
+
+async def _lab_overlay_latest_handler(request: web.Request) -> web.Response:
+    """Serve the most recently written onex-lab overlay record, any sha.
+
+    OMN-18399. Two answers, mirroring ``_lab_overlay_handler``'s two failure
+    modes for the same reason -- they are different facts:
+
+    * ``404`` -- no lab-overlay record has ever been written on this agent.
+      Distinct from "the one I asked for is missing" (that is ``/lab-overlay/
+      {sha}``'s 404): this means the apply path has never completed once.
+    * ``500`` -- a record exists and is unparseable.
+    """
+    store: JobStore = request.app["job_store"]
+    try:
+        record = load_latest_record(store.state_dir)
+    except (OSError, ValueError) as exc:
+        return web.json_response({"error": f"record is unreadable: {exc}"}, status=500)
+    if record is None:
+        return web.json_response(
+            {"error": "no lab-overlay record exists yet"}, status=404
+        )
     return web.json_response(record)
