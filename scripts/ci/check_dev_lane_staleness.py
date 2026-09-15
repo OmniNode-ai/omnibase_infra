@@ -64,14 +64,49 @@ by removing or muting the failing step").
 
 Convergence mode
 ----------------
-``--expect-revision <sha>`` polls until the lane reports that exact revision, and
-fails when it does not within ``--wait-timeout``. This is what the post-merge
-job uses, so a delivered-but-not-applied redeploy surfaces on the SAME run that
-published it rather than an hour later. The default 25-minute wait is derived
-from checked-in contract values, not invented: ``node_redeploy_orchestrator``
+``--expect-revision <sha>`` polls until the lane reports a revision that CONTAINS
+that sha, and fails when it does not within ``--wait-timeout``. This is what the
+post-merge job uses, so a delivered-but-not-applied redeploy surfaces on the SAME
+run that published it rather than an hour later. The default 25-minute wait is
+derived from checked-in contract values, not invented: ``node_redeploy_orchestrator``
 and ``node_redeploy_deploy_effect`` each declare ``timeout_ms: 660000`` (11 min),
 so the declared chain bound is 22 minutes, plus a 3-minute margin for the bus
 hops and the container recreate.
+
+Convergence is containment, not byte equality (OMN-18388)
+---------------------------------------------------------
+This mode originally demanded that the label equal the merge sha byte for byte.
+Measured 2026-09-15 on run 34934096166 (merge sha ``18b539f0``): the deploy agent
+had rebuilt the lane at 08:15Z from a LATER dev head, ``0d0250a6``, which CONTAINS
+``18b539f0``. Byte equality reported that lane as never having applied the change,
+the job failed NOT_CONVERGED at 08:40:32Z, and the compose-dev lab-pass receipt
+for ``18b539f0`` was emitted FAIL on ``deployed_revision``. With dev taking several
+runtime-affecting merges an hour and a rebuild costing 30 minutes to two hours
+under lab load, most merge shas could not obtain a PASS receipt at all, because by
+the time the lane converged it was already on a newer head — and rule 24(b) then
+refuses to deliver any sha that was not the last merge before a quiet period.
+
+The two directions are NOT symmetric and the guard must keep them apart:
+
+* a lane on a **descendant** of the merge sha, **on the tracked branch**, contains
+  the change and has exercised it — converged;
+* a lane on an **ancestor** is running code older than the merge — stale, and the
+  same delivered-but-not-applied finding as before (this is the OMN-18284
+  "stale lane serving happily" class, which must not be widened away);
+* a lane on a revision the branch does not contain — an unrelated commit or a
+  branch build — is NOT converged for its own reason, whether or not it happens to
+  contain the merge sha. Measured fixture: PR 3569's head ``3ad9b3af`` is seven
+  commits ahead of ``18b539f0`` and dev does not contain it.
+
+Both facts come from GitHub's compare API rather than local ``git`` because the
+job's checkout is depth 1: ``compare/{expected}...{observed}`` gives the relation,
+``compare/{observed}...{branch}`` gives containment. An ancestry that cannot be
+resolved is its own finding and never a pass.
+
+The receipt KEY is untouched by any of this. Rule 24(b) keys the artifact by the
+exact 40-hex merge sha and ``ModelLabPassReceipt`` enforces that; the descendant
+window lives in the CHECK and its evidence, which name the observed revision and
+the ancestry relation.
 
 Positive control
 ----------------
@@ -134,6 +169,36 @@ SENTINEL_REVISIONS = frozenset({"", "unknown", "none", "null", "dev", "HEAD"})
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
+# OMN-18388. What the OBSERVED lane revision is, relative to the expected merge
+# sha. ``compare/{base}...{head}`` describes the HEAD relative to the BASE, so
+# with base=expected and head=observed, "ahead" means the lane is ahead of the
+# merge commit — it contains it.
+RELATION_IDENTICAL = "identical"
+RELATION_DESCENDANT = "descendant"
+RELATION_ANCESTOR = "ancestor"
+RELATION_UNRELATED = "unrelated"
+
+_RELATION_BY_COMPARE_STATUS = {
+    "identical": RELATION_IDENTICAL,
+    "ahead": RELATION_DESCENDANT,
+    "behind": RELATION_ANCESTOR,
+    "diverged": RELATION_UNRELATED,
+}
+
+# Relations that mean the lane has run the merged change.
+_CONTAINING_RELATIONS = frozenset({RELATION_IDENTICAL, RELATION_DESCENDANT})
+
+# ``compare/{observed}...{branch}`` statuses that mean the BRANCH contains the
+# observed revision. "behind" means the branch is behind it (a build from an
+# unmerged ref) and "diverged" means another line of history; neither is on the
+# branch.
+_CONTAINED_COMPARE_STATUSES = frozenset({"identical", "ahead"})
+
+# GITHUB_OUTPUT is line-oriented and the evidence is re-read as one field of a
+# receipt check, so it is rendered on a single line with nothing in it that a
+# shell would re-interpret.
+_EVIDENCE_UNSAFE = str.maketrans({"\n": " ", "\r": " ", '"': "'", "`": "'", "$": "S"})
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -162,6 +227,24 @@ class LaneRevision:
     compose_project: str
     build_source: str
     state: str
+
+
+@dataclass(frozen=True)
+class Ancestry:
+    """How the lane's observed revision relates to one expected merge sha.
+
+    Two independent facts, because either alone is insufficient: ``relation``
+    says whether the observed revision contains the merge sha, and
+    ``observed_on_branch`` says whether the tracked branch contains the observed
+    revision. A branch build can be a descendant of the merge sha and still be
+    code the branch has never carried.
+    """
+
+    relation: str
+    #: commits the observed revision has that the expected merge sha does not
+    commits_ahead: int
+    observed_on_branch: bool
+    branch: str
 
 
 @dataclass(frozen=True)
@@ -350,8 +433,15 @@ def evaluate_convergence(
     expected_revision: str,
     waited: timedelta,
     wait_timeout: timedelta,
+    ancestry: Ancestry | None,
 ) -> Verdict:
-    """Decide whether the lane converged onto one specific merge SHA."""
+    """Decide whether the lane is running code that contains one merge SHA.
+
+    ``ancestry`` is the resolved relation between the lane's revision and
+    ``expected_revision``; ``None`` means it could not be resolved, which is a
+    finding of its own and never a pass. It is not consulted at all when the two
+    revisions are byte-equal, so the common case costs no API call.
+    """
     verdict = Verdict()
     if revisions_match(lane.revision, expected_revision):
         verdict.notes.append(
@@ -360,17 +450,61 @@ def evaluate_convergence(
         )
         return verdict
 
+    if ancestry is None:
+        verdict.findings.append(
+            Finding(
+                "ANCESTRY_UNPROVABLE",
+                f"the dev lane runs {lane.revision[:12]} and the merge commit is "
+                f"{expected_revision[:12]}, but the relation between them could not "
+                "be resolved, so whether the lane contains this change is unknown. "
+                "An unreadable compare is not evidence of convergence; failing "
+                "closed. Check that the job's GH_TOKEN can read "
+                "repos/<repo>/compare, and that both revisions still resolve — a "
+                "force-push or a garbage-collected build ref makes them unresolvable.",
+            )
+        )
+        return verdict
+
+    if not ancestry.observed_on_branch:
+        verdict.findings.append(
+            Finding(
+                "LANE_OFF_BRANCH",
+                f"the dev lane runs {lane.revision[:12]}, which {ancestry.branch} "
+                f"does NOT contain (relation to the merge commit "
+                f"{expected_revision[:12]}: {ancestry.relation}). That is a "
+                "hand-built or branch image, not a delivery of merged code, and it "
+                "is not converged even when it happens to contain the merge commit "
+                "— the lane is carrying commits the branch has never had. Do not "
+                "clear this by rebuilding from a branch ref; rebuild the lane from "
+                f"{ancestry.branch}.",
+            )
+        )
+        return verdict
+
+    if ancestry.relation in _CONTAINING_RELATIONS:
+        verdict.notes.append(
+            f"dev lane runs {lane.revision[:12]}, which CONTAINS the merge commit "
+            f"{expected_revision[:12]} ({ancestry.commits_ahead} commit(s) ahead on "
+            f"{ancestry.branch}) — the lane has exercised this change. Converged "
+            f"after {_format_age(waited)}; the receipt sha stays "
+            f"{expected_revision[:12]}."
+        )
+        return verdict
+
     verdict.findings.append(
         Finding(
             "NOT_CONVERGED",
             f"after {_format_age(waited)} (bound {_format_age(wait_timeout)}) the dev "
-            f"lane still runs {lane.revision[:12]}, not the merge commit "
-            f"{expected_revision[:12]} this run published a redeploy-start for. "
-            "This is the delivered-but-not-applied shape. WHAT THIS RUN ACTUALLY "
-            "ATTESTS is that one redeploy-start command reached the broker — NOT "
-            "that a rebuild-requested command ever reached the deploy agent. Those "
-            "are different topics with an orchestrator and node_redeploy's deploy "
-            "effect between them, and that effect is SERIAL: it publishes one "
+            f"lane runs {lane.revision[:12]}, which does NOT contain the merge commit "
+            f"{expected_revision[:12]} this run published a redeploy-start for "
+            f"(relation: {ancestry.relation} on {ancestry.branch}). The lane is "
+            "running code OLDER than the merge — this is the "
+            "delivered-but-not-applied shape, and a descendant revision would have "
+            "been accepted, so this is not the OMN-18388 window. WHAT THIS RUN "
+            "ACTUALLY ATTESTS is that one redeploy-start command reached the broker "
+            "— NOT that a rebuild-requested command ever reached the deploy agent. "
+            "Those are different topics with an orchestrator and node_redeploy's "
+            "deploy effect between them, and that effect is SERIAL: it publishes one "
             "rebuild-requested, then polls for completion until its own timeout, so "
             "a backlog of correlations ahead of this merge delays it by that timeout "
             "each. Check in this order: (1) whether a rebuild-requested exists for "
@@ -384,6 +518,57 @@ def evaluate_convergence(
         )
     )
     return verdict
+
+
+def convergence_evidence(
+    lane: LaneRevision,
+    expected_revision: str,
+    ancestry: Ancestry | None,
+    waited: timedelta,
+    converged: bool,
+) -> str:
+    """Render the one-line evidence the lab-pass receipt's check carries.
+
+    OMN-18388 AC2: the ``deployed_revision`` check must name BOTH shas and the
+    ancestry relation, so a reader of the receipt can tell "the lane ran a newer
+    dev head that contains this change" apart from "the lane never applied it".
+    The static string it replaces named neither and was identical on every run.
+    """
+    observed = lane.revision[:12]
+    expected = expected_revision[:12]
+    waited_text = _format_age(waited)
+
+    if converged and revisions_match(lane.revision, expected_revision):
+        line = (
+            f"lane at {observed} == merge sha {expected}, converged after "
+            f"{waited_text} (check_dev_lane_staleness.py --expect-revision "
+            f"{expected_revision} against the omnibase-infra compose project)"
+        )
+    elif ancestry is None:
+        line = (
+            f"lane at {observed}; its ancestry against merge sha {expected} could "
+            f"not be resolved after {waited_text}, so convergence is unproven "
+            "(failing closed)"
+        )
+    elif not ancestry.observed_on_branch:
+        line = (
+            f"lane at {observed}, which is not contained in {ancestry.branch} "
+            f"(relation to merge sha {expected}: {ancestry.relation}); not "
+            f"converged after {waited_text}"
+        )
+    elif ancestry.relation in _CONTAINING_RELATIONS:
+        line = (
+            f"lane at {observed}, which contains merge sha {expected} "
+            f"({ancestry.commits_ahead} commit(s) ahead on {ancestry.branch}); "
+            f"converged after {waited_text}"
+        )
+    else:
+        line = (
+            f"lane at {observed}, which does not contain merge sha {expected} "
+            f"(relation: {ancestry.relation} on {ancestry.branch}); not converged "
+            f"after {waited_text}"
+        )
+    return " ".join(line.translate(_EVIDENCE_UNSAFE).split())
 
 
 def _run(argv: list[str]) -> str:
@@ -473,6 +658,62 @@ def parse_compare(payload: Any, head_sha: str) -> Divergence:
         base_committed_at=_parse_ts(
             payload["base_commit"]["commit"]["committer"]["date"]
         ),
+    )
+
+
+def read_ancestry(
+    repo: str, branch: str, expected_revision: str, observed_revision: str
+) -> Ancestry:
+    """Resolve how the lane's revision relates to one merge SHA, and to ``branch``.
+
+    Two compare calls rather than a local ``git merge-base``, for the same reason
+    :func:`read_divergence` uses the API: the verify job checks out at depth 1, so
+    a local ancestry test would be answering from history the runner does not
+    have. Fetching enough depth to answer it would mean a full clone of a busy
+    repository on every merge, on the single ``omnibase-deploy`` runner slot.
+
+    No new credential: this is the ``GITHUB_TOKEN`` the job already holds for
+    :func:`read_divergence`.
+    """
+    relation_payload = _gh(
+        ["api", f"repos/{repo}/compare/{expected_revision}...{observed_revision}"]
+    )
+    containment_payload = _gh(
+        ["api", f"repos/{repo}/compare/{observed_revision}...{branch}"]
+    )
+    return parse_ancestry(relation_payload, containment_payload, branch)
+
+
+def parse_ancestry(
+    relation_payload: Any, containment_payload: Any, branch: str
+) -> Ancestry:
+    """Project two GitHub compare responses onto the ancestry the verdict uses.
+
+    Split out for the same reason as :func:`parse_compare`: the tests drive it
+    over GitHub's own captured bytes, so the guard is proven able to read the
+    real responses. An unrecognised compare status raises rather than defaulting
+    to a relation — a guard that guessed here would guess in the direction of
+    "converged", which is the failure this module exists to prevent.
+    """
+    status = str(relation_payload["status"])
+    relation = _RELATION_BY_COMPARE_STATUS.get(status)
+    if relation is None:
+        raise ValueError(
+            f"compare returned status {status!r}, which this guard does not "
+            "interpret as an ancestry relation. Failing closed rather than guessing."
+        )
+    containment_status = str(containment_payload["status"])
+    if containment_status not in _RELATION_BY_COMPARE_STATUS:
+        raise ValueError(
+            f"branch containment compare returned status {containment_status!r}, "
+            "which this guard does not interpret. Failing closed rather than "
+            "guessing."
+        )
+    return Ancestry(
+        relation=relation,
+        commits_ahead=int(relation_payload.get("ahead_by", 0)),
+        observed_on_branch=containment_status in _CONTAINED_COMPARE_STATUSES,
+        branch=branch,
     )
 
 
@@ -639,29 +880,121 @@ def _run_staleness_mode(args: argparse.Namespace) -> int:
     return _report(verdict)
 
 
+class _AncestryResolver:
+    """Resolve ancestry at most once per distinct observed revision.
+
+    The lane's label changes only when the lane is recreated, so a poll loop that
+    asked GitHub every minute would spend fifty calls proving the same fact. A
+    resolution that fails is cached as ``None`` for that revision too: retrying a
+    broken compare once a minute would neither fix it nor change the verdict.
+    """
+
+    def __init__(self, repo: str, branch: str, expected: str) -> None:
+        self._repo = repo
+        self._branch = branch
+        self._expected = expected
+        self._cache: dict[str, Ancestry | None] = {}
+        self.last_error: str = ""
+
+    def resolve(self, observed: str) -> Ancestry | None:
+        if revisions_match(observed, self._expected):
+            return None  # never consulted; the exact match decides
+        if observed in self._cache:
+            return self._cache[observed]
+        try:
+            resolved: Ancestry | None = read_ancestry(
+                self._repo, self._branch, self._expected, observed
+            )
+        except (
+            OSError,
+            ValueError,
+            RuntimeError,
+            KeyError,
+            json.JSONDecodeError,
+        ) as exc:
+            self.last_error = str(exc)
+            print(f"::warning::ancestry of {observed[:12]} unresolved: {exc}")
+            resolved = None
+        self._cache[observed] = resolved
+        return resolved
+
+
+def _write_output(name: str, value: str) -> None:
+    """Publish one single-line value to the calling step's outputs."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"{name}={value}\n")
+
+
 def _run_convergence_mode(args: argparse.Namespace) -> int:
     expected = normalize_revision(args.expect_revision)
     deadline = time.monotonic() + args.wait_timeout.total_seconds()
     started = time.monotonic()
-    lane = _read_lane(args)
+    resolver = _AncestryResolver(repo=args.repo, branch=args.branch, expected=expected)
 
-    while not revisions_match(lane.revision, expected):
+    def _verdict_now(
+        lane: LaneRevision, waited: timedelta
+    ) -> tuple[Verdict, Ancestry | None]:
+        ancestry = resolver.resolve(lane.revision)
+        return (
+            evaluate_convergence(
+                lane=lane,
+                expected_revision=expected,
+                waited=waited,
+                wait_timeout=args.wait_timeout,
+                ancestry=ancestry,
+            ),
+            ancestry,
+        )
+
+    lane = _read_lane(args)
+    verdict, ancestry = _verdict_now(lane, timedelta(0))
+
+    # The loop exits as soon as the lane CONTAINS the merge sha, not only when it
+    # equals it: holding the single omnibase-deploy runner slot for the full
+    # window after the lane has already run the change serialises the next
+    # merge's guard behind this one for no added proof.
+    while not verdict.ok:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
         time.sleep(min(args.poll_interval.total_seconds(), remaining))
         lane = _read_lane(args)
+        verdict, ancestry = _verdict_now(
+            lane, timedelta(seconds=time.monotonic() - started)
+        )
 
     waited = timedelta(seconds=time.monotonic() - started)
-    verdict = evaluate_convergence(lane, expected, waited, args.wait_timeout)
+    verdict, ancestry = _verdict_now(lane, waited)
+
+    evidence = convergence_evidence(
+        lane=lane,
+        expected_revision=expected,
+        ancestry=ancestry,
+        waited=waited,
+        converged=verdict.ok,
+    )
+    # OMN-18388 AC2: the receipt's deployed_revision check carries this, so the
+    # artifact names the revision the lane was actually observed at and how it
+    # relates to the sha the receipt is keyed by.
+    _write_output("evidence", evidence)
 
     _summary(
         [
-            "## Dev-lane convergence (OMN-17888 AC4)",
+            "## Dev-lane convergence (OMN-17888 AC4, OMN-18388)",
             "",
             f"- expected revision: `{expected}`",
             f"- lane revision: `{lane.revision}`",
+            f"- relation: `{ancestry.relation if ancestry else 'unresolved'}`, "
+            f"on `{args.branch}`: "
+            f"`{ancestry.observed_on_branch if ancestry else 'unknown'}`",
             f"- waited: {_format_age(waited)} (bound {_format_age(args.wait_timeout)})",
+            "",
+            "Convergence is CONTAINMENT: a lane running a descendant of the merge "
+            "sha on this branch has exercised the change. A lane running an "
+            "ancestor has not, and is still a failure.",
         ]
     )
     return _report(verdict)

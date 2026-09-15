@@ -287,7 +287,13 @@ jobs:
       - name: Record the lab-pass window start
         run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-      - name: Wait for the dev lane to report the merge SHA
+      # OMN-18388: this waits for the lane to report a revision that CONTAINS
+      # the merge sha, not one byte-equal to it. The deploy agent rebuilds from
+      # whatever dev head is current when it gets to the job, so on a busy
+      # branch the lane converges onto a DESCENDANT and byte equality reported
+      # that as never-applied. The stale direction (an ancestor) is unchanged
+      # and still fails, and so does a revision dev does not contain.
+      - name: Wait for the dev lane to report a revision containing the merge SHA
         id: converge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -411,14 +417,34 @@ jobs:
         if: always()
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          DEPLOYED_REVISION_VERDICT: ${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}
+          # OMN-18388 AC2. The guard writes one line naming the revision the lane
+          # was actually observed at and how it relates to the merge sha
+          # ("lane at 0d0250a6c31f, which contains merge sha 18b539f0f76f, 6
+          # commit(s) ahead on dev"). The static string it replaces was identical
+          # on every run and named neither, so a reader of a FAIL receipt could
+          # not tell a lane that had run a newer dev head containing the change
+          # from one that never applied it -- which is exactly the confusion that
+          # produced this ticket.
+          #
+          # Passed through env and dereferenced in the shell, never interpolated
+          # into the run block: an expression-substituted value in a script body
+          # is the workflow script-injection shape.
+          CONVERGE_EVIDENCE: ${{ steps.converge.outputs.evidence }}
         run: |
           set -euo pipefail
+          # The fallback covers the step dying before it could write its output
+          # (a crash, or the job being cancelled mid-poll). A receipt check with
+          # an empty evidence field is refused by ModelLabPassCheck, so the
+          # receipt would not be written at all -- and an unwritten receipt is
+          # the one outcome worse than a failing one.
+          EVIDENCE="${CONVERGE_EVIDENCE:-check_dev_lane_staleness.py --expect-revision $MERGE_SHA against the omnibase-infra compose project (the guard wrote no evidence)}"
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$MERGE_SHA" \
             --lane compose-dev \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --check "deployed_revision:${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}:check_dev_lane_staleness.py --expect-revision $MERGE_SHA against the omnibase-infra compose project" \
+            --check "deployed_revision:${DEPLOYED_REVISION_VERDICT}:${EVIDENCE}" \
             --checks-json /tmp/lab-pass-checks.json \
             --out /tmp/lab-pass-receipt/receipt.json
 
