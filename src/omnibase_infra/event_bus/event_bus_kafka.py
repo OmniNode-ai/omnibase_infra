@@ -3221,7 +3221,7 @@ class EventBusKafka(
         return default
 
     def _kafka_headers_to_model(
-        self, kafka_headers: list[tuple[str, bytes]] | None
+        self, kafka_headers: list[tuple[str, bytes | None]] | None
     ) -> ModelEventHeaders:
         """Convert Kafka headers to ModelEventHeaders.
 
@@ -3237,6 +3237,14 @@ class EventBusKafka(
                 event_type="unknown",
                 timestamp=datetime.now(UTC),
             )
+
+        idempotency_values = [
+            value for key, value in kafka_headers if key == "idempotency_key"
+        ]
+        if len(idempotency_values) > 1:
+            raise ValueError("duplicate idempotency_key Kafka header")
+        if idempotency_values == [None]:
+            raise ValueError("nullable idempotency_key Kafka header")
 
         headers_dict: dict[str, str] = {}
         for key, value in kafka_headers:
@@ -3348,6 +3356,7 @@ class EventBusKafka(
             retry_count=retry_count,
             max_retries=max_retries,
             ttl_seconds=ttl_seconds,
+            idempotency_key=headers_dict.get("idempotency_key"),
         )
 
     def _kafka_msg_to_model(self, msg: object, topic: str) -> ModelEventMessage:
