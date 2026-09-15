@@ -45,6 +45,9 @@ class EnumDlqFailureClass(str, Enum):
             apply this label from deploy/registry context.
         CONSUMER_ERROR: A dispatcher WAS selected and invoked but raised
             during handling (distinct from routing failure).
+        PROJECTION_WEDGE_EXHAUSTED: A projection refused the same record the
+            same way past its declared withhold bound, so the record was
+            quarantined to release the partition (OMN-17379).
     """
 
     PUBLISHER_MALFORMED = "publisher_malformed"
@@ -58,6 +61,19 @@ class EnumDlqFailureClass(str, Enum):
 
     CONSUMER_ERROR = "consumer_error"
     """A selected dispatcher raised during handling."""
+
+    PROJECTION_WEDGE_EXHAUSTED = "projection_wedge_exhausted"
+    """A projection refused the SAME record the same way past its withhold bound.
+
+    OMN-17379's offset withhold has no ceiling of its own: a record that wrote
+    no row for a non-content reason is rewound and redelivered until the write
+    path is repaired. That is right for a transient failure and wrong for a
+    record whose refusal never changes -- the record blocks every later record
+    on its partition, including ones that would project fine. This class marks
+    the dead-letter that ENDS such a stall, and it is deliberately distinct
+    from ``CONSUMER_ERROR``: a census that cannot separate "one handler raised"
+    from "a partition was wedged and then released" cannot see the outage.
+    """
 
     def __str__(self) -> str:
         """Return the string value for serialization."""

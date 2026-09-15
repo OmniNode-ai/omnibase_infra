@@ -193,7 +193,7 @@ import logging
 import os
 import random
 import socket
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -213,7 +213,11 @@ from aiokafka.errors import (
 )
 from aiokafka.structs import TopicPartition
 
-from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumConsumerGroupPurpose,
+    EnumDlqFailureClass,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     EventPayloadTooLargeError,
     InfraConnectionError,
@@ -222,6 +226,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
     ProjectionNotMaterializedError,
+    ProjectionWedgeExhaustedError,
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
@@ -298,6 +303,24 @@ _IDEMPOTENT_PRODUCER_FATAL_ERRORS: Final[tuple[type[KafkaError], ...]] = (
 # does not turn the consume loop into a hot spin over the same offset. The
 # rewind itself is what keeps the data safe; this only bounds the retry rate.
 DLQ_UNPERSISTED_REWIND_BACKOFF_SECONDS: float = 1.0
+
+
+def _record_coordinate(msg: object) -> tuple[int, int] | None:
+    """The ``(partition, offset)`` of a raw Kafka record, or ``None``.
+
+    OMN-17379. Used to key the per-record withhold bound. Returns ``None`` when
+    either coordinate is absent or not an integer -- a record that cannot be
+    identified must not share a counter with a different one, and the caller
+    then leaves the withhold unbounded, which is the pre-bound behaviour and the
+    safe direction.
+    """
+    partition = getattr(msg, "partition", None)
+    offset = getattr(msg, "offset", None)
+    if isinstance(partition, bool) or isinstance(offset, bool):
+        return None
+    if not isinstance(partition, int) or not isinstance(offset, int):
+        return None
+    return (partition, offset)
 
 
 class EventBusKafka(
@@ -407,6 +430,23 @@ class EventBusKafka(
 
         # Store config reference
         self._config = config
+
+        # OMN-17379: consecutive withholds per record coordinate, so the offset
+        # withhold has a ceiling. Keyed by (topic, partition, offset,
+        # subscription_id) -> (count, failure_fingerprint). An ``OrderedDict``
+        # rather than a plain dict because the capacity bound below evicts the
+        # OLDEST entry, and insertion order is what makes "oldest" meaningful.
+        #
+        # PROCESS-LOCAL AND DELIBERATELY SO, with the residual stated: a pod
+        # restart resets every count, so a crash-looping consumer could withhold
+        # indefinitely without ever reaching the bound. Persisting the count
+        # would mean a second durable store on the consume path for a fact whose
+        # whole purpose is to bound an in-process stall; the crash-loop case is
+        # already loud (a restarting pod is visible where a Stable/lag-0 wedge is
+        # not), which is why this is the residual accepted rather than closed.
+        self._projection_withholds: OrderedDict[
+            tuple[str, int, int, str], tuple[int, str]
+        ] = OrderedDict()
 
         # Apply config values
         self._bootstrap_servers = config.bootstrap_servers
@@ -2302,6 +2342,64 @@ class EventBusKafka(
             pass
         return "unknown"
 
+    # ------------------------------------------------------------------
+    # OMN-17379: bounding the offset withhold
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _projection_failure_fingerprint(exc: BaseException) -> str:
+        """Identify a failure so "the same refusal again" is decidable.
+
+        The count must reset when the failure CHANGES, because a write path
+        being repaired in stages reports a different error as it goes and such a
+        record is progressing toward a row rather than stuck. Fingerprinting on
+        the type alone would miss that -- every refusal on this path is a
+        ``ProjectionNotMaterializedError`` -- so the underlying cause's type and
+        the rendered message are folded in. The message is hashed rather than
+        stored: it carries the payload's own identifiers on some paths, and a
+        cache of error strings keyed by offset is not a thing this class should
+        hold.
+        """
+        cause = exc.__cause__
+        parts = f"{type(exc).__name__}|{type(cause).__name__ if cause else ''}|{exc}"
+        return hashlib.sha256(parts.encode("utf-8", "replace")).hexdigest()[:32]
+
+    def _record_projection_withhold(
+        self,
+        key: tuple[str, int, int, str],
+        fingerprint: str,
+    ) -> int:
+        """Count consecutive identical refusals of ONE record, and return the count.
+
+        A DIFFERENT fingerprint restarts the count at 1 rather than incrementing
+        it: two different failures are not one record failing to progress.
+        """
+        previous = self._projection_withholds.get(key)
+        count = (
+            previous[0] + 1
+            if previous is not None and previous[1] == fingerprint
+            else 1
+        )
+        self._projection_withholds[key] = (count, fingerprint)
+        self._projection_withholds.move_to_end(key)
+        capacity = self._config.projection_withhold_tracking_capacity
+        while len(self._projection_withholds) > capacity:
+            # Evict the least recently touched coordinate. Losing a count only
+            # ever restores that record's full budget, which is the safe
+            # direction: it can delay a release, never cause an early one.
+            self._projection_withholds.popitem(last=False)
+        return count
+
+    def _clear_projection_withhold(self, key: tuple[str, int, int, str]) -> None:
+        """Forget a coordinate's history.
+
+        Called when the record projects successfully and when it is
+        dead-lettered. Without the first, a record that failed during an outage
+        would carry that history and be released early on a later, unrelated
+        refusal.
+        """
+        self._projection_withholds.pop(key, None)
+
     async def _dispatch_to_subscriber(
         self,
         callback: Callable[[ModelEventMessage], Awaitable[None]],
@@ -2310,8 +2408,20 @@ class EventBusKafka(
         topic: str,
         group_id: str,
         correlation_id: UUID,
+        *,
+        record_coordinate: tuple[int, int] | None = None,
     ) -> bool:
         """Invoke a single subscriber callback, routing to DLQ on exhausted retries.
+
+        ``record_coordinate`` is the ``(partition, offset)`` of the record under
+        dispatch. It is what makes the OMN-17379 withhold bound PER RECORD: a
+        per-partition or per-correlation counter would release the wrong thing
+        (a correlation id is shared by a delegation terminal and its quality
+        verdict, and a partition counter would dead-letter the Nth DIFFERENT
+        record during an ordinary database outage). ``None`` means the caller
+        could not resolve a coordinate, and the bound is then not applied at
+        all -- the withhold stays unbounded, which is the pre-OMN-17379-bound
+        behaviour and the safe direction when the record cannot be identified.
 
         Returns:
             ``True`` when it is safe for the partition offset to advance past
@@ -2327,7 +2437,14 @@ class EventBusKafka(
         """
         try:
             await callback(event_message)
-        except ProjectionNotMaterializedError:
+            # A record that projected has no withhold history worth keeping: a
+            # repaired write path must restore the full budget, or an outage's
+            # leftover count would release a later record early.
+            if record_coordinate is not None:
+                self._clear_projection_withhold(
+                    (topic, record_coordinate[0], record_coordinate[1], subscription_id)
+                )
+        except ProjectionNotMaterializedError as projection_error:
             # OMN-17379: a projection consumed a well-formed event and wrote no
             # row because its WRITE PATH failed. Every other arm below decides
             # between "DLQ it" and "retries remain", and both of those end in
@@ -2363,6 +2480,91 @@ class EventBusKafka(
                     "correlation_id": str(correlation_id),
                 },
             )
+            # OMN-17379 (bound): withholding forever is its own outage. The arm
+            # above is right for a TRANSIENT write-path failure -- the record is
+            # still owed a row and redelivery materialises it once the path is
+            # repaired. It is wrong for a record whose refusal never changes:
+            # that record blocks every LATER record on its partition, including
+            # ones that would project fine, and nothing ever ends the stall.
+            #
+            # Measured on the onex-dev staging namespace 2026-09-15:
+            # delegation-completed.v1 p0 o286 (a tenant-registry refusal) and
+            # quality-gate-result.v1 p0 o300 (a NOT NULL violation) each
+            # re-refused about once per second, and the staging business-proof
+            # gate went red and stayed red behind them. Both are POISON by
+            # omnimarket's own projection error classification -- which this
+            # dispatch path never consults, because the writer is wired by this
+            # runtime rather than by BaseProjectionRunner.
+            #
+            # So: the SAME record failing the SAME way past a declared bound is
+            # quarantined with a typed reason and the partition is released. A
+            # changed failure resets the count, and a successful projection
+            # clears it, so nothing that is still progressing is discarded.
+            if record_coordinate is not None:
+                partition, offset = record_coordinate
+                fingerprint = self._projection_failure_fingerprint(projection_error)
+                withhold_key = (topic, partition, offset, subscription_id)
+                withheld = self._record_projection_withhold(withhold_key, fingerprint)
+                bound = self._config.projection_withhold_max_redeliveries
+                if withheld > bound:
+                    reason = (
+                        f"projection withhold exhausted after {withheld} "
+                        f"consecutive identical refusals of {topic} partition "
+                        f"{partition} offset {offset} by {subscription_id} "
+                        f"(bound {bound}, fingerprint {fingerprint}): "
+                        f"{projection_error}"
+                    )
+                    wedge_error = ProjectionWedgeExhaustedError(
+                        reason,
+                        projection_type=getattr(
+                            projection_error, "projection_type", None
+                        ),
+                    )
+                    wedge_error.__cause__ = projection_error
+                    dlq_result = await self._publish_to_dlq(
+                        original_topic=topic,
+                        failed_message=event_message,
+                        error=wedge_error,
+                        correlation_id=correlation_id,
+                        consumer_group=group_id,
+                        failure_class=EnumDlqFailureClass.PROJECTION_WEDGE_EXHAUSTED,
+                        validation_detail=reason,
+                    )
+                    # OMN-15232 is NOT relaxed here. Only a CONFIRMED durable
+                    # quarantine releases the partition; an unconfirmed one keeps
+                    # stalling, because a record that exists nowhere is worse
+                    # than a feed that is visibly stuck.
+                    if dlq_result is not False:
+                        self._clear_projection_withhold(withhold_key)
+                        # TRY400 suppressed: the refusal's traceback was already
+                        # emitted by the ``logger.exception`` above this block.
+                        # This line reports the RELEASE outcome, not a second
+                        # copy of that stack.
+                        logger.error(  # noqa: TRY400
+                            "projection_wedge_released topic=%s partition=%s "
+                            "offset=%s subscription_id=%s correlation_id=%s "
+                            "withheld=%s bound=%s -- this record refused the "
+                            "same way past its bound and was quarantined so the "
+                            "partition can advance (OMN-17379)",
+                            topic,
+                            partition,
+                            offset,
+                            subscription_id,
+                            str(correlation_id),
+                            withheld,
+                            bound,
+                            extra={
+                                "topic": topic,
+                                "group_id": group_id,
+                                "subscription_id": subscription_id,
+                                "correlation_id": str(correlation_id),
+                                "partition": partition,
+                                "offset": offset,
+                                "withheld": withheld,
+                                "bound": bound,
+                            },
+                        )
+                        return True
             return False
         except Exception as e:
             retry_count = event_message.headers.retry_count
@@ -2713,6 +2915,7 @@ class EventBusKafka(
                         topic,
                         group_id,
                         correlation_id,
+                        record_coordinate=_record_coordinate(msg),
                     )
                     # OMN-15232: same gate on the dispatch path. Every subscriber
                     # still gets the message (one failing subscriber must not
