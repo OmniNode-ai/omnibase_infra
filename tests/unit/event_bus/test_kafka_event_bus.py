@@ -1364,6 +1364,7 @@ class TestKafkaEventBusHeaderConversion:
             ("source", b"test-source"),
             ("event_type", b"test-event"),
             ("schema_version", b"2.0.0"),
+            ("idempotency_key", b"content-addressed-event-id"),
         ]
 
         headers = event_bus._kafka_headers_to_model(kafka_headers)
@@ -1372,6 +1373,40 @@ class TestKafkaEventBusHeaderConversion:
         assert headers.source == "test-source"
         assert headers.event_type == "test-event"
         assert headers.schema_version == "2.0.0"
+        assert headers.idempotency_key == "content-addressed-event-id"
+
+    def test_kafka_headers_to_model_rejects_duplicate_idempotency_key(self) -> None:
+        """A raw duplicate must not become a last-wins content assertion."""
+        event_bus = EventBusKafka()
+
+        with pytest.raises(ValueError, match="duplicate idempotency_key"):
+            event_bus._kafka_headers_to_model(
+                [
+                    ("idempotency_key", b"first"),
+                    ("idempotency_key", b"second"),
+                ]
+            )
+
+    def test_kafka_headers_to_model_rejects_nullable_then_valid_idempotency_key(
+        self,
+    ) -> None:
+        """A null header still occupies the single raw content-key slot."""
+        event_bus = EventBusKafka()
+
+        with pytest.raises(ValueError, match="duplicate idempotency_key"):
+            event_bus._kafka_headers_to_model(
+                [
+                    ("idempotency_key", None),
+                    ("idempotency_key", b"valid"),
+                ]
+            )
+
+    def test_kafka_headers_to_model_rejects_nullable_idempotency_key(self) -> None:
+        """A supplied null content assertion is malformed, never legacy absence."""
+        event_bus = EventBusKafka()
+
+        with pytest.raises(ValueError, match="nullable idempotency_key"):
+            event_bus._kafka_headers_to_model([("idempotency_key", None)])
 
     def test_kafka_headers_to_model_empty(self) -> None:
         """Test conversion with empty headers."""

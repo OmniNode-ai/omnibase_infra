@@ -428,6 +428,7 @@ class KafkaTransport:
         """Map an aiokafka ``ConsumerRecord`` to the transport-agnostic model."""
         raw_headers = getattr(record, "headers", None) or ()
         headers: dict[str, bytes] = {}
+        has_idempotency_key = False
         for key, value in raw_headers:
             if value is None:
                 context = ModelInfraErrorContext.with_correlation(
@@ -442,6 +443,21 @@ class KafkaTransport:
                     parameter=f"headers[{key!r}]",
                     value=None,
                 )
+            if key == "idempotency_key":
+                if has_idempotency_key:
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="poll",
+                        target_name="kafka_transport",
+                    )
+                    raise ProtocolConfigurationError(
+                        "KafkaTransport cannot map duplicate idempotency_key "
+                        "headers into ModelTransportMessage.headers.",
+                        context=context,
+                        parameter="headers['idempotency_key']",
+                        value="duplicate",
+                    )
+                has_idempotency_key = True
             headers[key] = value if isinstance(value, bytes) else bytes(value)
         offset = int(record.offset)  # type: ignore[attr-defined]
         return ModelTransportMessage(
