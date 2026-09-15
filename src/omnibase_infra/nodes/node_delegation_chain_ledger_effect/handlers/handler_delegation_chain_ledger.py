@@ -197,6 +197,23 @@ class HandlerDelegationChainLedger:
         rows = assemble_replay_and_verify(
             correlation_id, observed, self._declared_chain
         )
+        if not rows:
+            # OMN-18398: `_persist_rows` is a loop over `rows`, so an empty row
+            # set writes NOTHING and the effect output below would report that
+            # as success -- indistinguishable from a complete write. On the
+            # .201 compose dev lane that was every dispatch: `public.ledger_chain`
+            # held zero rows while the handler reported `status=success`. A
+            # write that cannot happen is a typed failure, never a success.
+            raise self._runtime_error(
+                "no delegation-chain evidence to persist: public.event_ledger "
+                f"carries no row for correlation {correlation_id} on any "
+                f"declared chain topic {list(self._declared_chain)!r} after "
+                f"{self._settle_attempts} settle attempt(s); no ledger_chain "
+                "row can be written, and reporting success here would be "
+                "indistinguishable from a complete write",
+                "delegation_chain.write",
+                correlation_id,
+            )
         await self._persist_rows(rows)
 
         return ModelHandlerOutput.for_effect(
@@ -266,6 +283,18 @@ class HandlerDelegationChainLedger:
             if response.result is None:
                 raise self._runtime_error(
                     f"ledger_chain upsert returned no result for hop {row.hop_index}",
+                    "delegation_chain.write",
+                    row.correlation_id,
+                )
+            # OMN-18398: the statement ran, but "ran" is not "wrote". The upsert
+            # always touches exactly one row (INSERT, or the ON CONFLICT UPDATE),
+            # so a zero count means the row this handler claims to have recorded
+            # is not in the relation.
+            if response.result.payload.row_count < 1:
+                raise self._runtime_error(
+                    f"ledger_chain upsert affected no row for hop {row.hop_index} "
+                    f"({row.hop!r}); the statement executed but the row is not "
+                    "in public.ledger_chain",
                     "delegation_chain.write",
                     row.correlation_id,
                 )

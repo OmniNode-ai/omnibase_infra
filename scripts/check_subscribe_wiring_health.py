@@ -127,6 +127,21 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # contract-declared node — same external-CLI-trigger shape as the
     # baselines-batch-compute entry above.
     "onex.cmd.omnibase-infra.fault-inject-fixture.v1": "Published by an external fault-injection caller (manual run or future regression script per the fixture's runbook), not a contract-declared node | owner: jonah | expiry: 2026-12-01",
+    # OMN-18398: node_ledger_projection_compute widened subscribe_topics to the
+    # four delegation-chain topics declared as `chain_topology` by
+    # node_delegation_chain_ledger_effect, so that public.event_ledger actually
+    # carries the evidence that writer reads back (it held none of them, so
+    # public.ledger_chain stayed at zero rows while the writer reported
+    # success). Three of the four have publishers in omnimarket and are not
+    # visible to this repository's scan -- the same cross-repo shape as the
+    # OMN-15006 OCC/omnimarket entries above. The fourth,
+    # onex.evt.omnimarket.delegate-skill-completed.v1, is already allowlisted
+    # above for the OMN-16964 writer's own subscription. Note the
+    # `omnibase-infra` segment on two of these topic names is a NAMESPACE, not
+    # a statement about which repository publishes them.
+    "onex.cmd.omnimarket.delegate-skill.v1": "Published by omnimarket node_delegate_skill_orchestrator (command_topic, contract.yaml:220), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.delegation-routing-request.v1": "Published by omnimarket node_delegation_orchestrator (contract.yaml:148), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omnibase-infra.routing-decision.v1": "Published by omnimarket node_delegation_routing_reducer as its success terminal (contract.yaml:87), cross-repo | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------
