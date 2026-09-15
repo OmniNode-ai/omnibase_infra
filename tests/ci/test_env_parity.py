@@ -454,10 +454,12 @@ K8S_ONLY_KEYS: frozenset[str] = frozenset(
         # as placeholders that kustomize `replacements:` in each outermost
         # overlay's kustomization.yaml overwrite at apply time with the image
         # digest that overlay finally renders and the git sha of the deployed
-        # commit, so service_kernel.py can bind non-null image_sha/deployment_sha
-        # onto the introspection manifest instead of reporting them null with
-        # absent_reason "<NAME> is not set". Compose lanes have no equivalent
-        # value to bind: they identify a build by BUILD_SOURCE/
+        # commit. If a replacement is missing, the value remains blank and
+        # ModelRuntimeBuildSha.from_raw classifies it as absent rather than as
+        # an empty digest/deployment sha. When replacement succeeds, the runtime
+        # binds non-blank image_sha/deployment_sha onto the introspection
+        # manifest. Compose lanes have no equivalent value to bind: they
+        # identify a build by BUILD_SOURCE/
         # EXPECTED_BUILD_SOURCE ("release" vs "workspace" — see
         # docker/docker-compose.infra.yml), not by a pinned OCI digest or a
         # deploy-time git sha; a workspace build in particular has no image
