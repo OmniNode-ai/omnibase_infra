@@ -161,6 +161,22 @@ ARTIFACT_RETENTION_DAYS = 90
 #: a gate that resolves a prefix is a gate that can match the wrong commit.
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# Declared by omnimarket's projection API
+# (src/omnimarket/projection/api_server.py::list_projections) and pinned by
+# tests/test_projection_api_server.py::test_projections_entry_has_required_fields.
+PROJECTION_TOPIC_REQUIRED_FIELDS = frozenset(
+    {
+        "topic",
+        "table",
+        "status",
+        "columns",
+        "limit",
+        "source_contract",
+        "bus_backed",
+        "backing",
+    }
+)
+
 
 class EnumLabLane(StrEnum):
     """The lab surfaces rule 24(a) names as receipt emitters.
@@ -510,26 +526,14 @@ def check_ready(name: str, url: str, timeout_seconds: float) -> ModelLabPassChec
 
 def check_projections_ready(url: str, timeout_seconds: float) -> ModelLabPassCheck:
     """The projection API's ``/projections`` endpoint must answer 200 with a
-    parseable ``topics`` list (OMN-18387).
+    non-empty ``topics`` list whose entries match the declared omnimarket
+    metadata shape (OMN-18387).
 
-    The top-level key is ``topics``, not ``projections`` -- confirmed against
-    the live dev-lane container 2026-09-15 (``curl http://localhost:3002/projections``
-    returns ``{"topics": [{"topic": ..., "cursor_column": ..., ...}, ...]}``,
-    61 entries on that read). The first revision of this check assumed
-    ``projections`` from the endpoint's own path name and from the ticket's
-    diagnostic probe, and that assumption was never verified against a live
-    response before landing -- exactly the class of error rule 16 exists to
-    catch. It read every real 200 as a failure, including a freshly-deployed
-    container, which would have made this check permanently red and useless
-    as a lab-pass gate rather than merely wrong on a stale one.
-
-    Deliberately NOT a check of any one entry's ``cursor_column`` -- that
-    would tie this general readiness probe to one topic's schema and break
-    the moment a projection is renamed or removed. What this asserts is
-    exactly what ``omnimarket-projection-api`` staying five days stale would
-    have failed: the container the deploy agent's up-target/verification set
-    now reaches (see OMN-18387's parity fix in
-    ``scripts/deploy-agent/deploy_agent/events.py``) is actually serving.
+    The top-level key is ``topics``, not ``projections``. That is declared by
+    omnimarket's projection API route, not inferred from one live response.
+    What this asserts is exactly what ``omnimarket-projection-api`` staying
+    stale would have failed: the container the deploy agent now reaches is
+    actually serving projection metadata.
     """
     status, body = _http_get(url, timeout_seconds)
     if status != 200:
@@ -556,6 +560,32 @@ def check_projections_ready(url: str, timeout_seconds: float) -> ModelLabPassChe
                 "absent list is not a serving projection API"
             ),
         )
+    if not topics:
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=(
+                f"GET {url} -> 200 but reports zero topics; an empty projection "
+                "catalogue is not a serving projection API"
+            ),
+        )
+    for index, entry in enumerate(topics):
+        if not isinstance(entry, dict):
+            return ModelLabPassCheck(
+                name="projection_ready",
+                ok=False,
+                evidence=(f"GET {url} -> 200 but topics[{index}] is not an object"),
+            )
+        missing = sorted(PROJECTION_TOPIC_REQUIRED_FIELDS - set(entry))
+        if missing:
+            return ModelLabPassCheck(
+                name="projection_ready",
+                ok=False,
+                evidence=(
+                    f"GET {url} -> 200 but topics[{index}] is missing "
+                    f"required field(s): {missing}"
+                ),
+            )
     return ModelLabPassCheck(
         name="projection_ready",
         ok=True,
