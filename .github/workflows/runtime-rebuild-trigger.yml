@@ -585,12 +585,18 @@ jobs:
           # No LAN address is committed: the alias resolves to the docker bridge
           # gateway.
           LAB_AGENT_URL: http://host.docker.internal:8098
+          # OMN-18399: the descendant-tolerance fallback's `gh api compare`
+          # calls, same token and same pattern as the compose-dev guard above
+          # (verify-lane-converged's "Wait for the dev lane..." step) -- no new
+          # credential.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/lab-overlay-receipt
           uv run python scripts/ci/fetch_lab_overlay_record.py \
             --sha "$MERGE_SHA" \
             --agent-url "$LAB_AGENT_URL" \
+            --repo "${{ github.repository }}" \
             --wait-seconds 1800 \
             --poll-interval-seconds 30 \
             --out /tmp/lab-overlay-checks.json
