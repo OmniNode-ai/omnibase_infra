@@ -86,7 +86,7 @@ class ActionAuthorizationClaimUnixRpc:
         self._server: asyncio.AbstractServer | None = None
         self._socket_identity: tuple[int, int] | None = None
 
-    def _validate_socket_parent(self) -> None:
+    def _validate_socket_parent(self) -> os.stat_result:
         """Require an overlay-owned, non-writable directory before binding."""
         if not self._socket_path.is_absolute():
             msg = "local claim socket path must be absolute"
@@ -106,6 +106,18 @@ class ActionAuthorizationClaimUnixRpc:
         other_writable = bool(parent_stat.st_mode & stat.S_IWOTH)
         if group_writable or other_writable:
             msg = "local claim socket parent must not be group or other writable"
+            raise PermissionError(msg)
+        return parent_stat
+
+    def _validated_socket_parent_identity(self) -> tuple[int, int]:
+        """Pin the parent directory identity used for the path bind."""
+        parent_stat = self._validate_socket_parent()
+        return (parent_stat.st_dev, parent_stat.st_ino)
+
+    def _assert_socket_parent_identity(self, identity: tuple[int, int]) -> None:
+        parent_stat = os.lstat(self._socket_path.parent)
+        if (parent_stat.st_dev, parent_stat.st_ino) != identity:
+            msg = "local claim socket parent changed during bind"
             raise PermissionError(msg)
 
     def _assert_socket_path_absent(self) -> None:
@@ -146,19 +158,21 @@ class ActionAuthorizationClaimUnixRpc:
         a restrictive umask avoids an ambient-umask exposure window; the
         explicit chmod/chown and final lstat make that property auditable.
         """
-        self._validate_socket_parent()
+        parent_identity = self._validated_socket_parent_identity()
         self._assert_socket_path_absent()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         prior_umask = os.umask(0o177)
         identity: tuple[int, int] | None = None
         try:
             try:
+                self._assert_socket_parent_identity(parent_identity)
                 listener.bind(str(self._socket_path))
             except Exception:
                 listener.close()
                 raise
             try:
                 identity = self._record_bound_socket_identity()
+                self._assert_socket_parent_identity(parent_identity)
             except Exception as bind_identity_error:
                 listener.close()
                 msg = "local claim socket cleanup is uncertain after bind"

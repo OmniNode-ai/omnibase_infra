@@ -128,3 +128,41 @@ def test_claim_uses_the_dedicated_atomic_function() -> None:
     assert request.nonce not in values
     assert values[19] == request.request_digest
     assert values[20] == request.redacted_receipt_digest
+
+
+@pytest.mark.unit
+def test_close_waits_for_inflight_claim_before_closing_pool() -> None:
+    events: list[str] = []
+    release_fetch = asyncio.Event()
+
+    class _SlowConnection(_Connection):
+        async def fetchrow(self, sql: str, *values: object) -> object:
+            events.append("fetch-start")
+            await release_fetch.wait()
+            events.append("fetch-end")
+            return {
+                "outcome": "CLAIMED",
+                "state": "CLAIMED",
+                "version": 1,
+                "redacted_receipt_digest": _request().redacted_receipt_digest,
+            }
+
+    async def scenario() -> _Pool:
+        pool = _Pool(_SlowConnection(iter(())))
+
+        async def pool_factory() -> _Pool:
+            return pool
+
+        adapter = PostgresActionAuthorizationClaim(pool_factory=pool_factory)  # type: ignore[arg-type]
+        claim_task = asyncio.create_task(adapter.claim(_request()))
+        while events != ["fetch-start"]:
+            await asyncio.sleep(0)
+        close_task = asyncio.create_task(adapter.close())
+        await asyncio.sleep(0)
+        assert not pool.closed
+        release_fetch.set()
+        await claim_task
+        await close_task
+        return pool
+
+    assert asyncio.run(scenario()).closed

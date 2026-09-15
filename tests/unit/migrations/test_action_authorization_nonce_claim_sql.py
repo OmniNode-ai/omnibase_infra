@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,10 @@ _ROLLBACK = (
     / "docker/migrations/rollback/rollback_107_create_action_authorization_nonce_claim.sql"
 )
 _RUNNER = _ROOT / "scripts/run-forward-migrations.sh"
+_CLAIM_FUNCTION_SIGNATURE_PATTERN = re.compile(
+    r"claim_action_authorization\(\s*([\s\S]*?)\s*\)",
+    re.MULTILINE,
+)
 
 
 @pytest.mark.unit
@@ -68,6 +73,7 @@ def test_nonce_claim_migration_is_atomic_default_deny_and_acl_restricted() -> No
     assert "claim_time := clock_timestamp()" in sql
     assert "claim_time >= p_expires_at" in sql
     assert "SECURITY DEFINER" in sql
+    assert "SET search_path = pg_catalog, action_authorization_claim" in sql
 
     # The claim is settled by one statement against the unique indexes. A
     # retry loop here is what produced the OMN-17486 livelock: the conflict
@@ -102,11 +108,15 @@ def test_nonce_claim_migration_is_atomic_default_deny_and_acl_restricted() -> No
 @pytest.mark.unit
 def test_backout_disables_restricted_claim_without_destroying_history() -> None:
     rollback = _ROLLBACK.read_text(encoding="utf-8")
+    forward = _MIGRATION.read_text(encoding="utf-8")
+    forward_signatures = _CLAIM_FUNCTION_SIGNATURE_PATTERN.findall(forward)
+    rollback_signatures = _CLAIM_FUNCTION_SIGNATURE_PATTERN.findall(rollback)
 
     assert (
         "REVOKE EXECUTE ON FUNCTION action_authorization_claim.claim_action_authorization"
         in rollback
     )
+    assert rollback_signatures == forward_signatures[-1:]
     assert "REVOKE USAGE ON SCHEMA action_authorization_claim" in rollback
     assert "DROP " not in rollback
     assert "CASCADE" not in rollback

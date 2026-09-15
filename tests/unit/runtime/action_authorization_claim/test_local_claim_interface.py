@@ -105,7 +105,7 @@ def test_local_socket_binds_under_restrictive_umask_before_asyncio(
     class _FakeListener:
         def bind(self, path: str) -> None:
             assert path == str(socket_path)
-            assert events[-1] == "umask:177"
+            assert events[-2:] == ["umask:177", "lstat-parent"]
             state["bound"] = True
             events.append("bind")
 
@@ -189,8 +189,10 @@ def test_local_socket_binds_under_restrictive_umask_before_asyncio(
     assert events == [
         "lstat-parent",
         "umask:177",
+        "lstat-parent",
         "bind",
         "lstat-socket",
+        "lstat-parent",
         "listen",
         "umask:22",
         "chmod",
@@ -228,7 +230,12 @@ def test_listen_failure_closes_and_unlinks_only_the_recorded_socket(
     def fake_lstat(path: Path | str) -> SimpleNamespace:
         candidate = Path(path)
         if candidate == socket_path.parent:
-            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=501)
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o700,
+                st_uid=501,
+                st_dev=9,
+                st_ino=10,
+            )
         if candidate == socket_path and bound:
             return SimpleNamespace(
                 st_mode=stat.S_IFSOCK | 0o600,
@@ -298,7 +305,12 @@ def test_first_post_bind_lstat_failure_preserves_same_mode_owner_replacement(
         nonlocal socket_lstats
         candidate = Path(path)
         if candidate == socket_path.parent:
-            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=501)
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o700,
+                st_uid=501,
+                st_dev=9,
+                st_ino=10,
+            )
         if candidate == socket_path and not bound:
             raise FileNotFoundError(path)
         if candidate == socket_path:
@@ -402,3 +414,59 @@ def test_local_socket_rejects_unsafe_parent_before_listener_or_handler(
 
     assert socket_calls == 0
     assert handler_calls == 0
+
+
+@pytest.mark.unit
+def test_parent_replacement_between_validation_and_bind_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket_path = Path("/claim-parent/claim.sock")
+    parent_lstats = 0
+    bind_calls = 0
+
+    class _Listener:
+        def bind(self, path: str) -> None:
+            nonlocal bind_calls
+            assert path == str(socket_path)
+            bind_calls += 1
+
+        def close(self) -> None:
+            return None
+
+    def fake_lstat(path: Path | str) -> SimpleNamespace:
+        nonlocal parent_lstats
+        candidate = Path(path)
+        if candidate == socket_path.parent:
+            parent_lstats += 1
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o700,
+                st_uid=501,
+                st_dev=9,
+                st_ino=10 + parent_lstats,
+            )
+        if candidate == socket_path:
+            raise FileNotFoundError(path)
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(local_interface_module.os, "lstat", fake_lstat)
+    monkeypatch.setattr(
+        local_interface_module,
+        "socket",
+        SimpleNamespace(
+            AF_UNIX=socket.AF_UNIX,
+            SOCK_STREAM=socket.SOCK_STREAM,
+            socket=lambda *_: _Listener(),
+        ),
+    )
+    interface = ActionAuthorizationClaimUnixRpc(
+        socket_path=socket_path,
+        claim_port=_Port(),
+        socket_owner_uid=501,
+        authorized_unix_uid=700,
+        restricted_principal="rsd_action_authorization_claim",
+    )
+
+    with pytest.raises(PermissionError, match="parent changed during bind"):
+        interface._bind_restricted_listener()
+
+    assert bind_calls == 0
