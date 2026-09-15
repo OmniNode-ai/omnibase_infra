@@ -25,12 +25,12 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     assert config.runner_host == "omninode-pc.tail75df5e.ts.net"
     assert config.runner_group == "omnibase-ci"
     assert config.runner_name_prefix == "omninode-runner"
-    # OMN-15978: reconciled to the live 88-runner fleet (saturation scale-up
-    # to 72 was later scaled further to 88 on the host ahead of the repo).
-    # All 88 are always-on steady-state (no burst tier), so burst_count ==
-    # expected_count.
-    assert config.expected_count == 88
-    assert config.burst_count == 88
+    # OMN-18411: capped 88 -> 60 after a CI burst drove one-minute load to
+    # 100.9 on the 32-core host -- the registered runner count is the
+    # worst-case concurrent-job ceiling. All 60 are always-on steady-state
+    # (no burst tier), so burst_count == expected_count.
+    assert config.expected_count == 60
+    assert config.burst_count == 60
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -456,12 +456,16 @@ def test_runner_compose_healthcheck_uses_egress_script() -> None:
         assert resolved_test == ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
 
 
-def test_runner_compose_reconciled_to_saturation_scale_88_fleet() -> None:
-    """OMN-15978: the repo compose must match the .201 fleet of 88
+def test_runner_compose_reconciled_to_capacity_capped_60_fleet() -> None:
+    """OMN-18411: the repo compose must match the .201 fleet of 60
     always-on steady-state runners, so `deploy-runners.sh` cannot orphan-remove
-    live runners beyond 88 (which would shrink the org CI fleet and trigger an
-    outage). All 88 runners are steady (no burst profiles) and each mounts the
-    OMN-12433 egress healthcheck script.
+    or resurrect runners beyond 60. All 60 runners are steady (no burst
+    profiles) and each mounts the OMN-12433 egress healthcheck script.
+
+    Capped down from 88 (OMN-15978) after a CI burst drove one-minute load to
+    100.9 on the 32-core `.201` host: idle runners cost nothing, so the
+    registered runner count is what sets the worst-case concurrent-job
+    ceiling on a fixed-core box.
     """
     compose = yaml.safe_load(
         (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
@@ -474,25 +478,25 @@ def test_runner_compose_reconciled_to_saturation_scale_88_fleet() -> None:
         for name, definition in compose["services"].items()
         if re.fullmatch(r"omninode-runner-\d+", name)
     }
-    assert len(runner_services) == 88, "expected exactly 88 runner services"
-    # Contiguous runner-1 .. runner-88, no gaps.
+    assert len(runner_services) == 60, "expected exactly 60 runner services"
+    # Contiguous runner-1 .. runner-60, no gaps.
     indices = sorted(int(name.rsplit("-", 1)[1]) for name in runner_services)
-    assert indices == list(range(1, 89))
+    assert indices == list(range(1, 61))
 
     hc_mount = "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
     for name, definition in runner_services.items():
-        # All 88 are steady-state: no burst profile gating any runner.
+        # All 60 are steady-state: no burst profile gating any runner.
         assert "profiles" not in definition, f"{name} unexpectedly profile-gated"
         assert hc_mount in definition["volumes"], f"{name} missing healthcheck mount"
         assert definition["volumes"][-1] == (
             f"runner-{name.rsplit('-', 1)[1]}-creds:/home/runner/.runner-creds"
         )
 
-    # A backing named volume exists for each of the 88 runners.
+    # A backing named volume exists for each of the 60 runners.
     volume_names = {
         name for name in compose["volumes"] if re.fullmatch(r"runner-\d+-creds", name)
     }
-    assert len(volume_names) == 88
+    assert len(volume_names) == 60
 
 
 def test_deploy_ships_healthcheck_script_to_host() -> None:
