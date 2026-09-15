@@ -7,7 +7,7 @@
 # Ticket: OMN-3277 / Epic: OMN-3273
 #
 # Usage:
-#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft]
+#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N]]
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
@@ -29,6 +29,22 @@
 #   4. docker restart each container (preserves filesystem + cached credentials)
 #   Skips: registration token fetch, force-recreate, cron installs
 #   Use when: updating entrypoint logic without needing fresh registration
+#
+# --rolling mode (one runner at a time, busy-checked, fail-closed):
+#   1. Rsync runner artifacts to host
+#   2. For each fleet service in turn: confirm it is idle on TWO independent
+#      signals, recreate that ONE service, wait for it to come back online
+#   3. Skip (and retry later) any runner executing a job; HALT if a recreated
+#      runner does not return
+#   Skips: image build, cron installs, --remove-orphans
+#   Use when: a container-env change must reach live runners. Env is frozen at
+#   container creation, so a recreate is the only way; --soft cannot carry one.
+#   Cost: roughly 60-100s per runner, serial by nature (see the mode's own
+#   comment block below).
+#   --limit=N stops after N successful recreates: --limit=1 is the canary
+#   step, proven before the rest of the fleet is touched.
+#   With --dry-run the READ-ONLY busy probes still run -- a rolling dry run is
+#   how you see which runners are executing jobs -- but nothing is recreated.
 #
 # Requirements:
 #   - gh CLI authenticated with org admin scope
@@ -73,6 +89,25 @@
 #   - DEPLOY_RUNNER_OPERATOR_ENV_FILE  Host path of the operator env file
 #                                   (e.g. /home/<operator>/.omnibase/.env).
 #                                   Fail-fast `:?` in compose.
+#
+# FOURTH REQUIRED VAR, satisfied by a FILE rather than an export (OMN-18415):
+#   - LOCAL_LLM_SHARED_SECRET       HMAC signing key for the local LLM
+#                                   inference endpoint, consumed by the
+#                                   omninode-runner-N fleet (the Hostile
+#                                   Review Gate's reviewer fails closed
+#                                   without it). Fail-fast `:?` in compose,
+#                                   like the two above -- but nothing needs to
+#                                   export it, because compose reads it from
+#                                   `docker/.env` in the compose PROJECT
+#                                   DIRECTORY (the directory of the first `-f`
+#                                   file), which resolves the same way for the
+#                                   runner-monitor auto-bounce cron as for
+#                                   this script. That file is host-generated,
+#                                   mode 600, and is deliberately absent from
+#                                   SYNC_PATHS below so an rsync from this
+#                                   repo can never overwrite or blank it --
+#                                   the same rule the lab credentials
+#                                   directory follows.
 # See knowledge-base-internal:runbooks/omnibase-infra-release-train-lab.md for the full recreate procedure.
 
 set -euo pipefail
@@ -166,18 +201,28 @@ SYNC_PATHS=(
 DRY_RUN=false
 SKIP_BUILD=false
 SOFT_DEPLOY=false
+ROLLING_DEPLOY=false
+# 0 means the whole fleet; --limit=N stops after N successful recreates.
+ROLL_LIMIT=0
 
 for arg in "$@"; do
     case "${arg}" in
         --dry-run)    DRY_RUN=true ;;
         --skip-build) SKIP_BUILD=true ;;
         --soft)       SOFT_DEPLOY=true ;;
+        --rolling)    ROLLING_DEPLOY=true ;;
+        --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
         --help|-h)
-            echo "Usage: $0 [--dry-run] [--skip-build] [--soft]"
+            echo "Usage: $0 [--dry-run] [--skip-build] [--soft] [--rolling]"
             echo "  --dry-run     Print actions without executing remote commands"
             echo "  --skip-build  Skip docker build (use existing image)"
             echo "  --soft        Update entrypoint in-place without destroying containers"
             echo "                (preserves cached credentials, skips registration token)"
+            echo "  --rolling     Recreate the fleet ONE runner at a time, skipping any"
+            echo "                runner executing a job. The only supported way to apply"
+            echo "                a container-env change (env is frozen at creation)."
+            echo "  --limit=N     With --rolling: stop after N successful recreates."
+            echo "                --limit=1 is the canary step of a fleet roll."
             exit 0
             ;;
         *)
@@ -719,8 +764,208 @@ install_host_artifact_freshness_cron() {
 # Main
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Rolling deploy: recreate the fleet one runner at a time, never a busy one
+# ---------------------------------------------------------------------------
+#
+# WHY THIS MODE EXISTS (OMN-18415). Container ENV is frozen at creation, so any
+# change to the `&runner-env` block reaches a live runner only through a
+# RECREATE. The default path above recreates every service in one compose call,
+# which takes the whole fleet down; `--soft` does not recreate at all and so
+# cannot carry an env change. Neither is usable for an env roll, and the
+# procedure that is -- one service at a time, skipping runners that are
+# executing someone else's job -- was until now a hand-typed loop, which is
+# exactly the shape that produces a killed live job when somebody's busy check
+# is subtly fail-open.
+#
+# WHAT IT COSTS. Roughly 60-100s per runner (stop, create, start, then the
+# listener's reconnect to GitHub), measured over two full rolls. Batching buys
+# nothing: `docker compose up -d --force-recreate` serialises container stop and
+# start regardless of how many services are named, so a batch only puts more
+# runners down at once. Serial keeps the rest of the fleet available throughout.
+#
+# THE BUSY CHECK FAILS CLOSED, and that is the load-bearing property. Two
+# independent signals are consulted -- GitHub's own `busy` flag (authoritative)
+# and the container's process list -- and a runner is touched only when BOTH
+# say idle. An API error, a missing runner, a failed `docker top`, or any
+# disagreement between the two yields UNKNOWN, and UNKNOWN skips. A fail-open
+# `docker top` check is what killed a live job once already.
+#
+# A runner that does not come back online HALTS the roll rather than cascading:
+# the remaining runners keep the old env, which is a partial roll, not an
+# outage.
+ROLL_ONLINE_MAX_SECONDS="${ROLL_ONLINE_MAX_SECONDS:-240}"
+ROLL_ONLINE_INTERVAL_SECONDS="${ROLL_ONLINE_INTERVAL_SECONDS:-10}"
+ROLL_SKIP_RETRY_PASSES="${ROLL_SKIP_RETRY_PASSES:-2}"
+
+fleet_services() {
+    # Enumerate fleet services from the compose file itself, then cross-check
+    # the count against config/runner_fleet.yaml. Deriving the list from
+    # `seq 1 ${RUNNER_COUNT}` would silently invent service names if the two
+    # ever disagreed; this fails closed instead.
+    local names
+    names=$(grep -E "^  ${RUNNER_NAME_PREFIX}-[0-9]+:$" "${REPO_ROOT}/${COMPOSE_FILE}" \
+        | tr -d ' :' || true)
+    local count
+    count=$(printf '%s\n' "${names}" | grep -c . || true)
+    if [[ "${count}" -ne "${RUNNER_COUNT}" ]]; then
+        err "compose declares ${count} ${RUNNER_NAME_PREFIX}-N services but config/runner_fleet.yaml expects ${RUNNER_COUNT}; refusing to roll against a disagreeing fleet definition."
+    fi
+    printf '%s\n' "${names}"
+}
+
+github_runner_state() {
+    # Echo "<status> <busy>" for one runner name, or "unknown unknown".
+    local name="${1}"
+    local row
+    row=$(gh api --paginate "/orgs/${RUNNER_ORG}/actions/runners?per_page=100" 2>/dev/null |
+        jq -rs --arg name "${name}" '
+          [.[].runners[] | select(.name == $name)][0]
+          | if . == null then "unknown unknown"
+            else "\(.status) \(.busy | tostring)" end
+        ' 2>/dev/null) || row=""
+    if [[ -z "${row}" ]]; then
+        echo "unknown unknown"
+        return 0
+    fi
+    echo "${row}"
+}
+
+runner_is_idle() {
+    # Fail CLOSED: returns 0 (idle, safe to recreate) only when GitHub says
+    # online+not-busy AND the container's process list carries no job worker.
+    # Anything else -- API failure, unknown runner, docker failure, the two
+    # signals disagreeing -- returns non-zero and the caller skips.
+    local name="${1}"
+    local state status busy
+    state=$(github_runner_state "${name}")
+    status="${state%% *}"
+    busy="${state##* }"
+    if [[ "${status}" != "online" ]] || [[ "${busy}" != "false" ]]; then
+        return 1
+    fi
+
+    local worker_lines
+    if ! worker_lines=$(ssh "${RUNNER_HOST}" "docker top ${name} 2>/dev/null | grep -c 'Runner.Worker' || true" 2>/dev/null); then
+        return 1
+    fi
+    worker_lines="${worker_lines//[$'\r\n ']/}"
+    # An empty answer means `docker top` produced nothing we can read. That is
+    # UNKNOWN, not idle.
+    [[ -n "${worker_lines}" ]] || return 1
+    [[ "${worker_lines}" == "0" ]] || return 1
+    return 0
+}
+
+wait_for_runner_online() {
+    local name="${1}"
+    local elapsed=0
+    while [[ "${elapsed}" -lt "${ROLL_ONLINE_MAX_SECONDS}" ]]; do
+        sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
+        local state
+        state=$(github_runner_state "${name}")
+        if [[ "${state%% *}" == "online" ]]; then
+            log "  ${name} back online after ~${elapsed}s."
+            return 0
+        fi
+    done
+    return 1
+}
+
+roll_one_runner() {
+    local name="${1}"
+    local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
+
+    # Re-check immediately before stopping: a job can start between the
+    # selection pass and this call.
+    if ! runner_is_idle "${name}"; then
+        log "  ${name} became busy (or its state is unknown) -- skipped."
+        return 2
+    fi
+
+    log "  Recreating ${name} ..."
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] would run: ${compose_cmd} up -d --force-recreate --no-deps ${name}"
+        return 0
+    fi
+
+    # ONE service name, always. No --remove-orphans on this path: a rolling
+    # call names a single service, and an orphan sweep during a partial roll
+    # would delete containers this pass has not reached yet.
+    # A roll asks GitHub for nothing, deliberately. A recreate restores the
+    # runner's cached registration from its per-runner named volume, so the
+    # container never re-registers and needs no registration handle at all;
+    # RUNNER_TOKEN is exported empty purely so compose interpolates
+    # deterministically instead of warning. A runner that nonetheless fails to
+    # come back halts the roll, and recovering it is then a deliberate
+    # operator step rather than something this path does silently.
+    ssh "${RUNNER_HOST}" "
+        set -euo pipefail
+        export RUNNER_TOKEN=''
+        cd ${RUNNER_HOST_DIR}
+        ${compose_cmd} up -d --force-recreate --no-deps --no-build ${name}
+    " || return 1
+
+    wait_for_runner_online "${name}" || return 1
+    return 0
+}
+
+rolling_deploy() {
+    log "=== Rolling deploy (one runner at a time, busy-checked, fail-closed) ==="
+    rsync_artifacts
+
+    local services
+    services=$(fleet_services)
+    local total
+    total=$(printf '%s\n' "${services}" | grep -c .)
+    log "Rolling ${total} fleet services on ${RUNNER_HOST}. Expect roughly $((total * 100 / 60)) minutes."
+
+    local pending=() name
+    while IFS= read -r name; do
+        [[ -n "${name}" ]] || continue
+        pending+=("${name}")
+    done <<< "${services}"
+
+    local pass=0 done_count=0 failed="" rc
+    while [[ "${#pending[@]}" -gt 0 ]] && [[ "${pass}" -le "${ROLL_SKIP_RETRY_PASSES}" ]]; do
+        [[ "${pass}" -eq 0 ]] || log "--- retry pass ${pass} for ${#pending[@]} runner(s) that were busy earlier ---"
+        local next=()
+        for name in "${pending[@]}"; do
+            rc=0
+            roll_one_runner "${name}" || rc=$?
+            case "${rc}" in
+                0) done_count=$((done_count + 1))
+                   log "  [${done_count}/${total}] ${name} done."
+                   # --limit=N is the canary step: stop after N successful
+                   # recreates so the change can be proven on one runner before
+                   # the remaining 59 are touched.
+                   if [[ "${ROLL_LIMIT}" -gt 0 ]] && [[ "${done_count}" -ge "${ROLL_LIMIT}" ]]; then
+                       log "Reached --limit=${ROLL_LIMIT}; stopping. The rest of the fleet keeps its previous container env until the next roll."
+                       return 0
+                   fi ;;
+                2) next+=("${name}") ;;
+                *) failed="${name}"; break ;;
+            esac
+        done
+        [[ -z "${failed}" ]] || break
+        pending=(${next[@]+"${next[@]}"})
+        pass=$((pass + 1))
+    done
+
+    if [[ -n "${failed}" ]]; then
+        err "HALTED at ${failed}: it did not come back online within ${ROLL_ONLINE_MAX_SECONDS}s. ${done_count}/${total} rolled; the rest still carry the previous container env. Investigate that container before resuming -- do NOT retry blindly, a wedged removal spawns another wedged container."
+    fi
+
+    log "Rolled ${done_count}/${total} runners."
+    if [[ "${#pending[@]}" -gt 0 ]]; then
+        warn "Still busy after ${ROLL_SKIP_RETRY_PASSES} retry pass(es), NOT rolled: ${pending[*]}"
+        warn "Re-run with --rolling to converge; a runner already rolled is recreated again, which is idempotent."
+    fi
+}
+
 main() {
-    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY})"
+    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY})"
     log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
     log "Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
 
@@ -728,7 +973,13 @@ main() {
         log "[DRY RUN MODE] No remote commands will be executed."
     fi
 
-    if "${SOFT_DEPLOY}"; then
+    if "${SOFT_DEPLOY}" && "${ROLLING_DEPLOY}"; then
+        err "--soft and --rolling are mutually exclusive: --soft never recreates a container, so it cannot carry a container-env change, which is the only reason to roll."
+    fi
+
+    if "${ROLLING_DEPLOY}"; then
+        rolling_deploy
+    elif "${SOFT_DEPLOY}"; then
         soft_deploy
         poll_runners_online || warn "Not all runners came online. Check logs on ${RUNNER_HOST}."
     else
