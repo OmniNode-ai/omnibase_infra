@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -94,11 +95,21 @@ def test_the_route_job_is_time_bounded_so_it_cannot_stall_every_consumer() -> No
     )
 
 
-def test_the_reusable_workflow_exposes_the_three_outputs_consumers_read() -> None:
-    outputs = _triggers(_workflow("runner-route-reusable.yml"))["workflow_call"][
-        "outputs"
-    ]
-    assert set(outputs) == {"labels", "decision", "reason"}
+def test_the_reusable_workflow_exposes_the_outputs_consumers_read() -> None:
+    """A consumer reads the label set and can audit the verdict.
+
+    `runs_on` is the name a call site reads it by -- `runs-on:
+    fromJSON(needs.route.outputs.runs_on)` says what it is at the point of use
+    -- and `labels` is the name the pilot shipped and the saturation monitor
+    already consumes. Both are emitted rather than one renamed: renaming the
+    one a live consumer reads would break it silently, since an unknown output
+    resolves to the empty string and an empty `runs-on` fails to schedule
+    rather than failing loudly.
+    """
+    outputs = _workflow("runner-route-reusable.yml")[True]["workflow_call"]["outputs"]
+    assert set(outputs) == {"labels", "runs_on", "decision", "reason"}
+    assert "jobs.route.outputs.runs_on" in outputs["runs_on"]["value"]
+    assert "jobs.route.outputs.labels" in outputs["labels"]["value"]
 
 
 # --- enforcement: registration is half the mechanism -----------------------
@@ -640,14 +651,59 @@ def test_lints_runs_on_names_no_runner_variable_at_all() -> None:
         assert variable not in runs_on
 
 
+def _decide_via_node(**kwargs: Any) -> Any:
+    """Drive the shipped decision -- the routing node's handler.
+
+    The wiring tests assert on PLACEMENT, so they go through the same typed
+    request the route job builds rather than re-deriving one; a wiring test
+    that exercised a copy of the decision would pass while the shipped one
+    changed underneath it.
+    """
+    route_module = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    from omnibase_infra.nodes.node_ci_runner_route_compute.handlers.handler_ci_runner_route import (
+        HandlerCIRunnerRoute,
+    )
+
+    policy = kwargs.pop("policy")
+    request = route_module.build_request(
+        event_name=kwargs["event_name"],
+        head_repo=kwargs.get("head_repo", ""),
+        repository=kwargs["repository"],
+        workflow_path=kwargs["workflow_path"],
+        seam_json=kwargs["seam_json"],
+        public_json=kwargs["public_json"],
+        visibility=kwargs.get("visibility", "public"),
+        fleet=kwargs["fleet"],
+        lab=kwargs["lab"],
+        hosted_workflows=tuple(kwargs.get("allowlist") or ()),
+        force="auto",
+        policy=policy,
+        fleet_expected_count=88,
+    )
+    decision = HandlerCIRunnerRoute().handle(request)
+    return SimpleNamespace(
+        labels=list(decision.runs_on),
+        decision=decision.decision.value,
+        reason=decision.reason_wire,
+    )
+
+
 def test_fork_pr_isolation_still_holds_for_the_lint_workflow_path() -> None:
     """The behavioural half of the test above. For a fork PR the route output
     IS the public variable's labels, so lint's placement on a fork is decided by
     the same knob the V1 expression read -- before any capacity signal.
     """
     route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
-    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))["route"]
-    result = route.decide(
+    # The SHIPPED thresholds, from the contract that declares them. Read from
+    # the contract rather than the config file precisely because the config
+    # file no longer carries them: a test that kept reading the old home would
+    # pass on a policy nothing applies.
+    route_module = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    policy = route_module.load_contract_policy(
+        REPO_ROOT
+        / "src/omnibase_infra/nodes/node_ci_runner_route_compute/contract.yaml"
+    )
+    result = _decide_via_node(
         event_name="pull_request",
         head_repo="a-fork/omnibase_infra",
         repository="OmniNode-ai/omnibase_infra",
@@ -678,8 +734,16 @@ def test_a_misconfigured_public_variable_cannot_widen_a_fork_onto_the_fleet() ->
     named the fleet, a fork PR still lands hosted.
     """
     route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
-    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))["route"]
-    result = route.decide(
+    # The SHIPPED thresholds, from the contract that declares them. Read from
+    # the contract rather than the config file precisely because the config
+    # file no longer carries them: a test that kept reading the old home would
+    # pass on a policy nothing applies.
+    route_module = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    policy = route_module.load_contract_policy(
+        REPO_ROOT
+        / "src/omnibase_infra/nodes/node_ci_runner_route_compute/contract.yaml"
+    )
+    result = _decide_via_node(
         event_name="pull_request",
         head_repo="a-fork/omnibase_infra",
         repository="OmniNode-ai/omnibase_infra",

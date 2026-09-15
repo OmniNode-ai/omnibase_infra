@@ -1,0 +1,159 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeCIRunnerRouteCompute
+#
+# Decides, once per CI run, whether that run's jobs execute on the lab runner
+# fleet or on GitHub-hosted compute, from live capacity and the repository's
+# own visibility. The trusted-CI runner variable is read as a CEILING and never
+# written (CLAUDE.md rule 14, single-owner): routing may only ever DOWNGRADE
+# from what the variable already allows.
+#
+# WHY THIS CONTRACT CARRIES THE THRESHOLDS. They decide where every job in a
+# repository runs, so they are declared here, in the contract, rather than in a
+# workflow file, an environment variable or a second config file. The handler
+# receives them as a typed model and applies them; it invents no value and
+# defaults nothing, so a contract missing a key fails at load with that key's
+# name instead of at the first run that needed it.
+#
+# Related tickets:
+#   - OMN-18031: the per-run routing decision this node re-homes
+#   - OMN-18412: repository visibility rule; the move to a COMPUTE node
+name: "node_ci_runner_route_compute"
+contract_name: "node_ci_runner_route_compute"
+node_name: "node_ci_runner_route_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Compute node that chooses a runs-on label set for one CI run. Ordered elimination -- hosted workflow list, fork isolation, seam ceiling, probe integrity, fleet saturation, fleet size, lab load -- where every step can only move the answer toward GitHub-hosted, followed by two guards on the answer: never-widen (a fleet label may appear only when the ceiling carried one) and visibility (a private repository is never placed on a hosted runner; a capacity downgrade is reversed back to the fleet and a trust reason is refused outright). Stateless and deterministic: every observation is probed at the boundary and handed in, so a recorded decision replays without a network.
+
+input_model:
+  name: "ModelCIRunnerRouteRequest"
+  module: "omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_route_request"
+  description: "Observations plus the declared policy: event, repository, visibility, seam ceiling, fleet capacity, lab load, hosted workflow list, operator override."
+output_model:
+  name: "ModelCIRunnerRouteDecision"
+  module: "omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_route_decision"
+  description: "The chosen label set, the decision class, the reason and typed evidence -- complete enough to audit without the run log."
+capabilities:
+  - name: "ci.runner.route"
+    description: "Choose the runner label set for one CI run"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "ci.runner.route"
+      handler:
+        name: "HandlerCIRunnerRoute"
+        module: "omnibase_infra.nodes.node_ci_runner_route_compute.handlers.handler_ci_runner_route"
+      description: "Ordered elimination plus the never-widen and visibility guards"
+      supported_operations:
+        - "ci.runner.route"
+      input_model:
+        name: "ModelCIRunnerRouteRequest"
+        module: "omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_route_request"
+        description: "Input for one placement decision."
+# THE DECLARED POLICY. Parsed into ModelCIRunnerRoutePolicy, whose fields are
+# all required -- a missing key here is a load-time failure naming the key, not
+# a silent default (CLAUDE.md rule 8).
+config:
+  policy_version: 1
+  # The runner group capacity is observed from. The fleet INVENTORY -- how many
+  # runners are meant to exist on which host -- is config/runner_fleet.yaml and
+  # is read there rather than restated here, so the two cannot disagree.
+  runner_group: "omnibase-ci"
+  lab_labels:
+    - "self-hosted"
+    - "omnibase-ci"
+  hosted_labels:
+    - "ubuntu-latest"
+  # Headroom FLOOR, not a capacity match. A measured CI fan-out in the pilot
+  # repository is roughly 47 jobs; this is the margin below which routing stops
+  # adding load to the fleet.
+  min_idle_runners: 12
+  # Deliberately well below the observed peak: busy was measured swinging from
+  # 65 to 10 of 88 inside about two minutes, and a threshold near the peak
+  # would flap run to run.
+  max_busy_fraction: 0.80
+  # A separate and LOWER floor than the fleet canary's own health threshold:
+  # the canary asks whether the fleet is healthy, this asks whether it is big
+  # enough to route onto at all.
+  #
+  # A FRACTION OF THE DECLARED INVENTORY, not a count, and the reason is a live
+  # near-miss. The previous literal was 60, chosen as roughly two thirds of the
+  # 88-runner fleet of the time. The fleet was capped to 60 on 2026-09-15, which
+  # made that literal equal to the entire fleet: one runner going offline would
+  # have refused the fleet on every run, and nothing would have reported it as
+  # anything but a quiet return to GitHub-hosted. Read against
+  # config/runner_fleet.yaml expected_count, the same two thirds tracks the cap.
+  min_online_fraction: 0.67
+  # The route job runs hosted and cannot reach the lab, so the lab reading
+  # arrives asynchronously and is freshness-bounded. Consequence, named rather
+  # than hidden: the lab signal is up to ten minutes old by construction.
+  lab_record_max_age_seconds: 600
+  # COPIED VERBATIM from the pre-push placement picker's committed defaults so
+  # the lab has ONE definition of "too loaded", shared by pre-push placement
+  # and CI routing rather than two that drift apart.
+  max_lab_load_ratio: 1.0
+  min_lab_free_mem_mib: 4096
+  # The reasons that mean "the fleet is unavailable for THIS run". ONLY these
+  # may be reversed for a repository that may not run hosted. Reversing a trust
+  # reason instead -- fork isolation, or the hosted workflow list -- would put
+  # untrusted code or a registry push on the fleet, which no capacity argument
+  # may ever do. That split is the whole safety property of the rule, so it is
+  # declared here rather than left implicit in the handler.
+  capacity_downgrade_reasons:
+    - "fleet_saturated"
+    - "fleet_degraded"
+    - "lab_unknown"
+    - "lab_saturated"
+    - "probe_error"
+  # Operator ruling 2026-09-14, firm: a private repository never runs CI on a
+  # GitHub-hosted runner. When hosted is the only placement the policy allows,
+  # the decision is a REFUSAL rather than a silent hosted placement -- which
+  # would not execute in any case, because those minutes are billed.
+  private_repo_hosted_placement: "refuse"
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "SeamUnparseableError"
+      description: "The trusted-CI runner variable did not parse as a JSON array of strings; reported as a probe_error reason and resolved to hosted, never raised"
+      recoverable: false
+    - name: "PlacementRefusedError"
+      description: "A private repository whose only allowed placement is GitHub-hosted; the decision is BLOCKED with no labels and the calling run stops"
+      recoverable: false
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 60
+  checks:
+    - name: "route_handler_loaded"
+      type: "handler"
+      critical: true
+metadata:
+  description: "Per-run CI runner placement: lab fleet when it has headroom, GitHub-hosted when it does not, and never hosted for a private repository"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-09-15"
+  tags:
+    - compute
+    - ci
+    - runner
+    - routing
+    - placement
+  related_tickets:
+    - "OMN-18031"
+    - "OMN-18412"

@@ -46,10 +46,25 @@ on:
         required: false
         default: false
         type: boolean
+      force:
+        description: >-
+          Operator override: auto (decide), fleet, or hosted. Subject to every
+          safety rule rather than a bypass of them -- fleet still cannot widen
+          past the seam ceiling and still cannot take a fork pull request, and
+          hosted is still refused for a private repository. It exists so the
+          kill switch a static seam value provided survives per-run routing.
+        required: false
+        default: auto
+        type: string
     outputs:
       labels:
         description: "runs-on label set, as a JSON array for fromJSON()."
         value: ${{ jobs.route.outputs.labels }}
+      runs_on:
+        description: >-
+          The same label set under the name a consumer reads it by:
+          `runs-on: ${{ fromJSON(needs.route.outputs.runs_on) }}`.
+        value: ${{ jobs.route.outputs.runs_on }}
       decision:
         description: "hosted | self_hosted"
         value: ${{ jobs.route.outputs.decision }}
@@ -74,15 +89,31 @@ jobs:
     timeout-minutes: 2
     outputs:
       labels: ${{ steps.decide.outputs.labels }}
+      runs_on: ${{ steps.decide.outputs.runs_on }}
       decision: ${{ steps.decide.outputs.decision }}
       reason: ${{ steps.decide.outputs.reason }}
     steps:
-      - name: Checkout (decision module + policy)
+      - name: Checkout (routing node + policy)
         uses: actions/checkout@v4
         with:
           # No git operations after checkout — do not leave the Actions token
           # in local git config (zizmor artipacked).
           persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # TWO PINNED PACKAGES, NOT THE PROJECT ENVIRONMENT. The decision needs
+      # the typed models and a YAML parser and nothing else -- it performs no
+      # database, broker or container work -- so this installs exactly that in
+      # seconds rather than syncing the repository's full dependency set on the
+      # critical path of every consuming run. The node's handler is imported
+      # from the checked-out tree, so the decision executing here is the same
+      # code the tests bind to.
+      - name: Install the decision's dependencies
+        run: pip install "pydantic==2.13.4" "PyYAML==6.0.2"
 
       - name: Download the most recent lab-load record
         id: lab
@@ -148,6 +179,7 @@ jobs:
                 || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}
           PUBLIC_JSON: ${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}
           DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
           LAB_RECORD: ${{ steps.lab.outputs.path }}
         run: |
           set -uo pipefail
@@ -160,9 +192,21 @@ jobs:
             --seam-json "${SEAM_JSON}"
             --public-json "${PUBLIC_JSON}"
             --policy config/runner_routing_policy.yaml
+            --force "${FORCE}"
           )
           [ "${DRY_RUN}" = "true" ] && args+=(--dry-run)
           [ -n "${LAB_RECORD}" ] && args+=(--lab-record "${LAB_RECORD}")
+          # THE DECISION IS THE NODE'S. This script is the I/O boundary: it
+          # probes, assembles the node's typed request, and invokes
+          # `node_ci_runner_route_compute`'s handler, whose contract declares
+          # the thresholds, the label sets and the private-repository refusal.
+          #
+          # WHY NOT `onex node <name>`, the sanctioned local node CLI. Measured
+          # 2026-09-15: that path refuses to dispatch unless the workspace venv
+          # carries every sibling package installed from git, which on a hosted
+          # runner means minutes of install on the critical path of every run
+          # for a decision that takes milliseconds. The same handler executes
+          # either way; only the dispatch machinery differs.
           python3 scripts/ci/runner_route_decision.py "${args[@]}" || rc=$?
           # FAIL-CLOSED FLOOR. The module already catches everything internally,
           # but if the interpreter itself could not run, the calling workflow
@@ -170,6 +214,7 @@ jobs:
           # would make every consuming job fail to schedule.
           if [ ! -s "${GITHUB_OUTPUT}" ] || ! grep -q '^labels=' "${GITHUB_OUTPUT}"; then
             echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
+            echo 'runs_on=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
             echo 'decision=hosted' >> "${GITHUB_OUTPUT}"
             echo 'reason=probe_error:module_unavailable' >> "${GITHUB_OUTPUT}"
           fi
