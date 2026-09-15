@@ -470,6 +470,101 @@ def test_the_runner_variables_are_supplied_through_env() -> None:
         assert "--seam-json" in body and "--public-json" in body, workflow_name
 
 
+# --- OMN-18412: the private-repo rule reaches the workflow, not just the module
+
+
+ROUTE_CALL_SITES = (
+    ("runner-route-reusable.yml", "route"),
+    ("runner-route-probe.yml", "route-inline"),
+)
+
+
+def test_both_route_call_sites_give_the_module_a_token_to_read_visibility() -> None:
+    """Without a token the probe returns `unknown` on every run, and the
+    private-repo rule degrades to its weaker half in silence -- a green route
+    job, a plausible record, and no refusal that should have happened.
+
+    The JOB token is what is wired, deliberately: repository metadata is
+    readable under the `metadata: read` scope every Actions token already
+    carries, so the rule costs no new credential and no new scope.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        env = _decide_step(workflow_name, job).get("env") or {}
+        assert "GITHUB_TOKEN" in env, (
+            f"{workflow_name}:{job} gives the module no token, so "
+            f"probe_repo_visibility returns 'unknown' on every run"
+        )
+        assert "github.token" in str(env["GITHUB_TOKEN"]), workflow_name
+
+
+def test_both_route_call_sites_fail_the_run_on_a_refusal() -> None:
+    """A refusal must STOP the run. It is not a crash and not a capacity
+    fallback: it means the only placement this repository's policy allows is
+    one the 2026-09-14 operator ruling forbids.
+
+    Three things are pinned together because each fails on its own. `rc` must
+    be initialised, or `set -u` makes the check itself the error. The exit
+    status must be CAPTURED rather than swallowed. And the run must exit
+    non-zero, or the refusal is a log line that places the jobs anyway.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        assert "rc=0" in body, f"{workflow_name}:{job} leaves rc unset under set -u"
+        assert "|| rc=$?" in body, (
+            f"{workflow_name}:{job} discards the module's exit status, so a "
+            f"refusal is indistinguishable from a successful decision"
+        )
+        assert '[ "${rc}" = "3" ]' in body, workflow_name
+        assert "exit 1" in body, (
+            f"{workflow_name}:{job} reports a refusal without failing the run"
+        )
+
+
+def test_the_refusal_check_runs_after_the_fail_closed_floor() -> None:
+    """ORDER IS THE MECHANISM. The floor writes hosted labels whenever no
+    `labels=` line exists, so that a crashed router still hands the run a
+    usable runs-on. If the refusal check ran first, a refusal would exit before
+    the floor and the ordering would not matter; if the floor ran and then
+    OVERWROTE a refusal, a forbidden hosted placement would be emitted by the
+    very step that exists to make failures safe. The module writes its own
+    `labels=` line before returning 3, which makes the floor a no-op on this
+    path -- and this test pins the arrangement that keeps it one.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        floor = body.index("probe_error:module_unavailable")
+        refusal = body.index('[ "${rc}" = "3" ]')
+        assert floor < refusal, (
+            f"{workflow_name}:{job} checks the refusal before the fail-closed "
+            f"floor, so the floor can overwrite a refusal with hosted labels"
+        )
+
+
+def test_the_refusal_exit_code_matches_the_module() -> None:
+    """The workflow tests a literal 3 and the module returns a named constant.
+    A rename or renumber on either side silently disarms the check, so the two
+    are compared rather than assumed equal.
+    """
+    route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    assert route.REFUSED_EXIT_CODE == 3
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        assert f'[ "${{rc}}" = "{route.REFUSED_EXIT_CODE}" ]' in body, workflow_name
+
+
+def test_visibility_is_read_by_the_module_and_not_interpolated() -> None:
+    """The counterpart to the no-interpolation rule: the fact arrives because
+    the module reads it, so no `--repo-visibility` argument is spelled at
+    either call site. An interpolated `github.event.repository.private` would
+    also be absent from some event payloads, which is the second reason the
+    probe owns this rather than the template.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        assert "--repo-visibility" not in body, workflow_name
+        assert "${{" not in body, workflow_name
+
+
 # --- G6: the first heavy-job consumer of the route output -------------------
 #
 # `lint` is the ONE job whose placement now resolves from the route decision.
@@ -556,6 +651,9 @@ def test_fork_pr_isolation_still_holds_for_the_lint_workflow_path() -> None:
         event_name="pull_request",
         head_repo="a-fork/omnibase_infra",
         repository="OmniNode-ai/omnibase_infra",
+        # omnibase_infra is public, so the OMN-18412 rule is a no-op here and
+        # this stays a statement about fork isolation alone.
+        visibility="public",
         workflow_path=".github/workflows/ci.yml",
         # A seam that DOES permit the lab, so the assertion is about fork
         # isolation and not about today's inert hosted ceiling.
@@ -585,6 +683,9 @@ def test_a_misconfigured_public_variable_cannot_widen_a_fork_onto_the_fleet() ->
         event_name="pull_request",
         head_repo="a-fork/omnibase_infra",
         repository="OmniNode-ai/omnibase_infra",
+        # omnibase_infra is public, so the OMN-18412 rule is a no-op here and
+        # this stays a statement about fork isolation alone.
+        visibility="public",
         workflow_path=".github/workflows/ci.yml",
         seam_json='["self-hosted","omnibase-ci"]',
         public_json='["self-hosted","omnibase-ci"]',

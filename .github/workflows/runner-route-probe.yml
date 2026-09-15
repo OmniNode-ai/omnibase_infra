@@ -80,8 +80,16 @@ jobs:
             ${{ (github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON)
                 || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}
           PUBLIC_JSON: ${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}
+          # OMN-18412: the module reads this repository's visibility itself so a
+          # PRIVATE repository is never downgraded onto a hosted runner. Wired
+          # here as well as in the reusable because this job is the documented
+          # FALLBACK SHAPE -- the one a repository copies if `needs` outputs
+          # ever stop resolving in `runs-on` -- and a fallback that silently
+          # drops the rule is worse than no fallback.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          rc=0
           python3 scripts/ci/runner_route_decision.py \
             --event-name "${EVENT_NAME}" \
             --head-repo "${HEAD_REPO}" \
@@ -89,11 +97,19 @@ jobs:
             --workflow-path ".github/workflows/runner-route-probe.yml" \
             --seam-json "${SEAM_JSON}" \
             --public-json "${PUBLIC_JSON}" \
-            --policy config/runner_routing_policy.yaml || true
+            --policy config/runner_routing_policy.yaml || rc=$?
           if ! grep -q '^labels=' "${GITHUB_OUTPUT}"; then
             echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
             echo 'decision=hosted' >> "${GITHUB_OUTPUT}"
             echo 'reason=probe_error:module_unavailable' >> "${GITHUB_OUTPUT}"
+          fi
+          # OMN-18412 REFUSAL, exit 3: this placement is forbidden rather than
+          # merely unavailable. Not swallowed -- the previous `|| true` would
+          # have handed the consumer an empty label set and produced a job that
+          # fails to SCHEDULE, which reads as a mystery rather than as a rule.
+          if [ "${rc}" = "3" ]; then
+            echo "::error title=Runner route refused::the decision record names the reason; this run is not placed"
+            exit 1
           fi
 
   consume-inline:
