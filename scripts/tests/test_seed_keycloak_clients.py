@@ -216,9 +216,16 @@ class TestClientAttributes:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
 
+        # OMN-16504: the update carries {id, clientId} + the drifted field and
+        # NOTHING else. This assertion used to read `{**existing, ...}` -- it
+        # pinned the full-representation PUT, which is what let an unrelated
+        # drift re-assert `bearerOnly` and make Keycloak clear a confidential
+        # client's secret. Do not restore the spread: the narrow payload is
+        # the fix, not an accident of the fake.
         assert put_payloads == [
             {
-                **existing,
+                "id": existing["id"],
+                "clientId": "omniweb",
                 "attributes": {"pkce.code.challenge.method": "S256"},
             }
         ]
@@ -266,9 +273,12 @@ class TestClientAttributes:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
 
+        # OMN-16504: narrow payload only -- see the note on the attribute-drift
+        # test above for why the `{**existing, ...}` spread was removed.
         assert put_payloads == [
             {
-                **existing,
+                "id": existing["id"],
+                "clientId": "omniweb",
                 "webOrigins": [
                     "https://app.omninode.ai",
                     "https://dev.app.omninode.ai",
