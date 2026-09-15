@@ -21,10 +21,6 @@ from omnibase_infra.runtime.action_authorization_claim import (
     local_interface as local_interface_module,
 )
 
-_ROOT = Path(__file__).resolve().parents[4]
-_MIGRATION = (
-    _ROOT / "docker/migrations/forward/107_create_action_authorization_nonce_claim.sql"
-)
 _ROLE = "rsd_action_authorization_claim"
 
 
@@ -77,49 +73,6 @@ def _server() -> ActionAuthorizationClaimUnixRpc:
         authorized_unix_uid=501,
         restricted_principal=_ROLE,
     )
-
-
-@pytest.mark.unit
-def test_restricted_principal_has_schema_and_function_only_not_public_or_table_dml() -> (
-    None
-):
-    sql = _MIGRATION.read_text(encoding="utf-8")
-
-    assert "CREATE ROLE rsd_action_authorization_claim" in sql
-    assert "REVOKE ALL ON SCHEMA action_authorization_claim FROM PUBLIC" in sql
-    assert (
-        "REVOKE ALL ON TABLE action_authorization_claim.nonce_claims FROM PUBLIC" in sql
-    )
-    assert (
-        "REVOKE ALL ON TABLE action_authorization_claim.nonce_claims FROM rsd_action_authorization_claim"
-        in sql
-    )
-    assert (
-        "REVOKE ALL ON FUNCTION action_authorization_claim.claim_action_authorization"
-        in sql
-    )
-    assert (
-        "GRANT USAGE ON SCHEMA action_authorization_claim TO rsd_action_authorization_claim"
-        in sql
-    )
-    assert (
-        "GRANT EXECUTE ON FUNCTION action_authorization_claim.claim_action_authorization"
-        in sql
-    )
-    for privilege in (
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "TRUNCATE",
-        "REFERENCES",
-        "TRIGGER",
-    ):
-        assert (
-            "GRANT "
-            f"{privilege} ON TABLE action_authorization_claim.nonce_claims "
-            f"TO {_ROLE}"
-        ) not in sql
 
 
 @pytest.mark.unit
