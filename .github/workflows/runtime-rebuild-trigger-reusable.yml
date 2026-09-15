@@ -88,6 +88,17 @@ on:
         description: "Merged PR number, recorded in requested_by"
         required: true
         type: string
+      infra_ref:
+        description: >-
+          Ref the verify-sibling-converged guard checks THIS repository out at,
+          to supply the scripts that job invokes. Leave unset in normal use: the
+          default is github.job_workflow_sha, which is exactly the SHA the caller
+          pinned this reusable workflow to, so the YAML spelling a script's
+          arguments and the script itself are one commit behind one pin and
+          cannot drift apart (OMN-18200, OMN-16723).
+        required: false
+        default: ""
+        type: string
     secrets:
       KAFKA_SASL_USERNAME:
         required: true
@@ -125,6 +136,27 @@ jobs:
       # Into the workspace ROOT, so `./.github/actions/setup-python-uv` below
       # resolves against omnibase_infra rather than the caller's tree, and so
       # the primary ref is read from a real clone instead of an API call.
+      # reusable-checkout-ref-ok: trigger-rebuild OMN-18200 this clone's HEAD IS
+      # the published PRIMARY_REF, so it must be dev, not this workflow's commit.
+      #
+      # Deliberately NOT pinned to `github.job_workflow_sha`, unlike the
+      # verify-sibling-converged checkout below, and the difference is worth
+      # stating because the two look identical. This checkout does two jobs: it
+      # supplies `./.github/actions/setup-python-uv` and the publisher script,
+      # AND the next step reads its HEAD as the omnibase_infra revision the lane
+      # is told to rebuild at (`steps.primary`, published as `--primary-ref`).
+      # The second job wants dev HEAD by definition. Pinning it to this
+      # workflow's own commit -- which is an OLDER commit of dev, whatever the
+      # caller last bumped its `uses:` to -- would silently rebuild the lane at a
+      # stale infra revision, which is a worse defect than the one being fixed.
+      #
+      # Residual, stated rather than left implicit: the publisher script this
+      # step runs therefore still floats against the pinned YAML that invokes it,
+      # the same class as the probe-lane skew below. It has not bitten because
+      # the publisher's arguments have been stable, not because it cannot.
+      # Closing it properly means separating the two jobs -- a pinned script
+      # checkout plus a distinct read of dev HEAD for PRIMARY_REF -- which is a
+      # behaviour change to what gets published and belongs in its own PR.
       - name: Checkout omnibase_infra (the build-context repository)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -215,19 +247,28 @@ jobs:
       needs.trigger-rebuild.outputs.published == 'true' &&
       needs.trigger-rebuild.outputs.runtime_lane == 'dev'
     # The lane's docker daemon is on the LAN; hosted compute cannot see it. The
-    # checkout below is pinned to omnibase_infra dev, so no caller-authored code
-    # executes on the fleet.
+    # checkout below is pinned to a commit of omnibase_infra, so no
+    # caller-authored code executes on the fleet.
     runs-on: [self-hosted, omnibase-deploy]
     # 25-minute convergence wait plus a tail for the probe, the emit and the
     # upload. A job killed by timeout uploads NO receipt, which is the one
     # outcome worse than a failing one.
     timeout-minutes: 30
     steps:
+      # Same pin, and this is the one that actually broke. The probe step below
+      # spells `lab_pass_receipt.py probe-lane`'s arguments in YAML resolved at
+      # the caller's pin, and runs the script from THIS checkout. At `ref: dev`
+      # the two were different commits, so when OMN-18387 made
+      # `--projection-url` required and updated its caller in the same commit,
+      # omnimarket's pinned YAML kept invoking the new script without it:
+      # run 35019423922 (2026-09-15T20:24Z) exit 2, "refusing to emit an invalid
+      # receipt", a FAIL compose-dev receipt -- which under rule 24(b) is a
+      # delivery outage, not a cosmetic one.
       - name: Checkout omnibase_infra (the guard's own repository)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_infra
-          ref: dev
+          ref: ${{ inputs.infra_ref || github.job_workflow_sha }}
           persist-credentials: false
 
       - name: Set up CI Python environment
