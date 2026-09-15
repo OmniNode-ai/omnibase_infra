@@ -3392,8 +3392,7 @@ def virgin_pg_target() -> Iterator[PgTarget]:
 @pytest.fixture
 def virgin_node_db(virgin_pg_target: PgTarget) -> Iterator[str]:
     """A separate node database against ``virgin_pg_target``'s coordinates —
-    mirrors ``node_db`` above, but bound to the un-seeded target so both
-    databases in the pair are genuinely virgin.
+    mirrors ``node_db`` above, but bound to the un-seeded target.
 
     Named LITERALLY ``omnidash_analytics``, not randomly: several REAL flat
     migrations (e.g. ``083_create_log_entries.sql``) hardcode
@@ -3405,6 +3404,14 @@ def virgin_node_db(virgin_pg_target: PgTarget) -> Iterator[str]:
     unrelated reason, not prove or disprove the guard fix. ``virgin_pg_target``
     (a private ephemeral cluster, or a scratch external server used by one
     test at a time) makes the literal name safe.
+
+    Migration 107 is in the flat tree and deliberately refuses to create
+    ``action_authorization_claim`` itself because managed lanes must provision
+    that schema through the application-database provisioning seam before the
+    forward runner starts. The fixture creates only that required schema in
+    the flat-runner database and the node database, then leaves the committed
+    runner and migration tree to prove the same cold-lane behavior these tests
+    own.
     """
     admin = PgTarget(
         host=virgin_pg_target.host,
@@ -3415,6 +3422,15 @@ def virgin_node_db(virgin_pg_target: PgTarget) -> Iterator[str]:
     )
     name = "omnidash_analytics"
     _psql(admin, f'CREATE DATABASE "{name}"')
+    _psql(admin, "CREATE SCHEMA action_authorization_claim")
+    node = PgTarget(
+        host=virgin_pg_target.host,
+        port=virgin_pg_target.port,
+        user=virgin_pg_target.user,
+        password=virgin_pg_target.password,
+        dbname=name,
+    )
+    _psql(node, "CREATE SCHEMA action_authorization_claim")
     try:
         yield name
     finally:
