@@ -169,6 +169,12 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.gate_binding import (
+    EnumGateBindingProbe,
+    declared_form_summary,
+    gate_binding_line,
+    resolve_gate_binding,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.cascade_supersession import (
     resolve_verified_supersession,
 )
@@ -1815,30 +1821,40 @@ def _live_acceptance_criteria_items(description: str) -> list[str]:
     return live
 
 
-# -- the gate probe a ticket names for itself (OMN-16106) -------------------
+# -- the gate probe a ticket names for itself (OMN-16106, OMN-18414) --------
 #
-# A `Gate:` line in the Linear description is the ticket telling this mechanism
-# where its own proof lives. Two forms are accepted and one of them is a hold:
+# A `Gate:` line in the Linear description is the ticket naming the commitment
+# it exists to serve, and -- for one of the five declared forms -- the live
+# surface that PROVES it.
 #
-#     Gate: OmniNode-ai/omnibase_infra chain-canary.yml   -> resolvable
-#     Gate: chain-canary.yml                              -> HOLD, no repo
+# OMN-18414: THE GRAMMAR IS NOT SPELLED HERE ANY MORE. It is declared once in
+# `omnibase_infra/contracts/gate_binding_grammar.json` and read by both
+# consumers of the key. Until that contract existed this module accepted
+# exactly one form -- `<owner>/<repo> <workflow-file.yml>` -- and omniclaude's
+# ticket-creation admission guard, which is the AUTHORING authority for the
+# same key, mandated four entirely different ones. The two sets did not
+# overlap, so every ticket the guard admitted arrived here as an unreadable
+# declaration and was held; the form this module required would have been
+# refused at creation. Four Done-candidates (OMN-18403, OMN-18387, OMN-18368,
+# OMN-18365) were held on nothing else at the 2026-09-15T21:34Z dry-run tick.
 #
-# The second is refused rather than guessed at. Defaulting the repo to the one
-# the companion happens to live in would resolve a DIFFERENT workflow with the
-# same filename and report its colour as this ticket's proof, which is a worse
-# failure than declining to answer.
-# The case-insensitivity is an INLINE `(?i)` flag rather than a `re.IGNORECASE |
-# re.MULTILINE` flags argument: the union-usage ratchet counts that `|` as a type
-# union and fails the commit. It is a runtime bitwise-or of two ints, not a type
-# union, so the ratchet is miscounting — but raising a ceiling to get past a
-# false positive is how ceilings stop meaning anything, and the inline form is
-# equivalent.
-_GATE_PROBE_RE = re.compile(
-    r"(?i)^[ \t>*_]*(?:\*\*)?gate(?:\s+probe)?(?:\*\*)?[ \t]*:[ \t]*(.+?)[ \t]*$",
-    re.MULTILINE,
-)
-_GATE_PROBE_REPO_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$")
-_GATE_PROBE_WORKFLOW_RE = re.compile(r"^[A-Za-z0-9_.-]+\.ya?ml$")
+# What did NOT change is the conjunct's purpose. A form the contract marks
+# `workflow_run` is still a proof pointer and anything but `success` still
+# holds the flip -- the OMN-16025 case that motivated OMN-16106 (counters 6/12
+# with 0 failed, against a chain-canary that was `failure` on every run that
+# day) behaves identically. What changed is that the four TRACEABILITY forms
+# are now read as what they are instead of as unreadable text. The contract's
+# `$comment` carries the live evidence for why resolving those four to a probe
+# is refuted rather than merely unimplemented: the beta board is generated FROM
+# Linear, so probing it to decide a Linear flip is a cycle, and a live-gate
+# defect names a surface that is red by construction at filing time.
+#
+# Text matching NO declared form is still a HOLD, and the hold now names the
+# forms that would have been readable. Defaulting a bare workflow filename to
+# whichever repository the companion happens to live in would resolve a
+# DIFFERENT workflow of the same name and report its colour as this ticket's
+# proof, which remains a worse failure than declining to answer.
+
 # Conclusions that are not `success` and are not "still deciding". A probe in
 # any of these states has NOT proved the ticket.
 _GATE_PROBE_RED_CONCLUSIONS = frozenset(
@@ -1846,28 +1862,43 @@ _GATE_PROBE_RED_CONCLUSIONS = frozenset(
 )
 
 
-def _gate_probe_declaration(description: str) -> tuple[str, str, str]:
-    """Parse the ticket's own ``Gate:`` line into ``(repo, workflow, raw)``.
+def _gate_binding_probe_target(description: str) -> tuple[str, str, str]:
+    """Decide what the ticket's own ``Gate:`` line requires to be read live.
 
-    ``raw`` is the declared text, empty when the ticket names no probe at all.
-    A ``raw`` that is non-empty with an empty ``repo``/``workflow`` is a
-    declaration this sweep cannot resolve -- which is a HOLD, never a pass.
+    Returns ``(repo, workflow, hold_reason)``. Exactly three outcomes:
+
+    * ``("", "", "")`` -- nothing to probe. Either the description declares no
+      binding at all, or it declares one of the traceability forms, which name
+      a commitment rather than a surface. This is NOT a pass on the ticket:
+      every other conjunct of the sweep still applies.
+    * ``(repo, workflow, "")`` -- a proof pointer. Read that workflow's newest
+      completed run and hold on anything but ``success``.
+    * ``("", "", reason)`` -- the line declares a binding matching no declared
+      form. HELD, never passed, and the reason names the accepted forms.
+
+    Pure: no I/O, so every branch is exercised without a network.
     """
-    matches = _GATE_PROBE_RE.findall(description)
-    if not matches:
+    raw = gate_binding_line(description)
+    if not raw:
         return "", "", ""
-    # Last declaration wins: a description edited to re-point its gate should
-    # not be judged against the line it replaced.
-    raw = str(matches[-1]).strip().strip("`").strip()
-    parts = raw.split()
-    if len(parts) != 2:
-        return "", "", raw
-    repo, workflow = parts[0].strip("`"), parts[1].strip("`")
-    if not _GATE_PROBE_REPO_RE.match(repo):
-        return "", "", raw
-    if not _GATE_PROBE_WORKFLOW_RE.match(workflow):
-        return "", "", raw
-    return repo, workflow, raw
+    binding = resolve_gate_binding(description)
+    if binding is None:
+        return (
+            "",
+            "",
+            (
+                f"the ticket declares a gate binding `{raw}` matching no form "
+                f"of the declared grammar. Accepted forms are "
+                f"{declared_form_summary()}. A binding nobody can read is not "
+                "a binding, and guessing at one is how the authoring and "
+                "reading grammars drifted apart (OMN-18414)."
+            ),
+        )
+    if binding.probe is not EnumGateBindingProbe.WORKFLOW_RUN:
+        # A traceability binding. It says which commitment this ticket serves;
+        # it does not name a surface, so there is nothing here to read live.
+        return "", "", ""
+    return binding.groups["repo"], binding.groups["workflow"], ""
 
 
 def _ac_coverage_gap(
@@ -4844,30 +4875,28 @@ class HandlerEvidenceAutocloseSweep:
     async def _gate_probe_verdict(
         self, *, description: str, gh_timeout_seconds: float
     ) -> tuple[str, str, str]:
-        """Resolve the ticket's declared gate probe.
+        """Resolve the ticket's declared gate binding, reading live where one applies.
 
         Returns ``(workflow_ref, conclusion, hold_reason)``. A non-empty
-        ``hold_reason`` means the flip must be HELD -- either the probe is red
-        or it could not be resolved. Every ambiguous branch fails closed: a
-        ticket that names its own proof and cannot produce it is not a ticket
-        to close on arithmetic.
+        ``hold_reason`` means the flip must be HELD -- either the probe is red,
+        or it could not be read, or the binding line matches no declared form.
+        Every ambiguous branch fails closed: a ticket that names its own proof
+        and cannot produce it is not a ticket to close on arithmetic.
+
+        All three empty means there was nothing to read -- no binding, or one of
+        the four TRACEABILITY forms, which name the commitment a ticket serves
+        rather than a surface that proves it. That is not a pass; it is the
+        absence of a proof pointer, and every other conjunct still applies.
+        Which forms probe and which do not is declared in the grammar contract,
+        not decided here (OMN-18414).
         """
-        repo, workflow, raw = _gate_probe_declaration(description)
-        if not raw:
-            return "", "", ""
-        workflow_ref = f"{repo} {workflow}".strip() or raw
+        repo, workflow, unreadable = _gate_binding_probe_target(description)
+        if unreadable:
+            return gate_binding_line(description), "", unreadable
         if not repo or not workflow:
-            return (
-                workflow_ref,
-                "",
-                (
-                    f"the ticket declares a gate probe `{raw}` that does not "
-                    "resolve to `<owner>/<repo> <workflow-file.yml>`. The "
-                    "workflow filename alone is ambiguous across repos, and "
-                    "reading the wrong workflow's colour as this ticket's "
-                    "proof is worse than declining to answer."
-                ),
-            )
+            # No binding, or a traceability binding. Nothing to read live.
+            return "", "", ""
+        workflow_ref = f"{repo} {workflow}"
         payload, error = await self._run_gh_command(
             [
                 "gh",
