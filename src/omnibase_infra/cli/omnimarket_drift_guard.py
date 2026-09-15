@@ -139,7 +139,7 @@ class PathOnexResolutionStatus(StrEnum):
     RESOLVE_FAILED = "resolve_failed"
 
 
-_DIAGNOSTIC_EXCEPTIONS = (OSError, RuntimeError, ValueError)
+_DIAGNOSTIC_EXCEPTIONS = (OSError, ValueError)
 
 
 def _diagnostic_error(exc: BaseException) -> str:
@@ -148,6 +148,13 @@ def _diagnostic_error(exc: BaseException) -> str:
 
 class OmnimarketDriftError(RuntimeError):
     """Raised when the installed omnimarket commit diverges from canonical."""
+
+
+def _path_onex_executable(identity: PathOnexIdentity) -> str:
+    """Return the PATH executable without relying on optimisable assertions."""
+    if identity.executable is None:
+        return "<invalid-path-onex-identity>"
+    return identity.executable
 
 
 def installed_omnimarket_commit() -> str | None:
@@ -222,6 +229,9 @@ def _path_onex_identity() -> PathOnexIdentity | None:
     if not path_onex:
         return None
     try:
+        # shutil.which() and resolve() cannot be atomic: PATH entries can be
+        # replaced between lookup and identity comparison. The result is used
+        # only for operator diagnosis and never to authorize execution.
         return PathOnexIdentity(
             status=PathOnexResolutionStatus.RESOLVED,
             executable=path_onex,
@@ -471,10 +481,10 @@ def check_omnimarket_drift(
                     f"resolved: {path_onex_identity.resolution_error}."
                 )
             else:
-                assert path_onex_identity.executable is not None
+                path_onex_executable = _path_onex_executable(path_onex_identity)
                 path_diagnosis = (
                     "PATH resolves 'onex' to "
-                    f"{path_onex_identity.executable}, but that entry's "
+                    f"{path_onex_executable}, but that entry's "
                     "filesystem identity cannot be compared: "
                     f"{path_onex_identity.resolution_error}."
                 )
@@ -486,22 +496,23 @@ def check_omnimarket_drift(
                     "canonical wrapper resolution failed: "
                     f"{canonical_wrapper_resolution_error}"
                 )
-            assert path_onex_identity.executable is not None
+            path_onex_executable = _path_onex_executable(path_onex_identity)
             path_diagnosis = (
                 "PATH resolves 'onex' to "
-                f"{path_onex_identity.executable}, but the canonical wrapper's "
+                f"{path_onex_executable}, but the canonical wrapper's "
                 f"filesystem identity cannot be compared ({canonical_detail})."
             )
         elif path_onex_identity.identity == canonical_wrapper_identity:
+            path_onex_executable = _path_onex_executable(path_onex_identity)
             path_diagnosis = (
                 "PATH resolves 'onex' through the canonical wrapper: "
-                f"{path_onex_identity.executable}."
+                f"{path_onex_executable}."
             )
         else:
-            assert path_onex_identity.executable is not None
+            path_onex_executable = _path_onex_executable(path_onex_identity)
             path_diagnosis = (
                 "PATH resolves 'onex' to an entry that is not the canonical "
-                f"wrapper by filesystem identity: {path_onex_identity.executable}. "
+                f"wrapper by filesystem identity: {path_onex_executable}. "
                 f"Canonical wrapper: {canonical_wrapper}."
             )
         detail = (
