@@ -36,14 +36,18 @@ Environment
 -----------
 ``OMNIBASE_INFRA_DB_URL`` pointing at a database migrated with
 ``scripts/run-migrations.py`` (the environment ci.yml's ``integration-guard``
-job builds), as
-a role that may CREATE ROLE. Skips when Postgres is unset or unreachable, like
-the sibling real-DB proofs. A reachable database WITHOUT migration 106 fails.
+job builds), as a role that may CREATE ROLE. Skips when Postgres is unset or
+unreachable, like the sibling real-DB proofs. A reachable database WITHOUT
+migration 106 fails. With ``OMN18172_REQUIRE_PG=1`` (set by that CI step and by
+the evidence check, Jonah OMN-18172 comment c02674f2) an unset or unreachable
+Postgres FAILS instead of skipping: a runner that reads only the exit status
+would otherwise take a skip for a pass that asserted nothing.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import secrets
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -100,17 +104,35 @@ POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable
     timeout=1.0,
 )
 
+_REQUIRE_PG_ENV = "OMN18172_REQUIRE_PG"
+REQUIRE_PG = os.environ.get(_REQUIRE_PG_ENV) == "1"
+_POSTGRES_UNAVAILABLE_REASON = (
+    "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL to a database "
+    "migrated with scripts/run-migrations.py)"
+)
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.postgres,
+    # Under OMN18172_REQUIRE_PG=1 nothing in this module may skip; the autouse
+    # fixture below fails every test instead.
     pytest.mark.skipif(
-        not POSTGRES_AVAILABLE,
-        reason=(
-            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL to a database "
-            "migrated with scripts/run-migrations.py)"
-        ),
+        not POSTGRES_AVAILABLE and not REQUIRE_PG,
+        reason=_POSTGRES_UNAVAILABLE_REASON,
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _postgres_required_when_flagged() -> None:
+    if REQUIRE_PG and not POSTGRES_AVAILABLE:
+        pytest.fail(
+            f"{_REQUIRE_PG_ENV}=1 but {_POSTGRES_UNAVAILABLE_REASON}: "
+            "OMNIBASE_INFRA_DB_URL is unset, malformed, or unreachable. This proof "
+            "fails closed rather than skipping, so a Postgres-absent run cannot "
+            "read as a pass."
+        )
+
 
 # Fixed, real UUIDs: one canary run, and its provenance-less control.
 CANARY_CID = UUID("18172a01-0001-4001-8001-181720000001")
