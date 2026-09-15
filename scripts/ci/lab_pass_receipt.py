@@ -510,11 +510,22 @@ def check_ready(name: str, url: str, timeout_seconds: float) -> ModelLabPassChec
 
 def check_projections_ready(url: str, timeout_seconds: float) -> ModelLabPassCheck:
     """The projection API's ``/projections`` endpoint must answer 200 with a
-    parseable ``projections`` list (OMN-18387).
+    parseable ``topics`` list (OMN-18387).
 
-    Deliberately NOT a check of any one projection's ``cursor_column`` --
-    that would tie this general readiness probe to one topic's schema and
-    break the moment a projection is renamed or removed. What this asserts is
+    The top-level key is ``topics``, not ``projections`` -- confirmed against
+    the live dev-lane container 2026-09-15 (``curl http://localhost:3002/projections``
+    returns ``{"topics": [{"topic": ..., "cursor_column": ..., ...}, ...]}``,
+    61 entries on that read). The first revision of this check assumed
+    ``projections`` from the endpoint's own path name and from the ticket's
+    diagnostic probe, and that assumption was never verified against a live
+    response before landing -- exactly the class of error rule 16 exists to
+    catch. It read every real 200 as a failure, including a freshly-deployed
+    container, which would have made this check permanently red and useless
+    as a lab-pass gate rather than merely wrong on a stale one.
+
+    Deliberately NOT a check of any one entry's ``cursor_column`` -- that
+    would tie this general readiness probe to one topic's schema and break
+    the moment a projection is renamed or removed. What this asserts is
     exactly what ``omnimarket-projection-api`` staying five days stale would
     have failed: the container the deploy agent's up-target/verification set
     now reaches (see OMN-18387's parity fix in
@@ -535,20 +546,20 @@ def check_projections_ready(url: str, timeout_seconds: float) -> ModelLabPassChe
             ok=False,
             evidence=f"GET {url} -> 200 but body is not JSON: {exc}",
         )
-    projections = payload.get("projections") if isinstance(payload, dict) else None
-    if not isinstance(projections, list):
+    topics = payload.get("topics") if isinstance(payload, dict) else None
+    if not isinstance(topics, list):
         return ModelLabPassCheck(
             name="projection_ready",
             ok=False,
             evidence=(
-                f"GET {url} -> 200 but carries no 'projections' list; an "
+                f"GET {url} -> 200 but carries no 'topics' list; an "
                 "absent list is not a serving projection API"
             ),
         )
     return ModelLabPassCheck(
         name="projection_ready",
         ok=True,
-        evidence=f"GET {url} -> 200, {len(projections)} projection(s) reported",
+        evidence=f"GET {url} -> 200, {len(topics)} topic(s) reported",
     )
 
 
