@@ -167,6 +167,15 @@ def _only_state_row(
     return key, prior_payload_json, version
 
 
+def _quote_ident(value: str) -> str:
+    escaped = value.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _quote_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 _TABLE = "delegation_workflow_state"
 # scripts/run-forward-migrations.sh LOGIN_ONLY_ROLE_GRANT_MAP, chain_canary_reader.
 _READER_GRANT_COLUMNS = "correlation_id, state, traffic_class"
@@ -327,8 +336,16 @@ async def _run_canary(
     probe_correlation_id: UUID,
     run_correlation_id: UUID,
 ) -> ModelChainCanaryResult:
-    # The handler mints its probe id with uuid4(); pin it to a known real UUID.
-    monkeypatch.setattr(handler_chain_canary, "uuid4", lambda: probe_correlation_id)
+    minted_probe_ids = iter((probe_correlation_id,))
+
+    def _next_probe_uuid() -> UUID:
+        try:
+            return next(minted_probe_ids)
+        except StopIteration:
+            pytest.fail("HandlerChainCanary minted more UUIDs than this proof binds")
+
+    # The handler mints exactly one probe id with uuid4(); pin it to a known UUID.
+    monkeypatch.setattr(handler_chain_canary, "uuid4", _next_probe_uuid)
     handler = HandlerChainCanary(
         ingress=ingress,
         quarantine_scan=_quarantine_clean,
@@ -378,8 +395,8 @@ async def admin_connection(
                 f"(is_generated={generated!r}): apply the forward migrations "
                 "through 106 with scripts/run-migrations.py first"
             )
-        canary_cid, control_cid, _ = probe_ids
-        test_keys = [str(canary_cid), str(control_cid)]
+        canary_cid, control_cid, run_cid = probe_ids
+        test_keys = [str(canary_cid), str(control_cid), str(run_cid)]
         await connection.execute(
             f"DELETE FROM {_TABLE} WHERE correlation_id = ANY($1::text[])",  # noqa: S608 - module constant
             test_keys,
@@ -399,19 +416,25 @@ async def canary_reader_dsn(
 ) -> AsyncIterator[str]:
     """A least-privilege LOGIN role with the chain_canary_reader column grant."""
     role = f"omn18172_canary_reader_{secrets.token_hex(4)}"
+    role_sql = _quote_ident(role)
     password = secrets.token_hex(24)
+    role_created = False
     await admin_connection.execute(
-        f"CREATE ROLE {role} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB "
-        f"NOCREATEROLE NOREPLICATION PASSWORD '{password}'"
+        f"CREATE ROLE {role_sql} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB "
+        f"NOCREATEROLE NOREPLICATION PASSWORD {_quote_literal(password)}"
     )
+    role_created = True
     try:
-        database = await admin_connection.fetchval("SELECT current_database()")
-        await admin_connection.execute(
-            f'GRANT CONNECT ON DATABASE "{database}" TO {role}'
+        database = cast(
+            "str",
+            await admin_connection.fetchval("SELECT current_database()"),
         )
-        await admin_connection.execute(f"GRANT USAGE ON SCHEMA public TO {role}")
         await admin_connection.execute(
-            f"GRANT SELECT ({_READER_GRANT_COLUMNS}) ON public.{_TABLE} TO {role}"
+            f"GRANT CONNECT ON DATABASE {_quote_ident(database)} TO {role_sql}"
+        )
+        await admin_connection.execute(f"GRANT USAGE ON SCHEMA public TO {role_sql}")
+        await admin_connection.execute(
+            f"GRANT SELECT ({_READER_GRANT_COLUMNS}) ON public.{_TABLE} TO {role_sql}"
         )
         yield PostgresConfig(
             host=_postgres_config.host,
@@ -421,9 +444,10 @@ async def canary_reader_dsn(
             password=password,
         ).build_dsn()
     finally:
-        # DROP OWNED also revokes the role's database-level and column grants.
-        await admin_connection.execute(f"DROP OWNED BY {role}")
-        await admin_connection.execute(f"DROP ROLE IF EXISTS {role}")
+        if role_created:
+            # DROP OWNED revokes privileges granted to the temporary role.
+            await admin_connection.execute(f"DROP OWNED BY {role_sql}")
+        await admin_connection.execute(f"DROP ROLE IF EXISTS {role_sql}")
 
 
 @pytest.fixture
@@ -446,6 +470,18 @@ async def _read_as_canary_reader(reader_dsn: str, cid: UUID) -> asyncpg.Record |
             f"SELECT state, traffic_class FROM {_TABLE} WHERE correlation_id = $1",  # noqa: S608 - module constant
             str(cid),
         )
+    finally:
+        await connection.close()
+
+
+async def _assert_payload_denied_for_canary_reader(reader_dsn: str, cid: UUID) -> None:
+    connection = await asyncpg.connect(reader_dsn, timeout=10.0)
+    try:
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await connection.fetchval(
+                f"SELECT payload FROM {_TABLE} WHERE correlation_id = $1",  # noqa: S608 - module constant
+                str(cid),
+            )
     finally:
         await connection.close()
 
@@ -493,6 +529,7 @@ async def test_canary_delegation_terminal_row_stores_traffic_class_synthetic(
     row = await _read_as_canary_reader(canary_reader_dsn, canary_cid)
     assert row is not None
     assert (row["state"], row["traffic_class"]) == ("COMPLETED", "synthetic")
+    await _assert_payload_denied_for_canary_reader(canary_reader_dsn, canary_cid)
 
 
 async def test_request_without_provenance_stores_unclassified_never_synthetic(
@@ -539,3 +576,14 @@ async def test_request_without_provenance_stores_unclassified_never_synthetic(
     row = await _read_as_canary_reader(canary_reader_dsn, control_cid)
     assert row is not None
     assert (row["state"], row["traffic_class"]) == ("COMPLETED", "unclassified")
+    await _assert_payload_denied_for_canary_reader(canary_reader_dsn, control_cid)
+
+    stored = await admin_connection.fetchrow(
+        f"SELECT state, payload FROM {_TABLE} WHERE correlation_id = $1",  # noqa: S608 - module constant
+        str(control_cid),
+    )
+    assert stored is not None
+    assert stored["state"] == "COMPLETED"
+    payload = cast("dict[str, Any]", json.loads(stored["payload"]))
+    request = cast("dict[str, Any]", payload["request"])
+    assert "provenance" not in request
