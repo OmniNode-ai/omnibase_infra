@@ -1701,15 +1701,20 @@ services:
   # this file: a fleet-wide recreate costs about three hours and cannot be
   # parallelised (see the OMN-18188 note on the lab-credentials mount above).
   #
-  # RESIDUAL, STATED RATHER THAN LEFT TO BE DISCOVERED: runner-monitor.sh scopes
-  # every check to services matching `^omninode-runner-[0-9]+$` and to GitHub
-  # runner names starting with that same prefix, so this pair is invisible to
-  # its health alerting and to its auto-bounce. That is deliberate for now --
-  # auto-bounce recreating a runner is the behaviour with the sharpest edge on
-  # this host -- but it means an offline customer-plane runner is noticed by the
-  # probe failing to schedule, not by a Slack alert. Widening the monitor is a
-  # separate change; do not widen the prefix regex, which would also pull
-  # `omninode-deploy-runner` in.
+  # MONITORING (OMN-18396). runner-monitor.sh's main detection loop scopes
+  # every check to services matching `^omninode-runner-[0-9]+$`, so this pair
+  # is invisible to it. A dedicated, alert-only block added by OMN-18396
+  # checks Docker + GitHub-registration status for exactly these two names and
+  # feeds an outage into the same Slack alert path -- an offline
+  # customer-plane runner is now paged, not only noticed by the reachability
+  # probe failing to schedule. AUTO-BOUNCE remains OUT of scope: that block
+  # never adds either name to `collect_remediation_targets()`'s input lists,
+  # and `collect_remediation_targets()` itself still hard-filters on
+  # `^omninode-runner-[0-9]+$`, so this pair cannot become a bounce target
+  # through this monitor. Building real auto-bounce for this family (its own
+  # expected-count bound, offline-age state, crash-loop/stuck-Created
+  # detection) is a separate, larger change. Do not widen the general-pool
+  # prefix regex, which would also pull `omninode-deploy-runner` in.
   omninode-customer-plane-runner-1:
     image: omninode-runner:latest
     container_name: omninode-customer-plane-runner-1
