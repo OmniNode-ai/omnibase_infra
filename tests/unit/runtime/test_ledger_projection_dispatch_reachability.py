@@ -129,8 +129,9 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
     (same one-entry-per-topic pattern), and OMN-15168 added 1 more paired
     entry for steel_onslaught's forwarded terminal-match topic. OMN-18013 then
     deleted the six DLQ subscriptions whose names derive no message category
-    (dispatch rejected every message on them), so wiring_count is 20, one per
-    topic-scoped dispatcher.
+    (dispatch rejected every message on them), reducing wiring_count to 20.
+    OMN-16964 then added the four delegation-chain audit topics, so the current
+    wiring_count is 24, one per topic-scoped dispatcher.
     """
     outcome, wiring_count, reason = await _wire(with_applier=True)
 
@@ -139,8 +140,8 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
         f"reason={reason!r}). A raw audit/projection contract that does not reach "
         "WIRED never creates a consumer, so event_ledger stays empty."
     )
-    assert wiring_count == 20, (
-        f"expected 20 wired handlers (1 per topic), got {wiring_count}"
+    assert wiring_count == 24, (
+        f"expected 24 wired handlers (1 per topic), got {wiring_count}"
     )
 
 
