@@ -1474,8 +1474,16 @@ services:
   # exactly why the gap went unnoticed.
   #
   # BLAST RADIUS. The group is `visibility: selected` over precisely the two
-  # repositories that reference the label -- omnibase_infra and omnimarket --
-  # with `allows_public_repositories: false`. omniclaude and omnibase_core were
+  # repositories that reference the label -- omnibase_infra and omnimarket.
+  # That repository access list is the whole of the control. The group also
+  # carries `allows_public_repositories: true`, which is NOT a widening and is
+  # NOT optional: both repositories are PUBLIC, and a group with that flag
+  # false refuses their jobs SILENTLY -- the job queues forever with no runner
+  # and no error, which is the exact symptom this ticket exists to remove. It
+  # was set false first, on the assumption that these repositories were
+  # private, and a dispatched probe job sat queued against an online, idle
+  # runner until the flag was corrected. The shared omnibase-ci group carries
+  # the same flag for the same reason. omniclaude and omnibase_core were
   # checked on 2026-09-15 and have no runtime-rebuild-trigger workflow at all,
   # so they are deliberately NOT in the group; add a repository here only when
   # it actually calls the reusable. This DOES widen the surface: any workflow
