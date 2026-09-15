@@ -417,7 +417,7 @@ jobs:
         if: always()
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
-          DEPLOYED_REVISION_VERDICT: ${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}
+          CONVERGE_OUTCOME: ${{ steps.converge.outcome }}
           # OMN-18388 AC2. The guard writes one line naming the revision the lane
           # was actually observed at and how it relates to the merge sha
           # ("lane at 0d0250a6c31f, which contains merge sha 18b539f0f76f, 6
@@ -438,7 +438,24 @@ jobs:
           # an empty evidence field is refused by ModelLabPassCheck, so the
           # receipt would not be written at all -- and an unwritten receipt is
           # the one outcome worse than a failing one.
-          EVIDENCE="${CONVERGE_EVIDENCE:-check_dev_lane_staleness.py --expect-revision $MERGE_SHA against the omnibase-infra compose project (the guard wrote no evidence)}"
+          if [[ "$MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            SAFE_MERGE_SHA="$MERGE_SHA"
+          else
+            SAFE_MERGE_SHA="<invalid-merge-sha>"
+          fi
+          case "$CONVERGE_OUTCOME" in
+            success)
+              DEPLOYED_REVISION_VERDICT=ok
+              ;;
+            failure)
+              DEPLOYED_REVISION_VERDICT=fail
+              ;;
+            *)
+              DEPLOYED_REVISION_VERDICT=fail
+              CONVERGE_EVIDENCE="convergence step ended ${CONVERGE_OUTCOME}; no completed deployed-revision verdict was available"
+              ;;
+          esac
+          EVIDENCE="${CONVERGE_EVIDENCE:-check_dev_lane_staleness.py --expect-revision ${SAFE_MERGE_SHA} against the omnibase-infra compose project (the guard wrote no evidence)}"
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$MERGE_SHA" \
             --lane compose-dev \

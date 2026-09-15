@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.ci import check_dev_lane_staleness as staleness_module
 from scripts.ci.check_dev_lane_staleness import (
     DEFAULT_MAX_AGE,
     DEFAULT_MAX_COMMITS_BEHIND,
@@ -588,6 +589,17 @@ class TestOffBranchRevisionsNeverConverge:
         assert not verdict.ok
         assert verdict.findings[0].code == "LANE_OFF_BRANCH"
 
+    def test_an_unrelated_on_branch_revision_is_not_called_older(self) -> None:
+        verdict = _converge(
+            ancestry=_ancestry(
+                relation=RELATION_UNRELATED, commits_ahead=0, observed_on_branch=True
+            )
+        )
+        assert not verdict.ok
+        assert verdict.findings[0].code == "NOT_CONVERGED"
+        assert "OLDER than the merge" not in verdict.findings[0].detail
+        assert "divergent" in verdict.findings[0].detail
+
     def test_a_diverged_containment_status_is_off_branch(self) -> None:
         ancestry = parse_ancestry(
             relation_payload={"status": "diverged", "ahead_by": 2, "behind_by": 3},
@@ -711,3 +723,113 @@ class TestTheReceiptCarriesTheAncestryEvidence:
             "expression-interpolating a value into a run block is the script "
             "injection shape; pass it through env and dereference the variable"
         )
+
+    def test_cancelled_or_skipped_convergence_is_recorded_as_inconclusive(
+        self,
+    ) -> None:
+        emit = next(
+            s
+            for s in self._verify_job()["steps"]
+            if "lab_pass_receipt.py emit" in str(s.get("run", ""))
+        )
+        body = emit["run"]
+        assert "CONVERGE_OUTCOME" in yaml.dump(emit)
+        assert "convergence step ended ${CONVERGE_OUTCOME}" in body
+        assert "DEPLOYED_REVISION_VERDICT=fail" in body
+        assert "steps.converge.outcome == 'success' && 'ok' || 'fail'" not in yaml.dump(
+            emit
+        )
+
+    def test_fallback_evidence_uses_a_validated_merge_sha_copy(self) -> None:
+        emit = next(
+            s
+            for s in self._verify_job()["steps"]
+            if "lab_pass_receipt.py emit" in str(s.get("run", ""))
+        )
+        body = emit["run"]
+        assert "SAFE_MERGE_SHA" in body
+        assert "^[0-9a-f]{40}$" in body
+        assert "--expect-revision ${SAFE_MERGE_SHA}" in body
+
+
+class TestAncestryResolver:
+    def test_transient_resolution_failure_is_not_cached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = 0
+        resolved = _ancestry()
+
+        def fake_read_ancestry(
+            repo: str, branch: str, expected_revision: str, observed_revision: str
+        ) -> Ancestry:
+            nonlocal calls
+            assert (repo, branch, expected_revision, observed_revision) == (
+                "repo/name",
+                "dev",
+                MERGE_SHA_18388,
+                LANE_DESCENDANT_18388,
+            )
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("502")
+            return resolved
+
+        monkeypatch.setattr(staleness_module, "read_ancestry", fake_read_ancestry)
+        resolver = staleness_module._AncestryResolver(
+            repo="repo/name", branch="dev", expected=MERGE_SHA_18388
+        )
+
+        assert resolver.resolve(LANE_DESCENDANT_18388) is None
+        assert resolver.resolve(LANE_DESCENDANT_18388) == resolved
+        assert resolver.resolve(LANE_DESCENDANT_18388) == resolved
+        assert calls == 2
+
+    def test_convergence_loop_does_not_reevaluate_after_success(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
+        reads = [
+            _lane(MEASURED_REVISION),
+            _lane(LANE_DESCENDANT_18388),
+        ]
+        observed_reads: list[str] = []
+
+        def fake_read_lane(args) -> LaneRevision:  # type: ignore[no-untyped-def]
+            lane = reads.pop(0)
+            observed_reads.append(lane.revision)
+            return lane
+
+        def fake_sleep(_seconds: float) -> None:
+            return None
+
+        def fake_monotonic() -> float:
+            fake_monotonic.value += 1
+            return fake_monotonic.value
+
+        fake_monotonic.value = 0.0  # type: ignore[attr-defined]
+
+        monkeypatch.setattr(staleness_module, "_read_lane", fake_read_lane)
+        monkeypatch.setattr(staleness_module.time, "sleep", fake_sleep)
+        monkeypatch.setattr(staleness_module.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(
+            staleness_module._AncestryResolver,
+            "resolve",
+            lambda _self, observed: _ancestry()
+            if observed == LANE_DESCENDANT_18388
+            else _ancestry(relation=RELATION_ANCESTOR, commits_ahead=0),
+        )
+
+        args = type(
+            "Args",
+            (),
+            {
+                "expect_revision": MERGE_SHA_18388,
+                "wait_timeout": timedelta(minutes=25),
+                "poll_interval": timedelta(seconds=60),
+                "repo": "repo/name",
+                "branch": "dev",
+            },
+        )()
+
+        assert staleness_module._run_convergence_mode(args) == 0
+        assert observed_reads == [MEASURED_REVISION, LANE_DESCENDANT_18388]

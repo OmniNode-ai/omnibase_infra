@@ -497,9 +497,16 @@ def evaluate_convergence(
             f"after {_format_age(waited)} (bound {_format_age(wait_timeout)}) the dev "
             f"lane runs {lane.revision[:12]}, which does NOT contain the merge commit "
             f"{expected_revision[:12]} this run published a redeploy-start for "
-            f"(relation: {ancestry.relation} on {ancestry.branch}). The lane is "
-            "running code OLDER than the merge — this is the "
-            "delivered-but-not-applied shape, and a descendant revision would have "
+            f"(relation: {ancestry.relation} on {ancestry.branch}). "
+            + (
+                "The lane is running code OLDER than the merge — this is the "
+                "delivered-but-not-applied shape. "
+                if ancestry.relation == RELATION_ANCESTOR
+                else "The lane relation is not a containing relation, so this is "
+                "a divergent or unclassified non-convergence shape rather than "
+                "the delivered-but-not-applied ancestor case. "
+            )
+            + "A descendant revision would have "
             "been accepted, so this is not the OMN-18388 window. WHAT THIS RUN "
             "ACTUALLY ATTESTS is that one redeploy-start command reached the broker "
             "— NOT that a rebuild-requested command ever reached the deploy agent. "
@@ -884,16 +891,17 @@ class _AncestryResolver:
     """Resolve ancestry at most once per distinct observed revision.
 
     The lane's label changes only when the lane is recreated, so a poll loop that
-    asked GitHub every minute would spend fifty calls proving the same fact. A
-    resolution that fails is cached as ``None`` for that revision too: retrying a
-    broken compare once a minute would neither fix it nor change the verdict.
+    asked GitHub every minute would spend fifty calls proving the same fact.
+    Successful resolutions are cached. Transient failures are not: a rate limit,
+    502, or token hiccup is recoverable on the next poll and must not poison the
+    whole convergence window.
     """
 
     def __init__(self, repo: str, branch: str, expected: str) -> None:
         self._repo = repo
         self._branch = branch
         self._expected = expected
-        self._cache: dict[str, Ancestry | None] = {}
+        self._cache: dict[str, Ancestry] = {}
         self.last_error: str = ""
 
     def resolve(self, observed: str) -> Ancestry | None:
@@ -902,9 +910,7 @@ class _AncestryResolver:
         if observed in self._cache:
             return self._cache[observed]
         try:
-            resolved: Ancestry | None = read_ancestry(
-                self._repo, self._branch, self._expected, observed
-            )
+            resolved = read_ancestry(self._repo, self._branch, self._expected, observed)
         except (
             OSError,
             ValueError,
@@ -914,7 +920,7 @@ class _AncestryResolver:
         ) as exc:
             self.last_error = str(exc)
             print(f"::warning::ancestry of {observed[:12]} unresolved: {exc}")
-            resolved = None
+            return None
         self._cache[observed] = resolved
         return resolved
 
@@ -967,7 +973,6 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         )
 
     waited = timedelta(seconds=time.monotonic() - started)
-    verdict, ancestry = _verdict_now(lane, waited)
 
     evidence = convergence_evidence(
         lane=lane,
