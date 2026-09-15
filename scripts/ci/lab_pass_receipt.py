@@ -449,7 +449,23 @@ def artifact_name(lane: EnumLabLane, sha: str) -> str:
 #: Checks a ``compose-dev`` emitter proves from the runner, and the reason each
 #: is here. The set is deliberately the subset that is provable from an HTTP
 #: surface plus the job's own staleness guard; see ``PROBES_NOT_YET_WIRED``.
-COMPOSE_DEV_HTTP_CHECKS = ("ready_main", "ready_effects", "health_dimensions")
+#:
+#: ``projection_ready`` (OMN-18387): the ``omnimarket-projection-api``
+#: container was a second gap in the same rule 24(a) automatic lab pass --
+#: neither the runtime-rebuild classifier nor the deploy agent's up-target set
+#: reached it, so a five-day-stale container passed every other check here.
+#: Reachability from THIS runner is not assumed: confirmed live 2026-09-15
+#: from inside the ``omninode-deploy-runner`` container on the same host that
+#: already answers ``ready_main``/``ready_effects`` --
+#: ``curl http://host.docker.internal:3002/projections`` -> ``HTTP_200``,
+#: identically to ``http://host.docker.internal:8085/ready``. Same host, same
+#: published-port mechanism, no additional isolation layer between the two.
+COMPOSE_DEV_HTTP_CHECKS = (
+    "ready_main",
+    "ready_effects",
+    "health_dimensions",
+    "projection_ready",
+)
 
 #: Named here rather than silently absent, so a reader can see what a
 #: ``compose-dev`` receipt does NOT cover. Each needs database or broker access
@@ -489,6 +505,50 @@ def check_ready(name: str, url: str, timeout_seconds: float) -> ModelLabPassChec
         name=name,
         ok=status == 200,
         evidence=f"GET {url} -> {status} {_truncate(body)}",
+    )
+
+
+def check_projections_ready(url: str, timeout_seconds: float) -> ModelLabPassCheck:
+    """The projection API's ``/projections`` endpoint must answer 200 with a
+    parseable ``projections`` list (OMN-18387).
+
+    Deliberately NOT a check of any one projection's ``cursor_column`` --
+    that would tie this general readiness probe to one topic's schema and
+    break the moment a projection is renamed or removed. What this asserts is
+    exactly what ``omnimarket-projection-api`` staying five days stale would
+    have failed: the container the deploy agent's up-target/verification set
+    now reaches (see OMN-18387's parity fix in
+    ``scripts/deploy-agent/deploy_agent/events.py``) is actually serving.
+    """
+    status, body = _http_get(url, timeout_seconds)
+    if status != 200:
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=f"GET {url} -> {status} {_truncate(body)}",
+        )
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=f"GET {url} -> 200 but body is not JSON: {exc}",
+        )
+    projections = payload.get("projections") if isinstance(payload, dict) else None
+    if not isinstance(projections, list):
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=(
+                f"GET {url} -> 200 but carries no 'projections' list; an "
+                "absent list is not a serving projection API"
+            ),
+        )
+    return ModelLabPassCheck(
+        name="projection_ready",
+        ok=True,
+        evidence=f"GET {url} -> 200, {len(projections)} projection(s) reported",
     )
 
 
@@ -652,6 +712,7 @@ def probe_compose_dev(
     effects_url: str,
     timeout_seconds: float,
     settle_timeout_seconds: float,
+    projection_url: str,
 ) -> list[ModelLabPassCheck]:
     """The read-only probes the ``.201`` dev lane emitter runs.
 
@@ -664,9 +725,15 @@ def probe_compose_dev(
     # starting)" while omninode-runtime-effects was still "Created", and at
     # 12:37:29Z main was healthy while effects had been up 44 seconds. Waiting
     # on main alone would clear the race for ready_main and leave it for
-    # ready_effects.
+    # ready_effects. projection-api joins the same wait for the same reason
+    # (OMN-18387): it is its own container with its own recreate timing, and
+    # it carries its own ``/ready`` endpoint (confirmed live 2026-09-15).
     settle = wait_for_lane_ready(
-        [f"{main_url.rstrip('/')}/ready", f"{effects_url.rstrip('/')}/ready"],
+        [
+            f"{main_url.rstrip('/')}/ready",
+            f"{effects_url.rstrip('/')}/ready",
+            f"{projection_url.rstrip('/')}/ready",
+        ],
         timeout_seconds,
         settle_timeout_seconds,
     )
@@ -676,6 +743,9 @@ def probe_compose_dev(
             "ready_effects", f"{effects_url.rstrip('/')}/ready", timeout_seconds
         ),
         check_health_dimensions(f"{main_url.rstrip('/')}/health", timeout_seconds),
+        check_projections_ready(
+            f"{projection_url.rstrip('/')}/projections", timeout_seconds
+        ),
     ]
     # Every check carries what the probe waited for, passing ones included: a
     # green read taken with no settle budget is a different fact from a green
@@ -957,6 +1027,7 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
     probe.add_argument("--main-url", required=True)
     probe.add_argument("--effects-url", required=True)
+    probe.add_argument("--projection-url", required=True)
     probe.add_argument("--timeout-seconds", type=float, default=15.0)
     probe.add_argument(
         "--settle-timeout-seconds",
@@ -1025,6 +1096,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.effects_url,
             args.timeout_seconds,
             args.settle_timeout_seconds,
+            args.projection_url,
         )
         print(json.dumps([c.to_dict() for c in checks], indent=2))
         return 0
