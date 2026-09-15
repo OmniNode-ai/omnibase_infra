@@ -42,6 +42,22 @@ migration 106 fails. With ``OMN18172_REQUIRE_PG=1`` (set by that CI step and by
 the evidence check, Jonah OMN-18172 comment c02674f2) an unset or unreachable
 Postgres FAILS instead of skipping: a runner that reads only the exit status
 would otherwise take a skip for a pass that asserted nothing.
+
+Because the proof writes ``delegation_workflow_state`` rows and creates a
+temporary role, a reachable Postgres is used only when its host is loopback
+(``localhost``, ``127.0.0.1`` or ``::1``) AND the run is either in GitHub
+Actions (``GITHUB_ACTIONS=true``) or explicitly opted in with
+``OMN18172_ALLOW_LAB_PG=1`` (Jonah, OMN-18172 comment f0406df9: the exact
+receipt command against a throwaway loopback Postgres on a lab host). Otherwise
+the module skips. The opt-in never widens the host rule: with
+``OMN18172_ALLOW_LAB_PG=1`` and a non-loopback host every test FAILS before
+connecting to the database, so a mistyped DSN can neither mutate a shared
+database nor read as a pass. Guard decisions, in order:
+
+* ``OMN18172_ALLOW_LAB_PG=1`` with a non-loopback (or unset) host: fail.
+* Postgres unset or unreachable: fail under ``OMN18172_REQUIRE_PG=1``, else skip.
+* Loopback host, and GitHub Actions or ``OMN18172_ALLOW_LAB_PG=1``: run.
+* Anything else: skip.
 """
 
 from __future__ import annotations
@@ -100,6 +116,11 @@ _postgres_config = PostgresConfig.from_env()
 
 _REQUIRE_PG_ENV = "OMN18172_REQUIRE_PG"
 REQUIRE_PG = os.environ.get(_REQUIRE_PG_ENV) == "1"
+# Explicit lab opt-in (Jonah, OMN-18172 comment f0406df9): lets the exact receipt
+# command run outside GitHub Actions, and only against loopback Postgres.
+_ALLOW_LAB_PG_ENV = "OMN18172_ALLOW_LAB_PG"
+ALLOW_LAB_PG = os.environ.get(_ALLOW_LAB_PG_ENV) == "1"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _POSTGRES_UNAVAILABLE_REASON = (
     "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL to a database "
     "migrated with scripts/run-migrations.py)"
@@ -118,16 +139,25 @@ def _postgres_available() -> bool:
     )
 
 
+def _postgres_host_is_loopback() -> bool:
+    return _postgres_config.host in _LOOPBACK_HOSTS
+
+
 def _safe_to_mutate_postgres() -> bool:
-    return os.environ.get("GITHUB_ACTIONS") == "true" and _postgres_config.host in {
-        "localhost",
-        "127.0.0.1",
-        "::1",
-    }
+    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    return (in_actions or ALLOW_LAB_PG) and _postgres_host_is_loopback()
 
 
 @pytest.fixture(autouse=True)
 def _postgres_required_when_flagged() -> None:
+    if ALLOW_LAB_PG and not _postgres_host_is_loopback():
+        # An explicit opt-in that cannot be honoured is an operator error, not a
+        # skip: refuse before even probing the database.
+        pytest.fail(
+            f"{_ALLOW_LAB_PG_ENV}=1 permits a non-Actions run only against loopback "
+            f"Postgres; OMNIBASE_INFRA_DB_URL host {_postgres_config.host!r} is not "
+            "loopback. Refusing to mutate delegation_workflow_state or create a role."
+        )
     if not _postgres_available():
         message = (
             f"{_POSTGRES_UNAVAILABLE_REASON}: OMNIBASE_INFRA_DB_URL is unset, "
@@ -142,7 +172,8 @@ def _postgres_required_when_flagged() -> None:
     if not _safe_to_mutate_postgres():
         message = (
             "OMN-18172 mutates delegation_workflow_state and creates a temporary "
-            "role; it may run only in GitHub Actions against loopback Postgres."
+            "role; it may run only against loopback Postgres, in GitHub Actions or "
+            f"with the explicit lab opt-in {_ALLOW_LAB_PG_ENV}=1."
         )
         pytest.skip(message)
 
