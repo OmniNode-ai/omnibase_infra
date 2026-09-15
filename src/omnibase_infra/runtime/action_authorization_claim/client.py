@@ -21,6 +21,7 @@ from omnibase_infra.runtime.action_authorization_claim.model_action_authorizatio
 )
 
 _MAX_FRAME_BYTES = 16_384
+_CLAIM_TIMEOUT_SECONDS = 10.0
 
 
 async def claim_action_authorization_via_unix_socket(
@@ -38,22 +39,28 @@ async def claim_action_authorization_via_unix_socket(
         ensure_ascii=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    if len(wire) >= _MAX_FRAME_BYTES:
+    if len(wire) + 1 > _MAX_FRAME_BYTES:
         return ModelActionAuthorizationClaimResult(
             outcome=EnumActionAuthorizationClaimOutcome.ERROR
         )
     try:
-        reader, writer = await asyncio.open_unix_connection(
-            str(socket_path), limit=_MAX_FRAME_BYTES
-        )
-        try:
-            writer.write(wire + b"\n")
-            await writer.drain()
-            response = await reader.readuntil(b"\n")
-        finally:
-            writer.close()
-            await writer.wait_closed()
-    except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, OSError):
+        async with asyncio.timeout(_CLAIM_TIMEOUT_SECONDS):
+            reader, writer = await asyncio.open_unix_connection(
+                str(socket_path), limit=_MAX_FRAME_BYTES
+            )
+            try:
+                writer.write(wire + b"\n")
+                await writer.drain()
+                response = await reader.readuntil(b"\n")
+            finally:
+                writer.close()
+                await writer.wait_closed()
+    except (
+        TimeoutError,
+        asyncio.IncompleteReadError,
+        asyncio.LimitOverrunError,
+        OSError,
+    ):
         return ModelActionAuthorizationClaimResult(
             outcome=EnumActionAuthorizationClaimOutcome.ERROR
         )

@@ -74,6 +74,13 @@ class _Writer:
         return None
 
 
+class _HangingReader:
+    async def readuntil(self, separator: bytes) -> bytes:
+        assert separator == b"\n"
+        await asyncio.sleep(60)
+        raise AssertionError("timeout must cancel the stalled read")
+
+
 @pytest.mark.unit
 def test_stable_client_uses_one_bounded_claim_frame(
     monkeypatch: pytest.MonkeyPatch,
@@ -101,6 +108,34 @@ def test_stable_client_uses_one_bounded_claim_frame(
     assert writer.closed
     assert len(writer.writes) == 1
     assert writer.writes[0].startswith(b'{"operation":"claim","request":')
+
+
+@pytest.mark.unit
+def test_stable_client_times_out_a_stalled_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _Writer()
+
+    async def fake_open_unix_connection(
+        path: str, *, limit: int
+    ) -> tuple[_HangingReader, _Writer]:
+        assert path == "/private/tmp/claim.sock"
+        assert limit == 16_384
+        return _HangingReader(), writer
+
+    monkeypatch.setattr(
+        client_module.asyncio, "open_unix_connection", fake_open_unix_connection
+    )
+    monkeypatch.setattr(client_module, "_CLAIM_TIMEOUT_SECONDS", 0.01)
+
+    result = asyncio.run(
+        claim_action_authorization_via_unix_socket(
+            socket_path=Path("/private/tmp/claim.sock"), request=_request()
+        )
+    )
+
+    assert result.outcome is EnumActionAuthorizationClaimOutcome.ERROR
+    assert writer.closed
 
 
 @pytest.mark.unit

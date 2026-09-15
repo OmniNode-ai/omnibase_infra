@@ -29,10 +29,21 @@ def _apply(ephemeral_postgres: EphemeralPostgres, migration: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def _provision_claim_schema(ephemeral_postgres: EphemeralPostgres) -> None:
+    result = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "CREATE SCHEMA action_authorization_claim",
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.integration
 def test_postgres16_restricted_principal_has_only_the_atomic_claim_function(
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
+    _provision_claim_schema(ephemeral_postgres)
     _apply(ephemeral_postgres, _MIGRATION)
     connection = ephemeral_postgres.connect()
     try:
@@ -71,6 +82,7 @@ def test_postgres16_restricted_principal_has_only_the_atomic_claim_function(
 def test_postgres16_backout_revokes_interface_but_preserves_claim_history_table(
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
+    _provision_claim_schema(ephemeral_postgres)
     _apply(ephemeral_postgres, _MIGRATION)
     _apply(ephemeral_postgres, _ROLLBACK)
     connection = ephemeral_postgres.connect()

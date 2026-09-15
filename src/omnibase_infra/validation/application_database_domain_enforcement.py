@@ -523,7 +523,7 @@ def _normalized_routine_signature(signature_body: str) -> str:
     pending_space = False
     for character in signature_body:
         if quoted:
-            normalized.append(character)
+            normalized.append(" " if character.isspace() else character)
             if character == '"':
                 quoted = False
             continue

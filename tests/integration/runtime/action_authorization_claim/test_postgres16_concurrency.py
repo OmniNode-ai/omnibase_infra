@@ -43,6 +43,13 @@ _MIGRATION = (
 
 
 def _apply(ephemeral_postgres: EphemeralPostgres) -> None:
+    provision = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "CREATE SCHEMA action_authorization_claim",
+    )
+    assert provision.returncode == 0, provision.stderr
     result = ephemeral_postgres.psql("-v", "ON_ERROR_STOP=1", "-f", str(_MIGRATION))
     assert result.returncode == 0, result.stderr
 

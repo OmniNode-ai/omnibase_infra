@@ -43,18 +43,18 @@ class PostgresActionAuthorizationClaim:
         self._pool: asyncpg.Pool | None = None
         self._pool_lock = asyncio.Lock()
 
-    async def _get_pool(self) -> asyncpg.Pool:
+    async def _get_pool_locked(self) -> asyncpg.Pool:
         if self._pool is not None:
             return self._pool
-        async with self._pool_lock:
-            if self._pool is None:
-                self._pool = await self._pool_factory()
+        self._pool = await self._pool_factory()
         return self._pool
 
     async def close(self) -> None:
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
+        async with self._pool_lock:
+            if self._pool is not None:
+                pool = self._pool
+                self._pool = None
+                await pool.close()
 
     @staticmethod
     def _claim_result(row: Mapping[str, object]) -> ModelActionAuthorizationClaimResult:
@@ -63,9 +63,10 @@ class PostgresActionAuthorizationClaim:
     async def _fetchrow(
         self, sql: str, request: ModelActionAuthorizationClaimRequest
     ) -> asyncpg.Record | None:
-        pool = await self._get_pool()
-        async with pool.acquire() as connection:
-            return await connection.fetchrow(sql, *request.sql_arguments())
+        async with self._pool_lock:
+            pool = await self._get_pool_locked()
+            async with pool.acquire() as connection:
+                return await connection.fetchrow(sql, *request.sql_arguments())
 
     async def claim(
         self, request: ModelActionAuthorizationClaimRequest
