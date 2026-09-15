@@ -4,11 +4,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
+from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+import yaml
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger import (
@@ -21,6 +24,55 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
 )
 
 _CHAIN = ("command", "route-request", "route-decision", "completed")
+
+
+def _get_repo_root() -> Path:
+    """Resolve the repository root without depending on test-file depth."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise RuntimeError("Could not locate repository root from pyproject.toml")
+
+
+_REPO_ROOT = _get_repo_root()
+_CHAIN_CONTRACT = (
+    _REPO_ROOT
+    / "src/omnibase_infra/nodes/node_delegation_chain_ledger_effect/contract.yaml"
+)
+_LEDGER_PROJECTION_CONTRACT = (
+    _REPO_ROOT / "src/omnibase_infra/nodes/node_ledger_projection_compute/contract.yaml"
+)
+
+
+def test_declared_chain_is_audited_before_writer_reads_event_ledger() -> None:
+    """Every writer hop must reach event_ledger through one typed route.
+
+    The chain writer cannot repair a missing audit subscription: it selects
+    only rows already persisted in ``event_ledger``. Keep its topology coupled
+    to the generic audit projection so a newly declared hop cannot make every
+    live replay honestly-but-permanently incomplete.
+    """
+    chain_raw = yaml.safe_load(_CHAIN_CONTRACT.read_text(encoding="utf-8")) or {}
+    projection_raw = (
+        yaml.safe_load(_LEDGER_PROJECTION_CONTRACT.read_text(encoding="utf-8")) or {}
+    )
+
+    declared_chain = tuple(chain_raw.get("chain_topology") or ())
+    subscribed = set(projection_raw.get("event_bus", {}).get("subscribe_topics") or ())
+    route_counts = Counter(
+        entry.get("topic")
+        for entry in projection_raw.get("handler_routing", {}).get("handlers") or ()
+        if entry.get("topic")
+    )
+
+    assert declared_chain, "chain writer must declare a non-empty topology"
+    assert set(declared_chain) <= subscribed, (
+        "chain writer reads event_ledger, but these declared hops are not "
+        f"audited into it: {sorted(set(declared_chain) - subscribed)}"
+    )
+    assert {topic: route_counts[topic] for topic in declared_chain} == dict.fromkeys(
+        declared_chain, 1
+    )
 
 
 def _handler(declared_chain: tuple[str, ...] = _CHAIN) -> HandlerDelegationChainLedger:

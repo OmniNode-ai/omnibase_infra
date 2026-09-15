@@ -74,6 +74,13 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # it as the caller for chain-canary link 5; this repository scan cannot see
     # the producer contract.
     "onex.evt.omnimarket.delegate-skill-completed.v1": "Published by omnimarket node_delegate_skill_orchestrator (cross-repo); consumed by the OMN-16964 infra chain-ledger writer | owner: lakshman | expiry: 2026-12-01",
+    # OMN-16964: the remaining delegation-chain hops are likewise owned by
+    # omnimarket contracts or an external ingress. The generic audit projection
+    # must consume them so event_ledger can supply the complete chain to the
+    # honest replay writer; this repository-only scan cannot see those owners.
+    "onex.cmd.omnimarket.delegate-skill.v1": "Published by the delegation CLI/runtime ingress declared by omnimarket node_delegate_skill_orchestrator.command_topic (cross-repo); audited for OMN-16964 replay | owner: lakshman | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.delegation-routing-request.v1": "Published by omnimarket node_delegation_orchestrator (cross-repo); audited for OMN-16964 replay | owner: lakshman | expiry: 2026-12-01",
+    "onex.evt.omnibase-infra.routing-decision.v1": "Published by omnimarket node_delegation_routing_reducer (cross-repo); audited for OMN-16964 replay | owner: lakshman | expiry: 2026-12-01",
     # Pattern B dispatch commands enter through local runtime transport / skill clients;
     # RuntimePatternBBroker consumes them but no contract-declared node publishes them.
     "onex.cmd.omnibase-infra.pattern-b-dispatch.v1": "Published by local runtime transport / runtime-backed skill clients | owner: jonah | expiry: 2026-12-01",
