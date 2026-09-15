@@ -312,6 +312,13 @@ def test_docker_compose_config_resolves_without_error_for_the_fleet(
             "RUNNER_TOKEN": "dummy",
             "DEPLOY_RUNNER_OMNI_HOME": str(fake_omni_home),
             "DEPLOY_RUNNER_OPERATOR_ENV_FILE": str(fake_operator_env),
+            # OMN-18415: the fleet's local-LLM HMAC key is `:?`-guarded like the
+            # two above, so it must be supplied here for the same reason -- this
+            # env dict stands in for the runner host's own compose `.env`, which
+            # is where the real value is read from. A synthetic value is
+            # sufficient: this test proves interpolation resolves, never that
+            # any particular secret is correct.
+            "LOCAL_LLM_SHARED_SECRET": "dummy-interpolation-value",
         },
     )
     assert result.returncode == 0, (

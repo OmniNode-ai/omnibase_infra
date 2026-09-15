@@ -73,6 +73,25 @@
 #   - DEPLOY_RUNNER_OPERATOR_ENV_FILE  Host path of the operator env file
 #                                   (e.g. /home/<operator>/.omnibase/.env).
 #                                   Fail-fast `:?` in compose.
+#
+# FOURTH REQUIRED VAR, satisfied by a FILE rather than an export (OMN-18415):
+#   - LOCAL_LLM_SHARED_SECRET       HMAC signing key for the local LLM
+#                                   inference endpoint, consumed by the
+#                                   omninode-runner-N fleet (the Hostile
+#                                   Review Gate's reviewer fails closed
+#                                   without it). Fail-fast `:?` in compose,
+#                                   like the two above -- but nothing needs to
+#                                   export it, because compose reads it from
+#                                   `docker/.env` in the compose PROJECT
+#                                   DIRECTORY (the directory of the first `-f`
+#                                   file), which resolves the same way for the
+#                                   runner-monitor auto-bounce cron as for
+#                                   this script. That file is host-generated,
+#                                   mode 600, and is deliberately absent from
+#                                   SYNC_PATHS below so an rsync from this
+#                                   repo can never overwrite or blank it --
+#                                   the same rule the lab credentials
+#                                   directory follows.
 # See knowledge-base-internal:runbooks/omnibase-infra-release-train-lab.md for the full recreate procedure.
 
 set -euo pipefail

@@ -65,6 +65,48 @@ x-runner-base: &runner-base
     # containers is required for this to take effect; a bind-mounted file
     # update alone does not change a live container's env.
     KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
+    # OMN-18415 — HMAC signing key for local LLM inference calls, fleet-wide.
+    #
+    # WHY IT IS HERE. omniintelligence's `cli_review` (the Hostile Review
+    # Gate's reviewer) calls the .201 inference endpoint through
+    # omnibase_infra's MixinLlmHttpTransport, which HMAC-signs every request
+    # with this key and fails CLOSED per model when it is absent
+    # (ONEX_CORE_041_INVALID_CONFIGURATION). Until this line existed the key
+    # was on no runner in the fleet, so every model call failed and the gate
+    # reported a review it had never performed. The key is a MAPPING entry on
+    # `&runner-env`, so unlike the volume mounts below it reaches all 60
+    # services through each one's `!!merge <<: *runner-env` -- YAML merge keys
+    # merge mappings, and only mappings.
+    #
+    # SCOPE. Fleet services only. `omninode-deploy-runner` and the two
+    # `omninode-customer-plane-runner-N` services define their own
+    # `environment:` blocks and do NOT merge this anchor, so they stay
+    # credential-free (OMN-18392) with no exclusion needed here.
+    #
+    # WHERE THE VALUE COMES FROM. `docker/.env` on the runner host, mode 600,
+    # owned by the operator -- the compose PROJECT DIRECTORY is the directory
+    # of the first `-f` file, so compose loads it for every invocation against
+    # this file regardless of cwd, including the runner-monitor auto-bounce
+    # cron that recreates individual runners. That file is host-generated and
+    # is NEVER rsynced from this repo (it is absent from deploy-runners.sh's
+    # SYNC_PATHS), exactly as the lab credentials directory is. The value
+    # itself is the existing `/shared/llm/` key registered in
+    # config/shared_key_registry.yaml -- this wiring places an existing
+    # credential, it does not mint or rotate one.
+    #
+    # FAIL-CLOSED ON PURPOSE. `:?` and not `:-`. An empty value would still
+    # satisfy the transport's "is it set" check and produce a wrong signature,
+    # which is a 401 with no named cause -- the same class of silent failure
+    # this ticket exists to remove. An unset value therefore stops compose at
+    # interpolation time, where the monitor's own preflight
+    # (`docker compose config -q`) already blocks auto-repair and logs it,
+    # rather than producing a runner that looks healthy and reviews nothing.
+    #
+    # Environment is frozen at container creation (same as the healthcheck
+    # definition below): a container RECREATE is required for a change here to
+    # take effect, and that roll is serial and busy-checked -- never a
+    # fleet-wide `--force-recreate`.
+    LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
