@@ -222,7 +222,9 @@ if [ "${args[0]:-}" = "systemctl" ]; then
 fi
 if [ "${args[0]:-}" = "stat" ] && [ "${args[1]:-}" = "-c" ]; then
   target="${args[3]:-}"
-  mode="$(/usr/bin/stat -f '%Lp' "${target}")"
+  if ! mode="$(/usr/bin/stat -c '%a' "${target}" 2>/dev/null)"; then
+    mode="$(/usr/bin/stat -f '%Lp' "${target}")"
+  fi
   printf '%s:0:%s\\n' "${mode}" "${GATEWAY_CONTAINER_GID:?}"
   exit 0
 fi

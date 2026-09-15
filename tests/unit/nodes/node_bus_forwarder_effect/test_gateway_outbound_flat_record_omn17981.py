@@ -394,7 +394,7 @@ async def test_synthesis_carries_content_event_id_from_idempotency_header() -> N
     }
     envelope = synthesize_outbound_envelope(
         _session_started_record(headers=headers),
-        _config(outbound=(SESSION_STARTED_TOPIC,)).tenant_identity,
+        _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
     )
 
     assert envelope is not None
@@ -404,14 +404,14 @@ async def test_synthesis_carries_content_event_id_from_idempotency_header() -> N
 async def test_matching_content_event_id_is_forwarded_unchanged() -> None:
     """The claimed post-redaction content ID survives flat-record synthesis."""
     baseline = synthesize_outbound_envelope(
-        _session_started_record(),
-        _config(outbound=(SESSION_STARTED_TOPIC,)).tenant_identity,
+        _admitted_session_started_record(),
+        _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
     )
     assert baseline is not None
     event_id = content_addressed_event_id(baseline, SESSION_STARTED_TOPIC)
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
         headers={
             **_SESSION_STARTED_HEADERS,
             "idempotency_key": event_id.encode("utf-8"),
@@ -430,8 +430,8 @@ async def test_matching_content_event_id_is_forwarded_unchanged() -> None:
 async def test_mismatched_content_event_id_is_quarantined() -> None:
     """A producer assertion that disagrees with redacted content cannot cross."""
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
         headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
     )
 
@@ -445,8 +445,8 @@ async def test_mismatched_content_event_id_is_quarantined() -> None:
 async def test_malformed_content_event_id_is_quarantined() -> None:
     """A supplied but undecodable content assertion is not a legacy absence."""
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
         headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"\xff"}
     )
 
@@ -461,8 +461,8 @@ async def test_refusal_without_dlq_sender_is_not_committed() -> None:
     """A permanent refusal awaits a durable quarantine before its ACK."""
     source = _Source()
     source.send = None  # type: ignore[method-assign]
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
         headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
     )
 
@@ -487,8 +487,8 @@ class _FailingDlqSource(_Source):
 async def test_refusal_with_failed_dlq_is_not_committed() -> None:
     """A failed durable quarantine must retain the source offset."""
     source = _FailingDlqSource()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
         headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
     )
 
