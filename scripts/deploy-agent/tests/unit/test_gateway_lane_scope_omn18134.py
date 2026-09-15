@@ -45,6 +45,7 @@ claims.
 from __future__ import annotations
 
 import inspect
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -68,11 +69,13 @@ from deploy_agent.events import (
 )
 from deploy_agent.executor import (
     GATEWAY_ENV_PASSTHROUGH_VARS,
+    GATEWAY_HTTPS_REQUIRED_REF,
     GATEWAY_REQUIRED_MAP_VARS,
     DeployExecutor,
     GatewayDeployScriptUnavailableError,
     GatewayLaneConfigError,
     _requested_services_for_up,
+    materialize_gateway_https_resolver_artifacts,
 )
 
 # ``gateway_lane`` opts this module out of the conftest stub that keeps the
@@ -168,6 +171,57 @@ def _write_gateway_env(
     env_file = tmp_path / "gateway.env"
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return env_file
+
+
+def test_https_materialization_is_opt_in_and_strict(
+    tmp_path: Path,
+) -> None:
+    environment = {
+        "INFISICAL_ADDR": "https://store.invalid",
+        "INFISICAL_CLIENT_ID": "synthetic-client-id",
+        "INFISICAL_CLIENT_SECRET": "synthetic-client-secret",
+        "INFISICAL_PROJECT_ID": "11111111-1111-1111-1111-111111111111",
+    }
+    assert (
+        materialize_gateway_https_resolver_artifacts({}, process_env=environment)
+        is None
+    )
+
+    stage = materialize_gateway_https_resolver_artifacts(
+        {
+            "GATEWAY_INFISICAL_SOURCE_PATH": "/dev/gateway/GATEWAY_TOKEN",
+            "GATEWAY_INFISICAL_SECRET_DIR": str(tmp_path),
+        },
+        process_env=environment,
+        stage_parent=tmp_path,
+    )
+
+    assert stage is not None
+    assert stage.stat().st_mode & 0o777 == 0o700
+    bootstrap = stage / "infisical-bootstrap.json"
+    resolver = stage / "secret-resolver.json"
+    assert bootstrap.stat().st_mode & 0o777 == 0o400
+    rendered = json.loads(resolver.read_text(encoding="utf-8"))
+    assert rendered["required_secrets"] == [GATEWAY_HTTPS_REQUIRED_REF]
+    assert rendered["mappings"][0]["source"]["source_type"] == "infisical"
+
+
+def test_https_materialization_refuses_missing_bootstrap_without_writing(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(GatewayLaneConfigError, match="INFISICAL_CLIENT_SECRET"):
+        materialize_gateway_https_resolver_artifacts(
+            {
+                "GATEWAY_INFISICAL_SOURCE_PATH": "/dev/gateway/GATEWAY_TOKEN",
+                "GATEWAY_INFISICAL_SECRET_DIR": str(tmp_path),
+            },
+            process_env={
+                "INFISICAL_ADDR": "https://store.invalid",
+                "INFISICAL_CLIENT_ID": "synthetic-client-id",
+                "INFISICAL_PROJECT_ID": "11111111-1111-1111-1111-111111111111",
+            },
+        )
+    assert not list(tmp_path.iterdir())
 
 
 class TestPositiveControls:
@@ -583,6 +637,48 @@ class TestFailClosed:
                 build_source=BuildSource.RELEASE,
                 lane=EnumRuntimeLane.DEV,
             )
+
+    def test_a_failing_script_removes_the_private_resolver_stage(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A failed root install/deploy cannot leave bootstrap material in /tmp."""
+        from deploy_agent import executor as executor_mod
+
+        env_file = _write_gateway_env(tmp_path)
+        with env_file.open("a", encoding="utf-8") as handle:
+            handle.write("GATEWAY_INFISICAL_SOURCE_PATH=/dev/gateway/GATEWAY_TOKEN\n")
+        monkeypatch.setattr(executor_mod, "gateway_env_file", lambda: str(env_file))
+        for name, value in {
+            "INFISICAL_ADDR": "https://store.invalid",
+            "INFISICAL_CLIENT_ID": "synthetic-client-id",
+            "INFISICAL_CLIENT_SECRET": "synthetic-client-secret",
+            "INFISICAL_PROJECT_ID": "11111111-1111-1111-1111-111111111111",
+        }.items():
+            monkeypatch.setenv(name, value)
+        stage = tmp_path / "private-stage"
+
+        def _mkdtemp(*_args: object, **_kwargs: object) -> str:
+            stage.mkdir(mode=0o700)
+            return str(stage)
+
+        monkeypatch.setattr(executor_mod.tempfile, "mkdtemp", _mkdtemp)
+        with (
+            patch(
+                "deploy_agent.executor._run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr="root install failed"
+                ),
+            ),
+            pytest.raises(RuntimeError, match="GATEWAY_DEPLOY_FAILED"),
+        ):
+            DeployExecutor()._deploy_gateway_lane(
+                _noop_phase_update,
+                lane=EnumRuntimeLane.DEV,
+                build_source=BuildSource.RELEASE,
+                targets=list(DEV_LANE_GATEWAY_SERVICES),
+                git_ref="origin/dev",
+            )
+        assert not stage.exists()
 
 
 class TestTheCommandsPinReachesTheGatewayScript:

@@ -226,7 +226,7 @@ config:
     https_ingest:
       ingest_url_ref: "gateway.cloud.https.ingest_url"
       ingest_auth_ref: "gateway.cloud.https.gateway_token"
-      idempotency_key: "envelope_id"
+      idempotency_key: "event_id"
       max_batch_records: 100
       request_timeout_seconds: 15
       retry_initial_seconds: 1

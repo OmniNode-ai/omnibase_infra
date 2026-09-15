@@ -32,6 +32,7 @@ What these tests pin:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -84,7 +85,7 @@ def _https_ingest_config(**overrides: object) -> ModelGatewayHttpsIngestConfig:
         "ingest_url": "https://dev.api.omninode.ai/v1/gateway/ingest",
         "ingest_url_ref": INGEST_URL_REF,
         "ingest_auth_ref": INGEST_AUTH_REF,
-        "idempotency_key": "envelope_id",
+        "idempotency_key": "event_id",
         "max_batch_records": 100,
         "request_timeout_seconds": 15.0,
         "retry_initial_seconds": 1.0,
@@ -165,10 +166,10 @@ def test_contract_declares_the_https_ingest_leg() -> None:
     assert block["ingest_auth_ref"] == INGEST_AUTH_REF
 
 
-def test_contract_ingest_is_idempotent_on_the_content_addressed_envelope_id() -> None:
+def test_contract_ingest_is_idempotent_on_the_content_addressed_event_id() -> None:
     """2026-08-30 ruling clause 2: idempotency belongs on the route, keyed on the
-    content-addressed envelope id -- not on a dedupe service and not on the sink."""
-    assert _contract_https_ingest_block()["idempotency_key"] == "envelope_id"
+    content-addressed event id -- not on a dedupe service and not on the sink."""
+    assert _contract_https_ingest_block()["idempotency_key"] == "event_id"
 
 
 def test_contract_declares_one_batch_route_not_a_route_per_event_class() -> None:
@@ -267,7 +268,7 @@ def test_ingest_config_rejects_an_auth_value_in_place_of_a_reference() -> None:
         _https_ingest_config(ingest_auth_ref="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9")
 
 
-def test_ingest_config_rejects_a_non_envelope_id_idempotency_key() -> None:
+def test_ingest_config_rejects_a_non_event_id_idempotency_key() -> None:
     with pytest.raises(ValidationError):
         _https_ingest_config(idempotency_key="topic")
 
@@ -466,10 +467,19 @@ def test_loader_leaves_the_kafka_outbound_leg_alone_when_the_set_is_absent(
 
 
 def _envelope_bytes(envelope_id: str) -> bytes:
+    payload = {"hello": "world"}
+    event_id = hashlib.sha256(
+        (
+            "onex.evt.omniclaude.tool-executed.v1\n"
+            + json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        ).encode("utf-8")
+    ).hexdigest()
     return json.dumps(
         {
             "envelope_id": envelope_id,
-            "payload": {"hello": "world"},
+            "event_type": "omnibase.hook.tool-executed",
+            "payload": payload,
+            "metadata": {"tags": {"event_id": event_id}},
         }
     ).encode("utf-8")
 
@@ -524,6 +534,34 @@ async def test_transport_posts_one_record_to_the_single_contract_declared_route(
 
 
 @pytest.mark.asyncio
+async def test_transport_posts_multiple_records_in_one_request() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(202)
+
+    await _ingest_transport(handler).publish_batch(
+        [
+            (
+                "t-onex.evt.omniclaude.tool-executed.v1",
+                None,
+                _envelope_bytes("11111111-1111-1111-1111-111111111111"),
+                None,
+            ),
+            (
+                "t-onex.evt.omniclaude.tool-executed.v1",
+                None,
+                _envelope_bytes("22222222-2222-2222-2222-222222222222"),
+                None,
+            ),
+        ]
+    )
+    assert len(seen) == 1
+    assert len(json.loads(seen[0].content)["records"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_transport_preserves_the_record_bytes_exactly() -> None:
     """The cloud route republishes under the same topic names; a lossy transport
     would break deterministic replay of the mirrored record."""
@@ -544,11 +582,11 @@ async def test_transport_preserves_the_record_bytes_exactly() -> None:
 
 
 @pytest.mark.asyncio
-async def test_transport_sends_the_content_addressed_envelope_id_as_idempotency_key() -> (
+async def test_transport_sends_the_content_addressed_event_id_as_idempotency_key() -> (
     None
 ):
     """2026-08-30 ruling clause 2 -- idempotency is asserted by the caller on the
-    route, keyed on the content-addressed envelope id."""
+    route, keyed on the content-addressed event id."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -560,7 +598,12 @@ async def test_transport_sends_the_content_addressed_envelope_id_as_idempotency_
         key=None,
         value=_envelope_bytes("33333333-3333-3333-3333-333333333333"),
     )
-    assert seen[0].headers["idempotency-key"] == "33333333-3333-3333-3333-333333333333"
+    assert (
+        seen[0].headers["idempotency-key"]
+        == hashlib.sha256(
+            b'onex.evt.omniclaude.tool-executed.v1\n{"hello":"world"}'
+        ).hexdigest()
+    )
 
 
 @pytest.mark.asyncio
