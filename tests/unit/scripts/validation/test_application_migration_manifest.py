@@ -638,7 +638,13 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # The new nullable UUID is a delivery trace beside the existing content
     # identity; it has no backfill or uniqueness rule, so historical rows keep
     # their honest absence of an envelope identifier.
-    assert len(result.declarations) == 183
+    #
+    # 183 -> 184 for OMN-18079's
+    # nodes/node_delegation_routing_reducer/0004_add_delegation_routing_tenant_overlay_provider.sql,
+    # vendored from omnimarket so the routing overlay can carry the provider
+    # identity a BYOK route was registered against. Additive and nullable, so
+    # rows written before provenance existed keep their honest NULL.
+    assert len(result.declarations) == 184
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
