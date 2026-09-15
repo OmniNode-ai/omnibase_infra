@@ -47,11 +47,41 @@ jobs:
           cache-enabled: "false"
           install-args: "--frozen"
 
+      # OMN-16727: this step tolerates its own failure so the next step is
+      # never skipped. Before this, a finding here (e.g. stale policy drift)
+      # exited non-zero and GitHub Actions' implicit success() default on the
+      # next step's `if:` skipped it outright -- during the 2026-08-26/27
+      # re-flip that masked the OMN-16683 fork-isolation surface for the
+      # entire window the local-workflows pass was red.
       - name: Audit local workflow routing
+        id: local_workflows
+        continue-on-error: true
         run: uv run python scripts/audit-runner-routing.py --local-workflows
 
+      # OMN-16727: `always()` is required here -- without it this step
+      # inherits the implicit `success()` default and is skipped whenever the
+      # previous step failed, which is the exact masking this ticket exists to
+      # close, even with continue-on-error set above.
       - name: Audit GitHub runner variables
-        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        id: github_vars
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
         run: uv run python scripts/audit-runner-routing.py --github-vars
+
+      # OMN-16727: collect both step outcomes and fail the job exactly once,
+      # after both passes have had the chance to print their own findings.
+      # A per-step green checkmark on a skipped or errored step must not read
+      # as "nothing to report" -- this step is what turns two independent
+      # continue-on-error steps back into one merge-relevant signal.
+      - name: Evaluate combined runner routing audit result
+        if: always()
+        run: |
+          echo "local_workflows outcome: ${{ steps.local_workflows.outcome }}"
+          echo "github_vars outcome: ${{ steps.github_vars.outcome }}"
+          if [ "${{ steps.local_workflows.outcome }}" = "failure" ] || [ "${{ steps.github_vars.outcome }}" = "failure" ]; then
+            echo "::error title=Runner routing drift::at least one audit pass reported findings; see the step logs above for every surface, not just the first"
+            exit 1
+          fi
+          echo "Runner routing audit: all executed passes reported clean."
