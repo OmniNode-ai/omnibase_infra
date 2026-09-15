@@ -54,7 +54,9 @@ EXPECTED_MOUNT_SOURCE_EXPR = (
     "${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}"
 )
 EXPECTED_KUBECONFIG_ENV = "/home/runner/.lab-credentials/lab-ci-reader.kubeconfig"
-FLEET_SERVICE_COUNT = 88
+# OMN-18411: fleet capped 88 -> 60 (CI burst drove one-minute load to 100.9 on
+# the 32-core .201 host).
+FLEET_SERVICE_COUNT = 60
 
 
 def _load_compose() -> dict[str, Any]:
@@ -246,7 +248,10 @@ def _parse_sync_paths() -> list[str]:
     finally:
         if str(SCRIPTS_CI) in sys.path:
             sys.path.remove(str(SCRIPTS_CI))
-    return module.parse_sync_paths(DEPLOY_SCRIPT.read_text(encoding="utf-8"))
+    result: list[str] = module.parse_sync_paths(
+        DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    )
+    return result
 
 
 def test_the_kubeconfig_is_not_in_sync_paths() -> None:
