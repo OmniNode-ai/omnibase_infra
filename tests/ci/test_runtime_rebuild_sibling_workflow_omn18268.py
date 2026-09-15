@@ -66,12 +66,34 @@ def test_the_publisher_passes_both_the_sibling_sha_and_a_primary_ref() -> None:
 
 
 def test_the_build_context_repo_is_checked_out_at_the_workspace_root() -> None:
-    """`./.github/actions/...` resolves from the workspace, not from the caller."""
+    """`./.github/actions/...` resolves from the workspace, not from the caller.
+
+    The `ref` assertions below are per-job because the two self-checkouts answer
+    different questions (OMN-18200):
+
+    * ``trigger-rebuild``'s clone HEAD IS the published ``--primary-ref``, the
+      omnibase_infra revision the lane is told to rebuild at, so it must be dev.
+    * ``verify-sibling-converged`` only supplies the scripts its steps invoke, so
+      it must be this workflow file's own commit -- at ``dev`` the YAML spelling
+      ``probe-lane``'s arguments and the script reading them were different
+      commits, which is what produced the FAIL compose-dev receipt on omnimarket
+      run 35019423922.
+    """
     workflow = _load()
-    for job in workflow["jobs"].values():
+    expected_ref = {
+        "trigger-rebuild": "dev",
+        "verify-sibling-converged": (
+            "${{ inputs.infra_ref || github.job_workflow_sha }}"
+        ),
+    }
+    assert set(workflow["jobs"]) == set(expected_ref), (
+        "a job was added or renamed; decide which of the two refs above it needs "
+        "rather than letting it default to an unasserted one"
+    )
+    for job_id, job in workflow["jobs"].items():
         first = job["steps"][0]
         assert first["with"]["repository"] == "OmniNode-ai/omnibase_infra"
-        assert first["with"]["ref"] == "dev"
+        assert first["with"]["ref"] == expected_ref[job_id], job_id
         assert "path" not in first["with"]
         assert first["with"]["persist-credentials"] is False
 

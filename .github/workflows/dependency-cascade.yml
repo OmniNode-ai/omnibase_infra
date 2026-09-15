@@ -152,11 +152,18 @@ jobs:
       # workspace, so this repo's own scripts/ are not otherwise present)
       # so the "Create branch and upgrade lockfile" step below can fail loud
       # BEFORE attempting a lock that is guaranteed to be a silent no-op.
+      # Same OMN-18200 invariant as runtime-rebuild-trigger-reusable.yml: with no
+      # `ref:` this resolved to the default branch at run time, so a caller's
+      # `uses: ...@<sha>` pin governed the YAML while check_dep_provenance.py
+      # came from wherever dev happened to be. `github.job_workflow_sha` is the
+      # commit this workflow file was loaded from, which puts the two on one
+      # commit behind one pin.
       - name: Checkout omnibase_infra dep-provenance script
         if: steps.token_check.outputs.has_token == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_infra
+          ref: ${{ github.job_workflow_sha }}
           path: _dep_provenance_gate
           sparse-checkout: |
             scripts/check_dep_provenance.py
