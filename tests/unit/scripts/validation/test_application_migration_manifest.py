@@ -632,7 +632,13 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # compose dev lane and the onex-dev RDS. 0041 is 0023's second half
     # re-landed alone. It is declared here, and fenced on arrival, because it
     # enables FORCE ROW LEVEL SECURITY and cannot be grandfathered.
-    assert len(result.declarations) == 182
+    #
+    # 182 -> 183 for OMN-17201's
+    # nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql.
+    # The new nullable UUID is a delivery trace beside the existing content
+    # identity; it has no backfill or uniqueness rule, so historical rows keep
+    # their honest absence of an envelope identifier.
+    assert len(result.declarations) == 183
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30
