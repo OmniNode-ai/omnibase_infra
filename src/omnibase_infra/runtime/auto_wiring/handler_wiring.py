@@ -156,6 +156,7 @@ from omnibase_infra.runtime.contract_terminal_events import (
     load_terminal_event_topics,
 )
 from omnibase_infra.runtime.dispatch_envelope_context import (
+    bind_dispatch_envelope,
     current_dispatch_envelope,
     current_projection_tenant_authority,
 )
@@ -6691,7 +6692,24 @@ def _make_event_bus_callback(
                 )
                 if result_applier is not None and result is not None:
                     try:
-                        await result_applier.apply(result, envelope.correlation_id)
+                        # OMN-16831: the applier is the origination site for both
+                        # the OMN-18116 causal edge and the tenant dimension, and
+                        # it reads the consumed envelope off this contextvar. The
+                        # engine binds it only around the DISPATCHER call, which
+                        # has already returned by the time we get here, so on this
+                        # boundary -- the deployed one -- the applier saw None and
+                        # every event it published was recorded as a chain head
+                        # with no tenant. Measured on the real wiring seam:
+                        # parent_envelope_id None and tenant_id None for a
+                        # consumed envelope carrying both.
+                        #
+                        # Binding here rather than moving the engine's bind keeps
+                        # the engine's narrower guarantee intact and adds the one
+                        # this seam needs. `envelope` is the record this callback
+                        # consumed, which is precisely what both dimensions are
+                        # supposed to be derived from.
+                        with bind_dispatch_envelope(envelope):
+                            await result_applier.apply(result, envelope.correlation_id)
                     except Exception as apply_exc:
                         # OMN-14403 §4.3: on the outbox path a publish failure
                         # must PROPAGATE (redeliver), never be retried-then-
@@ -7393,7 +7411,11 @@ def _make_raw_event_projection_callback(
             dispatcher_scope,
         )
         if result is not None:
-            await result_applier.apply(result, envelope.correlation_id)
+            # OMN-16831: same reason as the sibling boundary above -- the
+            # applier's causal edge and tenant dimension both come off the
+            # consumed envelope, which it reads from this contextvar.
+            with bind_dispatch_envelope(envelope):
+                await result_applier.apply(result, envelope.correlation_id)
 
     async def callback(message: object) -> None:
         try:
