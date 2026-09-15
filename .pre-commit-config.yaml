@@ -1207,8 +1207,8 @@ repos:
       # environment — see OMN-15537 for why the host-env-reading shape was a defect).
       - id: check-required-env-vars
         name: Check required env vars are declared in the manifest
-        entry: python scripts/check_required_env_vars.py
-        language: python
+        entry: uv run --frozen python scripts/check_required_env_vars.py
+        language: system
         files: docker/(docker-compose\.infra\.yml|required-env-vars\.manifest\.txt)
         pass_filenames: false
       # OMN-17530: the dev lane loads TWO compose files -- the base above plus
@@ -1220,8 +1220,8 @@ repos:
       - id: check-dev-lane-required-env-vars
         name: Check dev-lane required env vars are declared in the manifest
         entry: >-
-          python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-lane.yml --manifest-file docker/dev-lane-required-env.manifest.txt
-        language: python
+          uv run --frozen python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-lane.yml --manifest-file docker/dev-lane-required-env.manifest.txt
+        language: system
         files: docker/(docker-compose\.dev-lane\.yml|dev-lane-required-env\.manifest\.txt)
         pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
@@ -1551,7 +1551,7 @@ repos:
     hooks:
       - id: workflow-input-default-type-parity
         name: Workflow input defaults must match declared type (OMN-16906)
-        entry: python scripts/ci/check_workflow_input_default_types.py
+        entry: uv run --frozen python scripts/ci/check_workflow_input_default_types.py
         language: system
         pass_filenames: false
         files: '^\.github/workflows/.*\.ya?ml$'
@@ -1571,7 +1571,7 @@ repos:
     hooks:
       - id: workflow-uv-available
         name: Hosted-runner steps must install uv before invoking it (OMN-18364)
-        entry: python scripts/ci/check_workflow_uv_available.py
+        entry: uv run --frozen python scripts/ci/check_workflow_uv_available.py
         language: system
         pass_filenames: false
         files: '^(\.github/workflows/.*\.ya?ml|\.github/actions/.*/action\.ya?ml)$'
