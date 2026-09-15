@@ -6,6 +6,12 @@
 The incident this protects against: repo-level GitHub variables drifted
 OMNI_TRUSTED_CI_RUNS_ON_JSON back to ["ubuntu-latest"], so trusted CI silently
 used GitHub-hosted minutes even though the workflow selector looked correct.
+
+OMN-16727: ``main()`` collects every finding set from every enabled pass into
+one list and exits once, at the end -- see the module-level history in
+``runner-routing-audit.yml`` for the companion fix to the workflow-step level
+masking this ticket also covers (a finding in one ``run:`` step must not skip
+a later one).
 """
 
 from __future__ import annotations
