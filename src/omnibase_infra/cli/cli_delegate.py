@@ -352,6 +352,48 @@ def _attempt_evidence(result: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
+def _unattributed_reason(result: dict[str, object]) -> str:
+    """Say why no route was attributed, accurately for THIS run.
+
+    OMN-18306 landed the receipt; this is its sentence. The reason used to be
+    one constant asserting that "every rung this run attempted was refused",
+    which states two things it never checked: that rungs were attempted at all,
+    and — by naming none of them — which. Both halves were measured wrong on
+    2026-09-15. One run reached two backends and the constant named neither;
+    another was refused before dispatch in 265 ms with zero attempts, and the
+    constant described refusals that never happened.
+
+    Those are different failures with different fixes. "Four backends turned
+    this down" is a routing or quality problem; "a guard refused this before it
+    left the machine" is a request problem. A receipt that renders them
+    identically cannot tell a customer which one they have.
+
+    This NEVER names a route. The backends appear as evidence of what was
+    tried; the route stays unattributed, because attributing output nobody
+    accepted is the lie the refusal exists to prevent (AC3).
+    """
+    attempts = result.get("attempts")
+    reached = [
+        str(attempt.get("backend_id"))
+        for attempt in (attempts if isinstance(attempts, list) else [])
+        if isinstance(attempt, dict) and attempt.get("backend_id")
+    ]
+    if not reached:
+        return (
+            "no backend was reached: this run was refused before any rung was "
+            "dispatched, so there is no routing attempt to attribute. The "
+            "failure reason recorded on this receipt is the guard that refused "
+            "it, not a backend's verdict"
+        )
+    return (
+        "no accepted routing attempt: this run reached "
+        + ", ".join(reached)
+        + " and every one of them refused, errored, or climbed, so no backend "
+        "can be named as the author of this run's output. Each rung's own "
+        "backend, tier and failure class is recorded under attempts"
+    )
+
+
 def _write_unattributed_run_files(
     *,
     envelope: dict[str, object],
@@ -377,11 +419,7 @@ def _write_unattributed_run_files(
 
     metrics = result.get("metrics")
     cost_usd = metrics.get("cost_usd") if isinstance(metrics, dict) else None
-    unattributed = (
-        "no accepted routing attempt: every rung this run attempted was "
-        "refused, errored, or climbed, so no backend can be named as the "
-        "author of this run's output"
-    )
+    unattributed = _unattributed_reason(result)
 
     _atomic_write_text(run_dir / "result.txt", str(result.get("response") or ""))
     _atomic_write_text(
