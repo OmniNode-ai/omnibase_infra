@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-16979: widen ``mirror_topics.outbound`` to the content-bearing hook
-classes, behind a fail-closed egress-redaction admission gate.
+"""OMN-16979: widen ``mirror_topics.outbound`` to the capture topics behind a
+fail-closed egress-redaction admission gate.
 
 WHY A GATE AND NOT A BARE WIDENING. OMN-17209's framing is that "widening the
 payload without landing this contract first ships a credential pipeline." The
@@ -48,7 +48,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayTenantIdentity,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_config import (
-    is_content_bearing_hook_topic,
+    requires_egress_redaction,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
@@ -202,7 +202,7 @@ def test_config_refuses_a_governed_topic_absent_from_the_outbound_set() -> None:
         )
 
 
-def test_config_refuses_a_content_bearing_hook_class_that_is_not_governed() -> None:
+def test_config_refuses_a_capture_topic_that_is_not_governed() -> None:
     """The interlock in the other direction: a widening cannot be added to the
     outbound set without also being placed under the gate.
     """
@@ -505,27 +505,27 @@ def test_governed_set_matches_all_seven_upstream_capture_topics() -> None:
         SKILL_COMPLETED,
     ],
 )
-def test_known_omniclaude_content_classes_are_content_bearing(topic: str) -> None:
-    assert is_content_bearing_hook_topic(topic) is True
+def test_known_omniclaude_capture_classes_require_redaction(topic: str) -> None:
+    assert requires_egress_redaction(topic) is True
 
 
-def test_metadata_only_tool_output_is_content_bearing() -> None:
-    assert is_content_bearing_hook_topic(TOOL_OUTPUT_CAPTURED) is True
+def test_metadata_only_tool_output_requires_redaction() -> None:
+    assert requires_egress_redaction(TOOL_OUTPUT_CAPTURED) is True
 
 
-def test_a_hook_class_that_does_not_exist_yet_is_content_bearing() -> None:
+def test_a_hook_class_that_does_not_exist_yet_requires_redaction() -> None:
     """The fail-closed direction, and the reason this is a rule rather than a
     list: a list has to be edited when a new hook class appears, and the edit
     that forgets it is exactly the one that leaks.
     """
-    assert is_content_bearing_hook_topic("onex.evt.omniclaude.not-a-real-class.v1")
+    assert requires_egress_redaction("onex.evt.omniclaude.not-a-real-class.v1")
 
 
-def test_non_omniclaude_topics_are_not_content_bearing() -> None:
+def test_non_omniclaude_topics_do_not_require_redaction() -> None:
     """The rule must not accidentally govern the delegation legs."""
-    assert is_content_bearing_hook_topic(UNGOVERNED_OUTBOUND) is False
+    assert requires_egress_redaction(UNGOVERNED_OUTBOUND) is False
     assert (
-        is_content_bearing_hook_topic("onex.evt.omnibase-infra.gateway-heartbeat.v1")
+        requires_egress_redaction("onex.evt.omnibase-infra.gateway-heartbeat.v1")
         is False
     )
 

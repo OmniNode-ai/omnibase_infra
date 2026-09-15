@@ -31,7 +31,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_tenant_
     ModelGatewayTenantIdentity,
 )
 
-# OMN-16979. Which hook capture classes require redaction is a RULE, not a
+# OMN-16979. Which capture topics require redaction proof is a RULE, not a
 # topic registry -- deliberately.
 #
 # A list would have to be edited whenever a new hook class appears, and the
@@ -61,7 +61,7 @@ _HOOK_CAPTURE_PRODUCER = "omnimarket"
 _TOOL_OUTPUT_CAPTURE_EVENT = "tool-output-captured"
 
 
-def is_content_bearing_hook_topic(canonical_topic: str) -> bool:
+def requires_egress_redaction(canonical_topic: str) -> bool:
     """Whether ``canonical_topic`` must carry upstream redaction provenance."""
     segments = canonical_topic.split(".")
     if len(segments) < 5:
@@ -97,8 +97,8 @@ class ModelGatewayForwarderConfig(BaseModel):
     # ModelGatewayHttpsIngestConfig's module docstring for why that means this
     # block alone does not retire the OMN-16449 bastion.
     https_ingest: ModelGatewayHttpsIngestConfig | None = None
-    # OMN-16979: fail-closed admission gate for the content-bearing hook
-    # classes this ticket adds to ``mirror_topics.outbound``. Optional so every
+    # OMN-16979: fail-closed admission gate for the capture topics this ticket
+    # adds to ``mirror_topics.outbound``. Optional so every
     # deployment predating the widening keeps its exact behaviour; the
     # cross-field validator below is what refuses an inconsistent pairing.
     egress_redaction: ModelGatewayEgressRedaction | None = None
@@ -156,9 +156,9 @@ class ModelGatewayForwarderConfig(BaseModel):
         """OMN-16979: the widening and the gate must agree, in both directions.
 
         A gate that names a topic nobody mirrors is dead policy that reads like
-        live policy. A content-bearing hook class in the outbound set that the
-        gate does NOT name is the credential pipeline OMN-17209 exists to
-        prevent -- so it is refused here rather than merely discouraged.
+        live policy. A capture topic in the outbound set that the gate does NOT
+        name is the credential pipeline OMN-17209 exists to prevent -- so it is
+        refused here rather than merely discouraged.
         """
         policy = self.egress_redaction
         outbound = set(self.mirror_topics.outbound)
@@ -173,11 +173,11 @@ class ModelGatewayForwarderConfig(BaseModel):
         unguarded = sorted(
             topic
             for topic in outbound
-            if is_content_bearing_hook_topic(topic) and topic not in governed
+            if requires_egress_redaction(topic) and topic not in governed
         )
         if unguarded:
             raise ValueError(
-                "content-bearing hook topics may not be mirrored outbound "
+                "redaction-required capture topics may not be mirrored outbound "
                 "unless egress_redaction declares them governed; unguarded: "
                 f"{unguarded}"
             )
