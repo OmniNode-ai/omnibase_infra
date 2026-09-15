@@ -227,7 +227,7 @@ def test_this_ticket_does_not_widen_the_cloud_mirror_set() -> None:
     """OMN-16979 owns the widening; changing the TRANSPORT must not smuggle in
     new event classes.
 
-    OMN-16979 has since landed, so the two hook classes are now present. The
+    OMN-16979 has since landed, so the capture topics are now present. The
     guard is preserved in its still-falsifiable form: whatever is widened must
     be governed by `egress_redaction`. A transport change that added an
     UNGOVERNED class would still fail here.
@@ -236,14 +236,16 @@ def test_this_ticket_does_not_widen_the_cloud_mirror_set() -> None:
     forwarder = contract["config"]["gateway_forwarder"]
     outbound = set(forwarder["mirror_topics"]["outbound"])
     governed = set(forwarder.get("egress_redaction", {}).get("governed_topics", ()))
-    content_bearing = {
+    redaction_required = {
+        "onex.evt.omniclaude.session-started.v1",
+        "onex.evt.omniclaude.session-ended.v1",
         "onex.evt.omniclaude.tool-executed.v1",
         "onex.evt.omniclaude.prompt-submitted.v1",
-        "onex.evt.omniclaude.tool-output-captured.v1",
         "onex.evt.omniclaude.skill-started.v1",
         "onex.evt.omniclaude.skill-completed.v1",
+        "onex.evt.omnimarket.tool-output-captured.v1",
     }
-    assert (outbound & content_bearing) <= governed
+    assert (outbound & redaction_required) <= governed
 
 
 # --------------------------------------------------------------------------
