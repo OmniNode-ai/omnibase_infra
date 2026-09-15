@@ -42,6 +42,13 @@ STUCK_SERVICES = (
 )
 RUNNING_SERVICES = (
     "omninode-runtime",
+    # OMN-18387: added to SCOPE_SERVICES[Scope.RUNTIME] after this fixture was
+    # written. Not part of the 2026-09-08 incident's residue either way, so it
+    # belongs in the "came up fine" set, not STUCK_SERVICES -- a fourth entry
+    # missing from BOTH sets here reads as "missing" to verify_containers_up
+    # and gets swept into recovery, which is exactly the regression this
+    # comment heads off.
+    "projection-api",
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
     "context-audit-consumer",
