@@ -160,8 +160,18 @@ REQUIRED_CONTRACT_FIELDS = [
     "node_type",
     "contract_version",
     "input_model",
-    "output_model",
 ]
+
+# OMN-18390: output_model is required only for COMPUTE_GENERIC nodes -- per the
+# ONEX four-node architecture, COMPUTE MUST return a typed result (output_model
+# declares its type), while EFFECT/REDUCER/ORCHESTRATOR nodes publish
+# events[]/projections[]/intents[] instead and have no such requirement. This
+# linter previously required output_model unconditionally; that missed the real
+# defect class (a bus-triggered EFFECT contract declaring an output_model with no
+# publish_topics dead-letters every successful dispatch -- there is no result
+# applier to deliver the output its handler produces) and would have blocked the
+# correct fix (dropping the unused output_model) had it stayed unconditional.
+_OUTPUT_MODEL_REQUIRED_NODE_TYPES = frozenset({"COMPUTE_GENERIC"})
 
 # Valid dependency types (includes all types used across existing contracts)
 VALID_DEPENDENCY_TYPES = frozenset(
@@ -784,6 +794,25 @@ class ContractLinter:
                         suggestion=f"Add '{field}:' to your contract.yaml",
                     )
                 )
+
+        # OMN-18390: output_model is required for COMPUTE_GENERIC only -- see
+        # _OUTPUT_MODEL_REQUIRED_NODE_TYPES.
+        if (
+            content.get("node_type") in _OUTPUT_MODEL_REQUIRED_NODE_TYPES
+            and "output_model" not in content
+        ):
+            violations.append(
+                ModelContractViolation(
+                    file_path=file_path,
+                    field_path="output_model",
+                    message=(
+                        "Required field 'output_model' is missing "
+                        "(mandatory for COMPUTE_GENERIC nodes)"
+                    ),
+                    severity=EnumContractViolationSeverity.ERROR,
+                    suggestion="Add 'output_model:' to your contract.yaml",
+                )
+            )
 
         return violations
 

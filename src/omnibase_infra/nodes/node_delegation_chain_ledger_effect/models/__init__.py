@@ -12,9 +12,6 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_deleg
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_ledger_chain_row import (
     ModelLedgerChainRow,
 )
-from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_ledger_chain_write_result import (
-    ModelLedgerChainWriteResult,
-)
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_observed_hop import (
     ModelObservedHop,
 )
@@ -23,6 +20,5 @@ __all__ = [
     "EnumTierTwoVerdict",
     "ModelDelegationTerminalPayload",
     "ModelLedgerChainRow",
-    "ModelLedgerChainWriteResult",
     "ModelObservedHop",
 ]
