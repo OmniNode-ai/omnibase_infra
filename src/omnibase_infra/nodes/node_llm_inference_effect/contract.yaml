@@ -19,6 +19,15 @@
 #   and 40 tests were still live. The sanctioned CLI shell-out surface is
 #   node_coding_agent_invoke_effect (descriptor.agent_invocation: true) only.
 #   (2026-08-12)
+# OMN-18385: the api-key field on ModelLlmInferenceCommand and on both
+#   ModelLlmInferenceRequest classes is now a secret-wrapped type rather than a
+#   plain string. Bumps PATCH: the wire shape is unchanged and a JSON string
+#   still validates; what changes is that a dump or repr of these models emits
+#   a mask instead of the key. The handler reads the real value at one unwrap
+#   point when it builds the outbound auth header. Note that provider_config is
+#   a free-form mapping and can still carry a key under a dict entry, which no
+#   field type reaches -- the dead-letter publisher's field-name redaction is
+#   what covers that case. (2026-09-14)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
@@ -34,7 +43,7 @@ node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
   minor: 5
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
