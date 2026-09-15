@@ -131,7 +131,13 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
     fields: dict[str, object] = {
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
-        "budget_ms": 5_000,
+        # OMN-18389: link 5 now WAITS for the writer it grades, bounded by the
+        # readback window — which is `max(terminal_readback_timeout_seconds,
+        # budget_ms - elapsed)`. Both are declared here rather than defaulted,
+        # because a fixture leaving the 30 s floor in place would make every
+        # incomplete-chain case sit out a real 30 s wait.
+        "budget_ms": 1_000,
+        "terminal_readback_timeout_seconds": 1,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
         "ledger_source_env": _LEDGER_SOURCE_ENV,
@@ -585,3 +591,142 @@ async def test_connect_and_query_share_one_deadline(
     assert hops is None
     assert error
     assert elapsed < 0.6
+
+
+# -- OMN-18389: link 5 must WAIT for the writer whose output it grades -------
+#
+# The canary and `node_delegation_chain_ledger_effect` are two processes racing
+# the same terminal event. The writer is dispatched BY that terminal, settles
+# for up to 20 x 250 ms waiting on the ledger projection, and only then writes.
+# Link 5's read used to fire once, immediately, so it graded a relation the
+# writer had not reached yet.
+#
+# Measured on the .201 compose dev lane: run 35016830667's own correlation had
+# five `ledger_chain` rows persisted at 21:16:56 — one second AFTER the read at
+# 21:16:55, which reported all four hops missing. On the 20:42 scheduled run the
+# gap was 55 seconds. A read that lands before the write reports a complete
+# chain as incomplete, which is a statement about the canary's timing and not
+# about the chain.
+#
+# The wait is keyed on the EXPECTED HOP COUNT, never a fixed sleep: too short
+# and the race is still live, too long and every green run pays the worst case.
+
+
+class _LateLedgerReplay:
+    """A writer that lands after the canary's first look.
+
+    Returns an empty chain for the first ``absent_reads`` calls and the full
+    chain afterwards — the shape the dev lane produced, where the rows appeared
+    one second after the read.
+    """
+
+    def __init__(self, absent_reads: int, hops: tuple[str, ...] = _FULL_CHAIN) -> None:
+        self._absent_reads = absent_reads
+        self._hops = hops
+        self.calls: list[str] = []
+
+    async def __call__(
+        self, source: str, correlation_id: str, timeout_s: float
+    ) -> tuple[tuple[str, ...] | None, bool, str, str]:
+        self.calls.append(correlation_id)
+        if len(self.calls) <= self._absent_reads:
+            return (), False, "", ""
+        return self._hops, True, "pass", ""
+
+
+@pytest.fixture(autouse=True)
+def _fast_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shrink the poll interval so the bounded wait is exercised, not endured.
+
+    Autouse, because every incomplete-chain case in this module now runs the
+    bounded wait out. The WINDOW is unchanged — only the interval inside it —
+    so a test that stopped waiting early would still fail.
+    """
+    monkeypatch.setattr(
+        "omnibase_infra.nodes.node_chain_canary_effect.handlers."
+        "handler_chain_canary._LEDGER_POLL_INTERVAL_SECONDS",
+        0.01,
+        # `raising=False` so the RED-FIRST run against the unfixed handler --
+        # where the constant does not exist yet -- fails on the assertions
+        # these tests are about, rather than erroring in a fixture.
+        raising=False,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_link_five_waits_for_a_writer_that_lands_late() -> None:
+    """The canary re-reads until every declared hop is present.
+
+    Pre-fix this fails: one read, an empty relation, CHAIN_INCOMPLETE on a
+    chain that completes a moment later.
+    """
+    ledger = _LateLedgerReplay(absent_reads=2)
+    result = await _handler(ledger).handle(
+        _request(budget_ms=2_000, terminal_readback_timeout_seconds=2)
+    )
+
+    assert _link(result, EnumChainLink.LEDGER_REPLAY) is EnumChainLinkStatus.PASS
+    # The wait is what made the pass possible; one read would have missed it.
+    assert len(ledger.calls) == 3
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_complete_chain_is_never_waited_for() -> None:
+    """Positive control: the wait is keyed on the hops, not on the clock.
+
+    A chain that is already complete on the first read must cost exactly one
+    read. This is what distinguishes a hop-count-keyed wait from a fixed sleep,
+    and it is the half a bounded-wait fix most easily gets wrong.
+    """
+    ledger = _LateLedgerReplay(absent_reads=0)
+    result = await _handler(ledger).handle(
+        _request(budget_ms=2_000, terminal_readback_timeout_seconds=2)
+    )
+
+    assert _link(result, EnumChainLink.LEDGER_REPLAY) is EnumChainLinkStatus.PASS
+    assert len(ledger.calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_chain_that_never_completes_is_still_incomplete_and_bounded() -> None:
+    """A gap is still a gap, and the wait is bounded by the readback window.
+
+    The detail must say the chain was still short AFTER the wait. "Missing on
+    one look" and "missing after the whole window" are different facts about
+    the chain, and a bare hop list cannot tell a reader which one it has.
+    """
+    ledger = _LedgerReplay(hops=("received",))
+    started = time.monotonic()
+    result = await _handler(ledger).handle(
+        _request(budget_ms=1_000, terminal_readback_timeout_seconds=1)
+    )
+    elapsed = time.monotonic() - started
+
+    assert _link(result, EnumChainLink.LEDGER_REPLAY) is EnumChainLinkStatus.FAIL
+    assert result.verdict is EnumChainCanaryVerdict.LEDGER_CHAIN_INCOMPLETE
+    assert "still absent after" in result.detail
+    assert len(ledger.calls) > 1
+    # The window is the bound. A leg that outlived it would hold the whole
+    # `asyncio.gather` past the budget the probe was given.
+    assert elapsed < 5.0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_an_unreadable_ledger_is_reported_as_itself_not_retried() -> None:
+    """A read that FAILED is not a chain found to be short.
+
+    Retrying an unreadable ledger until the window expires would convert a
+    precise ERROR into a vague incompleteness and point the reader at the chain
+    instead of at the database.
+    """
+    ledger = _LedgerReplay(hops=None, error="connection refused")
+    result = await _handler(ledger).handle(
+        _request(budget_ms=1_000, terminal_readback_timeout_seconds=1)
+    )
+
+    assert result.verdict is EnumChainCanaryVerdict.LEDGER_REPLAY_UNREADABLE
+    assert len(ledger.calls) == 1
