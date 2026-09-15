@@ -467,13 +467,15 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
     repository new to the org must be in scope for the hosted-placement check
     from the moment it exists, with no policy edit required.
     """
+    # No --visibility filter: `gh repo list` accepts only public/private/internal
+    # (not "all"), and omitting the flag already returns every repository the
+    # token can see, of any visibility -- exactly the universe this check needs
+    # since it filters on the returned `isPrivate` field itself.
     result = _run_gh(
         [
             "repo",
             "list",
             org,
-            "--visibility",
-            "all",
             "--limit",
             "500",
             "--json",

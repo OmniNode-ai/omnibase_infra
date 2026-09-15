@@ -1268,3 +1268,46 @@ def test_repository_universe_derived_from_live_visibility(
         workflow_fetch_fn=fake_workflows_all_fleet,
     )
     assert clean_findings == []
+
+
+def test_live_repository_visibility_uses_a_gh_cli_flag_that_actually_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: ``gh repo list --visibility all`` is not a real invocation.
+
+    The live post-merge run of this audit (omnibase_infra workflow run
+    35003988912, 2026-09-15) crashed with ``invalid argument "all" for
+    "--visibility" flag: valid values are {public|private|internal}`` --
+    the fixture-based test above mocks ``visibility_fn`` entirely and never
+    exercises the real ``gh`` invocation, so it could not catch this. Omitting
+    ``--visibility`` returns repositories of every visibility the token can
+    see, which is what this check needs since it filters on the returned
+    ``isPrivate`` field itself.
+    """
+    module = _load_script()
+    captured_args: list[list[str]] = []
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> object:
+        captured_args.append(args)
+
+        class _Result:
+            returncode = 0
+            stdout = json.dumps(
+                [
+                    {"name": "a-private-repo", "isPrivate": True},
+                    {"name": "a-public-repo", "isPrivate": False},
+                ]
+            )
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    result = module._live_repository_visibility("OmniNode-ai")
+
+    assert captured_args == [
+        ["repo", "list", "OmniNode-ai", "--limit", "500", "--json", "name,isPrivate"]
+    ]
+    assert "--visibility" not in captured_args[0]
+    assert result == [("a-private-repo", True), ("a-public-repo", False)]
