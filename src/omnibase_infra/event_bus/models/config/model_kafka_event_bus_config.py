@@ -320,6 +320,49 @@ class ModelKafkaEventBusConfig(BaseModel):
         le=10,
     )
 
+    # Projection offset-withhold bound (OMN-17379). The withhold itself has no
+    # ceiling: `_dispatch_to_subscriber` rewinds unconditionally for a
+    # `ProjectionNotMaterializedError`, which is right for a transient write-path
+    # failure and wrong for a record whose refusal never changes. Measured on
+    # onex-dev 2026-09-15: two records (delegation-completed.v1 p0 o286, a tenant
+    # registry refusal; quality-gate-result.v1 p0 o300, a NOT NULL violation)
+    # re-refused about once per second and blocked every later record on both
+    # partitions, taking the staging business-proof gate red and keeping it red.
+    # Contract-config only, like the other consumer bounds here -- deliberately
+    # not an env override, so a lane cannot quietly disarm it.
+    projection_withhold_max_redeliveries: int = Field(
+        default=5,
+        description=(
+            "Consecutive redeliveries of the SAME record failing with the SAME "
+            "projection write-path error before the record is dead-lettered "
+            "with a typed reason and the offset is allowed to advance "
+            "(OMN-17379). A changing failure resets the count and a successful "
+            "projection clears it, so this bounds only a record that is "
+            "genuinely not progressing. Cannot be 0: dead-lettering on the "
+            "first refusal would discard a record a transient failure still "
+            "owes a row to, which is the defect the withhold exists to prevent. "
+            "5 is chosen against the measured live rate of roughly one "
+            "redelivery per second, so a real outage has seconds of redelivery "
+            "before release while a wedge clears in seconds rather than never."
+        ),
+        ge=1,
+        le=1000,
+    )
+    projection_withhold_tracking_capacity: int = Field(
+        default=1024,
+        description=(
+            "Maximum record coordinates tracked for the withhold bound above. "
+            "Entries clear on a successful projection and on a dead-letter, but "
+            "a partition revoked mid-stall leaves its key behind, so the map "
+            "needs a ceiling of its own; the oldest entry is evicted when it is "
+            "reached. A stall is a handful of coordinates, so this is far above "
+            "any legitimate working set and exists to bound a leak, not to "
+            "shape behaviour."
+        ),
+        ge=1,
+        le=1_000_000,
+    )
+
     # Kafka producer settings
     acks: EnumKafkaAcks = Field(
         default=EnumKafkaAcks.ALL,

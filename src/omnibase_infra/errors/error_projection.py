@@ -254,10 +254,44 @@ class ProjectionQueryRowBudgetError(ProjectionNotMaterializedError):
     """
 
 
+class ProjectionWedgeExhaustedError(ProjectionError):
+    """A projection refused the SAME record the same way past its withhold bound.
+
+    OMN-17379. The offset withhold that error's sibling
+    :class:`ProjectionNotMaterializedError` triggers has no ceiling of its own:
+    the record is rewound and redelivered until the write path is repaired. That
+    is right for a TRANSIENT failure -- a missing GRANT, a dead database, an
+    unapplied migration -- where the record is still owed a row.
+
+    It is wrong for a record whose refusal never changes. Such a record blocks
+    every LATER record on its partition, including ones that would project
+    fine, and nothing ends the stall. Measured on the onex-dev staging
+    namespace 2026-09-15: ``delegation-completed.v1`` partition 0
+    offset 286 (a tenant-registry refusal for an unmirrored historical tenant)
+    and ``quality-gate-result.v1`` partition 0 offset 300 (a NOT NULL violation
+    on ``delegation_events.task_type``) each re-refused about once per second,
+    and the staging business-proof gate went red behind them and would have
+    stayed red on every subsequent deploy.
+
+    This type is the REASON carried on the dead-letter that ends such a stall,
+    not something a handler raises. It is deliberately NOT a subclass of
+    :class:`ProjectionNotMaterializedError`: every offset-unsafe arm in the
+    runtime matches that type, and inheriting from it would make the very
+    quarantine that releases the partition withhold the offset again.
+
+    The honest limit: the count that reaches this bound is process-local, so a
+    crash-looping consumer can withhold indefinitely without ever reaching it.
+    A restarting pod is a visible failure where a Stable/lag-0 wedge is not,
+    which is why that residual is accepted rather than closed with a second
+    durable store on the consume path.
+    """
+
+
 __all__ = [
     "ProjectionError",
     "ProjectionNotMaterializedError",
     "ProjectionQueryRowBudgetError",
     "ProjectionTenantContextError",
+    "ProjectionWedgeExhaustedError",
     "QuarantinePublishUnconfirmedError",
 ]
