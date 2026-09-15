@@ -173,7 +173,7 @@ class HandlerDelegationChainLedger:
         The write result is recorded on this node's own persistence path
         (``public.ledger_chain``, via ``_persist_rows``) and nothing consumes a
         published summary of it (OMN-16964 comment, 2026-09-15T11:52:22Z), so
-        this returns a void-compute output. Returning a typed ``.result`` here
+        this returns an effect output with no events. Returning a typed ``.result`` here
         would have the auto-wiring boundary append it to ``output_events``
         with no ``publish_topics`` declared to resolve a result applier for
         it -- the exact OMN-18390 mechanism that dead-lettered every
@@ -199,7 +199,7 @@ class HandlerDelegationChainLedger:
         )
         await self._persist_rows(rows)
 
-        return ModelHandlerOutput.for_void_compute(
+        return ModelHandlerOutput.for_effect(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
             handler_id=HANDLER_ID_DELEGATION_CHAIN_LEDGER,

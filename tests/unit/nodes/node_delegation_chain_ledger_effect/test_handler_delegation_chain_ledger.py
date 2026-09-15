@@ -165,7 +165,7 @@ async def test_handle_never_returns_a_bus_publishable_result() -> None:
     ``ModelHandlerOutput.for_compute(result=...)`` puts a BaseModel on
     ``.result``, and the auto-wiring boundary appends any BaseModel ``.result``
     to ``output_events`` regardless of contract wiring (OMN-18390 mechanism).
-    Pin the handler to the void-compute shape so it can never regress into
+    Pin the handler to the effect/no-events shape so it can never regress into
     producing an output event this contract has no applier for.
     """
     correlation_id = uuid4()
@@ -177,7 +177,7 @@ async def test_handle_never_returns_a_bus_publishable_result() -> None:
 
     output = await handler.handle(_request(correlation_id))
 
-    assert output.node_kind is EnumNodeKind.COMPUTE
+    assert output.node_kind is EnumNodeKind.EFFECT
     assert output.result is None
     assert output.events == ()
     assert output.intents == ()

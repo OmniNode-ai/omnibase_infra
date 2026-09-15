@@ -516,7 +516,7 @@ class ContractLinter:
         - node_type: One of EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC
         - contract_version: Semantic version dict with major, minor, patch
         - input_model: Dict with name and module fields
-        - output_model: Dict with name and module fields
+        - output_model: Dict with name and module fields for COMPUTE_GENERIC nodes
 
     Optional but Recommended Fields:
         - description: Human-readable description
@@ -660,6 +660,9 @@ class ContractLinter:
         violations.extend(
             self._validate_model_reference(file_str, content, "output_model", line_map)
         )
+        violations.extend(
+            self._validate_output_model_publish_wiring(file_str, content, line_map)
+        )
 
         # Validate naming convention (name should be snake_case)
         violations.extend(self._validate_name_convention(file_str, content, line_map))
@@ -796,9 +799,13 @@ class ContractLinter:
                 )
 
         # OMN-18390: output_model is required for COMPUTE_GENERIC only -- see
-        # _OUTPUT_MODEL_REQUIRED_NODE_TYPES.
+        # _OUTPUT_MODEL_REQUIRED_NODE_TYPES. Normalize here so malformed casing
+        # does not create a fail-open gap before _validate_node_type reports the
+        # invalid spelling.
+        node_type = content.get("node_type")
         if (
-            content.get("node_type") in _OUTPUT_MODEL_REQUIRED_NODE_TYPES
+            isinstance(node_type, str)
+            and node_type.upper() in _OUTPUT_MODEL_REQUIRED_NODE_TYPES
             and "output_model" not in content
         ):
             violations.append(
@@ -815,6 +822,46 @@ class ContractLinter:
             )
 
         return violations
+
+    # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
+    def _validate_output_model_publish_wiring(
+        self,
+        file_path: str,
+        content: dict[str, object],
+        line_map: dict[str, int],
+    ) -> list[ModelContractViolation]:
+        """Refuse bus-triggered result models with no publish applier.
+
+        OMN-18390: auto-wiring appends a handler's BaseModel result to
+        output_events, but result appliers are built from event_bus.publish_topics.
+        A bus-triggered contract with output_model and subscribe_topics but no
+        publish_topics can dead-letter successful dispatches when its handler
+        returns a BaseModel result.
+        """
+        event_bus = content.get("event_bus")
+        if not isinstance(event_bus, dict):
+            return []
+        subscribe_topics = event_bus.get("subscribe_topics") or []
+        publish_topics = event_bus.get("publish_topics") or []
+        if not subscribe_topics or publish_topics or "output_model" not in content:
+            return []
+        return [
+            ModelContractViolation(
+                file_path=file_path,
+                field_path="event_bus.publish_topics",
+                message=(
+                    "bus-triggered contracts that declare output_model must also "
+                    "declare event_bus.publish_topics so successful dispatch "
+                    "outputs have a result applier (OMN-18390)"
+                ),
+                severity=EnumContractViolationSeverity.WARNING,
+                suggestion=(
+                    "Remove the unused output_model or declare the publish topic "
+                    "that consumes the result."
+                ),
+                line_number=line_map.get("event_bus"),
+            )
+        ]
 
     # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
     def _validate_node_type(

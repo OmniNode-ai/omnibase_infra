@@ -22,6 +22,7 @@ that route for a handler using the pre-fix shape.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
@@ -54,11 +55,14 @@ class ModelFixtureWriteResult(BaseModel):
 
 
 class HandlerFixedShape:
-    """Mirrors the post-fix handler: void-compute, nothing to deliver."""
+    """Mirrors the post-fix handler: effect output, nothing to deliver."""
+
+    calls: ClassVar[int] = 0
 
     async def handle(self, envelope: object) -> ModelHandlerOutput[None]:
+        type(self).calls += 1
         correlation_id = _extract_correlation_id(envelope)
-        return ModelHandlerOutput.for_void_compute(
+        return ModelHandlerOutput.for_effect(
             input_envelope_id=uuid4(),
             correlation_id=correlation_id,
             handler_id="fixture-fixed-shape",
@@ -68,9 +72,12 @@ class HandlerFixedShape:
 class HandlerPreFixShape:
     """Mirrors the pre-fix handler: for_compute(result=<BaseModel>)."""
 
+    calls: ClassVar[int] = 0
+
     async def handle(
         self, envelope: object
     ) -> ModelHandlerOutput[ModelFixtureWriteResult]:
+        type(self).calls += 1
         correlation_id = _extract_correlation_id(envelope)
         return ModelHandlerOutput.for_compute(
             input_envelope_id=uuid4(),
@@ -84,6 +91,9 @@ class HandlerPreFixShape:
 
 def _extract_correlation_id(envelope: object) -> UUID:
     if isinstance(envelope, dict):
+        # The dispatch engine injects this trace before invoking handlers; the
+        # assertion below proves the message reached the handler rather than
+        # passing vacuously before dispatch.
         debug_trace = envelope["__debug_trace"]
         assert isinstance(debug_trace, dict)
         return UUID(str(debug_trace["correlation_id"]))
@@ -123,6 +133,7 @@ def _no_publish_topics_contract(handler_qualname: str) -> ModelDiscoveredContrac
 
 
 async def _dispatch_one(handler_cls: type) -> None:
+    handler_cls.calls = 0
     contract = _no_publish_topics_contract(handler_cls.__qualname__)
     bus = EventBusInmemory(environment="test", group="omn18390-no-undeliverable")
     await bus.start()
@@ -151,6 +162,9 @@ async def _dispatch_one(handler_cls: type) -> None:
             command.model_dump_json().encode("utf-8"),
             None,
         )
+        # EventBusInmemory awaits subscriber callbacks inline before returning
+        # from publish(), so this is a synchronization point for the dispatch.
+        assert handler_cls.calls == 1
     finally:
         await bus.close()
 
