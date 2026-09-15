@@ -43,7 +43,13 @@ FORK_PR_PREDICATE = (
 DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
 # OMN-18031: the per-run routing consumer shape. A job whose runs-on resolves
 # from a route job's output rather than from the seam expression directly.
-ROUTE_CONSUMER_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.labels")
+# A routed job reads either output name. `labels` is what the pilot shipped;
+# `runs_on` is what the node-backed route job emits and what a cross-repo
+# consumer reads, because at the call site `runs-on: fromJSON(...runs_on)` says
+# what it is. BOTH are recognised deliberately: an audit that knew only one
+# would report every job using the other as an unrouted job -- drift where
+# there is none, which is how a routing audit gets muted.
+ROUTE_CONSUMER_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.(?:labels|runs_on)")
 # OMN-18031: the selector-generation markers. V1 is the inline seam expression
 # that 94 job definitions in this repo carry; V2 is a job whose placement comes
 # from a route job's output. The marker is a COMMENT, so YAML parsing drops it
