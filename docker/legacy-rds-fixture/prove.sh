@@ -188,6 +188,16 @@ EOSQL
   fi
 }
 
+provision_action_authorization_claim_schema() {
+  host="$1"
+  port="$2"
+  database="$3"
+  psql -X -q -h "$host" -p "$port" -U postgres -d "$database" \
+    -v ON_ERROR_STOP=1 <<'EOSQL'
+CREATE SCHEMA IF NOT EXISTS action_authorization_claim;
+EOSQL
+}
+
 run_control_forward() {
   host="$1"
   port="$2"
@@ -351,6 +361,8 @@ done
 echo "fixture_case=application_ledger_migration_id_sources status=PASS source_preserved=true service_row_ignored=true"
 
 for pass in 1 2; do
+  provision_action_authorization_claim_schema \
+    "$FRESH_HOST" "$FRESH_PORT" omnibase_infra
   fresh_log="$(mktemp)"
   run_forward "$FRESH_HOST" "$FRESH_PORT" omnibase_infra "$fresh_log" \
     || { sed -n '1,240p' "$fresh_log"; fail "fresh real migration pass $pass failed"; }
@@ -368,6 +380,8 @@ done
 # then prove idempotence instead of stopping at the historical unresolved-domain
 # preflight hold.
 for pass in 1 2; do
+  provision_action_authorization_claim_schema \
+    "$LEGACY_HOST" "$LEGACY_PORT" omnibase_infra
   legacy_log="$(mktemp)"
   run_forward "$LEGACY_HOST" "$LEGACY_PORT" omnibase_infra "$legacy_log" \
     || { sed -n '1,240p' "$legacy_log"; fail "legacy upgrade pass $pass failed"; }
