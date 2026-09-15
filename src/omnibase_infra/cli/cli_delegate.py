@@ -90,8 +90,10 @@ error) even when the hang is not asyncio-cooperative.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
+import re
 import signal
 import sys
 import uuid
@@ -129,6 +131,7 @@ from omnibase_infra.cli.task_class_selection import (
     ModelTaskTypeResolution,
     TaskClassContractError,
     load_selectable_task_classes,
+    load_selection_fallback,
     resolve_task_class_contract_path,
     resolve_task_type,
 )
@@ -150,6 +153,7 @@ __all__ = [
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "classify_task_type",
+    "load_supported_criteria",
     "resolve_default_bus",
     "resolve_task_class",
     "run_delegate",
@@ -315,6 +319,13 @@ def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
         if isinstance(nested, dict) and isinstance(nested.get("attempts"), list):
             return nested
     return None
+
+
+#: Mirrors the wire model's own pattern for a parameterised criterion slug.
+#: The SLUG SET is read from the installed omnimarket (see
+#: :func:`load_supported_criteria`); only this shape is spelled here, because a
+#: regex cannot drift the way a copied list of names can.
+_MAX_WORDS_PER_SENTENCE_RE = re.compile(r"^max_words_per_sentence_([1-9]\d*)$")
 
 
 _ATTEMPT_EVIDENCE_FIELDS: tuple[str, ...] = (
@@ -722,12 +733,119 @@ def resolve_task_class(
     contract cannot be resolved, this fails closed (propagates
     ``TaskClassContractError``) rather than falling back to the mirror.
     """
-    resolved = (
-        classes
-        if classes is not None
-        else load_selectable_task_classes(resolve_task_class_contract_path())
+    if classes is not None:
+        return resolve_task_type(prompt, explicit=explicit, classes=classes)
+    contract_path = resolve_task_class_contract_path()
+    return resolve_task_type(
+        prompt,
+        explicit=explicit,
+        classes=load_selectable_task_classes(contract_path),
+        # OMN-18305 residual: the fallback is a GRADING decision, so the
+        # contract owns it. A contract that declares none yields the module
+        # default, whose docstring records the two properties any fallback
+        # has to satisfy.
+        fallback=load_selection_fallback(contract_path),
     )
-    return resolve_task_type(prompt, explicit=explicit, classes=resolved)
+
+
+def load_supported_criteria() -> frozenset[str] | None:
+    """Return the closed acceptance-criterion vocabulary, or ``None`` if unreadable.
+
+    ``acceptance_criteria`` is NOT free text. The delegation wire model
+    validates every entry against a closed slug set, plus the pattern
+    ``max_words_per_sentence_<N>``, and refuses the whole request otherwise.
+    Measured live 2026-09-15: three free-text criteria produced a 265 ms
+    ``ValidationError`` with a pydantic traceback, zero rungs attempted, and no
+    mention of which command-line flag the caller had got wrong.
+
+    So the vocabulary is resolved HERE, at the flag, from the same installed
+    omnimarket the contract itself is read from — one source, not a copy that
+    can drift. ``None`` means omnimarket is unresolvable, in which case this
+    command cannot dispatch at all for unrelated reasons and the criteria are
+    passed through to be validated where they always were.
+    """
+    try:
+        module = importlib.import_module(
+            "omnimarket.models.delegation.wire.model_delegation_request"
+        )
+        supported = module.SUPPORTED_ACCEPTANCE_CRITERIA
+    except (ImportError, AttributeError):
+        return None
+    return frozenset(str(item) for item in supported)
+
+
+def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
+    """Refuse an unknown criterion here, naming the flag and the vocabulary."""
+    if not criteria:
+        return criteria
+    supported = load_supported_criteria()
+    if supported is None:
+        return criteria
+    unsupported = sorted(
+        item
+        for item in criteria
+        if item not in supported and not _MAX_WORDS_PER_SENTENCE_RE.match(item)
+    )
+    if unsupported:
+        raise ValueError(
+            "--criteria takes declared criterion slugs, not free text. "
+            f"Unsupported: {', '.join(repr(item) for item in unsupported)}. "
+            f"Allowed: {', '.join(sorted(supported))}, or "
+            "max_words_per_sentence_<N>."
+        )
+    return criteria
+
+
+def _resolve_task_class_flag(
+    task_type: str | None, task_class_alias: str | None
+) -> str | None:
+    """Collapse ``--task-type`` and its ``--task-class`` alias into one value.
+
+    Passing both is a usage error rather than a precedence rule: a silent
+    winner between two spellings of the same flag is how a caller ends up
+    graded against a class it thought it had overridden.
+    """
+    if task_type is not None and task_class_alias is not None:
+        raise ValueError(
+            "--task-type and --task-class are two spellings of the same flag; "
+            "pass one, not both"
+        )
+    return task_type if task_type is not None else task_class_alias
+
+
+def _load_response_contract(raw: str | None) -> dict[str, object] | None:
+    """Read ``--response-contract`` as inline JSON or as a path to a JSON file.
+
+    Refuses anything that is not a JSON object: the field is threaded to the
+    quality gate as a JSON-Schema-shaped contract, and a list or a bare scalar
+    would be accepted here and rejected far downstream with no mention of this
+    flag.
+    """
+    if raw is None:
+        return None
+    candidate = Path(raw)
+    if candidate.suffix == ".json":
+        if not candidate.is_file():
+            raise ValueError(
+                f"--response-contract names {raw!r}, which ends in .json but is "
+                "not a readable file"
+            )
+        text = candidate.read_text(encoding="utf-8")
+    else:
+        text = raw
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"--response-contract is neither a readable .json file nor valid "
+            f"inline JSON: {exc}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "--response-contract must be a JSON object describing the expected "
+            f"response structure, not a {type(parsed).__name__}"
+        )
+    return parsed
 
 
 def _write_payload(
@@ -739,6 +857,10 @@ def _write_payload(
     state_root: Path,
     run_id: uuid.UUID,
     correlation_id: uuid.UUID,
+    acceptance_criteria: tuple[str, ...] = (),
+    quality_contract_mode: str | None = None,
+    response_contract: dict[str, object] | None = None,
+    system_prompt: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -763,6 +885,18 @@ def _write_payload(
     the one place guaranteed to mint a fresh identity per invocation (a new
     OS process every time), so it owns this run's tracing identity end to end
     instead of delegating that responsibility downstream.
+
+    THE FOUR CALLER-STATED FIELDS (OMN-18305 residual, measured 2026-09-15).
+    ``ModelDelegateSkillRequest`` has carried ``acceptance_criteria``,
+    ``quality_contract_mode``, ``response_contract`` and ``system_prompt``
+    since OMN-15193/OMN-15482, and the quality-gate reducer already branches on
+    ``replace_task_class`` — but this CLI wrote none of them, so the ONLY
+    rubric a ``onex delegate`` caller could be graded against was the one the
+    task class declares. That is the rubric that was wrong in both failures
+    measured on 2026-09-15: a drafting prompt refused on ``planning``'s
+    ``covers_dependencies`` and another refused on ``research``'s
+    ``cites_sources``. Each field is omitted entirely when unset, so no
+    existing caller changes shape.
     """
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -775,6 +909,14 @@ def _write_payload(
     }
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if acceptance_criteria:
+        payload["acceptance_criteria"] = list(acceptance_criteria)
+    if quality_contract_mode is not None:
+        payload["quality_contract_mode"] = quality_contract_mode
+    if response_contract is not None:
+        payload["response_contract"] = response_contract
+    if system_prompt is not None:
+        payload["system_prompt"] = system_prompt
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -868,6 +1010,65 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
         f"predicates; the fallback when none claims the prompt is "
         f"{DEFAULT_TASK_TYPE}. The chosen class and how it was chosen are "
         "printed on stderr and recorded in the run artifacts."
+    ),
+)
+@click.option(
+    "--task-class",
+    "task_class_alias",
+    type=str,
+    default=None,
+    help=(
+        "Alias for --task-type. The contract calls these TASK CLASSES, so the "
+        "flag that selects one may be spelled either way; passing both is a "
+        "usage error rather than a silent precedence rule."
+    ),
+)
+@click.option(
+    "--criteria",
+    "criteria",
+    type=str,
+    multiple=True,
+    help=(
+        "An acceptance criterion this answer must meet, repeatable. Stating "
+        "your own criteria is how you stop being graded against a rubric you "
+        "did not ask for: on 2026-09-15 a drafting prompt was refused on every "
+        "rung for missing source citations, because the task class it landed "
+        "on grades research. With --criteria-mode replace-task-class these "
+        "criteria BECOME the bar; by default they are added to it."
+    ),
+)
+@click.option(
+    "--criteria-mode",
+    "criteria_mode",
+    type=click.Choice(["extend-task-class", "replace-task-class"]),
+    default=None,
+    help=(
+        "Whether --criteria are added to the task class's own definition of "
+        "done (the default) or REPLACE it. Only meaningful with --criteria. "
+        "'replace-task-class' is the escape hatch from a shape floor that does "
+        "not apply to your task."
+    ),
+)
+@click.option(
+    "--response-contract",
+    "response_contract",
+    type=str,
+    default=None,
+    help=(
+        "A JSON-Schema-shaped contract describing the response structure you "
+        "expect, as inline JSON or a path to a .json file. When set, the "
+        "quality gate validates the response STRUCTURALLY against this schema "
+        "instead of the task class's keyword heuristics."
+    ),
+)
+@click.option(
+    "--system-prompt",
+    "system_prompt",
+    type=str,
+    default=None,
+    help=(
+        "A system message sent as a distinct role alongside the prompt, rather "
+        "than concatenated into it. Omit to use the task class default."
     ),
 )
 @click.option(
@@ -1002,6 +1203,11 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
 def delegate_command(
     prompt: str,
     task_type: str | None,
+    task_class_alias: str | None,
+    criteria: tuple[str, ...],
+    criteria_mode: str | None,
+    response_contract: str | None,
+    system_prompt: str | None,
     max_tokens: int | None,
     source: str | None,
     bus: str | None,
@@ -1035,7 +1241,11 @@ def delegate_command(
     try:
         exit_code = run_delegate(
             prompt=prompt,
-            task_type=task_type,
+            task_type=_resolve_task_class_flag(task_type, task_class_alias),
+            acceptance_criteria=_validate_criteria(tuple(criteria)),
+            criteria_mode=criteria_mode,
+            response_contract=_load_response_contract(response_contract),
+            system_prompt=system_prompt,
             max_tokens=max_tokens,
             source=source,
             bus=bus,
@@ -1057,6 +1267,10 @@ def run_delegate(
     *,
     prompt: str,
     task_type: str | None,
+    acceptance_criteria: tuple[str, ...] = (),
+    criteria_mode: str | None = None,
+    response_contract: dict[str, object] | None = None,
+    system_prompt: str | None = None,
     max_tokens: int | None,
     source: str | None = None,
     bus: str | None = None,
@@ -1213,6 +1427,14 @@ def run_delegate(
         prompt=prompt,
         task_type=resolved_task_type,
         source=resolved_source,
+        acceptance_criteria=acceptance_criteria,
+        # The wire enum spells these with underscores; the flag spells them
+        # with dashes, as every other choice flag on this command does.
+        quality_contract_mode=(
+            None if criteria_mode is None else criteria_mode.replace("-", "_")
+        ),
+        response_contract=response_contract,
+        system_prompt=system_prompt,
         max_tokens=max_tokens,
         state_root=state_root,
         run_id=run_id,

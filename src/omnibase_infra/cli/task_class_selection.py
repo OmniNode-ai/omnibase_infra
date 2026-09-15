@@ -60,7 +60,9 @@ __all__ = [
     "ModelSelectableTaskClass",
     "ModelTaskTypeResolution",
     "TaskClassContractError",
+    "DEFAULT_TASK_TYPE",
     "load_selectable_task_classes",
+    "load_selection_fallback",
     "resolve_task_class_contract_path",
     "resolve_task_type",
 ]
@@ -68,11 +70,29 @@ __all__ = [
 #: Where the task-class contract sits inside the installed omnimarket package.
 TASK_CLASS_CONTRACT_RELATIVE_PATH = Path("configs") / "task_class_contracts.v1.yaml"
 
-#: The class a prompt resolves to when no declared predicate claims it. It is
-#: deliberately one of the classes whose quality bar arms the prose checks: an
-#: unrecognised prompt must not land somewhere the checks are disarmed, which
-#: is precisely the failure OMN-18305 was opened for.
-DEFAULT_TASK_TYPE = "research"
+#: The class a prompt resolves to when no declared predicate claims it, and the
+#: contract declares no ``selection_fallback`` of its own.
+#:
+#: It must satisfy TWO properties, and the first revision of this module only
+#: had the second:
+#:
+#: 1. **Its blocking floors must be shape-agnostic.** A prompt that reached the
+#:    fallback is by construction a prompt whose SHAPE no predicate recognised,
+#:    so grading it on a shape floor refuses correct answers for not being
+#:    something nobody asked them to be. ``research`` — the original choice —
+#:    carries ``cites_sources`` and ``methodical_analysis``, two shape floors,
+#:    and that is exactly what refused a 170-word drafting prompt on every rung
+#:    on 2026-09-15 (ledger ``docs/tracking/ROLLING_WORK_LEDGER.md:8210``).
+#:    ``document``'s floors are ``no_refusal``, ``accurate`` and
+#:    ``semantic_adequacy``: three qualities any well-formed prose answer can
+#:    meet, and no shape at all.
+#: 2. **It must still arm the prose checks**, ``identifiers_grounded`` included
+#:    (OMN-18297). An unrecognised prompt must not land somewhere ungraded,
+#:    which is the failure OMN-18305 was opened for. ``document`` arms them.
+#:
+#: Both properties are pinned by ``TestTheFallbackIsPermissiveNotStrict``, with
+#: a positive control asserting ``research`` and ``planning`` fail the first.
+DEFAULT_TASK_TYPE = "document"
 
 
 class TaskClassContractError(Exception):
@@ -153,11 +173,60 @@ def load_selectable_task_classes(
     return tuple(selectable)
 
 
+def load_selection_fallback(contract_path: Path) -> str:
+    """Return the class an unclaimed prompt falls back to, as the contract declares it.
+
+    The fallback is a decision about GRADING, so it belongs beside the grading
+    rules rather than in this evaluator: moving it must not require a CLI
+    release. A contract that declares ``selection_fallback.task_class`` owns the
+    choice; one that does not yields :data:`DEFAULT_TASK_TYPE`, whose docstring
+    records the two properties any fallback has to satisfy.
+
+    A declared fallback naming a class the contract does not gateway-expose is a
+    contract defect and is refused by name. Silently reverting to the module
+    constant there would hide the drift the declaration exists to prevent.
+    """
+    try:
+        raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} could not be read: {exc}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} is not a mapping"
+        )
+
+    declared = raw.get("selection_fallback")
+    if declared is None:
+        return DEFAULT_TASK_TYPE
+    if not isinstance(declared, dict) or not declared.get("task_class"):
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} declares a "
+            "selection_fallback with no task_class"
+        )
+
+    name = str(declared["task_class"])
+    public = {
+        str(key)
+        for key, entry in (raw.get("task_classes") or {}).items()
+        if isinstance(entry, dict) and entry.get("gateway_exposure") == "public"
+    }
+    if name not in public:
+        raise TaskClassContractError(
+            f"selection_fallback names {name!r}, which the contract at "
+            f"{contract_path} does not gateway-expose; a prompt can never be "
+            f"routed there. Exposed: {', '.join(sorted(public)) or '(none)'}"
+        )
+    return name
+
+
 def resolve_task_type(
     prompt: str,
     *,
     explicit: str | None,
     classes: tuple[ModelSelectableTaskClass, ...],
+    fallback: str = DEFAULT_TASK_TYPE,
 ) -> ModelTaskTypeResolution:
     """Resolve this run's task class and record how the decision was made.
 
@@ -190,12 +259,13 @@ def resolve_task_type(
 
     if not eligible:
         return ModelTaskTypeResolution(
-            task_type=DEFAULT_TASK_TYPE,
+            task_type=fallback,
             resolution=EnumTaskTypeResolution.FALLBACK,
             reason=(
                 f"no declared selection predicate claimed this "
                 f"{word_count}-word prompt; using the declared fallback "
-                f"{DEFAULT_TASK_TYPE!r}"
+                f"{fallback!r}, whose quality floors are shape-agnostic. Pass "
+                f"--criteria to state your own acceptance criteria instead"
             ),
         )
 
