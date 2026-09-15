@@ -101,6 +101,11 @@ def _decide(**overrides: Any) -> Any:
         "lab": _lab(),
         "policy": _policy(),
         "allowlist": [],
+        # omnibase_infra is a PUBLIC repository, so this is what its own runs
+        # carry. It is spelled out rather than defaulted inside the module:
+        # a defaulted visibility would make the OMN-18412 rule fail OPEN for
+        # any caller that forgot to wire it.
+        "visibility": route.VISIBILITY_PUBLIC,
     }
     kwargs.update(overrides)
     return route.decide(**kwargs)
@@ -293,10 +298,18 @@ def test_never_widens_beyond_ceiling() -> None:
         {"ok": False, "error": "x"},
     ]
     paths = [".github/workflows/ci.yml", ".github/workflows/anything.yml"]
+    # OMN-18412: the visibility rule can REVERSE a hosted answer back onto the
+    # fleet, which is the one kind of edit that could widen. It is swept here
+    # rather than tested only in isolation for exactly that reason.
+    visibilities = [
+        route.VISIBILITY_PUBLIC,
+        route.VISIBILITY_PRIVATE,
+        route.VISIBILITY_UNKNOWN,
+    ]
 
     checked = 0
-    for seam, event, head, fleet, lab, path in itertools.product(
-        seams, events, head_repos, fleets, labs, paths
+    for seam, event, head, fleet, lab, path, visibility in itertools.product(
+        seams, events, head_repos, fleets, labs, paths, visibilities
     ):
         result = _decide(
             seam_json=seam,
@@ -305,9 +318,16 @@ def test_never_widens_beyond_ceiling() -> None:
             fleet=fleet,
             lab=lab,
             workflow_path=path,
+            visibility=visibility,
         )
         seam_labels = set(json.loads(seam))
         returned = set(result.labels)
+        if result.decision == "blocked":
+            # A refusal names no labels at all. That is neither hosted nor a
+            # widening; it is the third outcome OMN-18412 added.
+            assert returned == set()
+            checked += 1
+            continue
         # Either exactly the hosted set, or a subset of what the seam allowed.
         assert returned == set(HOSTED_LABELS) or returned <= seam_labels, (
             f"WIDENED: seam={seam} event={event} head={head} -> {result.labels}"
@@ -320,7 +340,7 @@ def test_never_widens_beyond_ceiling() -> None:
     # Non-vacuity: the sweep must actually have run the combinations.
     assert checked == len(seams) * len(events) * len(head_repos) * len(fleets) * len(
         labs
-    ) * len(paths)
+    ) * len(paths) * len(visibilities)
     assert checked > 1500
 
 
@@ -680,3 +700,324 @@ def test_probe_lab_saturation_from_fleet_treats_zero_online_as_fully_saturated(
         "tok", "omnibase-ci", "https://api.github.com"
     )
     assert result["hosts"][0]["ratio"] == 1.0
+
+
+# --- OMN-18412. A private repository is never placed on a hosted runner -----
+#
+# Operator ruling, 2026-09-14, firm. These are the tests the module did not have
+# when that ruling landed: every one of them passes trivially on a public repo,
+# and the first four fail against the pre-OMN-18412 module.
+
+
+def test_a_private_repo_is_not_downgraded_to_hosted_by_saturation() -> None:
+    """The load-bearing case. Fleet saturated, ceiling names the fleet, repo
+    private -> the FLEET, not hosted. The fleet being busy is not a reason to
+    break the ruling; the job waits for a runner instead.
+    """
+    result = _decide(
+        visibility=route.VISIBILITY_PRIVATE,
+        seam_json=LAB_SEAM,
+        fleet=_fleet(online=88, busy=85),
+    )
+    assert result.labels == LAB_LABELS
+    assert result.decision == "self_hosted"
+    assert result.reason == "private_repo_no_hosted_downgrade"
+    assert result.inputs["downgrade_refused_from"] == "fleet_saturated"
+
+
+@pytest.mark.parametrize(
+    ("fleet", "lab", "expected_from"),
+    [
+        (_fleet(88, 85), _lab(), "fleet_saturated"),
+        (_fleet(30, 0), _lab(), "fleet_degraded"),
+        (_fleet(88, 10), _lab(age_seconds=99999), "lab_unknown"),
+        (_fleet(88, 10), _lab(ratio=9.9), "lab_saturated"),
+        (_fleet(88, 10), _lab(free_mem_mib=10), "lab_saturated"),
+        ({"ok": False, "error": "timeout"}, _lab(), "probe_error:timeout"),
+        (None, _lab(), "probe_error:unexpected_shape"),
+    ],
+)
+def test_every_capacity_downgrade_is_reversed_for_a_private_repo(
+    fleet: Any, lab: Any, expected_from: str
+) -> None:
+    """All six capacity/probe reasons, not just the one in the headline case.
+
+    A rule that only covered `fleet_saturated` would leave five other paths
+    placing a private repository hosted, and each of them is reachable on an
+    ordinary run.
+    """
+    result = _decide(
+        visibility=route.VISIBILITY_PRIVATE, seam_json=LAB_SEAM, fleet=fleet, lab=lab
+    )
+    assert result.labels == LAB_LABELS
+    assert result.reason == "private_repo_no_hosted_downgrade"
+    assert result.inputs["downgrade_refused_from"] == expected_from
+
+
+def test_a_private_repo_with_a_hosted_only_ceiling_is_refused_not_placed() -> None:
+    """Hosted is the only placement the seam permits, and this repository may
+    not be placed hosted. There is no answer, so the router says so instead of
+    inventing one: blocked, no labels.
+    """
+    result = _decide(visibility=route.VISIBILITY_PRIVATE, seam_json=HOSTED_SEAM)
+    assert result.decision == "blocked"
+    assert result.labels == []
+    assert result.reason == "private_repo_hosted_forbidden:seam_ceiling_hosted"
+
+
+def test_a_private_repo_fork_pull_request_is_refused_not_put_on_the_fleet() -> None:
+    """THE CASE THE RULE MUST NOT GET WRONG. Two inviolable rules collide:
+    untrusted code never reaches self-hosted compute (OMN-16683), and a private
+    repository never runs hosted (2026-09-14). Reversing the fork isolation
+    would resolve the collision by putting untrusted code on the lab fleet,
+    which no capacity argument may ever do. The refusal is the only safe answer.
+    """
+    result = _decide(
+        visibility=route.VISIBILITY_PRIVATE,
+        seam_json=LAB_SEAM,
+        event_name="pull_request",
+        head_repo="fork/omnibase_infra",
+        fleet=_fleet(88, 0),
+    )
+    assert result.decision == "blocked"
+    assert result.labels == []
+    assert result.reason == "private_repo_hosted_forbidden:fork_isolation"
+    assert "self-hosted" not in result.labels
+
+
+def test_a_private_repo_on_an_allowlisted_workflow_is_refused() -> None:
+    """The hosted allowlist encodes reasons that outrank capacity -- fate
+    isolation from the fleet, clean egress for a registry push. Reversing one
+    would put an ECR push or a fleet canary on the very fleet it is isolated
+    from, so this is a refusal too, not a conversion.
+    """
+    result = _decide(
+        visibility=route.VISIBILITY_PRIVATE,
+        seam_json=LAB_SEAM,
+        workflow_path=".github/workflows/build-and-push-runtime.yml",
+        allowlist=[".github/workflows/build-and-push-runtime.yml"],
+        fleet=_fleet(88, 0),
+    )
+    assert result.decision == "blocked"
+    assert result.reason == "private_repo_hosted_forbidden:policy_allowlist"
+
+
+def test_a_private_repo_with_capacity_available_is_untouched() -> None:
+    """The rule only ever inspects a HOSTED answer. An answer that already
+    names the fleet passes through with its own reason intact, so a private
+    repository's ordinary run is not relabelled into looking like a refusal.
+    """
+    result = _decide(
+        visibility=route.VISIBILITY_PRIVATE, seam_json=LAB_SEAM, fleet=_fleet(88, 0)
+    )
+    assert result.labels == LAB_LABELS
+    assert result.reason == "capacity_available"
+
+
+def test_unknown_visibility_is_not_downgraded_when_the_ceiling_names_the_fleet() -> (
+    None
+):
+    """Fail-closed for the half that is safe to fail closed: if the router
+    cannot PROVE the repository is public, it does not move the run off the
+    fleet. Named distinctly from the private case so the record does not claim
+    a fact the probe never established.
+    """
+    result = _decide(
+        visibility=route.VISIBILITY_UNKNOWN,
+        seam_json=LAB_SEAM,
+        fleet=_fleet(online=88, busy=85),
+    )
+    assert result.labels == LAB_LABELS
+    assert result.reason == "visibility_unknown_no_hosted_downgrade"
+
+
+def test_unknown_visibility_with_a_hosted_ceiling_never_refuses() -> None:
+    """THE ASYMMETRY, AND WHY IT IS DELIBERATE. Every public repository's seam
+    reads `["ubuntu-latest"]` today, so refusing on unknown visibility would
+    turn one transient metadata read failure into a fleet-wide CI outage. The
+    misconfigured-private case is covered statically by the exported
+    `private-repo-runner-placement` gate, which reads visibility itself.
+    """
+    result = _decide(visibility=route.VISIBILITY_UNKNOWN, seam_json=HOSTED_SEAM)
+    assert result.decision == "hosted"
+    assert result.labels == HOSTED_LABELS
+    assert result.reason == "seam_ceiling_hosted"
+    assert result.inputs["visibility"] == route.VISIBILITY_UNKNOWN
+
+
+def test_a_public_repo_is_completely_unaffected() -> None:
+    """Regression control: the rule must be invisible to every public repo,
+    which is all seven routing scopes that could route today.
+    """
+    saturated = _decide(seam_json=LAB_SEAM, fleet=_fleet(88, 85))
+    assert saturated.labels == HOSTED_LABELS
+    assert saturated.reason == "fleet_saturated"
+    inert = _decide(seam_json=HOSTED_SEAM)
+    assert inert.reason == "seam_ceiling_hosted"
+
+
+def test_a_blocked_decision_is_json_serialisable_and_names_its_cause() -> None:
+    """A refusal is an audit record like any other decision: the run log is not
+    the evidence surface, the artifact is.
+    """
+    result = _decide(visibility=route.VISIBILITY_PRIVATE, seam_json=HOSTED_SEAM)
+    record = json.loads(json.dumps(result.to_record()))
+    assert record["decision"] == "blocked"
+    assert record["labels"] == []
+    assert record["inputs"]["visibility"] == "private"
+    assert record["reason"].startswith("private_repo_hosted_forbidden:")
+
+
+def test_visibility_is_required_and_has_no_default() -> None:
+    """Rule 8: a defaulted visibility fails OPEN. A caller that does not supply
+    it is a wiring error, and it is loud.
+    """
+    kwargs: dict[str, Any] = {
+        "event_name": "push",
+        "head_repo": "OmniNode-ai/omnibase_infra",
+        "repository": "OmniNode-ai/omnibase_infra",
+        "workflow_path": ".github/workflows/ci.yml",
+        "seam_json": LAB_SEAM,
+        "public_json": HOSTED_SEAM,
+        "fleet": _fleet(),
+        "lab": _lab(),
+        "policy": _policy(),
+        "allowlist": [],
+    }
+    with pytest.raises(KeyError):
+        route.decide(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("public", "public"),
+        ("private", "private"),
+        # `internal` is not publicly readable and its hosted minutes are billed
+        # exactly like a private repository's, so it is private here. Treating
+        # it as public because the API spells it differently would be a silent
+        # exemption from the ruling.
+        ("internal", "private"),
+        ("unknown", "unknown"),
+        (None, "unknown"),
+        ("", "unknown"),
+        (True, "unknown"),
+        ("PUBLIC", "unknown"),
+    ],
+)
+def test_visibility_normalisation_never_guesses_public(raw: Any, expected: str) -> None:
+    assert route.normalise_visibility(raw) == expected
+
+
+# --- the probe, at the I/O boundary ----------------------------------------
+
+
+class _Response:
+    def __init__(self, payload: Any) -> None:
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self) -> _Response:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"visibility": "public"}, "public"),
+        ({"visibility": "private"}, "private"),
+        ({"visibility": "internal"}, "private"),
+        # the older boolean form, read ONLY when `visibility` is absent
+        ({"private": True}, "private"),
+        ({"private": False}, "public"),
+        ({}, "unknown"),
+        ([], "unknown"),
+        ({"visibility": "something-new"}, "unknown"),
+    ],
+)
+def test_probe_repo_visibility_reads_the_live_repository(
+    payload: Any, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        route.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+    )
+    assert (
+        route.probe_repo_visibility(
+            "t", "OmniNode-ai/omniweb", "https://api.github.com"
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("token", "repository", "api_url"),
+    [
+        (None, "OmniNode-ai/omniweb", "https://api.github.com"),
+        ("", "OmniNode-ai/omniweb", "https://api.github.com"),
+        ("t", "omniweb", "https://api.github.com"),
+        ("t", "", "https://api.github.com"),
+        ("t", "OmniNode-ai/omniweb", "file:///etc/passwd"),
+        ("t", "OmniNode-ai/omniweb", "http://api.github.com"),
+    ],
+)
+def test_probe_repo_visibility_is_unknown_on_every_bad_input(
+    token: Any, repository: str, api_url: str
+) -> None:
+    """Including the scheme pin: the answer decides where jobs execute, so it
+    may only ever come from the real API over https.
+    """
+    assert route.probe_repo_visibility(token, repository, api_url) == "unknown"
+
+
+def test_probe_repo_visibility_is_unknown_on_a_transport_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise(*_a: Any, **_k: Any) -> None:
+        raise route.urllib.error.URLError("down")
+
+    monkeypatch.setattr(route.urllib.request, "urlopen", _raise)
+    assert (
+        route.probe_repo_visibility(
+            "t", "OmniNode-ai/omniweb", "https://api.github.com"
+        )
+        == "unknown"
+    )
+
+
+def test_the_probe_test_is_not_vacuous(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Positive control for the two tests above: a stub that returns a real
+    payload must produce a real answer, or "always unknown" would pass them
+    both while the probe was broken.
+    """
+    monkeypatch.setattr(
+        route.urllib.request,
+        "urlopen",
+        lambda *a, **k: _Response({"private": True}),
+    )
+    assert (
+        route.probe_repo_visibility(
+            "t", "OmniNode-ai/omniweb", "https://api.github.com"
+        )
+        == "private"
+    )
+
+
+def test_the_policy_file_declares_no_repository_visibility() -> None:
+    """Visibility is read live, never declared. A declared list is a second
+    copy of a fact GitHub owns and goes stale silently the first time a
+    repository changes visibility -- the failure rule 14 names for the routing
+    table it tells you not to enumerate from.
+    """
+    text = (REPO_ROOT / "config" / "runner_routing_policy.yaml").read_text(
+        encoding="utf-8"
+    )
+    import yaml as _yaml
+
+    section = _yaml.safe_load(text)["route"]
+    assert "visibility" not in section
+    assert "private_repositories" not in section

@@ -34,6 +34,11 @@ TOWARD HOSTED:
   S6  lab record missing / stale / loaded / mem-starved  -> hosted
   S7  otherwise                                          -> the seam labels
 
+  V   the answer is hosted and the repository is PRIVATE  -> the fleet, or a
+      REFUSAL (OMN-18412; operator ruling 2026-09-14, a private repository
+      never runs CI on a GitHub-hosted runner). Applied to the ANSWER, after
+      the never-widen degrade, so no return point escapes it.
+
 FAIL-CLOSED IS THE WHOLE SAFETY STORY. Nothing raises to the caller: the
 boundary catches every exception and degrades to hosted, so even a crashing
 route job hands the run a usable ``runs-on`` rather than an empty one. An
@@ -102,6 +107,49 @@ REQUIRED_ALERT_KEYS: tuple[str, ...] = (
     "busy_fraction_threshold",
     "lab_load_ratio_threshold",
     "sustained_samples",
+)
+
+# --- repository visibility (operator ruling 2026-09-14, OMN-18412) ---------
+#
+# A PRIVATE repository never runs CI on GitHub-hosted runners. That ruling
+# post-dates this module by a week, and every step of the elimination above can
+# move the answer toward hosted, so without this the saturation branch would
+# quietly place a private repository's jobs on `ubuntu-latest` -- the one
+# placement the ruling forbids, and one that does not even execute (the hosted
+# minutes are billed, and the routing policy file records the annotation).
+#
+# THE NEVER-WIDEN GUARD CANNOT CATCH IT. That guard asks whether the answer
+# gained a fleet label the seam did not carry. Downgrading a private repository
+# to hosted NARROWS, so it passes. This is a separate invariant in the opposite
+# direction and needs its own check.
+VISIBILITY_PUBLIC = "public"
+VISIBILITY_PRIVATE = "private"
+VISIBILITY_UNKNOWN = "unknown"
+VISIBILITIES: tuple[str, ...] = (
+    VISIBILITY_PUBLIC,
+    VISIBILITY_PRIVATE,
+    VISIBILITY_UNKNOWN,
+)
+
+# Reasons that mean "the fleet is not available for THIS run" -- a CAPACITY
+# downgrade. Only these may be reversed for a repository that may not be placed
+# hosted. Reversing a TRUST reason instead (`fork_isolation`) would put
+# untrusted code on self-hosted compute, which no capacity argument may ever
+# do; reversing `policy_allowlist` would put an ECR push or a fleet canary on
+# the fleet it exists to be isolated from. Those two are refusals, not
+# conversions, and the split is the whole safety property of the rule.
+# The exit status a refusal uses. Distinct from 1 so the calling workflow can
+# tell "the router refused this placement" from "the module itself broke", and
+# so the workflow's fail-closed floor -- which exists to hand a crashed router's
+# run a usable runs-on -- cannot mistake a deliberate refusal for a crash and
+# paper over it with hosted labels.
+REFUSED_EXIT_CODE = 3
+
+CAPACITY_DOWNGRADE_REASONS: tuple[str, ...] = (
+    "fleet_saturated",
+    "fleet_degraded",
+    "lab_unknown",
+    "lab_saturated",
 )
 
 
@@ -202,6 +250,116 @@ def assert_never_widens(
         raise AssertionError(f"routing invented a self-hosted label: ceiling={ceiling}")
 
 
+def normalise_visibility(value: Any) -> str:
+    """Map a raw visibility reading onto the three values this module knows.
+
+    ``internal`` is PRIVATE here. It is not publicly readable and its hosted
+    minutes are billed exactly like a private repository's, which is what the
+    ruling is about; treating it as public because the API spells it
+    differently would be a silent exemption.
+    """
+    if value in VISIBILITIES:
+        return str(value)
+    if value == "internal":
+        return VISIBILITY_PRIVATE
+    return VISIBILITY_UNKNOWN
+
+
+def _is_capacity_downgrade(reason: str) -> bool:
+    return reason in CAPACITY_DOWNGRADE_REASONS or reason.startswith("probe_error:")
+
+
+def apply_visibility_rule(
+    decision: RouteDecision,
+    *,
+    visibility: str,
+    ceiling: list[str],
+    hosted: list[str],
+) -> RouteDecision:
+    """Enforce "a private repository is never placed on a hosted runner".
+
+    Applied to the ANSWER, after the elimination and after the never-widen
+    guard, for the same reason that guard is: a check placed inside one branch
+    only defends that branch, and there are eight return points.
+
+    Three outcomes, and the split between them is the safety property:
+
+    * the answer already names the fleet, or the repository is public -> pass
+      it through untouched. This rule only ever looks at a hosted answer.
+    * the answer is hosted for a CAPACITY reason and the seam ceiling names the
+      fleet -> return the ceiling. The fleet being busy is not a reason to
+      break the ruling; the job waits for a runner instead.
+    * anything else -> REFUSE. A hosted-only ceiling, a fork pull request and a
+      policy-allowlisted workflow each mean hosted is the only placement the
+      policy would allow, and for this repository that placement is forbidden.
+      Refusing is the honest answer: the alternative is either untrusted code
+      on the fleet or a job that is queued forever against hosted capacity it
+      may not use, and a queued job reads as a mystery rather than a rule.
+
+    UNKNOWN VISIBILITY NEVER REFUSES, deliberately and asymmetrically. A
+    transient metadata read failure must not stop CI in every repository whose
+    ceiling is hosted -- which is every public repository today -- so unknown
+    gets the no-downgrade half of the rule and not the refusal half. The
+    misconfigured-private case is covered statically by the exported
+    `private-repo-runner-placement` gate, which reads visibility itself.
+    """
+    if visibility == VISIBILITY_PUBLIC:
+        return decision
+    if _is_self_hosted(decision.labels):
+        return decision
+
+    inputs = {**decision.inputs, "visibility": visibility}
+
+    if _is_capacity_downgrade(decision.reason) and _is_self_hosted(ceiling):
+        reason = (
+            "private_repo_no_hosted_downgrade"
+            if visibility == VISIBILITY_PRIVATE
+            else "visibility_unknown_no_hosted_downgrade"
+        )
+        converted = RouteDecision(
+            labels=list(ceiling),
+            decision="self_hosted",
+            reason=reason,
+            policy_version=decision.policy_version,
+            decided_at=decision.decided_at,
+            inputs={**inputs, "downgrade_refused_from": decision.reason},
+        )
+        try:
+            assert_never_widens(converted.labels, ceiling, hosted)
+        except AssertionError as exc:
+            # Unreachable by construction -- the ceiling is trivially within
+            # itself -- and checked anyway, because "unreachable" is what the
+            # tautological never-widen call in an earlier build also claimed.
+            return RouteDecision(
+                labels=[],
+                decision="blocked",
+                reason="private_repo_conversion_would_widen",
+                policy_version=decision.policy_version,
+                decided_at=decision.decided_at,
+                inputs={**inputs, "violation": str(exc)},
+            )
+        return converted
+
+    if visibility == VISIBILITY_UNKNOWN:
+        return RouteDecision(
+            labels=decision.labels,
+            decision=decision.decision,
+            reason=decision.reason,
+            policy_version=decision.policy_version,
+            decided_at=decision.decided_at,
+            inputs=inputs,
+        )
+
+    return RouteDecision(
+        labels=[],
+        decision="blocked",
+        reason=f"private_repo_hosted_forbidden:{decision.reason}",
+        policy_version=decision.policy_version,
+        decided_at=decision.decided_at,
+        inputs=inputs,
+    )
+
+
 def _decide_unchecked(
     *,
     event_name: str,
@@ -213,6 +371,7 @@ def _decide_unchecked(
     fleet: Any,
     lab: Any,
     policy: dict[str, Any],
+    visibility: str,
     allowlist: list[str] | None = None,
 ) -> RouteDecision:
     """The ordered elimination itself. Callers use ``decide``, which re-checks
@@ -245,6 +404,7 @@ def _decide_unchecked(
                 "repository": repository,
                 "workflow_path": workflow_path,
                 "seam_json": seam_json,
+                "visibility": visibility,
                 **(extra or {}),
             },
         )
@@ -290,6 +450,7 @@ def _decide_unchecked(
                     "repository": repository,
                     "workflow_path": workflow_path,
                     "seam_json": seam_json,
+                    "visibility": visibility,
                 },
             )
 
@@ -408,6 +569,7 @@ def _decide_unchecked(
                 "repository": repository,
                 "workflow_path": workflow_path,
                 "seam_json": seam_json,
+                "visibility": visibility,
                 "fleet": {"online": online, "busy": busy},
                 "idle": idle,
                 "busy_fraction": round(busy_fraction, 4),
@@ -422,7 +584,11 @@ def _decide_unchecked(
             reason=f"probe_error:internal:{type(exc).__name__}",
             policy_version=version,
             decided_at=decided_at,
-            inputs={"event_name": event_name, "workflow_path": workflow_path},
+            inputs={
+                "event_name": event_name,
+                "workflow_path": workflow_path,
+                "visibility": visibility,
+            },
         )
 
 
@@ -443,15 +609,28 @@ def decide(**kwargs: Any) -> RouteDecision:
     edit to any of the eight return points is re-validated here against the
     seam that run actually carried, and a violation degrades to hosted rather
     than raising -- an unroutable run is worse than a hosted one.
+
+    THE VISIBILITY RULE IS APPLIED LAST, AFTER the never-widen degrade, and the
+    order is load-bearing rather than incidental: that degrade emits HOSTED, so
+    running the visibility rule before it would let the one path that ignores
+    the elimination entirely place a private repository on a hosted runner.
+    Last means every answer this function can return has passed it.
+
+    ``visibility`` is a REQUIRED key with no default. A defaulted visibility
+    would make the rule fail OPEN on a caller that forgot to wire it, which is
+    the "silently defaulted threshold" failure CLAUDE.md rule 8 names, and a
+    missing key here is a wiring error caught by the wiring tests rather than a
+    runtime condition this module is promising to survive.
     """
-    decision = _decide_unchecked(**kwargs)
     policy = kwargs["policy"]
+    visibility = normalise_visibility(kwargs["visibility"])
     hosted = [str(item) for item in policy.get("hosted_labels", ["ubuntu-latest"])]
     ceiling = _parse_labels(kwargs.get("seam_json")) or []
+    decision = _decide_unchecked(**{**kwargs, "visibility": visibility})
     try:
         assert_never_widens(decision.labels, ceiling, hosted)
     except AssertionError as exc:
-        return RouteDecision(
+        decision = RouteDecision(
             labels=hosted,
             decision="hosted",
             reason="never_widen_violation",
@@ -459,7 +638,9 @@ def decide(**kwargs: Any) -> RouteDecision:
             decided_at=decision.decided_at,
             inputs={**decision.inputs, "violation": str(exc)},
         )
-    return decision
+    return apply_visibility_rule(
+        decision, visibility=visibility, ceiling=ceiling, hosted=hosted
+    )
 
 
 # --------------------------------------------------------------------------
@@ -520,6 +701,59 @@ def probe_fleet(token: str | None, runner_group: str, api_url: str) -> dict[str,
     # the registry read is stale, the listener is not dead (OMN-16030).
     busy = sum(1 for item in grouped if item.get("busy") is True)
     return {"ok": True, "online": online, "busy": busy, "total": len(grouped)}
+
+
+def probe_repo_visibility(token: str | None, repository: str, api_url: str) -> str:
+    """Read THIS repository's visibility from the API. Never raises.
+
+    READ AT DECISION TIME, not declared in the policy file. A declared list of
+    private repositories is a second copy of a fact GitHub already owns, and it
+    goes stale silently the first time a repository changes visibility -- the
+    same class of defect as the runner-routing table that rule 14 tells you not
+    to enumerate from. The sibling `private-repo-runner-placement` gate reads
+    live visibility for the same reason.
+
+    ``unknown`` on every fault, and ``unknown`` is NOT a refusal -- see
+    ``apply_visibility_rule`` for why that asymmetry is deliberate.
+    """
+    if not token:
+        return VISIBILITY_UNKNOWN
+    # Scheme-pinned for the same reason probe_fleet pins it: the answer decides
+    # where jobs execute, so it may only ever come from the real API.
+    if not api_url.startswith("https://"):
+        return VISIBILITY_UNKNOWN
+    if not repository or repository.count("/") != 1:
+        return VISIBILITY_UNKNOWN
+    try:
+        request = urllib.request.Request(  # noqa: S310 -- scheme pinned to https above
+            f"{api_url}/repos/{repository}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 -- scheme pinned to https above
+            payload = json.loads(response.read().decode("utf-8"))
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+        TypeError,
+    ):
+        return VISIBILITY_UNKNOWN
+    if not isinstance(payload, dict):
+        return VISIBILITY_UNKNOWN
+    if "visibility" in payload:
+        return normalise_visibility(payload.get("visibility"))
+    # `private` is the older boolean form of the same fact; read it only when
+    # `visibility` is absent, never as a second opinion that could disagree.
+    private = payload.get("private")
+    if private is True:
+        return VISIBILITY_PRIVATE
+    if private is False:
+        return VISIBILITY_PUBLIC
+    return VISIBILITY_UNKNOWN
 
 
 def probe_lab_saturation_from_fleet(
@@ -683,6 +917,15 @@ def main(argv: list[str] | None = None) -> int:
         "--fleet-json", type=Path, default=None, help="pre-probed fleet payload"
     )
     parser.add_argument(
+        "--repo-visibility",
+        choices=list(VISIBILITIES),
+        default=None,
+        help=(
+            "this repository's visibility; probed from the API when omitted. "
+            "A private repository is never placed on a hosted runner (OMN-18412)."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print the decision, write nothing to GITHUB_OUTPUT, always exit 0",
@@ -719,6 +962,18 @@ def main(argv: list[str] | None = None) -> int:
         else read_lab_record(args.lab_record)
     )
 
+    # The job token is enough: repository metadata is readable with the default
+    # `metadata: read` every Actions token carries, so this needs no new secret
+    # and no new scope. The fleet-status tokens are accepted as a fallback only
+    # so a dry run outside Actions can still resolve the fact.
+    visibility = args.repo_visibility or probe_repo_visibility(
+        os.environ.get("GITHUB_TOKEN")
+        or os.environ.get("RUNNER_FLEET_STATUS_TOKEN")
+        or os.environ.get("CROSS_REPO_PAT"),
+        args.repository,
+        args.api_url,
+    )
+
     decision = decide(
         event_name=args.event_name,
         head_repo=args.head_repo,
@@ -729,15 +984,25 @@ def main(argv: list[str] | None = None) -> int:
         fleet=fleet,
         lab=lab,
         policy=policy,
+        visibility=visibility,
         allowlist=allowlist,
     )
 
     record = decision.to_record()
     print(json.dumps(record, indent=2, sort_keys=True))
-    print(
-        f"::notice title=Runner route::{decision.decision} "
-        f"({decision.reason}) -> {json.dumps(decision.labels)}"
-    )
+    if decision.decision == "blocked":
+        print(
+            f"::error title=Runner route refused::{decision.reason} -- this "
+            "repository is private and the only placement its policy allows is "
+            "a GitHub-hosted runner, which the 2026-09-14 operator ruling "
+            "forbids. Fix the cause named in the reason; do not place the job "
+            "hosted."
+        )
+    else:
+        print(
+            f"::notice title=Runner route::{decision.decision} "
+            f"({decision.reason}) -> {json.dumps(decision.labels)}"
+        )
 
     if args.dry_run:
         # A dry run computes and reports; it gates nothing and cannot fail a run.
@@ -753,6 +1018,13 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.get("RUNNER_ROUTE_ARTIFACT", "runner-route-decision.json")
     )
     artifact.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    # The outputs and the record are written FIRST and the refusal is signalled
+    # by the exit status, in that order: a refused run must still leave an
+    # auditable decision record, and the consuming workflow must still see a
+    # `labels=` line so its fail-closed floor does not overwrite the refusal
+    # with a hosted placement.
+    if decision.decision == "blocked":
+        return REFUSED_EXIT_CODE
     return 0
 
 
