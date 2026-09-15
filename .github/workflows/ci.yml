@@ -4309,6 +4309,23 @@ jobs:
         env:
           OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra
         run: |
+          uv run python - <<'PY'
+          import asyncio
+          import os
+
+          import asyncpg
+
+
+          async def main() -> None:
+              conn = await asyncpg.connect(os.environ["OMNIBASE_INFRA_DB_URL"])
+              try:
+                  await conn.execute("CREATE SCHEMA IF NOT EXISTS action_authorization_claim")
+              finally:
+                  await conn.close()
+
+
+          asyncio.run(main())
+          PY
           uv run python scripts/run-migrations.py
 
       # OMN-15376: node-migration shape drift. Runs HERE, in the one job that
@@ -4669,6 +4686,23 @@ jobs:
         env:
           OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ steps.start_postgres.outputs.port }}/omnibase_infra
         run: |
+          uv run python - <<'PY'
+          import asyncio
+          import os
+
+          import asyncpg
+
+
+          async def main() -> None:
+              conn = await asyncpg.connect(os.environ["OMNIBASE_INFRA_DB_URL"])
+              try:
+                  await conn.execute("CREATE SCHEMA IF NOT EXISTS action_authorization_claim")
+              finally:
+                  await conn.close()
+
+
+          asyncio.run(main())
+          PY
           uv run python scripts/run-migrations.py
 
       # Export the connection env the curated integration proofs read. The
