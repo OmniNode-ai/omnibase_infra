@@ -22,10 +22,12 @@ Two properties are pinned here, and they are layered rather than redundant:
 1. **The update path cannot destroy incidentally.** A drift on a declared field
    sends that field and nothing else, so an unrelated change can no longer
    reach a secret-clearing field.
-2. **The run cannot end silently destroyed.** If a live client shape that
-   authenticates with a secret is empty at the end of a reconcile, the Job
-   exits non-zero and names the client. Public and bearer-only clients are not
-   secret-authenticating clients and are skipped.
+2. **The run cannot end silently destroyed.** If a confidential live client is
+   empty at the end of a reconcile, the Job exits non-zero and names it. Only
+   ``publicClient`` exempts a client. Bearer-only clients are NOT exempt: this
+   realm's ``onex-api`` is bearer-only and is the client the runtime presents
+   as HTTP Basic auth on every introspection POST, so exempting bearer-only
+   would make this guard skip the one client it exists to catch.
 
 Every Keycloak interaction here is against the in-process fake below. The
 secret-clearing behaviour is reproduced in the fake and is never exercised
@@ -294,6 +296,34 @@ class TestEmptyConfidentialSecretFailsTheJob:
         assert excinfo.value.code == 1
         assert fake.put_payloads == [], "nothing drifted, so nothing should be written"
 
+    def test_bearer_only_introspection_caller_with_no_secret_fails_red(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: Any
+    ) -> None:
+        """The live state of both clusters, and the reason this ticket exists.
+
+        ``onex-api`` is bearer-only, holds no secret, and is the client the
+        runtime authenticates as on every introspection POST. Keycloak's
+        textbook model says a bearer-only client never authenticates outbound
+        and so needs no secret; this realm does not follow that model, and a
+        guard that took Keycloak's word for it would skip the exact client
+        whose emptied secret is the outage.
+
+        Exempting bearer-only clients makes this test pass silently while
+        introspection returns 401. That is the failure mode, not a fix for it.
+        """
+        live = _onex_api_live()
+        live["fullScopeAllowed"] = False
+        live["secret"] = ""
+        fake = FakeKeycloak([live])
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
+
+        assert excinfo.value.code == 1
+        record = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+        assert record["clients"] == ["onex-api"]
+        assert fake.put_payloads == [], "nothing drifted, so nothing should be written"
+
 
 @pytest.mark.unit
 class TestPublicClientsAreNotTrippedByTheGuard:
@@ -322,18 +352,6 @@ class TestPublicClientsAreNotTrippedByTheGuard:
         _run_main(monkeypatch, tmp_path, fake, [spec])
 
         assert fake._find("internal-omnidash-spa")["fullScopeAllowed"] is False
-
-    def test_bearer_only_client_with_no_secret_passes(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        live = _onex_api_live()
-        live["fullScopeAllowed"] = False
-        live["secret"] = ""
-        fake = FakeKeycloak([live])
-
-        _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
-
-        assert fake.put_payloads == []
 
     def test_a_healthy_confidential_client_passes(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

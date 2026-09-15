@@ -546,11 +546,28 @@ def _die_naming_clients(check: str, reason: str, client_ids: list[str]) -> NoRet
 
 
 def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
-    """Return whether the live Keycloak client shape is expected to hold a secret."""
-    return (
-        existing.get("publicClient") is not True
-        and existing.get("bearerOnly") is not True
-    )
+    """Return whether the live Keycloak client shape is expected to hold a secret.
+
+    Classified from the LIVE representation rather than the desired spec,
+    because a roster entry is partial: it declares only the fields the
+    reconciler owns, so a spec that omits ``publicClient`` says nothing about
+    whether the live client is public.
+
+    Only ``publicClient`` exempts a client. **``bearerOnly`` deliberately does
+    not**, even though Keycloak's textbook model says a bearer-only client is
+    a pure resource server that never authenticates outbound. In this realm
+    that model does not hold: ``onex-api`` is bearer-only AND is the client
+    the runtime presents as HTTP Basic auth on every token-introspection POST,
+    so it must hold a secret. Exempting bearer-only clients here would make
+    this guard skip the exact client whose emptied secret it exists to catch
+    -- the deploy would stay green while introspection returns 401, which is
+    the silent failure OMN-16504 is about.
+
+    The architectural mismatch is real and is worth fixing separately, by
+    moving introspection onto a non-bearer-only client. Until that happens the
+    guard reports what is true of this realm today.
+    """
+    return existing.get("publicClient") is not True
 
 
 def _read_client_secret_is_present(
@@ -596,10 +613,11 @@ def _assert_confidential_clients_have_secrets(
     That is how the onex-api destruction described in _reconcile_client() ran
     unnoticed for three days.
 
-    The guard classifies the live client representation, not the partial
-    desired spec. Public clients and bearer-only clients do not authenticate
-    with client secrets and are skipped. Clients that can authenticate with a
-    secret must still have one after reconcile.
+    The guard classifies the LIVE client representation, not the partial
+    desired spec -- see _live_client_requires_secret(). Public clients are
+    supposed to hold no secret and are skipped; they are the positive control
+    for this check. Bearer-only clients are NOT skipped, because this realm
+    uses one as its introspection caller.
 
     Every offending client is collected before failing, so one run names the
     whole set rather than making an operator re-run the Job per client.

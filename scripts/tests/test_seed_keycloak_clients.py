@@ -224,7 +224,6 @@ class TestClientAttributes:
         # the fix, not an accident of the fake.
         assert put_payloads == [
             {
-                "id": existing["id"],
                 "clientId": "omniweb",
                 "attributes": {"pkce.code.challenge.method": "S256"},
             }
@@ -277,7 +276,6 @@ class TestClientAttributes:
         # test above for why the `{**existing, ...}` spread was removed.
         assert put_payloads == [
             {
-                "id": existing["id"],
                 "clientId": "omniweb",
                 "webOrigins": [
                     "https://app.omninode.ai",
