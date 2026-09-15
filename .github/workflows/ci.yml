@@ -4701,9 +4701,14 @@ jobs:
       # runs on that path (that is the whole point of the guard).
       - name: Run curated Postgres integration proofs (Postgres provisioned)
         id: run_curated_proofs
+        env:
+          # OMN-18172 (Jonah, comment c02674f2): read ONLY by the stored-synthetic
+          # proof below, which fails instead of skipping when Postgres is absent.
+          OMN18172_REQUIRE_PG: "1"
         run: |
           uv run pytest \
             tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid \
+            tests/integration/db/test_chain_canary_stored_traffic_class_omn18172.py \
             -rs -v --tb=short \
             --junitxml=integration-guard.xml
 
