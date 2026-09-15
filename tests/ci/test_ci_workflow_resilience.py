@@ -51,7 +51,12 @@ SETUP_PYTHON_UV_ACTION = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "b441ff9d979e248ac20c51a00c135a3ce273cef2"
+# OMN-18413: re-pinned from b441ff9d9 (orphaned by the OMN-16642 omniclaude
+# release-sync main move -- reachable from neither dev nor main after that
+# move landed) to omniclaude dev/main's current tip. Confirmed no checkout
+# step was added between the two commits (diff-reviewed): the invariant this
+# constant pins still holds at the new sha.
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "2173a846258c05b77858c454176f22ff1e41a3aa"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
