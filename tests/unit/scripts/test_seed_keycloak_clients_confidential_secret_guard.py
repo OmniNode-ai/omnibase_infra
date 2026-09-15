@@ -22,10 +22,10 @@ Two properties are pinned here, and they are layered rather than redundant:
 1. **The update path cannot destroy incidentally.** A drift on a declared field
    sends that field and nothing else, so an unrelated change can no longer
    reach a secret-clearing field.
-2. **The run cannot end silently destroyed.** If a secret is empty at the end of
-   a reconcile -- including the case where the roster genuinely declares a
-   change to ``bearerOnly`` and property 1 cannot help -- the Job exits
-   non-zero and names the client.
+2. **The run cannot end silently destroyed.** If a live client shape that
+   authenticates with a secret is empty at the end of a reconcile, the Job
+   exits non-zero and names the client. Public and bearer-only clients are not
+   secret-authenticating clients and are skipped.
 
 Every Keycloak interaction here is against the in-process fake below. The
 secret-clearing behaviour is reproduced in the fake and is never exercised
@@ -78,6 +78,7 @@ class FakeKeycloak:
     def __init__(self, clients: list[dict[str, Any]]) -> None:
         self.clients: list[dict[str, Any]] = [dict(c) for c in clients]
         self.put_payloads: list[dict[str, Any]] = []
+        self.secret_endpoint_404_for: set[str] = set()
 
     def _find(self, internal_id: str) -> dict[str, Any]:
         for client in self.clients:
@@ -102,8 +103,10 @@ class FakeKeycloak:
         if method == "GET" and path.endswith("/client-secret"):
             client = self._find(path[len(base) + 1 : -len("/client-secret")])
             secret = client.get("secret") or ""
+            if client["clientId"] in self.secret_endpoint_404_for:
+                return 404, {"error": "Client secret endpoint unavailable"}
             # Keycloak answers 404 for a client that cannot hold a secret.
-            if not secret and client.get("publicClient"):
+            if not secret and (client.get("publicClient") or client.get("bearerOnly")):
                 return 404, {"error": "Client is not confidential"}
             return 200, {"type": "secret", "value": secret}
 
@@ -199,11 +202,12 @@ class TestDriftedUpdateDoesNotCarryTheWholeRepresentation:
 
         assert len(fake.put_payloads) == 1, "expected exactly one update PUT"
         payload = fake.put_payloads[0]
-        assert set(payload) == {"id", "clientId", "fullScopeAllowed"}, (
+        assert set(payload) == {"clientId", "fullScopeAllowed"}, (
             "the update must carry only the drifted field; carrying the live "
             "representation is what re-asserted bearerOnly and emptied the "
             f"secret. Got: {sorted(payload)}"
         )
+        assert "id" not in payload
         assert "bearerOnly" not in payload
         assert "secret" not in payload
 
@@ -229,24 +233,32 @@ class TestEmptyConfidentialSecretFailsTheJob:
     def test_job_fails_red_and_names_the_client(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: Any
     ) -> None:
-        """A roster that really does declare bearerOnly drift still destroys.
-
-        Property 1 cannot save this case -- the drifted field IS the
-        secret-clearing one -- so the guard is what must catch it.
-        """
-        live = _onex_api_live()
-        live["bearerOnly"] = False
+        live = {
+            "id": "internal-onex-service",
+            "clientId": "onex-service",
+            "publicClient": False,
+            "bearerOnly": False,
+            "serviceAccountsEnabled": True,
+            "fullScopeAllowed": False,
+            "secret": "",
+        }
+        spec = {
+            "clientId": "onex-service",
+            "publicClient": False,
+            "serviceAccountsEnabled": True,
+            "fullScopeAllowed": False,
+        }
         fake = FakeKeycloak([live])
 
         with pytest.raises(SystemExit) as excinfo:
-            _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
+            _run_main(monkeypatch, tmp_path, fake, [spec])
 
         assert excinfo.value.code == 1, "an emptied confidential secret must fail red"
         stderr = capsys.readouterr().err
         record = json.loads(stderr.strip().splitlines()[-1])
         assert record["op"] == "error"
         assert record["check"] == "confidential_client_secret_present"
-        assert record["clients"] == ["onex-api"], (
+        assert record["clients"] == ["onex-service"], (
             "the failure must name the offending client; a redacted failure "
             "leaves an operator exactly where this check was added to help"
         )
@@ -256,16 +268,28 @@ class TestEmptyConfidentialSecretFailsTheJob:
     ) -> None:
         """No drift, no PUT, nothing changed -- and still red.
 
-        This is the state both live clusters are in today: every reconcile
-        line reads op=unchanged while the auth path is down.
+        A broken secret-authenticating client must fail even when no declared
+        field drifted and the reconcile loop would otherwise log unchanged.
         """
-        live = _onex_api_live()
-        live["fullScopeAllowed"] = False
-        live["secret"] = ""
+        live = {
+            "id": "internal-onex-service",
+            "clientId": "onex-service",
+            "publicClient": False,
+            "bearerOnly": False,
+            "serviceAccountsEnabled": True,
+            "fullScopeAllowed": False,
+            "secret": "",
+        }
+        spec = {
+            "clientId": "onex-service",
+            "publicClient": False,
+            "serviceAccountsEnabled": True,
+            "fullScopeAllowed": False,
+        }
         fake = FakeKeycloak([live])
 
         with pytest.raises(SystemExit) as excinfo:
-            _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
+            _run_main(monkeypatch, tmp_path, fake, [spec])
 
         assert excinfo.value.code == 1
         assert fake.put_payloads == [], "nothing drifted, so nothing should be written"
@@ -299,6 +323,18 @@ class TestPublicClientsAreNotTrippedByTheGuard:
 
         assert fake._find("internal-omnidash-spa")["fullScopeAllowed"] is False
 
+    def test_bearer_only_client_with_no_secret_passes(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        live = _onex_api_live()
+        live["fullScopeAllowed"] = False
+        live["secret"] = ""
+        fake = FakeKeycloak([live])
+
+        _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
+
+        assert fake.put_payloads == []
+
     def test_a_healthy_confidential_client_passes(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -320,3 +356,26 @@ class TestPublicClientsAreNotTrippedByTheGuard:
         _run_main(monkeypatch, tmp_path, fake, [spec])
 
         assert fake._find("internal-onex-service")["secret"]
+
+    def test_secret_endpoint_404_falls_back_to_live_representation(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        live = {
+            "id": "internal-onex-service",
+            "clientId": "onex-service",
+            "publicClient": False,
+            "bearerOnly": False,
+            "serviceAccountsEnabled": True,
+            "fullScopeAllowed": False,
+            "secret": "a-live-client-secret",  # pragma: allowlist secret
+        }
+        spec = {
+            "clientId": "onex-service",
+            "publicClient": False,
+            "serviceAccountsEnabled": True,
+            "fullScopeAllowed": False,
+        }
+        fake = FakeKeycloak([live])
+        fake.secret_endpoint_404_for.add("onex-service")
+
+        _run_main(monkeypatch, tmp_path, fake, [spec])

@@ -454,20 +454,15 @@ def _reconcile_client(
             # workloads holding the now-orphaned secret were all left correct
             # and all left unable to authenticate.
             #
-            # Keycloak's update is a merge over non-null fields, so omitting a
-            # field leaves it alone. Sending exactly `{id, clientId} + drifted`
-            # therefore expresses the intended change and nothing else, and an
-            # unrelated drift can no longer reach a secret-clearing field.
+            # Sending exactly `{clientId} + drifted` expresses the intended
+            # change and nothing else; the URL already identifies the internal
+            # client id. An unrelated drift can no longer reach a
+            # secret-clearing field from the live representation.
             #
-            # `bearerOnly` is itself in BASE_FIELDS, so a roster that really
-            # does declare a change to it still sends it and Keycloak still
-            # clears the secret. That case is caught after the loop by
-            # _assert_confidential_clients_have_secrets(), which fails the Job
-            # red instead of letting the destruction pass silently.
-            update_payload: dict[str, Any] = {
-                "id": existing["id"],
-                "clientId": client_id,
-            }
+            # The post-reconcile guard classifies the live client shape, so it
+            # only requires secrets from clients that can actually authenticate
+            # with them.
+            update_payload: dict[str, Any] = {"clientId": client_id}
             for field in drift_fields:
                 update_payload[field] = spec[field]
             if secret is not None:
@@ -550,8 +545,16 @@ def _die_naming_clients(check: str, reason: str, client_ids: list[str]) -> NoRet
     sys.exit(1)
 
 
+def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
+    """Return whether the live Keycloak client shape is expected to hold a secret."""
+    return (
+        existing.get("publicClient") is not True
+        and existing.get("bearerOnly") is not True
+    )
+
+
 def _read_client_secret_is_present(
-    kc_url: str, realm: str, token: str, internal_id: str
+    kc_url: str, realm: str, token: str, existing: dict[str, Any]
 ) -> bool:
     """Return whether the live client currently holds a non-empty secret.
 
@@ -566,14 +569,14 @@ def _read_client_secret_is_present(
     """
     status, body = _request(
         "GET",
-        f"{kc_url}/admin/realms/{realm}/clients/{internal_id}/client-secret",
+        f"{kc_url}/admin/realms/{realm}/clients/{existing['id']}/client-secret",
         token=token,
     )
     if status == 200 and isinstance(body, dict) and body.get("value"):
         return True
 
     status, body = _request(
-        "GET", f"{kc_url}/admin/realms/{realm}/clients/{internal_id}", token=token
+        "GET", f"{kc_url}/admin/realms/{realm}/clients/{existing['id']}", token=token
     )
     return bool(status == 200 and isinstance(body, dict) and body.get("secret"))
 
@@ -593,23 +596,24 @@ def _assert_confidential_clients_have_secrets(
     That is how the onex-api destruction described in _reconcile_client() ran
     unnoticed for three days.
 
-    Confidential means ``publicClient`` is not true, which is the same test
-    Keycloak applies. Public clients are supposed to have no secret and are
-    skipped -- they are the positive control for this check.
+    The guard classifies the live client representation, not the partial
+    desired spec. Public clients and bearer-only clients do not authenticate
+    with client secrets and are skipped. Clients that can authenticate with a
+    secret must still have one after reconcile.
 
     Every offending client is collected before failing, so one run names the
     whole set rather than making an operator re-run the Job per client.
     """
     offenders: list[str] = []
     for spec in clients:
-        if spec.get("publicClient") is True:
-            continue
         client_id = spec["clientId"]
         existing = _get_existing_client(kc_url, realm, token, client_id)
         if existing is None:
             offenders.append(client_id)
             continue
-        if not _read_client_secret_is_present(kc_url, realm, token, existing["id"]):
+        if not _live_client_requires_secret(existing):
+            continue
+        if not _read_client_secret_is_present(kc_url, realm, token, existing):
             offenders.append(client_id)
 
     if offenders:
