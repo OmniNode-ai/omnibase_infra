@@ -216,18 +216,17 @@ class TestClientAttributes:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
 
-        # OMN-16504: the update carries {id, clientId} + the drifted field and
-        # NOTHING else. This assertion used to read `{**existing, ...}` -- it
-        # pinned the full-representation PUT, which is what let an unrelated
-        # drift re-assert `bearerOnly` and make Keycloak clear a confidential
-        # client's secret. Do not restore the spread: the narrow payload is
-        # the fix, not an accident of the fake.
-        assert put_payloads == [
-            {
-                "clientId": "omniweb",
-                "attributes": {"pkce.code.challenge.method": "S256"},
-            }
-        ]
+        # OMN-16504: the payload still carries the full live representation --
+        # deliberately, so no collection-valued field (redirectUris,
+        # webOrigins, scopes) can be dropped on a Keycloak version that
+        # replaces rather than merges. What it must NOT carry is publicClient
+        # or bearerOnly, the two flags that make Keycloak clear the client
+        # secret. Neither drifted here, so both are absent.
+        expected = {k: v for k, v in existing.items() if k != "publicClient"}
+        expected["attributes"] = {"pkce.code.challenge.method": "S256"}
+        assert put_payloads == [expected]
+        assert "publicClient" not in put_payloads[0]
+        assert "bearerOnly" not in put_payloads[0]
         record = json.loads(capsys.readouterr().out.strip())
         assert record["op"] == "updated"
         assert record["fields_changed"] == ["attributes"]
@@ -272,17 +271,15 @@ class TestClientAttributes:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
 
-        # OMN-16504: narrow payload only -- see the note on the attribute-drift
-        # test above for why the `{**existing, ...}` spread was removed.
-        assert put_payloads == [
-            {
-                "clientId": "omniweb",
-                "webOrigins": [
-                    "https://app.omninode.ai",
-                    "https://dev.app.omninode.ai",
-                ],
-            }
+        # OMN-16504: full representation minus the two secret-clearing flags --
+        # see the note on the attribute-drift test above.
+        expected = {k: v for k, v in existing.items() if k != "publicClient"}
+        expected["webOrigins"] = [
+            "https://app.omninode.ai",
+            "https://dev.app.omninode.ai",
         ]
+        assert put_payloads == [expected]
+        assert "publicClient" not in put_payloads[0]
         record = json.loads(capsys.readouterr().out.strip())
         assert record["op"] == "updated"
         assert record["fields_changed"] == ["webOrigins"]

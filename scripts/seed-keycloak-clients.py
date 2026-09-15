@@ -454,17 +454,38 @@ def _reconcile_client(
             # workloads holding the now-orphaned secret were all left correct
             # and all left unable to authenticate.
             #
-            # Sending exactly `{clientId} + drifted` expresses the intended
-            # change and nothing else; the URL already identifies the internal
-            # client id. An unrelated drift can no longer reach a
-            # secret-clearing field from the live representation.
+            # THE FIX: keep sending the full live representation, and drop
+            # exactly the two flags that make Keycloak clear the secret.
             #
-            # The post-reconcile guard classifies the live client shape, so it
-            # only requires secrets from clients that can actually authenticate
-            # with them.
-            update_payload: dict[str, Any] = {"clientId": client_id}
+            # An earlier revision of this change sent only `{clientId} +
+            # drifted` instead. Review rejected that, correctly: Keycloak's
+            # client update is documented as a merge over non-null fields, but
+            # that has not held uniformly across versions for the
+            # collection-valued fields -- `redirectUris`, `webOrigins`,
+            # `defaultClientScopes`, `protocolMappers`. A narrow PUT that
+            # omitted them would, on any version that replaces rather than
+            # merges, silently empty omniweb's redirect URIs and break login.
+            # That trades this bug for a worse one the guard below cannot see,
+            # because the guard only reads secrets.
+            #
+            # Dropping the two flags is a strictly smaller change. Every
+            # collection field is still carried exactly as the previous,
+            # long-working code carried it, so no collection semantics change
+            # at all; the only difference from the code that caused the outage
+            # is the two keys that trigger the clearing.
+            #
+            # When the roster genuinely DOES declare a change to `bearerOnly`
+            # or `publicClient`, the flag is sent, Keycloak clears the secret,
+            # and _assert_confidential_clients_have_secrets() fails the Job red
+            # rather than letting it pass silently. The layering is deliberate:
+            # this block stops the INCIDENTAL destruction, the guard catches
+            # the deliberate one.
+            update_payload: dict[str, Any] = {**existing}
             for field in drift_fields:
                 update_payload[field] = spec[field]
+            for secret_clearing_flag in ("bearerOnly", "publicClient"):
+                if secret_clearing_flag not in drift_fields:
+                    update_payload.pop(secret_clearing_flag, None)
             if secret is not None:
                 update_payload["secret"] = secret
             url = f"{kc_url}/admin/realms/{realm}/clients/{existing['id']}"
