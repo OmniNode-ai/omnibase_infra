@@ -793,6 +793,20 @@ fenced_node_migrations:
   # locked out. The release is still a live operator decision and this entry
   # is not it.
   #
+  # RELEASED ON THE COMPOSE DEV/LAB LANE 2026-09-15 (OMN-14894). The entry
+  # above stays exactly as written -- this id remains in the BASELINE, because
+  # a baseline removal is FATAL under the item-4 FORCE-RLS guard. What changed
+  # is the compose runner's own dev arm
+  # (scripts/run-forward-migrations.sh LANE_RELEASED_NODE_MIGRATION_IDS),
+  # which now un-gates this id on ONEX_MIGRATION_LANE=dev and on no other
+  # lane; the k8s Job layers its own release for onex-dev in omninode_infra.
+  # That split is the mechanism this file's header describes and is not a
+  # parity break. Authorisation: the OPERATOR-CONSENT row of
+  # 2026-09-14T12:11:31Z in omni_home docs/tracking/ROLLING_WORK_LEDGER.md.
+  # Pre-release readback on that lane, so a later reader can tell what this
+  # release changed: relrowsecurity=f, relforcerowsecurity=f, 0 policies,
+  # 0 rows, owner postgres, role app_dashboard present.
+  #
   # THE VENDORED COPY LANDS BEFORE ITS OMNIMARKET SOURCE, AND THAT IS THE ONLY
   # ORDER THE TWO GATES PERMIT. omnimarket's node-migration-vendor-parity-gate
   # refuses any omnimarket PR touching src/omnimarket/nodes/*/migrations/*.sql
