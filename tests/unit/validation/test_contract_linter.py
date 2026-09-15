@@ -161,7 +161,15 @@ class TestContractLinter:
         assert any("mapping" in v.message.lower() for v in result.violations)
 
     def test_lint_missing_required_fields(self, tmp_path: Path) -> None:
-        """Test linting detects missing required fields."""
+        """Test linting detects missing required fields.
+
+        output_model is NOT in this set (OMN-18390): it is required only for
+        COMPUTE_GENERIC nodes, and node_type itself is missing here, so the
+        conditional requirement never activates. See
+        test_lint_missing_output_model_required_for_compute_node and
+        test_lint_missing_output_model_not_required_for_effect_node below for
+        the conditional behavior.
+        """
         contract_file = tmp_path / "contract.yaml"
         contract_file.write_text("description: Just a description")
 
@@ -169,13 +177,12 @@ class TestContractLinter:
         result = linter.lint_file(contract_file)
 
         assert not result.is_valid
-        # Should report missing name, node_type, contract_version, input_model, output_model
+        # Should report missing name, node_type, contract_version, input_model
         missing_fields = {
             "name",
             "node_type",
             "contract_version",
             "input_model",
-            "output_model",
         }
         found_missing = set()
         for v in result.violations:
@@ -184,6 +191,186 @@ class TestContractLinter:
                     if field in v.field_path:
                         found_missing.add(field)
         assert found_missing == missing_fields
+        assert not any(
+            v.field_path == "output_model"
+            for v in result.violations
+            if v.severity == EnumContractViolationSeverity.ERROR
+        )
+
+    def test_lint_missing_output_model_required_for_compute_node(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-18390: COMPUTE_GENERIC nodes must return a typed result."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: node_fixture_compute\n"
+            "node_type: COMPUTE_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelFixtureRequest\n"
+            "  module: fixture.models\n"
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        assert not result.is_valid
+        assert any(
+            v.field_path == "output_model"
+            and v.severity == EnumContractViolationSeverity.ERROR
+            for v in result.violations
+        )
+
+    def test_lint_compute_node_with_output_model_is_valid(self, tmp_path: Path) -> None:
+        """OMN-18390: the COMPUTE positive path must not false-positive."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: node_fixture_compute\n"
+            "node_type: COMPUTE_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelFixtureRequest\n"
+            "  module: fixture.models\n"
+            "output_model:\n"
+            "  name: ModelFixtureResult\n"
+            "  module: fixture.models\n"
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        assert not any(
+            v.field_path == "output_model"
+            and v.severity == EnumContractViolationSeverity.ERROR
+            for v in result.violations
+        )
+
+    def test_lint_missing_output_model_required_for_mis_cased_compute_node(
+        self, tmp_path: Path
+    ) -> None:
+        """The conditional output_model check must not fail open on casing."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: node_fixture_compute\n"
+            "node_type: compute_generic\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelFixtureRequest\n"
+            "  module: fixture.models\n"
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        assert any(v.field_path == "node_type" for v in result.violations)
+        assert any(v.field_path == "output_model" for v in result.violations)
+
+    def test_lint_missing_output_model_not_required_for_effect_node(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-18390: EFFECT_GENERIC nodes publish events[], not a result.
+
+        A bus-triggered EFFECT node that declares an output_model with no
+        publish_topics is a real wiring defect (every dispatch dead-letters
+        with no result applier), but the fix is to drop output_model, not to
+        require one -- an EFFECT contract with neither is correct.
+        """
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: node_fixture_effect\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelFixtureEvent\n"
+            "  module: fixture.models\n"
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        assert not any(
+            v.field_path == "output_model"
+            and v.severity == EnumContractViolationSeverity.ERROR
+            for v in result.violations
+        )
+
+    def test_lint_bus_triggered_output_model_without_publish_topics_warns(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-18390: the generic defect shape is visible in the linter."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: node_fixture_effect\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelFixtureEvent\n"
+            "  module: fixture.models\n"
+            "output_model:\n"
+            "  name: ModelFixtureResult\n"
+            "  module: fixture.models\n"
+            "event_bus:\n"
+            "  subscribe_topics:\n"
+            "    - onex.evt.fixture.something-happened.v1\n"
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        assert any(
+            v.field_path == "event_bus.publish_topics"
+            and v.severity == EnumContractViolationSeverity.WARNING
+            for v in result.violations
+        )
+
+    def test_lint_bus_triggered_output_model_with_publish_topics_is_valid(
+        self, tmp_path: Path
+    ) -> None:
+        """A declared publish topic supplies the result applier."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: node_fixture_effect\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelFixtureEvent\n"
+            "  module: fixture.models\n"
+            "output_model:\n"
+            "  name: ModelFixtureResult\n"
+            "  module: fixture.models\n"
+            "event_bus:\n"
+            "  subscribe_topics:\n"
+            "    - onex.evt.fixture.something-happened.v1\n"
+            "  publish_topics:\n"
+            "    - onex.evt.fixture.something-recorded.v1\n"
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        assert not any(
+            v.field_path == "event_bus.publish_topics"
+            and v.severity == EnumContractViolationSeverity.WARNING
+            for v in result.violations
+        )
 
     def test_lint_invalid_node_type(self, tmp_path: Path) -> None:
         """Test linting detects invalid node_type."""
