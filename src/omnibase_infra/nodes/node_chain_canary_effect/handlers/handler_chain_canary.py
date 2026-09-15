@@ -89,6 +89,10 @@ from uuid import uuid4
 
 import httpx
 
+from omnibase_core.enums.enum_delegation_traffic_class import (
+    EnumDelegationTrafficClass,
+)
+from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
     dsn_shaped_argv_flags,
@@ -201,6 +205,13 @@ TypeLedgerReplay = Callable[
 # distinction is only enforceable if SKIP survives as itself this far.
 _VERIFIER_SKIP = "skip"
 _VERIFIER_PASS = "pass"
+
+_CANARY_DELEGATION_PROVENANCE = ModelDelegationProvenance(
+    source="external-client",
+    traffic_class=EnumDelegationTrafficClass.SYNTHETIC,
+    source_surface="scheduled-chain-canary",
+    requested_by="chain-canary",
+)
 
 # The FSM states that count as terminal in delegation_workflow_state. Anything
 # else that exists as a row is stranded mid-flight — OMN-14843 measured
@@ -1025,6 +1036,7 @@ class HandlerChainCanary:
         canary is evidence about the path real callers take rather than
         about a bespoke probe-only path that could drift away from it.
         """
+        provenance = _CANARY_DELEGATION_PROVENANCE
         return {
             "command_name": request.runtime_command,
             "correlation_id": probe_correlation_id,
@@ -1032,13 +1044,14 @@ class HandlerChainCanary:
             "payload": {
                 "prompt": request.prompt,
                 "task_type": request.task_type,
-                "source": "external-client",
+                "source": provenance.source,
+                "provenance": provenance.model_dump(mode="json"),
                 "wait": True,
                 "correlation_id": probe_correlation_id,
                 "max_tokens": request.max_tokens,
                 "metadata": {
-                    "requested_by": "chain-canary",
-                    "source_surface": "scheduled-chain-canary",
+                    "requested_by": provenance.requested_by,
+                    "source_surface": provenance.source_surface,
                 },
             },
         }

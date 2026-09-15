@@ -1458,17 +1458,42 @@ services:
   # single-source list (with mint/export instructions for all three) in
   # scripts/deploy-runners.sh's top-of-file usage comment.
   #
-  # REGISTRATION IS REPOSITORY-SCOPED (live-verified 2026-07-22):
-  # GITHUB_ORG_URL points at the omnibase_infra REPO, matching the live
-  # registration and the credential cache seeded in the
-  # omninode-deploy-runner-creds volume (cache key = labels + URL; changing
-  # the URL orphans the cache and forces re-registration). RUNNER_GROUP is
-  # explicitly EMPTY: repo-scoped `config.sh --runnergroup` hard-fails, and
-  # the entrypoint (OMN-14900) only omits the flag for an explicitly empty
-  # value. A recreate re-registers only if the creds volume is lost; then
-  # mint a REPO registration token (`gh api -X POST
-  # repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token`,
-  # valid 1h) and export DEPLOY_RUNNER_TOKEN before `up -d`.
+  # REGISTRATION IS ORGANIZATION-SCOPED, in runner group `omnibase-deploy`
+  # (OMN-18386; was repository-scoped on omnibase_infra until 2026-09-15).
+  #
+  # WHY IT MOVED. A reusable workflow's jobs run in the CALLER's repository.
+  # runtime-rebuild-trigger-reusable.yml's `verify-sibling-converged` job is
+  # pinned to `runs-on: [self-hosted, omnibase-deploy]` because the dev lane's
+  # docker daemon is on the LAN and hosted compute cannot see it -- but with
+  # the runner registered on omnibase_infra alone, no runner carrying that
+  # label was visible to omnimarket, the one external caller. Its verify job
+  # therefore queued forever with no runner (runs 34903286467 and 34908448152
+  # sat queued for over an hour), no compose-dev lab-pass receipt was emitted
+  # for any omnimarket merge, and CLAUDE.md rule 24(a) was silently false for
+  # that repo. omnibase_infra's own runs scheduled the same job fine, which is
+  # exactly why the gap went unnoticed.
+  #
+  # BLAST RADIUS. The group is `visibility: selected` over precisely the two
+  # repositories that reference the label -- omnibase_infra and omnimarket --
+  # with `allows_public_repositories: false`. omniclaude and omnibase_core were
+  # checked on 2026-09-15 and have no runtime-rebuild-trigger workflow at all,
+  # so they are deliberately NOT in the group; add a repository here only when
+  # it actually calls the reusable. This DOES widen the surface: any workflow
+  # in either repository can now target the label and reach this container's
+  # docker.sock and private clone tree. The reusable's verify job itself runs
+  # no caller-authored code (it checks out omnibase_infra@dev pinned), and a
+  # fork PR cannot reach it (the trigger job routes forks to hosted compute and
+  # the LAN publish is refused, so the verify job's `if:` is false).
+  #
+  # RUNNER_GROUP is `omnibase-deploy` and GITHUB_ORG_URL is the ORG. The
+  # credential cache key is SHA256(labels + URL), so changing the URL orphans
+  # the old repo-scoped cache and forces re-registration on the next recreate;
+  # the orphaned entry is left in place deliberately, so reverting this file
+  # restores the repo-scoped registration from cache. A recreate needs an ORG
+  # registration token (`gh api -X POST
+  # orgs/OmniNode-ai/actions/runners/registration-token`, valid 1h) exported as
+  # DEPLOY_RUNNER_TOKEN before `up -d`. The group must exist before the
+  # recreate: `config.sh --runnergroup` fails on an unknown group.
   # See knowledge-base-internal:runbooks/omnibase-infra-release-train-lab.md for the full recreate procedure.
   omninode-deploy-runner:
     image: omninode-runner:latest
@@ -1523,12 +1548,14 @@ services:
     environment:
       RUNNER_LABELS: self-hosted,omnibase-deploy,linux,x64
       RUNNER_NAME: omninode-deploy-runner
-      # Repo-scoped, matching the live registration + seeded creds volume.
-      GITHUB_ORG_URL: https://github.com/OmniNode-ai/omnibase_infra
+      # Org-scoped (OMN-18386), matching the live registration + the creds
+      # volume entry re-seeded at that scope.
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
-      # Present-and-empty = do NOT pass --runnergroup (repo-scoped
-      # registration rejects it; see docker/runners/entrypoint.sh).
-      RUNNER_GROUP: ""
+      # Org-scoped registration DOES take --runnergroup; the entrypoint passes
+      # the flag for any non-empty value (see docker/runners/entrypoint.sh).
+      # The group scopes repository access -- see the block above.
+      RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
       OMNI_HOME: ${DEPLOY_RUNNER_OMNI_HOME:?DEPLOY_RUNNER_OMNI_HOME must be set (private deploy-runner clone tree, e.g. /data/omninode/runner_omni_home)}
       # OMN-14958: the runtime_build scripts + deploy-runtime.sh need the
