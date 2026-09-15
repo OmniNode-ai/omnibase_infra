@@ -491,6 +491,41 @@ if [[ -n "$SP" ]]; then
 fi
 
 # --------------------------------------------------------------------------- #
+# onex CLI PATH-shadow surface (OMN-18403)
+# --------------------------------------------------------------------------- #
+# A `uv tool install omnibase-core` (or any other package shipping an `onex`
+# console script) drops a binary at `$HOME/.local/bin/onex`. The sanctioned
+# invocation is the wrapper at `$SCRIPT_DIR/onex` (`scripts/onex`), reached via
+# the interactive-shell alias in `~/.zshrc` -- but that alias covers
+# INTERACTIVE shells only. Every non-interactive invocation of a bare `onex`
+# (a script, a hook, a cron job, `zsh -c`) resolves through PATH instead, and
+# `~/.local/bin` sits ahead of nothing that would stop it. A stray tool install
+# there silently outranks the wrapper for exactly the invocations most likely
+# to run unattended -- this was live on this host from 2026-09-10 to
+# 2026-09-15, went undetected by this reconciler for five days, and produced
+# four separate "onex delegate unavailable or stale" reports before being
+# found and removed by hand.
+#
+# This surface is deliberately checked in BOTH modes (unlike the clone-origin
+# drift leg above, which is report-only in repair mode because the venv
+# reconciler does not own clone convergence): a stray tool install under
+# ~/.local/bin is not a surface this reconciler mutates in either mode, but it
+# IS the exact class of drift a "clones/venv: in sync" verdict must not paper
+# over. A fixed path is checked -- not a live `command -v onex`, which would
+# depend on the caller's own PATH -- so the verdict is deterministic
+# regardless of what shell state this process happens to inherit from.
+path_onex_shadow_check() {
+  local shadow wrapper
+  [[ -n "${HOME:-}" ]] || return 0
+  shadow="${HOME}/.local/bin/onex"
+  wrapper="$SCRIPT_DIR/onex"
+  [[ -e "$shadow" ]] || return 0
+  record "onex-path-shadow" "SHADOWED" \
+    "$shadow exists and outranks $wrapper for every non-interactive onex invocation (the interactive-shell alias never covers those) — fix: uv tool uninstall omnibase-core"
+}
+path_onex_shadow_check
+
+# --------------------------------------------------------------------------- #
 # Receipt, floor, alert
 # --------------------------------------------------------------------------- #
 {
