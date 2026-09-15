@@ -396,7 +396,7 @@ on:
 # Splitting the groups waits on a test proving no writer can escape the common
 # one.
 concurrency:
-  group: evidence-autoclose-apply
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
