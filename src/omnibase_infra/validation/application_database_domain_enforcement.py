@@ -539,6 +539,23 @@ def _normalized_routine_signature(signature_body: str) -> str:
     return "".join(normalized)
 
 
+def _routine_catalog_identity_signature(signature_body: str) -> str:
+    """Return a routine signature in PostgreSQL catalog identity form."""
+    arguments: list[str] = []
+    for argument in _split_top_level_commas(
+        _normalized_routine_signature(signature_body)
+    ):
+        tokens = argument.split()
+        if (
+            len(tokens) >= 2
+            and tokens[0].lower() not in {"in", "out", "inout", "variadic"}
+            and re.match(rf"^{_SQL_IDENTIFIER}$", tokens[0], re.IGNORECASE)
+        ):
+            argument = " ".join(tokens[1:])
+        arguments.append(argument)
+    return ", ".join(arguments)
+
+
 def _balanced_parenthesized(
     value: str,
     start: int,
@@ -1185,6 +1202,8 @@ def _record_sql_target(
     """Apply one topology-derived qualification verdict to a parsed target."""
     name = _unquote_identifier(name_token)
     if schema_token is None:
+        if name.lower() in {"false", "true"}:
+            return
         if permits_ephemeral and (
             name in cte_names or remaining.lstrip().startswith("(")
         ):
@@ -1870,7 +1889,7 @@ def application_database_created_catalog_identities(
             if signature is not None:
                 signature_body, _ = signature
                 function_signature = (
-                    f"({_normalized_routine_signature(signature_body)})"
+                    f"({_routine_catalog_identity_signature(signature_body)})"
                 )
             if (
                 kind is EnumApplicationInventoryObjectKind.FUNCTION
@@ -2472,7 +2491,7 @@ def _target_requirement(
         parenthesized = _balanced_parenthesized(target, offset)
         if parenthesized is not None:
             signature_body, _ = parenthesized
-            signature = f"({_normalized_routine_signature(signature_body)})"
+            signature = f"({_routine_catalog_identity_signature(signature_body)})"
     return ApplicationDatabaseSqlTargetRequirement(
         schema=schema,
         name=name,
