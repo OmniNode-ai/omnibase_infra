@@ -433,9 +433,49 @@ case "${ONEX_MIGRATION_LANE}" in
     # the released set a strict subset of the fence is the property that makes
     # is_lane_released_node_migration meaningful; naming an id the fence no
     # longer covers would be inert but would misdescribe the policy.
+    #
+    # WIDENED 2026-09-15 (OMN-14894). The arm also releases 0041, which puts
+    # ENABLE + FORCE ROW LEVEL SECURITY and a tenant_isolation policy on
+    # delegation_budget_state and grants SELECT on it to app_dashboard. It is
+    # 0023's orphaned second half: 0023 wrote that posture for BOTH
+    # delegation_events and delegation_budget_state, delegation_events
+    # recovered it from the operative 0037 after the uuid conversion, and
+    # delegation_budget_state recovered nothing. Measured 2026-09-15 on THIS
+    # lane before the release: relrowsecurity=f, relforcerowsecurity=f, zero
+    # policies, ZERO rows -- a relation the OMN-15354 manifest classifies
+    # TENANT with no tenant boundary at all.
+    #
+    # It keeps its BASELINE fence entry for the same mechanical reason 0037
+    # does: it enables FORCE ROW LEVEL SECURITY and is not grandfathered, so a
+    # baseline removal hands it to the OMN-15336 item-4 guard, which is FATAL.
+    # The lane release is the remedy the guard's own message prescribes.
+    #
+    # WHY THE 0026 HAZARD DOES NOT TRANSFER, since that sibling was released,
+    # applied, and then measured to refuse every write its async writer issued.
+    # 0026's writer called the adapter with no `tenant=` and the GUC fell back
+    # to the table-less house slug while the column held a uuid. Both of
+    # delegation_budget_state's write paths instead derive the GUC from the row
+    # being written -- the sync adapter's resolve_write_tenant(row["tenant_id"])
+    # and the async _dynamic_upsert that mirrors it under the OMN-15919 seam --
+    # so GUC and column agree by construction, and the column is TEXT on both
+    # sides with no cast anywhere.
+    #
+    # HONEST LIMIT OF WHAT THIS LANE CAN PROVE, stated rather than implied: on
+    # the compose lanes the projection writers connect as the postgres
+    # SUPERUSER, and a superuser bypasses RLS whether or not FORCE is set. This
+    # release therefore proves the migration APPLIES cleanly and sets the
+    # posture on this lane; it does NOT exercise the enforcement path for the
+    # writers here. The enforcement proof belongs to onex-dev, where the table
+    # is owned by role_omninode_owner and the writer is a non-superuser.
+    #
+    # AUTHORISATION: the OPERATOR-CONSENT row of 2026-09-14T12:11:31Z in
+    # omni_home docs/tracking/ROLLING_WORK_LEDGER.md, which authorizes resuming
+    # tenant row-level security on relations the OMN-15354 classification
+    # manifest classifies TENANT, lab first and onex-dev second.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
-node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
+node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql
+node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""

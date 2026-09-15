@@ -634,10 +634,21 @@ DEV_LANE_VALUE = "dev"
 # stability-test lane still holds delegation_events.tenant_id as TEXT with an
 # EMPTY tenant_registry_mirror, so a baseline release would abort there and
 # take every later node directory with it by lexical sort order.
+# OMN-14894, 2026-09-15: 0041 joined this arm. It is the lab release of
+# delegation_budget_state's tenant boundary — the one TENANT-classified relation
+# in this corpus that carried none on any lane. It stays in the BASELINE fence
+# (a removal is FATAL under the item-4 FORCE-RLS guard, same mechanical reason
+# as 0037), so the lane release is again the only mechanism that can un-gate it.
+# The operator authorization is the OPERATOR-CONSENT row of 2026-09-14 in
+# omni_home docs/tracking/ROLLING_WORK_LEDGER.md, which authorizes resuming
+# tenant row-level security on relations the OMN-15354 manifest classifies
+# TENANT, lab first and staging second.
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
     "node:node_projection_delegation:"
     "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
+    "node:node_projection_delegation:"
+    "0041_delegation_budget_state_rls_tenant_isolation.sql",
 )
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
@@ -1112,6 +1123,8 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
     assert set(LANE_RELEASED_IDS) - set(FENCED_REGISTRATION_IDS) == {
         "node:node_projection_delegation:"
         "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
+        "node:node_projection_delegation:"
+        "0041_delegation_budget_state_rls_tenant_isolation.sql",
     }, "the dev-lane release carries ids no operator ruling names"
 
 
