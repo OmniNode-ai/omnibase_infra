@@ -112,7 +112,26 @@ def _runners_json(*, status: str = "online", busy: bool = False) -> str:
         }
         for i in range(1, TEST_FLEET_COUNT + 1)
     ]
-    return json.dumps({"total_count": TEST_FLEET_COUNT, "runners": runners})
+    # OMN-18396: the org's registration list always carries the credential-free
+    # customer-plane pair too. Modeled here as steady-state online so these
+    # general-pool tests (unrelated to OMN-18396) do not pick up a spurious
+    # finding from a check they never anticipated.
+    for cp_name in (
+        "omninode-customer-plane-runner-1",
+        "omninode-customer-plane-runner-2",
+    ):
+        runners.append(
+            {
+                "name": cp_name,
+                "status": "online",
+                "busy": False,
+                "labels": [
+                    {"name": "self-hosted"},
+                    {"name": "omnibase-customer-plane"},
+                ],
+            }
+        )
+    return json.dumps({"total_count": len(runners), "runners": runners})
 
 
 def _make_mock_bin(
@@ -136,9 +155,20 @@ def _make_mock_bin(
         cmd="${{1:-}}"
         case "${{cmd}}" in
           ps)
-            for i in $(seq 1 {TEST_FLEET_COUNT}); do
-              printf '%s\\t%s\\n' "{PREFIX}-${{i}}" "{docker_status}"
-            done
+            # OMN-18396: runner-monitor.sh now issues a SECOND, differently
+            # filtered `docker ps` for the customer-plane pair. This mock
+            # is about the general pool, so model the customer-plane pair as
+            # steady-state healthy (matching production, where they always
+            # exist) -- these tests are unrelated to OMN-18396 and must not
+            # pick up a spurious finding from a check they never anticipated.
+            if [[ "$*" == *"customer-plane"* ]]; then
+              printf '%s\\t%s\\n' "omninode-customer-plane-runner-1" "Up (healthy)"
+              printf '%s\\t%s\\n' "omninode-customer-plane-runner-2" "Up (healthy)"
+            else
+              for i in $(seq 1 {TEST_FLEET_COUNT}); do
+                printf '%s\\t%s\\n' "{PREFIX}-${{i}}" "{docker_status}"
+              done
+            fi
             ;;
           inspect)
             fmt="$*"

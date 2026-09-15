@@ -203,23 +203,39 @@ class Scenario:
             )
 
     def runners_json(self, *, status: str = "online", busy: bool = False) -> str:
-        return json.dumps(
+        runners = [
             {
-                "total_count": self.fleet_count,
-                "runners": [
-                    {
-                        "name": f"{PREFIX}-{i}",
-                        "status": status,
-                        "busy": busy,
-                        "labels": [
-                            {"name": "self-hosted"},
-                            {"name": "omnibase-ci"},
-                        ],
-                    }
-                    for i in range(1, self.fleet_count + 1)
+                "name": f"{PREFIX}-{i}",
+                "status": status,
+                "busy": busy,
+                "labels": [
+                    {"name": "self-hosted"},
+                    {"name": "omnibase-ci"},
                 ],
             }
-        )
+            for i in range(1, self.fleet_count + 1)
+        ]
+        # OMN-18396: the org's registration list always carries the
+        # credential-free customer-plane pair too. Modeled here as
+        # steady-state online so these general-pool scenarios (unrelated to
+        # OMN-18396) do not pick up a spurious finding from a check they
+        # never anticipated.
+        for cp_name in (
+            "omninode-customer-plane-runner-1",
+            "omninode-customer-plane-runner-2",
+        ):
+            runners.append(
+                {
+                    "name": cp_name,
+                    "status": "online",
+                    "busy": False,
+                    "labels": [
+                        {"name": "self-hosted"},
+                        {"name": "omnibase-customer-plane"},
+                    ],
+                }
+            )
+        return json.dumps({"total_count": len(runners), "runners": runners})
 
     def compose_recreate_targets(self) -> list[list[str]]:
         """Each `docker compose ... up` call's target service list, in order."""
@@ -249,7 +265,19 @@ def _make_mock_bin(bindir: Path, scen: Scenario) -> None:
         cmd="${{1:-}}"
         case "${{cmd}}" in
           ps)
-            cat "${{SCEN}}/ps.tsv" 2>/dev/null || true
+            # OMN-18396: runner-monitor.sh now issues a SECOND, differently
+            # filtered `docker ps` for the customer-plane pair. This
+            # scenario's ps.tsv is about the general pool, so model the
+            # customer-plane pair as steady-state healthy (matching
+            # production, where they always exist) -- these scenarios are
+            # unrelated to OMN-18396 and must not pick up a spurious finding
+            # from a check they never anticipated.
+            if [[ "$*" == *"customer-plane"* ]]; then
+              printf '%s\\t%s\\n' "omninode-customer-plane-runner-1" "Up (healthy)"
+              printf '%s\\t%s\\n' "omninode-customer-plane-runner-2" "Up (healthy)"
+            else
+              cat "${{SCEN}}/ps.tsv" 2>/dev/null || true
+            fi
             ;;
           inspect)
             fmt="$*"
