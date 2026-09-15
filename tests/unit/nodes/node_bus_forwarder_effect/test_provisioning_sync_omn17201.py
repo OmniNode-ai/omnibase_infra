@@ -10,10 +10,10 @@ over ``topic_constants.py::DEFAULT_TENANT_CANONICAL_TOPICS``. That file states
 in its own header that it "MUST stay in sync with the P0A forwarder contract
 mirror_topics union" -- and until OMN-17201 nothing enforced it.
 
-THE MEASURED COST OF THE UNENFORCED COMMENT. OMN-16204 and OMN-16979 widened
-``mirror_topics.outbound`` with the four governed omniclaude hook classes. The
+THE MEASURED COST OF THE UNENFORCED COMMENT. OMN-16204 and the earlier
+four-class OMN-16979 declaration widened ``mirror_topics.outbound`` while the
 provisioning tuple stayed at eight. ``omninode-dev-msk`` runs
-``auto.create.topics.enable=false``, so the four wire topics could not appear
+``auto.create.topics.enable=false``, so those four wire topics could not appear
 lazily either: on 2026-09-05 the cloud hook-ledger writer crash-looped on
 ``UnknownTopicOrPartitionError`` against topics that had never been created,
 and had to be parked at ``replicas: 0`` (omninode_infra#1164). A broker
@@ -22,7 +22,7 @@ tenant-prefixed forms absent.
 
 WHY A PINNED LITERAL LIST AND NOT A CROSS-REPO IMPORT. omninode_infra is not on
 this repo's import path in CI, and vendoring its module would make one repo's
-tests depend on the other's checkout. Instead BOTH repos pin the same twelve
+tests depend on the other's checkout. Instead BOTH repos pin the same fifteen
 wire-format literals independently -- this file from the contract's side,
 ``topic_constants.FORWARDER_MIRROR_TOPIC_UNION`` from the provisioner's side --
 so a one-sided edit fails a test in whichever repo made it, which is the
@@ -49,7 +49,7 @@ CONTRACT_PATH = (
     / "contract.yaml"
 )
 
-# The twelve canonical topics that every tenant's wire set must contain.
+# The fifteen canonical topics that every tenant's wire set must contain.
 # Counterpart: omninode_infra docker/onex-api/topic_constants.py
 # ``FORWARDER_MIRROR_TOPIC_UNION`` / ``DEFAULT_TENANT_CANONICAL_TOPICS``.
 PROVISIONED_TENANT_CANONICAL_TOPICS: frozenset[str] = frozenset(
@@ -66,10 +66,13 @@ PROVISIONED_TENANT_CANONICAL_TOPICS: frozenset[str] = frozenset(
         "onex.evt.omniclaude.session-ended.v1",
         "onex.evt.omniclaude.tool-executed.v1",
         "onex.evt.omniclaude.prompt-submitted.v1",
+        "onex.evt.omniclaude.skill-started.v1",
+        "onex.evt.omniclaude.skill-completed.v1",
+        "onex.evt.omnimarket.tool-output-captured.v1",
     }
 )
 
-# The subset OMN-17201 is about: the four governed omniclaude hook classes the
+# The subset OMN-17201 is about: the seven governed hook capture classes the
 # cloud hook-ledger writer (omnimarket node_projection_hook_ledger) subscribes
 # to in their tenant-prefixed form.
 HOOK_CLASSES: tuple[str, ...] = (
@@ -77,6 +80,9 @@ HOOK_CLASSES: tuple[str, ...] = (
     "onex.evt.omniclaude.session-ended.v1",
     "onex.evt.omniclaude.tool-executed.v1",
     "onex.evt.omniclaude.prompt-submitted.v1",
+    "onex.evt.omniclaude.skill-started.v1",
+    "onex.evt.omniclaude.skill-completed.v1",
+    "onex.evt.omnimarket.tool-output-captured.v1",
 )
 
 
@@ -112,10 +118,10 @@ def test_each_hook_class_is_in_the_provisioned_set(topic: str) -> None:
 
 @pytest.mark.unit
 def test_pin_is_a_falsifiable_count() -> None:
-    """8 (pre-OMN-16204) + 2 (OD-9 pair) + 2 (OMN-16979 governed pair) = 12.
+    """8 pre-existing topics plus all seven governed capture topics = 15.
 
     A count assertion catches the case a set-equality edit would launder: an
     author who "fixes" a failure by editing BOTH sides of the pin at once still
     has to move this number, which is the line a reviewer reads.
     """
-    assert len(PROVISIONED_TENANT_CANONICAL_TOPICS) == 12
+    assert len(PROVISIONED_TENANT_CANONICAL_TOPICS) == 15
