@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class ModelGatewayHeartbeatRequest(BaseModel):
@@ -22,7 +22,14 @@ class ModelGatewayHeartbeatRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     session_id: UUID
-    access_token: str = Field(min_length=1)
+    # OMN-18385: ``SecretStr``, not ``str``. This model is reconstructed
+    # from a bus payload and is re-serialised into logs, error contexts and
+    # dead-letter envelopes; ``SecretStr`` renders as a mask in every one of
+    # those. Two customer bearer tokens reached
+    # onex.dlq.omnibase-infra.commands.v1 in cleartext (offsets 137/138,
+    # onex-dev) because this field was a plain string. The handler reads the
+    # real value with ``.get_secret_value()`` at its single unwrap point.
+    access_token: SecretStr = Field(min_length=1)
 
 
 __all__ = ["ModelGatewayHeartbeatRequest"]

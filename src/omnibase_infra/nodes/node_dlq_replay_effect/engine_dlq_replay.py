@@ -346,6 +346,20 @@ def should_replay(
             "consumer of the original topic can decode (OMN-17896)",
         )
 
+    if message.redacted_fields:
+        return (
+            False,
+            "Redacted original body: the dead-letter publisher removed "
+            f"{len(message.redacted_fields)} credential-named field(s) "
+            f"({', '.join(sorted(message.redacted_fields))}) from this "
+            "record's body (OMN-18385), so the body is deliberately "
+            "incomplete. Republishing it would put a command carrying a "
+            "redaction marker where its credential belongs onto the original "
+            "topic, which cannot authenticate and would dead-letter again. "
+            "The credential is gone by design and cannot be restored from "
+            "this record; the producer must re-issue the command",
+        )
+
     if message.original_value == DLQ_UNREADABLE_VALUE_MARKER:
         return (
             False,

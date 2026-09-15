@@ -289,7 +289,13 @@ class HandlerLlmOpenaiCompatible:
         response_data = await self._execute_with_auth(
             url=url,
             payload=payload,
-            api_key=request.api_key,
+            # OMN-18385: single unwrap point -- the outbound auth header
+            # is the only consumer that needs the real value.
+            api_key=(
+                request.api_key.get_secret_value()
+                if request.api_key is not None
+                else None
+            ),
             extra_headers=request.extra_headers,
             correlation_id=correlation_id,
             timeout_seconds=request.timeout_seconds,
