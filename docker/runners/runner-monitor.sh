@@ -487,6 +487,13 @@ declare -A github_status
 declare -A github_busy
 declare -A healthy_names
 
+# OMN-18396: the credential-free customer-plane pair (OMN-18392) is a fixed,
+# separate runner family, not part of the RUNNER_NAME_PREFIX/EXPECTED_RUNNERS
+# loop below. See the ALERT-ONLY block after the main loop for why it is
+# checked here rather than folded into that loop.
+declare -A customer_plane_docker_status
+declare -A customer_plane_github_status
+
 total_found=0
 healthy=0
 online_count=0
@@ -632,6 +639,73 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
     fi
     healthy=$((healthy + 1))
     healthy_names["${name}"]=1
+done
+
+# ---------------------------------------------------------------------------
+# Customer-plane runner alerting (OMN-18392 residual, OMN-18396)
+# ---------------------------------------------------------------------------
+# omninode-customer-plane-runner-1/2 (OMN-18392) are a separate, fixed pair --
+# NOT part of the RUNNER_NAME_PREFIX/EXPECTED_RUNNERS loop above -- so the main
+# loop never sees them: its docker ps filter and its GitHub-registration jq
+# filter both key on RUNNER_NAME_PREFIX (`omninode-runner`), and this pair
+# deliberately does not match that prefix.
+#
+# ALERT-ONLY, BY DESIGN. This block reports an outage into `unhealthy_list` (so
+# it reaches the existing Slack alert path below) but never adds either name to
+# `missing_container_list`, `crashloop_list`, `offline_idle_recreate_list`, or
+# `stuck_created_list` -- the only lists `collect_remediation_targets()` reads.
+# Two independent reasons that is the right scope, not merely the cautious one:
+#
+#   1. `collect_remediation_targets()` hard-filters every candidate service
+#      name against `^${RUNNER_NAME_PREFIX}-[0-9]+$` (see that function,
+#      below). A customer-plane name could never survive that filter and
+#      become a bounce target even if it were added to one of the four lists
+#      above -- so this block does not rely on that filter as its only guard,
+#      but the filter is real defence-in-depth.
+#   2. A hypothetical bounce (`docker compose up -d --force-recreate --no-deps
+#      <service>`) keys strictly on the named compose SERVICE, and
+#      omninode-customer-plane-runner-1/2 have their own no-mount service
+#      blocks in this same compose file (OMN-18392) -- it would not recreate
+#      from the general-pool definition even if dispatched.
+#
+# Building genuine auto-bounce support for this second fleet family (its own
+# expected-count bound, its own offline-age state keying, its own crash-loop
+# and stuck-Created detection) is a separate, larger change than "widen
+# alerting" and is explicitly out of scope for OMN-18396.
+CUSTOMER_PLANE_RUNNER_NAMES=(omninode-customer-plane-runner-1 omninode-customer-plane-runner-2)
+customer_plane_alert_present=false
+
+while IFS=$'\t' read -r name status; do
+    [[ -z "${name}" ]] && continue
+    customer_plane_docker_status["$name"]="$status"
+done < <(docker ps -a --filter "name=omninode-customer-plane-runner-" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+
+if [[ "${github_api_failed}" != true ]]; then
+    while IFS=$'\t' read -r name status; do
+        [[ -z "${name}" ]] && continue
+        customer_plane_github_status["$name"]="$status"
+    done < <(jq -r '
+        .runners[]
+        | select(.name | startswith("omninode-customer-plane-runner-"))
+        | [.name, .status]
+        | @tsv
+    ' <<< "${github_json}")
+fi
+
+for name in "${CUSTOMER_PLANE_RUNNER_NAMES[@]}"; do
+    docker_state="${customer_plane_docker_status[$name]:-MISSING (no container)}"
+    if [[ "${docker_state}" != *"(healthy)"* ]] || [[ "${docker_state}" != Up* ]]; then
+        unhealthy_list+=("${name}: Docker ${docker_state} [customer-plane, alert-only]")
+        customer_plane_alert_present=true
+        continue
+    fi
+    if [[ "${github_api_failed}" != true ]]; then
+        gh_state="${customer_plane_github_status[$name]:-missing}"
+        if [[ "${gh_state}" != "online" ]]; then
+            unhealthy_list+=("${name}: GitHub ${gh_state} while Docker ${docker_state} [customer-plane, alert-only]")
+            customer_plane_alert_present=true
+        fi
+    fi
 done
 
 # ---------------------------------------------------------------------------
@@ -997,6 +1071,15 @@ fi
 if [[ "${docker_ok}" != true ]]; then
     current_alert_count=$((current_alert_count + 1))
 fi
+# OMN-18396: the customer-plane pair contributes ONE finding to the actionable
+# count (same "one distinct finding" shape as wedge/drift/docker_ok above),
+# never a remediation target -- it is never counted through
+# remediation_target_count because collect_remediation_targets() never reads
+# it. This is what makes an outage of this pair actually page Slack (the
+# transition logic below fires only on current_alert_count changing).
+if [[ "${customer_plane_alert_present}" == true ]]; then
+    current_alert_count=$((current_alert_count + 1))
+fi
 
 # Write current state
 jq -n \
@@ -1020,6 +1103,7 @@ jq -n \
     --arg compose_interpolation_error "$COMPOSE_INTERPOLATION_ERROR" \
     --argjson total "$total_found" \
     --argjson docker_ok "$docker_ok" \
+    --argjson customer_plane_alert_present "$customer_plane_alert_present" \
     --arg timestamp "$(date -Iseconds)" \
     --arg unhealthy_names "$(printf '%s\n' "${unhealthy_list[@]}" 2>/dev/null || echo '')" \
     --arg github_degraded_names "$(printf '%s\n' "${github_degraded_list[@]}" 2>/dev/null || echo '')" \
@@ -1047,6 +1131,7 @@ jq -n \
         expected_runner_count: $expected_runner_count,
         total: $total,
         docker_ok: $docker_ok,
+        customer_plane_alert_present: $customer_plane_alert_present,
         timestamp: $timestamp,
         unhealthy_names: $unhealthy_names,
         github_degraded_names: $github_degraded_names,
