@@ -19,9 +19,13 @@ logged ``op=unchanged`` and the Job kept exiting 0.
 
 Two properties are pinned here, and they are layered rather than redundant:
 
-1. **The update path cannot destroy incidentally.** A drift on a declared field
-   sends that field and nothing else, so an unrelated change can no longer
-   reach a secret-clearing field.
+1. **The update path cannot destroy incidentally.** The PUT still carries the
+   writable live representation -- deliberately, so no collection-valued field
+   can be emptied on a Keycloak version whose client update replaces rather
+   than merges -- but it drops server-managed fields, returned secrets, and
+   ``bearerOnly``/``publicClient`` unless the roster actually declares a change
+   to them. An unrelated drift can therefore no longer reach a secret-clearing
+   flag or echo read-only admin metadata.
 2. **The run cannot end silently destroyed.** If a confidential live client is
    empty at the end of a reconcile, the Job exits non-zero and names it. Only
    ``publicClient`` exempts a client. Bearer-only clients are NOT exempt: this
@@ -81,6 +85,7 @@ class FakeKeycloak:
         self.clients: list[dict[str, Any]] = [dict(c) for c in clients]
         self.put_payloads: list[dict[str, Any]] = []
         self.secret_endpoint_404_for: set[str] = set()
+        self.reset_omitted_access_type_flags = False
 
     def _find(self, internal_id: str) -> dict[str, Any]:
         for client in self.clients:
@@ -123,6 +128,10 @@ class FakeKeycloak:
                 if key in ("id", "clientId"):
                     continue
                 client[key] = value
+            if self.reset_omitted_access_type_flags:
+                for key in ("bearerOnly", "publicClient"):
+                    if key not in payload:
+                        client[key] = False
             # The destruction under test: Keycloak drops the secret of a
             # client an update declares bearer-only or public.
             asserts_secretless = payload.get("bearerOnly") is True or (
@@ -194,24 +203,51 @@ def _run_main(
 
 @pytest.mark.unit
 class TestDriftedUpdateDoesNotCarryTheWholeRepresentation:
-    """Property 1: a declared-field drift sends that field and nothing else."""
+    """Property 1: the update never re-asserts a secret-clearing flag."""
 
-    def test_b88ae5c1_shape_sends_only_the_drifted_field(
+    def test_b88ae5c1_shape_drops_the_secret_clearing_flags(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        """The drifted field is applied; bearerOnly and publicClient are not sent.
+
+        The payload deliberately still carries the rest of the live
+        representation. A narrow payload would risk emptying collection-valued
+        fields on a Keycloak version whose client update replaces rather than
+        merges, which trades this bug for a worse one the secret guard cannot
+        see.
+        """
         fake = FakeKeycloak([_onex_api_live()])
         _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
 
         assert len(fake.put_payloads) == 1, "expected exactly one update PUT"
         payload = fake.put_payloads[0]
-        assert set(payload) == {"clientId", "fullScopeAllowed"}, (
-            "the update must carry only the drifted field; carrying the live "
-            "representation is what re-asserted bearerOnly and emptied the "
-            f"secret. Got: {sorted(payload)}"
-        )
+        assert payload["fullScopeAllowed"] is False, "the declared change must be sent"
         assert "id" not in payload
-        assert "bearerOnly" not in payload
+        assert "access" not in payload
         assert "secret" not in payload
+        assert "bearerOnly" not in payload, (
+            "re-asserting bearerOnly on an unrelated drift is what made Keycloak "
+            f"empty the secret. Got: {sorted(payload)}"
+        )
+        assert "publicClient" not in payload, (
+            "publicClient clears the secret the same way bearerOnly does and is "
+            f"not drifted here. Got: {sorted(payload)}"
+        )
+        # The rest of the representation is still carried, on purpose.
+        assert payload["clientId"] == "onex-api"
+
+    def test_replace_style_access_type_reset_fails_red(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Omitting a non-drifted access-type flag must not silently change it."""
+        fake = FakeKeycloak([_onex_api_live()])
+        fake.reset_omitted_access_type_flags = True
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
+
+        assert excinfo.value.code == 1
+        assert fake.put_payloads, "the guard must run after the update readback"
 
     def test_the_secret_survives_an_unrelated_declared_field_drift(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
