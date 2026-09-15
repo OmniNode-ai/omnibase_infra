@@ -66,7 +66,13 @@ from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
-pytestmark = pytest.mark.unit
+# The directory placement applies the `integration` marker. It is the right
+# home: these drive the REAL subscribe/publish boundary of a live broker
+# service rather than calling a function, which is the same shape
+# `test_tenant_dimension_seam_omn16831.py` uses for the tenant dimension. No
+# external service is required -- `EventBusInmemory` mints the same default
+# headers Kafka does (`event_bus_inmemory.py:206`), which is the behaviour
+# under test.
 
 _PATTERN_B_TOPIC = "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"  # onex-topic-allow: the topic whose alias is derived below
 _PATTERN_B_EVENT_TYPE = derive_event_type_alias_for_topic(_PATTERN_B_TOPIC)
