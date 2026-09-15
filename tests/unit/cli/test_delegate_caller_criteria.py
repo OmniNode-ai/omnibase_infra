@@ -356,3 +356,76 @@ class TestTheFlagsThemselves:
             quality_contract_mode="replace-task-class".replace("-", "_"),
         )
         assert payload["quality_contract_mode"] == "replace_task_class"
+
+
+class TestCriteriaAreAClosedVocabulary:
+    """``--criteria`` is a declared slug set, and a typo is refused at the flag.
+
+    MEASURED 2026-09-15, live against the real routing config: three free-text
+    criteria produced a 265 ms pydantic ``ValidationError``, zero rungs
+    attempted, no answer, and no mention of which flag was wrong. The
+    vocabulary was always closed; only the error was unusable.
+    """
+
+    def test_a_free_text_criterion_is_refused_naming_the_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_infra.cli import cli_delegate
+
+        monkeypatch.setattr(
+            cli_delegate, "load_supported_criteria", lambda: frozenset({"concise"})
+        )
+        with pytest.raises(ValueError) as excinfo:
+            cli_delegate._validate_criteria(("under 400 words",))
+        message = str(excinfo.value)
+        assert "--criteria takes declared criterion slugs, not free text" in message
+        assert "'under 400 words'" in message
+        assert "concise" in message, "the refusal must list what IS allowed"
+
+    def test_a_declared_slug_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from omnibase_infra.cli import cli_delegate
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "load_supported_criteria",
+            lambda: frozenset({"concise", "task_completed"}),
+        )
+        assert cli_delegate._validate_criteria(("concise", "task_completed")) == (
+            "concise",
+            "task_completed",
+        )
+
+    def test_the_parameterised_slug_shape_is_accepted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``max_words_per_sentence_<N>`` is a pattern, not a listed name."""
+        from omnibase_infra.cli import cli_delegate
+
+        monkeypatch.setattr(
+            cli_delegate, "load_supported_criteria", lambda: frozenset({"concise"})
+        )
+        assert cli_delegate._validate_criteria(("max_words_per_sentence_20",)) == (
+            "max_words_per_sentence_20",
+        )
+        with pytest.raises(ValueError):
+            cli_delegate._validate_criteria(("max_words_per_sentence_0",))
+
+    def test_unreadable_vocabulary_passes_through_rather_than_refusing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No omnimarket means no vocabulary; dispatch fails for its own reason.
+
+        Refusing here would turn a missing co-install into a misleading
+        complaint about the caller's criteria.
+        """
+        from omnibase_infra.cli import cli_delegate
+
+        monkeypatch.setattr(cli_delegate, "load_supported_criteria", lambda: None)
+        assert cli_delegate._validate_criteria(("anything at all",)) == (
+            "anything at all",
+        )
+
+    def test_no_criteria_never_consults_the_vocabulary(self) -> None:
+        from omnibase_infra.cli import cli_delegate
+
+        assert cli_delegate._validate_criteria(()) == ()

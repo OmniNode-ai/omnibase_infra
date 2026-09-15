@@ -90,8 +90,10 @@ error) even when the hang is not asyncio-cooperative.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
+import re
 import signal
 import sys
 import uuid
@@ -151,6 +153,7 @@ __all__ = [
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "classify_task_type",
+    "load_supported_criteria",
     "resolve_default_bus",
     "resolve_task_class",
     "run_delegate",
@@ -316,6 +319,13 @@ def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
         if isinstance(nested, dict) and isinstance(nested.get("attempts"), list):
             return nested
     return None
+
+
+#: Mirrors the wire model's own pattern for a parameterised criterion slug.
+#: The SLUG SET is read from the installed omnimarket (see
+#: :func:`load_supported_criteria`); only this shape is spelled here, because a
+#: regex cannot drift the way a copied list of names can.
+_MAX_WORDS_PER_SENTENCE_RE = re.compile(r"^max_words_per_sentence_([1-9]\d*)$")
 
 
 _ATTEMPT_EVIDENCE_FIELDS: tuple[str, ...] = (
@@ -698,6 +708,54 @@ def resolve_task_class(
         # has to satisfy.
         fallback=load_selection_fallback(contract_path),
     )
+
+
+def load_supported_criteria() -> frozenset[str] | None:
+    """Return the closed acceptance-criterion vocabulary, or ``None`` if unreadable.
+
+    ``acceptance_criteria`` is NOT free text. The delegation wire model
+    validates every entry against a closed slug set, plus the pattern
+    ``max_words_per_sentence_<N>``, and refuses the whole request otherwise.
+    Measured live 2026-09-15: three free-text criteria produced a 265 ms
+    ``ValidationError`` with a pydantic traceback, zero rungs attempted, and no
+    mention of which command-line flag the caller had got wrong.
+
+    So the vocabulary is resolved HERE, at the flag, from the same installed
+    omnimarket the contract itself is read from — one source, not a copy that
+    can drift. ``None`` means omnimarket is unresolvable, in which case this
+    command cannot dispatch at all for unrelated reasons and the criteria are
+    passed through to be validated where they always were.
+    """
+    try:
+        module = importlib.import_module(
+            "omnimarket.models.delegation.wire.model_delegation_request"
+        )
+        supported = module.SUPPORTED_ACCEPTANCE_CRITERIA
+    except (ImportError, AttributeError):
+        return None
+    return frozenset(str(item) for item in supported)
+
+
+def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
+    """Refuse an unknown criterion here, naming the flag and the vocabulary."""
+    if not criteria:
+        return criteria
+    supported = load_supported_criteria()
+    if supported is None:
+        return criteria
+    unsupported = sorted(
+        item
+        for item in criteria
+        if item not in supported and not _MAX_WORDS_PER_SENTENCE_RE.match(item)
+    )
+    if unsupported:
+        raise ValueError(
+            "--criteria takes declared criterion slugs, not free text. "
+            f"Unsupported: {', '.join(repr(item) for item in unsupported)}. "
+            f"Allowed: {', '.join(sorted(supported))}, or "
+            "max_words_per_sentence_<N>."
+        )
+    return criteria
 
 
 def _resolve_task_class_flag(
@@ -1146,7 +1204,7 @@ def delegate_command(
         exit_code = run_delegate(
             prompt=prompt,
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
-            acceptance_criteria=tuple(criteria),
+            acceptance_criteria=_validate_criteria(tuple(criteria)),
             criteria_mode=criteria_mode,
             response_contract=_load_response_contract(response_contract),
             system_prompt=system_prompt,
