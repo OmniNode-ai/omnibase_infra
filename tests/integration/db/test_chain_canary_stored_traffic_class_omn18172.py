@@ -53,7 +53,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -99,10 +99,6 @@ from omnibase_infra.runtime.state_io.state_store_adapter import (
 from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
 _postgres_config = PostgresConfig.from_env()
-POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable(
-    _postgres_config,
-    timeout=1.0,
-)
 
 _REQUIRE_PG_ENV = "OMN18172_REQUIRE_PG"
 REQUIRE_PG = os.environ.get(_REQUIRE_PG_ENV) == "1"
@@ -114,30 +110,62 @@ _POSTGRES_UNAVAILABLE_REASON = (
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.postgres,
-    # Under OMN18172_REQUIRE_PG=1 nothing in this module may skip; the autouse
-    # fixture below fails every test instead.
-    pytest.mark.skipif(
-        not POSTGRES_AVAILABLE and not REQUIRE_PG,
-        reason=_POSTGRES_UNAVAILABLE_REASON,
-    ),
 ]
+
+
+def _postgres_available() -> bool:
+    return _postgres_config.is_configured and check_postgres_reachable(
+        _postgres_config,
+        timeout=5.0,
+    )
+
+
+def _safe_to_mutate_postgres() -> bool:
+    return os.environ.get("GITHUB_ACTIONS") == "true" and _postgres_config.host in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
 
 
 @pytest.fixture(autouse=True)
 def _postgres_required_when_flagged() -> None:
-    if REQUIRE_PG and not POSTGRES_AVAILABLE:
-        pytest.fail(
-            f"{_REQUIRE_PG_ENV}=1 but {_POSTGRES_UNAVAILABLE_REASON}: "
-            "OMNIBASE_INFRA_DB_URL is unset, malformed, or unreachable. This proof "
-            "fails closed rather than skipping, so a Postgres-absent run cannot "
-            "read as a pass."
+    if not _postgres_available():
+        message = (
+            f"{_POSTGRES_UNAVAILABLE_REASON}: OMNIBASE_INFRA_DB_URL is unset, "
+            "malformed, or unreachable."
         )
+        if REQUIRE_PG:
+            pytest.fail(
+                f"{_REQUIRE_PG_ENV}=1 but {message} This proof fails closed "
+                "rather than skipping, so a Postgres-absent run cannot read as a pass."
+            )
+        pytest.skip(message)
+    if not _safe_to_mutate_postgres():
+        message = (
+            "OMN-18172 mutates delegation_workflow_state and creates a temporary "
+            "role; it may run only in GitHub Actions against loopback Postgres."
+        )
+        if REQUIRE_PG:
+            pytest.fail(f"{_REQUIRE_PG_ENV}=1 but {message}")
+        pytest.skip(message)
 
 
-# Fixed, real UUIDs: one canary run, and its provenance-less control.
-CANARY_CID = UUID("18172a01-0001-4001-8001-181720000001")
-CONTROL_CID = UUID("18172a02-0002-4002-8002-181720000002")
-RUN_CID = UUID("18172a03-0003-4003-8003-181720000003")
+@pytest.fixture
+def probe_ids() -> tuple[UUID, UUID, UUID]:
+    return uuid4(), uuid4(), uuid4()
+
+
+def _only_state_row(
+    rows: dict[str, tuple[str | None, int]],
+) -> tuple[str, str | None, int]:
+    assert len(rows) == 1, (
+        "state_io seam must expose exactly one correlation row to the fold; "
+        f"got {len(rows)} keys: {sorted(rows)}"
+    )
+    key, (prior_payload_json, version) = next(iter(rows.items()))
+    return key, prior_payload_json, version
+
 
 _TABLE = "delegation_workflow_state"
 # scripts/run-forward-migrations.sh LOGIN_ONLY_ROLE_GRANT_MAP, chain_canary_reader.
@@ -181,7 +209,7 @@ class _DelegationWorkflowFold:
 
     async def handle(self, envelope: object) -> ModelHandlerOutput[None]:
         rows = CONTEXTVAR_STATE_IO_ROWS.get() or {}
-        ((key, (prior_payload_json, version)),) = rows.items()
+        key, prior_payload_json, version = _only_state_row(rows)
         if prior_payload_json is None:
             request = ModelDelegationRequest.model_validate(
                 getattr(envelope, "payload", None)
@@ -198,7 +226,7 @@ class _DelegationWorkflowFold:
         workflow["in_flight"] = False
         CONTEXTVAR_STATE_IO_ROWS.set({key: (json.dumps(workflow), version)})
         return ModelHandlerOutput.for_orchestrator(
-            input_envelope_id=cast("UUID", getattr(envelope, "envelope_id", RUN_CID)),
+            input_envelope_id=cast("UUID", getattr(envelope, "envelope_id", uuid4())),
             correlation_id=UUID(key),
             handler_id="omn18172-delegation-workflow-fold",
             events=(),
@@ -297,6 +325,7 @@ async def _run_canary(
     ingress: _RuntimeIngress,
     reader_dsn: str,
     probe_correlation_id: UUID,
+    run_correlation_id: UUID,
 ) -> ModelChainCanaryResult:
     # The handler mints its probe id with uuid4(); pin it to a known real UUID.
     monkeypatch.setattr(handler_chain_canary, "uuid4", lambda: probe_correlation_id)
@@ -313,7 +342,7 @@ async def _run_canary(
     )
     return await handler.handle(
         ModelChainCanaryRequest(
-            correlation_id=RUN_CID,
+            correlation_id=run_correlation_id,
             probe_url="http://runtime.invalid:8085",
             budget_ms=5_000,
             terminal_bootstrap_servers="broker.invalid:19092",
@@ -332,7 +361,9 @@ def _link_two(result: ModelChainCanaryResult) -> tuple[EnumChainLinkStatus, str]
 
 
 @pytest.fixture
-async def admin_connection() -> AsyncIterator[asyncpg.Connection]:
+async def admin_connection(
+    probe_ids: tuple[UUID, UUID, UUID],
+) -> AsyncIterator[asyncpg.Connection]:
     connection = await asyncpg.connect(_postgres_config.build_dsn(), timeout=10.0)
     try:
         generated = await connection.fetchval(
@@ -347,7 +378,8 @@ async def admin_connection() -> AsyncIterator[asyncpg.Connection]:
                 f"(is_generated={generated!r}): apply the forward migrations "
                 "through 106 with scripts/run-migrations.py first"
             )
-        test_keys = [str(CANARY_CID), str(CONTROL_CID)]
+        canary_cid, control_cid, _ = probe_ids
+        test_keys = [str(canary_cid), str(control_cid)]
         await connection.execute(
             f"DELETE FROM {_TABLE} WHERE correlation_id = ANY($1::text[])",  # noqa: S608 - module constant
             test_keys,
@@ -420,25 +452,33 @@ async def _read_as_canary_reader(reader_dsn: str, cid: UUID) -> asyncpg.Record |
 
 async def test_canary_delegation_terminal_row_stores_traffic_class_synthetic(
     monkeypatch: pytest.MonkeyPatch,
+    probe_ids: tuple[UUID, UUID, UUID],
     admin_connection: asyncpg.Connection,
     canary_reader_dsn: str,
     state_adapter: StateStoreAdapter,
 ) -> None:
+    canary_cid, _, run_cid = probe_ids
     ingress = _RuntimeIngress(state_adapter)
 
-    result = await _run_canary(monkeypatch, ingress, canary_reader_dsn, CANARY_CID)
+    result = await _run_canary(
+        monkeypatch,
+        ingress,
+        canary_reader_dsn,
+        canary_cid,
+        run_cid,
+    )
 
     # One correlation id, traced: minted by the handler, on the wire, on the row.
-    assert result.probe_correlation_id == CANARY_CID
+    assert result.probe_correlation_id == canary_cid
     (body,) = ingress.bodies
-    assert body["correlation_id"] == str(CANARY_CID)
+    assert body["correlation_id"] == str(canary_cid)
     wire_payload = cast("dict[str, Any]", body["payload"])
     assert wire_payload["provenance"]["traffic_class"] == "synthetic"
 
     # The seam really seeded and then CAS-advanced the row to a terminal.
     stored = await admin_connection.fetchrow(
         f"SELECT state, version FROM {_TABLE} WHERE correlation_id = $1",  # noqa: S608 - module constant
-        str(CANARY_CID),
+        str(canary_cid),
     )
     assert stored is not None
     assert (stored["state"], stored["version"]) == ("COMPLETED", 1)
@@ -450,18 +490,20 @@ async def test_canary_delegation_terminal_row_stores_traffic_class_synthetic(
     assert "traffic_class=synthetic" in detail
 
     # And the column itself, read with only the column-scoped grant.
-    row = await _read_as_canary_reader(canary_reader_dsn, CANARY_CID)
+    row = await _read_as_canary_reader(canary_reader_dsn, canary_cid)
     assert row is not None
     assert (row["state"], row["traffic_class"]) == ("COMPLETED", "synthetic")
 
 
 async def test_request_without_provenance_stores_unclassified_never_synthetic(
     monkeypatch: pytest.MonkeyPatch,
+    probe_ids: tuple[UUID, UUID, UUID],
     admin_connection: asyncpg.Connection,
     canary_reader_dsn: str,
     state_adapter: StateStoreAdapter,
 ) -> None:
     """Negative control: the same path with provenance omitted from the body."""
+    _, control_cid, run_cid = probe_ids
     build_body = HandlerChainCanary._build_body
 
     def _build_body_without_provenance(
@@ -479,7 +521,13 @@ async def test_request_without_provenance_stores_unclassified_never_synthetic(
     )
     ingress = _RuntimeIngress(state_adapter)
 
-    result = await _run_canary(monkeypatch, ingress, canary_reader_dsn, CONTROL_CID)
+    result = await _run_canary(
+        monkeypatch,
+        ingress,
+        canary_reader_dsn,
+        control_cid,
+        run_cid,
+    )
 
     (body,) = ingress.bodies
     assert "provenance" not in cast("dict[str, object]", body["payload"])
@@ -488,6 +536,6 @@ async def test_request_without_provenance_stores_unclassified_never_synthetic(
     assert status is EnumChainLinkStatus.PASS, detail
     assert "traffic_class=unclassified" in detail
 
-    row = await _read_as_canary_reader(canary_reader_dsn, CONTROL_CID)
+    row = await _read_as_canary_reader(canary_reader_dsn, control_cid)
     assert row is not None
     assert (row["state"], row["traffic_class"]) == ("COMPLETED", "unclassified")
