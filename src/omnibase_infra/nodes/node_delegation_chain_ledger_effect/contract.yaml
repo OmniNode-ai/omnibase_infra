@@ -17,10 +17,6 @@ input_model:
   name: "ModelDelegationTerminalPayload"
   module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models"
   description: "Permissive terminal payload; chain evidence comes from the enclosing envelope and event ledger."
-output_model:
-  name: "ModelLedgerChainWriteResult"
-  module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models"
-  description: "Fail-closed summary of the rows written for one correlation."
 event_bus:
   subscribe_topics:
     - "onex.evt.omnimarket.delegate-skill-completed.v1"
@@ -70,8 +66,9 @@ metadata:
   description: "Evidence-derived writer for OMN-16025 chain-canary link 5."
   author: "OmniNode Team"
   created: "2026-09-13"
-  updated: "2026-09-13"
+  updated: "2026-09-15"
   ticket: "OMN-16964"
+  note: "OMN-18390: output_model dropped -- nothing consumed ModelLedgerChainWriteResult and the node has no publish_topics, so every declared output dead-lettered."
   tags:
     - "effect"
     - "delegation"

@@ -24,10 +24,8 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay impor
     assemble_replay_and_verify,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
-    EnumTierTwoVerdict,
     ModelDelegationTerminalPayload,
     ModelLedgerChainRow,
-    ModelLedgerChainWriteResult,
     ModelObservedHop,
 )
 
@@ -169,8 +167,18 @@ class HandlerDelegationChainLedger:
 
     async def handle(
         self, request: ModelDelegationTerminalPayload
-    ) -> ModelHandlerOutput[ModelLedgerChainWriteResult]:
-        """Assemble and persist one chain from the typed terminal payload."""
+    ) -> ModelHandlerOutput[None]:
+        """Assemble and persist one chain from the typed terminal payload.
+
+        The write result is recorded on this node's own persistence path
+        (``public.ledger_chain``, via ``_persist_rows``) and nothing consumes a
+        published summary of it (OMN-16964 comment, 2026-09-15T11:52:22Z), so
+        this returns an effect output with no events. Returning a typed ``.result`` here
+        would have the auto-wiring boundary append it to ``output_events``
+        with no ``publish_topics`` declared to resolve a result applier for
+        it -- the exact OMN-18390 mechanism that dead-lettered every
+        successful dispatch as ``UndeliverableDispatchOutputError``.
+        """
         correlation_id = self._required_uuid(
             request.correlation_id, "terminal payload correlation_id"
         )
@@ -191,30 +199,10 @@ class HandlerDelegationChainLedger:
         )
         await self._persist_rows(rows)
 
-        written_topics = tuple(row.hop for row in rows)
-        chain_complete = all(topic in written_topics for topic in self._declared_chain)
-        replay_green = bool(rows) and all(row.replay_green for row in rows)
-        if not rows or any(
-            row.verifier_verdict is EnumTierTwoVerdict.SKIP for row in rows
-        ):
-            verifier_verdict = EnumTierTwoVerdict.SKIP
-        elif any(row.verifier_verdict is EnumTierTwoVerdict.FAIL for row in rows):
-            verifier_verdict = EnumTierTwoVerdict.FAIL
-        else:
-            verifier_verdict = EnumTierTwoVerdict.PASS
-
-        result = ModelLedgerChainWriteResult(
-            correlation_id=correlation_id,
-            rows_written=len(rows),
-            chain_complete=chain_complete,
-            replay_green=replay_green,
-            verifier_verdict=verifier_verdict,
-        )
-        return ModelHandlerOutput.for_compute(
+        return ModelHandlerOutput.for_effect(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
             handler_id=HANDLER_ID_DELEGATION_CHAIN_LEDGER,
-            result=result,
         )
 
     async def _read_observed(
