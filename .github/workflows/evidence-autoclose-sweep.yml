@@ -200,9 +200,25 @@ name: Evidence Autoclose Sweep
 
 on:
   schedule:
-    # Every 30 minutes. lookback-hours below intentionally exceeds the
-    # interval so a missed/failed run never drops a companion merge.
-    - cron: '*/30 * * * *'
+    # Every 2 hours, REDUCED from every 30 minutes on the operator ruling of
+    # 2026-09-15 (~17:47Z, verbatim: "OK that's fine").
+    #
+    # RESTORE CONDITION, and it is a condition rather than a date: put this
+    # back to `*/30 * * * *` once the `binds_ac` unblock has proved ONE closer
+    # flip. Until then this sweep is measurably a no-op writer — since
+    # 2026-09-10 every candidate it reaches holds on AC binding, so it flips
+    # nothing, while each run still spends ~24-28 minutes of runner time. A
+    # 30-minute cadence for a job that cannot currently write is four times
+    # the runner spend for the same zero flips. The unblock is owned
+    # elsewhere; this file only decides how often the attempt is made.
+    #
+    # THE INTERVAL IS A COST KNOB, NOT A SAFETY ONE, and the reason is
+    # directly below: `lookback_hours` defaults to 6h, which exceeds even the
+    # new interval by 3x, so a missed or failed tick still cannot drop a
+    # companion merge. Nothing about WHAT the sweep decides changes here —
+    # every flip conjunct, the OMN-17891 fence and the kill switch are
+    # untouched.
+    - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       lookback_hours:
@@ -259,9 +275,11 @@ on:
           those merged inside the live window; 113 are out of reach for good,
           74 of them carrying a behaviour-proof receipt. Widening the freshness
           window cannot fix that, because `dod_verify` dominates the run budget
-          (~15s per ticket) against a 30-minute cadence — a window wide enough
-          to reach the backlog overruns the cadence, and overruns it worse as
-          the board grows. The slice is what makes the reach affordable.
+          (~15s per ticket) against the scheduled cadence — a window wide
+          enough to reach the backlog overruns the cadence, and overruns it
+          worse as the board grows. (The cadence itself moved to 2-hourly on
+          2026-09-15; the constraint is the per-run 60-minute job budget, not
+          the gap between runs, so this reasoning is unchanged by that.) The slice is what makes the reach affordable.
           It widens WHO is asked, never WHAT counts. Every flip conjunct is
           untouched: dod_verify's own terminal `verified`, the OMN-16821
           denominator equality, the OMN-15911 behaviour conjunct and the
@@ -341,7 +359,7 @@ on:
       apply:
         description: >-
           OMN-16106 / OMN-17658. WRITE MODE FOR THIS DISPATCH ONLY. The
-          30-minute SCHEDULE does not read this box and cannot; whether a
+          SCHEDULE does not read this box and cannot; whether a
           scheduled run writes is decided by the node contract's
           `scheduled_apply`, which this workflow does not set and cannot.
           What this decides is whether the run YOU are launching writes. Tick it and
@@ -368,7 +386,7 @@ on:
 # `max_flips_per_run` stops bounding the fleet and the OMN-16808
 # read-before-write comment dedup races itself.
 #
-# WORKFLOW SCOPE, and a LITERAL group. Every trigger of this file — the `*/30`
+# WORKFLOW SCOPE, and a LITERAL group. Every trigger of this file — the
 # cron and every manual dispatch — is one group member. A group rendered from
 # an expression (`${{ github.event_name }}`, `${{ github.ref }}`) reads like
 # serialization and puts the scheduled writer and the dispatched writer in
@@ -2313,7 +2331,7 @@ jobs:
             echo "and reached a flip/gap/refusal decision per bound ticket."
             echo ""
             if [ "${SWEEP_TRIGGER}" = "schedule" ]; then
-              echo "**Trigger: the 30-minute schedule.** Whether this run wrote to Linear is"
+              echo "**Trigger: the schedule.** Whether this run wrote to Linear is"
               echo "decided by the node contract's \`scheduled_apply\` (OMN-17658) — not by"
               echo "this workflow, which passes no arming value. The sweep receipt's"
               echo "\`mode\` field is the answer: \`apply_scheduled\`, \`dry_run\`,"
