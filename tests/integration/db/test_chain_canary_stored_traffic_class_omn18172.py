@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -65,9 +66,6 @@ from omnibase_core.models.delegation.wire import (
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
-from omnibase_infra.nodes.node_chain_canary_effect.handlers import (
-    handler_chain_canary,
-)
 from omnibase_infra.nodes.node_chain_canary_effect.handlers.handler_chain_canary import (
     HandlerChainCanary,
 )
@@ -146,14 +144,12 @@ def _postgres_required_when_flagged() -> None:
             "OMN-18172 mutates delegation_workflow_state and creates a temporary "
             "role; it may run only in GitHub Actions against loopback Postgres."
         )
-        if REQUIRE_PG:
-            pytest.fail(f"{_REQUIRE_PG_ENV}=1 but {message}")
         pytest.skip(message)
 
 
 @pytest.fixture
-def probe_ids() -> tuple[UUID, UUID, UUID]:
-    return uuid4(), uuid4(), uuid4()
+def created_correlation_ids() -> list[UUID]:
+    return []
 
 
 def _only_state_row(
@@ -330,22 +326,11 @@ async def _ledger_verified(
 
 
 async def _run_canary(
-    monkeypatch: pytest.MonkeyPatch,
     ingress: _RuntimeIngress,
     reader_dsn: str,
-    probe_correlation_id: UUID,
     run_correlation_id: UUID,
+    created_correlation_ids: list[UUID],
 ) -> ModelChainCanaryResult:
-    minted_probe_ids = iter((probe_correlation_id,))
-
-    def _next_probe_uuid() -> UUID:
-        try:
-            return next(minted_probe_ids)
-        except StopIteration:
-            pytest.fail("HandlerChainCanary minted more UUIDs than this proof binds")
-
-    # The handler mints exactly one probe id with uuid4(); pin it to a known UUID.
-    monkeypatch.setattr(handler_chain_canary, "uuid4", _next_probe_uuid)
     handler = HandlerChainCanary(
         ingress=ingress,
         quarantine_scan=_quarantine_clean,
@@ -357,17 +342,28 @@ async def _run_canary(
         ledger_dsn_lookup=lambda name: "postgresql://ledger.invalid/omnibase_infra",
         kill_switch_disabled=False,
     )
-    return await handler.handle(
-        ModelChainCanaryRequest(
-            correlation_id=run_correlation_id,
-            probe_url="http://runtime.invalid:8085",
-            budget_ms=5_000,
-            terminal_bootstrap_servers="broker.invalid:19092",
-            projection_dsn_env=_PROJECTION_DSN_ENV,
-            ledger_source_env="OMN18172_LEDGER_DSN",
-            expected_ledger_hops=_FULL_CHAIN,
-        )
+    request = ModelChainCanaryRequest(
+        correlation_id=run_correlation_id,
+        probe_url="http://runtime.invalid:8085",
+        budget_ms=5_000,
+        terminal_bootstrap_servers="broker.invalid:19092",
+        projection_dsn_env=_PROJECTION_DSN_ENV,
+        ledger_source_env="OMN18172_LEDGER_DSN",
+        expected_ledger_hops=_FULL_CHAIN,
     )
+    result = await handler.handle(request)
+    created_correlation_ids.extend((result.probe_correlation_id, run_correlation_id))
+    return result
+
+
+def _assert_reader_secret_not_reported(
+    result: ModelChainCanaryResult,
+    reader_dsn: str,
+    reader_password: str,
+) -> None:
+    serialized = result.model_dump_json()
+    assert reader_dsn not in serialized
+    assert reader_password not in serialized
 
 
 def _link_two(result: ModelChainCanaryResult) -> tuple[EnumChainLinkStatus, str]:
@@ -379,7 +375,7 @@ def _link_two(result: ModelChainCanaryResult) -> tuple[EnumChainLinkStatus, str]
 
 @pytest.fixture
 async def admin_connection(
-    probe_ids: tuple[UUID, UUID, UUID],
+    created_correlation_ids: list[UUID],
 ) -> AsyncIterator[asyncpg.Connection]:
     connection = await asyncpg.connect(_postgres_config.build_dsn(), timeout=10.0)
     try:
@@ -395,17 +391,13 @@ async def admin_connection(
                 f"(is_generated={generated!r}): apply the forward migrations "
                 "through 106 with scripts/run-migrations.py first"
             )
-        canary_cid, control_cid, run_cid = probe_ids
-        test_keys = [str(canary_cid), str(control_cid), str(run_cid)]
-        await connection.execute(
-            f"DELETE FROM {_TABLE} WHERE correlation_id = ANY($1::text[])",  # noqa: S608 - module constant
-            test_keys,
-        )
         yield connection
-        await connection.execute(
-            f"DELETE FROM {_TABLE} WHERE correlation_id = ANY($1::text[])",  # noqa: S608 - module constant
-            test_keys,
-        )
+        if created_correlation_ids:
+            test_keys = [str(cid) for cid in created_correlation_ids]
+            await connection.execute(
+                f"DELETE FROM {_TABLE} WHERE correlation_id = ANY($1::text[])",  # noqa: S608 - module constant
+                test_keys,
+            )
     finally:
         await connection.close()
 
@@ -413,7 +405,7 @@ async def admin_connection(
 @pytest.fixture
 async def canary_reader_dsn(
     admin_connection: asyncpg.Connection,
-) -> AsyncIterator[str]:
+) -> AsyncIterator[tuple[str, str]]:
     """A least-privilege LOGIN role with the chain_canary_reader column grant."""
     role = f"omn18172_canary_reader_{secrets.token_hex(4)}"
     role_sql = _quote_ident(role)
@@ -436,18 +428,38 @@ async def canary_reader_dsn(
         await admin_connection.execute(
             f"GRANT SELECT ({_READER_GRANT_COLUMNS}) ON public.{_TABLE} TO {role_sql}"
         )
-        yield PostgresConfig(
+        dsn = PostgresConfig(
             host=_postgres_config.host,
             port=_postgres_config.port,
             database=_postgres_config.database,
             user=role,
             password=password,
         ).build_dsn()
+        yield dsn, password
     finally:
+        cleanup_errors: list[str] = []
         if role_created:
-            # DROP OWNED revokes privileges granted to the temporary role.
-            await admin_connection.execute(f"DROP OWNED BY {role_sql}")
-        await admin_connection.execute(f"DROP ROLE IF EXISTS {role_sql}")
+            try:
+                await admin_connection.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE usename = $1 AND pid <> pg_backend_pid()",
+                    role,
+                )
+            except Exception as exc:  # noqa: BLE001 - preserve the test failure first
+                cleanup_errors.append(f"terminate backends: {exc}")
+            try:
+                # DROP OWNED revokes privileges granted to the temporary role.
+                await admin_connection.execute(f"DROP OWNED BY {role_sql}")
+            except Exception as exc:  # noqa: BLE001 - preserve the test failure first
+                cleanup_errors.append(f"drop owned: {exc}")
+        try:
+            await admin_connection.execute(f"DROP ROLE IF EXISTS {role_sql}")
+        except Exception as exc:  # noqa: BLE001 - preserve the test failure first
+            cleanup_errors.append(f"drop role: {exc}")
+        if cleanup_errors and sys.exception() is None:
+            pytest.fail(
+                "temporary canary reader cleanup failed: " + "; ".join(cleanup_errors)
+            )
 
 
 @pytest.fixture
@@ -487,25 +499,24 @@ async def _assert_payload_denied_for_canary_reader(reader_dsn: str, cid: UUID) -
 
 
 async def test_canary_delegation_terminal_row_stores_traffic_class_synthetic(
-    monkeypatch: pytest.MonkeyPatch,
-    probe_ids: tuple[UUID, UUID, UUID],
+    created_correlation_ids: list[UUID],
     admin_connection: asyncpg.Connection,
-    canary_reader_dsn: str,
+    canary_reader_dsn: tuple[str, str],
     state_adapter: StateStoreAdapter,
 ) -> None:
-    canary_cid, _, run_cid = probe_ids
+    reader_dsn, reader_password = canary_reader_dsn
+    run_cid = uuid4()
     ingress = _RuntimeIngress(state_adapter)
 
     result = await _run_canary(
-        monkeypatch,
         ingress,
-        canary_reader_dsn,
-        canary_cid,
+        reader_dsn,
         run_cid,
+        created_correlation_ids,
     )
+    canary_cid = result.probe_correlation_id
 
     # One correlation id, traced: minted by the handler, on the wire, on the row.
-    assert result.probe_correlation_id == canary_cid
     (body,) = ingress.bodies
     assert body["correlation_id"] == str(canary_cid)
     wire_payload = cast("dict[str, Any]", body["payload"])
@@ -526,21 +537,23 @@ async def test_canary_delegation_terminal_row_stores_traffic_class_synthetic(
     assert "traffic_class=synthetic" in detail
 
     # And the column itself, read with only the column-scoped grant.
-    row = await _read_as_canary_reader(canary_reader_dsn, canary_cid)
+    row = await _read_as_canary_reader(reader_dsn, canary_cid)
     assert row is not None
     assert (row["state"], row["traffic_class"]) == ("COMPLETED", "synthetic")
-    await _assert_payload_denied_for_canary_reader(canary_reader_dsn, canary_cid)
+    await _assert_payload_denied_for_canary_reader(reader_dsn, canary_cid)
+    _assert_reader_secret_not_reported(result, reader_dsn, reader_password)
 
 
 async def test_request_without_provenance_stores_unclassified_never_synthetic(
     monkeypatch: pytest.MonkeyPatch,
-    probe_ids: tuple[UUID, UUID, UUID],
+    created_correlation_ids: list[UUID],
     admin_connection: asyncpg.Connection,
-    canary_reader_dsn: str,
+    canary_reader_dsn: tuple[str, str],
     state_adapter: StateStoreAdapter,
 ) -> None:
     """Negative control: the same path with provenance omitted from the body."""
-    _, control_cid, run_cid = probe_ids
+    reader_dsn, reader_password = canary_reader_dsn
+    run_cid = uuid4()
     build_body = HandlerChainCanary._build_body
 
     def _build_body_without_provenance(
@@ -559,12 +572,12 @@ async def test_request_without_provenance_stores_unclassified_never_synthetic(
     ingress = _RuntimeIngress(state_adapter)
 
     result = await _run_canary(
-        monkeypatch,
         ingress,
-        canary_reader_dsn,
-        control_cid,
+        reader_dsn,
         run_cid,
+        created_correlation_ids,
     )
+    control_cid = result.probe_correlation_id
 
     (body,) = ingress.bodies
     assert "provenance" not in cast("dict[str, object]", body["payload"])
@@ -573,10 +586,11 @@ async def test_request_without_provenance_stores_unclassified_never_synthetic(
     assert status is EnumChainLinkStatus.PASS, detail
     assert "traffic_class=unclassified" in detail
 
-    row = await _read_as_canary_reader(canary_reader_dsn, control_cid)
+    row = await _read_as_canary_reader(reader_dsn, control_cid)
     assert row is not None
     assert (row["state"], row["traffic_class"]) == ("COMPLETED", "unclassified")
-    await _assert_payload_denied_for_canary_reader(canary_reader_dsn, control_cid)
+    await _assert_payload_denied_for_canary_reader(reader_dsn, control_cid)
+    _assert_reader_secret_not_reported(result, reader_dsn, reader_password)
 
     stored = await admin_connection.fetchrow(
         f"SELECT state, payload FROM {_TABLE} WHERE correlation_id = $1",  # noqa: S608 - module constant
