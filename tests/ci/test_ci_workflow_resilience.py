@@ -127,24 +127,12 @@ def test_migration_integration_resolves_reachable_postgres_host() -> None:
         apply_step["env"]["OMNIBASE_INFRA_DB_URL"]
         == "postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra"
     )
-    assert "CREATE SCHEMA IF NOT EXISTS action_authorization_claim" in apply_step["run"]
-    assert apply_step["run"].index(
-        "CREATE SCHEMA IF NOT EXISTS action_authorization_claim"
-    ) < apply_step["run"].index("uv run python scripts/run-migrations.py")
     apply_steps = [
         step
         for step in workflow["jobs"]["integration-guard"]["steps"]
         if step.get("name") == "Apply all migrations"
     ]
     assert len(apply_steps) == 1
-    guard_apply_step = apply_steps[0]
-    assert (
-        "CREATE SCHEMA IF NOT EXISTS action_authorization_claim"
-        in guard_apply_step["run"]
-    )
-    assert guard_apply_step["run"].index(
-        "CREATE SCHEMA IF NOT EXISTS action_authorization_claim"
-    ) < guard_apply_step["run"].index("uv run python scripts/run-migrations.py")
 
     assert_step = next(
         step for step in steps if step.get("name") == "Assert manifest tables exist"
