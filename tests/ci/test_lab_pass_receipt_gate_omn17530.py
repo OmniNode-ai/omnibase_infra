@@ -320,13 +320,9 @@ class TestProjectionReadinessProbe:
         assert "projection_ready" in COMPOSE_DEV_HTTP_CHECKS
 
     def test_a_serving_projection_api_passes(self, monkeypatch: Any) -> None:
-        """Pins the LIVE response shape: the top-level key is 'topics', not
-        'projections' -- confirmed 2026-09-15 against the dev-lane container
-        (curl http://localhost:3002/projections -> {"topics": [...]}, 61
-        entries). The first revision of this check assumed 'projections' from
-        the endpoint's own path name and was never verified live, which made
-        it read every real 200 as a failure -- a positive control against the
-        actual shape is exactly what would have caught that before landing."""
+        """Pins the declared response shape: the top-level key is 'topics',
+        not 'projections', and each entry carries omnimarket's projection
+        metadata fields."""
         monkeypatch.setattr(
             "scripts.ci.lab_pass_receipt._http_get",
             lambda url, timeout: (
@@ -337,6 +333,12 @@ class TestProjectionReadinessProbe:
                             {
                                 "topic": "onex.snapshot.projection.consumer-flow.v1",
                                 "table": "consumer_flow",
+                                "status": "serving",
+                                "columns": ["projection_cursor", "window_end"],
+                                "limit": 100,
+                                "source_contract": "projection/consumer-flow.yaml",
+                                "bus_backed": True,
+                                "backing": "bus",
                                 "cursor_column": "projection_cursor",
                                 "order_by": "window_end DESC, projection_cursor DESC",
                             }
@@ -376,6 +378,54 @@ class TestProjectionReadinessProbe:
         check = check_projections_ready("http://lane:3002/projections", 1.0)
         assert check.ok is False
         assert "topics" in check.evidence
+
+    @pytest.mark.parametrize(
+        "topics",
+        [
+            {"topic": "onex.snapshot.projection.consumer-flow.v1"},
+            "onex.snapshot.projection.consumer-flow.v1",
+        ],
+    )
+    def test_a_non_list_topics_value_fails_closed(
+        self, monkeypatch: Any, topics: object
+    ) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, json.dumps({"topics": topics})),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+        assert "no 'topics' list" in check.evidence
+
+    def test_an_empty_topics_list_fails_closed(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, json.dumps({"topics": []})),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+        assert "zero topics" in check.evidence
+
+    def test_a_malformed_topic_entry_fails_closed(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (
+                200,
+                json.dumps(
+                    {
+                        "topics": [
+                            {
+                                "topic": ("onex.snapshot.projection.consumer-flow.v1"),
+                                "table": "consumer_flow",
+                            }
+                        ]
+                    }
+                ),
+            ),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+        assert "missing required field" in check.evidence
 
     def test_non_json_body_fails_closed(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(
@@ -881,7 +931,22 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             if "/health" in url:
                 return 200, body
             if "/projections" in url:
-                return 200, '{"topics": []}'
+                return 200, json.dumps(
+                    {
+                        "topics": [
+                            {
+                                "topic": "onex.snapshot.projection.consumer-flow.v1",
+                                "table": "consumer_flow",
+                                "status": "serving",
+                                "columns": ["projection_cursor"],
+                                "limit": 100,
+                                "source_contract": "projection/consumer-flow.yaml",
+                                "bus_backed": True,
+                                "backing": "bus",
+                            }
+                        ]
+                    }
+                )
             return 200, '{"status":"healthy"}'
 
         monkeypatch.setattr("scripts.ci.lab_pass_receipt._http_get", fake_get)
