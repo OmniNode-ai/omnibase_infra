@@ -448,6 +448,24 @@ K8S_ONLY_KEYS: frozenset[str] = frozenset(
         # so there is nothing for this key to bind to by construction, not by
         # deferred convenience.
         "AUTH_URL",
+        # OMN-10856 runtime build identity (omninode_infra#1487, merged
+        # 2026-09-15): the three onex-dev runtime Deployments carry
+        #   ONEX_IMAGE_DIGEST=""   ONEX_DEPLOYMENT_SHA=""
+        # as placeholders that kustomize `replacements:` in each outermost
+        # overlay's kustomization.yaml overwrite at apply time with the image
+        # digest that overlay finally renders and the git sha of the deployed
+        # commit, so service_kernel.py can bind non-null image_sha/deployment_sha
+        # onto the introspection manifest instead of reporting them null with
+        # absent_reason "<NAME> is not set". Compose lanes have no equivalent
+        # value to bind: they identify a build by BUILD_SOURCE/
+        # EXPECTED_BUILD_SOURCE ("release" vs "workspace" — see
+        # docker/docker-compose.infra.yml), not by a pinned OCI digest or a
+        # deploy-time git sha; a workspace build in particular has no image
+        # digest at all until BUILD_SOURCE=release publishes one. There is no
+        # kustomize-replacement analogue in compose, so nothing would ever
+        # populate either key there.
+        "ONEX_IMAGE_DIGEST",
+        "ONEX_DEPLOYMENT_SHA",
     }
 )
 
