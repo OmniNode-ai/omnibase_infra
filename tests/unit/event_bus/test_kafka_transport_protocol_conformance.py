@@ -113,6 +113,21 @@ def test_to_model_rejects_nullable_kafka_headers(unit_topic: str) -> None:
         KafkaTransport._to_model(SimpleNamespace(topic=unit_topic, partition=0), record)
 
 
+def test_to_model_rejects_duplicate_idempotency_key(unit_topic: str) -> None:
+    """The transport must reject raw content-key ambiguity before dict collapse."""
+    record = SimpleNamespace(
+        topic=unit_topic,
+        partition=0,
+        offset=7,
+        key=None,
+        value=b"payload",
+        headers=[("idempotency_key", b"first"), ("idempotency_key", b"second")],
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="duplicate idempotency_key"):
+        KafkaTransport._to_model(SimpleNamespace(topic=unit_topic, partition=0), record)
+
+
 @pytest.mark.asyncio
 async def test_start_rolls_back_producer_when_consumer_start_fails(
     monkeypatch: pytest.MonkeyPatch, unit_bootstrap: str, unit_topic: str
