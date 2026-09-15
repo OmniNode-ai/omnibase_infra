@@ -52,6 +52,8 @@ UNGOVERNED_OUTBOUND = "onex.evt.omnibase-infra.inference-response.v1"
 STATE_REDACTED = "redacted"
 STATE_RESTRICTED = "restricted"
 STATE_SECRET_DETECTED = "secret_detected"
+STATE_RAW = "raw"
+ADMITTED_STATES = (STATE_REDACTED, STATE_RESTRICTED, STATE_SECRET_DETECTED)
 
 CONTRACT_PATH = (
     Path(__file__).resolve().parents[3]
@@ -106,7 +108,7 @@ def _contract_forwarder_block() -> dict[str, object]:
     return forwarder
 
 
-def _config() -> ModelGatewayForwarderConfig:
+def _config(dedupe_store_path: Path) -> ModelGatewayForwarderConfig:
     return ModelGatewayForwarderConfig(
         tenant_identity=ModelGatewayTenantIdentity(
             tenant_id=TENANT_ID,
@@ -122,7 +124,7 @@ def _config() -> ModelGatewayForwarderConfig:
             client_secret_api_key_ref="gateway.cloud.kafka.oauth.client_secret",
         ),
         local_transport_flavor="containerized",
-        dedupe_store_path=Path.cwd() / "gateway-egress-integration.sqlite3",
+        dedupe_store_path=dedupe_store_path,
         mirror_topics=ModelGatewayMirrorTopics(
             inbound=("onex.cmd.omnibase-infra.delegation-inference-request.v1",),
             outbound=(UNGOVERNED_OUTBOUND, *CAPTURE_TOPICS),
@@ -135,7 +137,7 @@ def _config() -> ModelGatewayForwarderConfig:
         ),
         egress_redaction=ModelGatewayEgressRedaction(
             state_field="redaction_state",
-            admitted_states=(STATE_REDACTED, STATE_RESTRICTED, STATE_SECRET_DETECTED),
+            admitted_states=ADMITTED_STATES,
             governed_topics=CAPTURE_TOPICS,
         ),
     )
@@ -168,22 +170,46 @@ def test_contract_declares_every_capture_topic_under_redaction_gate() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("topic", CAPTURE_TOPICS)
+@pytest.mark.parametrize("redaction_state", ADMITTED_STATES)
 async def test_capture_topics_cross_only_with_admitted_redaction_state(
     topic: str,
+    redaction_state: str,
+    tmp_path: Path,
 ) -> None:
     local_bus = MockGatewayBus()
     cloud_bus = MockGatewayBus()
     service = ServiceGatewayForwarder(
-        config=_config(),
+        config=_config(tmp_path / "gateway-egress-integration.sqlite3"),
         local_bus=local_bus,
         cloud_bus=cloud_bus,
     )
 
     await service.forward_outbound_message(
-        local_bus.message(topic, _envelope({"redaction_state": STATE_REDACTED}))
+        local_bus.message(topic, _envelope({"redaction_state": redaction_state}))
     )
     await service.forward_outbound_message(local_bus.message(topic, _envelope({})))
 
     assert [message.topic for message in cloud_bus.published] == [
         f"tenant-acme.{topic}"
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("topic", CAPTURE_TOPICS)
+async def test_capture_topics_drop_raw_state_on_the_integration_path(
+    topic: str,
+    tmp_path: Path,
+) -> None:
+    local_bus = MockGatewayBus()
+    cloud_bus = MockGatewayBus()
+    service = ServiceGatewayForwarder(
+        config=_config(tmp_path / "gateway-egress-integration.sqlite3"),
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+
+    await service.forward_outbound_message(
+        local_bus.message(topic, _envelope({"redaction_state": STATE_RAW}))
+    )
+
+    assert cloud_bus.published == []

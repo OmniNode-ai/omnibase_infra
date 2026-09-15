@@ -513,6 +513,15 @@ def test_metadata_only_tool_output_requires_redaction() -> None:
     assert requires_egress_redaction(TOOL_OUTPUT_CAPTURED) is True
 
 
+def test_topic_grammar_requires_one_trailing_version_segment() -> None:
+    assert (
+        requires_egress_redaction("onex.evt.omniclaude.tool-executed.v1.extra") is False
+    )
+    assert (
+        requires_egress_redaction("onex.evt.omnimarket.tool-output-captured") is False
+    )
+
+
 def test_a_hook_class_that_does_not_exist_yet_requires_redaction() -> None:
     """The fail-closed direction, and the reason this is a rule rather than a
     list: a list has to be edited when a new hook class appears, and the edit

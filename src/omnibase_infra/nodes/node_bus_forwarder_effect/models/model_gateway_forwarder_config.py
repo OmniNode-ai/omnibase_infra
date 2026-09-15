@@ -45,15 +45,11 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_tenant_
 # fails config validation, with no action required by whoever adds it. That is
 # the fail-closed direction.
 #
-# Matched on name segments rather than whole topic strings, so this stays a
-# predicate over the canonical topic grammar rather than a second topic
-# registry competing with the contract.
-# Parsed by SEGMENT over the canonical topic grammar
-# (``onex.<kind>.<producer>.<event-name>.<version>``) rather than by matching a
-# topic-shaped prefix string. That keeps this a predicate over the grammar --
-# no literal topic lives here, so this module cannot drift into a second topic
-# registry competing with the contract, which is what the imperative-contract
-# guard (OMN-12515) correctly rejected in the first revision of this change.
+# Parsed by exact segment over the canonical topic grammar
+# (``onex.<kind>.<producer>.<event-name>.<version>``) rather than by matching
+# a topic-shaped prefix string. That keeps this a predicate over the grammar:
+# no literal topic lives here, and malformed extra segments do not silently
+# collapse into a different event name.
 _ONEX_NAMESPACE = "onex"
 _EVENT_KIND = "evt"
 _OMNICLAUDE_PRODUCER = "omniclaude"
@@ -64,11 +60,14 @@ _TOOL_OUTPUT_CAPTURE_EVENT = "tool-output-captured"
 def requires_egress_redaction(canonical_topic: str) -> bool:
     """Whether ``canonical_topic`` must carry upstream redaction provenance."""
     segments = canonical_topic.split(".")
-    if len(segments) < 5:
+    if len(segments) != 5:
         return False
     if (segments[0], segments[1]) != (_ONEX_NAMESPACE, _EVENT_KIND):
         return False
-    event_name = ".".join(segments[3:-1])
+    version = segments[4]
+    if not version.startswith("v") or not version[1:].isdigit():
+        return False
+    event_name = segments[3]
     producer = segments[2]
     return producer == _OMNICLAUDE_PRODUCER or (
         producer == _HOOK_CAPTURE_PRODUCER and event_name == _TOOL_OUTPUT_CAPTURE_EVENT
