@@ -43,3 +43,9 @@ task_classes:
     selection:
       priority: 95
       phrases: []
+
+# OMN-18305 residual: the fallback is a CONTRACT decision, not a CLI constant.
+# `fallback_class` is the probe's shape-free class, so an unclaimed prompt in
+# these tests lands somewhere its floors can actually be met.
+selection_fallback:
+  task_class: fallback_class

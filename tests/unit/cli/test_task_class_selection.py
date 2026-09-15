@@ -152,12 +152,35 @@ class TestResolutionIsAnnounced:
     def test_the_fallback_is_named_rather_than_chosen_silently(
         self, classes: tuple
     ) -> None:
+        """AMENDED, not deleted (OMN-18305 residual, 2026-09-15).
+
+        This asserted the fallback was the module default or a contract class,
+        with ``"research"`` spelled literally. The fallback is now a value the
+        CALLER supplies — read from the contract's ``selection_fallback`` — so
+        pinning a literal class name here would pin the very coupling the
+        parameter removes. What is still worth asserting is the property: the
+        fallback is announced, and it is whatever was handed in.
+        """
+        resolution = resolve_task_type(
+            "an unremarkable sentence",
+            explicit=None,
+            classes=classes,
+            fallback="fallback_class",
+        )
+        assert resolution.resolution is EnumTaskTypeResolution.FALLBACK
+        assert resolution.task_type == "fallback_class"
+        assert "no declared selection predicate" in resolution.reason
+
+    def test_the_default_fallback_applies_when_the_caller_names_none(
+        self, classes: tuple
+    ) -> None:
+        """The module default is still reachable, and it is the permissive class."""
+        from omnibase_infra.cli.task_class_selection import DEFAULT_TASK_TYPE
+
         resolution = resolve_task_type(
             "an unremarkable sentence", explicit=None, classes=classes
         )
-        assert resolution.resolution is EnumTaskTypeResolution.FALLBACK
-        assert resolution.task_type in {entry.name for entry in classes} | {"research"}
-        assert "no declared selection predicate" in resolution.reason
+        assert resolution.task_type == DEFAULT_TASK_TYPE
 
     def test_a_contract_resolution_names_the_deciding_phrase(
         self, classes: tuple
