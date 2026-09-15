@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumLlmOperationType
@@ -29,7 +29,14 @@ class ModelLlmInferenceCommand(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: tuple[str, ...] = Field(default_factory=tuple)
-    api_key: str | None = Field(default=None, repr=False)
+    # OMN-18385: ``SecretStr``, not ``str``. This model crosses the runtime
+    # boundary, so it is reachable by the dead-letter path that copied two
+    # customer bearer tokens onto a durable topic in cleartext. The single
+    # unwrap point is the handler that builds the outbound HTTP auth header.
+    # NOTE: ``provider_config`` can also carry a key under a free-form dict
+    # entry, which no type can cover -- the dead-letter publisher's
+    # field-name redaction is what catches that case.
+    api_key: SecretStr | None = Field(default=None, repr=False)
     extra_headers: dict[str, str] = Field(default_factory=dict, repr=False)
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=600.0)
     gpu_type: str | None = Field(default=None, min_length=1, max_length=64)

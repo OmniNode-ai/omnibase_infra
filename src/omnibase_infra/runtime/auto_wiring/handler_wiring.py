@@ -4019,7 +4019,16 @@ async def _route_projection_error_to_dlq(
         original_message = model_dump(mode="json")
     else:
         original_message = {"raw": str(payload)}
-    dlq_envelope = {
+    # OMN-18385: third of the three envelope-building sites (the other two are
+    # in MixinKafkaDlq). A projection payload reaches here as a decoded
+    # structure, so redact it structurally before it is serialised onto the
+    # durable dead-letter topic, and record the field names that were removed.
+    from omnibase_infra.utils.util_dlq_credential_redaction import (
+        redact_credential_fields,
+    )
+
+    original_message, redacted_fields = redact_credential_fields(original_message)
+    dlq_envelope: dict[str, object] = {
         "original_message": original_message,
         "failure_reason": failure_reason,
         "failure_class": EnumDlqFailureClass.CONSUMER_ERROR.value,
@@ -4029,6 +4038,8 @@ async def _route_projection_error_to_dlq(
         "handler": handler_name,
         "quarantine_fallback": used_quarantine_fallback,
     }
+    if redacted_fields:
+        dlq_envelope["redacted_fields"] = list(redacted_fields)
     raw = json.dumps(dlq_envelope, default=str).encode("utf-8")
     publish = getattr(event_bus, "publish", None)
     if not callable(publish):

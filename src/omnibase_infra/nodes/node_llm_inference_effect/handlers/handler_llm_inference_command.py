@@ -98,7 +98,14 @@ class HandlerLlmInferenceCommand:
                 f"model={command.model}"
             )
 
-        api_key = _optional_str(command.api_key or command.provider_value("api_key"))
+        # OMN-18385: the single unwrap point for the command credential.
+        # ``_optional_str`` calls ``str()``, which on a ``SecretStr``
+        # yields the mask rather than the value -- so the secret is read
+        # out explicitly here before it is normalised.
+        _command_api_key = (
+            command.api_key.get_secret_value() if command.api_key is not None else None
+        )
+        api_key = _optional_str(_command_api_key or command.provider_value("api_key"))
         compute_usage_source = None
         if command.compute_usage_source is not None:
             compute_usage_source = EnumUsageSource(command.compute_usage_source)
