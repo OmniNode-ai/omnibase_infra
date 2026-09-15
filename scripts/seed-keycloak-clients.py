@@ -131,6 +131,9 @@ BASE_FIELDS = {
     "defaultClientScopes",
 }
 
+_SECRET_CLEARING_FLAGS = ("bearerOnly", "publicClient")
+_SERVER_MANAGED_CLIENT_FIELDS = frozenset({"access", "id"})
+
 
 def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
     secret_env = client_spec.get("secretEnv")
@@ -143,6 +146,45 @@ def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
             f"but it is not set or empty."
         )
     return val
+
+
+def _build_update_payload(
+    existing: dict[str, Any],
+    spec: dict[str, Any],
+    drift_fields: list[str],
+    secret: str | None,
+) -> dict[str, Any]:
+    update_payload: dict[str, Any] = {
+        key: value
+        for key, value in existing.items()
+        if key not in _SERVER_MANAGED_CLIENT_FIELDS and key != "secret"
+    }
+    for field in drift_fields:
+        update_payload[field] = spec[field]
+    for secret_clearing_flag in _SECRET_CLEARING_FLAGS:
+        if secret_clearing_flag not in drift_fields:
+            update_payload.pop(secret_clearing_flag, None)
+    if secret is not None:
+        update_payload["secret"] = secret
+    return update_payload
+
+
+def _assert_update_preserved_undeclared_access_type(
+    client_id: str,
+    before: dict[str, Any],
+    after: dict[str, Any],
+    drift_fields: list[str],
+) -> None:
+    changed = [
+        field
+        for field in _SECRET_CLEARING_FLAGS
+        if field not in drift_fields and before.get(field) != after.get(field)
+    ]
+    if changed:
+        _die(
+            f"Client '{client_id}' update changed non-drifted access-type fields: "
+            f"{', '.join(changed)}"
+        )
 
 
 # Maps each realmSettings.smtpServer.<key>Env field to the Keycloak realm
@@ -454,8 +496,10 @@ def _reconcile_client(
             # workloads holding the now-orphaned secret were all left correct
             # and all left unable to authenticate.
             #
-            # THE FIX: keep sending the full live representation, and drop
-            # exactly the two flags that make Keycloak clear the secret.
+            # THE FIX: keep sending the writable live representation, strip
+            # server-managed/read-only fields and any returned secret, and drop
+            # exactly the two flags that make Keycloak clear the secret unless
+            # those flags are themselves the declared drift.
             #
             # An earlier revision of this change sent only `{clientId} +
             # drifted` instead. Review rejected that, correctly: Keycloak's
@@ -468,30 +512,36 @@ def _reconcile_client(
             # That trades this bug for a worse one the guard below cannot see,
             # because the guard only reads secrets.
             #
-            # Dropping the two flags is a strictly smaller change. Every
-            # collection field is still carried exactly as the previous,
-            # long-working code carried it, so no collection semantics change
-            # at all; the only difference from the code that caused the outage
-            # is the two keys that trigger the clearing.
+            # Dropping the two flags is a strictly smaller change than a narrow
+            # drift-only PUT. Every writable collection field is still carried
+            # exactly as the previous, long-working code carried it, so no
+            # collection semantics change at all; the only differences from the
+            # code that caused the outage are the two keys that trigger secret
+            # clearing and the server-managed fields that the admin API may
+            # reject if echoed back.
             #
             # When the roster genuinely DOES declare a change to `bearerOnly`
             # or `publicClient`, the flag is sent, Keycloak clears the secret,
             # and _assert_confidential_clients_have_secrets() fails the Job red
-            # rather than letting it pass silently. The layering is deliberate:
-            # this block stops the INCIDENTAL destruction, the guard catches
-            # the deliberate one.
-            update_payload: dict[str, Any] = {**existing}
-            for field in drift_fields:
-                update_payload[field] = spec[field]
-            for secret_clearing_flag in ("bearerOnly", "publicClient"):
-                if secret_clearing_flag not in drift_fields:
-                    update_payload.pop(secret_clearing_flag, None)
-            if secret is not None:
-                update_payload["secret"] = secret
+            # rather than letting it pass silently. A post-PUT readback also
+            # verifies that omitting a non-drifted access-type flag did not let
+            # a replace-style server reset it. The layering is deliberate:
+            # this block stops the INCIDENTAL destruction, the readback catches
+            # replace-vs-merge ambiguity, and the secret guard catches the
+            # deliberate access-type change.
+            before_update = dict(existing)
+            update_payload = _build_update_payload(existing, spec, drift_fields, secret)
             url = f"{kc_url}/admin/realms/{realm}/clients/{existing['id']}"
             status, _ = _request("PUT", url, token=token, payload=update_payload)
             if status not in (200, 201, 204):
                 _die(f"Failed to update client '{client_id}': HTTP {status}")
+            refreshed = _get_existing_client(kc_url, realm, token, client_id)
+            if refreshed is None:
+                _die(f"Client '{client_id}' updated but could not be re-fetched")
+            _assert_update_preserved_undeclared_access_type(
+                client_id, before_update, refreshed, drift_fields
+            )
+            existing = refreshed
             all_changed.extend(drift_fields)
 
     internal_id = existing["id"]

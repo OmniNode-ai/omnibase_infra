@@ -99,6 +99,14 @@ def _make_existing_client(client_id: str, **kwargs: Any) -> dict[str, Any]:
     return base
 
 
+def _expected_update_base(existing: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: v
+        for k, v in existing.items()
+        if k not in {"access", "id", "publicClient", "secret"}
+    }
+
+
 # ---------------------------------------------------------------------------
 # Tests: idempotency (all unchanged)
 # ---------------------------------------------------------------------------
@@ -216,17 +224,18 @@ class TestClientAttributes:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
 
-        # OMN-16504: the payload still carries the full live representation --
-        # deliberately, so no collection-valued field (redirectUris,
-        # webOrigins, scopes) can be dropped on a Keycloak version that
-        # replaces rather than merges. What it must NOT carry is publicClient
-        # or bearerOnly, the two flags that make Keycloak clear the client
-        # secret. Neither drifted here, so both are absent.
-        expected = {k: v for k, v in existing.items() if k != "publicClient"}
+        # OMN-16504: the payload carries writable live fields so collection
+        # fields are not dropped by replace-style servers, but never echoes
+        # server-managed fields, returned secrets, or non-drifted access-type
+        # flags that can clear the client secret.
+        expected = _expected_update_base(existing)
         expected["attributes"] = {"pkce.code.challenge.method": "S256"}
         assert put_payloads == [expected]
         assert "publicClient" not in put_payloads[0]
         assert "bearerOnly" not in put_payloads[0]
+        assert "id" not in put_payloads[0]
+        assert "access" not in put_payloads[0]
+        assert "secret" not in put_payloads[0]
         record = json.loads(capsys.readouterr().out.strip())
         assert record["op"] == "updated"
         assert record["fields_changed"] == ["attributes"]
@@ -271,15 +280,17 @@ class TestClientAttributes:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
 
-        # OMN-16504: full representation minus the two secret-clearing flags --
-        # see the note on the attribute-drift test above.
-        expected = {k: v for k, v in existing.items() if k != "publicClient"}
+        # OMN-16504: writable live representation minus server-managed fields,
+        # returned secrets, and non-drifted secret-clearing flags -- see the
+        # note on the attribute-drift test above.
+        expected = _expected_update_base(existing)
         expected["webOrigins"] = [
             "https://app.omninode.ai",
             "https://dev.app.omninode.ai",
         ]
         assert put_payloads == [expected]
         assert "publicClient" not in put_payloads[0]
+        assert "bearerOnly" not in put_payloads[0]
         record = json.loads(capsys.readouterr().out.strip())
         assert record["op"] == "updated"
         assert record["fields_changed"] == ["webOrigins"]
