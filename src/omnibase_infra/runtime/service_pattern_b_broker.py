@@ -25,6 +25,10 @@ from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.event_bus.envelope_header_identity import (
+    header_identity_fields_from_envelope,
+)
+from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
@@ -51,6 +55,46 @@ _DIRECT_TERMINAL_MAX_POLL_INTERVAL_MS = 300000
 # After this grace window of forced refreshes the broker's answer is taken as
 # authoritative: assign whatever partitions exist (possibly none) and return.
 _DIRECT_TERMINAL_PARTITIONLESS_GRACE_SECONDS = 2.0
+
+
+def _headers_bound_to(envelope: object, topic: str) -> ModelEventHeaders:
+    """Wire headers whose IDENTITY comes from the envelope, not from uuid4().
+
+    OMN-18389. This broker publishes hop 0 of the delegation chain -- the
+    `onex.cmd.omnimarket.delegate-skill.v1` command -- and it was the ONE hop
+    in the chain topology that did not go through `publish_envelope`. It called
+    `publish(topic, key, value, None)`, and `EventBusKafka.publish` mints a
+    fresh `ModelEventHeaders` when handed none, whose `correlation_id` and
+    `message_id` both default to `uuid4()`.
+
+    That is not cosmetic, because `event_ledger` -- the relation every chain
+    replay reads back -- populates both columns from the HEADER, never from the
+    envelope body (`HandlerLedgerProjection`). Measured on the .201 dev lane:
+    hop 0 carried one correlation id and hops 1-3 shared a different one, so a
+    correlation-scoped read for the delegation's own identity found four of
+    five hops and the chain canary reported `ledger_chain_incomplete` on a
+    chain that had actually run end to end. The delegation's identity was
+    replaced on the wire between the head hop and the next -- the OMN-16931
+    shape, one seam further out.
+
+    The envelope's own `correlation_id` is authoritative here: it is the
+    caller-supplied id the local ingress validated and stamped
+    (`runtime_local_ingress.validate_runtime_local_ingress_payload`), and it is
+    what every later hop carries, because `DispatchResultApplier` derives them
+    from the consumed envelope.
+
+    Nothing is invented. `header_identity_fields_from_envelope` contributes a
+    key only when the envelope actually carries that value, so an envelope with
+    no parent still publishes without a `parent_message_id` -- the checkable
+    statement that this hop is a chain HEAD, which hop 0 genuinely is.
+    """
+    return ModelEventHeaders(
+        source="pattern-b-broker",
+        event_type=topic,
+        content_type="application/json",
+        timestamp=datetime.now(UTC),
+        **header_identity_fields_from_envelope(envelope),
+    )
 
 
 def _broker_group_id(command_topic: str) -> str:
@@ -774,7 +818,7 @@ class RuntimePatternBBroker:
             route.command_topic,
             None,
             worker_envelope.model_dump_json().encode("utf-8"),
-            None,
+            _headers_bound_to(worker_envelope, route.command_topic),
         )
 
     async def _publish_terminal_result(
@@ -795,7 +839,7 @@ class RuntimePatternBBroker:
             response_topic,
             None,
             envelope.model_dump_json().encode("utf-8"),
-            None,
+            _headers_bound_to(envelope, response_topic),
         )
 
 
