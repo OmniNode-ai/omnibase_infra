@@ -432,7 +432,37 @@ def _reconcile_client(
             if field in spec and existing.get(field) != spec[field]:
                 drift_fields.append(field)
         if drift_fields:
-            update_payload = {**existing}
+            # OMN-16504: send ONLY the drifted fields, never the full live
+            # representation.
+            #
+            # This used to be `{**existing}` with the drifted fields written
+            # over it. Keycloak's client update applies every non-null field of
+            # the representation it is given, and when that representation
+            # marks the client `bearerOnly` (or `publicClient`) it clears the
+            # stored client secret as a side effect. So a full-representation
+            # PUT re-asserted `bearerOnly: true` on every reconcile, and the
+            # first reconcile that found ANY unrelated drift destroyed the
+            # secret of a client the reconciler was not even asked to change.
+            #
+            # That is not hypothetical. omninode_infra b88ae5c1 (2026-09-10)
+            # added `"fullScopeAllowed": false` to the `onex-api` entry in
+            # desired-clients.json. Keycloak's default is `true`, so the next
+            # reconcile necessarily saw drift on that one declared field,
+            # carried `bearerOnly: true` forward on the PUT, and Keycloak
+            # emptied the secret. onex-api is the realm's introspection caller;
+            # its introspection POSTs have returned 401 ever since, and the 23
+            # workloads holding the now-orphaned secret were all left correct
+            # and all left unable to authenticate.
+            #
+            # Sending exactly `{clientId} + drifted` expresses the intended
+            # change and nothing else; the URL already identifies the internal
+            # client id. An unrelated drift can no longer reach a
+            # secret-clearing field from the live representation.
+            #
+            # The post-reconcile guard classifies the live client shape, so it
+            # only requires secrets from clients that can actually authenticate
+            # with them.
+            update_payload: dict[str, Any] = {"clientId": client_id}
             for field in drift_fields:
                 update_payload[field] = spec[field]
             if secret is not None:
@@ -479,6 +509,141 @@ def _reconcile_client(
         _log("updated", client_id, all_changed)
     else:
         _log("unchanged", client_id)
+
+
+# ---------------------------------------------------------------------------
+# Post-reconcile assertion: no confidential client may end with no secret
+# ---------------------------------------------------------------------------
+
+
+def _die_naming_clients(check: str, reason: str, client_ids: list[str]) -> NoReturn:
+    """Fail the Job non-zero, naming the offending clients.
+
+    Deliberately does NOT go through _die(), which redacts its message. What
+    is printed here is a check name, a reason and a list of clientIds --
+    clientIds are already emitted in the clear by _log() on every single
+    reconcile line, so naming them costs nothing that the normal run does not
+    already disclose. No secret, and no property of a secret other than "it is
+    empty", is printed.
+
+    The alternative -- a redacted failure -- would tell an operator that the
+    realm is broken without telling them which client, which is the same
+    debugging position this check exists to remove.
+    """
+    print(
+        json.dumps(
+            {
+                "op": "error",
+                "check": check,
+                "reason": reason,
+                "clients": sorted(client_ids),
+            }
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    sys.exit(1)
+
+
+def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
+    """Return whether the live Keycloak client shape is expected to hold a secret.
+
+    Classified from the LIVE representation rather than the desired spec,
+    because a roster entry is partial: it declares only the fields the
+    reconciler owns, so a spec that omits ``publicClient`` says nothing about
+    whether the live client is public.
+
+    Only ``publicClient`` exempts a client. **``bearerOnly`` deliberately does
+    not**, even though Keycloak's textbook model says a bearer-only client is
+    a pure resource server that never authenticates outbound. In this realm
+    that model does not hold: ``onex-api`` is bearer-only AND is the client
+    the runtime presents as HTTP Basic auth on every token-introspection POST,
+    so it must hold a secret. Exempting bearer-only clients here would make
+    this guard skip the exact client whose emptied secret it exists to catch
+    -- the deploy would stay green while introspection returns 401, which is
+    the silent failure OMN-16504 is about.
+
+    The architectural mismatch is real and is worth fixing separately, by
+    moving introspection onto a non-bearer-only client. Until that happens the
+    guard reports what is true of this realm today.
+    """
+    return existing.get("publicClient") is not True
+
+
+def _read_client_secret_is_present(
+    kc_url: str, realm: str, token: str, existing: dict[str, Any]
+) -> bool:
+    """Return whether the live client currently holds a non-empty secret.
+
+    Reads the dedicated client-secret endpoint and falls back to the client
+    representation's own ``secret`` field, because Keycloak answers the
+    dedicated endpoint with a 404 for some client shapes while still carrying
+    the value on the representation. The secret itself is never returned,
+    logged or compared -- only its presence.
+
+    Fails CLOSED: any status the read cannot interpret is reported as absent,
+    so an unreadable realm fails the Job rather than passing it.
+    """
+    status, body = _request(
+        "GET",
+        f"{kc_url}/admin/realms/{realm}/clients/{existing['id']}/client-secret",
+        token=token,
+    )
+    if status == 200 and isinstance(body, dict) and body.get("value"):
+        return True
+
+    status, body = _request(
+        "GET", f"{kc_url}/admin/realms/{realm}/clients/{existing['id']}", token=token
+    )
+    return bool(status == 200 and isinstance(body, dict) and body.get("secret"))
+
+
+def _assert_confidential_clients_have_secrets(
+    kc_url: str,
+    realm: str,
+    token: str,
+    clients: list[dict[str, Any]],
+) -> None:
+    """Fail the Job red if any confidential client ends the reconcile empty.
+
+    OMN-16504. A client secret that Keycloak has emptied is indistinguishable,
+    from the outside, from a healthy realm: every reconcile line still reads
+    ``op=unchanged``, the Job still exits 0, the deploy still goes green, and
+    the only symptom is that one authentication path starts returning 401.
+    That is how the onex-api destruction described in _reconcile_client() ran
+    unnoticed for three days.
+
+    The guard classifies the LIVE client representation, not the partial
+    desired spec -- see _live_client_requires_secret(). Public clients are
+    supposed to hold no secret and are skipped; they are the positive control
+    for this check. Bearer-only clients are NOT skipped, because this realm
+    uses one as its introspection caller.
+
+    Every offending client is collected before failing, so one run names the
+    whole set rather than making an operator re-run the Job per client.
+    """
+    offenders: list[str] = []
+    for spec in clients:
+        client_id = spec["clientId"]
+        existing = _get_existing_client(kc_url, realm, token, client_id)
+        if existing is None:
+            offenders.append(client_id)
+            continue
+        if not _live_client_requires_secret(existing):
+            continue
+        if not _read_client_secret_is_present(kc_url, realm, token, existing):
+            offenders.append(client_id)
+
+    if offenders:
+        _die_naming_clients(
+            "confidential_client_secret_present",
+            (
+                "one or more confidential clients hold no client secret after "
+                "reconcile; every caller authenticating as them will get HTTP "
+                "401 until the secret is restored"
+            ),
+            offenders,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -709,6 +874,11 @@ def main() -> None:
 
     for client_spec in clients:
         _reconcile_client(args.kc_url, args.realm, token, client_spec)
+
+    # OMN-16504: last thing the Job does, so it sees the realm as the reconcile
+    # actually left it rather than as any single client's branch believed it to
+    # be. Exits non-zero, which surfaces as a failed Job.
+    _assert_confidential_clients_have_secrets(args.kc_url, args.realm, token, clients)
 
 
 if __name__ == "__main__":
