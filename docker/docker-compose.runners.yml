@@ -1643,9 +1643,155 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # ---------------------------------------------------------------------------
+  # omninode-customer-plane-runner-1/2 -- OMN-18392: the credential-free pair.
+  #
+  # These two exist for ONE property: a job that runs here holds no platform
+  # credential of any kind, so its refusals mean something. They carry the
+  # `omnibase-customer-plane` label family, which NOTHING else in the org
+  # targets, and they are deliberately NOT labelled `omnibase-ci` -- a general
+  # CI job landing here would find no kubeconfig and fail closed at preflight,
+  # which is the OMN-18188 failure mode in reverse.
+  #
+  # WHY THEY ARE NEW CONTAINERS RATHER THAN A RELABEL. The customer-plane
+  # reachability probe (omninode_infra .github/workflows/
+  # customer-plane-reachability-probe.yml) asserts the absence of eight
+  # credential env vars and of a kubeconfig, then measures which internal
+  # surfaces refuse a TCP connect from a customer's vantage. It was pinned to a
+  # GitHub-hosted runner for exactly that identity, and the 2026-09-14 operator
+  # ruling that private repositories never run on hosted runners left it dark.
+  # The lab vantage carries the NETWORK half of that proof -- the roster names
+  # only public edges, the lab resolver and 1.1.1.1 agree, and an unmodified
+  # run from this host classified every leg identically to the hosted record.
+  # It could not carry the IDENTITY half: all 88 `omninode-runner-N` containers
+  # mount the lab credentials directory and export KUBECONFIG (OMN-18188), and
+  # the probe's own absence step fails on that, correctly. Clearing the
+  # variable while the file stayed mounted would be the green-gate-
+  # asserting-nothing outcome that workflow's header warns about, so the
+  # honest fix is a vantage that genuinely holds nothing.
+  #
+  # NOT A CANDIDATE, checked rather than assumed: `omninode-deploy-runner`
+  # bind-mounts the host operator env file (POSTGRES_PASSWORD, GH_PAT,
+  # LINEAR_API_KEY, Keycloak and Infisical credentials) and the docker socket,
+  # and `omninode-gate-runner` is not a GitHub Actions runner at all -- it is
+  # the bounded pre-push gate target from OMN-16295 and holds no registration.
+  #
+  # WHAT IS DELIBERATELY ABSENT, each line load-bearing:
+  #   - no ${RUNNER_LAB_CREDENTIALS_HOST_DIR} mount  (the k3s reader token)
+  #   - no KUBECONFIG                                (the probe checks this var)
+  #   - no /var/run/docker.sock                      (the host daemon is the
+  #     largest platform capability a runner can hold; the entrypoint's
+  #     _fix_docker_socket_gid already no-ops when the socket is absent, and
+  #     the disk-admission self-pause degrades to a logged skip)
+  #   - no group_add for the docker GID              (nothing to join)
+  # Pinned by tests/ci/test_customer_plane_runner_credential_free_omn18392.py,
+  # which asserts each absence against the resolved compose config AND carries
+  # a positive control proving a fleet runner still has all of them, so a
+  # parsing regression cannot report the absences vacuously.
+  #
+  # CAPACITY. Two, not one: the probe runs four times a day on a schedule with
+  # `cancel-in-progress: false`, and a single runner makes a recreate or a host
+  # restart a total outage of criterion C4 rather than a degraded one. Two, not
+  # more: nothing else targets this label, so idle capacity here is pure cost
+  # against the 88-runner fleet's share of the host.
+  #
+  # CREATION IS ADDITIVE. These join the existing compose project by name; they
+  # are created with `docker compose up -d --no-deps` naming exactly these two
+  # services. Never `--force-recreate` and never `--remove-orphans` against
+  # this file: a fleet-wide recreate costs about three hours and cannot be
+  # parallelised (see the OMN-18188 note on the lab-credentials mount above).
+  #
+  # RESIDUAL, STATED RATHER THAN LEFT TO BE DISCOVERED: runner-monitor.sh scopes
+  # every check to services matching `^omninode-runner-[0-9]+$` and to GitHub
+  # runner names starting with that same prefix, so this pair is invisible to
+  # its health alerting and to its auto-bounce. That is deliberate for now --
+  # auto-bounce recreating a runner is the behaviour with the sharpest edge on
+  # this host -- but it means an offline customer-plane runner is noticed by the
+  # probe failing to schedule, not by a Slack alert. Widening the monitor is a
+  # separate change; do not widen the prefix regex, which would also pull
+  # `omninode-deploy-runner` in.
+  omninode-customer-plane-runner-1:
+    image: omninode-runner:latest
+    container_name: omninode-customer-plane-runner-1
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64
+      RUNNER_NAME: omninode-customer-plane-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      UV_CONCURRENT_DOWNLOADS: "1"
+      UV_CONCURRENT_BUILDS: "1"
+      UV_CONCURRENT_INSTALLS: "1"
+      UV_HTTP_TIMEOUT: "600"
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - customer-plane-runner-1-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  omninode-customer-plane-runner-2:
+    image: omninode-runner:latest
+    container_name: omninode-customer-plane-runner-2
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64
+      RUNNER_NAME: omninode-customer-plane-runner-2
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      UV_CONCURRENT_DOWNLOADS: "1"
+      UV_CONCURRENT_BUILDS: "1"
+      UV_CONCURRENT_INSTALLS: "1"
+      UV_HTTP_TIMEOUT: "600"
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - customer-plane-runner-2-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   deploy-runner-creds:
     name: omninode-deploy-runner-creds
+  # OMN-18392 -- credential-free customer-plane pair (see the service
+  # definitions above). Separate creds volumes so their registration cache
+  # is keyed to their own label set and cannot inherit a fleet runner's.
+  customer-plane-runner-1-creds:
+    name: omninode-customer-plane-runner-1-creds
+  customer-plane-runner-2-creds:
+    name: omninode-customer-plane-runner-2-creds
   runner-1-creds:
     name: omninode-runner-1-creds
   runner-2-creds:
