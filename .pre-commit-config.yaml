@@ -1433,10 +1433,9 @@ repos:
       # (enforcement, not detection).
       - id: precommit-interpreter-resolution
         name: Pre-commit interpreter-resolution gate (OMN-17219)
-        entry: uv run python scripts/validation/validate_precommit_interpreter.py
+        entry: uv run --frozen python scripts/validation/validate_precommit_interpreter.py
         language: system
         pass_filenames: false
-        always_run: true
         stages: [pre-commit]
         files: ^(\.pre-commit-config\.yaml|scripts/.*\.(sh|py)|\.pre-commit-hooks/.*\.sh)$
       # Pin-parity ratchet: fails closed the moment the pre-commit `rev:` pin

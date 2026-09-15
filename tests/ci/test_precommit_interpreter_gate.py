@@ -25,7 +25,9 @@ CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 
 
 def _load() -> Any:
-    spec = importlib.util.spec_from_file_location("precommit_interpreter_gate", GATE)
+    spec = importlib.util.spec_from_file_location(
+        f"precommit_interpreter_gate_{Path(__file__).stem}", GATE
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -84,6 +86,19 @@ def test_resolvable_interpreter_entry_is_accepted(gate: Any, entry: str) -> None
 def test_suppression_marker_is_honored(gate: Any) -> None:
     entry = "python scripts/ci/x.py  # precommit-interp-ok: illustrative"
     assert gate._scan_entry("some-hook", entry) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "python scripts/ci/x.py  # precommit-interp-ok",
+        "python scripts/ci/x.py  # precommit-interp-ok:",
+    ],
+)
+def test_suppression_marker_requires_a_reason(gate: Any, entry: str) -> None:
+    violations = gate._scan_entry("some-hook", entry)
+    assert violations, f"bare suppression marker bypassed the gate: {entry!r}"
 
 
 @pytest.mark.unit
@@ -223,3 +238,16 @@ def test_resolvable_shell_lines_stay_accepted(
     finally:
         gate.REPO_ROOT = original
     assert violations == [], f"false positive on {line!r}: {violations}"
+
+
+@pytest.mark.unit
+def test_script_suppression_marker_requires_a_reason(gate: Any, tmp_path: Path) -> None:
+    script = tmp_path / "hook.sh"
+    script.write_text("#!/usr/bin/env bash\npython x.py # precommit-interp-ok\n")
+    original = gate.REPO_ROOT
+    gate.REPO_ROOT = tmp_path
+    try:
+        violations = gate._scan_script(script)
+    finally:
+        gate.REPO_ROOT = original
+    assert violations

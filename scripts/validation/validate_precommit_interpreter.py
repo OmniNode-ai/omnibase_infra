@@ -43,7 +43,7 @@ Suppress a reviewed false positive with `# precommit-interp-ok: <reason>` on
 the flagged line.
 
 Wired as BOTH a pre-commit hook (`precommit-interpreter-resolution`) and a CI
-step in `.github/workflows/precommit-fail-loud-gate.yml`, so the class cannot
+step in `.github/workflows/precommit-parity-gate.yml`, so the class cannot
 regenerate (Operating Rule 5: enforcement, not detection).
 """
 
@@ -62,6 +62,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
 
 SUPPRESS_MARKER = "precommit-interp-ok"
+SUPPRESS_MARKER_RE = re.compile(r"#\s*precommit-interp-ok:\s*\S")
 
 LOCAL_LANGUAGES = {"system", "script"}
 
@@ -187,7 +188,7 @@ def _command_word(tokens: list[str]) -> str | None:
 def _scan_entry(hook_id: str, entry: str) -> list[str]:
     """Return violation strings for one hook `entry:` value."""
     violations: list[str] = []
-    if SUPPRESS_MARKER in entry:
+    if SUPPRESS_MARKER_RE.search(entry):
         return violations
 
     try:
@@ -242,7 +243,7 @@ def _scan_script(path: Path) -> list[str]:
         stripped = line.strip()
         if stripped.startswith("#"):
             continue
-        if SUPPRESS_MARKER in line:
+        if SUPPRESS_MARKER_RE.search(line):
             continue
         if SCRIPT_BANNED_RE.search(line):
             violations.append(

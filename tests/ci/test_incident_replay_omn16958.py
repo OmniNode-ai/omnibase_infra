@@ -61,7 +61,9 @@ BARE_PYTHON3_HOOKS = {
 
 
 def _load_gate() -> Any:
-    spec = importlib.util.spec_from_file_location("precommit_interpreter_gate", GATE)
+    spec = importlib.util.spec_from_file_location(
+        f"precommit_interpreter_gate_{Path(__file__).stem}", GATE
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
