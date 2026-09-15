@@ -8,6 +8,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 
 import asyncpg
+from pydantic import ValidationError
 
 from omnibase_infra.runtime.action_authorization_claim.enum_action_authorization_claim_outcome import (
     EnumActionAuthorizationClaimOutcome,
@@ -42,19 +43,30 @@ class PostgresActionAuthorizationClaim:
         self._pool_factory = pool_factory
         self._pool: asyncpg.Pool | None = None
         self._pool_lock = asyncio.Lock()
+        self._pool_idle = asyncio.Condition(self._pool_lock)
+        self._active_claims = 0
 
-    async def _get_pool_locked(self) -> asyncpg.Pool:
-        if self._pool is not None:
+    async def _borrow_pool(self) -> asyncpg.Pool:
+        async with self._pool_lock:
+            if self._pool is None:
+                self._pool = await self._pool_factory()
+            self._active_claims += 1
             return self._pool
-        self._pool = await self._pool_factory()
-        return self._pool
+
+    async def _release_pool(self) -> None:
+        async with self._pool_idle:
+            self._active_claims -= 1
+            if self._active_claims == 0:
+                self._pool_idle.notify_all()
 
     async def close(self) -> None:
-        async with self._pool_lock:
-            if self._pool is not None:
-                pool = self._pool
-                self._pool = None
-                await pool.close()
+        async with self._pool_idle:
+            while self._active_claims:
+                await self._pool_idle.wait()
+            pool = self._pool
+            self._pool = None
+        if pool is not None:
+            await pool.close()
 
     @staticmethod
     def _claim_result(row: Mapping[str, object]) -> ModelActionAuthorizationClaimResult:
@@ -63,25 +75,27 @@ class PostgresActionAuthorizationClaim:
     async def _fetchrow(
         self, sql: str, request: ModelActionAuthorizationClaimRequest
     ) -> asyncpg.Record | None:
-        async with self._pool_lock:
-            pool = await self._get_pool_locked()
+        pool = await self._borrow_pool()
+        try:
             async with pool.acquire() as connection:
                 return await connection.fetchrow(sql, *request.sql_arguments())
+        finally:
+            await self._release_pool()
 
     async def claim(
         self, request: ModelActionAuthorizationClaimRequest
     ) -> ModelActionAuthorizationClaimResult:
         try:
             row = await self._fetchrow(_CLAIM_SQL, request)
-        except (asyncpg.PostgresError, OSError):
+            if row is None:
+                return ModelActionAuthorizationClaimResult(
+                    outcome=EnumActionAuthorizationClaimOutcome.ERROR
+                )
+            return self._claim_result(row)
+        except (asyncpg.PostgresError, OSError, TypeError, ValidationError):
             return ModelActionAuthorizationClaimResult(
                 outcome=EnumActionAuthorizationClaimOutcome.ERROR
             )
-        if row is None:
-            return ModelActionAuthorizationClaimResult(
-                outcome=EnumActionAuthorizationClaimOutcome.ERROR
-            )
-        return self._claim_result(row)
 
 
 __all__ = ["PostgresActionAuthorizationClaim"]

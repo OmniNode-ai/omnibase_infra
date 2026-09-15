@@ -1504,7 +1504,7 @@ def test_multiline_routine_signature_is_catalogued_as_one_identity() -> None:
     signature = routines[0].function_signature
     assert signature is not None
     assert "\n" not in signature
-    assert signature == "(p_first TEXT, p_second BOOLEAN, p_third TIMESTAMPTZ)"
+    assert signature == "(TEXT, BOOLEAN, TIMESTAMPTZ)"
 
 
 @pytest.mark.unit

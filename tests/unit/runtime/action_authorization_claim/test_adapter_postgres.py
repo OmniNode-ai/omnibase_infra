@@ -131,6 +131,60 @@ def test_claim_uses_the_dedicated_atomic_function() -> None:
 
 
 @pytest.mark.unit
+def test_malformed_database_result_maps_to_closed_redacted_error() -> None:
+    connection = _Connection(
+        iter(
+            [
+                {
+                    "outcome": "NOT_A_CLOSED_OUTCOME",
+                    "state": "CLAIMED",
+                    "version": 1,
+                    "redacted_receipt_digest": _request().redacted_receipt_digest,
+                }
+            ]
+        )
+    )
+
+    result = asyncio.run(_adapter(connection).claim(_request()))
+
+    assert result.outcome is EnumActionAuthorizationClaimOutcome.ERROR
+    assert result.state is None
+    assert result.redacted_receipt_digest is None
+
+
+@pytest.mark.unit
+def test_concurrent_claims_are_not_serialized_by_pool_creation_lock() -> None:
+    events: list[str] = []
+    release_fetch = asyncio.Event()
+
+    class _SlowConnection(_Connection):
+        async def fetchrow(self, sql: str, *values: object) -> object:
+            events.append("fetch-start")
+            if len(events) == 2:
+                release_fetch.set()
+            await release_fetch.wait()
+            events.append("fetch-end")
+            return {
+                "outcome": "CLAIMED",
+                "state": "CLAIMED",
+                "version": 1,
+                "redacted_receipt_digest": _request().redacted_receipt_digest,
+            }
+
+    async def scenario() -> list[str]:
+        pool = _Pool(_SlowConnection(iter(())))
+
+        async def pool_factory() -> _Pool:
+            return pool
+
+        adapter = PostgresActionAuthorizationClaim(pool_factory=pool_factory)  # type: ignore[arg-type]
+        await asyncio.gather(adapter.claim(_request()), adapter.claim(_request()))
+        return events
+
+    assert asyncio.run(scenario())[:2] == ["fetch-start", "fetch-start"]
+
+
+@pytest.mark.unit
 def test_close_waits_for_inflight_claim_before_closing_pool() -> None:
     events: list[str] = []
     release_fetch = asyncio.Event()
