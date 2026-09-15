@@ -320,16 +320,25 @@ class TestProjectionReadinessProbe:
         assert "projection_ready" in COMPOSE_DEV_HTTP_CHECKS
 
     def test_a_serving_projection_api_passes(self, monkeypatch: Any) -> None:
+        """Pins the LIVE response shape: the top-level key is 'topics', not
+        'projections' -- confirmed 2026-09-15 against the dev-lane container
+        (curl http://localhost:3002/projections -> {"topics": [...]}, 61
+        entries). The first revision of this check assumed 'projections' from
+        the endpoint's own path name and was never verified live, which made
+        it read every real 200 as a failure -- a positive control against the
+        actual shape is exactly what would have caught that before landing."""
         monkeypatch.setattr(
             "scripts.ci.lab_pass_receipt._http_get",
             lambda url, timeout: (
                 200,
                 json.dumps(
                     {
-                        "projections": [
+                        "topics": [
                             {
                                 "topic": "onex.snapshot.projection.consumer-flow.v1",
+                                "table": "consumer_flow",
                                 "cursor_column": "projection_cursor",
+                                "order_by": "window_end DESC, projection_cursor DESC",
                             }
                         ]
                     }
@@ -356,19 +365,17 @@ class TestProjectionReadinessProbe:
         check = check_projections_ready("http://lane:3002/projections", 1.0)
         assert check.ok is False
 
-    def test_a_body_with_no_projections_list_fails_closed(
-        self, monkeypatch: Any
-    ) -> None:
-        """A 200 that carries no 'projections' list is not a serving
-        projection API -- e.g. an unrelated endpoint or a proxy error page
-        that happens to answer 200."""
+    def test_a_body_with_no_topics_list_fails_closed(self, monkeypatch: Any) -> None:
+        """A 200 that carries no 'topics' list is not a serving projection
+        API -- e.g. an unrelated endpoint or a proxy error page that happens
+        to answer 200."""
         monkeypatch.setattr(
             "scripts.ci.lab_pass_receipt._http_get",
             lambda url, timeout: (200, json.dumps({"status": "ok"})),
         )
         check = check_projections_ready("http://lane:3002/projections", 1.0)
         assert check.ok is False
-        assert "projections" in check.evidence
+        assert "topics" in check.evidence
 
     def test_non_json_body_fails_closed(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(
@@ -874,7 +881,7 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             if "/health" in url:
                 return 200, body
             if "/projections" in url:
-                return 200, '{"projections": []}'
+                return 200, '{"topics": []}'
             return 200, '{"status":"healthy"}'
 
         monkeypatch.setattr("scripts.ci.lab_pass_receipt._http_get", fake_get)
