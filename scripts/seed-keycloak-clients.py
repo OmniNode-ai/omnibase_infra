@@ -23,6 +23,7 @@ op=unchanged lines and exits 0.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -115,6 +116,24 @@ def _die(_msg: str) -> NoReturn:
 
 
 # ---------------------------------------------------------------------------
+# Secret fingerprinting (OMN-18391)
+# ---------------------------------------------------------------------------
+
+
+def _secret_fingerprint(value: str) -> str:
+    """Return a comparison-safe fingerprint: sha256-12 plus length.
+
+    Never returns, logs, or otherwise exposes the underlying secret value.
+    Two equal secrets always fingerprint equal; a fingerprint collision
+    between two different secrets is not a concern this guard needs to
+    defend against -- it exists to catch an accidental mismatch (a
+    Keycloak-minted secret no consumer holds), not an adversarial one.
+    """
+    digest = hashlib.sha256(value.encode()).hexdigest()[:12]
+    return f"{digest}/{len(value)}"
+
+
+# ---------------------------------------------------------------------------
 # Keycloak admin helpers
 # ---------------------------------------------------------------------------
 
@@ -144,6 +163,32 @@ def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
         _die(
             f"Client '{client_spec['clientId']}' requires env var '{secret_env}' "
             f"but it is not set or empty."
+        )
+    return val
+
+
+def _resolve_consumer_secret(client_spec: dict[str, Any]) -> str | None:
+    """Resolve the env var naming the consuming k8s Secret's copy of this
+    client's secret (OMN-18391).
+
+    A client that declares ``consumerSecretEnv`` is one whose Keycloak secret
+    is not itself set by this reconciler (no ``secretEnv``) -- ``onex-api``
+    is the case this exists for: Keycloak mints its own secret when the
+    client becomes confidential, and the value ~15 runtime workloads actually
+    authenticate with lives in a separate k8s Secret this Job also mounts.
+
+    Fail-closed like _resolve_client_secret: a declared consumerSecretEnv
+    that is unset or empty aborts the Job rather than silently skipping the
+    fingerprint check.
+    """
+    consumer_env = client_spec.get("consumerSecretEnv")
+    if not consumer_env:
+        return None
+    val = os.environ.get(consumer_env)
+    if not val:
+        _die(
+            f"Client '{client_spec['clientId']}' declares consumerSecretEnv "
+            f"'{consumer_env}' but it is not set or empty."
         )
     return val
 
@@ -616,6 +661,35 @@ def _die_naming_clients(check: str, reason: str, client_ids: list[str]) -> NoRet
     sys.exit(1)
 
 
+def _die_fingerprint_mismatch(mismatches: list[dict[str, str]]) -> NoReturn:
+    """Fail the Job non-zero, naming each client by fingerprint only (OMN-18391).
+
+    ``mismatches`` entries are ``{"clientId": ..., "live": <fingerprint>,
+    "consumer": <fingerprint>}``. Neither secret value is ever read into this
+    function's arguments or printed -- only their fingerprints (sha256-12 +
+    length), computed by the caller via _secret_fingerprint().
+    """
+    print(
+        json.dumps(
+            {
+                "op": "error",
+                "check": "client_secret_fingerprint_mismatch",
+                "reason": (
+                    "one or more clients hold a live Keycloak secret that does "
+                    "not match the consuming k8s Secret's copy; every consumer "
+                    "authenticating with the stale copy will get HTTP 401 "
+                    "until the values are reconciled"
+                ),
+                "clients": sorted(m["clientId"] for m in mismatches),
+                "fingerprints": mismatches,
+            }
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    sys.exit(1)
+
+
 def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
     """Return whether the live Keycloak client shape is expected to hold a secret.
 
@@ -641,19 +715,16 @@ def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
     return existing.get("publicClient") is not True
 
 
-def _read_client_secret_is_present(
+def _read_client_secret_value(
     kc_url: str, realm: str, token: str, existing: dict[str, Any]
-) -> bool:
-    """Return whether the live client currently holds a non-empty secret.
+) -> str | None:
+    """Return the live client's secret value, or None if absent/empty.
 
-    Reads the dedicated client-secret endpoint and falls back to the client
-    representation's own ``secret`` field, because Keycloak answers the
-    dedicated endpoint with a 404 for some client shapes while still carrying
-    the value on the representation. The secret itself is never returned,
-    logged or compared -- only its presence.
-
-    Fails CLOSED: any status the read cannot interpret is reported as absent,
-    so an unreadable realm fails the Job rather than passing it.
+    Same dual-read strategy as the presence check below (dedicated endpoint,
+    falling back to the client representation), because the dedicated
+    endpoint 404s for some client shapes. The value returned here is used
+    ONLY to compute a fingerprint (OMN-18391) -- callers must never log,
+    print, or otherwise surface it directly.
     """
     status, body = _request(
         "GET",
@@ -661,12 +732,29 @@ def _read_client_secret_is_present(
         token=token,
     )
     if status == 200 and isinstance(body, dict) and body.get("value"):
-        return True
+        return str(body["value"])
 
     status, body = _request(
         "GET", f"{kc_url}/admin/realms/{realm}/clients/{existing['id']}", token=token
     )
-    return bool(status == 200 and isinstance(body, dict) and body.get("secret"))
+    if status == 200 and isinstance(body, dict) and body.get("secret"):
+        return str(body["secret"])
+    return None
+
+
+def _read_client_secret_is_present(
+    kc_url: str, realm: str, token: str, existing: dict[str, Any]
+) -> bool:
+    """Return whether the live client currently holds a non-empty secret.
+
+    Delegates to _read_client_secret_value(); this wrapper exists because
+    most callers only need presence, and returning a bool rather than the
+    value itself keeps them from ever handling the raw secret.
+
+    Fails CLOSED: any status the read cannot interpret is reported as absent,
+    so an unreadable realm fails the Job rather than passing it.
+    """
+    return _read_client_secret_value(kc_url, realm, token, existing) is not None
 
 
 def _assert_confidential_clients_have_secrets(
@@ -715,6 +803,56 @@ def _assert_confidential_clients_have_secrets(
             ),
             offenders,
         )
+
+
+def _assert_client_secrets_match_consumers(
+    kc_url: str,
+    realm: str,
+    token: str,
+    clients: list[dict[str, Any]],
+) -> None:
+    """Fail the Job red if a client's live secret does not match its consumer's copy.
+
+    OMN-18391. _assert_confidential_clients_have_secrets() (OMN-16504) only
+    checks that a confidential client ends the reconcile non-empty. When the
+    roster flips a client to confidential with no ``secretEnv`` declared (as
+    ``onex-api`` was), Keycloak mints its own secret -- non-empty, and no
+    consumer holds it. The presence guard reports green while every
+    consumer's introspection returns 401.
+
+    Only clients that declare ``consumerSecretEnv`` are checked here; a
+    client with a plain ``secretEnv`` already has this reconciler as the
+    single source of truth for its Keycloak secret and needs no separate
+    consumer comparison. Compares fingerprints only (sha256-12 + length) --
+    the secret values themselves are never read into a log line or an error
+    message.
+
+    Deliberately does not treat an absent or empty live secret as a
+    mismatch: those are the _assert_confidential_clients_have_secrets()
+    check's job, so the two failure classes stay distinguishable in the
+    Job's log rather than being conflated into one reason string.
+    """
+    mismatches: list[dict[str, str]] = []
+    for spec in clients:
+        client_id = spec["clientId"]
+        consumer_secret = _resolve_consumer_secret(spec)
+        if consumer_secret is None:
+            continue
+        existing = _get_existing_client(kc_url, realm, token, client_id)
+        if existing is None:
+            continue  # absence is _assert_confidential_clients_have_secrets' job
+        live_secret = _read_client_secret_value(kc_url, realm, token, existing)
+        if not live_secret:
+            continue  # emptiness is _assert_confidential_clients_have_secrets' job
+        live_fp = _secret_fingerprint(live_secret)
+        consumer_fp = _secret_fingerprint(consumer_secret)
+        if live_fp != consumer_fp:
+            mismatches.append(
+                {"clientId": client_id, "live": live_fp, "consumer": consumer_fp}
+            )
+
+    if mismatches:
+        _die_fingerprint_mismatch(mismatches)
 
 
 # ---------------------------------------------------------------------------
@@ -950,6 +1088,10 @@ def main() -> None:
     # actually left it rather than as any single client's branch believed it to
     # be. Exits non-zero, which surfaces as a failed Job.
     _assert_confidential_clients_have_secrets(args.kc_url, args.realm, token, clients)
+
+    # OMN-18391: a non-empty secret is not the same as the RIGHT secret. Runs
+    # after the presence guard so the two failure classes stay distinguishable.
+    _assert_client_secrets_match_consumers(args.kc_url, args.realm, token, clients)
 
 
 if __name__ == "__main__":
