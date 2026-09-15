@@ -29,17 +29,25 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.ci import check_dev_lane_staleness as staleness_module
 from scripts.ci.check_dev_lane_staleness import (
     DEFAULT_MAX_AGE,
     DEFAULT_MAX_COMMITS_BEHIND,
     DEV_LANE_COMPOSE_PROJECT,
     DEV_LANE_CONTAINER,
+    RELATION_ANCESTOR,
+    RELATION_DESCENDANT,
+    RELATION_IDENTICAL,
+    RELATION_UNRELATED,
+    Ancestry,
     Divergence,
     LaneRevision,
     assert_lane_fence,
+    convergence_evidence,
     evaluate,
     evaluate_convergence,
     normalize_revision,
+    parse_ancestry,
     revisions_match,
 )
 
@@ -239,6 +247,14 @@ class TestConvergenceMode:
             expected_revision=MEASURED_DEV_HEAD,
             waited=timedelta(minutes=25),
             wait_timeout=timedelta(minutes=25),
+            # 2ea74bc4de76 is nine commits BEHIND 116b4914 on dev: an ancestor,
+            # which is the stale direction and stays a finding (OMN-18388).
+            ancestry=Ancestry(
+                relation=RELATION_ANCESTOR,
+                commits_ahead=0,
+                observed_on_branch=True,
+                branch="dev",
+            ),
         )
         assert not verdict.ok
         assert verdict.findings[0].code == "NOT_CONVERGED"
@@ -256,6 +272,9 @@ class TestConvergenceMode:
             expected_revision=MEASURED_DEV_HEAD,
             waited=timedelta(minutes=6),
             wait_timeout=timedelta(minutes=25),
+            # Byte-equal: the ancestry probe is never reached, so an
+            # unresolvable ancestry must not make an exact match fail.
+            ancestry=None,
         )
         assert verdict.ok
 
@@ -370,6 +389,12 @@ class TestTheVerdictClaimsOnlyWhatTheGuardKnows:
             expected_revision=MEASURED_DEV_HEAD,
             waited=timedelta(minutes=25),
             wait_timeout=timedelta(minutes=25),
+            ancestry=Ancestry(
+                relation=RELATION_ANCESTOR,
+                commits_ahead=0,
+                observed_on_branch=True,
+                branch="dev",
+            ),
         )
         return verdict.findings[0].detail
 
@@ -414,3 +439,397 @@ class TestTheVerdictClaimsOnlyWhatTheGuardKnows:
             "of it; deriving a wall-clock convergence bound from it is the "
             "false premise that made a 25-minute wait look sufficient"
         )
+
+
+# --- OMN-18388: a lane running a DESCENDANT has exercised the change ---------
+#
+# The live readback, 2026-09-15. Run 34934096166 (omnibase_infra#3549, merge sha
+# 18b539f0) waited its full 25-minute window and failed NOT_CONVERGED at
+# 08:40:32Z, so the compose-dev lab-pass receipt for that sha was emitted FAIL on
+# `deployed_revision`. The .201 dev lane had in fact been rebuilt at 08:15Z to
+# 0d0250a6 (#3568) -- a commit that CONTAINS 18b539f0. Byte equality reported a
+# lane that had already run the change as one that never applied it.
+#
+# Every compare payload below is GitHub's own, captured 2026-09-15:
+#   compare/18b539f0...0d0250a6  -> {"status":"ahead","ahead_by":6,"behind_by":0}
+#   compare/0d0250a6...dev       -> {"status":"identical","ahead_by":0}
+#   compare/0d0250a6...18b539f0  -> {"status":"behind","ahead_by":0,"behind_by":6}
+#   compare/18b539f0...3ad9b3af  -> {"status":"ahead","ahead_by":7}   (PR 3569 head)
+#   compare/3ad9b3af...dev       -> {"status":"behind","behind_by":1}
+MERGE_SHA_18388 = "18b539f0f76fc4c5df1966d34ca4a2ebeba51f8f"
+LANE_DESCENDANT_18388 = "0d0250a6c31f0ea7a3bcbeb1f2b6d2efb73cd525"
+DESCENDANT_COMMITS_AHEAD = 6
+# PR 3569's head: a descendant of the merge sha that dev does NOT contain.
+BRANCH_BUILD_18388 = "3ad9b3af9cb8eaee8f8b01896e4a86b30137ee7d"
+
+
+def _lane(revision: str) -> LaneRevision:
+    return LaneRevision(
+        revision=revision,
+        compose_project=DEV_LANE_COMPOSE_PROJECT,
+        build_source="workspace",
+        state="running",
+    )
+
+
+def _ancestry(
+    relation: str = RELATION_DESCENDANT,
+    commits_ahead: int = DESCENDANT_COMMITS_AHEAD,
+    observed_on_branch: bool = True,
+) -> Ancestry:
+    return Ancestry(
+        relation=relation,
+        commits_ahead=commits_ahead,
+        observed_on_branch=observed_on_branch,
+        branch="dev",
+    )
+
+
+def _converge(
+    revision: str = LANE_DESCENDANT_18388,
+    ancestry: Ancestry | None = None,
+    waited: timedelta = timedelta(minutes=6),
+):
+    return evaluate_convergence(
+        lane=_lane(revision),
+        expected_revision=MERGE_SHA_18388,
+        waited=waited,
+        wait_timeout=timedelta(minutes=25),
+        ancestry=ancestry if ancestry is not None else _ancestry(),
+    )
+
+
+class TestConvergenceIsContainmentNotByteEquality:
+    """AC1/AC4 -- the real 2026-09-15 pair, in both directions."""
+
+    def test_the_measured_descendant_lane_converges(self) -> None:
+        assert _converge().ok, (
+            "0d0250a6 contains 18b539f0, so the lane has run the merged change; "
+            "byte equality reported this as delivered-but-not-applied and the "
+            "receipt for 18b539f0 could never be a PASS"
+        )
+
+    def test_the_reverse_direction_stays_a_finding(self) -> None:
+        """A lane on an ANCESTOR is the OMN-18284 stale-lane class, not this one."""
+        verdict = evaluate_convergence(
+            lane=_lane(MEASURED_REVISION),
+            expected_revision=MERGE_SHA_18388,
+            waited=timedelta(minutes=25),
+            wait_timeout=timedelta(minutes=25),
+            ancestry=_ancestry(relation=RELATION_ANCESTOR, commits_ahead=0),
+        )
+        assert not verdict.ok
+        assert verdict.findings[0].code == "NOT_CONVERGED"
+
+    def test_an_identical_relation_converges(self) -> None:
+        assert _converge(ancestry=_ancestry(relation=RELATION_IDENTICAL)).ok
+
+    def test_the_real_compare_payloads_project_onto_a_descendant(self) -> None:
+        """AC4 -- GitHub's own bytes, not a shape a test author imagined."""
+        ancestry = parse_ancestry(
+            relation_payload={"status": "ahead", "ahead_by": 6, "behind_by": 0},
+            containment_payload={"status": "identical", "ahead_by": 0},
+            branch="dev",
+        )
+        assert ancestry.relation == RELATION_DESCENDANT
+        assert ancestry.commits_ahead == DESCENDANT_COMMITS_AHEAD
+        assert ancestry.observed_on_branch
+
+    def test_the_real_compare_payloads_project_onto_an_ancestor(self) -> None:
+        ancestry = parse_ancestry(
+            relation_payload={"status": "behind", "ahead_by": 0, "behind_by": 6},
+            containment_payload={"status": "ahead", "ahead_by": 6},
+            branch="dev",
+        )
+        assert ancestry.relation == RELATION_ANCESTOR
+        assert ancestry.observed_on_branch
+
+    def test_an_uninterpretable_compare_status_raises(self) -> None:
+        """Fail closed: a status this guard does not know is not 'converged'."""
+        with pytest.raises(ValueError):
+            parse_ancestry(
+                relation_payload={"status": "sideways", "ahead_by": 0},
+                containment_payload={"status": "identical", "ahead_by": 0},
+                branch="dev",
+            )
+
+
+class TestOffBranchRevisionsNeverConverge:
+    """AC3 -- containment in origin/dev is checked independently of the relation."""
+
+    def test_the_real_branch_build_is_not_converged(self) -> None:
+        """PR 3569's head is a DESCENDANT of the merge sha and is NOT on dev.
+
+        This is the fixture that proves the two probes are independent: a guard
+        that only asked "does the observed revision contain the merge sha" would
+        report this hand-built branch image as a converged lane.
+        """
+        verdict = _converge(
+            revision=BRANCH_BUILD_18388,
+            ancestry=_ancestry(commits_ahead=7, observed_on_branch=False),
+        )
+        assert not verdict.ok
+        assert verdict.findings[0].code == "LANE_OFF_BRANCH"
+
+    def test_the_real_branch_build_payloads_project_as_off_branch(self) -> None:
+        ancestry = parse_ancestry(
+            relation_payload={"status": "ahead", "ahead_by": 7, "behind_by": 0},
+            containment_payload={"status": "behind", "ahead_by": 0, "behind_by": 1},
+            branch="dev",
+        )
+        assert ancestry.relation == RELATION_DESCENDANT
+        assert not ancestry.observed_on_branch
+
+    def test_an_unrelated_revision_is_not_converged(self) -> None:
+        verdict = _converge(
+            ancestry=_ancestry(
+                relation=RELATION_UNRELATED, commits_ahead=0, observed_on_branch=False
+            )
+        )
+        assert not verdict.ok
+        assert verdict.findings[0].code == "LANE_OFF_BRANCH"
+
+    def test_an_unrelated_on_branch_revision_is_not_called_older(self) -> None:
+        verdict = _converge(
+            ancestry=_ancestry(
+                relation=RELATION_UNRELATED, commits_ahead=0, observed_on_branch=True
+            )
+        )
+        assert not verdict.ok
+        assert verdict.findings[0].code == "NOT_CONVERGED"
+        assert "OLDER than the merge" not in verdict.findings[0].detail
+        assert "divergent" in verdict.findings[0].detail
+
+    def test_a_diverged_containment_status_is_off_branch(self) -> None:
+        ancestry = parse_ancestry(
+            relation_payload={"status": "diverged", "ahead_by": 2, "behind_by": 3},
+            containment_payload={"status": "diverged", "ahead_by": 1, "behind_by": 4},
+            branch="dev",
+        )
+        assert ancestry.relation == RELATION_UNRELATED
+        assert not ancestry.observed_on_branch
+
+    def test_an_unresolvable_ancestry_fails_closed(self) -> None:
+        """An ancestry the guard could not read is not evidence of convergence."""
+        verdict = evaluate_convergence(
+            lane=_lane(LANE_DESCENDANT_18388),
+            expected_revision=MERGE_SHA_18388,
+            waited=timedelta(minutes=25),
+            wait_timeout=timedelta(minutes=25),
+            ancestry=None,
+        )
+        assert not verdict.ok
+        assert verdict.findings[0].code == "ANCESTRY_UNPROVABLE"
+
+
+class TestTheConvergenceEvidence:
+    """AC2 -- the evidence names both shas and the relation, on one line."""
+
+    def test_the_descendant_evidence_names_both_shas_and_the_relation(self) -> None:
+        evidence = convergence_evidence(
+            lane=_lane(LANE_DESCENDANT_18388),
+            expected_revision=MERGE_SHA_18388,
+            ancestry=_ancestry(),
+            waited=timedelta(minutes=6),
+            converged=True,
+        )
+        assert LANE_DESCENDANT_18388[:12] in evidence
+        assert MERGE_SHA_18388[:12] in evidence
+        assert "contains" in evidence
+        assert "6 commit" in evidence
+        assert "dev" in evidence
+
+    def test_the_evidence_is_one_line_and_shell_safe(self) -> None:
+        """It is written to GITHUB_OUTPUT and re-read as a receipt check field."""
+        for ancestry in (
+            _ancestry(),
+            _ancestry(relation=RELATION_ANCESTOR, commits_ahead=0),
+            _ancestry(observed_on_branch=False),
+            None,
+        ):
+            evidence = convergence_evidence(
+                lane=_lane(LANE_DESCENDANT_18388),
+                expected_revision=MERGE_SHA_18388,
+                ancestry=ancestry,
+                waited=timedelta(minutes=6),
+                converged=False,
+            )
+            assert evidence, "an empty evidence string is refused by the receipt model"
+            assert "\n" not in evidence and "\r" not in evidence
+            assert '"' not in evidence and "`" not in evidence and "$" not in evidence
+
+    def test_the_off_branch_evidence_says_so(self) -> None:
+        evidence = convergence_evidence(
+            lane=_lane(BRANCH_BUILD_18388),
+            expected_revision=MERGE_SHA_18388,
+            ancestry=_ancestry(commits_ahead=7, observed_on_branch=False),
+            waited=timedelta(minutes=25),
+            converged=False,
+        )
+        assert BRANCH_BUILD_18388[:12] in evidence
+        assert MERGE_SHA_18388[:12] in evidence
+        assert "not contained" in evidence
+
+    def test_the_unprovable_evidence_names_the_expected_sha(self) -> None:
+        evidence = convergence_evidence(
+            lane=_lane(LANE_DESCENDANT_18388),
+            expected_revision=MERGE_SHA_18388,
+            ancestry=None,
+            waited=timedelta(minutes=25),
+            converged=False,
+        )
+        assert MERGE_SHA_18388[:12] in evidence
+
+
+class TestTheReceiptCarriesTheAncestryEvidence:
+    """AC2's wiring half: the receipt's sha stays exact, its evidence is live."""
+
+    @staticmethod
+    def _verify_job() -> dict:
+        document = yaml.safe_load(TRIGGER_WORKFLOW.read_text(encoding="utf-8"))
+        return document["jobs"]["verify-lane-converged"]
+
+    def test_the_receipt_sha_is_the_unmodified_merge_sha(self) -> None:
+        emit = next(
+            s
+            for s in self._verify_job()["steps"]
+            if "lab_pass_receipt.py emit" in str(s.get("run", ""))
+        )
+        assert '--sha "$MERGE_SHA"' in emit["run"], (
+            "rule 24(b) keys the artifact by the exact merge sha; a descendant "
+            "window belongs in the CHECK, never in the key"
+        )
+
+    def test_the_deployed_revision_evidence_comes_from_the_converge_step(self) -> None:
+        emit = next(
+            s
+            for s in self._verify_job()["steps"]
+            if "lab_pass_receipt.py emit" in str(s.get("run", ""))
+        )
+        assert "steps.converge.outputs.evidence" in yaml.dump(emit), (
+            "a static evidence string cannot name the revision the lane was "
+            "actually observed at, which is what AC2 requires"
+        )
+
+    def test_the_evidence_is_passed_through_env_not_interpolated_into_the_shell(
+        self,
+    ) -> None:
+        emit = next(
+            s
+            for s in self._verify_job()["steps"]
+            if "lab_pass_receipt.py emit" in str(s.get("run", ""))
+        )
+        assert "steps.converge.outputs.evidence" not in str(emit["run"]), (
+            "expression-interpolating a value into a run block is the script "
+            "injection shape; pass it through env and dereference the variable"
+        )
+
+    def test_cancelled_or_skipped_convergence_is_recorded_as_inconclusive(
+        self,
+    ) -> None:
+        emit = next(
+            s
+            for s in self._verify_job()["steps"]
+            if "lab_pass_receipt.py emit" in str(s.get("run", ""))
+        )
+        body = emit["run"]
+        assert "CONVERGE_OUTCOME" in yaml.dump(emit)
+        assert "convergence step ended ${CONVERGE_OUTCOME}" in body
+        assert "DEPLOYED_REVISION_VERDICT=fail" in body
+        assert "steps.converge.outcome == 'success' && 'ok' || 'fail'" not in yaml.dump(
+            emit
+        )
+
+    def test_fallback_evidence_uses_a_validated_merge_sha_copy(self) -> None:
+        emit = next(
+            s
+            for s in self._verify_job()["steps"]
+            if "lab_pass_receipt.py emit" in str(s.get("run", ""))
+        )
+        body = emit["run"]
+        assert "SAFE_MERGE_SHA" in body
+        assert "^[0-9a-f]{40}$" in body
+        assert "--expect-revision ${SAFE_MERGE_SHA}" in body
+
+
+class TestAncestryResolver:
+    def test_transient_resolution_failure_is_not_cached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = 0
+        resolved = _ancestry()
+
+        def fake_read_ancestry(
+            repo: str, branch: str, expected_revision: str, observed_revision: str
+        ) -> Ancestry:
+            nonlocal calls
+            assert (repo, branch, expected_revision, observed_revision) == (
+                "repo/name",
+                "dev",
+                MERGE_SHA_18388,
+                LANE_DESCENDANT_18388,
+            )
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("502")
+            return resolved
+
+        monkeypatch.setattr(staleness_module, "read_ancestry", fake_read_ancestry)
+        resolver = staleness_module._AncestryResolver(
+            repo="repo/name", branch="dev", expected=MERGE_SHA_18388
+        )
+
+        assert resolver.resolve(LANE_DESCENDANT_18388) is None
+        assert resolver.resolve(LANE_DESCENDANT_18388) == resolved
+        assert resolver.resolve(LANE_DESCENDANT_18388) == resolved
+        assert calls == 2
+
+    def test_convergence_loop_does_not_reevaluate_after_success(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
+        reads = [
+            _lane(MEASURED_REVISION),
+            _lane(LANE_DESCENDANT_18388),
+        ]
+        observed_reads: list[str] = []
+
+        def fake_read_lane(args) -> LaneRevision:  # type: ignore[no-untyped-def]
+            lane = reads.pop(0)
+            observed_reads.append(lane.revision)
+            return lane
+
+        def fake_sleep(_seconds: float) -> None:
+            return None
+
+        def fake_monotonic() -> float:
+            fake_monotonic.value += 1
+            return fake_monotonic.value
+
+        fake_monotonic.value = 0.0  # type: ignore[attr-defined]
+
+        monkeypatch.setattr(staleness_module, "_read_lane", fake_read_lane)
+        monkeypatch.setattr(staleness_module.time, "sleep", fake_sleep)
+        monkeypatch.setattr(staleness_module.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(
+            staleness_module._AncestryResolver,
+            "resolve",
+            lambda _self, observed: _ancestry()
+            if observed == LANE_DESCENDANT_18388
+            else _ancestry(relation=RELATION_ANCESTOR, commits_ahead=0),
+        )
+
+        args = type(
+            "Args",
+            (),
+            {
+                "expect_revision": MERGE_SHA_18388,
+                "wait_timeout": timedelta(minutes=25),
+                "poll_interval": timedelta(seconds=60),
+                "repo": "repo/name",
+                "branch": "dev",
+            },
+        )()
+
+        assert staleness_module._run_convergence_mode(args) == 0
+        assert observed_reads == [MEASURED_REVISION, LANE_DESCENDANT_18388]
