@@ -1055,3 +1055,216 @@ def test_the_requester_file_is_allowlisted_for_its_bare_hosted_pin() -> None:
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
     paths = {entry["path"] for entry in policy["hosted_runner_allowlist"]}
     assert ".github/workflows/application-acl-postgres16-proof.yml" in paths
+
+
+def test_public_pr_runner_variable_drift_is_reported_at_org_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-16684: audit_github_variables must also audit the public-PR variable.
+
+    Before the fix, ``audit_github_variables`` reads only
+    ``policy["trusted_runner_variable"]`` and never looks at
+    ``public_pr_runner_variable`` at all, so a drifted org-level value -- the
+    exact OMN-16683 shape, where fork PRs routed onto the self-hosted fleet for
+    seven weeks -- produces zero findings and the audit reports green.
+    """
+    module = _load_script()
+
+    def fake_variables(args: list[str]) -> list[dict[str, str]]:
+        if args == ["--org", "OmniNode-ai"]:
+            return [
+                {
+                    "name": "OMNI_PUBLIC_PR_RUNS_ON_JSON",
+                    "value": '["self-hosted","Linux","X64","omnibase-ci"]',
+                },
+                {
+                    "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+                    "value": '["ubuntu-latest"]',
+                },
+            ]
+        return [
+            {"name": "OMNI_TRUSTED_CI_RUNS_ON_JSON", "value": '["ubuntu-latest"]'},
+        ]
+
+    monkeypatch.setattr(module, "_variables", fake_variables)
+
+    policy = {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+        },
+        "public_pr_runner_variable": {
+            "name": "OMNI_PUBLIC_PR_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+        },
+        "repositories": ["omnibase_infra"],
+    }
+
+    findings = module.audit_github_variables(policy)
+
+    assert any(
+        f.scope == "OmniNode-ai" and "OMNI_PUBLIC_PR_RUNS_ON_JSON" in f.message
+        for f in findings
+    ), findings
+
+
+def test_public_pr_runner_variable_drift_is_reported_at_undeclared_repo_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18365 AC4 falsifier.
+
+    Sets the public-PR variable on a repository the policy declares should not
+    carry it (no ``repository_overrides`` entry for the public-PR variable
+    exists anywhere in the live policy) and asserts the audit returns a finding
+    naming that scope.
+    """
+    module = _load_script()
+
+    def fake_variables(args: list[str]) -> list[dict[str, str]]:
+        if args == ["--org", "OmniNode-ai"]:
+            return [
+                {"name": "OMNI_PUBLIC_PR_RUNS_ON_JSON", "value": '["ubuntu-latest"]'},
+            ]
+        if args == ["--repo", "OmniNode-ai/omnibase_core"]:
+            return [
+                {
+                    "name": "OMNI_PUBLIC_PR_RUNS_ON_JSON",
+                    "value": '["self-hosted","omnibase-ci"]',
+                },
+            ]
+        return []
+
+    monkeypatch.setattr(module, "_variables", fake_variables)
+
+    policy = {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+        },
+        "public_pr_runner_variable": {
+            "name": "OMNI_PUBLIC_PR_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+        },
+        "repositories": ["omnibase_core"],
+    }
+
+    findings = module.audit_github_variables(policy)
+
+    assert any(
+        f.scope == "omnibase_core" and "self-hosted" in f.message for f in findings
+    ), findings
+
+
+RUNNER_ROUTING_AUDIT_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "runner-routing-audit.yml"
+)
+
+
+def test_second_audit_step_is_not_masked_by_the_first_steps_failure() -> None:
+    """OMN-16727: a finding in the local-workflows step must not hide the
+    github-vars step.
+
+    ``runner-routing-audit.yml`` runs the two passes as separate ``run:``
+    steps. GitHub Actions skips a step whose ``if:`` does not call
+    ``always()``/``failure()``/``cancelled()`` once any earlier step fails --
+    the default condition is implicitly ANDed with ``success()``. During the
+    2026-08-26/27 re-flip, stale policy drift failed the first step and the
+    second (the ``OMN-16683`` fork-isolation surface) never ran at all.
+
+    The fix requires three things of the workflow, all missing today:
+    1. the local-workflows step tolerates its own failure so later steps run
+       (``continue-on-error: true``),
+    2. the github-vars step's condition includes ``always()`` so a first-step
+       failure cannot skip it, and
+    3. a final step evaluates both outcomes and fails the job once, so neither
+       surface's finding is silently swallowed by a per-step green checkmark.
+    """
+    import yaml
+
+    text = RUNNER_ROUTING_AUDIT_WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+    steps = workflow["jobs"]["audit"]["steps"]
+
+    local_step = next(
+        s for s in steps if s.get("name") == "Audit local workflow routing"
+    )
+    github_vars_step = next(
+        s for s in steps if s.get("name") == "Audit GitHub runner variables"
+    )
+
+    assert local_step.get("continue-on-error") is True, (
+        "the local-workflows step must tolerate its own failure so the "
+        "github-vars step is not skipped"
+    )
+    assert "always()" in str(github_vars_step.get("if", "")), (
+        "the github-vars step's condition must include always() or a first-"
+        "step failure skips it (the implicit success() default)"
+    )
+
+    combine_steps = [
+        s
+        for s in steps
+        if "always()" in str(s.get("if", ""))
+        and ("outcome" in str(s.get("run", "")) or "outcome" in json.dumps(s))
+    ]
+    assert combine_steps, (
+        "no step evaluates both step outcomes and fails the job once; without "
+        "it a per-step green checkmark can still hide a finding"
+    )
+
+
+def test_repository_universe_derived_from_live_visibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18365 AC3 falsifier.
+
+    A fixture private repository carrying one hosted-labelled job on its
+    default branch must produce a finding naming that job; a fixture where
+    every repository routes onto the fleet must exit clean. The universe of
+    repositories to check comes from a live-visibility callable, not from the
+    hand-curated ``repositories:`` list in the policy file.
+    """
+    module = _load_script()
+
+    def fake_visibility(org: str) -> list[tuple[str, bool]]:
+        return [("private-repo-with-hosted-job", True), ("public-repo", False)]
+
+    def fake_workflows(repo_name: str) -> dict[str, str]:
+        if repo_name == "private-repo-with-hosted-job":
+            return {
+                ".github/workflows/ci.yml": (
+                    "name: ci\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                )
+            }
+        if repo_name == "public-repo":
+            return {
+                ".github/workflows/ci.yml": (
+                    "name: ci\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                )
+            }
+        return {}
+
+    findings = module.audit_private_repo_hosted_placement(
+        visibility_fn=fake_visibility,
+        workflow_fetch_fn=fake_workflows,
+    )
+
+    assert any(
+        "private-repo-with-hosted-job" in f.scope and "build" in f.scope
+        for f in findings
+    ), findings
+    assert not any("public-repo" in f.scope for f in findings), findings
+
+    def fake_workflows_all_fleet(repo_name: str) -> dict[str, str]:
+        return {
+            ".github/workflows/ci.yml": (
+                "name: ci\njobs:\n  build:\n"
+                '    runs-on: ["self-hosted", "omnibase-ci"]\n'
+            )
+        }
+
+    clean_findings = module.audit_private_repo_hosted_placement(
+        visibility_fn=fake_visibility,
+        workflow_fetch_fn=fake_workflows_all_fleet,
+    )
+    assert clean_findings == []
