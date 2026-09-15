@@ -206,6 +206,13 @@ TypeLedgerReplay = Callable[
 _VERIFIER_SKIP = "skip"
 _VERIFIER_PASS = "pass"
 
+_CANARY_DELEGATION_PROVENANCE = ModelDelegationProvenance(
+    source="external-client",
+    traffic_class=EnumDelegationTrafficClass.SYNTHETIC,
+    source_surface="scheduled-chain-canary",
+    requested_by="chain-canary",
+)
+
 # The FSM states that count as terminal in delegation_workflow_state. Anything
 # else that exists as a row is stranded mid-flight — OMN-14843 measured
 # INFERENCE_COMPLETED, RECEIVED and ROUTED, but the set is defined by what IS
@@ -1029,12 +1036,7 @@ class HandlerChainCanary:
         canary is evidence about the path real callers take rather than
         about a bespoke probe-only path that could drift away from it.
         """
-        provenance = ModelDelegationProvenance(
-            source="external-client",
-            traffic_class=EnumDelegationTrafficClass.SYNTHETIC,
-            source_surface="scheduled-chain-canary",
-            requested_by="chain-canary",
-        )
+        provenance = _CANARY_DELEGATION_PROVENANCE
         return {
             "command_name": request.runtime_command,
             "correlation_id": probe_correlation_id,
@@ -1042,14 +1044,14 @@ class HandlerChainCanary:
             "payload": {
                 "prompt": request.prompt,
                 "task_type": request.task_type,
-                "source": "external-client",
+                "source": provenance.source,
                 "provenance": provenance.model_dump(mode="json"),
                 "wait": True,
                 "correlation_id": probe_correlation_id,
                 "max_tokens": request.max_tokens,
                 "metadata": {
-                    "requested_by": "chain-canary",
-                    "source_surface": "scheduled-chain-canary",
+                    "requested_by": provenance.requested_by,
+                    "source_surface": provenance.source_surface,
                 },
             },
         }

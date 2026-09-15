@@ -132,3 +132,4 @@ async def test_chain_canary_marks_delegated_skill_payload_as_synthetic(
         "source_surface": "scheduled-chain-canary",
         "requested_by": "chain-canary",
     }
+    assert payload["source"] == payload["provenance"]["source"]

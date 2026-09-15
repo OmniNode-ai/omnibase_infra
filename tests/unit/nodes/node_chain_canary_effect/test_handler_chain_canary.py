@@ -122,16 +122,25 @@ class _RecordingProjectionReadback:
     """Stubbed link-2 readback. Terminal by default, so these fixtures isolate
     the leg under test rather than tripping over an unconfigured link 2."""
 
-    def __init__(self, state: str | None = "COMPLETED", error: str = "") -> None:
+    def __init__(
+        self,
+        state: str | None = "COMPLETED",
+        error: str = "",
+        traffic_class: str = "unclassified",
+    ) -> None:
         self.state = state
         self.error = error
+        self.traffic_class = traffic_class
         self.calls: list[tuple[str, str, float]] = []
 
     async def __call__(
         self, dsn: str, correlation_id: str, timeout_s: float
     ) -> ModelProjectionReadbackOutcome:
         self.calls.append((dsn, correlation_id, timeout_s))
-        return _outcome(self.state, self.error)
+        outcome = _outcome(self.state, self.error)
+        if outcome.status is EnumProjectionReadbackStatus.TERMINAL:
+            return outcome.model_copy(update={"traffic_class": self.traffic_class})
+        return outcome
 
 
 def _request(**overrides: object) -> ModelChainCanaryRequest:
@@ -295,6 +304,11 @@ async def test_posts_the_recorded_delegation_recipe() -> None:
         "source_surface": "scheduled-chain-canary",
         "requested_by": "chain-canary",
     }
+    assert payload["source"] == payload["provenance"]["source"]
+    metadata = payload["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["requested_by"] == payload["provenance"]["requested_by"]
+    assert metadata["source_surface"] == payload["provenance"]["source_surface"]
     assert payload["wait"] is True
     assert payload["max_tokens"] == 32
     # The client budget must exceed the runtime budget or the canary times
@@ -331,6 +345,25 @@ async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
     assert result.ingress_terminal_event == "omnimarket.delegate-skill-completed"
     # The quarantine scan was asked about THIS run's correlation id.
     assert quarantine.calls[0][2] == str(result.probe_correlation_id)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reported_traffic_class_comes_from_projection_readback() -> None:
+    """OMN-18172 — the request hint cannot force the receipt classification."""
+    handler = HandlerChainCanary(
+        ingress=_RecordingIngress(response=_terminal_response()),
+        quarantine_scan=_RecordingQuarantine(),
+        terminal_readback=_RecordingTerminalReadback(),
+        projection_readback=_RecordingProjectionReadback(traffic_class="organic"),
+        ledger_replay=_RecordingLedgerReplay(),
+        ledger_dsn_lookup=_ledger_dsn_lookup,
+        kill_switch_disabled=False,
+    )
+
+    result = await handler.handle(_request())
+
+    assert result.projection_traffic_class == "organic"
 
 
 @pytest.mark.unit
