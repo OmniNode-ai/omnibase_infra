@@ -42,9 +42,9 @@ This module is the gate over that record. It pins:
 
 * the record names 107, its rollback, the commit the bytes were retired from,
   the digests of those bytes, and OMN-17486 as the condition for re-issue;
-* both retired files are out of the corpus and ordinal 107 is BURNED, so a lane
-  that somehow recorded 107 can never be confused with one that applied the
-  re-issue;
+* both retired files are out of the corpus and ordinal 107 is BURNED, so any
+  ephemeral lane that recorded 107 can never be confused with one that applied
+  the re-issue;
 * the surviving stream at or below 107 is byte-identical to the stream as it
   stood before #3549 landed, so the retirement removed exactly these two files;
 * the ``action_authorization_claim`` schema DECLARATION survives in every shipped
@@ -61,7 +61,9 @@ Ticket: OMN-17486. Precedent: OMN-17923 (the 104 retirement this follows).
 
 from __future__ import annotations
 
+import hashlib
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -141,8 +143,18 @@ def _row_for_107() -> dict[str, str]:
 
 
 def _ordinal(name: str) -> int | None:
-    match = re.match(r"^(?:rollback_)?(\d{3})_", name)
+    match = re.match(r"^(?:rollback_)?(\d+)_", name)
     return int(match.group(1)) if match else None
+
+
+def _git_bytes(commit: str, path: str) -> bytes:
+    result = subprocess.run(
+        ["git", "show", f"{commit}:{path}"],
+        check=True,
+        cwd=REPO_ROOT,
+        capture_output=True,
+    )
+    return result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +172,22 @@ def test_record_names_the_retired_bytes_precisely() -> None:
     )
     assert row["forward_sha256"] == RETIRED_FORWARD_SHA256
     assert row["rollback_sha256"] == RETIRED_ROLLBACK_SHA256
+
+
+@pytest.mark.unit
+def test_record_digests_match_the_retired_git_bytes() -> None:
+    row = _row_for_107()
+    forward = _git_bytes(
+        row["retired_from_commit"],
+        f"docker/migrations/forward/{row['retired_forward']}",
+    )
+    rollback = _git_bytes(
+        row["retired_from_commit"],
+        f"docker/migrations/rollback/{row['retired_rollback']}",
+    )
+
+    assert hashlib.sha256(forward).hexdigest() == row["forward_sha256"]
+    assert hashlib.sha256(rollback).hexdigest() == row["rollback_sha256"]
 
 
 @pytest.mark.unit
@@ -271,6 +299,39 @@ def test_stream_tops_out_at_106_until_the_reissue() -> None:
     assert max(at_or_below_retired) == SURVIVING_HIGH_WATER, (
         f"the surviving stream at or below {RETIRED_ORDINAL} tops out at "
         f"{max(at_or_below_retired)}, expected {SURVIVING_HIGH_WATER}"
+    )
+
+
+@pytest.mark.unit
+def test_surviving_ordinals_match_the_pre_3549_stream_below_107() -> None:
+    result = subprocess.run(
+        [
+            "git",
+            "ls-tree",
+            "--name-only",
+            f"{PRE_3549_PARENT_COMMIT}:docker/migrations/forward",
+        ],
+        check=True,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    expected = sorted(
+        ordinal
+        for name in result.stdout.splitlines()
+        if name.endswith(".sql")
+        and (ordinal := _ordinal(Path(name).name)) is not None
+        and ordinal <= SURVIVING_HIGH_WATER
+    )
+    actual = sorted(
+        ordinal
+        for path in FORWARD_DIR.glob("*.sql")
+        if (ordinal := _ordinal(path.name)) is not None
+        and ordinal <= SURVIVING_HIGH_WATER
+    )
+    assert actual == expected, (
+        "the retirement must not create, remove, or renumber any ordinal below "
+        f"{RETIRED_ORDINAL}; compare against {PRE_3549_PARENT_COMMIT[:9]}"
     )
 
 

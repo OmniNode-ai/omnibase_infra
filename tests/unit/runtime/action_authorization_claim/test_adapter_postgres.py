@@ -100,6 +100,19 @@ def test_claim_maps_a_database_error_to_closed_redacted_error() -> None:
 
 
 @pytest.mark.unit
+def test_missing_reissued_claim_function_fails_closed() -> None:
+    connection = _Connection(
+        iter([asyncpg.UndefinedFunctionError("claim function is not installed")])
+    )
+
+    result = asyncio.run(_adapter(connection).claim(_request()))
+
+    assert result.outcome is EnumActionAuthorizationClaimOutcome.ERROR
+    assert result.state is None
+    assert result.redacted_receipt_digest is None
+
+
+@pytest.mark.unit
 def test_claim_uses_the_dedicated_atomic_function() -> None:
     request = _request()
     connection = _Connection(
