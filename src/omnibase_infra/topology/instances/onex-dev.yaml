@@ -217,6 +217,9 @@ databases:
             schema: tenant
         login: true
     schemas:
+      action_authorization_claim:
+        domain: OMNINODE_INTERNAL
+        owner: owner_omninode_internal
       omninode_internal:
         domain: OMNINODE_INTERNAL
         owner: owner_omninode_internal
