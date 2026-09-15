@@ -191,7 +191,7 @@ repos:
       #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
       - id: exposed-identifier-gate
         name: Exposed identifier gate (OMN-17320)
-        entry: uv run --frozen python scripts/validation/check_exposed_identifiers.py --mode blocking
+        entry: python3 scripts/validation/check_exposed_identifiers.py --mode blocking
         language: system
         pass_filenames: true
         stages: [pre-commit]
@@ -570,7 +570,7 @@ repos:
       # the predicate is a git diff, not a per-file lint.
       - id: onex-check-migration-append-only
         name: ONEX Migration Append-Only Check
-        entry: uv run --frozen python scripts/validation/check_migration_append_only.py --staged --base origin/dev
+        entry: python3 scripts/validation/check_migration_append_only.py --staged --base origin/dev
         language: system
         pass_filenames: false
         always_run: true
@@ -589,7 +589,7 @@ repos:
       # file list.
       - id: onex-check-migration-rls-policy-atomicity
         name: ONEX Migration RLS Policy Atomicity
-        entry: uv run --frozen python scripts/validation/check_migration_rls_policy_atomicity.py
+        entry: python3 scripts/validation/check_migration_rls_policy_atomicity.py
         language: system
         pass_filenames: false
         always_run: true
@@ -610,7 +610,7 @@ repos:
       # corpus, not the staged file list.
       - id: onex-check-topology-grant-delivery
         name: ONEX Topology Grant Delivery
-        entry: uv run --frozen python scripts/validation/check_topology_grant_delivery.py
+        entry: python3 scripts/validation/check_topology_grant_delivery.py
         language: system
         pass_filenames: false
         always_run: true
@@ -632,7 +632,7 @@ repos:
       # same script unconditionally via sparse sibling checkouts.
       - id: onex-check-duplication-sweep
         name: ONEX Duplication Sweep (D1/D2, OMN-14086)
-        entry: uv run --frozen python scripts/ci/run_duplication_sweep.py --fail-on-severity error
+        entry: python3 scripts/ci/run_duplication_sweep.py --fail-on-severity error
         language: system
         pass_filenames: false
         always_run: true
@@ -1207,8 +1207,8 @@ repos:
       # environment — see OMN-15537 for why the host-env-reading shape was a defect).
       - id: check-required-env-vars
         name: Check required env vars are declared in the manifest
-        entry: uv run --frozen python scripts/check_required_env_vars.py
-        language: system
+        entry: python scripts/check_required_env_vars.py
+        language: python
         files: docker/(docker-compose\.infra\.yml|required-env-vars\.manifest\.txt)
         pass_filenames: false
       # OMN-17530: the dev lane loads TWO compose files -- the base above plus
@@ -1220,8 +1220,8 @@ repos:
       - id: check-dev-lane-required-env-vars
         name: Check dev-lane required env vars are declared in the manifest
         entry: >-
-          uv run --frozen python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-lane.yml --manifest-file docker/dev-lane-required-env.manifest.txt
-        language: system
+          python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-lane.yml --manifest-file docker/dev-lane-required-env.manifest.txt
+        language: python
         files: docker/(docker-compose\.dev-lane\.yml|dev-lane-required-env\.manifest\.txt)
         pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
@@ -1308,7 +1308,7 @@ repos:
       # made non-compliant by deleting a line elsewhere).
       - id: check-reconciler-movement-proof
         name: Reconcilers must prove movement by readback (OMN-17307)
-        entry: uv run --frozen python scripts/check_reconciler_movement_proof.py
+        entry: python3 scripts/check_reconciler_movement_proof.py
         language: system
         pass_filenames: false
         always_run: true
@@ -1321,7 +1321,7 @@ repos:
       # leaves root-owned files inside a user-owned venv. Whole-repo by design.
       - id: check-reconciler-privilege
         name: Reconcilers resolve tools explicitly and write as the owner (OMN-17335)
-        entry: uv run --frozen python scripts/check_reconciler_privilege.py
+        entry: python3 scripts/check_reconciler_privilege.py
         language: system
         pass_filenames: false
         always_run: true
@@ -1420,22 +1420,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
-        files: ^(\.pre-commit-config\.yaml|scripts/.*\.(sh|py)|\.pre-commit-hooks/.*\.sh)$
-      # OMN-16958 (port of omnimarket's OMN-17219 guard, unchanged):
-      # interpreter-resolution ratchet. Fails closed the moment a hook `entry:`
-      # -- or a shell script it calls -- shells out to a bare `python`, or an
-      # `entry:` shells out to a bare `python3`. macOS ships no bare `python`
-      # outside an activated venv, so such a hook refuses every `git commit` for
-      # anyone not inside one; a bare `python3` bypasses the project
-      # environment. Sanctioned form is `uv run python <script>`. Wired as BOTH
-      # this hook and a CI step in .github/workflows/precommit-parity-gate.yml
-      # (enforcement, not detection).
-      - id: precommit-interpreter-resolution
-        name: Pre-commit interpreter-resolution gate (OMN-17219)
-        entry: uv run --frozen python scripts/validation/validate_precommit_interpreter.py
-        language: system
-        pass_filenames: false
         stages: [pre-commit]
         files: ^(\.pre-commit-config\.yaml|scripts/.*\.(sh|py)|\.pre-commit-hooks/.*\.sh)$
       # Pin-parity ratchet: fails closed the moment the pre-commit `rev:` pin
@@ -1567,7 +1551,7 @@ repos:
     hooks:
       - id: workflow-input-default-type-parity
         name: Workflow input defaults must match declared type (OMN-16906)
-        entry: uv run --frozen python scripts/ci/check_workflow_input_default_types.py
+        entry: python scripts/ci/check_workflow_input_default_types.py
         language: system
         pass_filenames: false
         files: '^\.github/workflows/.*\.ya?ml$'
@@ -1587,7 +1571,7 @@ repos:
     hooks:
       - id: workflow-uv-available
         name: Hosted-runner steps must install uv before invoking it (OMN-18364)
-        entry: uv run --frozen python scripts/ci/check_workflow_uv_available.py
+        entry: python scripts/ci/check_workflow_uv_available.py
         language: system
         pass_filenames: false
         files: '^(\.github/workflows/.*\.ya?ml|\.github/actions/.*/action\.ya?ml)$'
