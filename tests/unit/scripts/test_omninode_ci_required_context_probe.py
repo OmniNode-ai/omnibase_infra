@@ -175,6 +175,106 @@ def test_absent_row_key_is_stable_across_ticks() -> None:
 
 
 # ---------------------------------------------------------------------------
+# OMN-15310 -- a conflicted PR is a different defect than a broken gate
+# ---------------------------------------------------------------------------
+
+
+def test_conflicted_pr_reports_the_conflict_not_an_absence() -> None:
+    """A PR conflicting with its base must not be reported as a never-reporting gate.
+
+    GitHub builds each ``pull_request`` run against ``refs/pull/N/merge``. When
+    the PR conflicts with its base that ref cannot be computed, so NO
+    ``pull_request`` event is delivered and NO run is created -- the required
+    contexts are not late, they are unproducible until the conflict is
+    resolved. Reporting that as "required context never reported" sends the
+    reader hunting a CI defect that does not exist; it cost four separate lanes
+    a diagnosis on 2026-07-28 and again on 2026-09-16 (onex_change_control
+    #9823, #9629 and two peers).
+    """
+    rows = run_probe("conflicted", "2026-07-30T20:00:00Z")
+    assert criticals(rows) == [], (
+        "a conflicted PR must not raise the absent CRITICAL:\n" + "\n".join(rows)
+    )
+    conflict_rows = [
+        r for r in warnings(rows) if r.split("|")[2].startswith("conflicted/")
+    ]
+    assert len(conflict_rows) == 1, "\n".join(rows)
+    row = conflict_rows[0]
+    assert f"#{OUTAGE_PR}" in row, row
+    # The reader must be able to act without opening GitHub: name the cause and
+    # the remedy, not just the symptom.
+    assert "conflict" in row.lower(), row
+    assert "merge ref" in row, row
+    assert REQUIRED_CONTEXT in row, row
+    hb = heartbeat(rows)
+    assert "conflicted=1" in hb, hb
+    assert "absent=0" in hb, hb
+
+
+def test_conflicted_row_is_one_per_pr_not_one_per_context() -> None:
+    """One conflict is one finding. Fanning it across contexts re-creates the noise."""
+    rows = run_probe("conflicted", "2026-07-30T20:00:00Z")
+    keys = [r.split("|")[2] for r in rows if r.split("|")[2].startswith("conflicted/")]
+    assert keys == [f"conflicted/omnibase_infra#{OUTAGE_PR}"], keys
+
+
+def test_conflicted_row_key_is_stable_across_ticks() -> None:
+    """Same de-duplication contract as the absent row: no ages in the key."""
+
+    def key(now: str) -> str:
+        rows = run_probe("conflicted", now)
+        row = next(r for r in rows if r.split("|")[2].startswith("conflicted/"))
+        return row.split("|")[2]
+
+    first, later = key("2026-07-30T20:00:00Z"), key("2026-07-30T21:00:00Z")
+    assert first == later, f"key changed between ticks: {first!r} -> {later!r}"
+    assert not re.search(r"\d+m", first), f"key embeds an age: {first!r}"
+
+
+def test_indeterminate_mergeability_still_alarms() -> None:
+    """Fail-closed control: ``unknown`` mergeability is not evidence of a conflict.
+
+    GitHub computes mergeability asynchronously and answers ``unknown`` while it
+    works. Reading that as "conflicted" would silence a genuine wedge on every
+    freshly-read PR, which is the failure this whole probe exists to prevent.
+    """
+    rows = run_probe("conflict_unknown", "2026-07-30T20:00:00Z")
+    crit = criticals(rows)
+    assert len(crit) == 1, "\n".join(rows)
+    assert "never reported" in crit[0], crit[0]
+    assert [r for r in rows if r.split("|")[2].startswith("conflicted/")] == []
+
+
+def test_unreadable_pr_state_still_alarms() -> None:
+    """The existing replay has no per-PR fixture at all; it must keep alarming.
+
+    A failed or missing read of the PR's merge state is the same undecidable
+    case as ``unknown`` -- it must never downgrade a CRITICAL absence.
+    """
+    crit = criticals(run_probe("absent", "2026-07-30T20:00:00Z"))
+    assert len(crit) == 1, crit
+    assert "never reported" in crit[0], crit[0]
+
+
+def test_conflicted_fixtures_differ_only_in_merge_state() -> None:
+    """Provenance guard: both scenarios must replay the SAME absent condition.
+
+    If the two fixture trees drift apart, the pair stops being a controlled
+    comparison and the fail-closed assertion above becomes vacuous.
+    """
+    conflicted = FIXTURES / "conflicted"
+    unknown = FIXTURES / "conflict_unknown"
+    pr_file = f"repos_OmniNode_ai_omnibase_infra_pulls_{OUTAGE_PR}.json"
+    names = {p.name for p in conflicted.iterdir()}
+    assert names == {p.name for p in unknown.iterdir()}
+    assert pr_file in names
+    for name in sorted(names - {pr_file}):
+        assert (conflicted / name).read_bytes() == (unknown / name).read_bytes(), name
+    assert json.loads((conflicted / pr_file).read_text())["mergeable_state"] == "dirty"
+    assert json.loads((unknown / pr_file).read_text())["mergeable_state"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
 # False-positive controls -- each is a real head that must stay quiet
 # ---------------------------------------------------------------------------
 
