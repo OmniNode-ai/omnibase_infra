@@ -65,13 +65,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess  # fixed argv, no shell, trusted docker/gh binaries
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from pathlib import Path
+from typing import Any, Final
+
+_REPO_ROOT: Final = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.ci.lab_pass_receipt import read_lane_generation
 
 #: The lane's effects container. Named AND fenced by its compose project below,
 #: so this guard can never read a governed lane (prod, stability-test, judge, or
@@ -371,11 +379,39 @@ def main(argv: list[str] | None = None) -> int:
         )
         time.sleep(args.poll_interval.total_seconds())
 
+    # OMN-18436: publish the identity of the container this guard read, so the
+    # lab-pass probe that runs next can prove its HTTP reads came from the SAME
+    # generation. The probe runs under `if: always()`, so on a failed guard the
+    # lane still answers -- from the PREVIOUS generation -- and without this the
+    # receipt records green reads with nothing in it naming the container that
+    # produced them. Written on both outcomes, because "which container
+    # answered" has an answer either way.
+    _write_output_generation(args.container)
+
     for note in verdict.notes:
         print(note)
     for finding in verdict.findings:
         print(f"::error::{finding.render()}", file=sys.stderr)
     return 0 if verdict.ok else 1
+
+
+def _write_output_generation(container: str) -> None:
+    """Publish one single-line generation record to the calling step's outputs.
+
+    An unreadable container warns and writes nothing; the probe treats an absent
+    record as a binding FAILURE rather than as permission to skip the check, so
+    a silent gap here cannot become a silent pass there.
+    """
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    try:
+        generation = read_lane_generation(container)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"::warning::lane generation unreadable: {exc}")
+        return
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"generation={generation.to_json()}\n")
 
 
 if __name__ == "__main__":

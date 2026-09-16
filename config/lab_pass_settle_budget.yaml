@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# lab_pass_settle_budget.yaml -- the DECLARED settle budget for each lab lane
+# the rule 24(a) lab-pass receipt probes (OMN-18436).
+#
+# WHAT A SETTLE BUDGET IS. `check_dev_lane_staleness.py --expect-revision`
+# returns the moment the RUNNING container carries the expected revision label,
+# and that label is stamped at container-create time, not when the runtime has
+# bound its port. The settle budget is how long the receipt emitter waits, AFTER
+# convergence returns, for the lane to answer its readiness endpoints.
+#
+# WHY IT IS DECLARED HERE RATHER THAN COMPUTED IN THE JOB. Until OMN-18436 the
+# budget was `job ceiling - elapsed - reserved tail`, i.e. whatever the
+# convergence wait happened to leave. That makes the lane's boot time a function
+# of how busy the deploy agent was, which it is not. Worse, the three constants
+# the job declared could not all hold at once: a 30-minute ceiling, a 25-minute
+# convergence wait and a 120-second tail leave 180 seconds for a boot measured at
+# 463-668 seconds, so every convergence slower than about 20 minutes produced a
+# receipt that FAILED on timing alone -- on a healthy lane running the merged
+# sha. Rule 24(b) fails closed on a FAIL receipt, so that receipt then refused
+# the sha for staging delivery.
+#
+# The budget is declared here, the job ceiling is DERIVED from it
+# (`converge_timeout + settle + reserved_tail`), and
+# tests/ci/test_lab_pass_settle_budget.py asserts the arithmetic over both
+# runtime-rebuild-trigger.yml and runtime-rebuild-trigger-reusable.yml. Raising
+# the ceiling is therefore a consequence of a declared number rather than a
+# knob, and lowering the declaration below the measurement is a red test rather
+# than a review catch.
+#
+# HOW A VALUE IS SIZED. Bounded BELOW by the worst boot this lane has been
+# OBSERVED to take (an observation is a floor on the real cost, never an
+# estimate of it -- the same reasoning `test_rebuild_trigger_ceiling_omn18200.py`
+# applies to the publisher's ceiling), and bounded ABOVE by the lane's own
+# declared compose `start_period`, which is the point docker itself stops
+# treating a slow boot as a boot. Both bounds are asserted mechanically against
+# the parsed compose model; neither is a comment.
+schema_version: 1
+lanes:
+  compose-dev:
+    # Resolved to 900s: 1.35x the worst observation below, and half the 1800s
+    # start_period `docker/docker-compose.infra.yml` declares on both
+    # `omninode-runtime` and `runtime-effects`.
+    settle_budget_seconds: 900
+    # The compose model this lane's upper bound is read from, and the services
+    # whose readiness the receipt actually waits on. The reader takes the MAX
+    # declared `start_period` across them; a service naming none is a hard
+    # failure, not a skipped row.
+    compose_file: docker/docker-compose.infra.yml
+    readiness_services:
+      - omninode-runtime
+      - runtime-effects
+      - projection-api
+    # Every observation is a `lane ready after Ns` line from a real emitted
+    # compose-dev receipt, with the sha it was keyed by. The lower bound is the
+    # MAX of these, so adding a slower observation without raising the budget
+    # turns the test red.
+    observed_boot_seconds:
+      - seconds: 463
+        sha: 9469bef3
+        note: lab-pass receipt, "ready after 463s"
+      - seconds: 488
+        sha: 6c540f4e
+        note: lab-pass receipt, "lane ready after 488s"
+      - seconds: 526
+        sha: 00926431e0185b674af1b9ea03aea7a3cf804f2c
+        note: runtime-rebuild-trigger run 34835273599, "lane ready 526s of 960s"
+      - seconds: 668
+        sha: 732fd291a98afeac849a4904670b210096649529
+        note: runtime-rebuild-trigger run 34825117758, "lane ready after 668s of an 837s settle budget"

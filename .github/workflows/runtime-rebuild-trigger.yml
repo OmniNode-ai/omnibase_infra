@@ -259,7 +259,12 @@ jobs:
     # guard behind this one. The right fix is for the guard to read queue
     # position rather than wall clock, and the queue it needs to read is the
     # effect's. That is a design change, not a constant.
-    timeout-minutes: 30
+    # DERIVED, not chosen: converge --wait-timeout 25m + the declared
+    # compose-dev settle budget (900s, config/lab_pass_settle_budget.yaml)
+    # + RESERVED_TAIL_SECONDS 120s = 2520s = 42m. Asserted by
+    # tests/ci/test_lab_pass_settle_budget.py, which also keeps it bounded
+    # above so a wedged job is still visible (OMN-18436).
+    timeout-minutes: 45
     steps:
       - name: Checkout the guard from the trusted base ref
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -367,8 +372,17 @@ jobs:
           # reads, the emit step and the artifact upload, so the settle wait can
           # never consume the time the receipt needs to be WRITTEN -- an
           # unwritten receipt is the one outcome worse than a failing one.
-          JOB_TIMEOUT_MINUTES: 30
+          # Must equal this job's own `timeout-minutes`, which is DERIVED from the
+          # declared parts (converge 25m + declared settle 900s + this tail) and
+          # asserted by tests/ci/test_lab_pass_settle_budget.py.
+          JOB_TIMEOUT_MINUTES: 45
           RESERVED_TAIL_SECONDS: 120
+          # The container whose generation binds these HTTP reads to the one the
+          # convergence guard verified. Empty CONVERGE_GENERATION means the
+          # guard published none, which FAILS the binding check rather than
+          # skipping it.
+          DEV_LANE_CONTAINER: omninode-runtime
+          CONVERGE_GENERATION: ${{ steps.converge.outputs.generation }}
           # `host.docker.internal`, NOT `localhost`. This job runs on the
           # lane's host's docker DAEMON, not in the host's network namespace:
           # the `omnibase-deploy` runner is a container
@@ -404,7 +418,7 @@ jobs:
           set -euo pipefail
           mkdir -p "${LAB_PASS_DIR}"
 
-          # SETTLE BUDGET = WHATEVER REMAINS BEFORE THIS JOB'S CEILING.
+          # SETTLE BUDGET = THE LANE'S DECLARED BOOT BUDGET (OMN-18436).
           #
           # A convergence success hands this step a lane that has JUST been
           # recreated: check_dev_lane_staleness.py returns the moment the
@@ -413,31 +427,50 @@ jobs:
           # port. Measured on run 34478680748 -- convergence 13:12:28.544Z,
           # probe 13:12:28.718Z, first Errno 111 at 13:12:28.826Z. 174ms.
           #
-          # The consequence was perverse: the HTTP checks passed only when
-          # deployed_revision FAILED (a stale lane serving happily) and failed
-          # exactly when it SUCCEEDED, so a compose-dev receipt could not be a
-          # PASS by construction.
+          # The budget WAS this job's ceiling minus elapsed, and that was wrong
+          # in a way that cost real deliveries. The three constants this job
+          # declares could not all hold: a 30-minute ceiling, a 25-minute
+          # convergence wait and a 120-second tail leave 180 seconds against a
+          # lane boot measured at 463-668 seconds, so every convergence slower
+          # than about twenty minutes FAILED the receipt on timing alone -- on a
+          # healthy lane running the merged sha -- and rule 24(b) then refused
+          # that sha for staging.
           #
-          # The budget is NOT a constant. The compose x-healthcheck-defaults
-          # start_period is 10s and measures something else; deriving from it
-          # would repeat the false-derivation defect corrected above. It is the
-          # time left before this job's own ceiling, so the single
-          # omnibase-deploy runner slot stays bounded exactly as it is today and
-          # a probe with nothing left records that instead of racing silently.
-          CEILING_SECONDS=$(( ${JOB_TIMEOUT_MINUTES} * 60 ))
+          # The budget is now DECLARED per lane in
+          # config/lab_pass_settle_budget.yaml, bounded below by the worst boot
+          # observed on this lane and above by the lane's own compose
+          # start_period, and THIS JOB'S CEILING IS DERIVED FROM IT
+          # (converge + settle + tail), asserted by
+          # tests/ci/test_lab_pass_settle_budget.py. The ceiling below is a
+          # consequence of that arithmetic, not a knob.
+          #
+          # This step passes the ceiling and the elapsed time so the probe can
+          # say whether the job could AFFORD the declared budget. It never
+          # passes a remainder, and there is no fallback to one: an unresolved
+          # declaration exits non-zero.
           STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
             || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
           ELAPSED=$(( $(date -u +%s) - STARTED_EPOCH ))
-          SETTLE=$(( CEILING_SECONDS - ELAPSED - RESERVED_TAIL_SECONDS ))
-          [ "$SETTLE" -lt 0 ] && SETTLE=0
-          echo "settle budget: ${SETTLE}s (ceiling ${CEILING_SECONDS}s, elapsed ${ELAPSED}s, tail ${RESERVED_TAIL_SECONDS}s)"
+
+          # The derivation is a tested Python step, not shell arithmetic. It
+          # exits non-zero and prints nothing on stdout when the declaration
+          # cannot be resolved, so a partial capture cannot become a guessed
+          # budget.
+          SETTLE_BUDGET_JSON=$(uv run python scripts/ci/lane_settle_budget.py \
+            --lane compose-dev \
+            --job-ceiling-seconds "$(( JOB_TIMEOUT_MINUTES * 60 ))" \
+            --elapsed-seconds "$ELAPSED" \
+            --reserved-tail-seconds "$RESERVED_TAIL_SECONDS")
+          echo "settle budget: ${SETTLE_BUDGET_JSON}"
 
           uv run python scripts/ci/lab_pass_receipt.py probe-lane \
             --lane compose-dev \
             --main-url "$DEV_LANE_MAIN_URL" \
             --effects-url "$DEV_LANE_EFFECTS_URL" \
             --projection-url "$DEV_LANE_PROJECTION_URL" \
-            --settle-timeout-seconds "$SETTLE" \
+            --settle-budget-json "$SETTLE_BUDGET_JSON" \
+            --generation-container "$DEV_LANE_CONTAINER" \
+            --expect-generation "$CONVERGE_GENERATION" \
             > "${LAB_PASS_CHECKS}"
           cat "${LAB_PASS_CHECKS}"
 

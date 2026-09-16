@@ -141,7 +141,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 #: Bump when a field is added or a meaning changes. A receipt carrying an
 #: unknown version is REFUSED by the gate rather than best-effort parsed: a
@@ -460,6 +460,251 @@ def artifact_name(lane: EnumLabLane, sha: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# lane generation and settle budget -- receipt vocabulary, stdlib only
+# ---------------------------------------------------------------------------
+# THESE LIVE HERE, not in a sibling module, for the reason
+# ``test_the_module_imports_nothing_outside_the_stdlib`` records: run
+# 34235502322 died at import on a bare runner and took a whole dev-candidate
+# delivery with it. That gate bans EVERY non-stdlib import root, a repo-local
+# one included, because the boot gate checks this repository out into a
+# subdirectory where a package path is not guaranteed to resolve. So the models
+# a receipt is written in terms of are defined in the module that writes it, and
+# the sibling that READS a declaration (and needs PyYAML to do it) imports THEM
+# rather than the other way round.
+
+#: Stamped from the git sha at build time by ``docker/Dockerfile.runtime``; the
+#: same label ``check_dev_lane_staleness.py`` resolves convergence from.
+REVISION_LABEL: Final[str] = "org.opencontainers.image.revision"
+
+
+@dataclass(frozen=True)
+class ModelLaneGeneration:
+    """One running container, identified so two reads can be compared.
+
+    ``container_id`` is the whole 64-character id as docker reports it; it is
+    abbreviated only for display. A generation comparison on an abbreviation is
+    a comparison that can collide, and the collision would read as agreement.
+    """
+
+    container: str
+    container_id: str
+    image: str
+    revision: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "container": self.container,
+            "container_id": self.container_id,
+            "image": self.image,
+            "revision": self.revision,
+        }
+
+    def to_json(self) -> str:
+        """One line, because this crosses a ``GITHUB_OUTPUT`` boundary."""
+        return json.dumps(self.to_dict(), separators=(",", ":"), sort_keys=True)
+
+    @property
+    def short(self) -> str:
+        return (
+            f"{self.container} id={self.container_id[:12] or '?'} "
+            f"image={self.image[:24] or '?'} revision={self.revision[:12] or '?'}"
+        )
+
+    def same_generation_as(self, other: ModelLaneGeneration) -> bool:
+        """Identity is the container and its image, never the revision alone.
+
+        Two recreates from one build carry the same revision label and are two
+        different generations; a probe that read one and a convergence guard
+        that read the other have not agreed about anything.
+        """
+        return (
+            self.container == other.container
+            and self.container_id == other.container_id
+            and self.image == other.image
+        )
+
+
+def parse_generation(payload: Any) -> ModelLaneGeneration:
+    """Project a ``docker inspect`` object, or a re-read JSON record, onto the model.
+
+    Split out from :func:`read_lane_generation` for the same reason
+    ``check_dev_lane_staleness.parse_docker_inspect`` is: a test that rebuilds
+    the shape by hand proves the comparison logic and nothing about whether the
+    reader can read what docker actually returns.
+    """
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            msg = f"generation record is not JSON: {exc}"
+            raise ValueError(msg) from exc
+    if isinstance(payload, list):  # some docker versions wrap in a list
+        if not payload:
+            msg = "docker inspect returned an empty list; no container was read"
+            raise ValueError(msg)
+        payload = payload[0]
+    if not isinstance(payload, dict):
+        msg = f"a generation record must be an object, got {type(payload).__name__}"
+        raise ValueError(msg)
+
+    # The already-projected form, as written to GITHUB_OUTPUT by the
+    # convergence step and read back by the probe.
+    if "container_id" in payload:
+        missing = sorted(
+            {"container", "container_id", "image", "revision"} - set(payload)
+        )
+        if missing:
+            msg = f"generation record is missing required field(s) {missing}"
+            raise ValueError(msg)
+        return ModelLaneGeneration(
+            container=str(payload["container"]),
+            container_id=str(payload["container_id"]),
+            image=str(payload["image"]),
+            revision=str(payload["revision"]),
+        )
+
+    # The raw `docker inspect` form.
+    labels = (payload.get("Config") or {}).get("Labels") or {}
+    name = str(payload.get("Name", "")).lstrip("/")
+    container_id = str(payload.get("Id", ""))
+    if not container_id:
+        msg = (
+            "docker inspect returned no Id. A generation with no identity cannot "
+            "be compared, and an empty string comparing equal to another empty "
+            "string would read as agreement."
+        )
+        raise ValueError(msg)
+    return ModelLaneGeneration(
+        container=name,
+        container_id=container_id,
+        image=str(payload.get("Image", "")),
+        revision=str(labels.get(REVISION_LABEL, "")),
+    )
+
+
+def read_lane_generation(container: str) -> ModelLaneGeneration:
+    """Read one running container's identity. Read-only; never mutates."""
+    result = subprocess.run(
+        ["docker", "inspect", container, "--format", "{{json .}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        msg = (
+            f"docker inspect {container} failed (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+        raise ValueError(msg)
+    return parse_generation(json.loads(result.stdout))
+
+
+@dataclass(frozen=True)
+class ModelSettleBudget:
+    """What the probe was granted, what it was owed, and whether they agree.
+
+    Constructed by ``scripts/ci/lane_settle_budget.py`` from the per-lane
+    declaration in ``config/lab_pass_settle_budget.yaml`` and handed to
+    ``probe-lane`` as one line of JSON, so this module needs no YAML reader.
+
+    ``granted_seconds`` is ``min(declared, affordable)`` so the probe never
+    overruns the job that has to WRITE the receipt -- an unwritten receipt is
+    the one outcome worse than a failing one. ``sufficient`` is the fact that
+    makes a short grant diagnosable instead of anonymous: before OMN-18436 a
+    job that could afford only 180s of a 463-668s boot reported the shortfall
+    as ``ready_effects: fail``, indistinguishable from an unhealthy lane.
+    """
+
+    lane: str
+    declared_seconds: int
+    affordable_seconds: int
+    job_ceiling_seconds: int
+    elapsed_seconds: int
+    reserved_tail_seconds: int
+    source: str
+
+    @property
+    def granted_seconds(self) -> int:
+        return max(0, min(self.declared_seconds, self.affordable_seconds))
+
+    @property
+    def sufficient(self) -> bool:
+        return self.affordable_seconds >= self.declared_seconds
+
+    @property
+    def evidence(self) -> str:
+        """The one line the ``settle_budget_sufficient`` check carries.
+
+        Names BOTH numbers on both verdicts. A short grant reported only as
+        "the lane was not ready" is indistinguishable from an unhealthy lane,
+        which is the confusion this check exists to remove.
+        """
+        head = (
+            f"declared {self.declared_seconds}s for lane {self.lane} "
+            f"({self.source}); this job could afford {self.affordable_seconds}s "
+            f"(ceiling {self.job_ceiling_seconds}s - elapsed "
+            f"{self.elapsed_seconds}s - reserved tail "
+            f"{self.reserved_tail_seconds}s); granted {self.granted_seconds}s"
+        )
+        if self.sufficient:
+            return f"{head} -- the job could afford the declared budget"
+        return (
+            f"{head} -- the job could NOT afford the declared budget, short by "
+            f"{self.declared_seconds - self.affordable_seconds}s, so a lane that "
+            "does not answer inside the grant has run out of CLOCK and has not "
+            "been shown to be unhealthy"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "lane": self.lane,
+            "declared_seconds": self.declared_seconds,
+            "affordable_seconds": self.affordable_seconds,
+            "job_ceiling_seconds": self.job_ceiling_seconds,
+            "elapsed_seconds": self.elapsed_seconds,
+            "reserved_tail_seconds": self.reserved_tail_seconds,
+            "source": self.source,
+        }
+
+    def to_json(self) -> str:
+        """One line, because this crosses a shell boundary."""
+        return json.dumps(self.to_dict(), separators=(",", ":"), sort_keys=True)
+
+    @classmethod
+    def from_json(cls, body: str) -> ModelSettleBudget:
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            msg = f"a settle budget must be an object, got {type(payload).__name__}"
+            raise ValueError(msg)
+        fields = {
+            "lane",
+            "declared_seconds",
+            "affordable_seconds",
+            "job_ceiling_seconds",
+            "elapsed_seconds",
+            "reserved_tail_seconds",
+            "source",
+        }
+        missing = sorted(fields - set(payload))
+        if missing:
+            msg = f"settle budget is missing required field(s) {missing}"
+            raise ValueError(msg)
+        unknown = sorted(set(payload) - fields)
+        if unknown:
+            msg = f"unknown settle-budget field(s) {unknown}"
+            raise ValueError(msg)
+        return cls(
+            lane=str(payload["lane"]),
+            declared_seconds=int(payload["declared_seconds"]),
+            affordable_seconds=int(payload["affordable_seconds"]),
+            job_ceiling_seconds=int(payload["job_ceiling_seconds"]),
+            elapsed_seconds=int(payload["elapsed_seconds"]),
+            reserved_tail_seconds=int(payload["reserved_tail_seconds"]),
+            source=str(payload["source"]),
+        )
+
+
+# ---------------------------------------------------------------------------
 # probe-lane
 # ---------------------------------------------------------------------------
 #: Checks a ``compose-dev`` emitter proves from the runner, and the reason each
@@ -695,14 +940,64 @@ def _unhealthy_dimension_names(dimensions: list[Any]) -> list[str]:
 SETTLE_POLL_SECONDS = 10.0
 
 
+#: The name of the check that says the job could afford the DECLARED settle
+#: budget. Named rather than folded into the readiness evidence because the two
+#: facts have different remedies: a short grant is a job-ceiling problem and an
+#: unready lane is a lane problem, and before OMN-18436 both arrived as
+#: ``ready_effects: fail``.
+SETTLE_BUDGET_CHECK = "settle_budget_sufficient"
+
+#: The name of the check that says the lane did not answer inside the grant.
+#: Distinct from the per-endpoint checks, which say WHAT did not answer; this
+#: one says the wait ran out, and carries how long it actually waited.
+SETTLE_TIMEOUT_CHECK = "timed_out_before_ready"
+
+#: The name of the check that binds these HTTP reads to the container
+#: generation the convergence guard observed.
+GENERATION_CHECK = "probe_generation_bound"
+
+
+@dataclass(frozen=True)
+class ModelSettleOutcome:
+    """What the settle wait actually did, rather than only what it concluded.
+
+    ``waited_seconds`` is the MEASURED boot when ``ready`` is true, which is the
+    number that sizes the declaration in
+    ``config/lab_pass_settle_budget.yaml``. Recording it on the failing path too
+    is the point: "still not ready after 180s" and "still not ready after 900s"
+    are different findings and the old string made them one.
+    """
+
+    ready: bool
+    waited_seconds: float
+    granted_seconds: float
+    pending: tuple[str, ...]
+
+    @property
+    def phrase(self) -> str:
+        if self.granted_seconds <= 0:
+            return "no settle budget remained, so this is a first-look read"
+        if self.ready:
+            return (
+                f"lane ready after {self.waited_seconds:.0f}s of a "
+                f"{self.granted_seconds:.0f}s settle budget"
+            )
+        return (
+            f"still not ready after the full {self.granted_seconds:.0f}s "
+            f"settle budget: {sorted(self.pending)}"
+        )
+
+
 def wait_for_lane_ready(
     ready_urls: Sequence[str], timeout_seconds: float, settle_timeout_seconds: float
-) -> str:
+) -> ModelSettleOutcome:
     """Poll one readiness endpoint until it answers 200, or the budget expires.
 
-    Returns a phrase describing what happened, which every check below appends
-    to its own evidence. It is deliberately a WAIT and never a verdict: the
-    checks still run afterwards and still fail on a lane that never came up.
+    Returns what happened, structured. Every check below appends
+    :attr:`ModelSettleOutcome.phrase` to its own evidence, and the probe turns
+    the same outcome into the ``timed_out_before_ready`` check. It is
+    deliberately a WAIT and never a verdict: the checks still run afterwards and
+    still fail on a lane that never came up.
 
     WHY THIS EXISTS. ``check_dev_lane_staleness.py`` returns the moment the
     RUNNING container carries the expected ``org.opencontainers.image.revision``
@@ -718,16 +1013,27 @@ def wait_for_lane_ready(
     serving happily) and failed exactly when it SUCCEEDED, so a ``compose-dev``
     receipt could not be a PASS by construction.
 
-    The budget is supplied by the caller rather than being a constant here. The
-    compose ``x-healthcheck-defaults`` ``start_period`` is 10s and measures
-    something else; deriving from it would repeat the false-derivation defect
-    this module's sibling commit corrected. What the caller passes is whatever
-    remains before the emitting job's own ceiling, so the runner slot stays
-    bounded exactly as it is today and a probe with nothing left says so.
+    WHERE THE BUDGET COMES FROM, corrected by OMN-18436. It is still supplied by
+    the caller, but the caller no longer computes it as a job-ceiling remainder.
+    It is DECLARED per lane in ``config/lab_pass_settle_budget.yaml``, bounded
+    below by the worst boot this lane has been observed to take and above by the
+    lane's own compose ``start_period``, and the emitting job's ceiling is
+    derived from it. The old remainder made the lane's boot budget a function of
+    how long the deploy agent queue happened to be: a convergence slower than
+    about twenty minutes left 180s against a 463-668s boot, and the receipt
+    FAILED on timing alone. The earlier note here -- that the compose
+    ``start_period`` is 10s and measures something else -- was reading the
+    ``x-healthcheck-defaults`` anchor; the runtime services override it to
+    ``1800s`` each, which is what the upper bound is taken from.
     """
-    if settle_timeout_seconds <= 0:
-        return "no settle budget remained, so this is a first-look read"
     started = time.monotonic()
+    if settle_timeout_seconds <= 0:
+        return ModelSettleOutcome(
+            ready=False,
+            waited_seconds=0.0,
+            granted_seconds=0.0,
+            pending=tuple(ready_urls),
+        )
     deadline = started + settle_timeout_seconds
     while True:
         pending = [
@@ -735,17 +1041,113 @@ def wait_for_lane_ready(
         ]
         waited = time.monotonic() - started
         if not pending:
-            return (
-                f"lane ready after {waited:.0f}s of a "
-                f"{settle_timeout_seconds:.0f}s settle budget"
+            return ModelSettleOutcome(
+                ready=True,
+                waited_seconds=waited,
+                granted_seconds=settle_timeout_seconds,
+                pending=(),
             )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return (
-                f"still not ready after the full {settle_timeout_seconds:.0f}s "
-                f"settle budget: {sorted(pending)}"
+            return ModelSettleOutcome(
+                ready=False,
+                waited_seconds=waited,
+                granted_seconds=settle_timeout_seconds,
+                pending=tuple(pending),
             )
         time.sleep(min(SETTLE_POLL_SECONDS, remaining))
+
+
+def settle_budget_check(budget: ModelSettleBudget) -> ModelLabPassCheck:
+    """Record whether the job could afford the lane's declared settle budget.
+
+    Emitted on BOTH verdicts. A check that appeared only when the budget was
+    short would be indistinguishable from one that was never run, which is the
+    shape this module's receipt contract refuses everywhere else.
+    """
+    return ModelLabPassCheck(
+        name=SETTLE_BUDGET_CHECK, ok=budget.sufficient, evidence=budget.evidence
+    )
+
+
+def settle_timeout_check(outcome: ModelSettleOutcome) -> ModelLabPassCheck:
+    """Record a boot that ran out of budget, with the measured wait.
+
+    Separate from the per-endpoint checks on purpose. Those say WHICH endpoint
+    did not answer; this says the wait itself expired, and carries the number
+    that sizes the declaration. A reader of a FAIL receipt could previously not
+    tell "the lane is unhealthy" from "the job ran out of clock eight seconds
+    before the lane bound its port".
+    """
+    if outcome.ready:
+        return ModelLabPassCheck(
+            name=SETTLE_TIMEOUT_CHECK,
+            ok=True,
+            evidence=(
+                f"lane answered every readiness endpoint after "
+                f"{outcome.waited_seconds:.0f}s of a "
+                f"{outcome.granted_seconds:.0f}s grant"
+            ),
+        )
+    return ModelLabPassCheck(
+        name=SETTLE_TIMEOUT_CHECK,
+        ok=False,
+        evidence=(
+            f"timed out before ready: waited {outcome.waited_seconds:.0f}s of a "
+            f"{outcome.granted_seconds:.0f}s grant with "
+            f"{sorted(outcome.pending)} still not answering 200"
+        ),
+    )
+
+
+def generation_check(
+    expected: ModelLaneGeneration | None,
+    observed: ModelLaneGeneration | None,
+    read_error: str = "",
+) -> ModelLabPassCheck:
+    """Bind these HTTP reads to the container generation convergence observed.
+
+    Four indeterminate cases, four evidence strings, one verdict. A probe that
+    cannot prove which container answered has not proven anything about the sha
+    this receipt is keyed by, and the greens it recorded are about some other
+    lane (receipt ``4853e0e1``: ``deployed_revision`` FAIL with ``ready_effects``
+    TRUE -- two true statements about two different containers).
+    """
+    if expected is None:
+        return ModelLabPassCheck(
+            name=GENERATION_CHECK,
+            ok=False,
+            evidence=(
+                "the convergence step published no container generation, so "
+                "these reads are not bound to any container and cannot be "
+                "evidence for this sha"
+            ),
+        )
+    if observed is None:
+        return ModelLabPassCheck(
+            name=GENERATION_CHECK,
+            ok=False,
+            evidence=(
+                f"expected generation {expected.short}, but the container could "
+                f"not be re-read at probe time ({read_error or 'no reason given'})"
+            ),
+        )
+    if not expected.same_generation_as(observed):
+        return ModelLabPassCheck(
+            name=GENERATION_CHECK,
+            ok=False,
+            evidence=(
+                f"the lane was recreated between convergence and this probe: "
+                f"convergence read {expected.short}, the probe read "
+                f"{observed.short}. These HTTP reads are about a different "
+                "container generation than the one convergence verified"
+            ),
+        )
+    return ModelLabPassCheck(
+        name=GENERATION_CHECK,
+        ok=True,
+        evidence=(f"probe bound to the generation convergence read: {observed.short}"),
+    )
 
 
 def probe_compose_dev(
@@ -754,12 +1156,24 @@ def probe_compose_dev(
     timeout_seconds: float,
     settle_timeout_seconds: float,
     projection_url: str,
+    *,
+    budget: ModelSettleBudget | None = None,
+    expected_generation: ModelLaneGeneration | None = None,
+    generation_container: str | None = None,
 ) -> list[ModelLabPassCheck]:
     """The read-only probes the ``.201`` dev lane emitter runs.
 
     A convergence success hands us a lane that has just been recreated, so the
     probes wait for it to come up before reading it. See
     :func:`wait_for_lane_ready` for the measurement that made this necessary.
+
+    ``budget`` and ``generation_container`` are supplied by the emitting job and
+    omitted by an ad hoc read. Their PRESENCE is the caller asserting a claim --
+    "this probe had a declared budget", "this probe is bound to a generation" --
+    so an ad hoc read makes neither claim and emits neither check, while the job
+    makes both and is held to both. ``generation_container`` with
+    ``expected_generation=None`` is the job saying convergence produced no
+    record, which is a failure and not an absence.
     """
     # BOTH readiness endpoints, not just main. Measured on the .201 lane
     # 2026-09-10: at 12:36:29Z omninode-runtime read "Up 3 minutes (health:
@@ -769,7 +1183,7 @@ def probe_compose_dev(
     # ready_effects. projection-api joins the same wait for the same reason
     # (OMN-18387): it is its own container with its own recreate timing, and
     # it carries its own ``/ready`` endpoint (confirmed live 2026-09-15).
-    settle = wait_for_lane_ready(
+    outcome = wait_for_lane_ready(
         [
             f"{main_url.rstrip('/')}/ready",
             f"{effects_url.rstrip('/')}/ready",
@@ -778,6 +1192,7 @@ def probe_compose_dev(
         timeout_seconds,
         settle_timeout_seconds,
     )
+    settle = outcome.phrase
     checks = [
         check_ready("ready_main", f"{main_url.rstrip('/')}/ready", timeout_seconds),
         check_ready(
@@ -792,12 +1207,25 @@ def probe_compose_dev(
     # green read taken with no settle budget is a different fact from a green
     # read taken after the lane reported itself up, and the receipt should not
     # make them look identical.
-    return [
+    annotated = [
         ModelLabPassCheck(
             name=check.name, ok=check.ok, evidence=f"{check.evidence} [{settle}]"
         )
         for check in checks
     ]
+    if budget is not None:
+        annotated.append(settle_budget_check(budget))
+    if settle_timeout_seconds > 0:
+        annotated.append(settle_timeout_check(outcome))
+    if generation_container is not None:
+        observed: ModelLaneGeneration | None = None
+        read_error = ""
+        try:
+            observed = read_lane_generation(generation_container)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            read_error = f"{type(exc).__name__}: {exc}"
+        annotated.append(generation_check(expected_generation, observed, read_error))
+    return annotated
 
 
 # ---------------------------------------------------------------------------
@@ -1137,8 +1565,42 @@ def build_parser() -> argparse.ArgumentParser:
             "A convergence success hands the probe a lane that has JUST been "
             "recreated, so without a budget here the probes race the compose "
             "recreate (measured: 174ms after convergence on run 34478680748). "
-            "The caller passes whatever remains before its own job ceiling; the "
-            "default of 0 preserves the first-look behaviour for an ad hoc read."
+            "For an ad hoc read only; the default of 0 preserves the first-look "
+            "behaviour. An emitting job passes --job-ceiling-seconds instead, "
+            "which DERIVES the budget from the lane's declaration rather than "
+            "from a remainder (OMN-18436)."
+        ),
+    )
+    probe.add_argument(
+        "--settle-budget-json",
+        default="",
+        help=(
+            "the lane's DECLARED settle budget and this job's affordance for "
+            "it, as one line of JSON from scripts/ci/lane_settle_budget.py. "
+            "Supplying it replaces --settle-timeout-seconds: the declaration is "
+            "the budget, and the job's ceiling only decides whether it could be "
+            "AFFORDED, which is recorded as its own check instead of arriving "
+            "as a lane-health failure (OMN-18436)."
+        ),
+    )
+    probe.add_argument(
+        "--generation-container",
+        default=None,
+        help=(
+            "the container whose identity binds these reads to the generation "
+            "the convergence guard observed. Supplying it asserts the binding "
+            "and emits the probe_generation_bound check; omitting it makes no "
+            "claim, which is the ad hoc case."
+        ),
+    )
+    probe.add_argument(
+        "--expect-generation",
+        default="",
+        help=(
+            "the convergence step's `generation` output, as one line of JSON. "
+            "An EMPTY value with --generation-container supplied means "
+            "convergence published none, which fails the binding check rather "
+            "than skipping it."
         ),
     )
 
@@ -1199,12 +1661,40 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "probe-lane":
+        budget: ModelSettleBudget | None = None
+        settle_seconds = args.settle_timeout_seconds
+        if args.settle_budget_json.strip():
+            try:
+                budget = ModelSettleBudget.from_json(args.settle_budget_json)
+            except (ValueError, json.JSONDecodeError) as exc:
+                # Fail closed and LOUD. There is no fallback to a job-ceiling
+                # remainder: the remainder is the defect this replaced, and
+                # falling back to it exactly when the declaration could not be
+                # read would reintroduce it on the runs nobody is watching.
+                print(f"::error::settle budget unreadable: {exc}", file=sys.stderr)
+                return 1
+            settle_seconds = float(budget.granted_seconds)
+            print(f"settle budget: {budget.evidence}", file=sys.stderr)
+
+        expected_generation: ModelLaneGeneration | None = None
+        if args.expect_generation.strip():
+            try:
+                expected_generation = parse_generation(args.expect_generation)
+            except ValueError as exc:
+                print(
+                    f"::warning::convergence generation record unreadable: {exc}",
+                    file=sys.stderr,
+                )
+
         checks = probe_compose_dev(
             args.main_url,
             args.effects_url,
             args.timeout_seconds,
-            args.settle_timeout_seconds,
+            settle_seconds,
             args.projection_url,
+            budget=budget,
+            expected_generation=expected_generation,
+            generation_container=args.generation_container,
         )
         print(json.dumps([c.to_dict() for c in checks], indent=2))
         return 0
