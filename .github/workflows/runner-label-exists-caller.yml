@@ -46,4 +46,11 @@ jobs:
       # cannot grant itself through `permissions:`. The gate refuses rather
       # than guessing when it cannot read the listing, because an unreadable
       # listing and an empty fleet are the same value and neither is a pass.
-      ORG_RUNNERS_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+      #
+      # RUNNER_FLEET_STATUS_TOKEN first, CROSS_REPO_PAT as the fallback: that
+      # is the precedence `dev-lane-liveness.yml`'s "Probe the org runner
+      # registry" step already uses for the identical read, and the first run
+      # of this gate proved why it matters -- CROSS_REPO_PAT alone returned
+      # HTTP 403 "Resource not accessible by personal access token", and the
+      # gate correctly refused rather than reporting a pass it had not earned.
+      ORG_RUNNERS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN || secrets.CROSS_REPO_PAT }}
