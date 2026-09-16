@@ -262,6 +262,8 @@ def running():
     return [c for c in spec["containers"] if c["status"].startswith("Up")]
 if a[0]=="ps" and "-a" in a:
     for n,s in ps_all(): print(f"{{n}}\\t{{s}}")
+elif a[0]=="ps" and ".Ports" in " ".join(a):
+    for c in running(): print(c["name"] + "\\t" + c.get("ports",""))
 elif a[0]=="ps" and "health=starting" in " ".join(a):
     for c in running():
         if "health: starting" in c["status"]: print(c["name"])
@@ -1718,3 +1720,288 @@ def test_endpoint_failures_are_counted_in_the_header(
         f"listed under *Active issues*:\n{report}"
     )
     assert listed_critical > 0, report
+
+
+# --------------------------------------------------------------------------
+# OMN-18435 -- a lane inside its container's declared start_period is BOOTING,
+# not down.
+#
+# Measured on .201 over 242 ticks (2026-09-14T00:00Z -> 2026-09-16T11:45Z):
+# `runtime-dev-8085` was CRITICAL on 20 ticks, EVERY one a single isolated tick
+# with the next tick back at 200. Eleven of the fourteen 503s carried
+# `is_running=false` -- a runtime serving HTTP whose kernel had not started, i.e.
+# a boot. `RestartCount` was 0 throughout, so nothing crashed. The lane is
+# recreated by the delivery chain dozens of times a day and its image declares
+# `StartPeriod=1800s`, so Docker itself never calls it unhealthy during these
+# boots -- only this reporter did.
+#
+# The script already honours a container's declared start_period on the
+# CONTAINER path (`starting_past_start_period`). These tests pin the same
+# concept on the ENDPOINT path, and pin fail-closed everywhere it cannot be
+# established: a monitor that cannot tell is still not allowed to say green.
+# --------------------------------------------------------------------------
+
+
+def _iso_ago(seconds: int) -> str:
+    """A UTC `StartedAt` that many seconds in the past, in Docker's own shape."""
+    return time.strftime(
+        "%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime(time.time() - seconds)
+    )
+
+
+def _lane_docker(
+    dev_port: str,
+    *,
+    age_seconds: int,
+    start_period_seconds: int,
+    publish_port: bool = True,
+    started_at: str | None = None,
+) -> dict[str, Any]:
+    """Docker state whose dev-lane runtime publishes the dev lane's main port.
+
+    Mirrors `.201`: `docker ps --format '{{.Names}}\t{{.Ports}}'` there renders
+    `omninode-runtime  0.0.0.0:8085->8085/tcp, [::]:8085->8085/tcp`, which is the
+    only fact tying a probed port to a container. Nothing here hardcodes the
+    container NAME into the script under test -- the port is the join key, and
+    it is the same port the probe itself already resolved from policy.
+    """
+    ports = (
+        f"0.0.0.0:{dev_port}->8085/tcp, [::]:{dev_port}->8085/tcp"
+        if publish_port
+        else ""
+    )
+    return {
+        "containers": [
+            {
+                "name": "omninode-runtime",
+                "status": "Up 1 minute (health: starting)",
+                "started_at": (
+                    started_at if started_at is not None else _iso_ago(age_seconds)
+                ),
+                "start_period_ns": start_period_seconds * 10**9,
+                "ports": ports,
+            },
+            {
+                "name": "omnibase-infra-postgres",
+                "status": "Up 40 minutes (healthy)",
+                "started_at": _iso_ago(2400),
+                "ports": "0.0.0.0:5432->5432/tcp",
+            },
+        ],
+        "dangling": [],
+    }
+
+
+def _dev_endpoint_status(report: str, dev_port: str) -> str:
+    """The dev lane's status as the digest renders it under *Runtime endpoints*.
+
+    `_run` returns the rendered digest, not the raw snapshot, so the status is
+    read from the line the operator actually sees -- which also pins that a
+    non-CRITICAL lane is still RENDERED rather than silently dropped.
+    """
+    section = report.split("*Runtime endpoints*", 1)
+    if len(section) < 2:
+        return ""
+    body = section[1].split("*CI required contexts*", 1)[0]
+    match = re.search(
+        rf"^- `runtime-dev-{re.escape(dev_port)}`: HTTP \S+ \((\w+)\)$",
+        body,
+        re.MULTILINE,
+    )
+    return match.group(1) if match else ""
+
+
+def test_runtime_lane_inside_its_start_period_is_not_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC1 -- a 503 from a lane 60s into a 1800s start_period is a boot.
+
+    This is the measured case: 11 of the 20 critical ticks carried
+    `is_running=false` while the container had just been recreated.
+    """
+    dev_port = lane_ports["dev"]
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(lane_ports),
+        docker_state=_lane_docker(dev_port, age_seconds=60, start_period_seconds=1800),
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    status = _dev_endpoint_status(report, dev_port)
+    assert status, f"the dev lane vanished from *Runtime endpoints* entirely:\n{report}"
+    assert status != "CRITICAL", (
+        f"a lane 60s into a 1800s start_period was scored CRITICAL:\n{report}"
+    )
+    assert status == "STARTING", (
+        f"expected a distinct non-paging status for a booting lane, got {status}:\n{report}"
+    )
+    # A booting lane must not become an ACTIVE ISSUE, and the header count must
+    # agree -- the OMN-15525 failure was a header that disagreed with the rows.
+    issues = report.split("*Active issues*", 1)[1]
+    assert f"runtime-dev-{dev_port}" not in issues, (
+        f"a booting lane was listed under *Active issues*:\n{report}"
+    )
+
+
+def test_runtime_lane_inside_its_start_period_does_not_page(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC1 -- and it never reaches the alert key set, so it cannot page."""
+    dev_port = lane_ports["dev"]
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(lane_ports),
+        docker_state=_lane_docker(dev_port, age_seconds=60, start_period_seconds=1800),
+    )
+    _log, posts = _run_alert(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert f"runtime-dev-{dev_port}" not in _alert_state(tmp_path), (
+        f"a booting lane entered the alert state machine:\n{_alert_state(tmp_path)}"
+    )
+    assert not any(f"runtime-dev-{dev_port}" in text for text in posts), (
+        f"a booting lane paged Slack:\n{posts}"
+    )
+
+
+def test_runtime_lane_past_its_start_period_is_still_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC2 -- the grace is bounded by the container's OWN declared budget."""
+    dev_port = lane_ports["dev"]
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(lane_ports),
+        docker_state=_lane_docker(
+            dev_port, age_seconds=7200, start_period_seconds=1800
+        ),
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert _dev_endpoint_status(report, dev_port) == "CRITICAL", (
+        f"a lane 2h into a 1800s start_period must still be CRITICAL:\n{report}"
+    )
+
+
+def test_runtime_lane_with_no_container_on_the_port_fails_closed(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC2 -- no container publishes the port, so nothing proves a boot."""
+    dev_port = lane_ports["dev"]
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(lane_ports),
+        docker_state=_lane_docker(
+            dev_port, age_seconds=60, start_period_seconds=1800, publish_port=False
+        ),
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert _dev_endpoint_status(report, dev_port) == "CRITICAL", (
+        f"an unresolvable container must fail closed to CRITICAL:\n{report}"
+    )
+
+
+def test_runtime_lane_with_unparseable_start_time_fails_closed(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC2 -- a container that cannot be AGED cannot be proven inside its grace.
+
+    Same rule the container path already applies (`age-unknown`): losing the
+    ability to measure must never be the quiet outcome.
+    """
+    dev_port = lane_ports["dev"]
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_outage_http(lane_ports),
+        docker_state=_lane_docker(
+            dev_port,
+            age_seconds=60,
+            start_period_seconds=1800,
+            started_at="not-a-timestamp",
+        ),
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert _dev_endpoint_status(report, dev_port) == "CRITICAL", (
+        f"a container with an unparseable StartedAt must fail closed:\n{report}"
+    )
+
+
+def test_healthy_lane_inside_its_start_period_still_reads_ok(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """Positive control -- the new branch only ever downgrades a CRITICAL.
+
+    Without this, a bug that stamped STARTING on everything inside the grace
+    would pass every test above while destroying the OK signal.
+    """
+    dev_port = lane_ports["dev"]
+    http = _outage_http(lane_ports)
+    http[dev_port] = (200, HEALTHY_BODY)
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=http,
+        docker_state=_lane_docker(dev_port, age_seconds=60, start_period_seconds=1800),
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert _dev_endpoint_status(report, dev_port) == "OK", (
+        f"a healthy lane inside its start_period must still read OK:\n{report}"
+    )
+
+
+# The unhealthy dimension is placed deliberately past the display-excerpt
+# boundary. On .201 the real body is ~4.3 KB and `BODY_EXCERPT_BYTES` is 180, so
+# every recorded 503 row stopped before `event_bus_healthy` -- which is why the
+# three genuinely-unhealthy ticks in the measured window cannot be diagnosed
+# from the logs at all. The monitor recorded a verdict with no reason.
+_DEEP_UNHEALTHY_BODY = json.dumps(
+    {
+        "status": "unhealthy",
+        "version": "0.38.29",
+        "details": {
+            "healthy": False,
+            "degraded": False,
+            "startup_in_progress": False,
+            "is_running": True,
+            "is_draining": False,
+            "pending_message_count": 0,
+            "max_concurrent_handlers": 64,
+            "handler_pool_size": 8,
+            "in_flight_tasks": 0,
+            "batch_response_enabled": True,
+            "batch_response_pending": 0,
+            "event_bus_healthy": False,
+            "no_handlers_registered": False,
+            "registered_handlers": 41,
+        },
+    }
+)
+assert _DEEP_UNHEALTHY_BODY.index("event_bus_healthy") > 180, (
+    "the failing dimension must sit past the display-excerpt boundary or this "
+    "test cannot observe the truncation it exists to pin"
+)
+
+
+def test_unhealthy_runtime_detail_names_the_failing_dimension(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC3 -- record WHY, not just that."""
+    dev_port = lane_ports["dev"]
+    http = _outage_http(lane_ports)
+    http[dev_port] = (503, _DEEP_UNHEALTHY_BODY)
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=http,
+        docker_state=_lane_docker(
+            dev_port, age_seconds=7200, start_period_seconds=1800
+        ),
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert _dev_endpoint_status(report, dev_port) == "CRITICAL", report
+    issues = report.split("*Active issues*", 1)[1]
+    assert "event_bus_healthy=false" in issues, (
+        "the recorded row must name the failing health dimension; the 180-byte "
+        f"excerpt alone stops before it:\n{issues}"
+    )
