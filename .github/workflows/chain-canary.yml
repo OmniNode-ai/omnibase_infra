@@ -126,9 +126,13 @@ on:
   workflow_dispatch:
     inputs:
       probe_url:
-        description: 'Runtime ingress base URL to probe. host.docker.internal resolves to the lane host from the deploy runner.'
+        description: 'Runtime ingress base URL. Used only when gateway_url is empty; that route carries no tenant (OMN-18421).'
         required: false
         default: 'http://host.docker.internal:8085'
+      gateway_url:
+        description: 'Tenant-bearing submission route (onex-api on the lane). Empty falls back to the tenant-less /skill ingress — see OMN-18421.'
+        required: false
+        default: 'http://host.docker.internal:8090'
       task_type:
         description: 'Delegation class to fire (see omnidash shared/contracts/delegation-task-types.json).'
         required: false
@@ -330,6 +334,28 @@ jobs:
           # is only refreshed on recreate (OMN-14958 / OMN-14900) — same
           # precedent as dev-lane-liveness.yml.
           PROBE_URL: ${{ github.event.inputs.probe_url || 'http://host.docker.internal:8085' }}
+          # OMN-18421: THE TENANT-BEARING SUBMISSION ROUTE.
+          #
+          # Why this probe moved off `/skill`. That ingress reads
+          # `X-Correlation-ID` and nothing else — no authorization header, no
+          # tenant — so every event the resulting chain published was
+          # unattributed, and omnimarket's delegation projection writer refused
+          # every one of them fail-closed into
+          # `onex.dlq.omnimarket.projection-delegation-malformed.v1`. The
+          # refusal is correct: a writer under FORCE ROW LEVEL SECURITY cannot
+          # discover a row's tenant by reading, and stamping a house identity
+          # would put rows where the submitting tenant's reader could never see
+          # them. The runtime will not source a tenant either — carrying one
+          # across a hop is its job, inventing one is forbidden. So this probe
+          # reported PROBE-GREEN on a chain that projected nothing while the
+          # DLQ Depth Monitor went red on every run.
+          #
+          # 8090 and not 8085: the lane's onex-api publishes its host port
+          # there (docker/docker-compose.dev-lane.yml), reachable from this
+          # runner by the same `host.docker.internal` host-gateway alias the
+          # 8085 probe already uses. No new network exposure was created for
+          # this and none is needed.
+          GATEWAY_URL: ${{ github.event.inputs.gateway_url || 'http://host.docker.internal:8090' }}
           TASK_TYPE: ${{ github.event.inputs.task_type || 'test' }}
           BUDGET_MS: ${{ github.event.inputs.budget_ms || '120000' }}
           # Empty means "use the lane declaration", resolved into
@@ -370,6 +396,33 @@ jobs:
           # argv is world-readable through /proc, and the dispatch step echoes
           # its own broker values into this log.
           CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
+          # OMN-18421: the gateway API key, injected as ENVIRONMENT under the
+          # literal name the probe is told to read, exactly like the two DSNs
+          # above and for the same reason — argv is world-readable through
+          # /proc and the dispatch step echoes its own arguments into this log.
+          # The flag below passes the NAME; the request model refuses a value
+          # that is not a valid environment variable name.
+          #
+          # The key is LANE-LOCAL. It belongs to the tenant the dev lane's own
+          # onex-api issues for itself in-process, through the same
+          # `auth_api_keys.create_api_key` call the /api-keys route uses, and it
+          # authorises nothing outside this compose project. The per-seam
+          # delegation smoke under scripts/smoke drives the same path.
+          #
+          # The script is described rather than named on purpose. The
+          # incident-replay coverage gate (OMN-15547) resolves "guard is wired
+          # as enforcement" by scanning workflow files for script paths, so a
+          # path spelled inside an explanatory comment enrols that script as a
+          # guard owing a replay case it was never meant to owe. Same class as
+          # the omni_home rule about PR bodies: a gate that parses prose fires
+          # on prose.
+          #
+          # ABSENT IS RED, BY DESIGN. When this variable resolves to nothing the
+          # run reports `submission_route_not_configured` and names it. It does
+          # NOT fall back to the tenant-less route: a probe that quietly submits
+          # the unattributed way reports green on a chain that projects nothing,
+          # which is the exact false-clean this ticket exists to remove.
+          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
           # OMN-16964: what a COMPLETE chain must carry, end to end. Declared
           # here rather than inferred from whatever the ledger returned,
           # because the scope's own wording is "no gaps tolerated silently" --
@@ -421,10 +474,20 @@ jobs:
           echo "terminal broker:   ${TERMINAL_BOOTSTRAP:-<unset>}"
           # The NAME is safe to print and is the one thing worth printing: it
           # is what a reader needs to check the declaration against the secret.
+          if [ -n "${GATEWAY_URL:-}" ]; then
+            echo "submission route:   ${GATEWAY_URL}/v1/workflows (tenant-bearing)"
+          else
+            echo "submission route:   ${PROBE_URL}/skill (NO TENANT — OMN-18421)"
+          fi
+          # The NAME, never the value. Whether anything is behind it is reported
+          # by the probe's own verdict, which is the surface worth reading.
+          echo "gateway key var:    CHAIN_CANARY_GATEWAY_API_KEY"
           echo "projection dsn var: ${CHAIN_CANARY_PROJECTION_DSN_ENV:-<undeclared>}"
           echo "ledger dsn var:     ${CHAIN_CANARY_LEDGER_DSN_ENV:-<undeclared>}"
           uv run onex skill chain_canary \
             --probe-url "${PROBE_URL}" \
+            --gateway-url "${GATEWAY_URL}" \
+            --gateway-api-key-env CHAIN_CANARY_GATEWAY_API_KEY \
             --task-type "${TASK_TYPE}" \
             --budget-ms "${BUDGET_MS}" \
             --terminal-bootstrap-servers "${TERMINAL_BOOTSTRAP}" \

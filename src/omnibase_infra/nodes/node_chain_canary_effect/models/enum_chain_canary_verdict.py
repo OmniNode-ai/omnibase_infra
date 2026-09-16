@@ -141,6 +141,23 @@ class EnumChainCanaryVerdict(StrEnum):
     # sends you to how the canary was wired (OMN-16964, mirroring
     # PROJECTION_READBACK_REFUSED above).
     LEDGER_REPLAY_REFUSED = "ledger_replay_refused"
+    # OMN-18421. The run declared the TENANT-BEARING submission route (the
+    # gateway) and could not use it, so nothing was published and no claim is
+    # made about the chain.
+    #
+    # This is RED, and it is red on purpose. The alternative -- silently
+    # falling back to the tenant-less `/skill` ingress -- is what makes a
+    # canary dishonest: it would keep reporting PROBE-GREEN on a chain whose
+    # every event is refused fail-closed by the delegation projection writer
+    # for want of attribution, which is exactly the false-clean that let
+    # `onex.dlq.omnimarket.projection-delegation-malformed.v1` take continuous
+    # arrivals while this probe said the chain was alive. A canary that cannot
+    # submit the way a real tenant submits has not proved the tenant path; it
+    # has proved a path no customer takes.
+    #
+    # The detail names the missing prerequisite by variable or URL, so the
+    # repair is readable off the receipt rather than guessed at.
+    SUBMISSION_ROUTE_NOT_CONFIGURED = "submission_route_not_configured"
     # ONEX_CHAIN_CANARY_DISABLED was set. Zero I/O was performed.
     SKIPPED_DISABLED = "skipped_disabled"
 

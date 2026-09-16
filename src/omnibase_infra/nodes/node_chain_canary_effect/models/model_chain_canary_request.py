@@ -5,10 +5,18 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
@@ -26,6 +34,12 @@ _DEFAULT_TERMINAL_SUCCESS_TOPICS: tuple[str, ...] = (
 _DEFAULT_TERMINAL_FAILURE_TOPICS: tuple[str, ...] = (
     EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value,
 )
+
+
+# A POSIX environment variable name. Used to refuse an API KEY passed where a
+# variable NAME belongs (OMN-18421) -- the transposition is silent, and the
+# consequence is three durable copies of a credential.
+_ENV_VAR_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _coerce_topics(value: object) -> object:
@@ -63,6 +77,60 @@ class ModelChainCanaryRequest(BaseModel):
             "a silent default would let a misconfigured run probe the wrong "
             "lane and report a green that means nothing (CLAUDE.md Rule 8). "
             "The caller names the lane; this node never guesses it."
+        ),
+    )
+    gateway_url: str = Field(
+        default="",
+        description=(
+            "Base URL of the TENANT-BEARING submission route — the onex-api "
+            "gateway, e.g. 'http://host.docker.internal:8090'. When set, the "
+            "probe submits POST {gateway_url}/v1/workflows with a real "
+            "credential instead of POST {probe_url}/skill (OMN-18421).\n\n"
+            "WHY THIS EXISTS. The `/skill` ingress reads X-Correlation-ID and "
+            "nothing else: no authorization header, no tenant. Every event the "
+            "resulting chain publishes is therefore unattributed, and "
+            "omnimarket's delegation projection writer refuses an unattributed "
+            "event fail-closed into its malformed sink — correctly, because a "
+            "writer under FORCE ROW LEVEL SECURITY cannot discover a row's "
+            "tenant by reading, and stamping a house identity would put rows "
+            "where the submitting tenant's reader could never see them. So the "
+            "canary's own chain was refused on every run while the probe "
+            "reported green. The gateway is the only surface with an "
+            "authenticated identity, and this field is how the canary reaches "
+            "it.\n\n"
+            "EMPTY keeps the legacy `/skill` route. It is not a silent "
+            "fallback: when this is set and the credential is missing the run "
+            "reports SUBMISSION_ROUTE_NOT_CONFIGURED and is RED, rather than "
+            "quietly submitting the tenant-less way and proving a path no "
+            "customer takes."
+        ),
+    )
+    gateway_api_key_env: str = Field(
+        default="",
+        description=(
+            "NAME of the environment variable carrying the gateway API key — "
+            "a NAME, never the key. Same reasoning as `projection_dsn_env` and "
+            "`ledger_source_env` below, and for the same three durable copies: "
+            "`onex skill` serialises every arg into the node payload, onto the "
+            "bus and into the event log, and the flag itself lands in argv, "
+            "which is world-readable through /proc. The value is injected into "
+            "the job environment under this name and read there.\n\n"
+            "REQUIRED when `gateway_url` is set. A gateway submission with no "
+            "credential is a 401, which is a claim about the canary's wiring "
+            "and not about the chain, so the run refuses before publishing "
+            "anything."
+        ),
+    )
+    gateway_workflow_type: str = Field(
+        default="delegate-skill",
+        description=(
+            "Public workflow_type submitted to the gateway. Defaults to the "
+            "catalog entry whose command topic is the FIRST hop of "
+            "`expected_ledger_hops` — the consumer-facing delegation entry "
+            "point. `delegation-inference` would also be accepted by the "
+            "gateway and would enter this chain at hop 2, so the head hop "
+            "would simply never exist and link 5 would report an incomplete "
+            "chain that was in fact never started."
         ),
     )
     runtime_command: str = Field(
@@ -383,6 +451,67 @@ class ModelChainCanaryRequest(BaseModel):
                 f"probe_url must be an absolute http(s) URL, got: {value!r}"
             )
         return stripped
+
+    @field_validator("gateway_url")
+    @classmethod
+    def _validate_gateway_url(cls, value: str) -> str:
+        """Empty keeps the legacy route; anything else must be a real URL."""
+        stripped = value.strip().rstrip("/")
+        if not stripped:
+            return ""
+        if not stripped.startswith(("http://", "https://")):
+            raise ValueError(
+                f"gateway_url must be an absolute http(s) URL, got: {value!r}"
+            )
+        return stripped
+
+    @field_validator("gateway_api_key_env")
+    @classmethod
+    def _gateway_api_key_env_is_a_name_not_a_key(cls, value: str) -> str:
+        """Refuse a value that is obviously the key itself.
+
+        An environment variable NAME is a POSIX identifier. A gateway API key
+        is not, and the two are easy to transpose on a command line where the
+        mistake is silent and durable — the flag lands in argv, the dispatch
+        step echoes its own arguments into the run log, and the request is
+        serialised into the event log. The message deliberately does not echo
+        the offending value.
+        """
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        if not _ENV_VAR_NAME_PATTERN.fullmatch(stripped):
+            raise ValueError(
+                "gateway_api_key_env takes the NAME of the environment "
+                "variable carrying the gateway API key, and the value supplied "
+                "is not a valid environment variable name. A key passed here "
+                "would land in argv, in this run's log and in the event log. "
+                "Pass the name and inject the value into the environment "
+                "under it."
+            )
+        return stripped
+
+    @model_validator(mode="after")
+    def _gateway_route_needs_a_credential(self) -> ModelChainCanaryRequest:
+        """A declared gateway route with no credential is refused at the model.
+
+        Refused here rather than at submit time so the run never reaches the
+        point of publishing: a 401 from the gateway is a claim about how this
+        canary was wired, and letting it happen would put a misleading
+        INGRESS_UNREACHABLE-shaped failure in the receipt instead of the real
+        cause. The handler's own SUBMISSION_ROUTE_NOT_CONFIGURED verdict covers
+        the other half — a name that is declared but resolves to nothing in the
+        environment, which this model cannot see.
+        """
+        if self.gateway_url and not self.gateway_api_key_env:
+            raise ValueError(
+                "gateway_url names the tenant-bearing submission route but "
+                "gateway_api_key_env is empty, so the submission would be "
+                "unauthenticated. Name the environment variable carrying the "
+                "gateway API key, or leave gateway_url empty to keep the "
+                "legacy tenant-less /skill route."
+            )
+        return self
 
 
 __all__ = ["ModelChainCanaryRequest"]
