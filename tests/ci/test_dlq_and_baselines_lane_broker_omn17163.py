@@ -231,9 +231,17 @@ def test_positive_control_the_reference_workflow_satisfies_these_pins() -> None:
     If it fails any of the three structural pins, the pin is wrong rather than
     the workflow under test -- so this check is what keeps the rest of the file
     honest rather than merely strict.
+
+    The reference's LABEL is the one thing that legitimately diverged.
+    OMN-18408 moved chain-canary.yml to `omnibase-verify` while leaving these
+    two probes on `omnibase-deploy` by explicit operator scope, pending a
+    separate decision on the remainder. Both labels are containers on the same
+    .201 host with the same docker.sock and host-gateway alias, so the
+    lane-reachability property this control exists to prove is unaffected; only
+    which of the two containers serves the job changed.
     """
     canary_text = _executable(_text(_CANARY_WORKFLOW))
-    assert _sole_job(_CANARY_WORKFLOW)["runs-on"] == _DEPLOY_RUNNER
+    assert _sole_job(_CANARY_WORKFLOW)["runs-on"] == ["self-hosted", "omnibase-verify"]
     assert not _HOST_LOCAL_BROKER.search(canary_text)
     assert _ROUTING_VARIABLE not in canary_text
     assert _LANE_OVERLAY_PATH in canary_text

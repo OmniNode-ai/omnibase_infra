@@ -471,18 +471,20 @@ def test_lane_probe_is_wired_to_a_firing_surface() -> None:
 
 
 def test_lane_probe_runs_where_the_lane_is_reachable() -> None:
-    """The lane job is self-hosted BY DESIGN, and only on the deploy runner.
+    """The lane job is self-hosted BY DESIGN, and only on a lab-host runner.
 
-    `omnibase-deploy` is the one runner carrying both docker.sock and the
+    A lab-host runner is the only place carrying both docker.sock and the
     host-gateway alias, so it is the only place either half of the probe
     (compose-project membership, lane host-port reachability) is observable.
     The lane's broker host-port is on the tailnet — GitHub-hosted compute
     could only ever assert "I cannot see it."
+
+    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. Both labels resolve to a container on the same .201 lab host carrying docker.sock and the `host.docker.internal` host-gateway alias, so every reachability reason this pin was written for is unchanged. What changed is that `omnibase-deploy` has exactly one member which also runs the release-train deploy, and this job was queueing behind it.
     """
     workflow = yaml.safe_load(LANE_WORKFLOW.read_text())
     assert workflow["jobs"]["dev-lane-liveness"]["runs-on"] == [
         "self-hosted",
-        "omnibase-deploy",
+        "omnibase-verify",
     ]
 
 

@@ -69,7 +69,15 @@ jobs:
   dev-lane-liveness:
     name: dev-lane-liveness
     # See "WHY SELF-HOSTED IS CORRECT HERE" above before changing this.
-    runs-on: [self-hosted, omnibase-deploy]
+    # OMN-18408: `omnibase-verify`, not `omnibase-deploy`. Same lab host,
+    # same docker socket and same `host.docker.internal` gateway -- the
+    # reason the job is self-hosted at all is unchanged. What changed is
+    # WHICH container serves it: `omnibase-deploy` has exactly one member,
+    # which also runs the release-train deploy, so every scheduled probe
+    # queued behind it (12 queued + 1 in progress at 2026-09-15T20:00Z).
+    # This job writes nothing and needs no private OMNI_HOME clone, so it
+    # belongs on the read-only verify runner. Do not move it back.
+    runs-on: [self-hosted, omnibase-verify]
     timeout-minutes: 10
     steps:
       - name: Checkout (health gate script + rendered runtime policy)

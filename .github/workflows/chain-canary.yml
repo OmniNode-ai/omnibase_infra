@@ -170,8 +170,16 @@ env:
 jobs:
   chain-canary:
     name: Chain Canary (dev lane)
-    # See "WHY SELF-HOSTED omnibase-deploy" above before changing this.
-    runs-on: [self-hosted, omnibase-deploy]
+    # See "WHY SELF-HOSTED" above before changing this.
+    # OMN-18408: `omnibase-verify`, not `omnibase-deploy`. Same lab host,
+    # same docker socket and same `host.docker.internal` gateway -- the
+    # reason the job is self-hosted at all is unchanged. What changed is
+    # WHICH container serves it: `omnibase-deploy` has exactly one member,
+    # which also runs the release-train deploy, so every scheduled probe
+    # queued behind it (12 queued + 1 in progress at 2026-09-15T20:00Z).
+    # This job writes nothing and needs no private OMNI_HOME clone, so it
+    # belongs on the read-only verify runner. Do not move it back.
+    runs-on: [self-hosted, omnibase-verify]
     timeout-minutes: 25
 
     steps:

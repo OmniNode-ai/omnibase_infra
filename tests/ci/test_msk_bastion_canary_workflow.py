@@ -59,9 +59,12 @@ def test_canary_is_scheduled() -> None:
 
 
 def test_canary_runs_where_the_bastion_is_reachable() -> None:
-    """GitHub-hosted compute cannot see the bastion; only this runner can."""
+    """GitHub-hosted compute cannot see the bastion; only a lab runner can.
+
+    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. Both labels resolve to a container on the same .201 lab host carrying docker.sock and the `host.docker.internal` host-gateway alias, so every reachability reason this pin was written for is unchanged. What changed is that `omnibase-deploy` has exactly one member which also runs the release-train deploy, and this job was queueing behind it.
+    """
     runs_on = _job()["runs-on"]
-    assert "self-hosted" in runs_on and "omnibase-deploy" in runs_on, (
+    assert "self-hosted" in runs_on and "omnibase-verify" in runs_on, (
         f"runs-on is {runs_on!r}. The bastion is reachable only from the .201 "
         "tailnet, so any other runner can report only 'I cannot see it'."
     )
