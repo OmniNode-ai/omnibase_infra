@@ -18,6 +18,20 @@
 name: ARM64 Verify Runner Proof
 
 on:
+  # PATH-SCOPED, and the scope is the point. A change to the runner image, the
+  # host inventory or a host's compose file is exactly the change whose author
+  # should learn immediately that the arm64 host is not actually able to run a
+  # job -- that is the defect class this whole change exists to remove, and
+  # learning it at provisioning time rather than at merge time is the lab-first
+  # rule applied to the fleet itself. No other PR triggers this, so no unrelated
+  # change depends on one desk machine being awake.
+  pull_request:
+    branches: [main, dev, develop]
+    paths:
+      - 'docker/runners/**'
+      - 'docker/docker-compose.runners*.yml'
+      - 'config/runner_fleet.yaml'
+      - '.github/workflows/arm64-verify-runner-proof.yml'
   workflow_dispatch:
   schedule:
     # Once a day. The host is a desk machine, not a datacentre: a frequent poll
@@ -38,6 +52,12 @@ jobs:
     # Both labels are load-bearing: `omnibase-verify` alone would also match an
     # amd64 verify runner on the primary host, and this job's whole subject is
     # the arm64 one.
+    # A FORK pull request must never land on a host holding real lab
+    # credentials. Same fork-isolation posture the trusted-CI seam takes, stated
+    # here because this job pins a literal runner set and so cannot inherit it.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, omnibase-verify, arch-arm64]
     timeout-minutes: 10
 
