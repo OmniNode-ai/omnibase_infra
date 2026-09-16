@@ -244,3 +244,20 @@ def test_the_canary_limit_stops_the_roll_and_says_so(rolling_block: str) -> None
         "completed fleet roll"
     )
     assert "keeps its previous container env" in rolling_block
+
+
+def test_a_single_runner_can_be_converged_later(script_text: str) -> None:
+    """A runner busy through every retry pass is correctly left alone. Without
+    --only, clearing that residual would need a hand-typed compose call -- the
+    exact recipe this mode replaces.
+    """
+    assert '--only=*)     ROLL_ONLY="${arg#*=}" ;;' in script_text
+    assert 'ROLL_ONLY=""' in script_text, "the default must be the whole fleet"
+
+
+def test_an_unknown_only_target_fails_closed(rolling_block: str) -> None:
+    """Rolling nothing and reporting "Rolled 0/0" reads exactly like a
+    converged fleet, so an unknown service name must abort instead.
+    """
+    assert '"${found}" || err "--only=' in rolling_block
+    assert 'pending=("${ROLL_ONLY}")' in rolling_block
