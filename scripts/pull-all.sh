@@ -12,6 +12,8 @@ set -euo pipefail
 OMNI_HOME="${OMNI_HOME:-/Volumes/PRO-G40/Code/omni_home}"
 
 REPOS=(
+  knowledge-base
+  knowledge-base-internal
   omniclaude
   omnibase_compat
   omnibase_core
@@ -383,21 +385,66 @@ _pull_one() {
     return
   fi
 
-  local branch
-  branch=$(git -C "$dir" branch --show-current 2>/dev/null)
-  if [[ "$branch" != "main" && "$branch" != "dev" ]]; then
-    echo "  SKIPPED  $repo (on branch: $branch)"
-    echo "SKIPPED" > "$result_file"
+  # Uncommitted TRACKED changes refuse the branch switch, because a switch can
+  # destroy them. Untracked files deliberately do NOT (OMN-17395): git itself
+  # refuses to clobber an untracked file on both `switch` and `merge --ff-only`,
+  # and that refusal surfaces below as a FAILED carrying git's own message -- so
+  # counting them as dirt buys no safety and costs a permanent refusal. The live
+  # case: $OMNI_HOME/knowledge-base-internal carries unpublished lane artifacts
+  # (deep dives, briefs) that no lane has committed yet, which under the old
+  # check would have re-broken the clone this ticket exists to repair on the
+  # very next run.
+  local dirty
+  dirty=$(git -C "$dir" status --porcelain --untracked-files=no)
+  if [[ -n "$dirty" ]]; then
+    echo "  FAILED   $repo (dirty worktree; refusing to switch branches)"
+    echo "           Commit or converge local changes before re-running:"
+    echo "           bash \"$CONVERGE_SCRIPT_SOURCE\" $repo --execute"
+    echo "FAILED" > "$result_file"
     return
   fi
 
-  local dirty
-  dirty=$(git -C "$dir" status --porcelain)
-  if [[ -n "$dirty" ]]; then
-    echo "  FAILED   $repo (dirty worktree; refusing to switch branches)"
-    echo "           Commit, stash, or remove local changes before re-running."
-    echo "FAILED" > "$result_file"
-    return
+  # A canonical clone ATTACHED to a lane branch is REPAIRED here, never skipped
+  # (OMN-17395). It used to print "SKIPPED <repo> (on branch: ...)" and return
+  # before fetching -- and SKIPPED is not counted into the terminal result line,
+  # so the run still reported overall=OK. That combination is what let
+  # $OMNI_HOME/knowledge-base-internal sit on a codex lane branch, 341 commits
+  # behind origin/main, for ELEVEN days while every lane that resolved it for
+  # friction state, prior reports and beta/GOAL.md read the stale tree, and the
+  # morning sweep re-reported it on ten consecutive runs.
+  #
+  # The canonical-clone guard denies a hand checkout/switch/reset inside
+  # $OMNI_HOME/<repo> and points at converge-canonical-clone.sh, so this script
+  # was the ONLY sanctioned repair path for the class -- and it was the one path
+  # structurally unable to perform it. The converge script has handled the
+  # WRONG BRANCH class since OMN-16497 (the target branch is DERIVED from
+  # refs/remotes/<remote>/HEAD, never guessed, and it refuses rather than
+  # defaults when the remote publishes none); only the wiring was missing.
+  local branch output
+  branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+  if [[ "$branch" != "main" && "$branch" != "dev" ]]; then
+    local parked="${branch:-DETACHED}"
+    if [[ ! -x "$CONVERGE_SCRIPT" ]]; then
+      echo "  FAILED   $repo (on branch: $parked; sanctioned converge script missing: $CONVERGE_SCRIPT_SOURCE)"
+      echo "FAILED" > "$result_file"
+      return
+    fi
+    if ! output=$(OMNI_HOME="$OMNI_HOME" bash "$CONVERGE_SCRIPT" "$repo" --execute --lane pull-all 2>&1); then
+      echo "  FAILED   $repo (on branch: $parked; converge-canonical-clone.sh --execute failed)"
+      echo "$output" | tail -5 | sed 's/^/           /'
+      echo "FAILED" > "$result_file"
+      return
+    fi
+    branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+    if [[ "$branch" != "main" && "$branch" != "dev" ]]; then
+      # The repair ran and the clone is STILL not on a tracking branch. Never
+      # report this as OK or swallow it: an unrepairable clone is the exact
+      # state whose silence cost eleven days.
+      echo "  FAILED   $repo (was on: $parked; still on ${branch:-DETACHED} after converge)"
+      echo "FAILED" > "$result_file"
+      return
+    fi
+    echo "  REPAIRED $repo (was parked on $parked; converged to $branch)"
   fi
 
   local before_main before_dev output main_converged=0
