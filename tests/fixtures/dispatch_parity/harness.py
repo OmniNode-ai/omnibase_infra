@@ -463,6 +463,24 @@ def _model_construct_instance(
 
     Returns (instance, error). On import/attr failure returns (None, error-string)
     so the probe is recorded ``construct-only=false`` — never dropped (design D6).
+
+    OMN-17296: an instance that constructs but cannot be MATERIALIZED is rejected
+    here too, on the same "record, do not drop" terms. ``model_construct`` sets no
+    fields, so for a model whose fields are required with no default, every
+    attribute access raises and ``model_dump`` raises with it. That instance is
+    unusable as a probe payload and it makes the two modes disagree for a reason
+    that has nothing to do with selection semantics: Mode A's engine materializes
+    the envelope before invoking the dispatcher
+    (``message_dispatch_engine._materialize_envelope_with_bindings``) and records
+    ``handler_error``, while Mode B's mixin does not materialize and records
+    ``success``. The committed oracle is shared by both modes, so such a probe can
+    never be satisfied by either mode's true behavior.
+
+    Measured over the corpus when this was added: 1 of 42 distinct event models —
+    ``ModelRuntimeManifestPublished``, whose base ``ModelRuntimeManifest`` declares
+    ``runtime_profile`` and ``started_at`` required with no default. The other 41
+    are unaffected, so this only ever converts a probe that could not work into the
+    ``_DictPayload`` fallback the caller already applies, with the reason recorded.
     """
     from omnibase_infra.runtime.auto_wiring.models.model_handler_ref import (
         ModelHandlerRef,
@@ -473,9 +491,19 @@ def _model_construct_instance(
     except Exception as exc:  # noqa: BLE001 — record, do not drop
         return None, f"{type(exc).__name__}: {exc}"
     try:
-        return model_cls.model_construct(), None
+        instance = model_cls.model_construct()
     except Exception as exc:  # noqa: BLE001 — record, do not drop
         return None, f"model_construct failed: {type(exc).__name__}: {exc}"
+    try:
+        instance.model_dump(mode="json")
+    except Exception as exc:  # noqa: BLE001 — record, do not drop
+        return None, (
+            "model_construct instance is not materializable "
+            f"({type(exc).__name__}: {exc}); the model has required fields with "
+            "no default, so an unvalidated instance cannot be dumped and the "
+            "engine cannot materialize an envelope carrying it"
+        )
+    return instance, None
 
 
 async def _run_probes(
