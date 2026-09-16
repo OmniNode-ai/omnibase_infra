@@ -129,3 +129,94 @@ def test_hostile_review_wires_shared_secret_from_ci_secrets() -> None:
         review_step["env"]["LOCAL_LLM_SHARED_SECRET"]
         == "${{ secrets.LOCAL_LLM_SHARED_SECRET }}"
     )
+
+
+def _extract_verdict_snippet() -> str:
+    """Return the inline verdict parser from the review step.
+
+    Extracted and EXECUTED rather than text-matched: a test that greps for
+    the word "quorum" passes on a comment mentioning it.
+    """
+    script = HOSTILE_REVIEWER_WORKFLOW.read_text(encoding="utf-8")
+    start = script.index("VERDICT_DATA=$(python3 - ")
+    body = script[script.index("\n", start) + 1 : script.index("PYEOF\n", start)]
+    return "\n".join(
+        line[10:] if line.startswith(" " * 10) else line for line in body.splitlines()
+    )
+
+
+def _run_verdict_snippet(tmp_path: Path, payload: dict[str, Any]) -> dict[str, str]:
+    """Run the extracted snippet in a subprocess, the way the step does."""
+    import json
+    import subprocess
+    import sys
+
+    result_path = tmp_path / "review.json"
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "-c", _extract_verdict_snippet(), str(result_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return dict(
+        line.split("=", 1) for line in completed.stdout.splitlines() if "=" in line
+    )
+
+
+def test_verdict_reads_the_reviewer_quorum_and_never_passes_a_degraded_one() -> None:
+    """OMN-18479: a degraded quorum has no verdict and must not report passed."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        degraded = _run_verdict_snippet(
+            tmp_path,
+            {
+                "models_succeeded": ["qwen3-review"],
+                "total_findings": 0,
+                "results": [],
+                "quorum": {
+                    "verdict": "degraded_quorum",
+                    "blocking_count": 0,
+                    "warning_count": 0,
+                },
+            },
+        )
+        assert degraded["verdict"] == "degraded"
+        assert degraded["quorum_verdict"] == "degraded_quorum"
+
+        # Positive control: a real quorum verdict still reports passed.
+        passed = _run_verdict_snippet(
+            tmp_path,
+            {
+                "models_succeeded": ["qwen3-review", "qwen3-review-b"],
+                "total_findings": 1,
+                "results": [],
+                "quorum": {
+                    "verdict": "passed",
+                    "blocking_count": 0,
+                    "warning_count": 1,
+                },
+            },
+        )
+        assert passed["verdict"] == "passed"
+        assert passed["quorum_below"] == "1"
+
+
+def test_verdict_falls_back_to_model_count_when_quorum_is_absent() -> None:
+    """A reviewer predating OMN-18479 must not read as a degraded run."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = _run_verdict_snippet(
+            Path(tmp),
+            {
+                "models_succeeded": ["qwen3-review", "qwen3-review-b"],
+                "total_findings": 0,
+                "results": [],
+            },
+        )
+        assert out["verdict"] == "passed"
+        assert out["quorum_verdict"] == "absent"
