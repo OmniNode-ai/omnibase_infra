@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-17477 -- the .101 host's runners.
+#
+# WHY A SEPARATE FILE RATHER THAN MORE SERVICES IN docker-compose.runners.yml.
+# That file hand-writes 60 literal service blocks bound to the primary host's
+# container names, its docker group GID, its Linux host paths and its
+# `${...:?}` fail-closed env contract. Adding this host's services there would
+# mean every `docker compose -f docker-compose.runners.yml ...` invocation on
+# EITHER host had to satisfy BOTH hosts' required variables -- compose
+# interpolates the whole file before selecting services -- so a missing value
+# belonging to the other machine would fail a deploy that never touched it.
+# One file per host keeps each host's fail-closed contract its own.
+#
+# WHAT THIS HOST IS. A MacBook Air (M4, 10 cores) running Docker Desktop,
+# arm64. It takes the VERIFY class first: those jobs are cloud-touching
+# (kubectl / aws / gh) and carry no architecture assumption, which makes them
+# the class that can move to arm64 without any workflow changing. It is
+# deliberately NOT labelled `omnibase-ci`: every job whose `runs-on` is
+# `[self-hosted, omnibase-ci]` today carries no architecture constraint, so an
+# arm64 runner in that class could be handed a job written for amd64. Adding
+# action-class runners here is gated on those jobs carrying `arch-amd64` first
+# -- see config/runner_fleet.yaml's `hosts:` comment.
+#
+# MACOS DIFFERENCES FROM THE PRIMARY HOST, each deliberate:
+#   - no `group_add`. That literal GID is the primary host's docker group.
+#     Docker Desktop's socket inside the VM is root-owned and the image's
+#     entrypoint already fixes the socket GID in its root phase before
+#     dropping to `runner`, so the static GID would be wrong here and is not
+#     needed.
+#   - `/var/run/docker.sock` on this host is a symlink into the user's Docker
+#     Desktop socket. Bound at the classic path so nothing inside the
+#     container has to know that.
+#   - paths under the user's home rather than /data, resolved by
+#     deploy-runners.sh --host rather than hardcoded.
+services:
+  omninode-air-runner-1:
+    image: omninode-runner:latest
+    container_name: omninode-air-runner-1
+    restart: unless-stopped
+    environment:
+      # `arm64` where the primary fleet says `x64`, plus the explicit
+      # OMN-17477 arch label. GitHub's own `ARM64` label is what a workflow
+      # would match by convention; `arch-arm64` is the fleet's own spelling,
+      # the one that matches Docker's TARGETARCH and the inventory, so a
+      # workflow can pin an architecture in one vocabulary rather than three.
+      # `host-105` mirrors the `host-201`/`host-101` labels the other verify
+      # runners carry, so a job that must pin a HOST and a job that
+      # must pin an ARCHITECTURE each have their own vocabulary instead of
+      # overloading one label to mean both.
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-105,linux,arm64,arch-arm64
+      RUNNER_NAME: omninode-air-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${AIR_RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-deploy
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      # Points kubectl at the least-privilege lab-ci-reader ServiceAccount
+      # token in the read-only credentials directory below, never at a node
+      # admin kubeconfig (OMN-18188).
+      KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
+      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+      UV_CONCURRENT_DOWNLOADS: "1"
+      UV_CONCURRENT_BUILDS: "1"
+      UV_CONCURRENT_INSTALLS: "1"
+      UV_HTTP_TIMEOUT: "600"
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -eu
+        # Same least-privilege copy the primary host's deploy runner makes: the
+        # host operator env file is 0600 and owned by the HOST operator, which
+        # the `runner` job user (uid 1001) cannot read once the entrypoint
+        # drops privilege. This root phase can, so it copies the content into
+        # the already-runner-owned creds volume at 0400 and the scripts are
+        # pointed at that copy. It does not relax the host file's perms.
+        runner_uid="$$(id -u runner)"
+        runner_gid="$$(id -g runner)"
+        mkdir -p /home/runner/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
+          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+        exec /usr/local/bin/entrypoint.sh
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Read-only lab credentials DIRECTORY, the same shape as the primary
+      # fleet's (OMN-18188): a directory so the next credential is a file drop
+      # rather than a compose change and a container recreate. `:ro` is
+      # load-bearing -- no job may mutate a lab credential.
+      - ${AIR_RUNNER_LAB_CREDENTIALS_HOST_DIR:?AIR_RUNNER_LAB_CREDENTIALS_HOST_DIR must be set (host path of the read-only lab credentials directory)}:/home/runner/.lab-credentials:ro
+      - ${AIR_RUNNER_OPERATOR_ENV_FILE:?AIR_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file)}:/run/omnibase-operator.env:ro
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - omninode-air-runner-1-creds:/home/runner/.runner-creds
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  omninode-air-runner-1-creds:
