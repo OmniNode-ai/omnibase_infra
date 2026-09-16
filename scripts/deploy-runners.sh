@@ -90,7 +90,15 @@
 #                                   (e.g. /home/<operator>/.omnibase/.env).
 #                                   Fail-fast `:?` in compose.
 #
-# FOURTH REQUIRED VAR, satisfied by a FILE rather than an export (OMN-18415):
+# FOURTH AND FIFTH REQUIRED VARS, satisfied by a FILE rather than an export
+# (OMN-18415). Both belong to the same call path and both fail closed: the
+# reviewer signs every local LLM request and refuses to send one outside a
+# declared trust boundary, so provisioning either alone just moves the failure
+# a few seconds later with the same empty log.
+#   - LLM_ENDPOINT_CIDR_ALLOWLIST   Network boundary for local LLM calls (not a
+#                                   secret). The transport refuses to default
+#                                   it -- a boundary nobody declared is not a
+#                                   boundary -- so compose refuses too.
 #   - LOCAL_LLM_SHARED_SECRET       HMAC signing key for the local LLM
 #                                   inference endpoint, consumed by the
 #                                   omninode-runner-N fleet (the Hostile

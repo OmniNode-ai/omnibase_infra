@@ -107,6 +107,23 @@ x-runner-base: &runner-base
     # take effect, and that roll is serial and busy-checked -- never a
     # fleet-wide `--force-recreate`.
     LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
+    # OMN-18415 — the OTHER half of the same fail-closed contract.
+    #
+    # `MixinLlmHttpTransport` rejects an outbound local LLM call before any HTTP
+    # is attempted unless the destination falls inside this allowlist, and it
+    # REFUSES TO DEFAULT it (`_parse_cidr_allowlist` raises when the variable is
+    # unset, by design: a trust boundary nobody declared is not a boundary).
+    # Provisioning only the signing key left the fleet failing on this instead,
+    # three seconds later in the same call path and with the same
+    # nothing-in-the-log symptom -- measured by reproducing the runner's exact
+    # environment, not inferred.
+    #
+    # Not a secret: a network boundary declaration. It is still `:?` rather than
+    # a literal default, because the library's own refusal to default it is the
+    # behaviour being mirrored, and a host whose trust boundary differs must say
+    # so rather than inherit this lab's. Value lives beside the signing key in
+    # `docker/.env` on the runner host.
+    LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
