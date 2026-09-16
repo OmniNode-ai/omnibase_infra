@@ -855,15 +855,15 @@ add_services_deploy() {
     log "=== Additive deploy of: ${ADD_SERVICES} ==="
     validate_add_services
 
-    local token token_b64
+    local reg_handle token_b64
     if "${DRY_RUN}"; then
-        token=***REDACTED***
+        reg_handle="dry-run-handle"
     else
         # A brand-new container has NO cached registration to restore from, so
         # unlike --rolling this path does need a real handle.
-        token=***REDACTED***
+        reg_handle="$(fetch_registration_token)"
     fi
-    token_b64=$(encode_token "${token}")
+    token_b64=$(encode_token "${reg_handle}")
 
     rsync_artifacts
 
