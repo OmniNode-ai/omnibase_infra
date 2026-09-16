@@ -46,12 +46,26 @@ jobs:
       contents: write   # needed to push baseline commit back to dev
 
     steps:
+      # OMN-18273: mint the onexbot-occ-writer installation token rather than
+      # pushing the baseline commit with the default workflow token. No
+      # `|| secrets.GITHUB_TOKEN` fallback — a fallback would silently restore
+      # the mis-attributed push while the job still reported success.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnibase_infra
+          permission-contents: write
+
       - name: Checkout dev branch
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: dev
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -90,8 +104,8 @@ jobs:
       - name: Commit and push updated baseline
         if: github.event.inputs.dry_run != 'true'
         run: |
-          git config user.name "omninode-bot"
-          git config user.email "bot@omninode.ai"
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
 
           # Only commit if the baseline actually changed
           if git diff --quiet config/validation/test-failure-baseline.yaml; then
@@ -100,7 +114,9 @@ jobs:
           fi
 
           git add config/validation/test-failure-baseline.yaml
-          git commit -m "chore(OMN-13027): update dev test-failure baseline [skip ci]"
+          git commit -m "chore(OMN-13027): update dev test-failure baseline [skip ci]" \
+            --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
+            --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin dev
 
       - name: Post summary

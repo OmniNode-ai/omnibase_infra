@@ -208,10 +208,16 @@ jobs:
             exit 0
           fi
           BRANCH="bot/omnimarket-contract-pin-$(date -u +%Y%m%d%H%M%S)"
-          git config user.name "omninode-bot"
-          git config user.email "bot@omninode.ai"
+          # OMN-18273: commit as the App this job already authenticates as. The
+          # previous "omninode-bot <bot@omninode.ai>" resolved to no GitHub
+          # account, so the commit rendered unlinked and named neither a bot nor
+          # a run. The numeric prefix on the address is what links it.
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git commit -m "chore(OMN-17292): advance omnimarket contract pin to ${TARGET_PIN:0:12} [bot]"
+          git commit -m "chore(OMN-17292): advance omnimarket contract pin to ${TARGET_PIN:0:12} [bot]" \
+            --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
+            --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin "$BRANCH"
           {
             printf '%s\n' "Automated omnimarket contract-pin advance (OMN-17292)."
