@@ -284,3 +284,86 @@ class TestBuildReview:
         comment = payload["comments"][0]
         assert comment["subject_type"] == "file"
         assert "line" not in comment
+
+
+class TestQuorumSplit:
+    """OMN-18479: only findings more than one model raised get threads.
+
+    The thread gate blocks while hostile-reviewer threads are unresolved,
+    so a thread IS the blocking surface on this repo. A finding raised by
+    one model of three must therefore be reported without one.
+    """
+
+    @staticmethod
+    def _result_with_quorum(
+        *, agreement_count: int, finding_id: str = "f-1", threshold: int = 2
+    ) -> dict[str, Any]:
+        return {
+            "quorum": {
+                "verdict": "passed",
+                "quorum_threshold": threshold,
+                "blocking_findings": [],
+                "warning_findings": [
+                    {
+                        "agreement_count": agreement_count,
+                        "finding_ids": [finding_id],
+                    }
+                ],
+            }
+        }
+
+    def test_single_model_finding_is_held_below_quorum(self) -> None:
+        finding = _finding()
+        finding["finding_id"] = "f-1"
+        agreed, below = poster.split_by_quorum(
+            self._result_with_quorum(agreement_count=1), [finding]
+        )
+        assert agreed == []
+        assert len(below) == 1
+
+    def test_agreed_finding_is_postable(self) -> None:
+        """Positive control for the zero above, same fixture, two models."""
+        finding = _finding()
+        finding["finding_id"] = "f-1"
+        agreed, below = poster.split_by_quorum(
+            self._result_with_quorum(agreement_count=2), [finding]
+        )
+        assert len(agreed) == 1
+        assert below == []
+
+    def test_absent_quorum_block_posts_everything(self) -> None:
+        """An older reviewer with no quorum block must not silently drop findings."""
+        finding = _finding()
+        finding["finding_id"] = "f-1"
+        agreed, below = poster.split_by_quorum({}, [finding])
+        assert len(agreed) == 1
+        assert below == []
+
+    def test_below_quorum_findings_never_request_changes(self) -> None:
+        agreed_finding = _finding(severity="error", file_path="src/foo.py:12")
+        below_finding = _finding(severity="error", file_path="src/bar.py:44")
+        payload, stats = poster.build_review(
+            [],
+            {"src/foo.py": {12}},
+            set(),
+            suppressed_hints=0,
+            models_succeeded=["qwen3-review", "qwen3-review-b"],
+            models_failed=[],
+            below_quorum=[below_finding],
+        )
+        assert payload is not None
+        assert payload["event"] == "COMMENT"
+        assert stats["below_quorum"] == 1
+        assert "below quorum" in payload["body"].lower()
+        assert below_finding["normalized_message"][:40] in payload["body"]
+        # Positive control: the same severity, above quorum, still requests changes.
+        payload_agreed, _ = poster.build_review(
+            [agreed_finding],
+            {"src/foo.py": {12}},
+            set(),
+            suppressed_hints=0,
+            models_succeeded=["qwen3-review", "qwen3-review-b"],
+            models_failed=[],
+        )
+        assert payload_agreed is not None
+        assert payload_agreed["event"] == "REQUEST_CHANGES"
