@@ -63,6 +63,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # The fallback shape needs the same environment as the reusable: a node
+      # cannot be imported without the project's dependency set, because the
+      # package __init__ eagerly pulls the database and broker surfaces. A
+      # fallback that silently fell through to its floor would look exactly
+      # like a working router (run 35039101488).
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-runner-route-probe
+          install-args: "--frozen"
       - name: Decide runs-on
         id: decide
         env:
@@ -90,7 +101,7 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          python3 scripts/ci/runner_route_decision.py \
+          uv run --frozen python3 scripts/ci/runner_route_decision.py \
             --event-name "${EVENT_NAME}" \
             --head-repo "${HEAD_REPO}" \
             --repository "${REPOSITORY}" \
