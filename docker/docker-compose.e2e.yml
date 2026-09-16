@@ -298,9 +298,9 @@ services:
         condition: service_completed_successfully
     environment:
       # PostgreSQL - primary DSN (used by omnibase_infra application code)
-      OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://postgres:test-password@postgres:5432/omnibase_infra}
+      OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra}
       # OmniIntelligence plugin database
-      OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://postgres:test-password@postgres:5432/omniintelligence}
+      OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omniintelligence}
       # Legacy individual vars - retained for agent-actions-consumer and session storage
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

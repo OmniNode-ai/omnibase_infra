@@ -15,6 +15,37 @@ from omnibase_infra.docker.catalog.resolver import ResolvedStack
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
 
 
+# OMN-18478. The PostToolUse secret redactor rewrites Bash tool OUTPUT, replacing
+# a credential with this token. It does not touch Write/Edit content, so the
+# token only ever reaches a file when an author used already-redacted tool output
+# as the source text for an edit -- which is how
+# docker/catalog/services/tenant-projection-writer.yaml came to bind it as a
+# postgres password. Rendering it produces a container whose DSN cannot
+# authenticate, and the failure surfaces at first query rather than at render.
+#
+# Built from parts rather than spelled: the literal in a source file is itself
+# rewritten in any Bash preview of this module, so a reader greps it and sees the
+# token instead of the code. The construction stays legible under redaction.
+_REDACTION_PLACEHOLDER = "*" * 3 + "REDACTED" + "*" * 3
+
+
+def _reject_redaction_placeholder(service: str, env: Mapping[str, str]) -> None:
+    """Refuse an environment binding carrying the redactor's replacement token.
+
+    Raised rather than logged: a rendered placeholder is indistinguishable from a
+    real value to every downstream consumer of the compose file, so the render
+    must not succeed.
+    """
+    offenders = sorted(k for k, v in env.items() if _REDACTION_PLACEHOLDER in v)
+    if offenders:
+        raise ValueError(
+            f"{service}: environment {offenders} carries the secret redactor's "
+            f"replacement token instead of a value. This is redacted tool output "
+            f"that was written into a catalog manifest; recover the real value "
+            f"or bind it as a ${{VAR:?...}} expansion."
+        )
+
+
 # Compose default for an optional directory bind mount whose source variable is
 # unset. It must be a DIRECTORY: a file fallback such as ``/dev/null`` is
 # invalid for a directory target, which is the OMN-13248 defect that made the
@@ -119,6 +150,7 @@ def generate_compose(
         env.update(manifest.hardcoded_env)
         env.update(manifest.operational_defaults)
         env.update(manifest.catalog_env)
+        _reject_redaction_placeholder(name, env)
 
         # Add required env as ${VAR:?message} references
         for var in manifest.required_env:

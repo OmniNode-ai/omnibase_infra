@@ -6,7 +6,7 @@ container_name: omninode-retry-worker
 required_env:
   - POSTGRES_PASSWORD
 hardcoded_env:
-  OMNIBASE_INFRA_RETRY_WORKER_POSTGRES_DSN: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+  OMNIBASE_INFRA_RETRY_WORKER_POSTGRES_DSN: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
 operational_defaults:
   ONEX_LOG_LEVEL: INFO
   ONEX_ENVIRONMENT: local

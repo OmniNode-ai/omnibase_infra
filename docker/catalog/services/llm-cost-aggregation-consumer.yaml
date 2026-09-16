@@ -6,7 +6,7 @@ container_name: omninode-llm-cost-aggregation-consumer
 required_env:
   - POSTGRES_PASSWORD
 hardcoded_env:
-  OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+  OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
   OMNIBASE_INFRA_LLM_COST_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   OMNIBASE_INFRA_LLM_COST_HEALTH_CHECK_PORT: '8097'
   OMNIBASE_INFRA_LLM_COST_HEALTH_CHECK_HOST: 0.0.0.0
