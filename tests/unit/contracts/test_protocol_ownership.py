@@ -163,6 +163,15 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # === [NODE] Probe-internal protocols ===
     # [NODE] DI boundary for verification executor — structural spec interface (OMN-5261)
     "VerificationSpec": "probes/protocol_verification_spec.py",
+    # [DI] OMN-18418 narrow structural type for the aiokafka admin client's
+    # describe_consumer_groups() return shape, so the lane probe can read
+    # `.groups` without importing an aiokafka response class. Deliberately NOT an
+    # spi contract: it describes a third-party library's response, not anything
+    # this fleet publishes or another repo implements. Same shape as the other
+    # library/row adapters already allowlisted here (RowLookup, CoreTransport).
+    # Added by omnibase_infra#3613, which did not update this allowlist and left
+    # dev red; recorded here rather than routed around (OMN-17296 lane).
+    "ConsumerGroupDescribeResponse": "backends/backend_probe.py",
     # === [NODE] Bifrost shadow policy protocol ===
     # [NODE] DI boundary for shadow comparison policy — pluggable shadow policy interface (OMN-5570)
     "ProtocolShadowPolicy": "nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py",
