@@ -9,7 +9,7 @@ required_env:
   - INFISICAL_ENCRYPTION_KEY
   - INFISICAL_AUTH_SECRET
 hardcoded_env:
-  DB_CONNECTION_URI: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/infisical?sslmode=disable'
+  DB_CONNECTION_URI: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/infisical?sslmode=disable'
   REDIS_URL: '${INFISICAL_REDIS_URL:?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}'
   ENCRYPTION_KEY: '${INFISICAL_ENCRYPTION_KEY}'
   AUTH_SECRET: '${INFISICAL_AUTH_SECRET}'
