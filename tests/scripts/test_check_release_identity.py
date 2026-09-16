@@ -41,6 +41,10 @@ from types import ModuleType
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -75,9 +79,42 @@ _LEGACY_PY.write_text(_LEGACY_FIXTURE.read_text())
 _OLD = _load_module("_crid_legacy_gate", _LEGACY_PY)
 
 
+def _scrubbed_git_env() -> dict[str, str]:
+    """Location-scrubbed env that also stays blind to user-level git config.
+
+    Two separate hazards, and the canonical scrubber only closes the first.
+
+    OMN-14891: git exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE into every
+    hook environment, and those OVERRIDE both ``cwd=`` and ``git -C``. A fixture
+    that shells out to git under a pre-commit or pre-push hook therefore mutates
+    the REAL invoking worktree instead of ``tmp_path``.
+    ``scrub_git_location_env`` removes exactly those.
+
+    OMN-16584: it also removes every ``GIT_CONFIG*`` key, and that set includes
+    the conftest fixture's PROTECTIVE ``GIT_CONFIG_GLOBAL=/dev/null`` and
+    ``GIT_CONFIG_NOSYSTEM=1``. Handing its result straight to a subprocess makes
+    git fall back to ``$HOME/.gitconfig``, so a developer's ``[tag] gpgsign =
+    true`` forces the bare ``git tag`` calls in ``_build_repo`` to annotate and
+    the suite dies with "no tag message?" or blocks in ``$GIT_EDITOR``. The
+    neutral overrides are re-added here, after the scrub, which is the same
+    shape the sibling gate's test file already uses.
+    """
+    env = scrub_git_location_env(os.environ)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_EDITOR"] = "true"
+    return env
+
+
 def _git(root: Path, *args: str) -> str:
+    scrubbed_git_env = _scrubbed_git_env()
     proc = subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=True
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrubbed_git_env,
     )
     return proc.stdout.strip()
 
@@ -388,23 +425,34 @@ def _bundle_and_clone(src: Path, dst: Path, *bundle_args: str) -> Path:
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
     bundle = dst.parent / f"{dst.name}.bundle"
+    scrubbed_git_env = _scrubbed_git_env()
     subprocess.run(
         ["git", "bundle", "create", str(bundle), *bundle_args],
         cwd=src,
         capture_output=True,
         text=True,
         check=True,
+        env=scrubbed_git_env,
     )
     subprocess.run(
         ["git", "clone", "-q", str(bundle), str(dst)],
         capture_output=True,
         text=True,
         check=True,
+        env=scrubbed_git_env,
     )
     subprocess.run(
-        ["git", "config", "user.email", "t@example.com"], cwd=dst, check=True
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=dst,
+        check=True,
+        env=scrubbed_git_env,
     )
-    subprocess.run(["git", "config", "user.name", "equiv-test"], cwd=dst, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "equiv-test"],
+        cwd=dst,
+        check=True,
+        env=scrubbed_git_env,
+    )
     return dst
 
 
@@ -463,3 +511,148 @@ def test_tag_carrying_bundle_clone_evaluates_the_real_tag_state(
     assert rc == 0, f"expected the version-ahead pass, got {rc}: {out!r} {err!r}"
     assert out == "OK: version 0.38.15 is ahead of latest published 0.38.14.\n"
     assert err == ""
+
+
+# ---------------------------------------------------------------------------
+# OMN-18443 — the collector must read ONE clock.
+#
+# The gate reads a VERSION FROM A TREE and a SET OF PUBLISHED RELEASES. On a
+# pull_request event GitHub hands the runner refs/pull/N/merge, the merge commit
+# it computed at TRIGGER time, while actions/checkout fetches every tag ref at
+# RUN time. Collecting the published set with `git tag --list` compared those two
+# clocks and refused trees that were correctly versioned when they were computed.
+#
+# These tests are the DELIBERATE divergence from the captured legacy gate, so
+# they live outside `_SCENARIOS` (which the equivalence test drives). Every
+# scenario in that list tags the base commit, which is reachable from HEAD, so
+# `--merged HEAD` and `--list` agree there and the equivalence still holds.
+# ---------------------------------------------------------------------------
+
+
+def _tag_peer_release_off_this_lineage(root: Path, tag: str) -> None:
+    """Cut ``tag`` on a lineage HEAD cannot reach — a peer PR's release."""
+    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    _git(root, "checkout", "-q", "-b", "omn18443-peer")
+    _write(root, "peer.txt", "peer release\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "peer release")
+    _git(root, "tag", tag)
+    _git(root, "checkout", "-q", branch)
+
+    all_tags = _git(root, "tag", "--list").split()
+    merged = _git(root, "tag", "--merged", "HEAD").split()
+    assert tag in all_tags, f"peer tag never created: {all_tags}"
+    assert tag not in merged, f"peer tag IS reachable — not the race: {merged}"
+
+
+@pytest.mark.unit
+def test_release_cut_off_this_lineage_does_not_arm_the_gate(tmp_path: Path) -> None:
+    """AC1: a release published after this tree must not refuse it.
+
+    The tree declares 2.0.0 and the highest release it descends from is v1.0.0,
+    so it is correctly versioned. v2.0.0 exists, cut from a peer's merge this
+    tree does not contain.
+    """
+    root, base_sha = _build_repo(
+        tmp_path, version="2.0.0", tags=["v1.0.0"], changed=["src/foo.py"]
+    )
+    _tag_peer_release_off_this_lineage(root, "v2.0.0")
+
+    rc, out, err = _run_in_process(_NEW, root, ["--base", base_sha])
+
+    assert rc == 0, f"out={out} err={err}"
+    assert "ahead of latest published" in out
+
+
+@pytest.mark.unit
+def test_version_equal_to_a_reachable_release_still_fails(tmp_path: Path) -> None:
+    """AC2 positive control: the real aliasing invariant must not regress."""
+    root, base_sha = _build_repo(
+        tmp_path, version="1.0.0", tags=["v1.0.0"], changed=["src/foo.py"]
+    )
+    _tag_peer_release_off_this_lineage(root, "v2.0.0")
+
+    rc, out, err = _run_in_process(_NEW, root, ["--base", base_sha])
+
+    assert rc == 1, f"out={out} err={err}"
+    assert "is NOT ahead of the latest published version" in err
+
+
+@pytest.mark.unit
+def test_version_behind_a_reachable_release_still_fails(tmp_path: Path) -> None:
+    """AC2 positive control, strictly-behind arm: unreachable tags never rescue."""
+    root, base_sha = _build_repo(
+        tmp_path, version="0.9.0", tags=["v1.0.0"], changed=["src/foo.py"]
+    )
+    _tag_peer_release_off_this_lineage(root, "v2.0.0")
+
+    rc, out, err = _run_in_process(_NEW, root, ["--base", base_sha])
+
+    assert rc == 1, f"out={out} err={err}"
+    assert "is NOT ahead of the latest published version" in err
+
+
+@pytest.mark.unit
+def test_published_tags_are_anchored_to_the_evaluated_tree(monkeypatch) -> None:
+    """The collector asks for tags REACHABLE FROM HEAD, not every tag that exists."""
+    seen: list[list[str]] = []
+
+    def fake_git(args: list[str]) -> str:
+        seen.append(list(args))
+        if args[:2] == ["rev-parse", "--is-shallow-repository"]:
+            return "false"
+        if args[:2] == ["tag", "--merged"]:
+            return "v1.0.0\nv1.0.1"
+        raise AssertionError(f"unexpected git call: {args}")
+
+    monkeypatch.setattr(_NEW, "_git", fake_git)
+
+    assert _NEW._published_tags() == ("v1.0.0", "v1.0.1")
+    assert ["tag", "--merged", "HEAD"] in seen
+    assert ["tag", "--list"] not in seen
+
+
+@pytest.mark.unit
+def test_shallow_clone_falls_back_to_the_full_tag_list(monkeypatch) -> None:
+    """Fail-CLOSED: ancestry is unknowable on a shallow clone.
+
+    ``git tag --merged`` needs the tagged commits' ancestry present; a shallow
+    clone can omit it and return FEWER tags, the permissive direction and the
+    same shape as the OMN-17240 empty-tag-set defect. The stricter full list is
+    used instead, and the OMN-17240 credibility check still runs on the result.
+    """
+    seen: list[list[str]] = []
+
+    def fake_git(args: list[str]) -> str:
+        seen.append(list(args))
+        if args[:2] == ["rev-parse", "--is-shallow-repository"]:
+            return "true"
+        if args[:2] == ["tag", "--merged"]:
+            raise AssertionError("must not ancestry-anchor on a shallow clone")
+        return "v1.0.0\nv9.9.9"
+
+    monkeypatch.setattr(_NEW, "_git", fake_git)
+
+    assert _NEW._published_tags() == ("v1.0.0", "v9.9.9")
+    assert ["tag", "--list"] in seen
+
+
+@pytest.mark.unit
+def test_empty_merged_result_falls_back_to_the_full_tag_list(monkeypatch) -> None:
+    """Fail-CLOSED: an anchor that resolves no tags is not a pass.
+
+    ``_git`` here swallows a non-zero exit and returns an empty string, so a
+    failed ``--merged`` is indistinguishable from a genuinely tag-less ancestry.
+    Both take the stricter branch rather than reporting nothing published.
+    """
+
+    def fake_git(args: list[str]) -> str:
+        if args[:2] == ["rev-parse", "--is-shallow-repository"]:
+            return "false"
+        if args[:2] == ["tag", "--merged"]:
+            return ""
+        return "v1.0.0\nv7.7.7"
+
+    monkeypatch.setattr(_NEW, "_git", fake_git)
+
+    assert _NEW._published_tags() == ("v1.0.0", "v7.7.7")
