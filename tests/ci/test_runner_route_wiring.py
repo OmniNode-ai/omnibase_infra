@@ -89,10 +89,56 @@ def test_the_route_decision_job_is_hosted_and_says_why() -> None:
 
 
 def test_the_route_job_is_time_bounded_so_it_cannot_stall_every_consumer() -> None:
-    """It sits on the critical path ahead of every heavy job in the run."""
+    """It sits on the critical path ahead of every heavy job in the run.
+
+    The budget covers a checkout and a cached environment sync as well as the
+    decision itself, which takes milliseconds. Widening it is how a routing
+    layer starts costing every pipeline in the repository a few minutes that
+    nobody attributes to it, so a sync that no longer fits fails here instead.
+    """
     assert (
         _workflow("runner-route-reusable.yml")["jobs"]["route"]["timeout-minutes"] <= 5
     )
+
+
+def test_both_route_call_sites_set_up_the_environment_before_deciding() -> None:
+    """THE SILENT DEGRADATION, pinned.
+
+    The route job imports the routing node, and importing anything in this
+    package executes its __init__, which pulls the database and broker
+    surfaces. A route job without the project environment therefore raises
+    ModuleNotFoundError, falls through to its own fail-closed floor, and
+    reports a GREEN job whose decision reads
+    `probe_error:module_unavailable` -- measured on run 35039101488, where the
+    mechanism was completely inert and no check was red.
+
+    Nothing else can see that: the floor exists precisely so a broken router
+    still hands the run a usable runs-on. The only durable guard is that the
+    setup step is present and precedes the decision.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        steps = _workflow(workflow_name)["jobs"][job]["steps"]
+        setup_index = next(
+            (
+                i
+                for i, step in enumerate(steps)
+                if "setup-python-uv" in str(step.get("uses", ""))
+            ),
+            None,
+        )
+        assert setup_index is not None, (
+            f"{workflow_name}:{job} invokes the routing node without setting up "
+            f"the environment; it will fall through to the fail-closed floor and "
+            f"report a green, inert route job"
+        )
+        decide_index = next(
+            i for i, step in enumerate(steps) if step.get("id") == "decide"
+        )
+        assert setup_index < decide_index, workflow_name
+        body = steps[decide_index]["run"]
+        assert "uv run --frozen" in body, (
+            f"{workflow_name}:{job} runs the module outside the synced environment"
+        )
 
 
 def test_no_workflow_call_declaration_carries_an_expression() -> None:

@@ -93,7 +93,12 @@ jobs:
     # MUST NOT share fate with the fleet it routes onto. Allowlisted in
     # config/runner_routing_policy.yaml (OMN-18031). Do not change runs-on.
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # Raised from 2 when the job gained an environment sync, and held at the
+    # codified 5-minute ceiling rather than widened past it. This job sits on
+    # the critical path of every consuming run, so the bound is deliberately
+    # tight enough that a sync regression fails here instead of quietly adding
+    # minutes to every pipeline in the repository.
+    timeout-minutes: 5
     outputs:
       labels: ${{ steps.decide.outputs.labels }}
       runs_on: ${{ steps.decide.outputs.runs_on }}
@@ -107,20 +112,26 @@ jobs:
           # in local git config (zizmor artipacked).
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # THE PROJECT ENVIRONMENT, and the measurement that settled it. An
+      # earlier revision installed two pinned packages -- the models need only
+      # pydantic and a YAML parser -- and the route job then failed with
+      # `No module named 'omnibase_core'`, fell through to its fail-closed
+      # floor, and reported a GREEN job carrying
+      # `reason=probe_error:module_unavailable`. Measured on run 35039101488:
+      # the mechanism was entirely inert and nothing was red.
+      #
+      # The cause is not this node. Importing anything under
+      # `omnibase_infra.` executes the package __init__, which eagerly pulls
+      # the database and broker surfaces, so a node cannot be imported without
+      # the project's dependency set. Loading modules by file path around that
+      # would be bespoke plumbing for one job; syncing the environment is what
+      # every other job here does.
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: "3.12"
-
-      # TWO PINNED PACKAGES, NOT THE PROJECT ENVIRONMENT. The decision needs
-      # the typed models and a YAML parser and nothing else -- it performs no
-      # database, broker or container work -- so this installs exactly that in
-      # seconds rather than syncing the repository's full dependency set on the
-      # critical path of every consuming run. The node's handler is imported
-      # from the checked-out tree, so the decision executing here is the same
-      # code the tests bind to.
-      - name: Install the decision's dependencies
-        run: pip install "pydantic==2.13.4" "PyYAML==6.0.2"
+          cache-key-prefix: uv-runner-route
+          install-args: "--frozen"
 
       - name: Download the most recent lab-load record
         id: lab
@@ -214,7 +225,7 @@ jobs:
           # runner means minutes of install on the critical path of every run
           # for a decision that takes milliseconds. The same handler executes
           # either way; only the dispatch machinery differs.
-          python3 scripts/ci/runner_route_decision.py "${args[@]}" || rc=$?
+          uv run --frozen python3 scripts/ci/runner_route_decision.py "${args[@]}" || rc=$?
           # FAIL-CLOSED FLOOR. The module already catches everything internally,
           # but if the interpreter itself could not run, the calling workflow
           # must still receive a usable runs-on rather than an empty string that
