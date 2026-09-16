@@ -73,9 +73,14 @@ Exit codes:
   1    --verify-claim-token: the claim does not precede the cited mutation,
        or the token does not match any row on disk
   2    usage error (argparse), including a malformed claim token
+  74   the append would cross a section cap, or a --roll-section left the
+       section over its cap; nothing was written
   75   timed out waiting for the lock (EX_TEMPFAIL in sysexits(3)) -- the
        lock is held by someone else; retry is expected to be safe because of
        the dedup-window check above
+  76   the payload does not open a row in the capped section named by
+       --section-heading, so appending it would extend the row above it
+       instead of starting its own; nothing was written
   127  the -- COMMAND could not be started
   <n>  whatever -- COMMAND itself exited with, when it started and ran
 """
@@ -693,14 +698,46 @@ def read_ledger_tail(path: Path, n: int) -> str:
 # rather than capping the wrong bytes.
 
 EXIT_SECTION_CAP = 74
+EXIT_ROW_SHAPE = 76
 ROLL_RECEIPT_SCHEMA = "ledger-roll/1"
 ROLL_RECEIPT_PREFIX = "ledger_lock: ROLL "
 ROLL_POINTER_MARKER = "<!-- ledger-roll:"
 ROLL_POINTER_PROSE_PREFIX = "> Older rows live in"
 
-# A row inside the section starts at a markdown heading. `##` and deeper are
-# both in live use in the rolling work ledger, so both open a row.
-ENTRY_HEADING_PATTERN = re.compile(r"^#{2,6} \S")
+# A row starts where an append starts (OMN-17403).
+#
+# This used to read `^#{2,6} \S` -- a row was a markdown heading. `append_text`
+# adds no heading, and lanes append timestamp-led lines, so the parser and the
+# writer disagreed about what a row is. Measured on the live rolling work
+# ledger on 2026-09-16: §5 held 8,219 lines that parsed as 29 rows. Two chronic
+# failures fell out of that one mismatch -- `ledger_watermark.py --advance`
+# anchored on a tail row whose body stayed open, so the next ordinary append
+# rewrote its digest and `--resolve` exited 3 for eleven consecutive days; and
+# `--roll-section` counts ROWS, so keeping 40 of 29 rolled nothing while the
+# section sat at twice its cap.
+#
+# The shapes below are the ones counted on that section: a bare UTC timestamp
+# (6,918 lines), a pipe-table row opening with one (436), a bullet opening with
+# one (715), and a markdown heading (29). Anything else is a continuation line
+# of the row above it, which is what wrapped prose in a row body actually is.
+ROW_START_PATTERN = re.compile(
+    r"^(?:"
+    r"#{2,6} \S"  # a markdown heading
+    r"|(?:[-*] +)?\|? *\d{4}-\d{2}-\d{2}"  # optional bullet, optional pipe, a date
+    r")"
+)
+
+
+def opens_a_row(payload: str) -> bool:
+    """Whether `payload` would start a new row rather than extend the last one.
+
+    Judged on the FIRST non-blank line only: a row is routinely several lines
+    long, and only its first line opens it.
+    """
+    for line in payload.splitlines():
+        if line.strip():
+            return ROW_START_PATTERN.match(line) is not None
+    return False
 
 
 class SectionError(ValueError):
@@ -777,7 +814,7 @@ def parse_section(text: str, heading: str) -> ParsedSection:
         )
     index = hits[0]
     body = lines[index + 1 :]
-    starts = [i for i, line in enumerate(body) if ENTRY_HEADING_PATTERN.match(line)]
+    starts = [i for i, line in enumerate(body) if ROW_START_PATTERN.match(line)]
     preamble = "".join(body[: starts[0]]) if starts else "".join(body)
     entries: list[SectionEntry] = []
     for position, start in enumerate(starts):
@@ -1231,9 +1268,61 @@ def run_roll_section(args: argparse.Namespace) -> int:
         args.roll_keep_entries,
         utc_now(),
     )
+    # A roll that fires and does not get under the cap is a FAILURE, and it has
+    # to say so (OMN-17403). It used to print a success receipt and exit 0 --
+    # on the live ledger on 2026-09-16 that was `entries_rolled: 0,
+    # section_lines_after: 8220` against a cap of 4000, exit 0. A trigger
+    # reading that receipt cannot tell it apart from a healthy no-op, so twelve
+    # days of daily firings and twelve days of nothing firing at all produce
+    # the same evidence. Nothing is written on the refusal.
+    still_over = section_cap_exceeded(
+        plan.receipt["section_lines_after"],
+        plan.receipt["section_bytes_after"],
+        args,
+    )
+    if still_over is not None:
+        print(
+            f"ledger_lock: ROLL REFUSED -- {args.section_heading!r} still crosses "
+            f"{still_over} after rolling {plan.receipt['entries_rolled']} of "
+            f"{plan.receipt['entries_rolled'] + plan.receipt['entries_kept']} rows. "
+            "Nothing was written. Lower --roll-keep-entries or raise the cap.",
+            file=sys.stderr,
+        )
+        print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(plan.receipt, sort_keys=True)}")
+        return EXIT_SECTION_CAP
     apply_roll(args.ledger, plan)
     print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(plan.receipt, sort_keys=True)}")
     return 0
+
+
+def enforce_row_shape(args: argparse.Namespace, payload: str) -> int | None:
+    """Refuse an append that would extend the previous row instead of opening
+    its own (OMN-17403).
+
+    Scoped to a caller that named a capped section, because that is the caller
+    who has declared the file to be row-structured. Without this the row model
+    holds only by the goodwill of every lane in the fleet, and one careless
+    payload silently rewrites the digest of the row above it -- which is
+    exactly how the 2026-09-04 friction-sweep anchor was invalidated.
+    """
+    if args.section_heading is None:
+        return None
+    # Resolve the section BEFORE judging the payload, so a heading that is
+    # absent or duplicated still fails closed as the usage error it is rather
+    # than being masked by a shape complaint about the payload.
+    parse_section_file(args.ledger, args.section_heading)
+    if opens_a_row(payload):
+        return None
+    first = next((line for line in payload.splitlines() if line.strip()), "")
+    print(
+        "ledger_lock: ROW SHAPE REFUSED -- this payload does not open a row in "
+        f"{args.section_heading!r}, so appending it would extend the row above it. "
+        f"First line: {first[:120]!r}. A row opens with a UTC date (optionally "
+        "behind a '- ' bullet or a '| ' table pipe) or with a markdown heading. "
+        "Nothing was written.",
+        file=sys.stderr,
+    )
+    return EXIT_ROW_SHAPE
 
 
 def enforce_section_caps(args: argparse.Namespace, payload: str) -> int | None:
@@ -1336,6 +1425,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.roll_section:
                 return run_roll_section(args)
             if payload is not None:
+                shape_rc = enforce_row_shape(args, payload)
+                if shape_rc is not None:
+                    return shape_rc
                 cap_rc = enforce_section_caps(args, payload)
                 if cap_rc is not None:
                     return cap_rc

@@ -341,7 +341,14 @@ def test_append_over_the_cap_rolls_then_appends_and_stays_under_the_cap(
 
 
 def test_roll_loses_no_row(tmp_path: Path) -> None:
-    """Union of live+archive headings must equal the pre-roll heading set."""
+    """Union of live+archive headings must equal the pre-roll heading set.
+
+    OMN-17403 changed the cap here from 1 to a cap the roll can actually
+    reach. A roll that leaves the section over its cap is now a refusal
+    (exit 74) rather than a success receipt, and a cap of 1 line is one no
+    roll can satisfy -- the section heading alone is a line. The assertion
+    this test exists for, that no row is lost, is unchanged.
+    """
     ledger = _ledger(tmp_path, 10)
     archive_dir = tmp_path / "archive"
     before = [e.heading for e in MOD.section_entries(ledger, SECTION)]
@@ -350,10 +357,11 @@ def test_roll_loses_no_row(tmp_path: Path) -> None:
         [
             str(ledger),
             "--roll-section",
+            "--force-roll",
             "--section-heading",
             SECTION,
             "--max-section-rows",
-            "1",
+            "100000",
             "--on-cap",
             "roll",
             "--archive-dir",
