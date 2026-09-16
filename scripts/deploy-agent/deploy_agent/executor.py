@@ -2289,11 +2289,15 @@ class DeployExecutor:
         job ``a1b8137b-8ff7-49c2-a95d-cf22b530ef69`` (2026-09-12T15:59:15Z):
         ``GATEWAY_DEPLOY_FAILED: ... exited 5 ... ERROR: DEPLOY_REF unset``.
 
-        The blast radius was not the gateway. ``agent.py::_run_rebuild`` calls
-        ``_apply_lab_overlay`` as the LAST statement of its ``try``, so this
-        exception skipped the OMN-18200 lab-overlay caller entirely and the
+        The blast radius was not the gateway. ``agent.py`` then called
+        ``_apply_lab_overlay`` as the LAST statement of its deploy ``try``, so
+        this exception skipped the OMN-18200 lab-overlay caller entirely and the
         persistent k3s ``onex-lab`` lane sat 16 hours behind ``dev`` with
         nothing reporting it -- rule 24(a)'s k3s half, silently not running.
+        That ordering is fixed (OMN-18545): the caller is in the job's
+        ``finally`` and now runs on the failing path too. This guard still
+        matters on its own terms -- an unpinned build is refused either way --
+        but a raise here no longer takes the lab overlay down with it.
 
         The guard STAYS. This passes the pin the accepted command already
         carries; it does not weaken, skip or opt out of the assertion. An empty

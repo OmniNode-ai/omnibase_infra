@@ -700,12 +700,14 @@ class TestTheCommandsPinReachesTheGatewayScript:
     between the consumer and the gateway step -- the identical shape OMN-16442
     fixed one step earlier in the same file.
 
-    THE BLAST RADIUS IS NOT THE GATEWAY. ``agent.py::_run_rebuild`` calls
-    ``_apply_lab_overlay`` as the LAST statement of its ``try``, after
-    ``rebuild_scope``, so this exception skips the OMN-18200 lab-overlay caller
+    THE BLAST RADIUS WAS NOT THE GATEWAY. ``agent.py`` then called
+    ``_apply_lab_overlay`` as the LAST statement of its deploy ``try``, after
+    ``rebuild_scope``, so this exception skipped the OMN-18200 lab-overlay caller
     entirely. Rule 24(a)'s k3s ``onex-lab`` half therefore did not run on the
     only runtime-affecting merge of 2026-09-12, and the lane stayed 16 hours
-    behind ``dev`` with nothing reporting it.
+    behind ``dev`` with nothing reporting it. OMN-18545 moved the caller into the
+    job's ``finally``, so that particular cascade is closed; the pin this file
+    asserts still has to travel, because an unpinned build is refused either way.
 
     The guard STAYS, exactly as OMN-16442 recorded: this passes the pin the
     command already carries. It does not weaken, skip, or opt out of the

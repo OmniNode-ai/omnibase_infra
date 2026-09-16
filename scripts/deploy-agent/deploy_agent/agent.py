@@ -351,6 +351,13 @@ class DeployAgent:
         # method has always discarded the return, which is why every terminal
         # event reported services_restarted=[] for a scope-default deploy.
         services_restarted: list[str] = []
+        # OMN-18545: the resolved sha is a PROPERTY OF THIS JOB, cleared here
+        # like the two above. It lives on the agent, which outlives the job, and
+        # the lab overlay now runs on the failing path too (see the `finally`
+        # below) -- so a job that dies before git_pull would otherwise build
+        # images and stamp a record for the PREVIOUS job's commit, which this
+        # job never deployed. An unresolved sha must read as unresolved.
+        self._current_git_sha = ""
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
             self.job_store.update_phase(cid, phase, status)
@@ -442,24 +449,53 @@ class DeployAgent:
             self.job_store.complete(cid, status="success")
             logger.info("Job %s completed successfully", cid)
 
+        except Exception as e:
+            logger.exception("Job %s failed: %s", cid, e)
+            self.job_store.complete(cid, status="failed", errors=[str(e)])
+
+        finally:
             # OMN-18200 AC5 -- the k3s onex-lab overlay's half of rule 24(a).
             #
-            # AFTER the compose lane is verified and the job is marked complete,
-            # and deliberately NOT part of its verdict. The compose lane
-            # converged on its own merits by this point; a lab-overlay failure
-            # must not report a lane that IS running the merged sha as broken.
-            # The lab verdict travels in its own sha-keyed receipt, on its own
-            # lane value, emitted by the workflow job that reads the record this
-            # writes.
+            # AFTER the job has a terminal status on BOTH paths, and deliberately
+            # NOT part of its verdict. A compose lane that converged did so on
+            # its own merits; a lab-overlay failure must not report a lane that
+            # IS running the merged sha as broken. The lab verdict travels in
+            # its own sha-keyed receipt, on its own lane value, emitted by the
+            # workflow job that reads the record this writes.
+            #
+            # OMN-18545 -- WHY THIS IS A `finally` AND NOT THE LAST STATEMENT OF
+            # THE `try`. It was the latter, and that closed a loop the agent
+            # could not open. The compose dev lane runs whatever
+            # ONEX_CLOUD_MIGRATE_IMAGE names; the dev-lane migration preflight
+            # (executor._ensure_runtime_migrations_ready, reached from
+            # _compose_up for the RUNTIME phase, i.e. from inside rebuild_scope
+            # above) requires the cloud-migration one-shots to exit 0 USING THAT
+            # IMAGE; and the only in-repo path that BUILDS a replacement migrate
+            # image is the applier below (lab_overlay.MIGRATE_DOCKERFILE). So
+            # while the pinned image was broken the preflight raised, control
+            # jumped to the `except`, and the build never ran -- the agent could
+            # not produce the image that would let the preflight pass. Measured
+            # three times on 2026-09-16; job 6d8316f0 reached terminal `failed`
+            # at 20:44:18Z with `verification: skipped` and no
+            # onex-lab/omninode-cloud-migrate tag for the merged sha ever
+            # appearing on the host.
+            #
+            # The honest limit, stated rather than implied: this makes a
+            # replacement image EXIST on the host. It does not DELIVER it --
+            # ONEX_CLOUD_MIGRATE_IMAGE is operator-held and nothing in this
+            # repository writes it. That half is deliberately out of scope.
+            #
+            # The isolation is structural, not incidental: the verdict is
+            # already written by the time this runs on either path, and the
+            # applier converts its own failures into a failing CHECK in the
+            # record it writes rather than into an exception. Both properties
+            # are pinned by tests, not by this comment --
+            # tests/unit/test_lab_overlay_build_order_omn18545.py.
             #
             # Only the dev lane. A merge to `main` targets stability-test, which
             # is a governed lane this agent's fence already refuses, and the lab
             # overlay is not a stability surface.
             self._apply_lab_overlay(cmd)
-
-        except Exception as e:
-            logger.exception("Job %s failed: %s", cid, e)
-            self.job_store.complete(cid, status="failed", errors=[str(e)])
 
         # Publish result (don't use on_phase_update — job is already completed,
         # and update_phase would revert status to in_progress)
@@ -493,6 +529,11 @@ class DeployAgent:
     def _apply_lab_overlay(self, cmd: ModelRebuildRequested) -> None:
         """Re-apply the k3s onex-lab overlay for this merge (OMN-18200 AC5).
 
+        Called from the deploy job's ``finally``, so it runs whether the job
+        succeeded or failed (OMN-18545). It is therefore also the agent's only
+        path to a freshly built migrate image, and a failed job is exactly when
+        that image is needed -- see the call site for the loop this opens.
+
         Swallows every exception by design. The record the applier writes is the
         channel this result travels on; a raise here would convert a lab finding
         into a failed compose deploy, which is the opposite of what the two
@@ -500,6 +541,15 @@ class DeployAgent:
         applier is itself logged and then dropped, because the applier's own
         contract is that it writes a record on both outcomes -- so an escape is a
         defect in the applier, reported as one, not a reason to lose the deploy.
+        Swallowing is also what keeps the ``finally`` from replacing the job's
+        real error with this one: an exception raised in a ``finally`` REPLACES
+        the in-flight exception, so an applier that raised here would erase the
+        preflight failure that sent the job down this path in the first place.
+
+        The sha guard below is load-bearing for the same reason. It is per-job
+        (cleared at the top of ``_run_deploy``), so a job that failed before
+        ``git_pull`` applies nothing rather than rebuilding the previous job's
+        commit.
         """
         if cmd.runtime_lane != EnumRuntimeLane.DEV:
             return

@@ -33,7 +33,13 @@ registry credential is involved.
 *The completion signal.* OMN-18200 AC3's asynchronous gap is real: the agent's
 build begins minutes after the command is published, so nothing that runs
 synchronously with the publish can know the lane converged. This module runs
-**after** this agent's own verify step, so the signal is not a wall clock.
+**after** this agent's own deploy job reaches a terminal status, so the signal is
+not a wall clock. As of OMN-18545 that is the job's ``finally``, not the tail of
+its ``try``: the caller runs on the FAILING path as well, because this module is
+also the only in-repo builder of the migrate image the dev-lane migration
+preflight needs, and a failed preflight is exactly when a replacement is wanted.
+A failing deploy therefore reaches this module with a terminal verdict already
+recorded -- the compose lane's verdict is never this module's to change.
 
 WHAT IS SPLIT OUT, AND WHY
 --------------------------
