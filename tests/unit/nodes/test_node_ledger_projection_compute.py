@@ -748,7 +748,7 @@ class TestContractValidation:
         with open(CONTRACT_PATH) as f:
             return yaml.safe_load(f)
 
-    def test_contract_has_all_24_dispatchable_topics(self, contract_data: dict) -> None:
+    def test_contract_has_all_25_dispatchable_topics(self, contract_data: dict) -> None:
         """Verify contract subscribes to every topic the runtime can deliver.
 
         7 platform topic suffixes + 12 of the business command/completion/DLQ
@@ -768,11 +768,19 @@ class TestContractValidation:
         declares as its `chain_topology`. This node is the only writer of
         public.event_ledger, so while they were absent that node's evidence read
         was empty by construction and public.ledger_chain held zero rows.
+
+        OMN-18419 added the FIFTH chain hop,
+        onex.cmd.omnibase-infra.delegation-request.v1 -- the pattern-B worker
+        command the runtime's delegation dispatch port publishes while consuming
+        the delegate-skill command. Absent here, the routing request's recorded
+        causal parent named an envelope no correlation-scoped read could
+        resolve, so the edge could not close and chain-canary link 5 graded a
+        correct chain red.
         """
         event_bus = contract_data.get("event_bus", {})
         topics = event_bus.get("subscribe_topics", [])
 
-        assert len(topics) == 24, f"Expected 24 topics, got {len(topics)}: {topics}"
+        assert len(topics) == 25, f"Expected 25 topics, got {len(topics)}: {topics}"
 
         # Verify expected topic suffixes/categories are covered
         expected_suffixes = [

@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay impor
     assemble_replay_and_verify,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
+    ModelDeclaredChainHop,
     ModelDelegationTerminalPayload,
     ModelLedgerChainRow,
     ModelObservedHop,
@@ -74,8 +75,76 @@ ON CONFLICT (correlation_id, hop_index) DO UPDATE SET
 """
 
 
-def _load_contract_settings() -> tuple[tuple[str, ...], int, float]:
-    """Load the tier-2 authority and bounded settle policy from the contract."""
+def _parse_declared_topology(
+    topology_raw: object,
+) -> tuple[ModelDeclaredChainHop, ...]:
+    """Turn the contract's ``chain_topology`` into declared hops, or refuse.
+
+    OMN-18419. Every refusal here is a contract that cannot be graded against,
+    and a topology that cannot be graded against must fail LOUDLY at construction
+    rather than quietly produce a chain the replay rates on a relation it
+    invented. The four refusals are the four ways a parent relation can be
+    unresolvable: a hop named twice (which parent does an edge close against?),
+    a parent naming a topic that is not a declared hop, no head at all (every
+    hop caused by another is a cycle), and more than one head (two chains, not
+    one).
+    """
+    if not isinstance(topology_raw, list) or not topology_raw:
+        raise RuntimeError("chain-writer contract must declare a non-empty topology")
+
+    hops: list[ModelDeclaredChainHop] = []
+    for entry in topology_raw:
+        if not isinstance(entry, Mapping):
+            raise RuntimeError(
+                "chain_topology entries must be mappings carrying `topic` and "
+                f"`parent`; got {entry!r}. The bare-topic list form cannot "
+                "express a branch, which is the OMN-18419 defect."
+            )
+        try:
+            hops.append(ModelDeclaredChainHop.model_validate(dict(entry)))
+        except Exception as exc:
+            raise RuntimeError(
+                f"invalid chain_topology entry {entry!r}: {exc}"
+            ) from exc
+
+    topics = [hop.topic for hop in hops]
+    duplicates = sorted({topic for topic in topics if topics.count(topic) > 1})
+    if duplicates:
+        raise RuntimeError(
+            f"chain_topology declares {duplicates!r} more than once; a parent "
+            "relation resolved by topic cannot say which occurrence it means"
+        )
+
+    declared = set(topics)
+    dangling = sorted(
+        {
+            hop.parent
+            for hop in hops
+            if hop.parent is not None and hop.parent not in declared
+        }
+    )
+    if dangling:
+        raise RuntimeError(
+            f"chain_topology names parent topic(s) {dangling!r} that are not "
+            "declared hops; an edge to an undeclared hop can never close"
+        )
+
+    heads = [hop.topic for hop in hops if hop.parent is None]
+    if not heads:
+        raise RuntimeError(
+            "chain_topology declares no head (every hop names a parent), which "
+            "is a cycle rather than a chain"
+        )
+    if len(heads) > 1:
+        raise RuntimeError(
+            f"chain_topology declares {len(heads)} heads {heads!r}; one "
+            "correlation's chain has exactly one head"
+        )
+    return tuple(hops)
+
+
+def _load_contract_settings() -> tuple[tuple[ModelDeclaredChainHop, ...], int, float]:
+    """Load the declared topology and bounded settle policy from the contract."""
     try:
         raw = yaml.safe_load(  # yaml-safe-load-ok: trusted package contract
             _CONTRACT_PATH.read_text(encoding="utf-8")
@@ -85,14 +154,7 @@ def _load_contract_settings() -> tuple[tuple[str, ...], int, float]:
     if not isinstance(raw, Mapping):
         raise RuntimeError("chain-writer contract root must be a mapping")
 
-    topology_raw = raw.get("chain_topology")
-    if (
-        not isinstance(topology_raw, list)
-        or not topology_raw
-        or not all(isinstance(topic, str) and topic for topic in topology_raw)
-    ):
-        raise RuntimeError("chain-writer contract must declare a non-empty topology")
-    topology = tuple(str(topic) for topic in topology_raw)
+    topology = _parse_declared_topology(raw.get("chain_topology"))
 
     writer_raw = raw.get("writer")
     writer = writer_raw if isinstance(writer_raw, Mapping) else {}
@@ -113,7 +175,7 @@ class HandlerDelegationChainLedger:
         container: ModelONEXContainer,
         db_dsn: str | None = None,
         *,
-        declared_chain: Sequence[str] | None = None,
+        declared_chain: Sequence[ModelDeclaredChainHop] | None = None,
         settle_attempts: int | None = None,
         settle_delay_seconds: float | None = None,
     ) -> None:
@@ -186,10 +248,11 @@ class HandlerDelegationChainLedger:
         await self._ensure_db_ready()
 
         observed: tuple[ModelObservedHop, ...] = ()
+        declared_topics = self._declared_topics()
         for attempt in range(self._settle_attempts):
             observed = await self._read_observed(correlation_id)
             observed_topics = {hop.topic for hop in observed}
-            if all(topic in observed_topics for topic in self._declared_chain):
+            if all(topic in observed_topics for topic in declared_topics):
                 break
             if attempt + 1 < self._settle_attempts and self._settle_delay_seconds:
                 await asyncio.sleep(self._settle_delay_seconds)
@@ -207,7 +270,7 @@ class HandlerDelegationChainLedger:
             raise self._runtime_error(
                 "no delegation-chain evidence to persist: public.event_ledger "
                 f"carries no row for correlation {correlation_id} on any "
-                f"declared chain topic {list(self._declared_chain)!r} after "
+                f"declared chain topic {list(self._declared_topics())!r} after "
                 f"{self._settle_attempts} settle attempt(s); no ledger_chain "
                 "row can be written, and reporting success here would be "
                 "indistinguishable from a complete write",
@@ -222,6 +285,15 @@ class HandlerDelegationChainLedger:
             handler_id=HANDLER_ID_DELEGATION_CHAIN_LEDGER,
         )
 
+    def _declared_topics(self) -> tuple[str, ...]:
+        """The declared hop topics, in declaration order.
+
+        The read filter and the settle predicate want topics; the replay wants
+        the parent relation. Deriving the topic list here keeps the declaration
+        a single object rather than two lists free to disagree.
+        """
+        return tuple(hop.topic for hop in self._declared_chain)
+
     async def _read_observed(
         self, correlation_id: UUID
     ) -> tuple[ModelObservedHop, ...]:
@@ -230,7 +302,7 @@ class HandlerDelegationChainLedger:
                 "operation": "db.query",
                 "payload": {
                     "sql": _SQL_READ_OBSERVED,
-                    "parameters": [str(correlation_id), list(self._declared_chain)],
+                    "parameters": [str(correlation_id), list(self._declared_topics())],
                 },
                 "correlation_id": str(correlation_id),
             }
