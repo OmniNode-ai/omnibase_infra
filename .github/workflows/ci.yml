@@ -3170,8 +3170,15 @@ jobs:
   # protection treats as never-satisfied — every omnibase_infra dev PR based on
   # 27478af4 or later was unmergeable until this repin.
   #
-  # d3182b6f is the current reusable workflow's pinned dev commit, reachable from
-  # `dev` forever.
+  # Current pin review (OMN-18205): ff6e41c is omnimarket#2575's squash merge
+  # commit, committed 2026-09-16T03:01:49Z. GitHub compare proved
+  # ff6e41cb...dev as `ahead` by 3 and behind by 0 on 2026-09-16, meaning this
+  # pin is an ancestor of protected `dev`. The prior pin d3182b6f compares to
+  # ff6e41c as `ahead` by 454 and behind by 0; this repin is a mainline
+  # descendant, not a deleted PR-head SHA. The test
+  # tests/ci/test_merge_hold_gate_omn15484.py::TestCiWiring::
+  # test_the_workflow_and_vocabulary_refs_are_the_same enforces that this
+  # workflow pin and `vocabulary_ref` remain identical.
   merge-hold-gate:
     permissions:
       contents: read

@@ -236,6 +236,15 @@ class TestCiWiring:
         job = self._hold_job()
         assert job["with"]["vocabulary_ref"] == job["uses"].split("@", 1)[1]
 
+    def test_current_pin_review_is_recorded_next_to_the_callsite(self) -> None:
+        """The supply-chain review note must travel with the executable pin."""
+        raw = _CI_YAML.read_text(encoding="utf-8")
+        current_pin = self._hold_job()["uses"].split("@", 1)[1]
+        assert f"Current pin review (OMN-18205): {current_pin[:7]}" in raw
+        assert "ff6e41cb...dev as `ahead` by 3 and behind by 0" in raw
+        assert "d3182b6f compares to" in raw
+        assert "workflow pin and `vocabulary_ref` remain identical" in raw
+
     def test_the_pin_is_immutable_or_mainline(self) -> None:
         """A feature-branch pin breaks this repo when that branch is deleted."""
         ref = self._hold_job()["uses"].split("@", 1)[1]
