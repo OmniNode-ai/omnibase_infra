@@ -45,6 +45,45 @@ on:
         required: false
         default: "dev"
         type: string
+      pinned_repo:
+        # OMN-17057. `sibling_ref` is ONE value applied to every sibling, which
+        # is why its own comments insist it stay a branch name: a commit SHA
+        # from omnimarket does not exist in omnibase_core, so cloning all four
+        # at it fails outright. That constraint is real, and it is also the
+        # whole defect -- it means the vendored sibling revision is never
+        # CHOSEN. Whichever commit each repo's `dev` happens to point at when
+        # some OTHER repository's merge fires a rebuild is the one the lane and
+        # then staging run, and no sibling merge can cause or prove delivery of
+        # its own sha.
+        #
+        # These two inputs name ONE repository and ONE revision. Everything
+        # else keeps taking `sibling_ref`, so the axis `sibling_ref` was
+        # protecting is untouched. The mechanism underneath already exists and
+        # has since OMN-17135: `deploy_source_ref.py` takes `--ref` plus
+        # `--fallback-ref` and resolves the primary in whichever repository
+        # carries it while taking the fallback everywhere else, recording
+        # `fallback_from`. What CI did until now was pass the same branch name
+        # as both, throwing that capability away.
+        #
+        # Family-general by construction: `omnimarket`, `omnibase_core`,
+        # `omnibase_compat` and `omnibase_spi` are all staged by the same loop,
+        # so each names itself here with no per-repo code anywhere. `omniclaude`
+        # is deliberately outside the family -- it is not in SIBLING_REPOS and
+        # is not vendored into the image, so there is nothing for it to pin.
+        description: >-
+          Sibling repository whose revision is pinned exactly (e.g. omnimarket).
+          Empty means every sibling takes sibling_ref, which is the pre-OMN-17057
+          behaviour.
+        required: false
+        default: ""
+        type: string
+      pinned_revision:
+        description: >-
+          40-character commit SHA in pinned_repo. Refused unless pinned_repo is
+          also set, and refused if the staged tree does not end up at it.
+        required: false
+        default: ""
+        type: string
       no-cache:
         # Same bare-boolean rule as the workflow_call block below. GitHub
         # tolerates a quoted default on a dispatch-only input, which is exactly
@@ -60,6 +99,45 @@ on:
         description: "Git ref to stage sibling repos at."
         required: false
         default: "dev"
+        type: string
+      pinned_repo:
+        # OMN-17057. `sibling_ref` is ONE value applied to every sibling, which
+        # is why its own comments insist it stay a branch name: a commit SHA
+        # from omnimarket does not exist in omnibase_core, so cloning all four
+        # at it fails outright. That constraint is real, and it is also the
+        # whole defect -- it means the vendored sibling revision is never
+        # CHOSEN. Whichever commit each repo's `dev` happens to point at when
+        # some OTHER repository's merge fires a rebuild is the one the lane and
+        # then staging run, and no sibling merge can cause or prove delivery of
+        # its own sha.
+        #
+        # These two inputs name ONE repository and ONE revision. Everything
+        # else keeps taking `sibling_ref`, so the axis `sibling_ref` was
+        # protecting is untouched. The mechanism underneath already exists and
+        # has since OMN-17135: `deploy_source_ref.py` takes `--ref` plus
+        # `--fallback-ref` and resolves the primary in whichever repository
+        # carries it while taking the fallback everywhere else, recording
+        # `fallback_from`. What CI did until now was pass the same branch name
+        # as both, throwing that capability away.
+        #
+        # Family-general by construction: `omnimarket`, `omnibase_core`,
+        # `omnibase_compat` and `omnibase_spi` are all staged by the same loop,
+        # so each names itself here with no per-repo code anywhere. `omniclaude`
+        # is deliberately outside the family -- it is not in SIBLING_REPOS and
+        # is not vendored into the image, so there is nothing for it to pin.
+        description: >-
+          Sibling repository whose revision is pinned exactly (e.g. omnimarket).
+          Empty means every sibling takes sibling_ref, which is the pre-OMN-17057
+          behaviour.
+        required: false
+        default: ""
+        type: string
+      pinned_revision:
+        description: >-
+          40-character commit SHA in pinned_repo. Refused unless pinned_repo is
+          also set, and refused if the staged tree does not end up at it.
+        required: false
+        default: ""
         type: string
       no-cache:
         # OMN-16906: BARE `false`, never `"false"`. GitHub type-checks this
@@ -144,10 +222,53 @@ jobs:
       # branch vendor the dev-HEAD siblings. Each clone is shallow at the ref but
       # carries full enough history for HEAD SHA / branch / status probes that
       # stage_workspace.sh records as per-repo VCS provenance (OMN-13030).
+      # OMN-17057: refuse a half-specified pin before anything is cloned. A
+      # revision with no repository names nothing; a repository with no
+      # revision would silently fall through to the branch and produce a build
+      # that LOOKS pinned. Both are refusals, not warnings.
+      - name: Validate the sibling pin
+        env:
+          PINNED_REPO: ${{ inputs.pinned_repo }}
+          PINNED_REVISION: ${{ inputs.pinned_revision }}
+          SIBLING_REPOS_ALL: ${{ env.SIBLING_REPOS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PINNED_REPO}" ] && [ -z "${PINNED_REVISION}" ]; then
+            echo "no sibling pin requested; every sibling takes sibling_ref"
+            exit 0
+          fi
+          if [ -z "${PINNED_REPO}" ] || [ -z "${PINNED_REVISION}" ]; then
+            echo "::error::pinned_repo='${PINNED_REPO}' and" \
+              "pinned_revision='${PINNED_REVISION}' must be set together." \
+              "A half-specified pin would build from the branch while reading" \
+              "as pinned."
+            exit 1
+          fi
+          if ! [[ "${PINNED_REVISION}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::pinned_revision='${PINNED_REVISION}' is not a" \
+              "40-character lowercase commit sha. A branch or tag is not a" \
+              "named revision -- that is the defect this input closes."
+            exit 1
+          fi
+          FOUND=0
+          for repo in ${SIBLING_REPOS_ALL}; do
+            [ "${repo}" = "${PINNED_REPO}" ] && FOUND=1
+          done
+          if [ "${FOUND}" -ne 1 ]; then
+            echo "::error::pinned_repo='${PINNED_REPO}' is not one of the" \
+              "repositories this image vendors (${SIBLING_REPOS_ALL})." \
+              "Pinning a repository the build does not stage would change" \
+              "nothing while reading as a pin."
+            exit 1
+          fi
+          echo "pinning ${PINNED_REPO} at ${PINNED_REVISION}; other siblings take sibling_ref"
+
       - name: Stage sibling repos at the requested ref
         id: stage-siblings
         env:
           SIBLING_REF: ${{ inputs.sibling_ref }}
+          PINNED_REPO: ${{ inputs.pinned_repo }}
+          PINNED_REVISION: ${{ inputs.pinned_revision }}
         run: |
           set -euo pipefail
           WORKSPACE_ROOT="${RUNNER_TEMP}/omni_workspace"
@@ -164,6 +285,23 @@ jobs:
             git clone --filter=blob:none --branch "${SIBLING_REF}" \
               "https://github.com/OmniNode-ai/${repo}.git" \
               "${WORKSPACE_ROOT}/${repo}"
+            # OMN-17057: the pinned commit is a MERGE commit on the branch just
+            # cloned, so it is already reachable -- but only if the branch tip
+            # is at or after it. A pin that raced its own merge landing on the
+            # remote would otherwise surface much later, inside RT-1, as an
+            # unresolvable ref with no clue which repository moved. Fetch it by
+            # sha explicitly and fail here, where the message can name the repo
+            # and the commit.
+            if [ "${repo}" = "${PINNED_REPO:-}" ]; then
+              if ! git -C "${WORKSPACE_ROOT}/${repo}" \
+                  fetch --filter=blob:none origin "${PINNED_REVISION}"; then
+                echo "::error::${repo} does not carry ${PINNED_REVISION}." \
+                  "Refusing to build a candidate that claims a revision its" \
+                  "source does not contain."
+                exit 1
+              fi
+              echo "  ${repo} carries the pinned revision ${PINNED_REVISION}"
+            fi
             echo "  ${repo} HEAD: $(git -C "${WORKSPACE_ROOT}/${repo}" rev-parse HEAD)"
             echo "::endgroup::"
           done
@@ -188,7 +326,18 @@ jobs:
           # above were cloned fresh AT sibling_ref, so arming RT-1 with the same
           # ref makes the checkout a no-op and turns the vendored SHA into an
           # asserted fact instead of an unfalsifiable claim.
-          DEPLOY_REF: ${{ inputs.sibling_ref }}
+          #
+          # OMN-17057: when a pin is requested, RT-1's primary ref becomes the
+          # pinned COMMIT and sibling_ref becomes the fallback. That is exactly
+          # the pair deploy_source_ref.py was built for in OMN-17135 -- the
+          # primary resolves in the one repository that carries it, every other
+          # repository takes the fallback and records `fallback_from`. Both
+          # values are still refs, so RT-1's own refusals (unresolvable ref,
+          # vendored SHA not equal to the expected one) apply unchanged.
+          DEPLOY_REF: ${{ inputs.pinned_revision || inputs.sibling_ref }}
+          DEPLOY_SIBLING_FALLBACK_REF: origin/${{ inputs.sibling_ref }}
+          PINNED_REPO: ${{ inputs.pinned_repo }}
+          PINNED_REVISION: ${{ inputs.pinned_revision }}
         run: |
           set -euo pipefail
           bash scripts/runtime_build/stage_workspace.sh
@@ -196,6 +345,28 @@ jobs:
           ls -1 workspace/sibling-repos/
           echo "Per-repo VCS provenance:"
           cat workspace/sibling-vcs-provenance.json
+
+          # OMN-17057: the pin is a VERIFIED fact or it is not a pin.
+          # stage_workspace.sh already refuses a vendored SHA that disagrees
+          # with what RT-1 checked out, but that assertion is about RT-1's own
+          # bookkeeping. This one is about the provenance file the image will
+          # BAKE and the staging deploy will later read out of a running pod
+          # (OMN-17926) -- the artefact the ticket's done-proof probe names. If
+          # those two ever diverge, the image would ship a claim nothing
+          # checked.
+          if [ -n "${PINNED_REPO}" ]; then
+            VENDORED="$(jq -r --arg repo "${PINNED_REPO}" \
+              '.siblings[$repo].vcs_ref // ""' \
+              workspace/sibling-vcs-provenance.json)"
+            if [ "${VENDORED}" != "${PINNED_REVISION}" ]; then
+              echo "::error::${PINNED_REPO} was pinned at ${PINNED_REVISION} but" \
+                "the staged tree vendors '${VENDORED}'. Refusing to publish a" \
+                "candidate whose baked provenance would not name the revision" \
+                "it was asked to carry."
+              exit 1
+            fi
+            echo "verified: ${PINNED_REPO} vendored at ${PINNED_REVISION}"
+          fi
 
       - name: Set up Python for AWS CLI
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -413,6 +584,12 @@ jobs:
         id: manifest
         env:
           SIBLING_REF: ${{ inputs.sibling_ref }}
+          # OMN-17057: which sibling revision was CHOSEN, as distinct from
+          # per_sibling_vcs_provenance, which records what each tree happened
+          # to be at. A reader has to be able to tell a deliberate pin from a
+          # branch that drifted to the same commit.
+          PINNED_REPO: ${{ inputs.pinned_repo }}
+          PINNED_REVISION: ${{ inputs.pinned_revision }}
         run: |
           set -euo pipefail
           mkdir -p ops/digests
@@ -425,6 +602,8 @@ jobs:
             --arg tag "${{ steps.meta.outputs.candidate_tag }}" \
             --arg date "${{ steps.timestamp.outputs.build_date }}" \
             --arg sibling_ref "${SIBLING_REF}" \
+            --arg pinned_repo "${PINNED_REPO}" \
+            --arg pinned_revision "${PINNED_REVISION}" \
             --arg run_id "$GITHUB_RUN_ID" \
             --argjson siblings "$SIBLINGS" \
             '{
@@ -439,6 +618,9 @@ jobs:
               image_ref: $ref,
               image_tag: $tag,
               sibling_ref: $sibling_ref,
+              pinned_sibling: (if $pinned_repo == "" then null
+                               else {repo: $pinned_repo, revision: $pinned_revision}
+                               end),
               per_sibling_vcs_provenance: $siblings.siblings,
               build_date: $date,
               workflow_run_id: $run_id,
@@ -458,6 +640,8 @@ jobs:
         if: always()
         env:
           SIBLING_REF: ${{ inputs.sibling_ref }}
+          PINNED_REPO: ${{ inputs.pinned_repo }}
+          PINNED_REVISION: ${{ inputs.pinned_revision }}
         run: |
           {
             echo "# Workspace Stability-Candidate Build (OMN-13656)"
@@ -469,6 +653,11 @@ jobs:
             echo "| non_main_lineage | true |"
             echo "| pinnable lanes | dev, stability-test (NEVER prod) |"
             echo "| sibling ref | \`${SIBLING_REF}\` |"
+            if [ -n "${PINNED_REPO}" ]; then
+              echo "| pinned sibling | \`${PINNED_REPO}@${PINNED_REVISION}\` |"
+            else
+              echo "| pinned sibling | none (every sibling at \`${SIBLING_REF}\`) |"
+            fi
             echo "| digest | \`${{ steps.resolve-digest.outputs.digest }}\` |"
             echo "| candidate tag | \`${{ steps.meta.outputs.candidate_tag }}\` |"
             echo ""
