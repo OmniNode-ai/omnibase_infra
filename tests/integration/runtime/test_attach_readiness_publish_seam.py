@@ -17,7 +17,7 @@ chain end to end with a contract whose required topic is ABSENT:
       -> real subscribe_wired_contract_topics  (provision -> confirm-ready -> attach)
       -> real publish_runtime_manifest         (the function the kernel calls)
       -> the envelope captured off a recording bus
-      -> real ModelPayloadInsertRuntimeManifest coercion of that wire payload
+      -> real ModelRuntimeManifestPublished decode of that wire payload
       -> real HandlerPostgresRuntimeManifestInsert SQL arguments
 
 and assert the absent topic is NAMED at the far end. Everything in that chain is
@@ -42,6 +42,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
 )
@@ -70,9 +71,6 @@ from omnibase_infra.event_bus.model_topic_set_readiness import ModelTopicSetRead
 from omnibase_infra.nodes.node_runtime_manifest_reducer.handlers.handler_postgres_runtime_manifest_insert import (
     SQL_INSERT_RUNTIME_MANIFEST,
     HandlerPostgresRuntimeManifestInsert,
-)
-from omnibase_infra.nodes.node_runtime_manifest_reducer.models.model_payload_insert_runtime_manifest import (
-    ModelPayloadInsertRuntimeManifest,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     subscribe_wired_contract_topics,
@@ -327,32 +325,27 @@ def _captured_manifest_payload(bus: _RecordingBus) -> dict[str, object]:
 
 
 async def _sql_args_for(payload: dict[str, object]) -> tuple[object, ...]:
-    """Coerce the wire payload into the intent model and run the real handler.
+    """Decode the wire payload the way the runtime does and run the real handler.
 
-    ``ModelPayloadInsertRuntimeManifest`` is ``extra="forbid"``: if the producer
-    key name and the consumer field name ever drift apart, this coercion raises
-    instead of silently dropping the blocker set.
+    OMN-17296: this used to hand-build ``ModelPayloadInsertRuntimeManifest`` from
+    the wire keys and call ``handle(payload, correlation_id)``. That two-argument
+    call is a shape auto-wiring never makes, and the hand-build was standing in
+    for a fold that did not exist in production — so the seam it claimed to prove
+    was not the seam that runs. It now decodes into the published EVENT model and
+    dispatches the envelope, which is what the adapter does on the lane.
+
+    Both models are ``extra="forbid"``, so a producer key drifting from a
+    consumer field still raises here instead of silently dropping the blocker set.
     """
-    intent_payload = ModelPayloadInsertRuntimeManifest(
-        runtime_profile=str(payload["runtime_profile"]),
-        contract_hash=str(payload["contract_hash"]),
-        topology_hash=str(payload["topology_hash"]),
-        manifest_hash=str(payload["topology_hash"]),
-        contracts=payload["contracts"],  # type: ignore[arg-type]
-        owned_command_topics=payload["owned_command_topics"],  # type: ignore[arg-type]
-        subscribed_event_topics=payload["subscribed_event_topics"],  # type: ignore[arg-type]
-        handlers=payload["handlers"],  # type: ignore[arg-type]
-        skipped_contracts=payload["skipped_contracts"],  # type: ignore[arg-type]
-        failed_contracts=payload["failed_contracts"],  # type: ignore[arg-type]
-        ownership_violations=payload["ownership_violations"],  # type: ignore[arg-type]
-        image_digest=None,
-        started_at=payload["started_at"],  # type: ignore[arg-type]
-        attach_readiness=payload["attach_readiness"],  # type: ignore[arg-type]
+    event = ModelRuntimeManifestPublished.model_validate(payload)
+    envelope: ModelEventEnvelope[ModelRuntimeManifestPublished] = ModelEventEnvelope(
+        payload=event,
+        correlation_id=uuid4(),
+        event_type="omnibase-infra.runtime-manifest-published",
+        source_tool="service_kernel",
     )
     pool = _make_pool()
-    result = await HandlerPostgresRuntimeManifestInsert(pool).handle(
-        intent_payload, uuid4()
-    )
+    result = await HandlerPostgresRuntimeManifestInsert(pool).handle(envelope)
     assert result.success is True, result.error
     args: tuple[object, ...] = pool._test_conn.fetchrow.call_args[0]
     assert args[0] == SQL_INSERT_RUNTIME_MANIFEST

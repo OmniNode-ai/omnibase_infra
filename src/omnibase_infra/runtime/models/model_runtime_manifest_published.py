@@ -39,7 +39,7 @@ Related Tickets:
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from omnibase_core.models.runtime_manifest.model_runtime_manifest import (
     ModelRuntimeManifest,
@@ -47,6 +47,12 @@ from omnibase_core.models.runtime_manifest.model_runtime_manifest import (
 from omnibase_infra.event_bus.model_runtime_attach_readiness import (
     ModelRuntimeAttachReadiness,
 )
+
+# ``contract_hash`` and ``topology_hash`` are pydantic ``computed_field``s on the
+# base: serialized on the way OUT, rejected on the way IN because the base is
+# ``extra="forbid"``. Naming them here rather than widening the model keeps every
+# genuinely unknown key a hard failure.
+_COMPUTED_FIELD_NAMES = ("contract_hash", "topology_hash")
 
 
 class ModelRuntimeManifestPublished(ModelRuntimeManifest):
@@ -63,6 +69,47 @@ class ModelRuntimeManifestPublished(ModelRuntimeManifest):
     """
 
     attach_readiness: ModelRuntimeAttachReadiness | None = Field(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_own_serialized_form(cls, data: object) -> object:
+        """Make the published payload round-trippable through this model.
+
+        OMN-17296: this model is what goes ON the wire, and ``model_dump``
+        includes the base's two ``computed_field``s. The base is
+        ``extra="forbid"``, so feeding that same dict back to ``model_validate``
+        — which is exactly what the auto-wiring dispatch adapter does on the
+        consumer side once the contract declares this as its ``event_model`` —
+        failed with ``extra_forbidden`` on ``contract_hash`` and
+        ``topology_hash``. A model that cannot read its own output is not a wire
+        model, and the asymmetry was invisible for as long as nothing on the
+        consumer side ever decoded the payload.
+
+        Only the two computed names are dropped, and only after they are checked
+        against the values this content actually produces. A mismatch means the
+        publisher derived a different hash from the same fields — genuine
+        cross-version manifest drift, which is the one thing these hashes exist
+        to reveal — so it raises rather than being silently discarded. Every
+        other unknown key still fails ``extra_forbidden`` untouched.
+        """
+        if not isinstance(data, dict):
+            return data
+        supplied = {name: data[name] for name in _COMPUTED_FIELD_NAMES if name in data}
+        if not supplied:
+            return data
+        remainder = {k: v for k, v in data.items() if k not in supplied}
+        recomputed = cls(**remainder)
+        for name, value in supplied.items():
+            actual = getattr(recomputed, name)
+            if value != actual:
+                raise ValueError(
+                    f"runtime manifest {name} on the wire is {value!r} but this "
+                    f"payload's contents derive {actual!r}. The publisher and "
+                    "this consumer computed the hash differently, which is "
+                    "manifest drift, not a decode problem — do not silence it by "
+                    "dropping the field."
+                )
+        return remainder
 
 
 __all__: list[str] = ["ModelRuntimeManifestPublished"]

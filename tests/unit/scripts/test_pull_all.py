@@ -483,14 +483,21 @@ class TestPullAllScript:
     def test_script_refuses_dirty_repo_before_branch_switch(
         self, tmp_path: Path
     ) -> None:
-        """Local uncommitted work blocks branch switching and remains in place."""
+        """Uncommitted work on a TRACKED file blocks the switch and survives.
+
+        OMN-17395 narrowed the refusal to tracked changes -- untracked files
+        are covered by :meth:`TestWrongBranchConvergeWiring.\
+test_untracked_files_do_not_refuse_the_sync`, which is the other half of the
+        same pair. This one is the case where a switch could actually destroy
+        work, so it must keep refusing.
+        """
         omni_home = tmp_path / "omni_home"
         omni_home.mkdir()
         fake_home = tmp_path / "home"
         fake_home.mkdir()
 
         omniclaude = _make_omniclaude_source(omni_home)
-        dirty_file = omniclaude / "local-notes.txt"
+        dirty_file = omniclaude / "plugins" / "onex" / "lib" / "example.py"
         dirty_file.write_text("do not lose this\n")
 
         result = _run_pull_all(omni_home, fake_home)
@@ -553,8 +560,9 @@ class TestPullAllScript:
         fake_home.mkdir()
 
         omniclaude = _make_omniclaude_source(omni_home)
-        # Make omniclaude dirty so it fails.
-        (omniclaude / "dirty.txt").write_text("uncommitted\n")
+        # Make omniclaude dirty so it fails. Must be a TRACKED file: since
+        # OMN-17395 untracked files no longer refuse the switch.
+        (omniclaude / "plugins" / "onex" / "lib" / "example.py").write_text("dirt\n")
 
         result = _run_pull_all(omni_home, fake_home, repos=["omniclaude", "absent_xyz"])
         assert result.returncode != 0, (
@@ -1130,7 +1138,8 @@ class TestOmnimarketDriftRepair:
         fake_home.mkdir()
 
         omnimarket = _make_simple_repo_source(omni_home, "omnimarket")
-        (omnimarket / "dirty.txt").write_text("uncommitted\n")
+        # TRACKED dirt: since OMN-17395 an untracked file does not refuse.
+        (omnimarket / "README.md").write_text("uncommitted\n")
         _infra_dir, calls_log = _make_fake_infra_with_drift_stub(omni_home)
 
         result = _run_pull_all(omni_home, fake_home, repos=["omnimarket"])
@@ -1551,6 +1560,11 @@ def _make_converge_stub(omni_home: Path, *, behavior: str = "ok") -> tuple[Path,
     stub = scripts_dir / "converge-canonical-clone.sh"
     if behavior == "ok":
         body = 'git -C "$OMNI_HOME/$1" branch -f main origin/main\n'
+    elif behavior == "wrong-branch":
+        # OMN-16497 default mode on an ATTACHED wrong branch: re-derive the
+        # remote's published default branch and switch the clone back to it.
+        # pull-all's own fetch+ff then does the catching up.
+        body = 'git -C "$OMNI_HOME/$1" switch -q main\n'
     else:
         body = "exit 1\n"
     stub.write_text(
@@ -1929,3 +1943,219 @@ class TestRegistryWideBareScan:
 
         result = _run_pull_all(omni_home, fake_home, repos=["omnidash"])
         assert "not named on this invocation" in result.stdout, result.stdout
+
+
+def _make_wrong_branch_repo(omni_home: Path, name: str) -> Path:
+    """A canonical clone ATTACHED to a lane branch (OMN-17395).
+
+    Models the live 2026-09-16 shape of ``$OMNI_HOME/knowledge-base-internal``:
+    a clone left on a pushed lane branch by an actor outside the Claude Code
+    harness, whose own upstream exists and is up to date, so nothing about the
+    clone looks broken from inside the branch. Clean tree, ahead of main.
+    """
+    repo = _make_simple_repo_source(omni_home, name)
+    _git(["switch", "-q", "-c", "codex/lane-branch"], cwd=repo)
+    _commit_file(repo, "lane.txt", "lane\n", "lane commit")
+    _git(["push", "-q", "-u", "origin", "codex/lane-branch"], cwd=repo)
+    # origin/main advances without the clone, which is the silent half
+    _git(["switch", "-q", "main"], cwd=repo)
+    _commit_file(repo, "main-advance.txt", "main\n", "main advance")
+    _git(["push", "-q", "origin", "main"], cwd=repo)
+    _git(["switch", "-q", "codex/lane-branch"], cwd=repo)
+    return repo
+
+
+@pytest.mark.unit
+class TestWrongBranchConvergeWiring:
+    """A canonical clone parked on a lane branch is repaired, not silently
+    skipped (OMN-17395).
+
+    Field failure this closes: ``$OMNI_HOME/knowledge-base-internal`` sat on
+    ``codex/omn-17871-source-artifact-attestation-plan``, 4 ahead / 341 behind
+    ``origin/main``, from 2026-09-05T21:25Z until 2026-09-16 -- eleven days --
+    while every lane that resolved that clone for friction state, prior
+    reports and ``beta/GOAL.md`` read an eleven-day-old tree. The
+    morning-friction-sweep reported the same stale read on ten consecutive
+    runs. ``pull-all.sh`` -- the ONE sanctioned reconcile path, since the
+    canonical-clone guard denies a hand ``checkout``/``switch``/``reset``
+    there -- answered ``SKIPPED  <repo> (on branch: ...)`` and returned before
+    fetching, and ``SKIPPED`` is deliberately not counted into the terminal
+    result line, so every run reported ``overall=OK``. The sanctioned path was
+    therefore structurally unable to repair the one drift class it was the
+    only sanctioned repair for.
+
+    ``converge-canonical-clone.sh`` has handled this class since OMN-16497
+    (WRONG BRANCH, re-derived from ``refs/remotes/<remote>/HEAD``). Only the
+    wiring was missing.
+    """
+
+    def test_wrong_branch_clone_is_converged_and_pulled(self, tmp_path: Path) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = _make_wrong_branch_repo(omni_home, "omnimarket")
+        _stub, calls_log = _make_converge_stub(omni_home, behavior="wrong-branch")
+        _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert result.returncode == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        # Scoped to the per-repo verdict line: the stage summary legitimately
+        # carries SKIPPED for stages that had nothing to do.
+        assert "SKIPPED  omnimarket" not in result.stdout, (
+            "a clone parked on a lane branch was skipped instead of converged; "
+            f"stdout={result.stdout!r}"
+        )
+        assert calls_log.exists(), (
+            f"converge script never invoked; stdout={result.stdout!r}"
+        )
+        call = calls_log.read_text()
+        assert "omnimarket --execute" in call, call
+        assert "--branch" not in call, (
+            "wrong-branch repair must use the DEFAULT mode (which re-derives the "
+            f"remote's published default branch), not --branch: {call}"
+        )
+        # Snapshot invocation, same race as OMN-16500: pull-all switches the
+        # canonical omniclaude clone mid-run, so the script must come from the
+        # run-start snapshot, never through the omniclaude working tree.
+        invoked_as = call.split("invoked_as=", 1)[1].split(" | ", 1)[0]
+        assert not invoked_as.startswith(str(omni_home / "omniclaude")), invoked_as
+
+        # The clone is back on a tracking branch and actually fast-forwarded.
+        branch = subprocess.check_output(
+            ["git", "-C", str(repo), "branch", "--show-current"],
+            text=True,
+            env=_hermetic_git_env(),
+        ).strip()
+        assert branch in {"main", "dev"}, f"left on {branch!r}"
+
+        def _sha(ref: str) -> str:
+            return subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", ref],
+                text=True,
+                env=_hermetic_git_env(),
+            ).strip()
+
+        # Returning to a tracking branch is only half the repair: the clone
+        # must also have caught up, or it is still serving a stale tree.
+        assert _sha("main") == _sha("origin/main"), (
+            "clone was returned to a tracking branch but never fast-forwarded "
+            f"to origin/main; stdout={result.stdout!r}"
+        )
+
+    def test_unrepairable_wrong_branch_counts_as_failed_not_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        """When the converge step cannot repair it, the run FAILS loudly.
+
+        The load-bearing half: an uncounted ``SKIPPED`` is what made eleven
+        days of staleness read as ``overall=OK``. A clone the sanctioned path
+        could not return to a tracking branch must land in ``repos_failed``.
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_wrong_branch_repo(omni_home, "omnimarket")
+        _make_converge_stub(omni_home, behavior="fail")
+        _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        fields = _parse_result_line(result.stdout)
+        assert fields, f"no terminal result line; stdout={result.stdout!r}"
+        assert fields["repos_failed"] == "1", (
+            f"an unrepairable wrong-branch clone must be counted as FAILED, "
+            f"not swallowed; fields={fields} stdout={result.stdout!r}"
+        )
+        assert fields["overall"] == "FAILED", fields
+
+    def test_untracked_files_do_not_refuse_the_sync(self, tmp_path: Path) -> None:
+        """Untracked lane output must not permanently red a canonical clone.
+
+        ``knowledge-base-internal`` carries ten untracked, unpublished lane
+        artifacts (deep dives, briefs) at the moment of this fix. The dirty
+        refusal exists so a branch switch cannot destroy uncommitted TRACKED
+        work; git itself refuses to clobber an untracked file on both
+        ``switch`` and ``merge --ff-only``, and that refusal surfaces as a
+        FAILED with git's own message. Counting untracked files as dirty would
+        mean the clone this ticket repairs is refused by the sanctioned path on
+        every subsequent run.
+        """
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = _make_simple_repo_source(omni_home, "omnimarket")
+        (repo / "unpublished-lane-output.md").write_text("# not committed\n")
+        _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert "dirty worktree" not in result.stdout, (
+            f"untracked-only tree refused as dirty; stdout={result.stdout!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("repos_ok") == "1", (
+            f"fields={fields} stdout={result.stdout!r}"
+        )
+        assert (repo / "unpublished-lane-output.md").exists(), (
+            "the sync destroyed untracked lane output"
+        )
+
+    def test_tracked_dirt_still_refuses_the_branch_switch(self, tmp_path: Path) -> None:
+        """Positive control for the test above: TRACKED dirt still refuses."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        repo = _make_simple_repo_source(omni_home, "omnimarket")
+        (repo / "README.md").write_text("# locally modified, uncommitted\n")
+        _make_fake_infra_with_drift_stub(omni_home)
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omnimarket"], timeout=HARNESS_BACKSTOP_SECONDS
+        )
+
+        assert "dirty worktree" in result.stdout, (
+            f"uncommitted TRACKED changes must still refuse the switch; "
+            f"stdout={result.stdout!r}"
+        )
+        fields = _parse_result_line(result.stdout)
+        assert fields.get("repos_failed") == "1", fields
+
+
+@pytest.mark.unit
+class TestKnowledgeBaseClonesInRegistry:
+    """The two knowledge-base clones are registry repos (OMN-17395).
+
+    ``knowledge-base-internal`` is where every lane's tracking artifacts,
+    plans, reports and ``beta/GOAL.md`` live (omni_home/CLAUDE.md rule 20), and
+    ``knowledge-base`` is the public book. Both are canonical clones under
+    ``$OMNI_HOME``, and neither was in the registry -- so a bare
+    ``pull-all.sh`` never fetched either one, and neither was covered by the
+    registry-wide ``core.bare`` corruption scan.
+    """
+
+    def test_knowledge_base_clones_are_registry_repos(self) -> None:
+        body = PULL_ALL.read_text()
+        repos_block = body.split("REPOS=(", 1)[1].split(")", 1)[0]
+        listed = repos_block.split()
+        for name in ("knowledge-base", "knowledge-base-internal"):
+            assert name in listed, (
+                f"{name} is a canonical clone under $OMNI_HOME that lanes read, "
+                f"but a bare pull-all.sh never syncs it; REPOS={listed}"
+            )

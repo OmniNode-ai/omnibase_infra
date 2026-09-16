@@ -7,6 +7,14 @@ Covers:
     - Duplicate row (ON CONFLICT DO NOTHING, fetchrow returns None) still succeeds
     - Correct SQL parameters passed to fetchrow
     - asyncpg connection pool error returns ModelBackendResult(success=False)
+
+OMN-17296: these drive ``handle(envelope)``, the shape auto-wiring actually
+dispatches. They previously called ``handle(payload, correlation_id)`` — a
+two-argument signature no dispatch path ever used — so the whole file was green
+while every manifest event on the dev lane dead-lettered with
+``TypeError: handle() missing 1 required positional argument: 'correlation_id'``.
+The fold from event to INSERT payload is now covered end to end here rather than
+being assumed.
 """
 
 from __future__ import annotations
@@ -19,12 +27,22 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.models.runtime_manifest.model_manifest_contract import (
+    ModelManifestContract,
+)
+from omnibase_core.models.runtime_manifest.model_manifest_handler import (
+    ModelManifestHandler,
+)
 from omnibase_infra.nodes.node_runtime_manifest_reducer.handlers.handler_postgres_runtime_manifest_insert import (
     SQL_INSERT_RUNTIME_MANIFEST,
     HandlerPostgresRuntimeManifestInsert,
 )
 from omnibase_infra.nodes.node_runtime_manifest_reducer.models.model_payload_insert_runtime_manifest import (
     ModelPayloadInsertRuntimeManifest,
+)
+from omnibase_infra.runtime.models.model_runtime_manifest_published import (
+    ModelRuntimeManifestPublished,
 )
 
 # ---------------------------------------------------------------------------
@@ -55,37 +73,43 @@ def _make_record(row_id: int = 1) -> MagicMock:
     return rec
 
 
-def _make_payload(**overrides: object) -> ModelPayloadInsertRuntimeManifest:
+def _make_event(**overrides: object) -> ModelRuntimeManifestPublished:
+    """A published boot manifest, the payload the subscribed topic carries."""
     defaults: dict[str, object] = {
         "runtime_profile": "main",
-        "contract_hash": "abc123",
-        "topology_hash": "topo456",
-        "manifest_hash": "mfst789",
-        "contracts": [
-            {
-                "name": "node_foo",
-                "version": "1.0.0",
-                "node_type": "EFFECT_GENERIC",
-                "contract_hash": "c1",
-            }
-        ],
-        "owned_command_topics": ["onex.cmd.platform.register.v1"],
-        "subscribed_event_topics": ["onex.evt.platform.node-registered.v1"],
-        "handlers": [
-            {
-                "name": "HandlerFoo",
-                "module_path": "foo.bar",
-                "routing_strategy": "payload_type_match",
-            }
-        ],
-        "skipped_contracts": [],
-        "failed_contracts": [],
-        "ownership_violations": [],
+        "contracts": (
+            ModelManifestContract(
+                name="node_foo",
+                version="1.0.0",
+                node_type="EFFECT_GENERIC",
+                contract_hash="c1",
+            ),
+        ),
+        "owned_command_topics": frozenset({"onex.cmd.platform.register.v1"}),
+        "subscribed_event_topics": frozenset({"onex.evt.platform.node-registered.v1"}),
+        "handlers": (
+            ModelManifestHandler(
+                name="HandlerFoo",
+                module_path="foo.bar",
+                routing_strategy="payload_type_match",
+            ),
+        ),
         "image_digest": None,
         "started_at": datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC),
     }
     defaults.update(overrides)
-    return ModelPayloadInsertRuntimeManifest(**defaults)  # type: ignore[arg-type]
+    return ModelRuntimeManifestPublished(**defaults)  # type: ignore[arg-type]
+
+
+def _envelope(
+    event: ModelRuntimeManifestPublished,
+) -> ModelEventEnvelope[ModelRuntimeManifestPublished]:
+    return ModelEventEnvelope(
+        payload=event,
+        correlation_id=uuid4(),
+        event_type="omnibase-infra.runtime-manifest-published",
+        source_tool="service_kernel",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +122,8 @@ async def test_insert_success_returns_backend_result_true() -> None:
     """Successful INSERT: returns ModelBackendResult(success=True)."""
     pool = _make_pool(fetchrow_return=_make_record(row_id=42))
     handler = HandlerPostgresRuntimeManifestInsert(pool)
-    payload = _make_payload()
 
-    result = await handler.handle(payload, uuid4())
+    result = await handler.handle(_envelope(_make_event()))
 
     assert result.success is True
     assert result.backend_id == "postgres"
@@ -112,9 +135,8 @@ async def test_duplicate_insert_returns_success() -> None:
     """ON CONFLICT DO NOTHING (fetchrow returns None) still succeeds."""
     pool = _make_pool(fetchrow_return=None)
     handler = HandlerPostgresRuntimeManifestInsert(pool)
-    payload = _make_payload()
 
-    result = await handler.handle(payload, uuid4())
+    result = await handler.handle(_envelope(_make_event()))
 
     assert result.success is True
 
@@ -124,10 +146,8 @@ async def test_correct_sql_called() -> None:
     """Verifies fetchrow is called with the canonical SQL statement."""
     pool = _make_pool(fetchrow_return=_make_record())
     handler = HandlerPostgresRuntimeManifestInsert(pool)
-    payload = _make_payload()
-    correlation_id = uuid4()
 
-    await handler.handle(payload, correlation_id)
+    await handler.handle(_envelope(_make_event()))
 
     conn = pool._test_conn
     conn.fetchrow.assert_called_once()
@@ -137,27 +157,28 @@ async def test_correct_sql_called() -> None:
 
 @pytest.mark.asyncio
 async def test_correct_positional_args_passed() -> None:
-    """Verifies positional args match payload fields in correct order."""
+    """Verifies positional args match the EVENT's fields in the column order.
+
+    The three hashes are derived, not supplied: two are the publisher's own
+    computed fields and the third is the whole-manifest hash. Asserting them
+    against the event's values is what proves the fold copied rather than
+    recomputed or dropped them.
+    """
     pool = _make_pool(fetchrow_return=_make_record())
     handler = HandlerPostgresRuntimeManifestInsert(pool)
-    payload = _make_payload(
-        runtime_profile="staging",
-        contract_hash="ch",
-        topology_hash="th",
-        manifest_hash="mh",
-        image_digest="sha256:abc",
-    )
-    await handler.handle(payload, uuid4())
+    event = _make_event(runtime_profile="staging", image_digest="sha256:abc")
+
+    await handler.handle(_envelope(event))
 
     conn = pool._test_conn
     args = conn.fetchrow.call_args[0]
     # args[0] = SQL, args[1..] = positional params
     assert args[1] == "staging"  # runtime_profile
-    assert args[2] == "ch"  # contract_hash
-    assert args[3] == "th"  # topology_hash
-    assert args[4] == "mh"  # manifest_hash
+    assert args[2] == event.contract_hash
+    assert args[3] == event.topology_hash
+    assert args[4] == ModelPayloadInsertRuntimeManifest.manifest_hash_for(event)
     assert args[12] == "sha256:abc"  # image_digest
-    assert args[13] == payload.started_at  # started_at
+    assert args[13] == event.started_at  # started_at
 
 
 @pytest.mark.asyncio
@@ -173,9 +194,8 @@ async def test_pool_error_returns_backend_result_false() -> None:
     pool.acquire = MagicMock(return_value=ctx)
 
     handler = HandlerPostgresRuntimeManifestInsert(pool)
-    payload = _make_payload()
 
-    result = await handler.handle(payload, uuid4())
+    result = await handler.handle(_envelope(_make_event()))
 
     assert result.success is False
     assert result.error != ""
@@ -183,23 +203,28 @@ async def test_pool_error_returns_backend_result_false() -> None:
 
 @pytest.mark.asyncio
 async def test_topics_are_sorted_in_jsonb() -> None:
-    """owned_command_topics and subscribed_event_topics are sorted before serialization."""
+    """owned_command_topics and subscribed_event_topics are sorted before serialization.
+
+    The wire type is a frozenset, whose iteration order is not stable across
+    processes, so without the sort two rows describing an identical topology
+    would differ by column bytes.
+    """
     import json
 
     pool = _make_pool(fetchrow_return=_make_record())
     handler = HandlerPostgresRuntimeManifestInsert(pool)
-    payload = _make_payload(
-        owned_command_topics=["onex.cmd.z.v1", "onex.cmd.a.v1"],
-        subscribed_event_topics=["onex.evt.z.v1", "onex.evt.a.v1"],
+    event = _make_event(
+        owned_command_topics=frozenset({"onex.cmd.z.v1", "onex.cmd.a.v1"}),
+        subscribed_event_topics=frozenset({"onex.evt.z.v1", "onex.evt.a.v1"}),
     )
-    await handler.handle(payload, uuid4())
+    await handler.handle(_envelope(event))
 
     conn = pool._test_conn
     args = conn.fetchrow.call_args[0]
     owned = json.loads(args[6])  # owned_command_topics
     subscribed = json.loads(args[7])  # subscribed_event_topics
-    assert owned == sorted(owned)
-    assert subscribed == sorted(subscribed)
+    assert owned == ["onex.cmd.a.v1", "onex.cmd.z.v1"]
+    assert subscribed == ["onex.evt.a.v1", "onex.evt.z.v1"]
 
 
 @pytest.mark.asyncio

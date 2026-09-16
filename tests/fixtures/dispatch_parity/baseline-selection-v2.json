@@ -2939,17 +2939,18 @@
     "dispatcher.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662": {
       "category": "event",
       "contract_name": "node_runtime_manifest_reducer",
-      "event_model_module": null,
-      "event_model_name": null,
+      "event_model_module": "omnibase_infra.runtime.models.model_runtime_manifest_published",
+      "event_model_name": "ModelRuntimeManifestPublished",
       "handler_id": "dispatcher.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662",
       "handler_module": "omnibase_infra.nodes.node_runtime_manifest_reducer.handlers.handler_postgres_runtime_manifest_insert",
       "handler_name": "HandlerPostgresRuntimeManifestInsert",
       "message_types": [
+        "ModelRuntimeManifestPublished",
         "omnibase-infra.runtime-manifest-published",
         "onex.evt.omnibase-infra.runtime-manifest-published.v1"
       ],
       "package": "omnibase_infra",
-      "type_scoped": false
+      "type_scoped": true
     },
     "dispatcher.auto.node_runtime_source_attestor_effect.HandlerSourceAttestation.attest_source_hash_92fa2147": {
       "category": "event",
@@ -3274,7 +3275,13 @@
   "header": {
     "accuracy": "engine-dispatch (live MessageDispatchEngine.dispatch)",
     "accuracy_note": "Selection is the engine's own async dispatch() over a probe taxonomy, including OMN-12416 payload type-scoping (real _make_payload_type_matcher installed per dispatcher). Registration order is canonical (contracts sorted by name, design D3). The equivalence tuple is (status, ordered dispatcher_ids, message_category, message_type, dlq_topic).",
-    "construct_only_failures": [],
+    "construct_only_failures": [
+      {
+        "dispatcher_id": "dispatcher.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662",
+        "error": "model_construct instance is not materializable (AttributeError: 'ModelRuntimeManifestPublished' object has no attribute 'runtime_profile'); the model has required fields with no default, so an unvalidated instance cannot be dumped and the engine cannot materialize an envelope carrying it",
+        "event_model": "omnibase_infra.runtime.models.model_runtime_manifest_published.ModelRuntimeManifestPublished"
+      }
+    ],
     "core_message_category_from_topic": "<enum 'EnumMessageCategory'>",
     "corpus": {
       "contracts_by_package": {
@@ -3285,10 +3292,10 @@
       "contracts_discovered": 144,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 102,
-      "probe_count": 974,
+      "probe_count": 975,
       "registered_dispatchers": 123,
       "registered_routes": 118,
-      "type_scoped_dispatchers": 71
+      "type_scoped_dispatchers": 72
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3328,9 +3335,9 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-09-16T02:12:49.422930+00:00",
+    "generated_at_utc": "2026-09-16T09:04:13.029373+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.14",
+      "omnibase-core": "0.47.15",
       "omnibase-infra": "0.38.29",
       "omniclaude": null,
       "omniintelligence": null,
@@ -4428,13 +4435,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
         "message_category": "event",
         "message_type": "omnibase-infra.runtime-manifest-published",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.omnibase-infra.runtime-manifest-published.v1"
     },
@@ -21253,6 +21258,24 @@
       },
       "topic": "onex.evt.omninode.runner-usage-recorded.v1"
     },
+    "P4::dispatcher.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662::onex.evt.omnibase-infra.runtime-manifest-published.v1": {
+      "construct_only": false,
+      "dispatcher_id": "dispatcher.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662",
+      "event_model": "omnibase_infra.runtime.models.model_runtime_manifest_published.ModelRuntimeManifestPublished",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.runtime-manifest-published",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "event",
+        "message_type": "omnibase-infra.runtime-manifest-published",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.runtime-manifest-published.v1"
+    },
     "P4::dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeCheckInitiate::onex.cmd.skill.scope-check.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeCheckInitiate",
@@ -22789,7 +22812,7 @@
       "route_id": "route.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662.onex_evt_omnibase_infra_runtime_manifest_published_v1",
       "topic": "onex.evt.omnibase-infra.runtime-manifest-published.v1",
       "topic_pattern": "*.evt.omnibase-infra.runtime-manifest-published.*",
-      "type_scoped": false
+      "type_scoped": true
     },
     {
       "contract_name": "node_runtime_source_attestor_effect",
