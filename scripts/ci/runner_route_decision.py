@@ -1,54 +1,40 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Per-run runner routing decision (OMN-18031).
+"""Per-run runner routing: the I/O boundary around the routing COMPUTE node.
 
-WHAT THIS IS. A hosted ``route`` job runs this once per workflow run and emits a
-``runs-on`` label set that the heavy jobs consume via
-``needs.route.outputs.labels``. The choice is made from live signals -- org
-runner busy/idle counts and lab host load -- with the trusted seam variable
-(``OMNI_TRUSTED_CI_RUNS_ON_JSON``) read as a CEILING.
+WHAT THIS IS, AND WHAT IT IS NOT. A hosted ``route`` job runs this once per
+workflow run. It PROBES -- org runner capacity, this repository's visibility,
+the lab-load record -- assembles a typed request, and asks
+``node_ci_runner_route_compute`` where the run's jobs should execute. The
+DECISION is not here: it is the node's handler, declared by its contract
+(OMN-18412). There is exactly one implementation of it, and this file cannot
+drift from it because it does not contain one.
+
+WHERE EACH INPUT COMES FROM, all of them declared rather than literal:
+
+  thresholds, labels, refusal policy  the node's contract.yaml `config:` block
+  fleet inventory (expected count)    config/runner_fleet.yaml
+  hosted workflow list                config/runner_routing_policy.yaml
+  the seam ceiling                    the caller's runner variable, READ ONLY
+  capacity / visibility / lab load    probed here, at this boundary
 
 THE SEAM IS READ, NEVER WRITTEN. CLAUDE.md rule 14 makes the routing variables
 single-owner: two lanes read-modify-writing them produce a last-writer-wins
-clobber with no error. This module therefore treats the seam as an upper bound
-on what routing may choose and has no code path that PATCHes any variable.
+clobber with no error. Routing treats the seam as an upper bound and has no
+code path that PATCHes any variable.
 
-CONSEQUENCE, STATED UP FRONT: with the seam at its current live value of
-``["ubuntu-latest"]`` (the deliberate OMN-16682 re-flip), step S2 below returns
-the seam verbatim on EVERY run and this mechanism is byte-identically inert.
-That is intended. This ticket lands a mechanism proven safe and inert; placement
-changes only after a separate single-owner claim flips the seam, which is
-OMN-16682 and not this ticket. Do not read a green route job as evidence that
-jobs moved to the lab -- read the decision artifact's ``reason``.
+CONSEQUENCE, STATED UP FRONT: while a repository's seam reads
+``["ubuntu-latest"]`` the node returns it verbatim on every run and placement is
+byte-identically what it is today. Do not read a green route job as evidence
+that jobs moved to the lab -- read the decision record's ``reason``.
 
-THE DECISION IS AN ORDERED ELIMINATION, AND EVERY STEP CAN ONLY MOVE THE ANSWER
-TOWARD HOSTED:
-
-  S0  workflow path is in the policy's hosted allowlist  -> hosted
-  S1  fork / untrusted PR event                          -> hosted (public var)
-  S2  seam names no self-hosted label                    -> the seam, VERBATIM
-  S3  any probe error, of any class                      -> hosted
-  S4  fleet saturated (idle floor or busy fraction)      -> hosted
-  S5  fleet degraded (too few online at all)             -> hosted
-  S6  lab record missing / stale / loaded / mem-starved  -> hosted
-  S7  otherwise                                          -> the seam labels
-
-FAIL-CLOSED IS THE WHOLE SAFETY STORY. Nothing raises to the caller: the
-boundary catches every exception and degrades to hosted, so even a crashing
-route job hands the run a usable ``runs-on`` rather than an empty one. An
-unreadable probe is never "assume ample" -- that assumption is the failure class
-the pre-push picker's own fail-closed rules already exist to prevent.
-
-NEVER-WIDEN IS MECHANICAL, NOT A CONVENTION. ``decide`` re-checks the label set
-``_decide_unchecked`` actually returned against that run's ceiling as the last
-act before emitting, and a violation degrades to hosted rather than raising, and
-``tests/ci/test_runner_route_decision.py::test_never_widens_beyond_ceiling``
-sweeps the cross-product of every input dimension asserting a self-hosted label
-can appear only when the seam already contained one.
-
-FORK ISOLATION LIVES HERE (S1), not at the 46 selector call sites in ci.yml,
-precisely so it cannot be edited wrong in one of them (OMN-16683/16684).
+FAIL-CLOSED. Every probe failure is modelled as a named error class rather than
+an absent reading, and the node resolves each to GitHub-hosted. This file
+catches everything at the boundary so even a crash hands the calling run a
+usable ``runs-on`` -- with one deliberate exception: a REFUSAL (a private
+repository whose only allowed placement is hosted) exits non-zero, because
+there is no placement to hand back.
 """
 
 from __future__ import annotations
@@ -59,407 +45,113 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-# NOT imported at module scope. PyYAML is a declared dependency
-# (pyproject.toml) for the hosted `route` job and the hosted `saturation-record`
-# job, but the self-hosted `lab-load-probe` job (OMN-18031 G7) runs on the bare
-# fleet image's system python3, which does NOT have it. A module-scope
-# `import yaml` therefore made `from runner_route_decision import
-# probe_lab_saturation_from_fleet` raise `ModuleNotFoundError: No module named
-# 'yaml'` on that job even though NOTHING it calls touches YAML --
-# `load_route_policy` is the only function that does. Measured: 10 of the last
-# 12 scheduled `lab-load-probe` runs failed on exactly this import, on a bare
-# `python3 -` invocation with no venv (the sanctioned `uv run` path is too
-# heavy for a <3s probe and would still need `uv sync` on a cold cache).
-# Importing it lazily, only inside the one function that needs it, is the
-# targeted fix: it costs the probe path nothing and changes no behavior for
-# the two hosted call sites, which already have PyYAML on `uv run python3`.
+# THE NODE IS IMPORTED LAZILY, INSIDE THE FUNCTIONS THAT DECIDE, and that is a
+# constraint rather than a style choice. `scripts/ci/probe_lab_load.py` imports
+# this module for its PROBES and runs on the fleet image's system python3,
+# which has neither PyYAML nor pydantic; ten of twelve scheduled probe runs
+# once failed on exactly such a module-scope import. Everything above the I/O
+# boundary therefore stays standard-library only, and the decision -- which
+# runs on a hosted runner with the package installed -- imports what it needs
+# where it needs it.
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_route_policy import (
+        ModelCIRunnerRoutePolicy,
+    )
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_route_request import (
+        ModelCIRunnerRouteRequest,
+    )
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+
 ORG = "OmniNode-ai"
+NODE_CONTRACT = (
+    Path(__file__).resolve().parents[2]
+    / "src/omnibase_infra/nodes/node_ci_runner_route_compute/contract.yaml"
+)
 DEFAULT_POLICY = Path("config/runner_routing_policy.yaml")
+FLEET_INVENTORY = Path("config/runner_fleet.yaml")
 
-# Every threshold the decision reads. A missing key raises at load rather than
-# silently defaulting (CLAUDE.md rule 8): a defaulted threshold is how a routing
-# gate quietly stops gating.
-REQUIRED_POLICY_KEYS: tuple[str, ...] = (
-    "policy_version",
-    "runner_group",
-    "lab_labels",
-    "hosted_labels",
-    "min_idle_runners",
-    "max_busy_fraction",
-    "min_online_runners",
-    "lab_record_max_age_seconds",
-    "max_lab_load_ratio",
-    "min_lab_free_mem_mib",
-    "hosted_workflows",
-)
-
-REQUIRED_ALERT_KEYS: tuple[str, ...] = (
-    "busy_fraction_threshold",
-    "lab_load_ratio_threshold",
-    "sustained_samples",
-)
+# The exit status a refusal uses. Distinct from 1 so the calling workflow can
+# tell "the router refused this placement" from "the module itself broke", and
+# so the workflow's fail-closed floor -- which exists to hand a crashed router's
+# run a usable runs-on -- cannot mistake a deliberate refusal for a crash and
+# paper over it with hosted labels.
+REFUSED_EXIT_CODE = 3
 
 
-@dataclass(frozen=True)
-class RouteDecision:
-    """The emitted decision, complete enough to audit without the run log."""
+def load_contract_policy(path: Path = NODE_CONTRACT) -> ModelCIRunnerRoutePolicy:
+    """Parse the node contract's ``config:`` block into the typed policy.
 
-    labels: list[str]
-    decision: str
-    reason: str
-    policy_version: int
-    inputs: dict[str, Any] = field(default_factory=dict)
-    decided_at: str = ""
+    Every field is required by the model, so a contract missing one fails here,
+    naming it, rather than at the first run that needed it (CLAUDE.md rule 8).
+    PyYAML is imported locally: the self-hosted lab-load probe imports this
+    module for its probe functions and runs on a bare interpreter that does not
+    have it.
+    """
+    import yaml
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "schema": "runner_route_decision/v1",
-            "labels": self.labels,
-            "decision": self.decision,
-            "reason": self.reason,
-            "policy_version": self.policy_version,
-            "decided_at": self.decided_at or datetime.now(UTC).isoformat(),
-            "inputs": self.inputs,
-        }
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_route_policy import (
+        ModelCIRunnerRoutePolicy,
+    )
+
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path} must contain a YAML mapping")
+    config = loaded.get("config")
+    if not isinstance(config, dict):
+        raise KeyError(f"{path} is missing the required 'config:' block")
+    return ModelCIRunnerRoutePolicy.model_validate(config)
 
 
-def load_route_policy(path: Path) -> dict[str, Any]:
-    """Load the ``route:`` section, failing on any missing threshold.
+def load_fleet_expected_count(path: Path = FLEET_INVENTORY) -> int:
+    """Read the declared fleet size from the fleet INVENTORY.
 
-    Imports PyYAML locally -- see the module docstring's note on why this is
-    the one function in the module allowed to need it.
+    Read here rather than restated in the contract so the routing floor tracks
+    a fleet resize instead of going stale against it -- the failure that made
+    the previous literal floor equal to the whole fleet when it was capped.
     """
     import yaml
 
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise ValueError(f"{path} must contain a YAML mapping")
-    if "route" not in loaded or not isinstance(loaded["route"], dict):
-        raise KeyError(f"{path} is missing the required 'route:' section")
-    section = loaded["route"]
-    for key in REQUIRED_POLICY_KEYS:
-        if key not in section:
-            raise KeyError(f"{path} route section is missing required key {key!r}")
-    return section
+    expected = loaded.get("expected_count")
+    if not isinstance(expected, int) or expected <= 0:
+        raise KeyError(f"{path} is missing a usable 'expected_count'")
+    return expected
 
 
-def hosted_workflows(policy: dict[str, Any]) -> list[str]:
+def load_hosted_workflows(path: Path = DEFAULT_POLICY) -> tuple[str, ...]:
     """Workflows whose routed jobs stay hosted regardless of capacity.
 
     DELIBERATELY NOT ``hosted_runner_allowlist``. That list marks files
-    containing an intentionally bare ``runs-on: ubuntu-latest`` job, which is
-    why ``ci.yml`` is on it -- for its one lightweight CI Summary aggregator.
-    An early build of this module read that list here, and a dry run against
-    live data returned ``policy_allowlist`` for ``ci.yml``: all 54 of its jobs
-    would have been pinned hosted forever, making the mechanism a silent no-op
-    on its single largest consumer while every unit test still passed. The two
-    lists answer different questions.
+    containing an intentionally bare hosted job, which is why ``ci.yml`` is on
+    it -- for its one lightweight summary aggregator. An early build read that
+    list here and a dry run against live data pinned all 54 of ci.yml's jobs
+    hosted forever, making the mechanism a silent no-op on its largest consumer
+    while every unit test still passed. The two lists answer different
+    questions.
+
+    This stays in the routing policy file rather than the contract because it
+    is per-repository data, not a threshold: the contract declares the rule,
+    the policy file names this repository's exceptions to it.
     """
-    return [str(item) for item in policy.get("hosted_workflows", [])]
+    import yaml
 
-
-def _parse_labels(raw: str | None) -> list[str] | None:
-    """Parse a runner-variable JSON array. ``None`` on anything unusable."""
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(parsed, list) or not parsed:
-        return None
-    if not all(isinstance(item, str) for item in parsed):
-        return None
-    return [str(item) for item in parsed]
-
-
-def _is_self_hosted(labels: list[str]) -> bool:
-    return "self-hosted" in labels
-
-
-def assert_never_widens(
-    returned: list[str], ceiling: list[str], hosted: list[str]
-) -> None:
-    """Last act before emitting: the answer is hosted, or within the ceiling.
-
-    This is a runtime assertion and not only a test because the failure it
-    guards -- untrusted or unbudgeted code reaching self-hosted compute -- is
-    the one outcome this design may never produce. A raise here is caught by
-    the boundary and degrades to hosted.
-    """
-    if set(returned) == set(hosted):
-        return
-    if not set(returned) <= set(ceiling):
-        raise AssertionError(
-            f"routing widened beyond the seam ceiling: returned={returned} ceiling={ceiling}"
-        )
-    if "self-hosted" in returned and "self-hosted" not in ceiling:
-        raise AssertionError(f"routing invented a self-hosted label: ceiling={ceiling}")
-
-
-def _decide_unchecked(
-    *,
-    event_name: str,
-    head_repo: str | None,
-    repository: str,
-    workflow_path: str,
-    seam_json: str | None,
-    public_json: str | None,
-    fleet: Any,
-    lab: Any,
-    policy: dict[str, Any],
-    allowlist: list[str] | None = None,
-) -> RouteDecision:
-    """The ordered elimination itself. Callers use ``decide``, which re-checks
-    this function's ANSWER against the ceiling before anyone can act on it.
-    """
-    hosted = [str(item) for item in policy.get("hosted_labels", ["ubuntu-latest"])]
-    version = int(policy.get("policy_version", 0))
-    decided_at = datetime.now(UTC).isoformat()
-
-    def hosted_result(
-        reason: str,
-        *,
-        labels: list[str] | None = None,
-        extra: dict[str, Any] | None = None,
-    ) -> RouteDecision:
-        # `extra` is an explicit mapping rather than **kwargs on purpose: with
-        # **kwargs, mypy cannot rule out a caller's dict supplying `labels`
-        # itself, which would let a probe payload silently override the chosen
-        # runner labels. Making it a separate parameter removes that path.
-        chosen = labels if labels else hosted
-        return RouteDecision(
-            labels=chosen,
-            decision="hosted",
-            reason=reason,
-            policy_version=version,
-            decided_at=decided_at,
-            inputs={
-                "event_name": event_name,
-                "head_repo": head_repo,
-                "repository": repository,
-                "workflow_path": workflow_path,
-                "seam_json": seam_json,
-                **(extra or {}),
-            },
-        )
-
-    try:
-        ceiling = _parse_labels(seam_json)
-        if ceiling is None:
-            # An unparseable or unset seam is a config fault, not a licence to
-            # pick. Hosted, and say so.
-            return hosted_result("probe_error:seam_unparseable")
-
-        # --- S0: the policy pins this workflow hosted, for reasons that
-        # outrank capacity entirely (fleet canaries must not share fate with
-        # the fleet; ECR pushes need clean egress; fork-only verification).
-        if workflow_path in set(allowlist or []):
-            return hosted_result("policy_allowlist")
-
-        # --- S1: fork isolation. INVIOLABLE, and deliberately ahead of every
-        # capacity signal: untrusted code never reaches self-hosted compute at
-        # any idle level (OMN-16683/16684).
-        is_fork_pr = event_name == "pull_request" and head_repo != repository
-        if is_fork_pr or event_name == "pull_request_target":
-            public = _parse_labels(public_json) or hosted
-            if _is_self_hosted(public):
-                # A misconfigured public variable can never widen a fork onto
-                # the fleet; the built-in hosted set wins.
-                public = hosted
-            return hosted_result("fork_isolation", labels=public)
-
-        # --- S2: the seam is the ceiling. If it names no self-hosted label
-        # there is nothing to decide -- return it VERBATIM (not normalised to
-        # ubuntu-latest, so a seam naming another hosted image is honoured).
-        if not _is_self_hosted(ceiling):
-            return RouteDecision(
-                labels=ceiling,
-                decision="hosted",
-                reason="seam_ceiling_hosted",
-                policy_version=version,
-                decided_at=decided_at,
-                inputs={
-                    "event_name": event_name,
-                    "head_repo": head_repo,
-                    "repository": repository,
-                    "workflow_path": workflow_path,
-                    "seam_json": seam_json,
-                },
-            )
-
-        # --- S3: probe integrity. Anything that cannot PROVE capacity is
-        # hosted, including a shape we did not expect.
-        if not isinstance(fleet, dict):
-            return hosted_result("probe_error:unexpected_shape")
-        if not fleet.get("ok"):
-            error_class = str(fleet.get("error") or "unknown")
-            return hosted_result(f"probe_error:{error_class}")
-        online = fleet.get("online")
-        busy = fleet.get("busy")
-        if (
-            not isinstance(online, int)
-            or not isinstance(busy, int)
-            or online < 0
-            or busy < 0
-        ):
-            return hosted_result("probe_error:unexpected_shape")
-
-        fleet_inputs = {"fleet": {"online": online, "busy": busy}}
-
-        # --- S4: saturation, on either independent threshold. The idle floor
-        # is HEADROOM (a measured CI fan-out is ~47 jobs), not a capacity
-        # match; the busy fraction sits well below the observed peak because
-        # busy was measured swinging 65 -> 10 of 88 inside two minutes, and a
-        # threshold near the peak would flap.
-        idle = online - busy
-        busy_fraction = (busy / online) if online else 1.0
-        if idle < int(policy["min_idle_runners"]) or busy_fraction >= float(
-            policy["max_busy_fraction"]
-        ):
-            return hosted_result(
-                "fleet_saturated",
-                extra={
-                    **fleet_inputs,
-                    "idle": idle,
-                    "busy_fraction": round(busy_fraction, 4),
-                },
-            )
-
-        # --- S5: a fleet too small to trust at all, a lower and separate
-        # floor from the canary's own offline thresholds.
-        if online < int(policy["min_online_runners"]):
-            return hosted_result("fleet_degraded", extra=fleet_inputs)
-
-        # --- S6: the lab half. A hosted route job cannot reach the lab
-        # directly (the pre-push probe reaches it over ssh to tailnet/RFC1918
-        # addresses), so this record arrives asynchronously from the
-        # saturation monitor and is FRESHNESS-BOUNDED. Stale is unknown, and
-        # unknown is hosted -- never "assume ample".
-        #
-        # `lab_error` rides in `inputs` on every `lab_unknown` branch so a
-        # zero-byte or malformed lab-load.json artifact reads as a NAMED,
-        # distinguishable cause in the decision record -- "unreadable_record",
-        # "stale", "no_hosts", "malformed_host" -- rather than the same bare
-        # `lab_unknown` string a genuinely-missing record also produces. The
-        # `reason` enum itself is unchanged (existing consumers key off it), so
-        # this is additive.
-        if not isinstance(lab, dict) or not lab.get("ok"):
-            lab_error = (
-                lab.get("error") if isinstance(lab, dict) else "unexpected_shape"
-            )
-            return hosted_result(
-                "lab_unknown",
-                extra={**fleet_inputs, "lab_error": lab_error or "unknown"},
-            )
-        age = lab.get("age_seconds")
-        if not isinstance(age, int) or age > int(policy["lab_record_max_age_seconds"]):
-            return hosted_result(
-                "lab_unknown", extra={**fleet_inputs, "lab_error": "stale"}
-            )
-        hosts = lab.get("hosts")
-        if not isinstance(hosts, list) or not hosts:
-            return hosted_result(
-                "lab_unknown", extra={**fleet_inputs, "lab_error": "no_hosts"}
-            )
-        for host in hosts:
-            if not isinstance(host, dict):
-                return hosted_result(
-                    "lab_unknown", extra={**fleet_inputs, "lab_error": "malformed_host"}
-                )
-            ratio = host.get("ratio")
-            free_mem = host.get("free_mem_mib")
-            if not isinstance(ratio, (int, float)) or not isinstance(free_mem, int):
-                return hosted_result(
-                    "lab_unknown", extra={**fleet_inputs, "lab_error": "malformed_host"}
-                )
-            # Load ranks, memory ADMITS (OMN-17392): a host at 0.10x load with
-            # 2.5 GiB free is the target that cost an OMN-17316 landing hours
-            # of OOM kills.
-            if float(ratio) > float(policy["max_lab_load_ratio"]):
-                return hosted_result(
-                    "lab_saturated",
-                    extra={**fleet_inputs, "lab_host": host.get("label")},
-                )
-            if free_mem < int(policy["min_lab_free_mem_mib"]):
-                return hosted_result(
-                    "lab_saturated",
-                    extra={**fleet_inputs, "lab_host": host.get("label")},
-                )
-
-        # --- S7: capacity is available and the seam permits it. The
-        # never-widen check is NOT made here -- checking `ceiling` against
-        # itself is a tautology that would pass a widened answer. It is made in
-        # `decide` below, against the labels this function actually returned.
-        return RouteDecision(
-            labels=ceiling,
-            decision="self_hosted",
-            reason="capacity_available",
-            policy_version=version,
-            decided_at=decided_at,
-            inputs={
-                "event_name": event_name,
-                "head_repo": head_repo,
-                "repository": repository,
-                "workflow_path": workflow_path,
-                "seam_json": seam_json,
-                "fleet": {"online": online, "busy": busy},
-                "idle": idle,
-                "busy_fraction": round(busy_fraction, 4),
-                "lab": {"age_seconds": age, "hosts": hosts},
-            },
-        )
-    except Exception as exc:  # noqa: BLE001 -- the boundary is the point
-        # A crashing route job must still hand the run a usable runs-on.
-        return RouteDecision(
-            labels=hosted,
-            decision="hosted",
-            reason=f"probe_error:internal:{type(exc).__name__}",
-            policy_version=version,
-            decided_at=decided_at,
-            inputs={"event_name": event_name, "workflow_path": workflow_path},
-        )
-
-
-def decide(**kwargs: Any) -> RouteDecision:
-    """Choose a runs-on label set. Never raises; every fault degrades to hosted.
-
-    THE NEVER-WIDEN CHECK LIVES HERE, ON THE WAY OUT, and it is the only place
-    it can be honest. An earlier build called ``assert_never_widens(ceiling,
-    ceiling, hosted)`` from inside the S7 branch and the module docstring
-    claimed that as the mechanical guard. It is a TAUTOLOGY -- it compares the
-    ceiling with itself and never looks at what was returned. Proven by
-    injecting a widening bug into S7: the runtime check passed and the widened
-    label set was emitted; only the cross-product sweep in
-    ``tests/ci/test_runner_route_decision.py`` caught it. A guard that cannot
-    fail is documentation, not enforcement (CLAUDE.md rule 5).
-
-    Checking the ANSWER, on every path, is what makes it enforcement: a future
-    edit to any of the eight return points is re-validated here against the
-    seam that run actually carried, and a violation degrades to hosted rather
-    than raising -- an unroutable run is worse than a hosted one.
-    """
-    decision = _decide_unchecked(**kwargs)
-    policy = kwargs["policy"]
-    hosted = [str(item) for item in policy.get("hosted_labels", ["ubuntu-latest"])]
-    ceiling = _parse_labels(kwargs.get("seam_json")) or []
-    try:
-        assert_never_widens(decision.labels, ceiling, hosted)
-    except AssertionError as exc:
-        return RouteDecision(
-            labels=hosted,
-            decision="hosted",
-            reason="never_widen_violation",
-            policy_version=int(policy.get("policy_version", 0)),
-            decided_at=decision.decided_at,
-            inputs={**decision.inputs, "violation": str(exc)},
-        )
-    return decision
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path} must contain a YAML mapping")
+    route = loaded.get("route")
+    if not isinstance(route, dict):
+        raise KeyError(f"{path} is missing the required 'route:' section")
+    declared = route.get("hosted_workflows")
+    if not isinstance(declared, list):
+        raise KeyError(f"{path} route section is missing 'hosted_workflows'")
+    return tuple(str(item) for item in declared)
 
 
 # --------------------------------------------------------------------------
@@ -520,6 +212,59 @@ def probe_fleet(token: str | None, runner_group: str, api_url: str) -> dict[str,
     # the registry read is stale, the listener is not dead (OMN-16030).
     busy = sum(1 for item in grouped if item.get("busy") is True)
     return {"ok": True, "online": online, "busy": busy, "total": len(grouped)}
+
+
+def probe_repo_visibility(token: str | None, repository: str, api_url: str) -> str:
+    """Read THIS repository's visibility from the API. Never raises.
+
+    READ AT DECISION TIME, not declared in the policy file. A declared list of
+    private repositories is a second copy of a fact GitHub already owns, and it
+    goes stale silently the first time a repository changes visibility -- the
+    same class of defect as the runner-routing table that rule 14 tells you not
+    to enumerate from. The sibling `private-repo-runner-placement` gate reads
+    live visibility for the same reason.
+
+    ``unknown`` on every fault, and ``unknown`` is NOT a refusal -- see
+    ``apply_visibility_rule`` for why that asymmetry is deliberate.
+    """
+    if not token:
+        return "unknown"
+    # Scheme-pinned for the same reason probe_fleet pins it: the answer decides
+    # where jobs execute, so it may only ever come from the real API.
+    if not api_url.startswith("https://"):
+        return "unknown"
+    if not repository or repository.count("/") != 1:
+        return "unknown"
+    try:
+        request = urllib.request.Request(  # noqa: S310 -- scheme pinned to https above
+            f"{api_url}/repos/{repository}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 -- scheme pinned to https above
+            payload = json.loads(response.read().decode("utf-8"))
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+        TypeError,
+    ):
+        return "unknown"
+    if not isinstance(payload, dict):
+        return "unknown"
+    if "visibility" in payload:
+        return normalise_visibility(payload.get("visibility"))
+    # `private` is the older boolean form of the same fact; read it only when
+    # `visibility` is absent, never as a second opinion that could disagree.
+    private = payload.get("private")
+    if private is True:
+        return "private"
+    if private is False:
+        return "public"
+    return "unknown"
 
 
 def probe_lab_saturation_from_fleet(
@@ -664,15 +409,135 @@ def _free_mem_mib() -> int | None:
         return None
 
 
+# --------------------------------------------------------------------------
+# Request assembly + CLI.
+# --------------------------------------------------------------------------
+
+
+def build_request(
+    *,
+    event_name: str,
+    head_repo: str,
+    repository: str,
+    workflow_path: str,
+    seam_json: str,
+    public_json: str,
+    visibility: str,
+    fleet: dict[str, Any],
+    lab: dict[str, Any],
+    hosted_workflows: tuple[str, ...],
+    force: str,
+    policy: ModelCIRunnerRoutePolicy,
+    fleet_expected_count: int,
+) -> ModelCIRunnerRouteRequest:
+    """Turn raw probe results into the node's typed request.
+
+    A probe result that cannot be understood becomes a NAMED failure class, not
+    a silently absent field: "the fleet is idle" and "nobody asked the fleet"
+    must not collapse into the same reading (CLAUDE.md rule 16).
+    """
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.enum_ci_runner_route_force import (
+        EnumCIRunnerRouteForce,
+    )
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.enum_ci_runner_route_visibility import (
+        EnumCIRunnerRouteVisibility,
+    )
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_fleet_observation import (
+        ModelCIRunnerFleetObservation,
+    )
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_lab_host import (
+        ModelCIRunnerLabHost,
+    )
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_lab_observation import (
+        ModelCIRunnerLabObservation,
+    )
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.model_ci_runner_route_request import (
+        ModelCIRunnerRouteRequest,
+    )
+
+    fleet_ok = bool(fleet.get("ok"))
+    online = fleet.get("online")
+    busy = fleet.get("busy")
+    if fleet_ok and not (isinstance(online, int) and isinstance(busy, int)):
+        fleet_ok, online, busy = False, None, None
+        fleet = {"error": "unexpected_shape"}
+    observation = ModelCIRunnerFleetObservation(
+        ok=fleet_ok,
+        error=str(fleet.get("error") or ""),
+        online=online if fleet_ok else None,
+        busy=busy if fleet_ok else None,
+    )
+
+    lab_hosts: list[ModelCIRunnerLabHost] = []
+    lab_ok = bool(lab.get("ok"))
+    lab_error = str(lab.get("error") or "")
+    if lab_ok:
+        for host in lab.get("hosts") or []:
+            if not isinstance(host, dict):
+                lab_ok, lab_error = False, "malformed_host"
+                break
+            ratio, free_mem = host.get("ratio"), host.get("free_mem_mib")
+            if not isinstance(ratio, (int, float)) or not isinstance(free_mem, int):
+                lab_ok, lab_error = False, "malformed_host"
+                break
+            lab_hosts.append(
+                ModelCIRunnerLabHost(
+                    label=str(host.get("label") or ""),
+                    ratio=float(ratio),
+                    free_mem_mib=free_mem,
+                )
+            )
+    age = lab.get("age_seconds")
+    lab_observation = ModelCIRunnerLabObservation(
+        ok=lab_ok,
+        error=lab_error,
+        age_seconds=age if lab_ok and isinstance(age, int) else None,
+        hosts=tuple(lab_hosts) if lab_ok else (),
+    )
+
+    return ModelCIRunnerRouteRequest(
+        github_event=event_name,
+        head_repo=head_repo,
+        repository=repository,
+        workflow_path=workflow_path,
+        seam_json=seam_json,
+        public_json=public_json,
+        visibility=EnumCIRunnerRouteVisibility(normalise_visibility(visibility)),
+        fleet=observation,
+        fleet_expected_count=fleet_expected_count,
+        lab=lab_observation,
+        hosted_workflows=hosted_workflows,
+        force=EnumCIRunnerRouteForce(force),
+        policy=policy,
+    )
+
+
+def normalise_visibility(value: Any) -> str:
+    """Map a raw visibility reading onto the three the node knows.
+
+    ``internal`` is PRIVATE: it is not publicly readable and its hosted minutes
+    are billed exactly like a private repository's, which is what the ruling is
+    about. Treating it as public because the API spells it differently would be
+    a silent exemption.
+    """
+    if value in {"public", "private", "unknown"}:
+        return str(value)
+    if value == "internal":
+        return "private"
+    return "unknown"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--event-name", required=True)
-    parser.add_argument("--head-repo", default=None)
+    parser.add_argument("--head-repo", default="")
     parser.add_argument("--repository", required=True)
     parser.add_argument("--workflow-path", required=True)
-    parser.add_argument("--seam-json", default=None)
-    parser.add_argument("--public-json", default=None)
+    parser.add_argument("--seam-json", default="")
+    parser.add_argument("--public-json", default="")
+    parser.add_argument("--contract", type=Path, default=NODE_CONTRACT)
     parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    parser.add_argument("--fleet-inventory", type=Path, default=FLEET_INVENTORY)
     parser.add_argument("--lab-record", type=Path, default=None)
     parser.add_argument(
         "--lab-probe-local",
@@ -683,6 +548,21 @@ def main(argv: list[str] | None = None) -> int:
         "--fleet-json", type=Path, default=None, help="pre-probed fleet payload"
     )
     parser.add_argument(
+        "--repo-visibility",
+        choices=["public", "private", "unknown"],
+        default=None,
+        help="this repository's visibility; probed from the API when omitted. "
+        "A private repository is never placed on a hosted runner (OMN-18412).",
+    )
+    parser.add_argument(
+        "--force",
+        choices=["auto", "fleet", "hosted"],
+        default="auto",
+        help="operator override. Subject to every safety rule rather than a "
+        "bypass of them: fleet cannot widen past the seam or take a fork, and "
+        "hosted is still refused for a private repository.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print the decision, write nothing to GITHUB_OUTPUT, always exit 0",
@@ -690,8 +570,7 @@ def main(argv: list[str] | None = None) -> int:
     # GITHUB_API_URL is injected by the Actions runner and names the GitHub REST
     # API this run executes against. It is not a first-party service endpoint and
     # has no routing-authority/integration-catalog entry to resolve from -- the
-    # same contract the existing fleet canary already operates under
-    # (scripts/ci/runner_fleet_canary.sh: GITHUB_API_URL:-https://api.github.com).
+    # same contract the existing fleet canary already operates under.
     # probe_fleet() scheme-pins the value to https before issuing any request.
     # fmt: off
     default_api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")  # url-authority-ok: Actions-injected GitHub REST base, not an ONEX-routed service endpoint; probe_fleet() scheme-pins it to https before any request
@@ -699,8 +578,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--api-url", default=default_api_url)
     args = parser.parse_args(argv)
 
-    policy = load_route_policy(args.policy)
-    allowlist = hosted_workflows(policy)
+    from omnibase_infra.nodes.node_ci_runner_route_compute.handlers.handler_ci_runner_route import (
+        HandlerCIRunnerRoute,
+    )
+    from omnibase_infra.nodes.node_ci_runner_route_compute.models.enum_ci_runner_route_decision import (
+        EnumCIRunnerRouteDecision,
+    )
+
+    policy = load_contract_policy(args.contract)
+    hosted_workflows = load_hosted_workflows(args.policy)
+    fleet_expected_count = load_fleet_expected_count(args.fleet_inventory)
 
     if args.fleet_json is not None:
         try:
@@ -711,7 +598,7 @@ def main(argv: list[str] | None = None) -> int:
         token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get(
             "CROSS_REPO_PAT"
         )
-        fleet = probe_fleet(token, str(policy["runner_group"]), args.api_url)
+        fleet = probe_fleet(token, policy.runner_group, args.api_url)
 
     lab = (
         probe_local_lab_load()
@@ -719,25 +606,57 @@ def main(argv: list[str] | None = None) -> int:
         else read_lab_record(args.lab_record)
     )
 
-    decision = decide(
-        event_name=args.event_name,
-        head_repo=args.head_repo,
-        repository=args.repository,
-        workflow_path=args.workflow_path,
-        seam_json=args.seam_json,
-        public_json=args.public_json,
-        fleet=fleet,
-        lab=lab,
-        policy=policy,
-        allowlist=allowlist,
+    # The job token is enough: repository metadata is readable with the default
+    # `metadata: read` every Actions token carries, so this needs no new
+    # credential and no new scope. The fleet-status tokens are accepted as a
+    # fallback only so a dry run outside Actions can still resolve the fact.
+    visibility = args.repo_visibility or probe_repo_visibility(
+        os.environ.get("GITHUB_TOKEN")
+        or os.environ.get("RUNNER_FLEET_STATUS_TOKEN")
+        or os.environ.get("CROSS_REPO_PAT"),
+        args.repository,
+        args.api_url,
     )
 
-    record = decision.to_record()
-    print(json.dumps(record, indent=2, sort_keys=True))
-    print(
-        f"::notice title=Runner route::{decision.decision} "
-        f"({decision.reason}) -> {json.dumps(decision.labels)}"
+    request = build_request(
+        event_name=args.event_name,
+        head_repo=args.head_repo or "",
+        repository=args.repository,
+        workflow_path=args.workflow_path,
+        seam_json=args.seam_json or "",
+        public_json=args.public_json or "",
+        visibility=visibility,
+        fleet=fleet
+        if isinstance(fleet, dict)
+        else {"ok": False, "error": "unexpected_shape"},
+        lab=lab
+        if isinstance(lab, dict)
+        else {"ok": False, "error": "unexpected_shape"},
+        hosted_workflows=hosted_workflows,
+        force=args.force,
+        policy=policy,
+        fleet_expected_count=fleet_expected_count,
     )
+
+    decision = HandlerCIRunnerRoute().handle(request)
+    record = decision.model_dump(mode="json")
+    print(json.dumps(record, indent=2, sort_keys=True))
+
+    labels = list(decision.runs_on)
+    refused = decision.decision is EnumCIRunnerRouteDecision.BLOCKED
+    if refused:
+        print(
+            f"::error title=Runner route refused::{decision.reason_wire} -- this "
+            "repository is private and the only placement its policy allows is "
+            "a GitHub-hosted runner, which the 2026-09-14 operator ruling "
+            "forbids. Fix the cause named in the reason; do not place the job "
+            "hosted."
+        )
+    else:
+        print(
+            f"::notice title=Runner route::{decision.decision.value} "
+            f"({decision.reason_wire}) -> {json.dumps(labels)}"
+        )
 
     if args.dry_run:
         # A dry run computes and reports; it gates nothing and cannot fail a run.
@@ -746,13 +665,21 @@ def main(argv: list[str] | None = None) -> int:
     output_path = os.environ.get("GITHUB_OUTPUT")
     if output_path:
         with Path(output_path).open("a", encoding="utf-8") as handle:
-            handle.write(f"labels={json.dumps(decision.labels)}\n")
-            handle.write(f"decision={decision.decision}\n")
-            handle.write(f"reason={decision.reason}\n")
+            handle.write(f"labels={json.dumps(labels)}\n")
+            handle.write(f"runs_on={json.dumps(labels)}\n")
+            handle.write(f"decision={decision.decision.value}\n")
+            handle.write(f"reason={decision.reason_wire}\n")
     artifact = Path(
         os.environ.get("RUNNER_ROUTE_ARTIFACT", "runner-route-decision.json")
     )
     artifact.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    # The outputs and the record are written FIRST and the refusal is signalled
+    # by the exit status, in that order: a refused run must still leave an
+    # auditable decision record, and the consuming workflow must still see a
+    # `labels=` line so its fail-closed floor does not overwrite the refusal
+    # with a hosted placement.
+    if refused:
+        return REFUSED_EXIT_CODE
     return 0
 
 

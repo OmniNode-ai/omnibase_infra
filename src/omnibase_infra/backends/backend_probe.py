@@ -19,14 +19,22 @@ Authority doctrine:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
+from typing import Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
 
 logger = logging.getLogger(__name__)
+
+_MAX_LIVE_CONSUMER_GROUP_DESCRIBE_CANDIDATES = 16
+
+
+class ConsumerGroupDescribeResponse(Protocol):
+    groups: list[tuple[object, ...]]
 
 
 def _tcp_reachable(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -123,8 +131,14 @@ def live_consumer_groups(
 
     Raises:
         ConsumerGroupLivenessUnknownError: the question could not be answered
-            — no broker configured, ``confluent_kafka`` absent, or the admin
-            call failed.
+            — no broker configured, the lane transport could not be resolved,
+            or the admin call failed.
+
+    Note:
+        Synchronous by contract because the delegate CLI's locus gate is, so
+        the aiokafka admin round trip runs under :func:`asyncio.run`. There is
+        no async caller today; one would pass through
+        :func:`_live_consumer_groups_async` directly rather than nest a loop.
     """
     resolved = bootstrap_servers or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
     if not resolved:
@@ -133,66 +147,142 @@ def live_consumer_groups(
             "KAFKA_BOOTSTRAP_SERVERS is set"
         )
     try:
-        from confluent_kafka.admin import AdminClient
-
-        from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
-        from omnibase_infra.event_bus.kafka_auth import (
-            build_confluent_auth_config_from_env,
+        return asyncio.run(
+            _live_consumer_groups_async(
+                topic=topic, bootstrap_servers=resolved, timeout=timeout
+            )
         )
-
-        # OMN-18012: honour the lane transport, exactly as ``probe_kafka``
-        # below already does. A PLAINTEXT lane resolves to ``{}`` and the
-        # construction is unchanged. On a SASL lane an unauthenticated
-        # AdminClient is disconnected by the broker at the metadata call, so
-        # every question this function asks resolves to UNKNOWN — and because
-        # the dispatch gate fails closed on UNKNOWN (by design), the delegate
-        # locus gate refuses EVERY dispatched run on such a lane regardless of
-        # how healthy the lane is. Measured 2026-09-09 against the .201 dev
-        # lane after it required SCRAM-SHA-256: unauthenticated raised
-        # ``_TRANSPORT ... Failed to get metadata``, while the same call with
-        # these credentials returned 762 groups including the STABLE
-        # orchestrator group bound to the delegate command topic.
-        admin = AdminClient(
-            {
-                "bootstrap.servers": resolved,
-                "socket.timeout.ms": int(timeout * 1000),
-                "request.timeout.ms": int(timeout * 1000),
-                **build_confluent_auth_config_from_env(),
-            }
-        )
-        # Metadata FIRST. On an unreachable broker librdkafka retries in the
-        # background and ``list_consumer_groups`` resolves to an EMPTY listing
-        # rather than raising — which reads as "nobody is bound" and is exactly
-        # the UNKNOWN/absent conflation this function exists to prevent.
-        # Observed live 2026-08-31 against a closed port: the group listing came
-        # back clean and empty while the connection was being refused. A
-        # cluster that cannot describe itself cannot be asked about consumers.
-        admin.list_topics(timeout=timeout)
-        future = admin.list_consumer_groups(request_timeout=timeout)
-        listing = future.result(timeout=timeout + 1.0)
+    except ConsumerGroupLivenessUnknownError:
+        raise
     except Exception as exc:
         raise ConsumerGroupLivenessUnknownError(
             f"could not list consumer groups on {resolved}: {exc}"
         ) from exc
 
-    # A listing that reports per-group errors is partial, and a partial answer
-    # to "is anything consuming this" is not an answer.
-    listing_errors = getattr(listing, "errors", []) or []
-    if listing_errors:
-        raise ConsumerGroupLivenessUnknownError(
-            f"consumer-group listing on {resolved} returned "
-            f"{len(listing_errors)} error(s); the answer is incomplete: "
-            f"{listing_errors[0]}"
-        )
 
-    suffix = f"{TOPIC_SCOPE_INFIX}{topic}"
+async def _live_consumer_groups_async(
+    *, topic: str, bootstrap_servers: str, timeout: float
+) -> tuple[str, ...]:
+    """Ask the broker the liveness question with the runtime's own client.
+
+    OMN-18418: this was the one bus caller in the repository built on the
+    synchronous ``confluent_kafka`` family, while every producer, consumer and
+    admin client the runtime wires is ``aiokafka`` via
+    :func:`build_aiokafka_auth_kwargs`. That split is not cosmetic. Token-
+    callback mechanisms — ``AWS_MSK_IAM`` and ``OAUTHBEARER`` — cannot be
+    expressed as librdkafka config entries at all, so
+    :func:`build_confluent_auth_config` refuses them by design, and the refusal
+    arrived here as an exception and left as UNKNOWN. On onex-dev, the only
+    ``AWS_MSK_IAM`` lane, that refused EVERY dispatched delegation with a
+    message about the lane rather than about the client: measured in-cluster
+    2026-09-15 in ``omninode-runtime-7946cbb694-wv8v7`` on the dev-system
+    cluster, where the runtime in the same pod was consuming the command topic
+    throughout.
+
+    OMN-17304 hit this class once already and fixed it by threading confluent
+    credentials into the same construction, which is why it reproduced the
+    moment a mechanism arrived the family cannot express. One client
+    resolution path is the fix, not a second set of credentials: the MSK token
+    callback has exactly one implementation and the probe shares it.
+    """
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+    from omnibase_infra.event_bus.kafka_auth import (
+        build_aiokafka_auth_kwargs_from_env,
+    )
+
+    admin = AIOKafkaAdminClient(
+        bootstrap_servers=bootstrap_servers,
+        request_timeout_ms=int(timeout * 1000),
+        **build_aiokafka_auth_kwargs_from_env(),
+    )
+    await admin.start()
+    try:
+        # Metadata FIRST, deliberately. A cluster that cannot describe itself
+        # cannot be asked about consumers, and a client that answers the group
+        # question anyway answers it EMPTY — which reads as "nobody is bound"
+        # and is exactly the UNKNOWN/absent conflation this function exists to
+        # prevent. Observed live 2026-08-31 against a closed port.
+        await admin.describe_cluster()
+        listing = await admin.list_consumer_groups()
+
+        # Narrow by name before describing. The group id carries the topic it
+        # is scoped to, so the describe — one coordinator round trip per group
+        # — runs over the handful of candidates rather than the ~600 groups a
+        # real cluster lists.
+        suffix = f"{TOPIC_SCOPE_INFIX}{topic}"
+        candidates = sorted(
+            {
+                str(entry[0])
+                for entry in listing
+                if entry and str(entry[0]).endswith(suffix)
+            }
+        )
+        if not candidates:
+            return ()
+        if len(candidates) > _MAX_LIVE_CONSUMER_GROUP_DESCRIBE_CANDIDATES:
+            raise ConsumerGroupLivenessUnknownError(
+                f"consumer group liveness for {topic!r} on {bootstrap_servers} "
+                f"matched {len(candidates)} candidate groups; refusing to run "
+                "unbounded serial DescribeGroups probes"
+            )
+
+        # ONE CANDIDATE PER DESCRIBE, deliberately. ``describe_consumer_groups``
+        # batches every group that shares a coordinator into a single
+        # ``DescribeGroupsRequest`` and gathers the responses concurrently, and
+        # against MSK that batched form fails to decode: measured in-cluster on
+        # onex-dev 2026-09-16, a describe of the three groups bound to
+        # ``onex.cmd.omnimarket.delegate-skill.v1`` died with
+        # ``ValueError: Buffer underrun decoding string`` and took the broker
+        # connection down with it, while the SAME three groups described ONE AT
+        # A TIME returned cleanly (``Stable``/1 member, ``Empty``/0, ``Stable``/1).
+        # Serial describes are intentionally capped above so this fail-closed
+        # gate cannot turn a broad group listing into an unbounded hot-path
+        # probe. If a later aiokafka/MSK combination proves batched describes
+        # safe, this loop can be collapsed only with a lane proof that covers
+        # the same three-group shape. Until then, any describe failure or
+        # missing candidate response still leaves the answer UNKNOWN rather
+        # than returning a partial consumer set.
+        described: list[ConsumerGroupDescribeResponse] = []
+        for candidate in candidates:
+            responses = cast(
+                "list[ConsumerGroupDescribeResponse]",
+                await admin.describe_consumer_groups([candidate]),
+            )
+            response_group_ids = {
+                str(group[1])
+                for response in responses
+                for group in getattr(response, "groups", [])
+                if len(group) >= 2
+            }
+            if candidate not in response_group_ids:
+                raise ConsumerGroupLivenessUnknownError(
+                    f"describing consumer group {candidate!r} on "
+                    f"{bootstrap_servers} returned no matching group; "
+                    "the answer is incomplete"
+                )
+            described.extend(responses)
+    finally:
+        await admin.close()
+
+    # Wiring truth needs the group's STATE, which the listing does not carry.
+    # ``Stable`` is Kafka's own spelling on the wire; the confluent enum spelled
+    # it ``STABLE``, so the comparison is case-folded rather than literal.
     found: set[str] = set()
-    for group in getattr(listing, "valid", []):
-        try:
-            if group.group_id.endswith(suffix) and group.state.name == "STABLE":
-                found.add(str(group.group_id))
-        except AttributeError:
-            continue
+    for response in described:
+        for group in getattr(response, "groups", []):
+            error_code, group_id, state = group[0], group[1], group[2]
+            if error_code:
+                # A per-group error makes the listing partial, and a partial
+                # answer to "is anything consuming this" is not an answer.
+                raise ConsumerGroupLivenessUnknownError(
+                    f"describing consumer group {group_id!r} on "
+                    f"{bootstrap_servers} returned error code {error_code}; "
+                    "the answer is incomplete"
+                )
+            if str(state).upper() == "STABLE":
+                found.add(str(group_id))
     return tuple(sorted(found))
 
 

@@ -632,7 +632,30 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # compose dev lane and the onex-dev RDS. 0041 is 0023's second half
     # re-landed alone. It is declared here, and fenced on arrival, because it
     # enables FORCE ROW LEVEL SECURITY and cannot be grandfathered.
-    assert len(result.declarations) == 182
+    #
+    # 182 -> 183 for OMN-17201's
+    # nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql.
+    # The new nullable UUID is a delivery trace beside the existing content
+    # identity; it has no backfill or uniqueness rule, so historical rows keep
+    # their honest absence of an envelope identifier.
+    #
+    # 183 -> 184 for OMN-18079's
+    # nodes/node_delegation_routing_reducer/0004_add_delegation_routing_tenant_overlay_provider.sql,
+    # vendored from omnimarket so the routing overlay can carry the provider
+    # identity a BYOK route was registered against. Additive and nullable, so
+    # rows written before provenance existed keep their honest NULL.
+    #
+    # 184 -> 185 for OMN-18079's
+    # nodes/node_delegation_routing_reducer/0005_backfill_delegation_routing_tenant_overlay_provider.sql.
+    # "Honest NULL" above turned out not to be honest but STRANDING: the same
+    # change that made 0004's column nullable also made the routing resolver
+    # REFUSE a blank provider, so every row written before provenance existed
+    # stopped routing the moment that resolver rolled out. All 33 rows on
+    # onex-dev carried NULL and the staging business proof went red on
+    # 2026-09-16T00:40:04Z. 0005 backfills the column by inverting the declared
+    # byok_provider_backends.v1.yaml binding, and leaves an uncatalogued
+    # backend NULL -- there the absence really is honest, and still refused.
+    assert len(result.declarations) == 185
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

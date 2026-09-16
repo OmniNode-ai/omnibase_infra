@@ -209,11 +209,25 @@ def resolve_delegate_locus(
         )
 
     command_topic = contract_command_topic(contract_path)
+    if kafka_bootstrap is None:
+        # OMN-16871. This used to mean "let the client read
+        # KAFKA_BOOTSTRAP_SERVERS", so the probe asked whichever lane the
+        # shell happened to name while the publish went somewhere else — a
+        # probe of a lane the run never reaches, which is the OMN-17295
+        # instrument defect in a second place. It is now a refusal, which also
+        # makes the recorded ``broker`` a real address rather than a
+        # placeholder string standing in for one.
+        raise DelegateLocusRefusedError(
+            f"cannot probe a deployed orchestrator on '{command_topic}': no "
+            "broker address was resolved for this run. Select the lane with "
+            "--lane <lane id> so the probe and the publish name the same "
+            "broker (OMN-16871)."
+        )
     groups = _assert_dispatch_viable(
         command_topic=command_topic,
         kafka_bootstrap=kafka_bootstrap,
     )
-    broker = kafka_bootstrap or "(from KAFKA_BOOTSTRAP_SERVERS)"
+    broker = kafka_bootstrap
     logger.info(
         "onex delegate: execution locus DEPLOYED-LANE (%s) — publishing to "
         "'%s' on %s; %d live consumer group(s) bound: %s. The accept/climb "
@@ -238,7 +252,7 @@ def resolve_delegate_locus(
 
 
 def _assert_dispatch_viable(
-    *, command_topic: str, kafka_bootstrap: str | None
+    *, command_topic: str, kafka_bootstrap: str
 ) -> tuple[str, ...]:
     """Refuse unless something is provably consuming the command topic NOW.
 
@@ -250,6 +264,10 @@ def _assert_dispatch_viable(
       slow" rather than "there was no lane".
     * broker could not be asked → refuse. UNKNOWN is not permission; that
       conflation is what let a probe report on an executor it never reached.
+
+    The address is required (OMN-16871): the caller resolves it from the
+    selected lane, so this function can never probe a broker the publish will
+    not use.
     """
     try:
         groups = live_consumer_groups(

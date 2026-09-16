@@ -195,7 +195,10 @@ def _lock(ws: Workspace, **versions: str) -> None:
 
 
 def _run(
-    ws: Workspace, *args: str, omni_home: str | None = "auto"
+    ws: Workspace,
+    *args: str,
+    omni_home: str | None = "auto",
+    home: str | None = "auto",
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("OMNI_HOME", None)
@@ -203,6 +206,19 @@ def _run(
         env["OMNI_HOME"] = str(ws.root)
     elif omni_home is not None:
         env["OMNI_HOME"] = omni_home
+    # HOME is overridden to a fixture-scoped, empty directory by default
+    # (OMN-18403): the reconciler's onex-path-shadow surface reads
+    # $HOME/.local/bin/onex, and asserting against the live $HOME would make
+    # this whole suite's outcome depend on whatever happens to be installed on
+    # the machine running it -- exactly the coupling `rp_user_home`'s own
+    # comment in reconcile_privilege_lib.sh calls out as a thing "a test can
+    # control". Individual tests override this to inject or omit the shadow.
+    if home == "auto":
+        fixture_home = ws.root.parent / "fixture_home"
+        fixture_home.mkdir(parents=True, exist_ok=True)
+        env["HOME"] = str(fixture_home)
+    elif home is not None:
+        env["HOME"] = home
     env["ONEX_RECONCILE_ALERT_CMD"] = f"{_writer_stub(ws)} {ws.alert_witness}"
     return subprocess.run(
         ["bash", str(ws.scripts / "reconcile-host.sh"), *args],
@@ -329,6 +345,72 @@ def test_clone_that_actually_advanced_passes(ws: Workspace) -> None:
     assert proc.returncode == EXIT_OK, proc.stderr
     assert "clone:omnibase_core: MOVED" in proc.stderr
     assert ws.floor.exists()
+
+
+def _build_green_fixture(ws: Workspace) -> None:
+    """The same all-green setup as ``test_clone_that_actually_advanced_passes``.
+
+    Factored out so the shadow tests below start from a workspace that would
+    otherwise pass cleanly -- isolating the shadow as the one variable.
+    """
+    clone, seed = _make_clone(ws.root, "omnibase_core")
+    _advance_origin(seed, "moved")
+    _lock(ws, **{"omnibase-core": "0.46.9"})
+    _write_dist(ws.site_packages, "omnibase_core", "0.46.9")
+    _stub(
+        ws.scripts / "runtime_build" / "reconcile_deploy_clones.sh",
+        ws.delegate_witness,
+        body=f'git -C "{clone}" fetch --quiet origin dev && '
+        f'git -C "{clone}" reset --hard --quiet origin/dev',
+    )
+    _stub(ws.scripts / "reconcile-workspace-venvs.sh", ws.delegate_witness)
+
+
+# --------------------------------------------------------------------------- #
+# onex CLI PATH-shadow surface (OMN-18403)
+# --------------------------------------------------------------------------- #
+def test_onex_path_shadow_absent_is_silent(ws: Workspace) -> None:
+    """Positive control: with no ``$HOME/.local/bin/onex``, nothing changes.
+
+    Without this, the shadow test below would also pass against a script that
+    simply always fails on this new surface.
+    """
+    _build_green_fixture(ws)
+
+    proc = _run(ws)
+
+    assert proc.returncode == EXIT_OK, proc.stderr
+    assert "onex-path-shadow" not in proc.stderr
+
+
+def test_onex_path_shadow_fails_the_run_in_both_modes(ws: Workspace) -> None:
+    """A stray ``~/.local/bin/onex`` must fail the run, in --check and repair.
+
+    Reproduces the 2026-09-10..09-15 incident (OMN-18403): a
+    ``uv tool install omnibase-core`` at ``$HOME/.local/bin/onex`` silently
+    outranked the sanctioned wrapper (``scripts/onex``) for every
+    non-interactive invocation -- the ``~/.zshrc`` alias only covers
+    interactive shells -- and this reconciler kept writing "clones/venv: in
+    sync" for five days because nothing here ever looked at
+    ``$HOME/.local/bin``.
+    """
+    _build_green_fixture(ws)
+
+    fake_home = ws.root.parent / "shadow_home"
+    shadow = fake_home / ".local" / "bin" / "onex"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    shadow.chmod(0o755)
+
+    for mode_args in ((), ("--check",)):
+        proc = _run(ws, *mode_args, home=str(fake_home))
+        assert proc.returncode == EXIT_FAILED, (mode_args, proc.stderr)
+        assert "onex-path-shadow" in proc.stderr, (mode_args, proc.stderr)
+        assert str(ws.scripts / "onex") in proc.stderr, (mode_args, proc.stderr)
+        assert "uv tool uninstall omnibase-core" in proc.stderr, (
+            mode_args,
+            proc.stderr,
+        )
 
 
 # --------------------------------------------------------------------------- #

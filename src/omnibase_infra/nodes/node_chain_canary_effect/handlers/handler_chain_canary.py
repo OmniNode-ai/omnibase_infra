@@ -89,6 +89,10 @@ from uuid import uuid4
 
 import httpx
 
+from omnibase_core.enums.enum_delegation_traffic_class import (
+    EnumDelegationTrafficClass,
+)
+from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
     dsn_shaped_argv_flags,
@@ -201,6 +205,34 @@ TypeLedgerReplay = Callable[
 # distinction is only enforceable if SKIP survives as itself this far.
 _VERIFIER_SKIP = "skip"
 _VERIFIER_PASS = "pass"
+
+# OMN-18389: how often link 5 re-reads `ledger_chain` while it waits for the
+# writer whose output it grades.
+#
+# The canary and `node_delegation_chain_ledger_effect` are two processes racing
+# the same terminal event. The writer is dispatched BY that terminal, then
+# settles for up to 20 x 250 ms waiting on the ledger projection, and only then
+# writes. The canary's link-5 read used to fire once, immediately. Measured on
+# the .201 dev lane: run 35016830667's own correlation had five `ledger_chain`
+# rows persisted at 21:16:56 -- one second AFTER the read at 21:16:55, which
+# reported all four hops missing. On the 20:42 scheduled run the gap was 55
+# seconds. A read that lands before the write reports a complete chain as
+# incomplete, and that is a statement about the canary's timing, not about the
+# chain.
+#
+# A fixed sleep would be the wrong shape twice over: too short and the race is
+# still live, too long and every green run pays for the worst case. The wait is
+# keyed on the EXPECTED HOP COUNT instead -- it stops the instant every declared
+# hop is present, and otherwise runs out the readback window that link 4 is
+# already holding open, so it costs no additional wall-clock in the common case.
+_LEDGER_POLL_INTERVAL_SECONDS = 2.0
+
+_CANARY_DELEGATION_PROVENANCE = ModelDelegationProvenance(
+    source="external-client",
+    traffic_class=EnumDelegationTrafficClass.SYNTHETIC,
+    source_surface="scheduled-chain-canary",
+    requested_by="chain-canary",
+)
 
 # The FSM states that count as terminal in delegation_workflow_state. Anything
 # else that exists as a row is stranded mid-flight — OMN-14843 measured
@@ -1025,6 +1057,7 @@ class HandlerChainCanary:
         canary is evidence about the path real callers take rather than
         about a bespoke probe-only path that could drift away from it.
         """
+        provenance = _CANARY_DELEGATION_PROVENANCE
         return {
             "command_name": request.runtime_command,
             "correlation_id": probe_correlation_id,
@@ -1032,13 +1065,14 @@ class HandlerChainCanary:
             "payload": {
                 "prompt": request.prompt,
                 "task_type": request.task_type,
-                "source": "external-client",
+                "source": provenance.source,
+                "provenance": provenance.model_dump(mode="json"),
                 "wait": True,
                 "correlation_id": probe_correlation_id,
                 "max_tokens": request.max_tokens,
                 "metadata": {
-                    "requested_by": "chain-canary",
-                    "source_surface": "scheduled-chain-canary",
+                    "requested_by": provenance.requested_by,
+                    "source_surface": provenance.source_surface,
                 },
             },
         }
@@ -1090,19 +1124,46 @@ class HandlerChainCanary:
                 ),
             )
 
-        hops, replay_green, verdict, error = await self._ledger_replay(
-            source,
-            probe_correlation_id,
-            window_s,
-        )
-        if hops is None:
-            return EnumLedgerReplayStatus.ERROR, error or "ledger replay failed"
+        # OMN-18389: WAIT for the writer this leg grades, bounded by the
+        # readback window, keyed on the expected hop count -- never a fixed
+        # sleep. The loop exits the instant every declared hop is present, so a
+        # healthy chain pays only its own latency; an absent hop costs the
+        # window that link 4 is holding open concurrently anyway.
+        deadline = time.monotonic() + window_s
+        attempts = 0
+        missing: tuple[str, ...] = ()
+        while True:
+            attempts += 1
+            remaining = max(0.0, deadline - time.monotonic())
+            hops, replay_green, verdict, error = await self._ledger_replay(
+                source,
+                probe_correlation_id,
+                remaining,
+            )
+            if hops is None:
+                # A read that FAILED is not a chain found to be short, and
+                # retrying an unreadable ledger would convert a precise ERROR
+                # into a vague incompleteness. Report it as itself, once.
+                return EnumLedgerReplayStatus.ERROR, error or "ledger replay failed"
 
-        missing = tuple(h for h in request.expected_ledger_hops if h not in hops)
+            missing = tuple(h for h in request.expected_ledger_hops if h not in hops)
+            if not missing:
+                break
+            if time.monotonic() + _LEDGER_POLL_INTERVAL_SECONDS >= deadline:
+                break
+            await asyncio.sleep(_LEDGER_POLL_INTERVAL_SECONDS)
+
         if missing:
+            # The wait is part of the finding. "Missing after one look" and
+            # "missing after the whole window" are different facts about the
+            # chain, and a reader cannot tell them apart from a bare hop list.
             return (
                 EnumLedgerReplayStatus.CHAIN_INCOMPLETE,
-                f"missing hops: {', '.join(missing)}",
+                (
+                    f"missing hops: {', '.join(missing)} "
+                    f"(still absent after {attempts} read(s) over "
+                    f"{window_s:.1f}s)"
+                ),
             )
         if not replay_green:
             return EnumLedgerReplayStatus.REPLAY_FAILED, ""

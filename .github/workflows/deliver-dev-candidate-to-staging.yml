@@ -111,6 +111,24 @@ on:
         required: false
         default: "dev"
         type: string
+  # OMN-17057: a SIBLING repository's merge, announcing its own revision.
+  #
+  # Until this existed, an omnimarket (or omnibase_core, or omnibase_compat)
+  # merge could not cause a delivery at all. It rode along on whatever the next
+  # push to THIS repository happened to build, and the candidate cloned it at
+  # branch `dev` at that instant -- so the vendored sibling revision was never
+  # chosen and could not be predicted. Measured on delivery run 35013603978:
+  # the candidate vendored omnimarket 3038d1da, which is simply where that
+  # branch was pointing 18 minutes after an unrelated commit merged here.
+  #
+  # This is a `repository_dispatch` and not a `workflow_dispatch` on purpose.
+  # A bare `workflow_dispatch` of a delivery workflow is a person or an agent
+  # asserting a delivery; this carries the sibling's merge sha, is sent only by
+  # the reusable rebuild trigger AFTER that repository's compose-dev lab pass
+  # converged on that sha, and is gated again on this side against the sibling
+  # repository's own receipt before anything is announced.
+  repository_dispatch:
+    types: [sibling-dev-candidate]
 
 concurrency:
   # A candidate build runs up to 75 minutes. Under ordinary merge traffic,
@@ -118,7 +136,14 @@ concurrency:
   # superseded run would be delivering code that is already stale. Collapsing
   # the burst makes the delivered candidate dev HEAD by construction; the
   # cancelled runs' commits are contained in the surviving one.
-  group: deliver-dev-candidate-${{ github.ref }}
+  # OMN-17057: `github.ref` on a repository_dispatch resolves to the default
+  # branch, so without the second segment an omnimarket-triggered delivery and
+  # an ordinary omnibase_infra push delivery would share one group -- and the
+  # next push would cancel the sibling's delivery silently, which is the exact
+  # class of invisible non-delivery this workflow exists to end. Two pinned
+  # deliveries of the SAME sibling still collapse, which is wanted: the later
+  # revision contains the earlier one.
+  group: deliver-dev-candidate-${{ github.ref }}-${{ github.event.client_payload.pinned_repo || 'self' }}
   cancel-in-progress: true
 
 permissions:
@@ -137,6 +162,14 @@ jobs:
       # a branch name, never this repo's commit SHA. This repo's own revision
       # comes from the called workflow's default checkout of `github.sha`.
       sibling_ref: ${{ inputs.sibling_ref || 'dev' }}
+      # OMN-17057: exactly ONE sibling may be named at an exact commit. Every
+      # other sibling still takes `sibling_ref` above, so the constraint that
+      # input's comments describe -- one value cannot be a commit in four
+      # repositories -- is preserved rather than worked around. Empty on a push
+      # or a manual dispatch, which is the pre-OMN-17057 behaviour byte for
+      # byte.
+      pinned_repo: ${{ github.event.client_payload.pinned_repo || '' }}
+      pinned_revision: ${{ github.event.client_payload.pinned_revision || '' }}
 
   build-migrate-bundle:
     name: Build migration bundle
@@ -954,6 +987,54 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             | tee /tmp/lab-pass-gate.txt
 
+      # OMN-17057. The gate above asks about THIS repository's sha. On a
+      # sibling-triggered delivery the revision under test is the sibling's,
+      # and its receipt lives in the SIBLING's artifact surface -- the reusable
+      # rebuild trigger runs as that repository's workflow, so
+      # `upload-artifact` publishes there and this repository's `GITHUB_TOKEN`
+      # cannot read it. A short-lived App installation token scoped
+      # `actions: read` on exactly that one repository is the whole additional
+      # capability this adds, and it is the same App identity the announcement
+      # job below already uses.
+      #
+      # Requested only when a pin is present, so the push path gains nothing.
+      # Absent App credentials fail the job rather than skipping it, for the
+      # same reason `dispatch-to-staging` below refuses on them: this check IS
+      # the premise, and a green run that checked nothing is the failure mode
+      # rule 24(b) exists to remove.
+      - name: Obtain a read-only Actions token for the pinned sibling repository
+        id: sibling-token
+        if: github.event.client_payload.pinned_repo != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: ${{ github.event.client_payload.pinned_repo }}
+          permission-actions: read
+
+      - name: Read the compose-dev lab-pass receipt for the pinned sibling revision
+        if: github.event.client_payload.pinned_repo != ''
+        env:
+          GH_TOKEN: ${{ steps.sibling-token.outputs.token }}
+          PINNED_REPO: ${{ github.event.client_payload.pinned_repo }}
+          PINNED_REVISION: ${{ github.event.client_payload.pinned_revision }}
+        run: |
+          set -euo pipefail
+          # --lane compose-dev and not the default "every lane": the sibling
+          # repositories run no boot gate and no k3s overlay apply, so asking
+          # about lanes nothing emits for them would report a missing receipt
+          # for a lane that never claimed to cover the sha. The compose dev lane
+          # is the one that IS proven to vendor the sibling revision, by
+          # check_lane_sibling_revision.py, immediately before the receipt is
+          # written.
+          uv run --no-project --with pydantic \
+            python3 scripts/ci/lab_pass_receipt.py gate \
+            --sha "${PINNED_REVISION}" \
+            --repo "OmniNode-ai/${PINNED_REPO}" \
+            --lane compose-dev \
+            | tee /tmp/lab-pass-gate-sibling.txt
+
       - name: Summarise
         if: always()
         run: |
@@ -963,6 +1044,15 @@ jobs:
             echo '```'
             cat /tmp/lab-pass-gate.txt 2>/dev/null || echo "(the gate produced no output)"
             echo '```'
+            if [ -n "${{ github.event.client_payload.pinned_repo }}" ]; then
+              echo ""
+              echo "### Sibling lab-pass gate (OMN-17057)"
+              echo ""
+              echo '```'
+              cat /tmp/lab-pass-gate-sibling.txt 2>/dev/null \
+                || echo "(the sibling gate produced no output)"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   dispatch-to-staging:
@@ -1030,6 +1120,16 @@ jobs:
           # readback can answer "which commit is running", not merely "did the
           # digest change".
           SOURCE_SHA: ${{ github.sha }}
+          # OMN-17057: the sibling revision this candidate was BUILT to carry,
+          # announced alongside it. The receiving deploy already resolves what
+          # each running image actually vendors, out of the pod's own baked
+          # build-provenance.json (OMN-17926's freshness gate reads
+          # per_repo_vcs_provenance.siblings.<repo>.vcs_ref). What it has never
+          # had is the other half of that comparison: which sibling revision
+          # was INTENDED. Empty on a push delivery, where no sibling was chosen
+          # and there is therefore nothing honest to claim.
+          PINNED_REPO: ${{ github.event.client_payload.pinned_repo }}
+          PINNED_REVISION: ${{ github.event.client_payload.pinned_revision }}
         run: |
           set -euo pipefail
 
@@ -1063,13 +1163,18 @@ jobs:
             --arg migrate "${MIGRATE_IMAGE_REF}" \
             --arg repo "${GITHUB_REPOSITORY}" \
             --arg sha "${SOURCE_SHA}" \
+            --arg pinned_repo "${PINNED_REPO:-}" \
+            --arg pinned_revision "${PINNED_REVISION:-}" \
             '{
               event_type: "omnibase-infra-dev-candidate",
               client_payload: {
                 runtime_image_ref: $runtime,
                 migrate_image_ref: $migrate,
                 source_repo: $repo,
-                source_sha: $sha
+                source_sha: $sha,
+                pinned_sibling: (if $pinned_repo == "" then null
+                                 else {repo: $pinned_repo, revision: $pinned_revision}
+                                 end)
               }
             }' \
             | gh api --method POST repos/OmniNode-ai/omninode_infra/dispatches --input -
@@ -1080,6 +1185,9 @@ jobs:
             echo "| field | value |"
             echo "| --- | --- |"
             echo "| source commit | \`${SOURCE_SHA}\` |"
+            if [ -n "${PINNED_REPO:-}" ]; then
+              echo "| pinned sibling | \`${PINNED_REPO}@${PINNED_REVISION}\` |"
+            fi
             echo "| runtime image | \`${RUNTIME_IMAGE_REF}\` |"
             echo "| migrate image | \`${MIGRATE_IMAGE_REF}\` |"
             echo ""

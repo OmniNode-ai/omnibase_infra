@@ -35,6 +35,22 @@ tier (set-and-ignored produces a warning), and a broker's reachability no
 longer decides the transport: execution locus is a resolved property of
 configuration, not an environmental accident.
 
+Broker addressing (OMN-16871). ``--bus`` says WHICH KIND of transport;
+``--lane`` says WHICH BROKER. The address used to be resolved by
+``EventBusKafka`` from the ambient ``KAFKA_BOOTSTRAP_SERVERS``, which on the
+launching Mac names the ``.201`` STABILITY-TEST lane — so every ad hoc
+delegation from a developer shell published onto a governed proof lane, and
+that lane recorded four such CLI terminal-run consumer groups when the finding
+was re-verified. That path is DELETED, not repointed: with the resolved bus on
+``kafka``, a run that named neither ``--lane`` nor ``--kafka-bootstrap`` is
+refused, and the refusal lists the declared lanes. ``--lane`` resolves the
+broker AND the declared transport from ``omnimarket/config/ci_bus_lanes.yaml``
+under the workspace root — the same declaration the OCC publishers and the
+chain canary already read, through the same ``load_lane_transport`` reader, so
+no second source exists. SASL credentials are unchanged and still reach the
+client through the standard ``KAFKA_SASL_*`` environment, which is where a
+secret belongs; what left the environment is the ADDRESS.
+
 **Execution locality (OMN-17295): ``--bus`` selects the TRANSPORT, never the
 executor.** On both values the ``node_delegate_skill_orchestrator`` runs
 IN-PROCESS in this CLI process, resolved from the local venv's installed
@@ -90,8 +106,10 @@ error) even when the hang is not asyncio-cooperative.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
+import re
 import signal
 import sys
 import uuid
@@ -109,6 +127,10 @@ from omnibase_infra.backends.auto_configure import (
     resolve_bus_type,
 )
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
+from omnibase_infra.cli.delegate_lane import (
+    DelegateLaneSelectionError,
+    resolve_lane_target,
+)
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
     resolve_delegate_locus,
@@ -129,6 +151,7 @@ from omnibase_infra.cli.task_class_selection import (
     ModelTaskTypeResolution,
     TaskClassContractError,
     load_selectable_task_classes,
+    load_selection_fallback,
     resolve_task_class_contract_path,
     resolve_task_type,
 )
@@ -150,6 +173,7 @@ __all__ = [
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "classify_task_type",
+    "load_supported_criteria",
     "resolve_default_bus",
     "resolve_task_class",
     "run_delegate",
@@ -317,6 +341,13 @@ def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
     return None
 
 
+#: Mirrors the wire model's own pattern for a parameterised criterion slug.
+#: The SLUG SET is read from the installed omnimarket (see
+#: :func:`load_supported_criteria`); only this shape is spelled here, because a
+#: regex cannot drift the way a copied list of names can.
+_MAX_WORDS_PER_SENTENCE_RE = re.compile(r"^max_words_per_sentence_([1-9]\d*)$")
+
+
 _ATTEMPT_EVIDENCE_FIELDS: tuple[str, ...] = (
     "backend_id",
     "tier",
@@ -352,6 +383,48 @@ def _attempt_evidence(result: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
+def _unattributed_reason(result: dict[str, object]) -> str:
+    """Say why no route was attributed, accurately for THIS run.
+
+    OMN-18306 landed the receipt; this is its sentence. The reason used to be
+    one constant asserting that "every rung this run attempted was refused",
+    which states two things it never checked: that rungs were attempted at all,
+    and — by naming none of them — which. Both halves were measured wrong on
+    2026-09-15. One run reached two backends and the constant named neither;
+    another was refused before dispatch in 265 ms with zero attempts, and the
+    constant described refusals that never happened.
+
+    Those are different failures with different fixes. "Four backends turned
+    this down" is a routing or quality problem; "a guard refused this before it
+    left the machine" is a request problem. A receipt that renders them
+    identically cannot tell a customer which one they have.
+
+    This NEVER names a route. The backends appear as evidence of what was
+    tried; the route stays unattributed, because attributing output nobody
+    accepted is the lie the refusal exists to prevent (AC3).
+    """
+    attempts = result.get("attempts")
+    reached = [
+        str(attempt.get("backend_id"))
+        for attempt in (attempts if isinstance(attempts, list) else [])
+        if isinstance(attempt, dict) and attempt.get("backend_id")
+    ]
+    if not reached:
+        return (
+            "no backend was reached: this run was refused before any rung was "
+            "dispatched, so there is no routing attempt to attribute. The "
+            "failure reason recorded on this receipt is the guard that refused "
+            "it, not a backend's verdict"
+        )
+    return (
+        "no accepted routing attempt: this run reached "
+        + ", ".join(reached)
+        + " and every one of them refused, errored, or climbed, so no backend "
+        "can be named as the author of this run's output. Each rung's own "
+        "backend, tier and failure class is recorded under attempts"
+    )
+
+
 def _write_unattributed_run_files(
     *,
     envelope: dict[str, object],
@@ -377,11 +450,7 @@ def _write_unattributed_run_files(
 
     metrics = result.get("metrics")
     cost_usd = metrics.get("cost_usd") if isinstance(metrics, dict) else None
-    unattributed = (
-        "no accepted routing attempt: every rung this run attempted was "
-        "refused, errored, or climbed, so no backend can be named as the "
-        "author of this run's output"
-    )
+    unattributed = _unattributed_reason(result)
 
     _atomic_write_text(run_dir / "result.txt", str(result.get("response") or ""))
     _atomic_write_text(
@@ -628,13 +697,18 @@ def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[st
     """Build the ``backend_overrides`` map for ``run_receipt_mode``/``RuntimeLocal``.
 
     ``bus`` selects the event-bus backend (``inmemory`` or ``kafka``). For
-    ``kafka``, an optional ``kafka_bootstrap`` (``host:port``) routes through
-    ``EventBusKafka.from_bootstrap`` so the live broker is targeted without
-    process-wide environment mutation; omitting it lets the Kafka bus resolve
-    its bootstrap from ``KAFKA_BOOTSTRAP_SERVERS``. ``kafka_bootstrap`` is only
-    meaningful for ``bus="kafka"`` and is rejected otherwise so a typo (e.g.
-    passing a broker with the default in-memory bus) fails loud rather than
-    silently running in-process.
+    ``kafka``, ``kafka_bootstrap`` (``host:port``) is REQUIRED and routes
+    through ``EventBusKafka.from_bootstrap`` so the live broker is targeted
+    without process-wide environment mutation. Omitting it used to let the
+    Kafka bus resolve its own bootstrap from ``KAFKA_BOOTSTRAP_SERVERS``;
+    OMN-16871 removed that path, because on the launching host that variable
+    names the governed stability-test lane and every ad hoc delegation from a
+    developer shell therefore published onto a proof lane. There is now no
+    combination of arguments that produces a kafka bus with an address this
+    process did not resolve explicitly. ``kafka_bootstrap`` is only meaningful
+    for ``bus="kafka"`` and is rejected otherwise so a typo (e.g. passing a
+    broker with the default in-memory bus) fails loud rather than silently
+    running in-process.
     """
     if bus not in BUS_CHOICES:
         raise ValueError(
@@ -643,6 +717,16 @@ def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[st
     if bus != "kafka" and kafka_bootstrap is not None:
         raise ValueError(
             f"--kafka-bootstrap is only valid with --bus kafka (got --bus {bus})."
+        )
+    if bus == "kafka" and kafka_bootstrap is None:
+        raise ValueError(
+            "the kafka bus requires a broker address: pass --lane <lane id> "
+            "to resolve it from the lane declaration, or --kafka-bootstrap "
+            "<host:port> to state a lane-internal address directly. It is no "
+            "longer resolved from KAFKA_BOOTSTRAP_SERVERS (OMN-16871) -- on "
+            "the launching host that variable names the governed "
+            "stability-test lane, so an ambient value silently selected a "
+            "proof lane."
         )
     overrides: dict[str, str] = {"event_bus": bus}
     if kafka_bootstrap is not None:
@@ -684,12 +768,119 @@ def resolve_task_class(
     contract cannot be resolved, this fails closed (propagates
     ``TaskClassContractError``) rather than falling back to the mirror.
     """
-    resolved = (
-        classes
-        if classes is not None
-        else load_selectable_task_classes(resolve_task_class_contract_path())
+    if classes is not None:
+        return resolve_task_type(prompt, explicit=explicit, classes=classes)
+    contract_path = resolve_task_class_contract_path()
+    return resolve_task_type(
+        prompt,
+        explicit=explicit,
+        classes=load_selectable_task_classes(contract_path),
+        # OMN-18305 residual: the fallback is a GRADING decision, so the
+        # contract owns it. A contract that declares none yields the module
+        # default, whose docstring records the two properties any fallback
+        # has to satisfy.
+        fallback=load_selection_fallback(contract_path),
     )
-    return resolve_task_type(prompt, explicit=explicit, classes=resolved)
+
+
+def load_supported_criteria() -> frozenset[str] | None:
+    """Return the closed acceptance-criterion vocabulary, or ``None`` if unreadable.
+
+    ``acceptance_criteria`` is NOT free text. The delegation wire model
+    validates every entry against a closed slug set, plus the pattern
+    ``max_words_per_sentence_<N>``, and refuses the whole request otherwise.
+    Measured live 2026-09-15: three free-text criteria produced a 265 ms
+    ``ValidationError`` with a pydantic traceback, zero rungs attempted, and no
+    mention of which command-line flag the caller had got wrong.
+
+    So the vocabulary is resolved HERE, at the flag, from the same installed
+    omnimarket the contract itself is read from — one source, not a copy that
+    can drift. ``None`` means omnimarket is unresolvable, in which case this
+    command cannot dispatch at all for unrelated reasons and the criteria are
+    passed through to be validated where they always were.
+    """
+    try:
+        module = importlib.import_module(
+            "omnimarket.models.delegation.wire.model_delegation_request"
+        )
+        supported = module.SUPPORTED_ACCEPTANCE_CRITERIA
+    except (ImportError, AttributeError):
+        return None
+    return frozenset(str(item) for item in supported)
+
+
+def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
+    """Refuse an unknown criterion here, naming the flag and the vocabulary."""
+    if not criteria:
+        return criteria
+    supported = load_supported_criteria()
+    if supported is None:
+        return criteria
+    unsupported = sorted(
+        item
+        for item in criteria
+        if item not in supported and not _MAX_WORDS_PER_SENTENCE_RE.match(item)
+    )
+    if unsupported:
+        raise ValueError(
+            "--criteria takes declared criterion slugs, not free text. "
+            f"Unsupported: {', '.join(repr(item) for item in unsupported)}. "
+            f"Allowed: {', '.join(sorted(supported))}, or "
+            "max_words_per_sentence_<N>."
+        )
+    return criteria
+
+
+def _resolve_task_class_flag(
+    task_type: str | None, task_class_alias: str | None
+) -> str | None:
+    """Collapse ``--task-type`` and its ``--task-class`` alias into one value.
+
+    Passing both is a usage error rather than a precedence rule: a silent
+    winner between two spellings of the same flag is how a caller ends up
+    graded against a class it thought it had overridden.
+    """
+    if task_type is not None and task_class_alias is not None:
+        raise ValueError(
+            "--task-type and --task-class are two spellings of the same flag; "
+            "pass one, not both"
+        )
+    return task_type if task_type is not None else task_class_alias
+
+
+def _load_response_contract(raw: str | None) -> dict[str, object] | None:
+    """Read ``--response-contract`` as inline JSON or as a path to a JSON file.
+
+    Refuses anything that is not a JSON object: the field is threaded to the
+    quality gate as a JSON-Schema-shaped contract, and a list or a bare scalar
+    would be accepted here and rejected far downstream with no mention of this
+    flag.
+    """
+    if raw is None:
+        return None
+    candidate = Path(raw)
+    if candidate.suffix == ".json":
+        if not candidate.is_file():
+            raise ValueError(
+                f"--response-contract names {raw!r}, which ends in .json but is "
+                "not a readable file"
+            )
+        text = candidate.read_text(encoding="utf-8")
+    else:
+        text = raw
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"--response-contract is neither a readable .json file nor valid "
+            f"inline JSON: {exc}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "--response-contract must be a JSON object describing the expected "
+            f"response structure, not a {type(parsed).__name__}"
+        )
+    return parsed
 
 
 def _write_payload(
@@ -701,6 +892,10 @@ def _write_payload(
     state_root: Path,
     run_id: uuid.UUID,
     correlation_id: uuid.UUID,
+    acceptance_criteria: tuple[str, ...] = (),
+    quality_contract_mode: str | None = None,
+    response_contract: dict[str, object] | None = None,
+    system_prompt: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -725,6 +920,18 @@ def _write_payload(
     the one place guaranteed to mint a fresh identity per invocation (a new
     OS process every time), so it owns this run's tracing identity end to end
     instead of delegating that responsibility downstream.
+
+    THE FOUR CALLER-STATED FIELDS (OMN-18305 residual, measured 2026-09-15).
+    ``ModelDelegateSkillRequest`` has carried ``acceptance_criteria``,
+    ``quality_contract_mode``, ``response_contract`` and ``system_prompt``
+    since OMN-15193/OMN-15482, and the quality-gate reducer already branches on
+    ``replace_task_class`` — but this CLI wrote none of them, so the ONLY
+    rubric a ``onex delegate`` caller could be graded against was the one the
+    task class declares. That is the rubric that was wrong in both failures
+    measured on 2026-09-15: a drafting prompt refused on ``planning``'s
+    ``covers_dependencies`` and another refused on ``research``'s
+    ``cites_sources``. Each field is omitted entirely when unset, so no
+    existing caller changes shape.
     """
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -737,6 +944,14 @@ def _write_payload(
     }
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if acceptance_criteria:
+        payload["acceptance_criteria"] = list(acceptance_criteria)
+    if quality_contract_mode is not None:
+        payload["quality_contract_mode"] = quality_contract_mode
+    if response_contract is not None:
+        payload["response_contract"] = response_contract
+    if system_prompt is not None:
+        payload["system_prompt"] = system_prompt
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -833,6 +1048,65 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     ),
 )
 @click.option(
+    "--task-class",
+    "task_class_alias",
+    type=str,
+    default=None,
+    help=(
+        "Alias for --task-type. The contract calls these TASK CLASSES, so the "
+        "flag that selects one may be spelled either way; passing both is a "
+        "usage error rather than a silent precedence rule."
+    ),
+)
+@click.option(
+    "--criteria",
+    "criteria",
+    type=str,
+    multiple=True,
+    help=(
+        "An acceptance criterion this answer must meet, repeatable. Stating "
+        "your own criteria is how you stop being graded against a rubric you "
+        "did not ask for: on 2026-09-15 a drafting prompt was refused on every "
+        "rung for missing source citations, because the task class it landed "
+        "on grades research. With --criteria-mode replace-task-class these "
+        "criteria BECOME the bar; by default they are added to it."
+    ),
+)
+@click.option(
+    "--criteria-mode",
+    "criteria_mode",
+    type=click.Choice(["extend-task-class", "replace-task-class"]),
+    default=None,
+    help=(
+        "Whether --criteria are added to the task class's own definition of "
+        "done (the default) or REPLACE it. Only meaningful with --criteria. "
+        "'replace-task-class' is the escape hatch from a shape floor that does "
+        "not apply to your task."
+    ),
+)
+@click.option(
+    "--response-contract",
+    "response_contract",
+    type=str,
+    default=None,
+    help=(
+        "A JSON-Schema-shaped contract describing the response structure you "
+        "expect, as inline JSON or a path to a .json file. When set, the "
+        "quality gate validates the response STRUCTURALLY against this schema "
+        "instead of the task class's keyword heuristics."
+    ),
+)
+@click.option(
+    "--system-prompt",
+    "system_prompt",
+    type=str,
+    default=None,
+    help=(
+        "A system message sent as a distinct role alongside the prompt, rather "
+        "than concatenated into it. Omit to use the task class default."
+    ),
+)
+@click.option(
     "--max-tokens",
     "max_tokens",
     type=click.IntRange(min=1),
@@ -891,15 +1165,33 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     ),
 )
 @click.option(
+    "--lane",
+    "lane",
+    type=str,
+    default=None,
+    help=(
+        "Lane this delegation is addressed to, e.g. 'dev'. Its broker and "
+        "transport are read from the checked-in lane declaration "
+        "omnimarket/config/ci_bus_lanes.yaml under the workspace root "
+        "(--omni-home / $OMNI_HOME); the refusal lists the declared lanes. "
+        "Required whenever the resolved bus is kafka, unless you state a "
+        "lane-internal address with --kafka-bootstrap. The broker address is "
+        "NOT read from KAFKA_BOOTSTRAP_SERVERS (OMN-16871): on the launching "
+        "host that variable names the governed stability-test lane, so an "
+        "ambient value silently selected a proof lane."
+    ),
+)
+@click.option(
     "--kafka-bootstrap",
     "kafka_bootstrap",
     type=str,
     default=None,
     help=(
-        "Kafka bootstrap servers (host:port) for --bus kafka. Omit to resolve "
-        "from KAFKA_BOOTSTRAP_SERVERS. Delegation model bindings come only "
-        "from the typed contract overlay. "
-        "Only valid with --bus kafka."
+        "Broker address (host:port) stated directly, for a lane-internal "
+        "address no declaration can carry -- e.g. 'redpanda:9092' from a "
+        "container on the lane's own compose network. Prefer --lane, which "
+        "resolves the address AND the transport from the lane declaration. "
+        "Mutually exclusive with --lane; only valid with --bus kafka."
     ),
 )
 @click.option(
@@ -964,10 +1256,16 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
 def delegate_command(
     prompt: str,
     task_type: str | None,
+    task_class_alias: str | None,
+    criteria: tuple[str, ...],
+    criteria_mode: str | None,
+    response_contract: str | None,
+    system_prompt: str | None,
     max_tokens: int | None,
     source: str | None,
     bus: str | None,
     locus: str,
+    lane: str | None,
     kafka_bootstrap: str | None,
     state_root: Path,
     timeout: int,
@@ -997,11 +1295,16 @@ def delegate_command(
     try:
         exit_code = run_delegate(
             prompt=prompt,
-            task_type=task_type,
+            task_type=_resolve_task_class_flag(task_type, task_class_alias),
+            acceptance_criteria=_validate_criteria(tuple(criteria)),
+            criteria_mode=criteria_mode,
+            response_contract=_load_response_contract(response_contract),
+            system_prompt=system_prompt,
             max_tokens=max_tokens,
             source=source,
             bus=bus,
             locus=EnumDelegateLocus(locus),
+            lane=lane,
             kafka_bootstrap=kafka_bootstrap,
             state_root=state_root,
             timeout=timeout,
@@ -1019,10 +1322,15 @@ def run_delegate(
     *,
     prompt: str,
     task_type: str | None,
+    acceptance_criteria: tuple[str, ...] = (),
+    criteria_mode: str | None = None,
+    response_contract: dict[str, object] | None = None,
+    system_prompt: str | None = None,
     max_tokens: int | None,
     source: str | None = None,
     bus: str | None = None,
     locus: EnumDelegateLocus = EnumDelegateLocus.AUTO,
+    lane: str | None = None,
     kafka_bootstrap: str | None = None,
     state_root: Path,
     timeout: int,
@@ -1051,13 +1359,18 @@ def run_delegate(
     (``inmemory``) — so a configured install reaches the shared platform
     substrate BY DEFAULT, with no ``--bus kafka`` flag required, and an
     unconfigured one stays fully offline. An explicit ``"inmemory"``
-    or ``"kafka"`` is never second-guessed. ``kafka_bootstrap`` optionally
-    overrides the broker when the resolved/explicit bus is ``"kafka"`` — it is
-    a usage error to supply it without also explicitly requesting
-    ``--bus kafka`` (a bare ``--kafka-bootstrap`` is never silently absorbed
-    into the auto-resolved default). Both flow through ``backend_overrides`` to
-    ``RuntimeLocal`` — the runtime is the single source of truth for the bus
-    (``feedback_bus_is_the_transport``).
+    or ``"kafka"`` is never second-guessed.
+
+    ``lane`` names the broker for a kafka run and is resolved through the lane
+    declaration (OMN-16871); ``kafka_bootstrap`` states an address directly,
+    for a lane-internal endpoint no declaration can carry. Exactly one of them
+    is required whenever the resolved bus is ``"kafka"`` — neither is a
+    refusal, and so is both. It remains a usage error to supply
+    ``kafka_bootstrap`` without also explicitly requesting ``--bus kafka`` (a
+    bare ``--kafka-bootstrap`` is never silently absorbed into the
+    auto-resolved default). The resolved address flows through
+    ``backend_overrides`` to ``RuntimeLocal`` — the runtime is the single
+    source of truth for the bus (``feedback_bus_is_the_transport``).
 
     ``timeout`` is enforced twice (OMN-14397): cooperatively inside
     ``RuntimeLocal`` via ``asyncio.wait_for``, and again here as a hard
@@ -1150,19 +1463,44 @@ def run_delegate(
             "config surface, env override, or broker probe was consulted",
             bus,
         )
-    if kafka_bootstrap is not None and bus == "kafka":
-        # The second, independent override: --bus names the transport,
-        # --kafka-bootstrap names the endpoint. Gated on the valid
-        # combination so the invalid one still fails loud in
-        # ``build_backend_overrides`` below rather than being announced first.
-        logger.info(
-            "onex delegate: explicit --kafka-bootstrap %s OVERRIDES the "
-            "broker address this run would otherwise resolve from the "
-            "configured authority",
-            kafka_bootstrap,
+    # OMN-16871: the broker ADDRESS comes from the lane the caller selected,
+    # read out of the checked-in lane declaration. It is never taken from
+    # ``KAFKA_BOOTSTRAP_SERVERS`` -- on the launching host that variable names
+    # the governed stability-test lane, so an ambient value silently addressed
+    # a proof lane. A kafka bus with no lane and no explicit broker is a
+    # REFUSAL here, not a fallback.
+    try:
+        lane_target = resolve_lane_target(
+            bus=bus,
+            lane=lane,
+            kafka_bootstrap=kafka_bootstrap,
+            omni_home=omni_home,
         )
+    except DelegateLaneSelectionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if lane_target is not None:
+        # Name the declaration that answered, not merely the address: a
+        # receipt that records only ``host:port`` cannot distinguish a
+        # declared lane from a value somebody typed.
+        logger.info(
+            "onex delegate: --lane %s resolves to broker %s over %s, declared in %s",
+            lane_target.lane,
+            lane_target.bootstrap_servers,
+            lane_target.security_protocol,
+            lane_target.declared_in,
+        )
+        resolved_bootstrap: str | None = lane_target.bootstrap_servers
+    else:
+        resolved_bootstrap = kafka_bootstrap
+        if resolved_bootstrap is not None:
+            logger.info(
+                "onex delegate: explicit --kafka-bootstrap %s states the "
+                "broker address directly; no lane declaration was consulted",
+                resolved_bootstrap,
+            )
     backend_overrides = build_backend_overrides(
-        bus=bus, kafka_bootstrap=kafka_bootstrap
+        bus=bus, kafka_bootstrap=resolved_bootstrap
     )
     run_id = uuid.uuid4()
     # OMN-14397: minted fresh per invocation — never reused/cached across runs
@@ -1175,6 +1513,14 @@ def run_delegate(
         prompt=prompt,
         task_type=resolved_task_type,
         source=resolved_source,
+        acceptance_criteria=acceptance_criteria,
+        # The wire enum spells these with underscores; the flag spells them
+        # with dashes, as every other choice flag on this command does.
+        quality_contract_mode=(
+            None if criteria_mode is None else criteria_mode.replace("-", "_")
+        ),
+        response_contract=response_contract,
+        system_prompt=system_prompt,
         max_tokens=max_tokens,
         state_root=state_root,
         run_id=run_id,
@@ -1191,7 +1537,13 @@ def run_delegate(
         locus_decision = resolve_delegate_locus(
             requested=locus,
             bus=bus,
-            kafka_bootstrap=kafka_bootstrap,
+            # OMN-16871: the RESOLVED address, not the raw flag. The
+            # deployed-lane probe asks whether a live consumer group is bound
+            # to the command topic; asking that of one broker and then
+            # publishing to another is a probe of a lane the run never
+            # reaches, which is the OMN-17295 instrument defect in a second
+            # place.
+            kafka_bootstrap=resolved_bootstrap,
             contract_path=contract_path,
             shared_bus_value=BUS_KAFKA,
         )

@@ -122,8 +122,15 @@ class HandlerGatewayDetach(MixinAsyncCircuitBreaker):
                 "Keycloak issuer secret ref resolved to None despite required=True"
             )
         jwks_keys = await self._fetch_jwks()
+        # OMN-18385: the SINGLE unwrap point for the credential in this
+        # handler. ``request.access_token`` is a ``SecretStr`` so that no
+        # log line, error context or dead-letter envelope built from the
+        # request model can carry it; token verification needs the real
+        # bytes, so it is read out once, here, into a local that never
+        # leaves this function.
+        raw_access_token = request.access_token.get_secret_value()
         claims = token_validator.verify_and_decode_claims(
-            request.access_token,
+            raw_access_token,
             jwks_keys,
             self._config,
             expected_issuer=issuer_secret.get_secret_value(),

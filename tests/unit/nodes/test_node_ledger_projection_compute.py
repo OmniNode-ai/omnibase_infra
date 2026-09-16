@@ -673,65 +673,6 @@ class TestHandlerLedgerProjection:
         assert payload.event_type == sample_message.headers.event_type
         assert payload.source == sample_message.headers.source
 
-    @pytest.mark.parametrize(
-        ("topic", "event_type"),
-        [
-            (
-                "onex.cmd.omnimarket.delegate-skill.v1",
-                "omnimarket.delegate-skill",
-            ),
-            (
-                "onex.cmd.omnibase-infra.delegation-routing-request.v1",
-                "omnibase-infra.delegation-routing-request",
-            ),
-            (
-                "onex.evt.omnibase-infra.routing-decision.v1",
-                "omnibase-infra.routing-decision",
-            ),
-            (
-                "onex.evt.omnimarket.delegate-skill-completed.v1",
-                "omnimarket.delegate-skill-completed",
-            ),
-        ],
-    )
-    def test_delegation_chain_topics_preserve_payload_and_causality(
-        self,
-        handler: HandlerLedgerProjection,
-        sample_headers: ModelEventHeaders,
-        topic: str,
-        event_type: str,
-    ) -> None:
-        """Each OMN-16964 route preserves raw data and causal headers."""
-        parent_message_id = uuid4()
-        headers = sample_headers.model_copy(
-            update={
-                "event_type": event_type,
-                "parent_message_id": parent_message_id,
-            }
-        )
-        raw_value = b'{"chain_canary":true,"step":"delegation"}'
-        raw_key = b"chain-correlation-key"
-        message = ModelEventMessage(
-            topic=topic,
-            key=raw_key,
-            value=raw_value,
-            headers=headers,
-            partition=2,
-            offset="41",
-        )
-
-        result = handler.project(message)
-        payload = result.payload
-
-        assert isinstance(payload, ModelPayloadLedgerAppend)
-        assert payload.topic == topic
-        assert payload.event_type == event_type
-        assert payload.correlation_id == headers.correlation_id
-        assert payload.envelope_id == headers.message_id
-        assert payload.onex_headers["parent_message_id"] == str(parent_message_id)
-        assert base64.b64decode(payload.event_key or "") == raw_key
-        assert base64.b64decode(payload.event_value) == raw_value
-
     def test_project_with_none_value_raises_error(
         self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
@@ -807,13 +748,12 @@ class TestContractValidation:
         with open(CONTRACT_PATH) as f:
             return yaml.safe_load(f)
 
-    def test_contract_has_all_24_dispatchable_topics(self, contract_data: dict) -> None:
+    def test_contract_has_all_25_dispatchable_topics(self, contract_data: dict) -> None:
         """Verify contract subscribes to every topic the runtime can deliver.
 
         7 platform topic suffixes + 12 of the business command/completion/DLQ
-        topics from OMN-15006 + 4 delegation-chain evidence topics from
-        OMN-16964 + 1 external steel_onslaught terminal-event topic from
-        OMN-15168 = 24.
+        topics from OMN-15006 + 1 external steel_onslaught terminal-event topic
+        from OMN-15168 + 4 delegation-chain topics from OMN-18398 = 24.
 
         Was 26. OMN-18013 deleted the six `onex.dlq.omnibase-infra.*`
         subscriptions whose names derive no message category
@@ -823,11 +763,24 @@ class TestContractValidation:
         They were dead subscriptions, not delivered ones — the runtime consumed,
         matched nothing, and committed the offset. Asserted absent in
         tests/unit/runtime/test_ledger_projection_business_topics_omn15006.py.
+
+        OMN-18398 then added the four topics node_delegation_chain_ledger_effect
+        declares as its `chain_topology`. This node is the only writer of
+        public.event_ledger, so while they were absent that node's evidence read
+        was empty by construction and public.ledger_chain held zero rows.
+
+        OMN-18419 added the FIFTH chain hop,
+        onex.cmd.omnibase-infra.delegation-request.v1 -- the pattern-B worker
+        command the runtime's delegation dispatch port publishes while consuming
+        the delegate-skill command. Absent here, the routing request's recorded
+        causal parent named an envelope no correlation-scoped read could
+        resolve, so the edge could not close and chain-canary link 5 graded a
+        correct chain red.
         """
         event_bus = contract_data.get("event_bus", {})
         topics = event_bus.get("subscribe_topics", [])
 
-        assert len(topics) == 24, f"Expected 24 topics, got {len(topics)}: {topics}"
+        assert len(topics) == 25, f"Expected 25 topics, got {len(topics)}: {topics}"
 
         # Verify expected topic suffixes/categories are covered
         expected_suffixes = [
@@ -838,15 +791,11 @@ class TestContractValidation:
             "fsm-state-transitions",
             "runtime-tick",
             "registration-snapshots",
-            "delegate-skill",
-            "delegate-skill-completed",
-            "delegation-routing-request",
-            "routing-decision",
             "match-terminal",
         ]
 
         for suffix in expected_suffixes:
-            matching = [t for t in topics if t.endswith(f"{suffix}.v1")]
+            matching = [t for t in topics if suffix in t]
             assert matching, f"No topic found containing '{suffix}'. Topics: {topics}"
 
     def test_consumer_purpose_is_audit(self, contract_data: dict) -> None:

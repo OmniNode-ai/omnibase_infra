@@ -54,8 +54,18 @@ on:
 # carve-out to main-only so dev is judged by the ordinary solo-dev invariant
 # it actually satisfies; the revision proved green at 0 failures across 9
 # checks for onex_change_control (102 checks across the full audited fleet).
+#
+# 8b3576c260 is `chore(OMN-16642): audit omniclaude main as release-synced
+# (onex_change_control#9686)`. omniclaude joined the OMN-16289 policy on
+# 2026-09-15: its release.yml gained the mint + REST fast-forward pair
+# (omniclaude#2177), its main required_status_checks were emptied, and ruleset
+# 23478723 now restricts updates to refs/heads/main with onexbot-occ-writer as
+# its only bypass actor. The 3209f6d854 revision still expects "CI Summary" on
+# that main, so leaving this pin there would false-FAIL the audit. Verified at
+# the new revision before the bump: 0 failures across 102 checks, all repos
+# compliant.
 env:
-  ONEX_CHANGE_CONTROL_REF: 3209f6d854d6723347a35b65e2fc11a0651de807
+  ONEX_CHANGE_CONTROL_REF: 8b3576c260bb9f520617579c1d5def48432d474e
 
 jobs:
   audit:

@@ -220,6 +220,51 @@ def test_new_target_keywords_inside_literals_remain_inert(statement: str) -> Non
     assert not lint_application_database_sql(statement, _TOPOLOGY)
 
 
+def test_boolean_check_literals_are_not_relation_targets() -> None:
+    sql = """
+    CREATE TABLE action_authorization_claim.nonce_claims (
+        execute_enabled BOOLEAN NOT NULL,
+        one_time_use BOOLEAN NOT NULL,
+        CONSTRAINT ck_execute_disabled CHECK (execute_enabled IS FALSE),
+        CONSTRAINT ck_one_time_use CHECK (one_time_use IS TRUE)
+    );
+    """
+
+    violations = lint_application_database_sql(sql, _TOPOLOGY)
+
+    assert "application relation target 'false' must be schema-qualified" not in (
+        "\n".join(violations)
+    )
+    assert "application relation target 'true' must be schema-qualified" not in (
+        "\n".join(violations)
+    )
+
+
+def test_created_function_identity_strips_argument_names() -> None:
+    sql = """
+    CREATE FUNCTION action_authorization_claim.claim_action_authorization(
+        p_authorization_id TEXT,
+        p_execute_enabled BOOLEAN,
+        p_issued_at TIMESTAMPTZ
+    )
+    RETURNS void
+    LANGUAGE plpgsql
+    AS $function$
+    BEGIN
+        RETURN;
+    END;
+    $function$;
+    """
+
+    identities = application_database_created_catalog_identities(sql)
+
+    assert {
+        identity.function_signature
+        for identity in identities
+        if identity.name == "claim_action_authorization"
+    } == {"(TEXT, BOOLEAN, TIMESTAMPTZ)"}
+
+
 @pytest.mark.parametrize(
     "statement",
     [

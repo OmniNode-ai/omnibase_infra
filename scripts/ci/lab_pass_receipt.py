@@ -161,6 +161,22 @@ ARTIFACT_RETENTION_DAYS = 90
 #: a gate that resolves a prefix is a gate that can match the wrong commit.
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# Declared by omnimarket's projection API
+# (src/omnimarket/projection/api_server.py::list_projections) and pinned by
+# tests/test_projection_api_server.py::test_projections_entry_has_required_fields.
+PROJECTION_TOPIC_REQUIRED_FIELDS = frozenset(
+    {
+        "topic",
+        "table",
+        "status",
+        "columns",
+        "limit",
+        "source_contract",
+        "bus_backed",
+        "backing",
+    }
+)
+
 
 class EnumLabLane(StrEnum):
     """The lab surfaces rule 24(a) names as receipt emitters.
@@ -449,7 +465,23 @@ def artifact_name(lane: EnumLabLane, sha: str) -> str:
 #: Checks a ``compose-dev`` emitter proves from the runner, and the reason each
 #: is here. The set is deliberately the subset that is provable from an HTTP
 #: surface plus the job's own staleness guard; see ``PROBES_NOT_YET_WIRED``.
-COMPOSE_DEV_HTTP_CHECKS = ("ready_main", "ready_effects", "health_dimensions")
+#:
+#: ``projection_ready`` (OMN-18387): the ``omnimarket-projection-api``
+#: container was a second gap in the same rule 24(a) automatic lab pass --
+#: neither the runtime-rebuild classifier nor the deploy agent's up-target set
+#: reached it, so a five-day-stale container passed every other check here.
+#: Reachability from THIS runner is not assumed: confirmed live 2026-09-15
+#: from inside the ``omninode-deploy-runner`` container on the same host that
+#: already answers ``ready_main``/``ready_effects`` --
+#: ``curl http://host.docker.internal:3002/projections`` -> ``HTTP_200``,
+#: identically to ``http://host.docker.internal:8085/ready``. Same host, same
+#: published-port mechanism, no additional isolation layer between the two.
+COMPOSE_DEV_HTTP_CHECKS = (
+    "ready_main",
+    "ready_effects",
+    "health_dimensions",
+    "projection_ready",
+)
 
 #: Named here rather than silently absent, so a reader can see what a
 #: ``compose-dev`` receipt does NOT cover. Each needs database or broker access
@@ -489,6 +521,75 @@ def check_ready(name: str, url: str, timeout_seconds: float) -> ModelLabPassChec
         name=name,
         ok=status == 200,
         evidence=f"GET {url} -> {status} {_truncate(body)}",
+    )
+
+
+def check_projections_ready(url: str, timeout_seconds: float) -> ModelLabPassCheck:
+    """The projection API's ``/projections`` endpoint must answer 200 with a
+    non-empty ``topics`` list whose entries match the declared omnimarket
+    metadata shape (OMN-18387).
+
+    The top-level key is ``topics``, not ``projections``. That is declared by
+    omnimarket's projection API route, not inferred from one live response.
+    What this asserts is exactly what ``omnimarket-projection-api`` staying
+    stale would have failed: the container the deploy agent now reaches is
+    actually serving projection metadata.
+    """
+    status, body = _http_get(url, timeout_seconds)
+    if status != 200:
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=f"GET {url} -> {status} {_truncate(body)}",
+        )
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=f"GET {url} -> 200 but body is not JSON: {exc}",
+        )
+    topics = payload.get("topics") if isinstance(payload, dict) else None
+    if not isinstance(topics, list):
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=(
+                f"GET {url} -> 200 but carries no 'topics' list; an "
+                "absent list is not a serving projection API"
+            ),
+        )
+    if not topics:
+        return ModelLabPassCheck(
+            name="projection_ready",
+            ok=False,
+            evidence=(
+                f"GET {url} -> 200 but reports zero topics; an empty projection "
+                "catalogue is not a serving projection API"
+            ),
+        )
+    for index, entry in enumerate(topics):
+        if not isinstance(entry, dict):
+            return ModelLabPassCheck(
+                name="projection_ready",
+                ok=False,
+                evidence=(f"GET {url} -> 200 but topics[{index}] is not an object"),
+            )
+        missing = sorted(PROJECTION_TOPIC_REQUIRED_FIELDS - set(entry))
+        if missing:
+            return ModelLabPassCheck(
+                name="projection_ready",
+                ok=False,
+                evidence=(
+                    f"GET {url} -> 200 but topics[{index}] is missing "
+                    f"required field(s): {missing}"
+                ),
+            )
+    return ModelLabPassCheck(
+        name="projection_ready",
+        ok=True,
+        evidence=f"GET {url} -> 200, {len(topics)} topic(s) reported",
     )
 
 
@@ -652,6 +753,7 @@ def probe_compose_dev(
     effects_url: str,
     timeout_seconds: float,
     settle_timeout_seconds: float,
+    projection_url: str,
 ) -> list[ModelLabPassCheck]:
     """The read-only probes the ``.201`` dev lane emitter runs.
 
@@ -664,9 +766,15 @@ def probe_compose_dev(
     # starting)" while omninode-runtime-effects was still "Created", and at
     # 12:37:29Z main was healthy while effects had been up 44 seconds. Waiting
     # on main alone would clear the race for ready_main and leave it for
-    # ready_effects.
+    # ready_effects. projection-api joins the same wait for the same reason
+    # (OMN-18387): it is its own container with its own recreate timing, and
+    # it carries its own ``/ready`` endpoint (confirmed live 2026-09-15).
     settle = wait_for_lane_ready(
-        [f"{main_url.rstrip('/')}/ready", f"{effects_url.rstrip('/')}/ready"],
+        [
+            f"{main_url.rstrip('/')}/ready",
+            f"{effects_url.rstrip('/')}/ready",
+            f"{projection_url.rstrip('/')}/ready",
+        ],
         timeout_seconds,
         settle_timeout_seconds,
     )
@@ -676,6 +784,9 @@ def probe_compose_dev(
             "ready_effects", f"{effects_url.rstrip('/')}/ready", timeout_seconds
         ),
         check_health_dimensions(f"{main_url.rstrip('/')}/health", timeout_seconds),
+        check_projections_ready(
+            f"{projection_url.rstrip('/')}/projections", timeout_seconds
+        ),
     ]
     # Every check carries what the probe waited for, passing ones included: a
     # green read taken with no settle budget is a different fact from a green
@@ -849,6 +960,64 @@ def render_receipt(receipt: ModelLabPassReceipt) -> str:
     return "\n".join(lines)
 
 
+def verify_emitted(path: Path, sha: str, lane: EnumLabLane, out: Any) -> int:
+    """Refuse a receipt file that is not the one this job just emitted (OMN-18420).
+
+    The presence assertion this sits beside (``assert_evidence_artifact.py``)
+    answers "is there a non-empty file here". On a self-hosted host that reuses
+    its filesystem across jobs, a STALE file answers that question identically
+    to a fresh one -- which is how omnimarket run ``35035178406`` published an
+    artifact named for an omnimarket commit carrying an ``omnibase_infra``
+    commit's receipt.
+
+    ``evaluate_gate`` already cross-checks the name against the payload, so the
+    consuming side was never fooled. But it is in a DIFFERENT REPOSITORY and
+    runs an hour later, so the emitting job reported green and the defect
+    surfaced as an unexplained delivery refusal. This moves the same assertion
+    to the side that can see what happened, and makes it about the file on
+    disk rather than about the artifact that will be built from it.
+
+    Deliberately not folded into ``emit``: ``emit`` writes the file, so it can
+    only ever agree with itself. The value of this check is that it runs as a
+    SEPARATE step over whatever is actually on disk at upload time.
+    """
+    try:
+        receipt = ModelLabPassReceipt.from_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(
+            f"::error::lab-pass receipt at {path} is unreadable or malformed "
+            f"({exc}). Refusing to upload it as evidence for {sha}.",
+            file=out,
+        )
+        return 1
+
+    if receipt.sha != sha:
+        print(
+            f"::error::lab-pass receipt at {path} carries sha {receipt.sha}, but "
+            f"this job is emitting for {sha}. This is a receipt left behind by "
+            "another job on this host (OMN-18420) -- refusing to upload it under "
+            "this job's name.",
+            file=out,
+        )
+        return 1
+
+    if receipt.lane != lane:
+        print(
+            f"::error::lab-pass receipt at {path} carries lane "
+            f"{receipt.lane.value}, but this job is emitting for {lane.value}. "
+            "Refusing to upload it under this job's name.",
+            file=out,
+        )
+        return 1
+
+    print(
+        f"verified {path} is this job's own receipt: sha {receipt.sha}, lane "
+        f"{receipt.lane.value}, result {receipt.result.value}",
+        file=out,
+    )
+    return 0
+
+
 def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -> int:
     """Fail closed unless a PASS receipt exists for the EXACT sha.
 
@@ -957,6 +1126,7 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
     probe.add_argument("--main-url", required=True)
     probe.add_argument("--effects-url", required=True)
+    probe.add_argument("--projection-url", required=True)
     probe.add_argument("--timeout-seconds", type=float, default=15.0)
     probe.add_argument(
         "--settle-timeout-seconds",
@@ -1013,6 +1183,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[e.value for e in EnumLabLane],
         help="repeatable; defaults to every lab lane",
     )
+
+    verify = sub.add_parser(
+        "verify",
+        help="refuse a receipt file that is not the one this job emitted",
+    )
+    verify.add_argument("--path", required=True, type=Path)
+    verify.add_argument("--sha", required=True)
+    verify.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
+
     return parser
 
 
@@ -1025,6 +1204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.effects_url,
             args.timeout_seconds,
             args.settle_timeout_seconds,
+            args.projection_url,
         )
         print(json.dumps([c.to_dict() for c in checks], indent=2))
         return 0
@@ -1061,6 +1241,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # exactly as valuable as the record of a passing one — but the emitting
         # step goes red so the failure is visible on the run that produced it.
         return 0 if receipt.result == EnumLabPassResult.PASS else 1
+
+    if args.command == "verify":
+        return verify_emitted(args.path, args.sha, EnumLabLane(args.lane), sys.stdout)
 
     if args.command == "gate":
         lanes = (

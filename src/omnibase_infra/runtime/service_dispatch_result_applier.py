@@ -729,6 +729,32 @@ class DispatchResultApplier:
             parent_envelope_id = (
                 consumed_envelope.envelope_id if consumed_envelope is not None else None
             )
+            # OMN-16831: the tenant DIMENSION rides the same edge, from the same
+            # consumed envelope, for the same reason.
+            #
+            # `ModelEventEnvelope.tenant_id` is "which tenant this event belongs
+            # to, recorded at write time", and omnimarket's delegation projection
+            # writer reads exactly it -- a writer under FORCE ROW LEVEL SECURITY
+            # cannot discover a row's tenant by reading, so attribution is
+            # producer-recorded or it does not exist. The gateway forwarder DOES
+            # record it on the envelope it synthesizes for inbound customer
+            # traffic, from the deploy-time-bound gateway identity.
+            #
+            # It then died here. This site already carried correlation and
+            # causation off the consumed envelope and dropped the tenant, so
+            # every event published downstream of the gateway arrived
+            # unattributed and was refused, fail-closed, into
+            # onex.dlq.omnimarket.projection-delegation-malformed.v1.
+            #
+            # CARRIED, never SOURCED. `None` stays `None`: nothing consumed, or
+            # a consumed envelope that recorded no tenant, both publish
+            # unattributed and reach that refusal -- which is the designed
+            # behaviour, not a gap to close here. Defaulting one in would stamp
+            # a house tenant onto a row the submitting tenant's reader could
+            # never see, and is forbidden by OMN-16831 AC2 and OMN-16804 AC3.
+            carried_tenant_id = (
+                consumed_envelope.tenant_id if consumed_envelope is not None else None
+            )
             for idx, output_event in enumerate(result.output_events):
                 try:
                     publish_payload = self._publish_payload_for_output_event(
@@ -767,6 +793,7 @@ class DispatchResultApplier:
                         correlation_id=effective_correlation_id,
                         envelope_timestamp=self._clock(),
                         parent_envelope_id=edge,
+                        tenant_id=carried_tenant_id,
                     )
 
                     # Extract partition key for per-entity ordering.

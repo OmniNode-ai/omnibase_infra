@@ -634,10 +634,21 @@ DEV_LANE_VALUE = "dev"
 # stability-test lane still holds delegation_events.tenant_id as TEXT with an
 # EMPTY tenant_registry_mirror, so a baseline release would abort there and
 # take every later node directory with it by lexical sort order.
+# OMN-14894, 2026-09-15: 0041 joined this arm. It is the lab release of
+# delegation_budget_state's tenant boundary — the one TENANT-classified relation
+# in this corpus that carried none on any lane. It stays in the BASELINE fence
+# (a removal is FATAL under the item-4 FORCE-RLS guard, same mechanical reason
+# as 0037), so the lane release is again the only mechanism that can un-gate it.
+# The operator authorization is the OPERATOR-CONSENT row of 2026-09-14 in
+# omni_home docs/tracking/ROLLING_WORK_LEDGER.md, which authorizes resuming
+# tenant row-level security on relations the OMN-15354 manifest classifies
+# TENANT, lab first and staging second.
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
     "node:node_projection_delegation:"
     "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
+    "node:node_projection_delegation:"
+    "0041_delegation_budget_state_rls_tenant_isolation.sql",
 )
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
@@ -1112,6 +1123,8 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
     assert set(LANE_RELEASED_IDS) - set(FENCED_REGISTRATION_IDS) == {
         "node:node_projection_delegation:"
         "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
+        "node:node_projection_delegation:"
+        "0041_delegation_budget_state_rls_tenant_isolation.sql",
     }, "the dev-lane release carries ids no operator ruling names"
 
 
@@ -3392,8 +3405,7 @@ def virgin_pg_target() -> Iterator[PgTarget]:
 @pytest.fixture
 def virgin_node_db(virgin_pg_target: PgTarget) -> Iterator[str]:
     """A separate node database against ``virgin_pg_target``'s coordinates —
-    mirrors ``node_db`` above, but bound to the un-seeded target so both
-    databases in the pair are genuinely virgin.
+    mirrors ``node_db`` above, but bound to the un-seeded target.
 
     Named LITERALLY ``omnidash_analytics``, not randomly: several REAL flat
     migrations (e.g. ``083_create_log_entries.sql``) hardcode
@@ -3405,6 +3417,14 @@ def virgin_node_db(virgin_pg_target: PgTarget) -> Iterator[str]:
     unrelated reason, not prove or disprove the guard fix. ``virgin_pg_target``
     (a private ephemeral cluster, or a scratch external server used by one
     test at a time) makes the literal name safe.
+
+    Migration 107 is in the flat tree and deliberately refuses to create
+    ``action_authorization_claim`` itself because managed lanes must provision
+    that schema through the application-database provisioning seam before the
+    forward runner starts. The fixture creates only that required schema in
+    the flat-runner database and the node database, then leaves the committed
+    runner and migration tree to prove the same cold-lane behavior these tests
+    own.
     """
     admin = PgTarget(
         host=virgin_pg_target.host,
@@ -3415,6 +3435,15 @@ def virgin_node_db(virgin_pg_target: PgTarget) -> Iterator[str]:
     )
     name = "omnidash_analytics"
     _psql(admin, f'CREATE DATABASE "{name}"')
+    _psql(admin, "CREATE SCHEMA action_authorization_claim")
+    node = PgTarget(
+        host=virgin_pg_target.host,
+        port=virgin_pg_target.port,
+        user=virgin_pg_target.user,
+        password=virgin_pg_target.password,
+        dbname=name,
+    )
+    _psql(node, "CREATE SCHEMA action_authorization_claim")
     try:
         yield name
     finally:

@@ -36,6 +36,7 @@ from scripts.ci.lab_pass_receipt import (
     artifact_name,
     build_receipt,
     check_health_dimensions,
+    check_projections_ready,
     evaluate_gate,
     parse_check_argument,
     parse_receipt,
@@ -301,6 +302,137 @@ class TestHealthDimensionProbe:
             lambda url, timeout: (0, "URLError: connection refused"),
         )
         check = check_health_dimensions("http://lane/health", 1.0)
+        assert check.ok is False
+
+
+class TestProjectionReadinessProbe:
+    """OMN-18387 AC4 -- the omnimarket-projection-api container was outside
+    the automatic lab pass twice; this is the receipt-side half. A
+    ``compose-dev`` receipt must carry a check naming the projection API's
+    readiness, and that check must fail closed on everything but a genuinely
+    serving endpoint -- a five-day-stale container that happens to answer 200
+    on some OTHER path must not read as this check passing.
+    """
+
+    def test_the_check_is_a_declared_compose_dev_check(self) -> None:
+        from scripts.ci.lab_pass_receipt import COMPOSE_DEV_HTTP_CHECKS
+
+        assert "projection_ready" in COMPOSE_DEV_HTTP_CHECKS
+
+    def test_a_serving_projection_api_passes(self, monkeypatch: Any) -> None:
+        """Pins the declared response shape: the top-level key is 'topics',
+        not 'projections', and each entry carries omnimarket's projection
+        metadata fields."""
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (
+                200,
+                json.dumps(
+                    {
+                        "topics": [
+                            {
+                                "topic": "onex.snapshot.projection.consumer-flow.v1",
+                                "table": "consumer_flow",
+                                "status": "serving",
+                                "columns": ["projection_cursor", "window_end"],
+                                "limit": 100,
+                                "source_contract": "projection/consumer-flow.yaml",
+                                "bus_backed": True,
+                                "backing": "bus",
+                                "cursor_column": "projection_cursor",
+                                "order_by": "window_end DESC, projection_cursor DESC",
+                            }
+                        ]
+                    }
+                ),
+            ),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is True
+        assert check.name == "projection_ready"
+
+    def test_a_non_200_fails_closed(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (503, "snapshot_bootstrap_incomplete"),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+
+    def test_transport_failure_fails_closed(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (0, "URLError: connection refused"),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+
+    def test_a_body_with_no_topics_list_fails_closed(self, monkeypatch: Any) -> None:
+        """A 200 that carries no 'topics' list is not a serving projection
+        API -- e.g. an unrelated endpoint or a proxy error page that happens
+        to answer 200."""
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, json.dumps({"status": "ok"})),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+        assert "topics" in check.evidence
+
+    @pytest.mark.parametrize(
+        "topics",
+        [
+            {"topic": "onex.snapshot.projection.consumer-flow.v1"},
+            "onex.snapshot.projection.consumer-flow.v1",
+        ],
+    )
+    def test_a_non_list_topics_value_fails_closed(
+        self, monkeypatch: Any, topics: object
+    ) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, json.dumps({"topics": topics})),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+        assert "no 'topics' list" in check.evidence
+
+    def test_an_empty_topics_list_fails_closed(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, json.dumps({"topics": []})),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+        assert "zero topics" in check.evidence
+
+    def test_a_malformed_topic_entry_fails_closed(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (
+                200,
+                json.dumps(
+                    {
+                        "topics": [
+                            {
+                                "topic": ("onex.snapshot.projection.consumer-flow.v1"),
+                                "table": "consumer_flow",
+                            }
+                        ]
+                    }
+                ),
+            ),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
+        assert check.ok is False
+        assert "missing required field" in check.evidence
+
+    def test_non_json_body_fails_closed(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "scripts.ci.lab_pass_receipt._http_get",
+            lambda url, timeout: (200, "not json"),
+        )
+        check = check_projections_ready("http://lane:3002/projections", 1.0)
         assert check.ok is False
 
 
@@ -796,7 +928,26 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             calls[url] = calls.get(url, 0) + 1
             if "/ready" in url and calls[url] < 3:
                 return 0, "URLError: <urlopen error [Errno 111] Connection refused>"
-            return 200, body if "/health" in url else '{"status":"healthy"}'
+            if "/health" in url:
+                return 200, body
+            if "/projections" in url:
+                return 200, json.dumps(
+                    {
+                        "topics": [
+                            {
+                                "topic": "onex.snapshot.projection.consumer-flow.v1",
+                                "table": "consumer_flow",
+                                "status": "serving",
+                                "columns": ["projection_cursor"],
+                                "limit": 100,
+                                "source_contract": "projection/consumer-flow.yaml",
+                                "bus_backed": True,
+                                "backing": "bus",
+                            }
+                        ]
+                    }
+                )
+            return 200, '{"status":"healthy"}'
 
         monkeypatch.setattr("scripts.ci.lab_pass_receipt._http_get", fake_get)
         _install_fake_clock(monkeypatch)
@@ -805,11 +956,13 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             effects_url="http://lane:8086",
             timeout_seconds=1.0,
             settle_timeout_seconds=60.0,
+            projection_url="http://lane:3002",
         )
         assert [c.name for c in checks] == [
             "ready_main",
             "ready_effects",
             "health_dimensions",
+            "projection_ready",
         ]
         assert all(c.ok for c in checks), [
             (c.name, c.evidence) for c in checks if not c.ok
@@ -833,6 +986,7 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             effects_url="http://lane:8086",
             timeout_seconds=1.0,
             settle_timeout_seconds=30.0,
+            projection_url="http://lane:3002",
         )
         assert not any(c.ok for c in checks)
 
@@ -852,6 +1006,7 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             effects_url="http://lane:8086",
             timeout_seconds=1.0,
             settle_timeout_seconds=0.0,
+            projection_url="http://lane:3002",
         )
         readiness = next(c for c in checks if c.name == "ready_main")
         assert "settle" in readiness.evidence.lower(), (

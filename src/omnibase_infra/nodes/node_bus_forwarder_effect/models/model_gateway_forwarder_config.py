@@ -31,48 +31,47 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_tenant_
     ModelGatewayTenantIdentity,
 )
 
-# OMN-16979. Which omniclaude hook classes are treated as content-bearing is a
-# RULE, not a list -- deliberately.
+# OMN-16979. Which capture topics require redaction proof is a RULE, not a
+# topic registry -- deliberately.
 #
 # A list would have to be edited whenever a new hook class appears, and the
 # edit that forgets it is exactly the one that leaks. The rule instead presumes
-# EVERY omniclaude event class carries content, and carves out only the
-# session-lifecycle pair that operator ruling OD-9 (2026-08-18) established as
-# content-free and that OMN-16204 already mirrors outbound without a gate.
+# EVERY omniclaude event class carries enough session or user context to need
+# the upstream redaction provenance at this trust boundary. The metadata-only
+# tool-output capture has the omnimarket producer segment, so its one event
+# grammar segment is included too. Full topic literals remain in the contract.
 #
-# So a hook class that does not exist yet is content-bearing by default: adding
-# it to mirror_topics.outbound without also governing it fails config
-# validation, with no action required by whoever adds it. That is the
-# fail-closed direction.
+# So a new omniclaude class added to mirror_topics.outbound without governance
+# fails config validation, with no action required by whoever adds it. That is
+# the fail-closed direction.
 #
-# Matched on name segments rather than whole topic strings, so this stays a
-# predicate over the canonical topic grammar rather than a second topic
-# registry competing with the contract.
-# Parsed by SEGMENT over the canonical topic grammar
-# (``onex.<kind>.<producer>.<event-name>.<version>``) rather than by matching a
-# topic-shaped prefix string. That keeps this a predicate over the grammar --
-# no literal topic lives here, so this module cannot drift into a second topic
-# registry competing with the contract, which is what the imperative-contract
-# guard (OMN-12515) correctly rejected in the first revision of this change.
+# Parsed by exact segment over the canonical topic grammar
+# (``onex.<kind>.<producer>.<event-name>.<version>``) rather than by matching
+# a topic-shaped prefix string. That keeps this a predicate over the grammar:
+# no literal topic lives here, and malformed extra segments do not silently
+# collapse into a different event name.
 _ONEX_NAMESPACE = "onex"
 _EVENT_KIND = "evt"
-_HOOK_PRODUCER = "omniclaude"
-_OD9_CONTENT_FREE_EVENTS = frozenset({"session-started", "session-ended"})
+_OMNICLAUDE_PRODUCER = "omniclaude"
+_HOOK_CAPTURE_PRODUCER = "omnimarket"
+_TOOL_OUTPUT_CAPTURE_EVENT = "tool-output-captured"
 
 
-def is_content_bearing_hook_topic(canonical_topic: str) -> bool:
-    """Whether ``canonical_topic`` is an omniclaude class presumed to carry content."""
+def requires_egress_redaction(canonical_topic: str) -> bool:
+    """Whether ``canonical_topic`` must carry upstream redaction provenance."""
     segments = canonical_topic.split(".")
-    if len(segments) < 5:
+    if len(segments) != 5:
         return False
-    if (segments[0], segments[1], segments[2]) != (
-        _ONEX_NAMESPACE,
-        _EVENT_KIND,
-        _HOOK_PRODUCER,
-    ):
+    if (segments[0], segments[1]) != (_ONEX_NAMESPACE, _EVENT_KIND):
         return False
-    event_name = ".".join(segments[3:-1])
-    return event_name not in _OD9_CONTENT_FREE_EVENTS
+    version = segments[4]
+    if not version.startswith("v") or not version[1:].isdigit():
+        return False
+    event_name = segments[3]
+    producer = segments[2]
+    return producer == _OMNICLAUDE_PRODUCER or (
+        producer == _HOOK_CAPTURE_PRODUCER and event_name == _TOOL_OUTPUT_CAPTURE_EVENT
+    )
 
 
 class ModelGatewayForwarderConfig(BaseModel):
@@ -97,8 +96,8 @@ class ModelGatewayForwarderConfig(BaseModel):
     # ModelGatewayHttpsIngestConfig's module docstring for why that means this
     # block alone does not retire the OMN-16449 bastion.
     https_ingest: ModelGatewayHttpsIngestConfig | None = None
-    # OMN-16979: fail-closed admission gate for the content-bearing hook
-    # classes this ticket adds to ``mirror_topics.outbound``. Optional so every
+    # OMN-16979: fail-closed admission gate for the capture topics this ticket
+    # adds to ``mirror_topics.outbound``. Optional so every
     # deployment predating the widening keeps its exact behaviour; the
     # cross-field validator below is what refuses an inconsistent pairing.
     egress_redaction: ModelGatewayEgressRedaction | None = None
@@ -156,9 +155,9 @@ class ModelGatewayForwarderConfig(BaseModel):
         """OMN-16979: the widening and the gate must agree, in both directions.
 
         A gate that names a topic nobody mirrors is dead policy that reads like
-        live policy. A content-bearing hook class in the outbound set that the
-        gate does NOT name is the credential pipeline OMN-17209 exists to
-        prevent -- so it is refused here rather than merely discouraged.
+        live policy. A capture topic in the outbound set that the gate does NOT
+        name is the credential pipeline OMN-17209 exists to prevent -- so it is
+        refused here rather than merely discouraged.
         """
         policy = self.egress_redaction
         outbound = set(self.mirror_topics.outbound)
@@ -173,11 +172,11 @@ class ModelGatewayForwarderConfig(BaseModel):
         unguarded = sorted(
             topic
             for topic in outbound
-            if is_content_bearing_hook_topic(topic) and topic not in governed
+            if requires_egress_redaction(topic) and topic not in governed
         )
         if unguarded:
             raise ValueError(
-                "content-bearing hook topics may not be mirrored outbound "
+                "redaction-required capture topics may not be mirrored outbound "
                 "unless egress_redaction declares them governed; unguarded: "
                 f"{unguarded}"
             )

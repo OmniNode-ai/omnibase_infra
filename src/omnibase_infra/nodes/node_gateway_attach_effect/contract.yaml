@@ -47,6 +47,17 @@
 #     extending a live ceiling on the strength of a heartbeat would let a
 #     credential the IdP has stopped authorizing hold a session open one
 #     heartbeat at a time.
+#   - OMN-18385: the access-token field on all three request models
+#     (attach, heartbeat, detach) is now a secret-wrapped type rather than a
+#     plain string. Bumps PATCH, not minor: the wire shape is unchanged and a
+#     JSON string still validates, so no producer changes. What changes is
+#     SERIALISATION -- a dump, repr or error context built from one of these
+#     models now emits a mask instead of the credential. This is the reason:
+#     the runtime boundary's dead-letter path published the raw inbound record
+#     body verbatim and put two customer bearer tokens on a durable topic in
+#     cleartext. Each handler reads the real value at one explicit unwrap
+#     point. The publisher-side field-name redaction is the second layer,
+#     because the raw dead-letter path never constructs these models at all.
 #   - OMN-16032: RFC 7662 introspection at the ATTACH boundary, not only at
 #     heartbeat. Local verification proves a token was minted by this realm
 #     and has not expired; it cannot prove the credential is still live,
@@ -75,7 +86,7 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 5
-  patch: 1
+  patch: 2
 node_version:
   major: 0
   minor: 4

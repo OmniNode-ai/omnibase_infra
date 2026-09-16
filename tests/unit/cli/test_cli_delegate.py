@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import get_args
 from unittest.mock import patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -862,12 +863,15 @@ class TestBusSelection:
             bus="kafka", kafka_bootstrap=KAFKA_BOOTSTRAP_ARG
         ) == {"event_bus": "kafka", "kafka_bootstrap": KAFKA_BOOTSTRAP_ARG}
 
-    def test_kafka_without_bootstrap_omits_key(self) -> None:
-        # No bootstrap => Kafka bus resolves from KAFKA_BOOTSTRAP_SERVERS; the
-        # override map must not carry an empty/None bootstrap.
-        assert build_backend_overrides(bus="kafka", kafka_bootstrap=None) == {
-            "event_bus": "kafka"
-        }
+    def test_kafka_without_an_address_is_refused(self) -> None:
+        # OMN-16871 flipped this. It used to assert {"event_bus": "kafka"} --
+        # an override map with no bootstrap, which left EventBusKafka to read
+        # KAFKA_BOOTSTRAP_SERVERS. On the launching host that variable names
+        # the governed stability-test lane, so the omission WAS the defect.
+        # There is now no argument combination that yields a kafka bus whose
+        # address this process did not resolve explicitly.
+        with pytest.raises(ValueError, match="requires a broker address"):
+            build_backend_overrides(bus="kafka", kafka_bootstrap=None)
 
     def test_bootstrap_with_inmemory_fails_loud(self) -> None:
         # Passing a broker with the default in-memory bus is a misconfiguration
@@ -978,24 +982,29 @@ class TestBusSelection:
         )
         monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
 
-        run_delegate(
-            prompt="research the routing architecture",
-            task_type=None,
-            max_tokens=None,
-            # OMN-17304: the subject is auto-resolution of the TRANSPORT, so
-            # the locus is pinned; otherwise resolving to kafka would also
-            # resolve to a lane dispatch and require a live consumer.
-            locus=EnumDelegateLocus.IN_PROCESS,
-            state_root=tmp_path / "state",
-            timeout=60,
-            verbose=False,
-            emit_socket=tmp_path / "no-daemon.sock",
-        )
+        # OMN-16871 changed the second half of this test, not the first. The
+        # configured authority still selects kafka with no --bus flag, which
+        # is what OMN-17304 established. What it no longer does is hand that
+        # transport an address nobody chose: the run is REFUSED, naming the
+        # missing lane selection, instead of letting EventBusKafka read
+        # KAFKA_BOOTSTRAP_SERVERS and publish onto whichever lane the shell
+        # happened to name.
+        with pytest.raises(click.ClickException, match="--lane"):
+            run_delegate(
+                prompt="research the routing architecture",
+                task_type=None,
+                max_tokens=None,
+                # OMN-17304: the subject is auto-resolution of the TRANSPORT,
+                # so the locus is pinned; otherwise resolving to kafka would
+                # also resolve to a lane dispatch and require a live consumer.
+                locus=EnumDelegateLocus.IN_PROCESS,
+                state_root=tmp_path / "state",
+                timeout=60,
+                verbose=False,
+                emit_socket=tmp_path / "no-daemon.sock",
+            )
 
-        # No explicit --kafka-bootstrap was passed, so the override map omits
-        # it — the Kafka bus resolves its own bootstrap from
-        # KAFKA_BOOTSTRAP_SERVERS at RuntimeLocal construction time.
-        assert captured["backend_overrides"] == {"event_bus": "kafka"}
+        assert captured == {}
 
     def test_run_delegate_reachable_broker_does_not_decide_the_transport(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1694,13 +1703,22 @@ class TestExplicitOverrideProvenance:
                 == 0
             )
 
-        overrides = self._override_records(caplog)
+        # OMN-16871 changed the VERB, not the requirement. The flag no longer
+        # "overrides" an address the run would otherwise have resolved,
+        # because the run resolves none: it states the address directly, and
+        # says so. What still has to hold is that the provenance names the
+        # flag and the value, so a receipt can tell a typed address apart
+        # from a declared one.
+        records = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == self._CLI_LOGGER
+        ]
         assert any(
-            "--kafka-bootstrap" in msg and KAFKA_BOOTSTRAP_ARG in msg
-            for msg in overrides
+            "--kafka-bootstrap" in msg and KAFKA_BOOTSTRAP_ARG in msg for msg in records
         ), (
-            "an explicit --kafka-bootstrap produced no OVERRIDE provenance "
-            f"line; captured override records: {overrides}"
+            "an explicit --kafka-bootstrap produced no provenance line; "
+            f"captured records: {records}"
         )
 
     def test_auto_resolved_bus_is_not_labelled_an_override(
@@ -1764,9 +1782,6 @@ class TestBusHelpTextTellsTheTruth:
 
     def test_bus_only_ever_sets_the_event_bus_backend(self) -> None:
         """The structural fact the help text has to match."""
-        assert build_backend_overrides(bus="kafka", kafka_bootstrap=None) == {
-            "event_bus": "kafka"
-        }
         assert build_backend_overrides(bus="kafka", kafka_bootstrap="broker:19092") == {
             "event_bus": "kafka",
             "kafka_bootstrap": "broker:19092",

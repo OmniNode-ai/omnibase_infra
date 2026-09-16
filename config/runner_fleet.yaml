@@ -11,11 +11,14 @@ runner_group: omnibase-ci
 runner_name_prefix: omninode-runner
 # Phase-A scale-up (OMN-14029), extended for saturation recovery (OMN-15978),
 # reconciled 72 -> 88 (OMN-15978) after the live host was scaled ahead of the
-# repo's authoritative config: 88 always-on steady-state runners. All 88 are
-# steady (no burst profiles), so burst_count == expected_count (no separate
-# burst tier).
-expected_count: 88
-burst_count: 88
+# repo's authoritative config, then capped 88 -> 60 (OMN-18411) after a CI
+# burst drove one-minute load to 100.9 on the 32-core host -- the registered
+# runner count is the worst-case concurrent-job ceiling on a fixed-core box,
+# and idle runners cost nothing, so 88 registered runners is what let a burst
+# reach that load. 60 always-on steady-state runners. All 60 are steady (no
+# burst profiles), so burst_count == expected_count (no separate burst tier).
+expected_count: 60
+burst_count: 60
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address
 # pool can subnet a bounded number of networks before `docker network create`
 # fails with "all predefined address pools have been fully subnetted". Alert at

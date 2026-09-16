@@ -69,6 +69,20 @@ def test_the_job_invokes_the_record_reader(job: dict[str, Any]) -> None:
     assert "scripts/ci/fetch_lab_overlay_record.py" in _step_text(job)
 
 
+def test_the_job_passes_repo_and_a_token_for_descendant_tolerance(
+    job: dict[str, Any],
+) -> None:
+    """OMN-18399: the reader's descendant-tolerance fallback resolves ancestry
+    via `gh api compare`, which needs both a repo slug and a token -- without
+    either, an intermediate merge sha under a busy dev branch can never obtain
+    a record and the onex-lab job times out (measured: runs 34966998273,
+    34969084464, 34976826412)."""
+    text = _step_text(job)
+    assert "--repo" in text
+    assert "github.repository" in text
+    assert "GH_TOKEN" in text
+
+
 def test_the_job_emits_the_receipt_on_the_k3s_lane(job: dict[str, Any]) -> None:
     text = _step_text(job)
     assert "lab_pass_receipt.py emit" in text
@@ -215,6 +229,8 @@ def _run_reader(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
             SHA,
             "--agent-url",
             "http://127.0.0.1:1",
+            "--repo",
+            "OmniNode-ai/omnibase_infra",
             "--out",
             str(out),
             *args,
@@ -250,6 +266,8 @@ def test_the_reader_refuses_an_abbreviated_sha(tmp_path: Path) -> None:
             "abc1234",
             "--agent-url",
             "http://127.0.0.1:1",
+            "--repo",
+            "OmniNode-ai/omnibase_infra",
             "--out",
             str(tmp_path / "checks.json"),
         ],

@@ -141,6 +141,16 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
         "omninode-runtime",
         "runtime-effects",
         "runtime-worker",
+        # OMN-18387: was missing here while scripts/deploy-runtime.sh's
+        # RUNTIME_SERVICES has always carried it. A re-publish through the
+        # deploy agent built a fresh projection-api image and reported the
+        # runtime phase SUCCESS end to end, but neither the up-target list
+        # nor container-verification (both derived from this same dict, see
+        # _requested_services_for_up / verify_containers_up in executor.py)
+        # ever named the service, so the running container stayed on its
+        # previous image. See tests/unit/test_runtime_services_parity_omn18387.py
+        # for the anti-drift test against the bash array.
+        "projection-api",
         "agent-actions-consumer",
         "skill-lifecycle-consumer",
         "context-audit-consumer",

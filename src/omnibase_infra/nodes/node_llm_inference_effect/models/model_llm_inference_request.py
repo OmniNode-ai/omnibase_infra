@@ -19,7 +19,14 @@ Related:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from omnibase_core.enums.cost import EnumUsageSource
 from omnibase_core.types import JsonType
@@ -162,7 +169,14 @@ class ModelLlmInferenceRequest(BaseModel):
         default=None,
         description="Constraint on how the model should use tools.",
     )
-    api_key: str | None = Field(
+    # OMN-18385: ``SecretStr``, not ``str``. This model crosses the runtime
+    # boundary, so it is reachable by the dead-letter path that copied two
+    # customer bearer tokens onto a durable topic in cleartext. The single
+    # unwrap point is the handler that builds the outbound HTTP auth header.
+    # NOTE: ``provider_config`` can also carry a key under a free-form dict
+    # entry, which no type can cover -- the dead-letter publisher's
+    # field-name redaction is what catches that case.
+    api_key: SecretStr | None = Field(
         default=None,
         repr=False,
         description="Optional API key for Bearer auth.",

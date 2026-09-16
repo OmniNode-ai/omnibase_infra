@@ -168,6 +168,36 @@ def _split_infisical_path(path: str) -> tuple[str, str | None]:
     return secret_name, folder or "/"
 
 
+# The message of an Infisical read failure: the failure, plus the CLASS NAME of
+# what caused it, and nothing else from the cause (OMN-17372).
+#
+# WHY THE TYPE, AND WHY IN THE MESSAGE. This message is the only part of the
+# failure a caller downstream of the bus ever sees. A delegation terminal
+# carries ``terminal_failure_reason``, not the error context, so a fact recorded
+# only in ``context`` is a fact the customer-facing record does not have. And
+# ``SecretResolutionError`` hardcodes ``RESOURCE_NOT_FOUND`` for every cause it
+# wraps, so without the type the record says "not found" for a rate limit, a
+# 5xx, a malformed response and a genuinely absent secret alike.
+#
+# MEASURED (OMN-17372 AC1). The scheduled customer-pass walk failed a real
+# customer-key OpenRouter delegation with the bare string on three consecutive
+# runs: 2026-09-14T18:35Z, 2026-09-15T01:15Z and 2026-09-15T06:47Z. By the time
+# anyone looked, the worker pods holding the logs had been replaced. The durable
+# record carried no failure class, no failure code and no cause, so the
+# condition could not be named at all. A class name would have named it.
+#
+# NOT THE CAUSE'S OWN MESSAGE. A class name cannot carry a secret; the message
+# of an adapter or SDK exception can carry a path, a key name or a value, and
+# this error class's own contract forbids putting secret paths in error
+# messages. The three exception families that already carry their own error
+# codes (authentication, timeout, unavailability) are re-raised before this
+# point on the async path and keep their identity; what reaches here is
+# everything else, which is exactly the set that was indistinguishable.
+def _infisical_read_failure_message(cause: BaseException) -> str:
+    """Name the failure and the KIND of thing that caused it, never its text."""
+    return f"Failed to resolve secret from Infisical ({type(cause).__name__})"
+
+
 @runtime_checkable
 class ProtocolSecretResolverMetrics(Protocol):
     """Protocol for SecretResolver metrics collection.
@@ -1912,9 +1942,10 @@ class SecretResolver:
                 transport_type=EnumInfraTransportType.INFISICAL,
                 operation="read_secret",
                 target_name="secret_resolver",
+                original_error_type=type(e).__name__,
             )
             raise SecretResolutionError(
-                "Failed to resolve secret from Infisical",
+                _infisical_read_failure_message(e),
                 context=context,
             ) from e
 
@@ -1994,9 +2025,10 @@ class SecretResolver:
                 transport_type=EnumInfraTransportType.INFISICAL,
                 operation="read_secret",
                 target_name="secret_resolver",
+                original_error_type=type(e).__name__,
             )
             raise SecretResolutionError(
-                "Failed to resolve secret from Infisical",
+                _infisical_read_failure_message(e),
                 context=context,
             ) from e
 

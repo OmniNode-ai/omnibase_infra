@@ -30,38 +30,23 @@ CONTRACT_PATH = (
     / "contract.yaml"
 )
 
-# OMN-16204: operator OD-9 ruling 2026-08-18 ~12:40Z allows EXACTLY this bare
-# session-lifecycle pair (session id + timestamps, content-free) to cross to
-# cloud via node_bus_forwarder_effect's mirror_topics.outbound.
-OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS = (
+# OMN-16979 activates the complete capture set only behind the declared
+# egress-redaction gate. The topic literals stay in this contract test rather
+# than becoming a production-side registry.
+ALL_CAPTURE_TOPICS = (
     "onex.evt.omniclaude.session-started.v1",
     "onex.evt.omniclaude.session-ended.v1",
-)
-
-# Content-bearing omniclaude topics that OD-9 explicitly keeps DENIED pending
-# the scrubbing/projection-transform layer OMN-14323 still owns.
-# OMN-16979 took the gated decision OD-9 deferred, for exactly two of the five
-# classes below: they are now mirrored outbound, but ONLY behind the
-# `egress_redaction` admission gate, which drops any record the upstream emit
-# seam did not stamp with an admitted `redaction_state`. So the OD-9 content
-# restriction is not relaxed -- it is now enforced per RECORD rather than per
-# TOPIC. The other three stay denied outright.
-OMN16979_GOVERNED_OMNICLAUDE_TOPICS = (
     "onex.evt.omniclaude.prompt-submitted.v1",
     "onex.evt.omniclaude.tool-executed.v1",
-)
-
-OD9_DENIED_OMNICLAUDE_TOPICS = (
     "onex.evt.omniclaude.skill-started.v1",
     "onex.evt.omniclaude.skill-completed.v1",
-    "onex.evt.omniclaude.tool-output-captured.v1",
+    "onex.evt.omnimarket.tool-output-captured.v1",
 )
 
 
-@pytest.mark.parametrize("topic", OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS)
-def test_mirror_topics_model_accepts_od9_session_lifecycle_topic(topic: str) -> None:
-    """Per-topic proof: each OD-9-allowed session-lifecycle topic independently
-    passes ``ModelGatewayMirrorTopics`` shape validation as an outbound entry."""
+@pytest.mark.parametrize("topic", ALL_CAPTURE_TOPICS)
+def test_mirror_topics_model_accepts_all_capture_topics(topic: str) -> None:
+    """Every governed capture topic is valid in an outbound declaration."""
     mirror_topics = ModelGatewayMirrorTopics(
         inbound=("onex.cmd.omnibase-infra.delegation-request.v1",),
         outbound=("onex.evt.omnibase-infra.inference-response.v1", topic),
@@ -69,33 +54,20 @@ def test_mirror_topics_model_accepts_od9_session_lifecycle_topic(topic: str) -> 
     assert topic in mirror_topics.outbound
 
 
-@pytest.mark.parametrize("topic", OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS)
-def test_contract_declares_od9_session_lifecycle_topic_in_outbound(
+@pytest.mark.parametrize("topic", ALL_CAPTURE_TOPICS)
+def test_contract_declares_each_capture_topic_once_in_outbound(
     topic: str,
 ) -> None:
-    """Per-topic proof against the REAL contract.yaml on disk: each OD-9
-    session-lifecycle topic is declared exactly once under
+    """Per-topic proof against the real contract: each capture topic is
+    declared exactly once under
     ``config.gateway_forwarder.mirror_topics.outbound``."""
     contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
     outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
     assert outbound.count(topic) == 1
 
 
-@pytest.mark.parametrize("topic", OD9_DENIED_OMNICLAUDE_TOPICS)
-def test_contract_does_not_widen_beyond_od9_session_lifecycle_pair(
-    topic: str,
-) -> None:
-    """OMN-16204 scope guard, narrowed by OMN-16979: the remaining omniclaude
-    content classes stay DENIED outright. `tool-output-captured` in particular
-    is the class that carries raw tool OUTPUT -- admitting it is a separate
-    decision behind OMN-17207, never a side effect."""
-    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
-    outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
-    assert topic not in outbound
-
-
-@pytest.mark.parametrize("topic", OMN16979_GOVERNED_OMNICLAUDE_TOPICS)
-def test_omn16979_widened_topic_is_mirrored_and_governed(topic: str) -> None:
+@pytest.mark.parametrize("topic", ALL_CAPTURE_TOPICS)
+def test_omn16979_capture_topic_is_mirrored_and_governed(topic: str) -> None:
     """OMN-16979: the widening and the gate are asserted together, never apart.
 
     A widened topic that is not also governed is the bare passthrough the
@@ -108,17 +80,12 @@ def test_omn16979_widened_topic_is_mirrored_and_governed(topic: str) -> None:
     assert topic in forwarder["egress_redaction"]["governed_topics"]
 
 
-def test_contract_outbound_gains_exactly_two_new_topics() -> None:
-    """Falsifiable count check: outbound grew from the pre-OMN-16204 baseline
-    of 6 topics to 8 (OMN-16204's OD-9 pair) and then to exactly 10
-    (OMN-16979's two governed hook classes) -- proving nothing beyond those
-    four was ever added."""
+def test_contract_outbound_has_exactly_all_seven_capture_topics() -> None:
+    """Six pre-existing topics plus seven governed captures makes thirteen."""
     contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
     outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
-    assert len(outbound) == 10
-    for topic in OD9_ALLOWED_SESSION_LIFECYCLE_TOPICS:
-        assert topic in outbound
-    for topic in OMN16979_GOVERNED_OMNICLAUDE_TOPICS:
+    assert len(outbound) == 13
+    for topic in ALL_CAPTURE_TOPICS:
         assert topic in outbound
 
 

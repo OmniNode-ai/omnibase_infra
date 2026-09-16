@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Fail-closed egress-redaction admission policy for the outbound cloud leg.
 
-OMN-16979 widens ``mirror_topics.outbound`` to the content-bearing omniclaude
-hook classes. OMN-17209's framing is why that widening cannot be bare: "widening
-the payload without landing this contract first ships a credential pipeline."
+OMN-16979 widens ``mirror_topics.outbound`` to the capture topics. OMN-17209's
+framing is why that widening cannot be bare: "widening the payload without
+landing this contract first ships a credential pipeline."
 
 The redaction itself is produced UPSTREAM, at omnimarket's emit seam (OMN-16019's
 per-topic transform, governed by ``capture_redaction.yaml``). That is the only

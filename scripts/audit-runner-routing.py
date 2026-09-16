@@ -6,15 +6,23 @@
 The incident this protects against: repo-level GitHub variables drifted
 OMNI_TRUSTED_CI_RUNS_ON_JSON back to ["ubuntu-latest"], so trusted CI silently
 used GitHub-hosted minutes even though the workflow selector looked correct.
+
+OMN-16727: ``main()`` collects every finding set from every enabled pass into
+one list and exits once, at the end -- see the module-level history in
+``runner-routing-audit.yml`` for the companion fix to the workflow-step level
+masking this ticket also covers (a finding in one ``run:`` step must not skip
+a later one).
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,7 +43,13 @@ FORK_PR_PREDICATE = (
 DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
 # OMN-18031: the per-run routing consumer shape. A job whose runs-on resolves
 # from a route job's output rather than from the seam expression directly.
-ROUTE_CONSUMER_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.labels")
+# A routed job reads either output name. `labels` is what the pilot shipped;
+# `runs_on` is what the node-backed route job emits and what a cross-repo
+# consumer reads, because at the call site `runs-on: fromJSON(...runs_on)` says
+# what it is. BOTH are recognised deliberately: an audit that knew only one
+# would report every job using the other as an unrouted job -- drift where
+# there is none, which is how a routing audit gets muted.
+ROUTE_CONSUMER_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.(?:labels|runs_on)")
 # OMN-18031: the selector-generation markers. V1 is the inline seam expression
 # that 94 job definitions in this repo carry; V2 is a job whose placement comes
 # from a route job's output. The marker is a COMMENT, so YAML parsing drops it
@@ -135,8 +149,18 @@ def _variable_value(values: list[dict[str, Any]], name: str) -> str | None:
     return None
 
 
-def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
-    variable = policy["trusted_runner_variable"]
+def _audit_trusted_style_variable(
+    variable: dict[str, Any], repositories: list[Any]
+) -> list[Finding]:
+    """Audit one org+per-repo variable declaration of the trusted-seam shape.
+
+    OMN-16684: extracted so the same org/repo-override/drift logic applies to
+    BOTH ``trusted_runner_variable`` and ``public_pr_runner_variable``. Before
+    this, ``audit_github_variables`` read only ``trusted_runner_variable`` and
+    never looked at the public-PR variable at all -- so the exact OMN-16683
+    shape (fork PRs routed onto the self-hosted fleet) produced zero findings
+    and the audit reported green while inverted.
+    """
     name = str(variable["name"])
     expected = _canonical_json(str(variable["expected_json"]))
     findings: list[Finding] = []
@@ -161,7 +185,7 @@ def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
         raise ValueError(
             "trusted_runner_variable.repository_overrides must be a mapping"
         )
-    for repo in policy.get("repositories", []):
+    for repo in repositories:
         repo_name = str(repo)
         # OMN-18031: a repo shadow the policy DECLARES is an asserted value in
         # its own right, not drift from the org value. Without this the audit
@@ -208,6 +232,23 @@ def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
                     f"{name} drifted to {actual!r}; expected {repo_expected_raw!r}",
                 )
             )
+    return findings
+
+
+def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
+    repositories = policy.get("repositories", [])
+    findings = list(
+        _audit_trusted_style_variable(policy["trusted_runner_variable"], repositories)
+    )
+    # OMN-16684: the public-PR variable is audited on the SAME terms as the
+    # trusted seam -- org value, per-repo overrides, drift -- rather than not
+    # at all. It has no repository_overrides declared in the live policy today
+    # (every repository is expected to inherit the org value), so any repo
+    # carrying a value is drift by construction, which is exactly the
+    # OMN-16683 shape this closes.
+    public_pr_variable = policy.get("public_pr_runner_variable")
+    if public_pr_variable is not None:
+        findings.extend(_audit_trusted_style_variable(public_pr_variable, repositories))
     return findings
 
 
@@ -418,6 +459,140 @@ def audit_scoped_variables(policy: dict[str, Any]) -> list[Finding]:
                         f"{name} drifted to {actual!r}; expected {expected_raw!r}",
                     )
                 )
+    return findings
+
+
+def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
+    """Return ``(repo_name, is_private)`` for every repository in the org, read live.
+
+    OMN-18365 AC3: the private-repo hosted-placement check below resolves its
+    repository universe from live GitHub visibility, not from the
+    hand-curated ``repositories:`` list elsewhere in this policy file. That
+    list exists for the trusted-seam and scoped-variable passes, which have
+    declared-divergence semantics a brand-new repository cannot have yet; a
+    repository new to the org must be in scope for the hosted-placement check
+    from the moment it exists, with no policy edit required.
+    """
+    # No --visibility filter: `gh repo list` accepts only public/private/internal
+    # (not "all"), and omitting the flag already returns every repository the
+    # token can see, of any visibility -- exactly the universe this check needs
+    # since it filters on the returned `isPrivate` field itself.
+    result = _run_gh(
+        [
+            "repo",
+            "list",
+            org,
+            "--limit",
+            "500",
+            "--json",
+            "name,isPrivate",
+        ]
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"gh repo list failed: {result.stderr.strip()}")
+    values = json.loads(result.stdout or "[]")
+    if not isinstance(values, list):
+        raise RuntimeError("gh repo list returned a non-list payload")
+    return [(str(item["name"]), bool(item["isPrivate"])) for item in values]
+
+
+def _default_branch_workflow_texts(repo_name: str, org: str = ORG) -> dict[str, str]:
+    """Fetch every default-branch ``.github/workflows/*.yml``/``.yaml`` file's text.
+
+    OMN-18365 AC3: reads live content through the GitHub contents API rather
+    than a local checkout, because the private-repo hosted-placement check
+    runs against every private repository in the org, not just this
+    repository's own clone. A repository with no workflows directory (or no
+    workflows at all) is not a finding-worthy condition and returns ``{}``.
+    """
+    listing = _run_gh(["api", f"repos/{org}/{repo_name}/contents/.github/workflows"])
+    if listing.returncode != 0:
+        return {}
+    entries = json.loads(listing.stdout or "[]")
+    if not isinstance(entries, list):
+        raise RuntimeError(
+            f"gh api contents listing for {repo_name} returned a non-list payload"
+        )
+    texts: dict[str, str] = {}
+    for entry in entries:
+        name = str(entry.get("name", ""))
+        if not name.endswith((".yml", ".yaml")):
+            continue
+        path = str(entry.get("path", f".github/workflows/{name}"))
+        content_result = _run_gh(
+            ["api", f"repos/{org}/{repo_name}/contents/{path}", "--jq", ".content"]
+        )
+        if content_result.returncode != 0:
+            raise RuntimeError(
+                f"gh api content fetch for {repo_name}:{path} failed: "
+                f"{content_result.stderr.strip()}"
+            )
+        encoded = content_result.stdout.replace("\n", "")
+        texts[path] = base64.b64decode(encoded).decode("utf-8")
+    return texts
+
+
+def audit_private_repo_hosted_placement(
+    visibility_fn: Callable[
+        [str], list[tuple[str, bool]]
+    ] = _live_repository_visibility,
+    workflow_fetch_fn: Callable[[str], dict[str, str]] = _default_branch_workflow_texts,
+    org: str = ORG,
+) -> list[Finding]:
+    """OMN-18365 AC3: private repositories never run on GitHub-hosted runners.
+
+    Authority: operator ruling 2026-09-14, firm, recorded at
+    ``docs/tracking/ROLLING_WORK_LEDGER.md:7777`` -- private repositories
+    never run on GitHub-hosted Actions runners; their CI runs on the lab
+    fleet. Hosted runners are for public repositories only, where minutes are
+    free.
+
+    Deliberately does NOT consult ``hosted_runner_allowlist``: that allowlist
+    is scoped to this repository's own workflows and their pre-existing,
+    individually-justified hosted pins (ECR pushes, fork isolation, and so
+    on). Extending it across every other repository in the org is a separate
+    claim this check does not make -- a private repository with a
+    legitimately-hosted job reports here as advisory drift until it earns its
+    own exception, the same way this repository's own bare hosted pins did
+    before they were allowlisted.
+
+    ADVISORY, like the rest of this script's ``--github-vars`` pass: it is
+    read by a scheduled workflow, not a merge gate (OMN-18365 AC5 -- this
+    layer only reports; it cannot itself stop a job from starting).
+    """
+    findings: list[Finding] = []
+    for repo_name, is_private in visibility_fn(org):
+        if not is_private:
+            continue
+        for path, text in workflow_fetch_fn(repo_name).items():
+            try:
+                workflow = yaml.safe_load(text)
+            except yaml.YAMLError as exc:
+                findings.append(
+                    Finding(
+                        f"{repo_name}:{path}", f"workflow is not parseable YAML: {exc}"
+                    )
+                )
+                continue
+            jobs = workflow.get("jobs", {}) if isinstance(workflow, dict) else {}
+            if not isinstance(jobs, dict):
+                continue
+            for job_name, job in jobs.items():
+                if not isinstance(job, dict) or "runs-on" not in job:
+                    continue
+                try:
+                    labels = runs_on_labels(job["runs-on"])
+                except UnreadableRunsOnError:
+                    continue
+                if is_bare_hosted_pin(labels):
+                    findings.append(
+                        Finding(
+                            f"{repo_name}:{path}:{job_name}",
+                            f"private repository job is pinned to {HOSTED_RUNNER_LABEL}; "
+                            "private repositories never run on GitHub-hosted Actions "
+                            "runners (operator ruling 2026-09-14)",
+                        )
+                    )
     return findings
 
 
@@ -785,6 +960,10 @@ def main() -> int:
         # finding here cannot be masked by the step-level ordering OMN-16727
         # records -- main() extends one findings list and prints them all.
         findings.extend(audit_scoped_variables(policy))
+        # OMN-18365 AC3, additive and inside the same step for the same
+        # reason: resolves its repository universe from live visibility
+        # rather than the policy's hand-curated `repositories:` list.
+        findings.extend(audit_private_repo_hosted_placement())
 
     if findings:
         for finding in findings:

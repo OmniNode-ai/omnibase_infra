@@ -156,6 +156,7 @@ from omnibase_infra.runtime.contract_terminal_events import (
     load_terminal_event_topics,
 )
 from omnibase_infra.runtime.dispatch_envelope_context import (
+    bind_dispatch_envelope,
     current_dispatch_envelope,
     current_projection_tenant_authority,
 )
@@ -4019,7 +4020,16 @@ async def _route_projection_error_to_dlq(
         original_message = model_dump(mode="json")
     else:
         original_message = {"raw": str(payload)}
-    dlq_envelope = {
+    # OMN-18385: third of the three envelope-building sites (the other two are
+    # in MixinKafkaDlq). A projection payload reaches here as a decoded
+    # structure, so redact it structurally before it is serialised onto the
+    # durable dead-letter topic, and record the field names that were removed.
+    from omnibase_infra.utils.util_dlq_credential_redaction import (
+        redact_credential_fields,
+    )
+
+    original_message, redacted_fields = redact_credential_fields(original_message)
+    dlq_envelope: dict[str, object] = {
         "original_message": original_message,
         "failure_reason": failure_reason,
         "failure_class": EnumDlqFailureClass.CONSUMER_ERROR.value,
@@ -4029,6 +4039,8 @@ async def _route_projection_error_to_dlq(
         "handler": handler_name,
         "quarantine_fallback": used_quarantine_fallback,
     }
+    if redacted_fields:
+        dlq_envelope["redacted_fields"] = list(redacted_fields)
     raw = json.dumps(dlq_envelope, default=str).encode("utf-8")
     publish = getattr(event_bus, "publish", None)
     if not callable(publish):
@@ -4898,6 +4910,44 @@ def _extract_state_io_metadata(payload_json: str) -> StateIoMetadata:
     )
 
 
+def _consumed_envelope_id(envelope: object) -> UUID | None:
+    """The identity of the envelope this dispatch consumed, or None.
+
+    OMN-18419. ``MessageDispatchEngine`` hands a dispatcher the JSON-safe
+    MATERIALIZATION of the envelope (``_materialize_envelope_with_bindings``),
+    not the typed envelope, and binds the typed one beside it on a contextvar
+    for exactly this reason -- its own comment says "for transport identity
+    (for example envelope_id)". The stateful wrapper read ``envelope_id`` as an
+    ATTRIBUTE off that dict, which is always ``None``, so every outbox entry
+    recorded the CORRELATION id as its causation via the fallback below.
+
+    Measured on the .201 compose dev lane, correlation
+    ``41235987-425c-481b-b2e3-8970083ce512``: the routing intent's deterministic
+    id re-derives exactly as ``uuid5(correlation, f"{correlation}:ModelRoutingIntent:0")``
+    -- the self-seeded fallback -- and not from the
+    ``onex.cmd.omnibase-infra.delegation-request.v1`` envelope
+    ``f1cc9a51-ef02-40f4-b2e7-81e5b57942ed`` that actually caused it.
+
+    The contextvar is consulted FIRST and the attribute second, so a caller
+    that hands this wrapper a real envelope directly (tests, the no-bus path)
+    keeps working unchanged.
+    """
+    typed = current_dispatch_envelope()
+    if typed is not None:
+        typed_id = getattr(typed, "envelope_id", None)
+        if isinstance(typed_id, UUID):
+            return typed_id
+    direct = getattr(envelope, "envelope_id", None)
+    if isinstance(direct, UUID):
+        return direct
+    if isinstance(direct, str) and direct:
+        try:
+            return UUID(direct)
+        except ValueError:
+            return None
+    return None
+
+
 def _make_stateful_dispatch_callback(
     handler_instance: ProtocolHandleable,
     event_model: ModelHandlerRef | None,
@@ -5256,11 +5306,32 @@ def _make_stateful_dispatch_callback(
             # derives ``None`` (the field default), so this is safe for every
             # topic shape the outbox can resolve.
             event_type = derive_event_type_from_topic(topic)
+            # OMN-18419: the causal edge, recorded rather than discarded.
+            #
+            # `causation` is the envelope whose consumption produced this
+            # emission. It was already in hand here -- it seeds the
+            # deterministic id one line above -- and was not put on the
+            # envelope, so every event published off this path arrived in
+            # `event_ledger` with a null `parent_message_id`: the checkable
+            # statement "chain head", asserted by hops that are not heads.
+            # `publish_envelope` binds the wire header from the envelope
+            # (`header_identity_fields_from_envelope`), so setting it here is
+            # what puts it on the wire.
+            #
+            # The ONE case that is deliberately NOT an edge is the
+            # completion-bound sweep, which seeds `causation_envelope_id` with
+            # the row's own correlation id precisely because no causing
+            # envelope exists (see `_terminalise_abandoned_rows`). A
+            # correlation id is not an envelope id, so recording it would
+            # fabricate an edge that can never close. Absence is the honest
+            # encoding of absence, the same rule `chain_replay` holds.
+            edge = None if causation == cid_uuid else causation
             out_envelope: _Envelope[BaseModel] = _Envelope(
                 envelope_id=envelope_id,
                 payload=payload,
                 correlation_id=cid_uuid,
                 event_type=event_type,
+                parent_envelope_id=edge,
             )
             key: bytes | None = None
             for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
@@ -5601,7 +5672,7 @@ def _make_stateful_dispatch_callback(
         # preserved. The resume predicate keys on envelope_id, NOT causation_id
         # (spec §4.1 E1 — a redelivered input keeps its envelope_id; its own
         # causation_id is the grandparent and would never match).
-        incoming_envelope_id = getattr(envelope, "envelope_id", None)
+        incoming_envelope_id = _consumed_envelope_id(envelope)
         locked = await _find_recoverable_row(cid)
         if locked is not None:
             entries = list(
@@ -6680,7 +6751,24 @@ def _make_event_bus_callback(
                 )
                 if result_applier is not None and result is not None:
                     try:
-                        await result_applier.apply(result, envelope.correlation_id)
+                        # OMN-16831: the applier is the origination site for both
+                        # the OMN-18116 causal edge and the tenant dimension, and
+                        # it reads the consumed envelope off this contextvar. The
+                        # engine binds it only around the DISPATCHER call, which
+                        # has already returned by the time we get here, so on this
+                        # boundary -- the deployed one -- the applier saw None and
+                        # every event it published was recorded as a chain head
+                        # with no tenant. Measured on the real wiring seam:
+                        # parent_envelope_id None and tenant_id None for a
+                        # consumed envelope carrying both.
+                        #
+                        # Binding here rather than moving the engine's bind keeps
+                        # the engine's narrower guarantee intact and adds the one
+                        # this seam needs. `envelope` is the record this callback
+                        # consumed, which is precisely what both dimensions are
+                        # supposed to be derived from.
+                        with bind_dispatch_envelope(envelope):
+                            await result_applier.apply(result, envelope.correlation_id)
                     except Exception as apply_exc:
                         # OMN-14403 §4.3: on the outbox path a publish failure
                         # must PROPAGATE (redeliver), never be retried-then-
@@ -7306,7 +7394,22 @@ def _stamp_tenant_id_from_topic_prefix(
     # OMN-14367: route through the single canonical stamp so this producer and
     # the gateway forwarder's consume_inbound cannot diverge on the shape again.
     stamped_payload = stamp_verified_tenant_slug(envelope.payload, slug)
-    return envelope.model_copy(update={"payload": stamped_payload})
+    # OMN-16831: the verified slug is written to the envelope's tenant DIMENSION
+    # as well as into the payload, because those were two different fields and
+    # the fleet's only reader of a tenant reads the envelope one.
+    #
+    # `ModelEventEnvelope.tenant_id` is the canonical envelope-side stamp, and
+    # omnimarket's `envelope_tenant_identity` reads it -- its docstring already
+    # named THIS function as one of the two writers of that field. It was not:
+    # it wrote `payload["tenant_id"]` only, so a producer and a consumer were
+    # split across two fields with the consumer asserting they were one, and
+    # every tenant-classified projection write was refused as unattributed.
+    #
+    # Payload and envelope carry the same verified value rather than one
+    # replacing the other: the payload copy is what the OMN-14367 gateway seam
+    # and the OMN-14058 downstream flow already read, and dropping it would
+    # trade this defect for that one.
+    return envelope.model_copy(update={"payload": stamped_payload, "tenant_id": slug})
 
 
 def _make_raw_event_projection_callback(
@@ -7367,7 +7470,11 @@ def _make_raw_event_projection_callback(
             dispatcher_scope,
         )
         if result is not None:
-            await result_applier.apply(result, envelope.correlation_id)
+            # OMN-16831: same reason as the sibling boundary above -- the
+            # applier's causal edge and tenant dimension both come off the
+            # consumed envelope, which it reads from this contextvar.
+            with bind_dispatch_envelope(envelope):
+                await result_applier.apply(result, envelope.correlation_id)
 
     async def callback(message: object) -> None:
         try:

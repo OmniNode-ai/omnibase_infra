@@ -6,10 +6,9 @@
 # ONEX Node Contract
 # Node: NodeLedgerProjectionCompute
 #
-# COMPUTE node that subscribes to 24 topics (7 platform-lifecycle topics,
-# 12 dispatchable business command/completion/DLQ topics, the 4 delegation
-# chain topics required by OMN-16964, plus 1 external steel_onslaught
-# terminal-event topic — OMN-15168) for event ledger
+# COMPUTE node that subscribes to 26 topics (7 platform-lifecycle topics plus
+# 18 business command/completion/DLQ topics — OMN-15006 — plus 1 external
+# steel_onslaught terminal-event topic — OMN-15168) for event ledger
 # persistence. This node projects events from the platform event bus into
 # the audit ledger for complete traceability and debugging support.
 #
@@ -35,20 +34,39 @@
 #     documented below — a bare subscribe_topics addition is "subscribed but
 #     never dispatched" (NO_DISPATCHER class); see this ticket's
 #     tests/unit/nodes/test_contract_subscription_audit.py pairing-count gate.
+#   - OMN-18398: widen subscribe_topics from 26 to 30 by adding the four
+#     delegation-chain topics declared as `chain_topology` by
+#     node_delegation_chain_ledger_effect. That node reads public.event_ledger
+#     for exactly those topics; this node is its only writer, so their absence
+#     here made the chain writer's read empty by construction and left
+#     public.ledger_chain at zero rows on the .201 dev lane while the writer
+#     reported success. Paired subscribe_topics+handler_routing diff, same
+#     OMN-14594 pattern as OMN-15168. This change also corrects the declared
+#     topic COUNT in the prose above, which still said 26 after OMN-18013
+#     deleted six category-less DLQ subscriptions and left 20 in the list.
+#     The list is the authority; the count now matches it at 24.
+#   - OMN-18419: widen subscribe_topics from 24 to 25 by adding the FIFTH
+#     delegation-chain hop, onex.cmd.omnibase-infra.delegation-request.v1 --
+#     the pattern-B worker command the runtime's delegation dispatch port
+#     publishes while consuming the delegate-skill command. It was on the wire
+#     and not in the ledger, so the routing request's recorded parent named an
+#     envelope no correlation-scoped read could resolve and chain-canary link 5
+#     graded a correct edge red. Paired subscribe_topics+handler_routing diff,
+#     same OMN-14594 pattern.
 # Contract identifiers
 name: "node_ledger_projection_compute"
 contract_name: "node_ledger_projection_compute"
 node_name: "node_ledger_projection_compute"
 contract_version:
   major: 1
-  minor: 3
+  minor: 4
   patch: 0
-node_version: "0.4.0"
+node_version: "0.5.0"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 24 topics (7 platform-lifecycle + 12 dispatchable business command/completion/DLQ topics, OMN-15006/OMN-18013 + 4 delegation-chain topics, OMN-16964 + 1 external steel_onslaught terminal-event topic, OMN-15168) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.3.0 adds the four delegation-chain topics as paired subscribe_topics+handler_routing entries so the OMN-16964 writer can observe the chain it verifies; contract 1.2.0 (OMN-15168) adds the steel_onslaught terminal-match topic; contract 1.1.0 (OMN-15006) widened the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
+  COMPUTE node that subscribes to 25 topics (7 platform-lifecycle + 12 business command/completion/DLQ topics remaining from OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions + 1 external steel_onslaught terminal-event topic, OMN-15168 + 5 delegation-chain topics, OMN-18398 and OMN-18419) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.4.0 (OMN-18419) adds the fifth delegation-chain hop, delegation-request.v1, without which the routing request's recorded causal parent resolved to nothing; contract 1.3.0 (OMN-18398) adds the four delegation-chain topics the chain-canary link-5 writer reads back out of public.event_ledger; contract 1.2.0 (OMN-15168) adds the steel_onslaught terminal-match topic as a paired subscribe_topics+handler_routing diff; contract 1.1.0 (OMN-15006) widened the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
 
 # Event bus configuration
 event_bus:
@@ -56,9 +74,13 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
-  # Subscribe to 26 topics for complete audit coverage: 7 platform-lifecycle
-  # topics plus 18 business command/completion/DLQ topics (OMN-15006) plus 1
-  # external steel_onslaught terminal-event topic (OMN-15168).
+  # Subscribe to 25 topics for complete audit coverage: 7 platform-lifecycle
+  # topics, plus the 12 business command/completion/DLQ topics that remain from
+  # OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions, plus 1
+  # external steel_onslaught terminal-event topic (OMN-15168), plus the 4
+  # delegation-chain topics (OMN-18398) plus the fifth (OMN-18419). Counted
+  # from the list below, which is
+  # the only authority -- the prose said 26 for as long as the list said 20.
   subscribe_topics:
     # Node lifecycle events
     - "onex.evt.platform.node-registration.v1"
@@ -72,15 +94,6 @@ event_bus:
     - "onex.intent.platform.runtime-tick.v1"
     # State snapshots
     - "onex.evt.platform.registration-snapshots.v1"
-    # --- OMN-16964: delegation chain evidence (4) ---
-    # The chain writer reads these exact correlation-scoped hops from
-    # event_ledger. Without audit subscriptions here its query is guaranteed
-    # to return an empty chain even when the foreground canary reaches its
-    # terminal event.
-    - "onex.cmd.omnimarket.delegate-skill.v1"
-    - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
-    - "onex.evt.omnibase-infra.routing-decision.v1"
-    - "onex.evt.omnimarket.delegate-skill-completed.v1"
     # --- OMN-15006: business command/completion/DLQ topics ---
     # build_loop (3) — EnumOmnibaseInfraTopic.CMD_BUILD_LOOP_APPEND_V1,
     # .EVT_BUILD_LOOP_APPENDED_V1; the completion event is owned by
@@ -116,6 +129,32 @@ event_bus:
     # merged f378cd48), same external-literal pattern as the OCC/omnimarket
     # topics above.
     - "onex.evt.steel-onslaught.match-terminal.v1"
+    # --- OMN-18398: the four delegation-chain topics ---
+    # These are the ordered `chain_topology` declared by
+    # node_delegation_chain_ledger_effect's contract. That node reads
+    # public.event_ledger for exactly these topics and writes one
+    # public.ledger_chain row per observed hop (chain-canary link 5). This node
+    # is the ONLY writer of public.event_ledger, so while these four were
+    # absent here the chain writer's read was empty BY CONSTRUCTION and
+    # ledger_chain held zero rows on the .201 dev lane no matter how the writer
+    # behaved. Two literals are owned by omnimarket (infra >/> market forbids
+    # importing EnumOmnimarketTopic), same external-literal pattern as the
+    # OMN-15006 OCC/omnimarket topics above; two are
+    # EnumOmnibaseInfraTopic members. Paired with handler_routing entries below
+    # per the OMN-14594 rule -- a bare subscribe_topics addition is
+    # subscribed-but-never-dispatched.
+    - "onex.cmd.omnimarket.delegate-skill.v1"
+    - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    - "onex.evt.omnibase-infra.routing-decision.v1"
+    - "onex.evt.omnimarket.delegate-skill-completed.v1"
+    # --- OMN-18419: the fifth delegation-chain hop ---
+    # The pattern-B worker command the runtime's delegation dispatch port
+    # publishes while consuming the delegate-skill command. It was always on
+    # the wire and never projected, so the routing request's recorded parent
+    # pointed at an envelope no chain read could resolve and the edge could
+    # not close. node_delegation_chain_ledger_effect's contract 1.1.0 declares
+    # it as a hop with delegate-skill as its parent.
+    - "onex.cmd.omnibase-infra.delegation-request.v1"
   # Audit consumer - read-only, non-processing consumption for ledger persistence
   consumer_purpose: "audit"
   # Start from earliest offset to capture all historical events
@@ -127,7 +166,7 @@ input_model:
   name: "ModelEventMessage"
   module: "omnibase_infra.event_bus.models.model_event_message"
   description: >
-    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 26 subscribed topics.
+    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 25 subscribed topics.
 
 output_model:
   name: "ModelIntent"
@@ -239,58 +278,6 @@ handler_routing:
       supported_operations:
         - "ledger.project"
     - topic: "onex.evt.platform.registration-snapshots.v1"
-      operation: ledger.project
-      message_category: "event"
-      handler_type: "ledger_projection"
-      event_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
-      handler:
-        name: "HandlerLedgerProjection"
-        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
-      supported_operations:
-        - "ledger.project"
-    # --- OMN-16964: delegation chain evidence (4 entries) ---
-    # Paired one-for-one with subscribe_topics. HandlerLedgerProjection is
-    # intentionally type-agnostic and persists the raw wrapper metadata that
-    # carries correlation, envelope, and parent-envelope identity.
-    - topic: "onex.cmd.omnimarket.delegate-skill.v1"
-      operation: ledger.project
-      message_category: "command"
-      handler_type: "ledger_projection"
-      event_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
-      handler:
-        name: "HandlerLedgerProjection"
-        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
-      supported_operations:
-        - "ledger.project"
-    - topic: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
-      operation: ledger.project
-      message_category: "command"
-      handler_type: "ledger_projection"
-      event_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
-      handler:
-        name: "HandlerLedgerProjection"
-        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
-      supported_operations:
-        - "ledger.project"
-    - topic: "onex.evt.omnibase-infra.routing-decision.v1"
-      operation: ledger.project
-      message_category: "event"
-      handler_type: "ledger_projection"
-      event_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
-      handler:
-        name: "HandlerLedgerProjection"
-        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
-      supported_operations:
-        - "ledger.project"
-    - topic: "onex.evt.omnimarket.delegate-skill-completed.v1"
       operation: ledger.project
       message_category: "event"
       handler_type: "ledger_projection"
@@ -475,6 +462,73 @@ handler_routing:
         module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
       supported_operations:
         - "ledger.project"
+    # --- OMN-18398: delegation-chain topics, paired with the
+    # subscribe_topics additions above. message_category follows the
+    # topic's own cmd/evt segment. event_model is ModelEventMessage, the
+    # same generic envelope-level wrapper every external-literal topic
+    # above uses -- HandlerLedgerProjection is TYPE-AGNOSTIC.
+    - topic: "onex.cmd.omnimarket.delegate-skill.v1"
+      operation: ledger.project
+      message_category: "command"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+      operation: ledger.project
+      message_category: "command"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.omnibase-infra.routing-decision.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    # OMN-18419: the fifth chain hop, paired with its subscribe_topics entry
+    # above per the OMN-14594 rule.
+    - topic: "onex.cmd.omnibase-infra.delegation-request.v1"
+      operation: ledger.project
+      message_category: "command"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.omnimarket.delegate-skill-completed.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
 # Intent consumption (OMN-14516): the projection emits a `ledger.append` intent
 # per consumed platform event. This table is the SOURCE OF TRUTH the kernel uses
 # to DERIVE a result applier for this contract — it names the effect node whose
@@ -508,11 +562,11 @@ dependencies:
     optional: false
 # Metadata
 metadata:
-  description: "Subscribes to 24 topics (7 platform-lifecycle + 12 dispatchable business command/completion/DLQ + 4 delegation-chain + 1 external steel_onslaught terminal-event) for event ledger persistence, projecting events from the platform bus into the audit ledger for traceability and debugging"
+  description: "Subscribes to 24 topics (7 platform-lifecycle + 12 business command/completion/DLQ remaining from OMN-15006 after OMN-18013 + 1 external steel_onslaught terminal-event topic, OMN-15168 + 4 delegation-chain topics, OMN-18398) for event ledger persistence, projecting events from the platform bus into the audit ledger for traceability and debugging"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-01-29"
-  ticket: "OMN-1648, OMN-1726, OMN-15168, OMN-16964"
+  ticket: "OMN-1648, OMN-1726, OMN-15168, OMN-18398"
   tags:
     - compute
     - ledger

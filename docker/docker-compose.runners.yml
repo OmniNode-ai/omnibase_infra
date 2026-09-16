@@ -65,6 +65,65 @@ x-runner-base: &runner-base
     # containers is required for this to take effect; a bind-mounted file
     # update alone does not change a live container's env.
     KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
+    # OMN-18415 — HMAC signing key for local LLM inference calls, fleet-wide.
+    #
+    # WHY IT IS HERE. omniintelligence's `cli_review` (the Hostile Review
+    # Gate's reviewer) calls the .201 inference endpoint through
+    # omnibase_infra's MixinLlmHttpTransport, which HMAC-signs every request
+    # with this key and fails CLOSED per model when it is absent
+    # (ONEX_CORE_041_INVALID_CONFIGURATION). Until this line existed the key
+    # was on no runner in the fleet, so every model call failed and the gate
+    # reported a review it had never performed. The key is a MAPPING entry on
+    # `&runner-env`, so unlike the volume mounts below it reaches all 60
+    # services through each one's `!!merge <<: *runner-env` -- YAML merge keys
+    # merge mappings, and only mappings.
+    #
+    # SCOPE. Fleet services only. `omninode-deploy-runner` and the two
+    # `omninode-customer-plane-runner-N` services define their own
+    # `environment:` blocks and do NOT merge this anchor, so they stay
+    # credential-free (OMN-18392) with no exclusion needed here.
+    #
+    # WHERE THE VALUE COMES FROM. `docker/.env` on the runner host, mode 600,
+    # owned by the operator -- the compose PROJECT DIRECTORY is the directory
+    # of the first `-f` file, so compose loads it for every invocation against
+    # this file regardless of cwd, including the runner-monitor auto-bounce
+    # cron that recreates individual runners. That file is host-generated and
+    # is NEVER rsynced from this repo (it is absent from deploy-runners.sh's
+    # SYNC_PATHS), exactly as the lab credentials directory is. The value
+    # itself is the existing `/shared/llm/` key registered in
+    # config/shared_key_registry.yaml -- this wiring places an existing
+    # credential, it does not mint or rotate one.
+    #
+    # FAIL-CLOSED ON PURPOSE. `:?` and not `:-`. An empty value would still
+    # satisfy the transport's "is it set" check and produce a wrong signature,
+    # which is a 401 with no named cause -- the same class of silent failure
+    # this ticket exists to remove. An unset value therefore stops compose at
+    # interpolation time, where the monitor's own preflight
+    # (`docker compose config -q`) already blocks auto-repair and logs it,
+    # rather than producing a runner that looks healthy and reviews nothing.
+    #
+    # Environment is frozen at container creation (same as the healthcheck
+    # definition below): a container RECREATE is required for a change here to
+    # take effect, and that roll is serial and busy-checked -- never a
+    # fleet-wide `--force-recreate`.
+    LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
+    # OMN-18415 — the OTHER half of the same fail-closed contract.
+    #
+    # `MixinLlmHttpTransport` rejects an outbound local LLM call before any HTTP
+    # is attempted unless the destination falls inside this allowlist, and it
+    # REFUSES TO DEFAULT it (`_parse_cidr_allowlist` raises when the variable is
+    # unset, by design: a trust boundary nobody declared is not a boundary).
+    # Provisioning only the signing key left the fleet failing on this instead,
+    # three seconds later in the same call path and with the same
+    # nothing-in-the-log symptom -- measured by reproducing the runner's exact
+    # environment, not inferred.
+    #
+    # Not a secret: a network boundary declaration. It is still `:?` rather than
+    # a literal default, because the library's own refusal to default it is the
+    # behaviour being mirrored, and a host whose trust boundary differs must say
+    # so rather than inherit this lab's. Value lives beside the signing key in
+    # `docker/.env` on the runner host.
+    LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
@@ -1015,398 +1074,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - runner-60-creds:/home/runner/.runner-creds
-  omninode-runner-61:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-61
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-61
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-61-creds:/home/runner/.runner-creds
-  omninode-runner-62:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-62
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-62
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-62-creds:/home/runner/.runner-creds
-  omninode-runner-63:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-63
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-63
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-63-creds:/home/runner/.runner-creds
-  omninode-runner-64:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-64
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-64
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-64-creds:/home/runner/.runner-creds
-  omninode-runner-65:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-65
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-65
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-65-creds:/home/runner/.runner-creds
-  omninode-runner-66:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-66
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-66
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-66-creds:/home/runner/.runner-creds
-  omninode-runner-67:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-67
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-67
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-67-creds:/home/runner/.runner-creds
-  omninode-runner-68:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-68
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-68
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-68-creds:/home/runner/.runner-creds
-  omninode-runner-69:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-69
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-69
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-69-creds:/home/runner/.runner-creds
-  omninode-runner-70:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-70
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-70
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-70-creds:/home/runner/.runner-creds
-  omninode-runner-71:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-71
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-71
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-71-creds:/home/runner/.runner-creds
-  omninode-runner-72:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-72
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-72
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-72-creds:/home/runner/.runner-creds
-  omninode-runner-73:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-73
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-73
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-73-creds:/home/runner/.runner-creds
-  omninode-runner-74:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-74
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-74
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-74-creds:/home/runner/.runner-creds
-  omninode-runner-75:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-75
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-75
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-75-creds:/home/runner/.runner-creds
-  omninode-runner-76:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-76
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-76
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-76-creds:/home/runner/.runner-creds
-  omninode-runner-77:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-77
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-77
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-77-creds:/home/runner/.runner-creds
-  omninode-runner-78:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-78
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-78
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-78-creds:/home/runner/.runner-creds
-  omninode-runner-79:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-79
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-79
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-79-creds:/home/runner/.runner-creds
-  omninode-runner-80:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-80
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-80
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-80-creds:/home/runner/.runner-creds
-  omninode-runner-81:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-81
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-81
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-81-creds:/home/runner/.runner-creds
-  omninode-runner-82:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-82
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-82
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-82-creds:/home/runner/.runner-creds
-  omninode-runner-83:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-83
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-83
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-83-creds:/home/runner/.runner-creds
-  omninode-runner-84:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-84
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-84
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-84-creds:/home/runner/.runner-creds
-  omninode-runner-85:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-85
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-85
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-85-creds:/home/runner/.runner-creds
-  omninode-runner-86:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-86
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-86
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-86-creds:/home/runner/.runner-creds
-  omninode-runner-87:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-87
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-87
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-87-creds:/home/runner/.runner-creds
-  omninode-runner-88:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-88
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-88
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
-      - runner-88-creds:/home/runner/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
@@ -1458,17 +1125,50 @@ services:
   # single-source list (with mint/export instructions for all three) in
   # scripts/deploy-runners.sh's top-of-file usage comment.
   #
-  # REGISTRATION IS REPOSITORY-SCOPED (live-verified 2026-07-22):
-  # GITHUB_ORG_URL points at the omnibase_infra REPO, matching the live
-  # registration and the credential cache seeded in the
-  # omninode-deploy-runner-creds volume (cache key = labels + URL; changing
-  # the URL orphans the cache and forces re-registration). RUNNER_GROUP is
-  # explicitly EMPTY: repo-scoped `config.sh --runnergroup` hard-fails, and
-  # the entrypoint (OMN-14900) only omits the flag for an explicitly empty
-  # value. A recreate re-registers only if the creds volume is lost; then
-  # mint a REPO registration token (`gh api -X POST
-  # repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token`,
-  # valid 1h) and export DEPLOY_RUNNER_TOKEN before `up -d`.
+  # REGISTRATION IS ORGANIZATION-SCOPED, in runner group `omnibase-deploy`
+  # (OMN-18386; was repository-scoped on omnibase_infra until 2026-09-15).
+  #
+  # WHY IT MOVED. A reusable workflow's jobs run in the CALLER's repository.
+  # runtime-rebuild-trigger-reusable.yml's `verify-sibling-converged` job is
+  # pinned to `runs-on: [self-hosted, omnibase-deploy]` because the dev lane's
+  # docker daemon is on the LAN and hosted compute cannot see it -- but with
+  # the runner registered on omnibase_infra alone, no runner carrying that
+  # label was visible to omnimarket, the one external caller. Its verify job
+  # therefore queued forever with no runner (runs 34903286467 and 34908448152
+  # sat queued for over an hour), no compose-dev lab-pass receipt was emitted
+  # for any omnimarket merge, and CLAUDE.md rule 24(a) was silently false for
+  # that repo. omnibase_infra's own runs scheduled the same job fine, which is
+  # exactly why the gap went unnoticed.
+  #
+  # BLAST RADIUS. The group is `visibility: selected` over precisely the two
+  # repositories that reference the label -- omnibase_infra and omnimarket.
+  # That repository access list is the whole of the control. The group also
+  # carries `allows_public_repositories: true`, which is NOT a widening and is
+  # NOT optional: both repositories are PUBLIC, and a group with that flag
+  # false refuses their jobs SILENTLY -- the job queues forever with no runner
+  # and no error, which is the exact symptom this ticket exists to remove. It
+  # was set false first, on the assumption that these repositories were
+  # private, and a dispatched probe job sat queued against an online, idle
+  # runner until the flag was corrected. The shared omnibase-ci group carries
+  # the same flag for the same reason. omniclaude and omnibase_core were
+  # checked on 2026-09-15 and have no runtime-rebuild-trigger workflow at all,
+  # so they are deliberately NOT in the group; add a repository here only when
+  # it actually calls the reusable. This DOES widen the surface: any workflow
+  # in either repository can now target the label and reach this container's
+  # docker.sock and private clone tree. The reusable's verify job itself runs
+  # no caller-authored code (it checks out omnibase_infra@dev pinned), and a
+  # fork PR cannot reach it (the trigger job routes forks to hosted compute and
+  # the LAN publish is refused, so the verify job's `if:` is false).
+  #
+  # RUNNER_GROUP is `omnibase-deploy` and GITHUB_ORG_URL is the ORG. The
+  # credential cache key is SHA256(labels + URL), so changing the URL orphans
+  # the old repo-scoped cache and forces re-registration on the next recreate;
+  # the orphaned entry is left in place deliberately, so reverting this file
+  # restores the repo-scoped registration from cache. A recreate needs an ORG
+  # registration token (`gh api -X POST
+  # orgs/OmniNode-ai/actions/runners/registration-token`, valid 1h) exported as
+  # DEPLOY_RUNNER_TOKEN before `up -d`. The group must exist before the
+  # recreate: `config.sh --runnergroup` fails on an unknown group.
   # See knowledge-base-internal:runbooks/omnibase-infra-release-train-lab.md for the full recreate procedure.
   omninode-deploy-runner:
     image: omninode-runner:latest
@@ -1523,12 +1223,14 @@ services:
     environment:
       RUNNER_LABELS: self-hosted,omnibase-deploy,linux,x64
       RUNNER_NAME: omninode-deploy-runner
-      # Repo-scoped, matching the live registration + seeded creds volume.
-      GITHUB_ORG_URL: https://github.com/OmniNode-ai/omnibase_infra
+      # Org-scoped (OMN-18386), matching the live registration + the creds
+      # volume entry re-seeded at that scope.
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
-      # Present-and-empty = do NOT pass --runnergroup (repo-scoped
-      # registration rejects it; see docker/runners/entrypoint.sh).
-      RUNNER_GROUP: ""
+      # Org-scoped registration DOES take --runnergroup; the entrypoint passes
+      # the flag for any non-empty value (see docker/runners/entrypoint.sh).
+      # The group scopes repository access -- see the block above.
+      RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
       OMNI_HOME: ${DEPLOY_RUNNER_OMNI_HOME:?DEPLOY_RUNNER_OMNI_HOME must be set (private deploy-runner clone tree, e.g. /data/omninode/runner_omni_home)}
       # OMN-14958: the runtime_build scripts + deploy-runtime.sh need the
@@ -1608,9 +1310,160 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # ---------------------------------------------------------------------------
+  # omninode-customer-plane-runner-1/2 -- OMN-18392: the credential-free pair.
+  #
+  # These two exist for ONE property: a job that runs here holds no platform
+  # credential of any kind, so its refusals mean something. They carry the
+  # `omnibase-customer-plane` label family, which NOTHING else in the org
+  # targets, and they are deliberately NOT labelled `omnibase-ci` -- a general
+  # CI job landing here would find no kubeconfig and fail closed at preflight,
+  # which is the OMN-18188 failure mode in reverse.
+  #
+  # WHY THEY ARE NEW CONTAINERS RATHER THAN A RELABEL. The customer-plane
+  # reachability probe (omninode_infra .github/workflows/
+  # customer-plane-reachability-probe.yml) asserts the absence of eight
+  # credential env vars and of a kubeconfig, then measures which internal
+  # surfaces refuse a TCP connect from a customer's vantage. It was pinned to a
+  # GitHub-hosted runner for exactly that identity, and the 2026-09-14 operator
+  # ruling that private repositories never run on hosted runners left it dark.
+  # The lab vantage carries the NETWORK half of that proof -- the roster names
+  # only public edges, the lab resolver and 1.1.1.1 agree, and an unmodified
+  # run from this host classified every leg identically to the hosted record.
+  # It could not carry the IDENTITY half: all 88 `omninode-runner-N` containers
+  # mount the lab credentials directory and export KUBECONFIG (OMN-18188), and
+  # the probe's own absence step fails on that, correctly. Clearing the
+  # variable while the file stayed mounted would be the green-gate-
+  # asserting-nothing outcome that workflow's header warns about, so the
+  # honest fix is a vantage that genuinely holds nothing.
+  #
+  # NOT A CANDIDATE, checked rather than assumed: `omninode-deploy-runner`
+  # bind-mounts the host operator env file (POSTGRES_PASSWORD, GH_PAT,
+  # LINEAR_API_KEY, Keycloak and Infisical credentials) and the docker socket,
+  # and `omninode-gate-runner` is not a GitHub Actions runner at all -- it is
+  # the bounded pre-push gate target from OMN-16295 and holds no registration.
+  #
+  # WHAT IS DELIBERATELY ABSENT, each line load-bearing:
+  #   - no ${RUNNER_LAB_CREDENTIALS_HOST_DIR} mount  (the k3s reader token)
+  #   - no KUBECONFIG                                (the probe checks this var)
+  #   - no /var/run/docker.sock                      (the host daemon is the
+  #     largest platform capability a runner can hold; the entrypoint's
+  #     _fix_docker_socket_gid already no-ops when the socket is absent, and
+  #     the disk-admission self-pause degrades to a logged skip)
+  #   - no group_add for the docker GID              (nothing to join)
+  # Pinned by tests/ci/test_customer_plane_runner_credential_free_omn18392.py,
+  # which asserts each absence against the resolved compose config AND carries
+  # a positive control proving a fleet runner still has all of them, so a
+  # parsing regression cannot report the absences vacuously.
+  #
+  # CAPACITY. Two, not one: the probe runs four times a day on a schedule with
+  # `cancel-in-progress: false`, and a single runner makes a recreate or a host
+  # restart a total outage of criterion C4 rather than a degraded one. Two, not
+  # more: nothing else targets this label, so idle capacity here is pure cost
+  # against the 88-runner fleet's share of the host.
+  #
+  # CREATION IS ADDITIVE. These join the existing compose project by name; they
+  # are created with `docker compose up -d --no-deps` naming exactly these two
+  # services. Never `--force-recreate` and never `--remove-orphans` against
+  # this file: a fleet-wide recreate costs about three hours and cannot be
+  # parallelised (see the OMN-18188 note on the lab-credentials mount above).
+  #
+  # MONITORING (OMN-18396). runner-monitor.sh's main detection loop scopes
+  # every check to services matching `^omninode-runner-[0-9]+$`, so this pair
+  # is invisible to it. A dedicated, alert-only block added by OMN-18396
+  # checks Docker + GitHub-registration status for exactly these two names and
+  # feeds an outage into the same Slack alert path -- an offline
+  # customer-plane runner is now paged, not only noticed by the reachability
+  # probe failing to schedule. AUTO-BOUNCE remains OUT of scope: that block
+  # never adds either name to `collect_remediation_targets()`'s input lists,
+  # and `collect_remediation_targets()` itself still hard-filters on
+  # `^omninode-runner-[0-9]+$`, so this pair cannot become a bounce target
+  # through this monitor. Building real auto-bounce for this family (its own
+  # expected-count bound, offline-age state, crash-loop/stuck-Created
+  # detection) is a separate, larger change. Do not widen the general-pool
+  # prefix regex, which would also pull `omninode-deploy-runner` in.
+  omninode-customer-plane-runner-1:
+    image: omninode-runner:latest
+    container_name: omninode-customer-plane-runner-1
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64
+      RUNNER_NAME: omninode-customer-plane-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      UV_CONCURRENT_DOWNLOADS: "1"
+      UV_CONCURRENT_BUILDS: "1"
+      UV_CONCURRENT_INSTALLS: "1"
+      UV_HTTP_TIMEOUT: "600"
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - customer-plane-runner-1-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  omninode-customer-plane-runner-2:
+    image: omninode-runner:latest
+    container_name: omninode-customer-plane-runner-2
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64
+      RUNNER_NAME: omninode-customer-plane-runner-2
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      UV_CONCURRENT_DOWNLOADS: "1"
+      UV_CONCURRENT_BUILDS: "1"
+      UV_CONCURRENT_INSTALLS: "1"
+      UV_HTTP_TIMEOUT: "600"
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - customer-plane-runner-2-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   deploy-runner-creds:
     name: omninode-deploy-runner-creds
+  # OMN-18392 -- credential-free customer-plane pair (see the service
+  # definitions above). Separate creds volumes so their registration cache
+  # is keyed to their own label set and cannot inherit a fleet runner's.
+  customer-plane-runner-1-creds:
+    name: omninode-customer-plane-runner-1-creds
+  customer-plane-runner-2-creds:
+    name: omninode-customer-plane-runner-2-creds
   runner-1-creds:
     name: omninode-runner-1-creds
   runner-2-creds:
@@ -1731,59 +1584,3 @@ volumes:
     name: omninode-runner-59-creds
   runner-60-creds:
     name: omninode-runner-60-creds
-  runner-61-creds:
-    name: omninode-runner-61-creds
-  runner-62-creds:
-    name: omninode-runner-62-creds
-  runner-63-creds:
-    name: omninode-runner-63-creds
-  runner-64-creds:
-    name: omninode-runner-64-creds
-  runner-65-creds:
-    name: omninode-runner-65-creds
-  runner-66-creds:
-    name: omninode-runner-66-creds
-  runner-67-creds:
-    name: omninode-runner-67-creds
-  runner-68-creds:
-    name: omninode-runner-68-creds
-  runner-69-creds:
-    name: omninode-runner-69-creds
-  runner-70-creds:
-    name: omninode-runner-70-creds
-  runner-71-creds:
-    name: omninode-runner-71-creds
-  runner-72-creds:
-    name: omninode-runner-72-creds
-  runner-73-creds:
-    name: omninode-runner-73-creds
-  runner-74-creds:
-    name: omninode-runner-74-creds
-  runner-75-creds:
-    name: omninode-runner-75-creds
-  runner-76-creds:
-    name: omninode-runner-76-creds
-  runner-77-creds:
-    name: omninode-runner-77-creds
-  runner-78-creds:
-    name: omninode-runner-78-creds
-  runner-79-creds:
-    name: omninode-runner-79-creds
-  runner-80-creds:
-    name: omninode-runner-80-creds
-  runner-81-creds:
-    name: omninode-runner-81-creds
-  runner-82-creds:
-    name: omninode-runner-82-creds
-  runner-83-creds:
-    name: omninode-runner-83-creds
-  runner-84-creds:
-    name: omninode-runner-84-creds
-  runner-85-creds:
-    name: omninode-runner-85-creds
-  runner-86-creds:
-    name: omninode-runner-86-creds
-  runner-87-creds:
-    name: omninode-runner-87-creds
-  runner-88-creds:
-    name: omninode-runner-88-creds

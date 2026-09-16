@@ -17,6 +17,19 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_re
 )
 
 
+def _parse_redacted_fields(value: object) -> tuple[str, ...]:
+    """Read the OMN-18385 redaction record off a raw DLQ envelope.
+
+    A non-list is not a redaction record and is read as 'no redaction'.
+    That is the correct default for every record written before the
+    publisher started emitting the key: those bodies were never redacted,
+    so refusing to replay them would be a claim this function cannot make.
+    """
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item) for item in value if str(item))
+
+
 class ModelDlqMessage(BaseModel):
     """A DLQ message parsed from a Kafka payload, with replay metadata."""
 
@@ -52,6 +65,17 @@ class ModelDlqMessage(BaseModel):
     )
     retry_count: int = Field(default=0, ge=0, description="Prior retry attempts.")
     error_type: str = Field(default="Unknown", description="Classified error type.")
+    redacted_fields: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Dotted paths of credential-named fields the dead-letter "
+            "publisher removed from ``original_value`` (OMN-18385). Field "
+            "NAMES only -- never values. Non-empty means the body on this "
+            "record is deliberately incomplete, and ``should_replay`` "
+            "refuses it: republishing a command whose credential has been "
+            "replaced by a marker sends a request that cannot authenticate."
+        ),
+    )
     dlq_offset: int = Field(
         ..., ge=0, description="Offset of this message in the DLQ topic."
     )
@@ -128,6 +152,7 @@ class ModelDlqMessage(BaseModel):
             correlation_id=correlation_id,
             retry_count=retry_count,
             error_type=str(payload.get("error_type", "Unknown")),
+            redacted_fields=_parse_redacted_fields(payload.get("redacted_fields")),
             dlq_offset=dlq_offset,
             dlq_partition=dlq_partition,
             raw_payload=payload,

@@ -51,7 +51,12 @@ SETUP_PYTHON_UV_ACTION = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "b441ff9d979e248ac20c51a00c135a3ce273cef2"
+# OMN-18413: re-pinned from b441ff9d9 (orphaned by the OMN-16642 omniclaude
+# release-sync main move -- reachable from neither dev nor main after that
+# move landed) to omniclaude dev/main's current tip. Confirmed no checkout
+# step was added between the two commits (diff-reviewed): the invariant this
+# constant pins still holds at the new sha.
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "2173a846258c05b77858c454176f22ff1e41a3aa"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -127,6 +132,12 @@ def test_migration_integration_resolves_reachable_postgres_host() -> None:
         apply_step["env"]["OMNIBASE_INFRA_DB_URL"]
         == "postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra"
     )
+    apply_steps = [
+        step
+        for step in workflow["jobs"]["integration-guard"]["steps"]
+        if step.get("name") == "Apply all migrations"
+    ]
+    assert len(apply_steps) == 1
 
     assert_step = next(
         step for step in steps if step.get("name") == "Assert manifest tables exist"
@@ -877,32 +888,59 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
                 continue
 
             steps = job["steps"]
-            setup_steps = [
-                step
-                for step in steps
-                if step.get("uses") == "./.github/actions/setup-python-uv"
-            ]
-            assert setup_steps, (
-                f"{workflow_path.name}:{job_name} must use setup-python-uv"
-            )
-            assert all(
-                step["with"]["install-args"] == "--frozen" for step in setup_steps
-            )
-            assert all(step["with"]["cache-enabled"] == "false" for step in setup_steps)
-            assert all(
-                step["with"]["shared-env-enabled"] == "true" for step in setup_steps
-            )
-
             run_scripts = [
                 step.get("run", "")
                 for step in steps
                 if isinstance(step.get("run"), str)
             ]
+
+            # Universal, whether or not this job runs Python: resolving deps
+            # imperatively is the thing being forbidden.
             assert not any(
                 re.search(r"(^|\n)\s*(?:python -m )?pip install\b", script)
                 for script in run_scripts
             ), f"{workflow_path.name} must not run pip install directly"
-            assert any("uv run python scripts/" in script for script in run_scripts)
+
+            setup_steps = [
+                step
+                for step in steps
+                if step.get("uses") == "./.github/actions/setup-python-uv"
+            ]
+
+            # OMN-17057: the assertion is about jobs that RUN Python. A job that
+            # runs none satisfies "does not resolve Python deps outside CI env
+            # setup" trivially, and requiring the setup action there would
+            # install a toolchain nothing uses -- ceremony that later reads as a
+            # dependency. deliver-sibling-candidate is the first such job: it
+            # runs `gh` and `jq` only.
+            #
+            # The discriminating half is the else branch. A job with no setup
+            # step is asserted to invoke no Python at all, so "forgot the setup
+            # action" cannot pass as "does not need it".
+            invokes_python = any(
+                re.search(r"(^|\n|\|\s*)\s*(uv run )?python3?\b", script)
+                for script in run_scripts
+            )
+            if invokes_python:
+                assert setup_steps, (
+                    f"{workflow_path.name}:{job_name} runs Python and must use "
+                    "setup-python-uv"
+                )
+                assert all(
+                    step["with"]["install-args"] == "--frozen" for step in setup_steps
+                )
+                assert all(
+                    step["with"]["cache-enabled"] == "false" for step in setup_steps
+                )
+                assert all(
+                    step["with"]["shared-env-enabled"] == "true" for step in setup_steps
+                )
+                assert any("uv run python scripts/" in script for script in run_scripts)
+            else:
+                assert not setup_steps, (
+                    f"{workflow_path.name}:{job_name} sets up the CI Python "
+                    "environment but invokes no Python"
+                )
 
 
 def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:

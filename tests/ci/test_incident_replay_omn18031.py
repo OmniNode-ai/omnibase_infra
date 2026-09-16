@@ -78,28 +78,52 @@ def test_the_captured_artifacts_are_the_bytes_the_registry_records() -> None:
 # --- CASE 1 ---------------------------------------------------------------
 
 
-def _live_policy() -> dict[str, Any]:
-    return route.load_route_policy(REPO_ROOT / "config" / "runner_routing_policy.yaml")
+def _live_policy() -> Any:
+    """The SHIPPED thresholds, from the node contract that declares them."""
+    return route.load_contract_policy(
+        REPO_ROOT
+        / "src/omnibase_infra/nodes/node_ci_runner_route_compute/contract.yaml"
+    )
+
+
+def _live_hosted_workflows() -> list[str]:
+    return list(
+        route.load_hosted_workflows(REPO_ROOT / "config" / "runner_routing_policy.yaml")
+    )
 
 
 def _decide_ci_yml(hosted_list: list[str]) -> Any:
-    """Drive the REAL decision function for ci.yml on an idle fleet."""
-    return route.decide(
+    """Drive the REAL decision -- the node's handler -- for ci.yml on an idle
+    fleet. The replay is only worth keeping if it exercises the shipped
+    decision rather than a copy of it, which is why it builds the same typed
+    request the route job builds.
+    """
+    from omnibase_infra.nodes.node_ci_runner_route_compute.handlers.handler_ci_runner_route import (
+        HandlerCIRunnerRoute,
+    )
+
+    request = route.build_request(
         event_name="push",
         head_repo="OmniNode-ai/omnibase_infra",
         repository="OmniNode-ai/omnibase_infra",
         workflow_path=".github/workflows/ci.yml",
         seam_json='["self-hosted","omnibase-ci"]',
         public_json='["ubuntu-latest"]',
+        # omnibase_infra is public; the visibility rule is a no-op here and the
+        # replay's expectations are unchanged by it.
+        visibility="public",
         fleet={"ok": True, "online": 88, "busy": 9, "total": 88},
         lab={
             "ok": True,
             "age_seconds": 30,
             "hosts": [{"label": "omninode-pc", "ratio": 0.40, "free_mem_mib": 49000}],
         },
+        hosted_workflows=tuple(hosted_list),
+        force="auto",
         policy=_live_policy(),
-        allowlist=hosted_list,
+        fleet_expected_count=88,
     )
+    return HandlerCIRunnerRoute().handle(request)
 
 
 def test_the_captured_policy_still_carries_the_list_that_caused_the_defect() -> None:
@@ -127,7 +151,7 @@ def test_the_real_guard_pins_ci_yml_hosted_when_fed_the_audit_allowlist() -> Non
     audit_allowlist = [entry["path"] for entry in captured["hosted_runner_allowlist"]]
     result = _decide_ci_yml(audit_allowlist)
     assert result.decision == "hosted"
-    assert result.reason == "policy_allowlist"
+    assert result.reason.value == "policy_allowlist"
 
 
 def test_the_shipped_configuration_does_not_pin_ci_yml_hosted() -> None:
@@ -136,9 +160,9 @@ def test_the_shipped_configuration_does_not_pin_ci_yml_hosted() -> None:
     ci.yml is free to route on capacity. If someone re-points the module at
     `hosted_runner_allowlist`, this fails.
     """
-    result = _decide_ci_yml(route.hosted_workflows(_live_policy()))
+    result = _decide_ci_yml(_live_hosted_workflows())
     assert result.decision == "self_hosted"
-    assert result.reason == "capacity_available"
+    assert result.reason.value == "capacity_available"
 
 
 def test_the_route_hosted_list_and_the_audit_allowlist_are_not_the_same_list() -> None:

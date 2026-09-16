@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 """OMN-16106 Item 0 — one applying Evidence Autoclose Sweep at a time.
 
-The sweep runs every 30 minutes AND is dispatchable by hand, and until this
+The sweep runs on a schedule (every 2 hours since 2026-09-15; every 30 minutes
+when this test was written) AND is dispatchable by hand, and until this
 change it declared no GitHub Actions ``concurrency`` key at all. Two runs of a
 writer whose whole job is to move tickets to Done could therefore overlap: a
 cron tick and an operator dispatch, or two cron ticks when one runs long

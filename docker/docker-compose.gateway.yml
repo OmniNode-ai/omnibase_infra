@@ -138,6 +138,9 @@ services:
       # this ticket closes. NOT A ROTATION (Operating Rule 22): the map binds
       # the principal OMN-18012 phase A provisioned.
       - ${GATEWAY_LANE_CREDENTIAL_MAP_FILE:?GATEWAY_LANE_CREDENTIAL_MAP_FILE is required - the gateway forwarder authenticates to the dev lane broker as the synthetic SCRAM principal provisioned by redpanda-scram-user (OMN-18012); operator-supplied, never inlined here}:/run/gateway/lane-credentials.yaml:ro
+      # HTTPS ingest is contract-selected. The directory stays empty for the
+      # direct-MSK default; the process reads its strict artifacts only on opt-in.
+      - ${GATEWAY_INFISICAL_SECRET_DIR:-/etc/omninode/gateway/secrets}:/run/gateway/secrets:ro
     devices:
       # The wrapped private key is usable only through the .201 TPM. The raw
       # signing key never exists in a host file or inside the container.

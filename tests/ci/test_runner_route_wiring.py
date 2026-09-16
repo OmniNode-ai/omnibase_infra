@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -88,17 +89,97 @@ def test_the_route_decision_job_is_hosted_and_says_why() -> None:
 
 
 def test_the_route_job_is_time_bounded_so_it_cannot_stall_every_consumer() -> None:
-    """It sits on the critical path ahead of every heavy job in the run."""
+    """It sits on the critical path ahead of every heavy job in the run.
+
+    The budget covers a checkout and a cached environment sync as well as the
+    decision itself, which takes milliseconds. Widening it is how a routing
+    layer starts costing every pipeline in the repository a few minutes that
+    nobody attributes to it, so a sync that no longer fits fails here instead.
+    """
     assert (
         _workflow("runner-route-reusable.yml")["jobs"]["route"]["timeout-minutes"] <= 5
     )
 
 
-def test_the_reusable_workflow_exposes_the_three_outputs_consumers_read() -> None:
-    outputs = _triggers(_workflow("runner-route-reusable.yml"))["workflow_call"][
-        "outputs"
-    ]
-    assert set(outputs) == {"labels", "decision", "reason"}
+def test_both_route_call_sites_set_up_the_environment_before_deciding() -> None:
+    """THE SILENT DEGRADATION, pinned.
+
+    The route job imports the routing node, and importing anything in this
+    package executes its __init__, which pulls the database and broker
+    surfaces. A route job without the project environment therefore raises
+    ModuleNotFoundError, falls through to its own fail-closed floor, and
+    reports a GREEN job whose decision reads
+    `probe_error:module_unavailable` -- measured on run 35039101488, where the
+    mechanism was completely inert and no check was red.
+
+    Nothing else can see that: the floor exists precisely so a broken router
+    still hands the run a usable runs-on. The only durable guard is that the
+    setup step is present and precedes the decision.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        steps = _workflow(workflow_name)["jobs"][job]["steps"]
+        setup_index = next(
+            (
+                i
+                for i, step in enumerate(steps)
+                if "setup-python-uv" in str(step.get("uses", ""))
+            ),
+            None,
+        )
+        assert setup_index is not None, (
+            f"{workflow_name}:{job} invokes the routing node without setting up "
+            f"the environment; it will fall through to the fail-closed floor and "
+            f"report a green, inert route job"
+        )
+        decide_index = next(
+            i for i, step in enumerate(steps) if step.get("id") == "decide"
+        )
+        assert setup_index < decide_index, workflow_name
+        body = steps[decide_index]["run"]
+        assert "uv run --frozen" in body, (
+            f"{workflow_name}:{job} runs the module outside the synced environment"
+        )
+
+
+def test_no_workflow_call_declaration_carries_an_expression() -> None:
+    """A STARTUP FAILURE, and the most expensive shape of one.
+
+    Actions evaluates `${{ }}` inside a workflow_call inputs/outputs block,
+    where the `needs` context does not exist. An illustrative snippet in an
+    output DESCRIPTION therefore fails every CALLING workflow before a single
+    job starts -- measured on run 35037012235, where ci.yml and the routing
+    probe each concluded failure with zero jobs and the run title fell back to
+    the file path, which is the only visible symptom. No check reports on a run
+    that never started, so nothing else in this suite can see it.
+    """
+    for name in ("runner-route-reusable.yml", "runner-route-probe.yml"):
+        block = _triggers(_workflow(name)).get("workflow_call")
+        if not isinstance(block, dict):
+            continue
+        for section in ("inputs", "outputs"):
+            for field, spec in (block.get(section) or {}).items():
+                description = str((spec or {}).get("description", ""))
+                assert "${{" not in description, (
+                    f"{name}: workflow_call.{section}.{field} description carries "
+                    f"an expression; that is a startup failure in every caller"
+                )
+
+
+def test_the_reusable_workflow_exposes_the_outputs_consumers_read() -> None:
+    """A consumer reads the label set and can audit the verdict.
+
+    `runs_on` is the name a call site reads it by -- `runs-on:
+    fromJSON(needs.route.outputs.runs_on)` says what it is at the point of use
+    -- and `labels` is the name the pilot shipped and the saturation monitor
+    already consumes. Both are emitted rather than one renamed: renaming the
+    one a live consumer reads would break it silently, since an unknown output
+    resolves to the empty string and an empty `runs-on` fails to schedule
+    rather than failing loudly.
+    """
+    outputs = _workflow("runner-route-reusable.yml")[True]["workflow_call"]["outputs"]
+    assert set(outputs) == {"labels", "runs_on", "decision", "reason"}
+    assert "jobs.route.outputs.runs_on" in outputs["runs_on"]["value"]
+    assert "jobs.route.outputs.labels" in outputs["labels"]["value"]
 
 
 # --- enforcement: registration is half the mechanism -----------------------
@@ -470,6 +551,101 @@ def test_the_runner_variables_are_supplied_through_env() -> None:
         assert "--seam-json" in body and "--public-json" in body, workflow_name
 
 
+# --- OMN-18412: the private-repo rule reaches the workflow, not just the module
+
+
+ROUTE_CALL_SITES = (
+    ("runner-route-reusable.yml", "route"),
+    ("runner-route-probe.yml", "route-inline"),
+)
+
+
+def test_both_route_call_sites_give_the_module_a_token_to_read_visibility() -> None:
+    """Without a token the probe returns `unknown` on every run, and the
+    private-repo rule degrades to its weaker half in silence -- a green route
+    job, a plausible record, and no refusal that should have happened.
+
+    The JOB token is what is wired, deliberately: repository metadata is
+    readable under the `metadata: read` scope every Actions token already
+    carries, so the rule costs no new credential and no new scope.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        env = _decide_step(workflow_name, job).get("env") or {}
+        assert "GITHUB_TOKEN" in env, (
+            f"{workflow_name}:{job} gives the module no token, so "
+            f"probe_repo_visibility returns 'unknown' on every run"
+        )
+        assert "github.token" in str(env["GITHUB_TOKEN"]), workflow_name
+
+
+def test_both_route_call_sites_fail_the_run_on_a_refusal() -> None:
+    """A refusal must STOP the run. It is not a crash and not a capacity
+    fallback: it means the only placement this repository's policy allows is
+    one the 2026-09-14 operator ruling forbids.
+
+    Three things are pinned together because each fails on its own. `rc` must
+    be initialised, or `set -u` makes the check itself the error. The exit
+    status must be CAPTURED rather than swallowed. And the run must exit
+    non-zero, or the refusal is a log line that places the jobs anyway.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        assert "rc=0" in body, f"{workflow_name}:{job} leaves rc unset under set -u"
+        assert "|| rc=$?" in body, (
+            f"{workflow_name}:{job} discards the module's exit status, so a "
+            f"refusal is indistinguishable from a successful decision"
+        )
+        assert '[ "${rc}" = "3" ]' in body, workflow_name
+        assert "exit 1" in body, (
+            f"{workflow_name}:{job} reports a refusal without failing the run"
+        )
+
+
+def test_the_refusal_check_runs_after_the_fail_closed_floor() -> None:
+    """ORDER IS THE MECHANISM. The floor writes hosted labels whenever no
+    `labels=` line exists, so that a crashed router still hands the run a
+    usable runs-on. If the refusal check ran first, a refusal would exit before
+    the floor and the ordering would not matter; if the floor ran and then
+    OVERWROTE a refusal, a forbidden hosted placement would be emitted by the
+    very step that exists to make failures safe. The module writes its own
+    `labels=` line before returning 3, which makes the floor a no-op on this
+    path -- and this test pins the arrangement that keeps it one.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        floor = body.index("probe_error:module_unavailable")
+        refusal = body.index('[ "${rc}" = "3" ]')
+        assert floor < refusal, (
+            f"{workflow_name}:{job} checks the refusal before the fail-closed "
+            f"floor, so the floor can overwrite a refusal with hosted labels"
+        )
+
+
+def test_the_refusal_exit_code_matches_the_module() -> None:
+    """The workflow tests a literal 3 and the module returns a named constant.
+    A rename or renumber on either side silently disarms the check, so the two
+    are compared rather than assumed equal.
+    """
+    route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    assert route.REFUSED_EXIT_CODE == 3
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        assert f'[ "${{rc}}" = "{route.REFUSED_EXIT_CODE}" ]' in body, workflow_name
+
+
+def test_visibility_is_read_by_the_module_and_not_interpolated() -> None:
+    """The counterpart to the no-interpolation rule: the fact arrives because
+    the module reads it, so no `--repo-visibility` argument is spelled at
+    either call site. An interpolated `github.event.repository.private` would
+    also be absent from some event payloads, which is the second reason the
+    probe owns this rather than the template.
+    """
+    for workflow_name, job in ROUTE_CALL_SITES:
+        body = _decide_step(workflow_name, job)["run"]
+        assert "--repo-visibility" not in body, workflow_name
+        assert "${{" not in body, workflow_name
+
+
 # --- G6: the first heavy-job consumer of the route output -------------------
 #
 # `lint` is the ONE job whose placement now resolves from the route decision.
@@ -545,17 +721,65 @@ def test_lints_runs_on_names_no_runner_variable_at_all() -> None:
         assert variable not in runs_on
 
 
+def _decide_via_node(**kwargs: Any) -> Any:
+    """Drive the shipped decision -- the routing node's handler.
+
+    The wiring tests assert on PLACEMENT, so they go through the same typed
+    request the route job builds rather than re-deriving one; a wiring test
+    that exercised a copy of the decision would pass while the shipped one
+    changed underneath it.
+    """
+    route_module = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    from omnibase_infra.nodes.node_ci_runner_route_compute.handlers.handler_ci_runner_route import (
+        HandlerCIRunnerRoute,
+    )
+
+    policy = kwargs.pop("policy")
+    request = route_module.build_request(
+        event_name=kwargs["event_name"],
+        head_repo=kwargs.get("head_repo", ""),
+        repository=kwargs["repository"],
+        workflow_path=kwargs["workflow_path"],
+        seam_json=kwargs["seam_json"],
+        public_json=kwargs["public_json"],
+        visibility=kwargs.get("visibility", "public"),
+        fleet=kwargs["fleet"],
+        lab=kwargs["lab"],
+        hosted_workflows=tuple(kwargs.get("allowlist") or ()),
+        force="auto",
+        policy=policy,
+        fleet_expected_count=88,
+    )
+    decision = HandlerCIRunnerRoute().handle(request)
+    return SimpleNamespace(
+        labels=list(decision.runs_on),
+        decision=decision.decision.value,
+        reason=decision.reason_wire,
+    )
+
+
 def test_fork_pr_isolation_still_holds_for_the_lint_workflow_path() -> None:
     """The behavioural half of the test above. For a fork PR the route output
     IS the public variable's labels, so lint's placement on a fork is decided by
     the same knob the V1 expression read -- before any capacity signal.
     """
     route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
-    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))["route"]
-    result = route.decide(
+    # The SHIPPED thresholds, from the contract that declares them. Read from
+    # the contract rather than the config file precisely because the config
+    # file no longer carries them: a test that kept reading the old home would
+    # pass on a policy nothing applies.
+    route_module = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    policy = route_module.load_contract_policy(
+        REPO_ROOT
+        / "src/omnibase_infra/nodes/node_ci_runner_route_compute/contract.yaml"
+    )
+    result = _decide_via_node(
         event_name="pull_request",
         head_repo="a-fork/omnibase_infra",
         repository="OmniNode-ai/omnibase_infra",
+        # omnibase_infra is public, so the OMN-18412 rule is a no-op here and
+        # this stays a statement about fork isolation alone.
+        visibility="public",
         workflow_path=".github/workflows/ci.yml",
         # A seam that DOES permit the lab, so the assertion is about fork
         # isolation and not about today's inert hosted ceiling.
@@ -580,11 +804,22 @@ def test_a_misconfigured_public_variable_cannot_widen_a_fork_onto_the_fleet() ->
     named the fleet, a fork PR still lands hosted.
     """
     route = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
-    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))["route"]
-    result = route.decide(
+    # The SHIPPED thresholds, from the contract that declares them. Read from
+    # the contract rather than the config file precisely because the config
+    # file no longer carries them: a test that kept reading the old home would
+    # pass on a policy nothing applies.
+    route_module = _load("runner_route_decision", "scripts/ci/runner_route_decision.py")
+    policy = route_module.load_contract_policy(
+        REPO_ROOT
+        / "src/omnibase_infra/nodes/node_ci_runner_route_compute/contract.yaml"
+    )
+    result = _decide_via_node(
         event_name="pull_request",
         head_repo="a-fork/omnibase_infra",
         repository="OmniNode-ai/omnibase_infra",
+        # omnibase_infra is public, so the OMN-18412 rule is a no-op here and
+        # this stays a statement about fork isolation alone.
+        visibility="public",
         workflow_path=".github/workflows/ci.yml",
         seam_json='["self-hosted","omnibase-ci"]',
         public_json='["self-hosted","omnibase-ci"]',

@@ -81,8 +81,10 @@
       "clientId": "onex-api",
       "publicClient": false,
       "fullScopeAllowed": false,
-      "bearerOnly": true,
-      "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"]
+      "bearerOnly": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
+      "consumerSecretEnv": "ONEX_API_CONSUMER_CLIENT_SECRET"
     },
     {
       "clientId": "omnidash-spa",

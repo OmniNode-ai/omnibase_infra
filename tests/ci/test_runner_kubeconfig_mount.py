@@ -54,7 +54,9 @@ EXPECTED_MOUNT_SOURCE_EXPR = (
     "${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}"
 )
 EXPECTED_KUBECONFIG_ENV = "/home/runner/.lab-credentials/lab-ci-reader.kubeconfig"
-FLEET_SERVICE_COUNT = 88
+# OMN-18411: fleet capped 88 -> 60 (CI burst drove one-minute load to 100.9 on
+# the 32-core .201 host).
+FLEET_SERVICE_COUNT = 60
 
 
 def _load_compose() -> dict[str, Any]:
@@ -246,7 +248,10 @@ def _parse_sync_paths() -> list[str]:
     finally:
         if str(SCRIPTS_CI) in sys.path:
             sys.path.remove(str(SCRIPTS_CI))
-    return module.parse_sync_paths(DEPLOY_SCRIPT.read_text(encoding="utf-8"))
+    result: list[str] = module.parse_sync_paths(
+        DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    )
+    return result
 
 
 def test_the_kubeconfig_is_not_in_sync_paths() -> None:
@@ -307,6 +312,14 @@ def test_docker_compose_config_resolves_without_error_for_the_fleet(
             "RUNNER_TOKEN": "dummy",
             "DEPLOY_RUNNER_OMNI_HOME": str(fake_omni_home),
             "DEPLOY_RUNNER_OPERATOR_ENV_FILE": str(fake_operator_env),
+            # OMN-18415: the fleet's local-LLM HMAC key is `:?`-guarded like the
+            # two above, so it must be supplied here for the same reason -- this
+            # env dict stands in for the runner host's own compose `.env`, which
+            # is where the real value is read from. A synthetic value is
+            # sufficient: this test proves interpolation resolves, never that
+            # any particular secret is correct.
+            "LOCAL_LLM_SHARED_SECRET": "dummy-interpolation-value",
+            "LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8",
         },
     )
     assert result.returncode == 0, (

@@ -3170,15 +3170,19 @@ jobs:
   # protection treats as never-satisfied — every omnibase_infra dev PR based on
   # 27478af4 or later was unmergeable until this repin.
   #
-  # d3182b6f is the current reusable workflow's pinned dev commit, reachable from
-  # `dev` forever.
+  # Current pin review (OMN-18205): ff6e41c is omnimarket#2575's squash merge
+  # commit, committed 2026-09-16T03:01:49Z. The mandatory Pin Reachability
+  # (OMN-15538) CI gate extracts both this reusable-workflow ref and the
+  # `vocabulary_ref`, then verifies each pin is reachable from the protected
+  # branch instead of merely fetchable. The merge-hold wiring test below also
+  # enforces that the workflow pin and `vocabulary_ref` remain identical.
   merge-hold-gate:
     permissions:
       contents: read
       pull-requests: read
-    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@d3182b6fb59b421383c793fcfea86a46b06b7b43
+    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@ff6e41cbfcad3184d728b2dd387aba2269da5e2c
     with:
-      vocabulary_ref: d3182b6fb59b421383c793fcfea86a46b06b7b43
+      vocabulary_ref: ff6e41cbfcad3184d728b2dd387aba2269da5e2c
       context_name: merge-hold-gate / evaluate
   # OMN-15361: P0/P8 fail-closed application database domain enforcement.
   # Unconditional after OCC eligibility and STRICT in ci_summary_gate.py: validators,
@@ -3376,7 +3380,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: 9e24df2ac07414a79c4de0ea9fa59458d595847c
+          ref: d7f922aacf5b76628fe84b0c2abffd5dc2eecc6e
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -4701,9 +4705,14 @@ jobs:
       # runs on that path (that is the whole point of the guard).
       - name: Run curated Postgres integration proofs (Postgres provisioned)
         id: run_curated_proofs
+        env:
+          # OMN-18172 (Jonah, comment c02674f2): read ONLY by the stored-synthetic
+          # proof below, which fails instead of skipping when Postgres is absent.
+          OMN18172_REQUIRE_PG: "1"
         run: |
           uv run pytest \
             tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid \
+            tests/integration/db/test_chain_canary_stored_traffic_class_omn18172.py \
             -rs -v --tb=short \
             --junitxml=integration-guard.xml
 

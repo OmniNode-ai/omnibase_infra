@@ -164,6 +164,8 @@ def test_proof_runs_real_migrations_twice_and_pins_the_blocked_upgrade() -> None
     assert "Sentinel set. Migration gate will report HEALTHY." in proof
     assert "second pass was not idempotent" in proof
     assert "platform_catalog.schema_migrations" in proof
+    assert "provision_action_authorization_claim_schema" in proof
+    assert "CREATE SCHEMA IF NOT EXISTS action_authorization_claim" in proof
     assert "fixture_case=application_ledger_fresh" in proof
     assert "fixture_case=application_ledger_legacy" in proof
     assert "selected_oid_preserved=true" in proof

@@ -40,6 +40,7 @@ silent_skip_allowed: false
 # `node_registrations` schema.
 curated_test_paths:
   - "tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid"
+  - "tests/integration/db/test_chain_canary_stored_traffic_class_omn18172.py"
 # At least this many integration tests must actually EXECUTE (not skip) on the
 # provisioning job. Guards the zero-collection / all-skip false-green (a marker
 # typo, a broken collection selecting nothing, or every curated proof silently

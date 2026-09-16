@@ -81,6 +81,8 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_del
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
+    content_addressed_event_id,
+    synthesize_outbound_envelope,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -187,6 +189,23 @@ def _session_started_record(
     )
 
 
+def _admitted_session_started_payload(**extra: object) -> bytes:
+    body = json.loads(_SESSION_STARTED_VALUE)
+    body["redaction_state"] = "redacted"
+    body.update(extra)
+    return json.dumps(body).encode("utf-8")
+
+
+def _admitted_session_started_record(
+    headers: Mapping[str, bytes] | None = None,
+    **extra: object,
+) -> ModelTransportMessage:
+    return _session_started_record(
+        headers=headers,
+        value=_admitted_session_started_payload(**extra),
+    )
+
+
 def _tool_executed_record(
     value: bytes | None = None,
 ) -> ModelTransportMessage:
@@ -278,16 +297,20 @@ def _config(
     )
 
 
-# The live contract's policy, verbatim from node_bus_forwarder_effect/contract.yaml.
-def _governed_config() -> ModelGatewayForwarderConfig:
+def _capture_config(*outbound: str) -> ModelGatewayForwarderConfig:
     return _config(
-        outbound=(SESSION_STARTED_TOPIC, TOOL_EXECUTED_TOPIC),
+        outbound=outbound,
         egress_redaction=ModelGatewayEgressRedaction(
             state_field="redaction_state",
             admitted_states=("redacted", "restricted", "secret_detected"),
-            governed_topics=(TOOL_EXECUTED_TOPIC,),
+            governed_topics=outbound,
         ),
     )
+
+
+# The live contract's policy, verbatim from node_bus_forwarder_effect/contract.yaml.
+def _governed_config() -> ModelGatewayForwarderConfig:
+    return _capture_config(SESSION_STARTED_TOPIC, TOOL_EXECUTED_TOPIC)
 
 
 def _delivery(
@@ -320,13 +343,13 @@ def _delivery(
 async def test_captured_flat_hook_record_is_delivered_and_acknowledged() -> None:
     """The line class that had never once appeared: an outbound ack on a hook topic.
 
-    ``session-started.v1`` is the un-governed content-free hook class (operator
-    OD-9 ruling 2026-08-18), so it exercises the decode fix alone with no
-    redaction gate in the way. Before the fix this record quarantined.
+    ``session-started.v1`` is now redaction-governed like the other capture
+    classes, so this uses an admitted fixture payload to exercise the decode
+    fix without making the redaction gate the reason it passes.
     """
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record()
 
     await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
 
@@ -343,7 +366,7 @@ async def test_captured_flat_hook_record_is_delivered_and_acknowledged() -> None
     assert published.envelope_id == UUID(_SESSION_STARTED_MESSAGE_ID)
     assert published.correlation_id == UUID(_SESSION_UUID)
     # The flat record crosses intact as the payload -- nothing is dropped.
-    assert published.payload == json.loads(_SESSION_STARTED_VALUE)
+    assert published.payload == json.loads(_admitted_session_started_payload())
     # The trust-boundary stamp is _prepare_outbound's, unchanged.
     tags = published.metadata.tags
     assert tags["source_tenant_id"] == str(TENANT_ID)
@@ -356,6 +379,124 @@ async def test_captured_flat_hook_record_is_delivered_and_acknowledged() -> None
     assert tags["gateway_synthesized_source_topic"] == SESSION_STARTED_TOPIC
     assert tags["gateway_synthesized_source_partition"] == "0"
     assert tags["gateway_synthesized_source_offset"] == "63816330"
+    # Older flat records carry no content header. The relay derives the same
+    # content identity at the standard-envelope boundary.
+    assert tags["event_id"] == content_addressed_event_id(
+        published, SESSION_STARTED_TOPIC
+    )
+
+
+async def test_synthesis_carries_content_event_id_from_idempotency_header() -> None:
+    """The flat-wire adapter preserves the producer content identity."""
+    headers = {
+        **_SESSION_STARTED_HEADERS,
+        "idempotency_key": b"a" * 64,
+    }
+    envelope = synthesize_outbound_envelope(
+        _session_started_record(headers=headers),
+        _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
+    )
+
+    assert envelope is not None
+    assert envelope.metadata.tags["event_id"] == "a" * 64
+
+
+async def test_matching_content_event_id_is_forwarded_unchanged() -> None:
+    """The claimed post-redaction content ID survives flat-record synthesis."""
+    baseline = synthesize_outbound_envelope(
+        _admitted_session_started_record(),
+        _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
+    )
+    assert baseline is not None
+    event_id = content_addressed_event_id(baseline, SESSION_STARTED_TOPIC)
+    source = _Source()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={
+            **_SESSION_STARTED_HEADERS,
+            "idempotency_key": event_id.encode("utf-8"),
+        }
+    )
+
+    await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert source.committed == [message]
+    published = ModelEventEnvelope[dict[str, object]].model_validate_json(
+        cloud_bus.sent[0][1]
+    )
+    assert published.metadata.tags["event_id"] == event_id
+
+
+async def test_mismatched_content_event_id_is_quarantined() -> None:
+    """A producer assertion that disagrees with redacted content cannot cross."""
+    source = _Source()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
+    )
+
+    await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.nacked == []
+    assert source.committed == [message]
+
+
+async def test_malformed_content_event_id_is_quarantined() -> None:
+    """A supplied but undecodable content assertion is not a legacy absence."""
+    source = _Source()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"\xff"}
+    )
+
+    await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.committed == [message]
+    assert source.dlq != []
+
+
+async def test_refusal_without_dlq_sender_is_not_committed() -> None:
+    """A permanent refusal awaits a durable quarantine before its ACK."""
+    source = _Source()
+    source.send = None  # type: ignore[method-assign]
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
+    )
+
+    with pytest.raises(RuntimeError, match="quarantine was not durable"):
+        await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.committed == []
+
+
+class _FailingDlqSource(_Source):
+    async def send(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: Mapping[str, bytes],
+    ) -> None:
+        raise RuntimeError("DLQ unavailable")
+
+
+async def test_refusal_with_failed_dlq_is_not_committed() -> None:
+    """A failed durable quarantine must retain the source offset."""
+    source = _FailingDlqSource()
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(
+        headers={**_SESSION_STARTED_HEADERS, "idempotency_key": b"f" * 64}
+    )
+
+    with pytest.raises(RuntimeError, match="quarantine was not durable"):
+        await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
+
+    assert cloud_bus.sent == []
+    assert source.committed == []
 
 
 async def test_synthesized_envelope_carries_the_attach_config_tenant() -> None:
@@ -366,9 +507,11 @@ async def test_synthesized_envelope_carries_the_attach_config_tenant() -> None:
     record.
     """
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
 
-    await delivery.deliver_message("outbound", source, _session_started_record())  # type: ignore[arg-type]
+    await delivery.deliver_message(
+        "outbound", source, _admitted_session_started_record()
+    )  # type: ignore[arg-type]
 
     published = ModelEventEnvelope[dict[str, object]].model_validate_json(
         cloud_bus.sent[0][1]
@@ -402,8 +545,8 @@ async def test_flat_record_without_identity_headers_is_quarantined(
         if key not in dropped
     }
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(headers=headers)
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(headers=headers)
 
     await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
 
@@ -417,8 +560,8 @@ async def test_flat_record_without_identity_headers_is_quarantined(
 async def test_flat_record_with_non_uuid_message_id_is_quarantined() -> None:
     headers = {**_SESSION_STARTED_HEADERS, "message_id": b"not-a-uuid"}
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(headers=headers)
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(headers=headers)
 
     await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
 
@@ -430,7 +573,7 @@ async def test_flat_record_with_non_uuid_message_id_is_quarantined() -> None:
 async def test_non_object_json_body_is_quarantined_even_with_headers() -> None:
     """A JSON array or scalar is not a hook payload; synthesis refuses it."""
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
     message = _session_started_record(value=b'["not", "a", "payload"]')
 
     await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
@@ -458,11 +601,11 @@ async def test_real_envelope_record_is_unchanged_by_the_synthesis_path() -> None
         envelope_id=envelope_id,
         correlation_id=correlation_id,
         event_type="omniclaude.session-started",
-        payload={"ok": True},
+        payload={"ok": True, "redaction_state": "redacted"},
         metadata=ModelEnvelopeMetadata(tags={}),
     )
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
     message = _record(
         topic=SESSION_STARTED_TOPIC,
         value=envelope.model_dump_json().encode("utf-8"),
@@ -477,7 +620,7 @@ async def test_real_envelope_record_is_unchanged_by_the_synthesis_path() -> None
     )
     assert published.envelope_id == envelope_id
     assert published.correlation_id == correlation_id
-    assert published.payload == {"ok": True}
+    assert published.payload == {"ok": True, "redaction_state": "redacted"}
     assert "gateway_synthesized_envelope" not in published.metadata.tags
 
 
@@ -494,11 +637,9 @@ async def test_synthesized_record_with_foreign_payload_tenant_is_refused() -> No
     tenant that is not the attached one must still refuse, and (post-OMN-17382)
     that refusal is a quarantine rather than a wedge.
     """
-    body = json.loads(_SESSION_STARTED_VALUE)
-    body["tenant_id"] = "not-acme"
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
-    message = _session_started_record(value=json.dumps(body).encode("utf-8"))
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
+    message = _admitted_session_started_record(tenant_id="not-acme")
 
     await delivery.deliver_message("outbound", source, message)  # type: ignore[arg-type]
 
@@ -511,15 +652,13 @@ async def test_synthesized_record_with_foreign_payload_tenant_is_refused() -> No
 async def test_synthesized_record_with_matching_payload_tenant_crosses() -> None:
     """The positive control for the refusal above -- otherwise a refusal that
     fires on everything would read identically to a working check."""
-    body = json.loads(_SESSION_STARTED_VALUE)
-    body["tenant_id"] = TENANT_SLUG
     source = _Source()
-    delivery, cloud_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
+    delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
 
     await delivery.deliver_message(  # type: ignore[arg-type]
         "outbound",
         source,
-        _session_started_record(value=json.dumps(body).encode("utf-8")),
+        _admitted_session_started_record(tenant_id=TENANT_SLUG),
     )
 
     assert len(cloud_bus.sent) == 1
@@ -586,7 +725,7 @@ async def test_inbound_flat_record_is_still_quarantined() -> None:
     boundary this node exists to hold.
     """
     source = _Source()
-    delivery, local_bus = _delivery(_config(outbound=(SESSION_STARTED_TOPIC,)), source)
+    delivery, local_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
     message = _record(
         topic=f"tenant-{TENANT_SLUG}.{INBOUND_TOPIC}",
         value=_SESSION_STARTED_VALUE,

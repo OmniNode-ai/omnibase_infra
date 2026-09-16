@@ -20,6 +20,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayCanaryConfig,
     ModelGatewayCloudBusConfig,
     ModelGatewayForwarderConfig,
+    ModelGatewayHttpsIngestConfig,
     ModelGatewayMirrorTopics,
     ModelGatewayTenantIdentity,
 )
@@ -75,6 +76,18 @@ class _BlockingBus(_RecordingBus):
         self.entered.set()
         await self.release.wait()
         await super().publish(topic, key, value, headers)
+
+
+class _BatchRecordingBus(_RecordingBus):
+    """Expose the HTTPS batch publisher seam used by ``deliver_messages``."""
+
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(events)
+        self.batches: list[list[object]] = []
+
+    async def publish_batch(self, records: list[object]) -> None:
+        self.events.append("destination_batch_ack")
+        self.batches.append(records)
 
 
 class _Source:
@@ -328,6 +341,54 @@ async def test_store_failure_nacks_without_destination_dispatch() -> None:
     assert source.committed == []
     assert source.nacked == [message]
     assert events == ["source_nack"]
+
+
+async def test_https_batch_duplicate_envelope_id_falls_back_to_local_dedupe() -> None:
+    """A duplicate inside one poll must not cross before its marker exists.
+
+    The durable local key remains ``envelope_id``.  A batch cannot check only
+    prior durable rows: two duplicate records in the same poll would otherwise
+    both be included in the HTTP request before either row is marked.
+    """
+    events: list[str] = []
+    source = _Source(events)
+    config = _config().model_copy(
+        update={
+            "https_ingest": ModelGatewayHttpsIngestConfig(
+                ingest_url="https://gateway.example/v1/gateway/batch-ingest",
+                ingest_url_ref="gateway.cloud.https.ingest_url",
+                ingest_auth_ref="gateway.cloud.https.ingest_auth",
+                idempotency_key="event_id",
+                max_batch_records=100,
+                request_timeout_seconds=15.0,
+                retry_initial_seconds=1.0,
+                retry_max_seconds=30.0,
+            )
+        }
+    )
+    local_bus = _RecordingBus(events)
+    cloud_bus = _BatchRecordingBus(events)
+    forwarder = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,  # type: ignore[arg-type]
+        cloud_bus=cloud_bus,  # type: ignore[arg-type]
+    )
+    delivery = NodeGatewayDelivery(
+        config=config,
+        forwarder=forwarder,
+        local_consumer=source,  # type: ignore[arg-type]
+        cloud_consumer=source,  # type: ignore[arg-type]
+        idempotency_store=StoreIdempotencyInmemory(),
+    )
+    envelope_id = uuid4()
+    first = _message(envelope_id)
+    second = first.model_copy(update={"offset": 8, "ack_token": (OUTBOUND_TOPIC, 0, 8)})
+
+    await delivery.deliver_messages("outbound", source, [first, second])  # type: ignore[arg-type]
+
+    assert cloud_bus.batches == []
+    assert len(cloud_bus.sent) == 1
+    assert source.committed == [first, second]
 
 
 class _SharedLocalTransport:
@@ -883,6 +944,67 @@ async def test_a_transport_fault_still_nacks_and_raises() -> None:
 
     assert source.nacked == [message], "a transport fault must still nack for retry"
     assert source.committed == [], "never commit past a transport fault -- data loss"
+
+
+async def test_failed_quarantine_stops_before_later_same_partition_commit() -> None:
+    """A retained poison offset must stop its partition before a later commit.
+
+    Kafka commits advance the partition position, not an isolated record token.
+    If a failed DLQ write merely avoids committing the poison record but lets the
+    loop poll again, committing the next good record also commits past poison.
+    """
+
+    class _SequencedSource(_Source):
+        def __init__(
+            self, events: list[str], records: list[ModelTransportMessage]
+        ) -> None:
+            super().__init__(events)
+            self.records = records
+            self.poll_calls = 0
+            self.send = None  # type: ignore[method-assign]
+
+        async def poll(
+            self, *, max_messages: int, timeout_ms: int
+        ) -> Sequence[ModelTransportMessage]:
+            self.poll_calls += 1
+            if self.records:
+                return [self.records.pop(0)]
+            await asyncio.sleep(timeout_ms / 1000)
+            return []
+
+    events: list[str] = []
+    poison = ModelTransportMessage(
+        topic=OUTBOUND_TOPIC,
+        partition=0,
+        offset=3,
+        key=b"tenant-key",
+        value=b"SYNTHETIC-not-valid-json{{{",
+        headers={},
+        ack_token=(OUTBOUND_TOPIC, 0, 3),
+    )
+    good = _message()
+    good = good.model_copy(
+        update={"partition": 0, "offset": 4, "ack_token": (OUTBOUND_TOPIC, 0, 4)}
+    )
+    source = _SequencedSource(events, [poison, good])
+    store = _RecordingStore(events)
+    delivery, cloud_bus = _delivery(events, source, store)
+
+    with pytest.raises(RuntimeError, match="quarantine was not durable"):
+        await delivery._run_direction("outbound", source)  # type: ignore[arg-type]
+
+    assert source.poll_calls == 1
+    assert source.committed == []
+    assert cloud_bus.sent == []
+
+    # A restarted consumer receives the same offset. Once its DLQ send works,
+    # the poison is committed, then normal forward progress may resume.
+    source.send = _Source.send.__get__(source, _SequencedSource)  # type: ignore[method-assign]
+    await delivery.deliver_message("outbound", source, poison)  # type: ignore[arg-type]
+    await delivery.deliver_message("outbound", source, good)  # type: ignore[arg-type]
+
+    assert source.committed == [poison, good]
+    assert len(cloud_bus.sent) == 1
 
 
 async def _no_sleep(_seconds: float) -> None:
