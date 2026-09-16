@@ -104,6 +104,19 @@ on:
         required: true
       KAFKA_SASL_PASSWORD:
         required: true
+      # OMN-17057. The announcement job below sends a repository_dispatch to
+      # omnibase_infra, which is gated on Contents:write on the TARGET
+      # repository -- the same org App the delivery workflow already uses for
+      # the same class of cross-repo announcement (OMN-16373). Declared
+      # `required: false` so an existing caller that has not yet passed them
+      # keeps compiling; the job itself refuses rather than skipping when they
+      # turn out to be absent, because in that state the delivery IS the
+      # deliverable and a green run that announced nothing is the failure this
+      # whole path exists to remove.
+      ONEXBOT_OCC_APP_ID:
+        required: false
+      ONEXBOT_OCC_PRIVATE_KEY:
+        required: false
 
 jobs:
   trigger-rebuild:
@@ -383,3 +396,114 @@ jobs:
           path: /tmp/lab-pass-receipt
           retention-days: 90
           if-no-files-found: error
+
+  # OMN-17057 -- the sibling half of rule 24: the lab is where a change first
+  # runs, and staging is the promotion that follows a lab proof.
+  #
+  # WHAT WAS MISSING. `verify-sibling-converged` above proves the `.201` dev
+  # lane vendors THIS repository's merged sha and writes a compose-dev lab-pass
+  # receipt for it. Nothing then carried that sha any further. A sibling merge
+  # reached staging only by riding whatever candidate the NEXT push to
+  # omnibase_infra happened to build, which clones every sibling at branch
+  # `dev` at that instant -- so the vendored sibling revision was never chosen,
+  # could not be predicted, and no sibling merge could prove its own delivery.
+  # Measured on delivery run 35013603978: the candidate vendored omnimarket
+  # 3038d1da, simply where that branch pointed 18 minutes after an unrelated
+  # omnibase_infra commit merged.
+  #
+  # WHY IT LIVES HERE AND NOT IN A CALLER. Every repository the runtime image
+  # vendors -- omnimarket, omnibase_core, omnibase_compat, omnibase_spi --
+  # calls this one file, so each acquires the delivery path with no per-repo
+  # code and no per-repo configuration. A copy in each caller is how the org
+  # ended up with two divergent trigger_rebuild_on_merge.py, which this file's
+  # own header records.
+  #
+  # WHY IT NEEDS the convergence job. `needs:` plus GitHub's default success()
+  # means the announcement fires only after the lane was PROVEN to vendor the
+  # merged sha and the receipt for it was emitted. A convergence that fails, is
+  # skipped or is cancelled leaves this unfired, so "skipped" can never read as
+  # "delivered". The receiving side then reads that receipt again from this
+  # repository's artifact surface before announcing anything to staging, so the
+  # premise is checked on both sides of the boundary rather than trusted across
+  # it.
+  deliver-sibling-candidate:
+    name: Announce the merged revision for delivery to staging
+    needs: [trigger-rebuild, verify-sibling-converged]
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 10
+    steps:
+      - name: Check the announcement credentials are configured
+        env:
+          APP_ID: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
+            echo "::error::the announcement App credentials are not configured" \
+              "for this caller. The lab pass converged and its receipt was" \
+              "published, but nothing can carry this revision to the delivery" \
+              "workflow -- failing rather than reporting a delivery that did" \
+              "not happen."
+            exit 1
+          fi
+
+      - name: Obtain a write token for omnibase_infra
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnibase_infra
+          permission-contents: write
+
+      - name: Announce the merged sibling revision to the delivery workflow
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SOURCE_REPO: ${{ needs.trigger-rebuild.outputs.source_repo }}
+          SIBLING_SHA: ${{ needs.trigger-rebuild.outputs.sibling_sha }}
+        run: |
+          set -euo pipefail
+
+          # Refuse a malformed announcement on the side that can see what
+          # produced it. The receiving workflow validates this again, because
+          # it also accepts dispatches this job did not send, but a 40-hex
+          # check here names the broken producer instead of the consumer.
+          if ! [[ "${SIBLING_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::sibling_sha='${SIBLING_SHA}' is not a 40-character" \
+              "lowercase commit sha. A delivery pinned to anything else is the" \
+              "floating ref this path replaces."
+            exit 1
+          fi
+          if [ -z "${SOURCE_REPO}" ]; then
+            echo "::error::source_repo is empty -- refusing to announce a" \
+              "revision with no repository to resolve it in."
+            exit 1
+          fi
+
+          jq -n \
+            --arg repo "${SOURCE_REPO}" \
+            --arg revision "${SIBLING_SHA}" \
+            '{
+              event_type: "sibling-dev-candidate",
+              client_payload: {
+                pinned_repo: $repo,
+                pinned_revision: $revision
+              }
+            }' \
+            | gh api --method POST repos/OmniNode-ai/omnibase_infra/dispatches --input -
+
+          {
+            echo "### Sibling revision announced for delivery (OMN-17057)"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| pinned repository | \`${SOURCE_REPO}\` |"
+            echo "| pinned revision | \`${SIBLING_SHA}\` |"
+            echo ""
+            echo "omnibase_infra's deliver-dev-candidate-to-staging.yml builds a"
+            echo "candidate vendoring this exact revision, re-reads this run's"
+            echo "compose-dev lab-pass receipt for it, and announces the bundle"
+            echo "to omninode_infra only if both hold."
+          } >> "$GITHUB_STEP_SUMMARY"
