@@ -107,6 +107,7 @@ class _RecordingAdminClient:
     described_states: dict[str, str] = {}
     describe_calls: list[list[str]] = []
     raise_on_describe_group: str | None = None
+    omit_describe_response_for_group: str | None = None
     closed: bool = False
 
     def __init__(self, **kwargs: Any) -> None:
@@ -145,6 +146,8 @@ class _RecordingAdminClient:
                         [],
                     )
                     for group_id in group_ids
+                    if group_id
+                    != _RecordingAdminClient.omit_describe_response_for_group
                 ]
             )
         ]
@@ -164,6 +167,7 @@ def _stub_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     _RecordingAdminClient.described_states = {}
     _RecordingAdminClient.describe_calls = []
     _RecordingAdminClient.raise_on_describe_group = None
+    _RecordingAdminClient.omit_describe_response_for_group = None
     monkeypatch.setattr(aiokafka.admin, "AIOKafkaAdminClient", _RecordingAdminClient)
 
 
@@ -401,4 +405,44 @@ def test_mid_loop_describe_failure_is_unknown_not_partial_success(
         live_consumer_groups(topic=_DELEGATE_COMMAND_TOPIC, bootstrap_servers=_BROKER)
 
     assert _RecordingAdminClient.describe_calls == [[scoped[0]], [scoped[1]]]
+    assert _RecordingAdminClient.closed is True
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_stub_admin")
+def test_missing_single_group_describe_response_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broker response that omits the requested group is not a full answer."""
+    _clear_kafka_env(monkeypatch)
+    _RecordingAdminClient.omit_describe_response_for_group = _bound_group_id()
+
+    with pytest.raises(ConsumerGroupLivenessUnknownError):
+        live_consumer_groups(topic=_DELEGATE_COMMAND_TOPIC, bootstrap_servers=_BROKER)
+
+    assert _RecordingAdminClient.closed is True
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_stub_admin")
+def test_candidate_count_is_bounded_before_serial_describes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The serial workaround is capped, not an unbounded hot-path loop."""
+    from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+
+    _clear_kafka_env(monkeypatch)
+    _RecordingAdminClient.listed_groups = [
+        (
+            f"onex-dev.omn18418.node-{n}.consume.1.{n}.0"
+            f"{TOPIC_SCOPE_INFIX}{_DELEGATE_COMMAND_TOPIC}",
+            "consumer",
+        )
+        for n in range(17)
+    ]
+
+    with pytest.raises(ConsumerGroupLivenessUnknownError):
+        live_consumer_groups(topic=_DELEGATE_COMMAND_TOPIC, bootstrap_servers=_BROKER)
+
+    assert _RecordingAdminClient.describe_calls == []
     assert _RecordingAdminClient.closed is True

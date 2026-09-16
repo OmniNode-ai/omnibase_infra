@@ -23,11 +23,18 @@ import asyncio
 import logging
 import os
 import socket
+from typing import Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
 
 logger = logging.getLogger(__name__)
+
+_MAX_LIVE_CONSUMER_GROUP_DESCRIBE_CANDIDATES = 16
+
+
+class ConsumerGroupDescribeResponse(Protocol):
+    groups: list[tuple[object, ...]]
 
 
 def _tcp_reachable(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -214,6 +221,12 @@ async def _live_consumer_groups_async(
         )
         if not candidates:
             return ()
+        if len(candidates) > _MAX_LIVE_CONSUMER_GROUP_DESCRIBE_CANDIDATES:
+            raise ConsumerGroupLivenessUnknownError(
+                f"consumer group liveness for {topic!r} on {bootstrap_servers} "
+                f"matched {len(candidates)} candidate groups; refusing to run "
+                "unbounded serial DescribeGroups probes"
+            )
 
         # ONE CANDIDATE PER DESCRIBE, deliberately. ``describe_consumer_groups``
         # batches every group that shares a coordinator into a single
@@ -224,15 +237,32 @@ async def _live_consumer_groups_async(
         # ``ValueError: Buffer underrun decoding string`` and took the broker
         # connection down with it, while the SAME three groups described ONE AT
         # A TIME returned cleanly (``Stable``/1 member, ``Empty``/0, ``Stable``/1).
-        # Serial describes of a handful of candidates cost nothing here and are
-        # the shape proven to work on the lane this gate guards. If a later
-        # aiokafka/MSK combination proves batched describes safe, this loop can
-        # be collapsed only with a lane proof that covers the same three-group
-        # shape. Until then, any describe failure still leaves the answer
-        # UNKNOWN rather than returning a partial consumer set.
-        described: list[object] = []
+        # Serial describes are intentionally capped above so this fail-closed
+        # gate cannot turn a broad group listing into an unbounded hot-path
+        # probe. If a later aiokafka/MSK combination proves batched describes
+        # safe, this loop can be collapsed only with a lane proof that covers
+        # the same three-group shape. Until then, any describe failure or
+        # missing candidate response still leaves the answer UNKNOWN rather
+        # than returning a partial consumer set.
+        described: list[ConsumerGroupDescribeResponse] = []
         for candidate in candidates:
-            described.extend(await admin.describe_consumer_groups([candidate]))
+            responses = cast(
+                "list[ConsumerGroupDescribeResponse]",
+                await admin.describe_consumer_groups([candidate]),
+            )
+            response_group_ids = {
+                str(group[1])
+                for response in responses
+                for group in getattr(response, "groups", [])
+                if len(group) >= 2
+            }
+            if candidate not in response_group_ids:
+                raise ConsumerGroupLivenessUnknownError(
+                    f"describing consumer group {candidate!r} on "
+                    f"{bootstrap_servers} returned no matching group; "
+                    "the answer is incomplete"
+                )
+            described.extend(responses)
     finally:
         await admin.close()
 
