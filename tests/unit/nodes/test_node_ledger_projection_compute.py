@@ -673,6 +673,65 @@ class TestHandlerLedgerProjection:
         assert payload.event_type == sample_message.headers.event_type
         assert payload.source == sample_message.headers.source
 
+    @pytest.mark.parametrize(
+        ("topic", "event_type"),
+        [
+            (
+                "onex.cmd.omnimarket.delegate-skill.v1",
+                "omnimarket.delegate-skill",
+            ),
+            (
+                "onex.cmd.omnibase-infra.delegation-routing-request.v1",
+                "omnibase-infra.delegation-routing-request",
+            ),
+            (
+                "onex.evt.omnibase-infra.routing-decision.v1",
+                "omnibase-infra.routing-decision",
+            ),
+            (
+                "onex.evt.omnimarket.delegate-skill-completed.v1",
+                "omnimarket.delegate-skill-completed",
+            ),
+        ],
+    )
+    def test_delegation_chain_topics_preserve_payload_and_causality(
+        self,
+        handler: HandlerLedgerProjection,
+        sample_headers: ModelEventHeaders,
+        topic: str,
+        event_type: str,
+    ) -> None:
+        """Each OMN-16964 route preserves raw data and causal headers."""
+        parent_message_id = uuid4()
+        headers = sample_headers.model_copy(
+            update={
+                "event_type": event_type,
+                "parent_message_id": parent_message_id,
+            }
+        )
+        raw_value = b'{"chain_canary":true,"step":"delegation"}'
+        raw_key = b"chain-correlation-key"
+        message = ModelEventMessage(
+            topic=topic,
+            key=raw_key,
+            value=raw_value,
+            headers=headers,
+            partition=2,
+            offset="41",
+        )
+
+        result = handler.project(message)
+        payload = result.payload
+
+        assert isinstance(payload, ModelPayloadLedgerAppend)
+        assert payload.topic == topic
+        assert payload.event_type == event_type
+        assert payload.correlation_id == headers.correlation_id
+        assert payload.envelope_id == headers.message_id
+        assert payload.onex_headers["parent_message_id"] == str(parent_message_id)
+        assert base64.b64decode(payload.event_key or "") == raw_key
+        assert base64.b64decode(payload.event_value) == raw_value
+
     def test_project_with_none_value_raises_error(
         self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
@@ -791,11 +850,15 @@ class TestContractValidation:
             "fsm-state-transitions",
             "runtime-tick",
             "registration-snapshots",
+            "delegate-skill",
+            "delegate-skill-completed",
+            "delegation-routing-request",
+            "routing-decision",
             "match-terminal",
         ]
 
         for suffix in expected_suffixes:
-            matching = [t for t in topics if suffix in t]
+            matching = [t for t in topics if t.endswith(f"{suffix}.v1")]
             assert matching, f"No topic found containing '{suffix}'. Topics: {topics}"
 
     def test_consumer_purpose_is_audit(self, contract_data: dict) -> None:
