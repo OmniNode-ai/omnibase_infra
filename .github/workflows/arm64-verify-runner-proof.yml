@@ -47,7 +47,22 @@ concurrency:
 
 jobs:
   arm64-verify-proof:
-    name: arm64-verify-proof
+    name: arm64-verify-proof (${{ matrix.host }})
+    # ONE LEG PER ARM64 VERIFY HOST. A single job pinned to the class label
+    # would be satisfied by whichever arm64 host happened to be idle, so a
+    # second host could sit broken behind a green check indefinitely -- the
+    # undocumented-but-running failure in its other direction. The host label
+    # is what makes each leg a statement about a machine.
+    #
+    # Read from the declared inventory when you add a host: a row in
+    # config/runner_fleet.yaml with arch arm64 and the verify class needs a leg
+    # here, and tests/integration/observability/
+    # test_runner_fleet_multihost_contract.py is where that correspondence is
+    # asserted rather than remembered.
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [host-101, host-105]
     # Pinned to the architecture AND the class, in the fleet's own vocabulary.
     # Both labels are load-bearing: `omnibase-verify` alone would also match an
     # amd64 verify runner on the primary host, and this job's whole subject is
@@ -58,7 +73,11 @@ jobs:
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, omnibase-verify, arch-arm64]
+    runs-on:
+      - self-hosted
+      - omnibase-verify
+      - arch-arm64
+      - ${{ matrix.host }}
     timeout-minutes: 10
 
     steps:
@@ -72,6 +91,7 @@ jobs:
             exit 1
           fi
           echo "runner name: ${RUNNER_NAME:-<unset>}"
+          echo "declared host label: ${{ matrix.host }}"
 
       # The four binaries a cloud-touching verify job uses. Each is checked for
       # its ARCHITECTURE, not merely its presence: an amd64 binary under

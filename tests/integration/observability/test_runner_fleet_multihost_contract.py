@@ -133,3 +133,55 @@ def test_no_runner_carries_an_architecture_label_it_is_not_on() -> None:
                 f"{sorted(overlap)}, which is not the architecture of any host "
                 f"it is defined on ({host.arch.value})"
             )
+
+
+PROOF_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "arm64-verify-runner-proof.yml"
+
+
+@pytest.mark.integration
+def test_every_arm64_verify_host_has_a_leg_in_the_proof_workflow() -> None:
+    """A declared arm64 verify host must be proven individually, not as a class.
+
+    The proof job pins the class label AND a host label, one matrix leg per
+    host. Without the host label a single leg would be satisfied by whichever
+    arm64 host happened to be idle, so a second host could sit broken behind a
+    green check indefinitely -- undocumented-but-running in its other
+    direction, and the reading would be worse than no check because it names a
+    host it did not touch.
+
+    This asserts the correspondence rather than leaving it to be remembered
+    when the next host is added.
+    """
+    config = load_runner_fleet_config(FLEET_CONFIG)
+    workflow = yaml.safe_load(PROOF_WORKFLOW.read_text(encoding="utf-8"))
+    legs = set(workflow["jobs"]["arm64-verify-proof"]["strategy"]["matrix"]["host"])
+
+    declared = {
+        f"host-{host.host.split('.')[0].split('-')[-1]}"
+        for host in config.hosts
+        if host.arch.value == "arm64" and "verify" in host.classes
+    }
+    assert declared, "the inventory declares no arm64 verify host"
+
+    compose_labels = set()
+    for host in config.hosts:
+        if host.arch.value != "arm64" or "verify" not in host.classes:
+            continue
+        compose = _compose_for(host.runner_name_prefix)
+        for definition in _services(compose).values():
+            labels = str(
+                definition.get("environment", {}).get("RUNNER_LABELS", "")
+            ).split(",")
+            compose_labels.update(x for x in labels if x.startswith("host-"))
+
+    missing = compose_labels - legs
+    assert not missing, (
+        f"{sorted(missing)} name arm64 verify hosts whose runners register that "
+        f"label, but .github/workflows/arm64-verify-runner-proof.yml proves only "
+        f"{sorted(legs)}; add a matrix leg per host"
+    )
+    stale = legs - compose_labels
+    assert not stale, (
+        f"{sorted(stale)} are proof legs for hosts no compose file registers; "
+        "a leg for an absent host blocks on a machine that will never answer"
+    )

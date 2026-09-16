@@ -70,6 +70,17 @@ hosts:
     runner_name_prefix: omninode-mini-runner
     expected_count: 1
     classes: [verify]
+  # .105 -- MacBook Air, M4, 10 cores, 32 GB. Docker Desktop 4.91.0, data folder
+  # on the internal disk (111 GiB free at provisioning, so no 1.5 TiB virtual
+  # disk like .101's external volume carries): 8 CPUs, 16384 MiB, 60 GiB. Same
+  # verify class and same reasoning as .101 -- cloud-touching jobs carry no
+  # architecture assumption, so they are the class that moves to arm64 without
+  # any workflow changing.
+  - host: omnibook.tail75df5e.ts.net
+    arch: arm64
+    runner_name_prefix: omninode-air-runner
+    expected_count: 1
+    classes: [verify]
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address
 # pool can subnet a bounded number of networks before `docker network create`
 # fails with "all predefined address pools have been fully subnetted". Alert at
