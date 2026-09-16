@@ -2112,6 +2112,94 @@ for service_role_entry in \
 done
 # ---- END service-role database access seam (OMN-18438) ----
 
+# ---- BEGIN corpus-applier database CREATE seam (OMN-18508) ----
+# The warm-volume half of the fresh-volume phase of the same name in
+# docker/migrations/forward/000_create_multiple_databases.sh. Postgres runs that
+# bootstrap from /docker-entrypoint-initdb.d only when the data directory is
+# empty, so on every lane that already exists it has never run and never will.
+#
+# WHAT IT ADDS, AND WHY THE SEAM ABOVE IS NOT ENOUGH. The OMN-18438 seam grants
+# CONNECT on the database and USAGE, CREATE on schema public. CREATE on a SCHEMA
+# is a different privilege from CREATE on a DATABASE, and a trusted extension
+# needs the latter: `CREATE EXTENSION` installs a database-level object, and
+# `trusted = t` waives only the SUPERUSER requirement, never the privilege
+# requirement. The omninode_cloud corpus opens with
+# `CREATE EXTENSION IF NOT EXISTS pgcrypto`, so without this seam the apply dies
+# on its first statement -- and the seam above reads its OWN grants back
+# successfully while it happens, which is why the failure looked like a migrate
+# image problem rather than a provisioning one.
+#
+# Measured on the .201 compose dev lane, Postgres 16.15, 2026-09-16, read-only:
+# has_database_privilege('role_omninode','omninode_cloud','CREATE') was f, with
+# the same expression for 'postgres' returning t as the positive control, while
+# has_schema_privilege(...,'public','CREATE') was already t.
+#
+# ITS OWN MAP, not a fourth field on the seam above. That map means "this
+# deployment owns this principal's credential"; this one means "this principal
+# APPLIES this database's corpus", which is a property of the migration one-shot
+# (docker-compose.dev-lane.yml's cloud-migration sets DB_USER: role_omninode),
+# not of the credential. Five of the six service databases are applied by the
+# POSTGRES_USER superuser and must not gain this grant.
+# tests/unit/infra/test_corpus_applier_database_create_omn18508.py pins this map
+# equal to the bootstrap's and derives the requirement by parsing each
+# one-shot's own DB_USER out of the compose files.
+grant_corpus_applier_database_create() {
+  corpus_database="$1"
+  corpus_role="$2"
+
+  # A lane that has not provisioned the role is a legitimate state: name the
+  # skip and re-assert next run. Failing here would turn the migration gate
+  # UNHEALTHY on a lane that needs nothing from this seam.
+  corpus_role_present=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
+    "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '${corpus_role}'")
+  if [ "$corpus_role_present" != "1" ]; then
+    echo "[forward-migration]   skip  ${corpus_role} (role absent on this lane)"
+    unset corpus_role_present
+    return 0
+  fi
+
+  corpus_database_present=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
+    "SELECT 1 FROM pg_database WHERE datname = '${corpus_database}'")
+  if [ "$corpus_database_present" != "1" ]; then
+    echo "[forward-migration]   skip  ${corpus_role} (database ${corpus_database} absent on this lane)"
+    unset corpus_role_present corpus_database_present
+    return 0
+  fi
+
+  # GRANT is idempotent in Postgres, so this is safe to re-assert on every
+  # compose up -- which is the point: it is how an existing warm volume picks
+  # the privilege up without anyone typing psql at a lane.
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q <<EOSQL
+GRANT CREATE ON DATABASE "${corpus_database}" TO "${corpus_role}";
+EOSQL
+
+  # READ IT BACK. A GRANT issued without grant option on the object warns and
+  # returns success rather than raising -- the trap the two seams above both
+  # document. Without this, a seam that granted nothing would log ok.
+  corpus_create_ok=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
+    "SELECT has_database_privilege('${corpus_role}', '${corpus_database}', 'CREATE')")
+  if [ "$corpus_create_ok" != "t" ]; then
+    echo "[forward-migration]   FAIL: ${corpus_role} still lacks CREATE on ${corpus_database} after the grant -- its corpus would die on CREATE EXTENSION" >&2
+    unset corpus_role_present corpus_database_present corpus_create_ok
+    return 1
+  fi
+
+  echo "[forward-migration]   ok    ${corpus_role} holds CREATE on ${corpus_database} (applies its corpus)"
+  unset corpus_role_present corpus_database_present corpus_create_ok
+}
+
+echo "[forward-migration] Re-asserting database CREATE for corpus appliers..."
+# CORPUS_APPLIER_DB_CREATE_MAP -- "database:role", entries quoted individually so
+# the loop needs no word splitting to stay correct, matching the three maps above.
+for corpus_applier_entry in \
+  "omninode_cloud:role_omninode" \
+; do
+  entry_corpus_database=${corpus_applier_entry%%:*}
+  entry_corpus_role=${corpus_applier_entry#*:}
+  grant_corpus_applier_database_create "$entry_corpus_database" "$entry_corpus_role"
+done
+# ---- END corpus-applier database CREATE seam (OMN-18508) ----
+
 # ---------------------------------------------------------------------------
 # 4. Set the sentinel TRUE only after ALL migrations succeed (OMN-13062)
 # ---------------------------------------------------------------------------

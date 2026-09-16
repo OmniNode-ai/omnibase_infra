@@ -5,10 +5,16 @@ image: postgres:16
 layer: infrastructure
 container_name: omnibase-infra-cloud-migration
 required_env:
-  # The corpus is applied AS its owning login, never as the superuser: onex-api
-  # connects as this same non-superuser role, so a corpus applied by `postgres`
-  # would leave every GRANT in it pointing at the wrong principal and would
-  # exempt the owner from the row-level security the lane exists to prove.
+  # The corpus is applied AS the database's mapped service role, never as the
+  # superuser: onex-api connects as this same non-superuser role, so a corpus
+  # applied by `postgres` would leave every GRANT in it pointing at the wrong
+  # principal and would exempt the applying session from the row-level security
+  # the lane exists to prove.
+  #
+  # OMN-18508: "its owning login" here was wrong -- omninode_cloud is owned by
+  # `postgres`. The role is granted CREATE on the DATABASE (a distinct privilege
+  # from CREATE on schema public, and the one `CREATE EXTENSION pgcrypto` needs)
+  # by the corpus-applier seams in the two provisioning scripts.
   - ROLE_OMNINODE_PASSWORD
 hardcoded_env:
   DB_HOST: postgres
