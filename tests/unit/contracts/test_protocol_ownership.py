@@ -207,22 +207,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "OmniGateValidatorCallable": "gate/validator_registry.py",
     # [NODE] OMN-11207 structural protocol for evidence bundles accepted by the writer
     "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
-    # [RUNTIME] OMN-18418 narrows the aiokafka admin's describe_consumer_groups
-    # RESPONSE surface to the single `groups` attribute the lane probe reads.
-    # The probe asks one candidate per describe because the batched form does
-    # not decode against MSK, and the response type it gets back differs between
-    # the two client families the runtime may be carrying -- so binding to a
-    # concrete class here would make the probe fail on whichever family it was
-    # not written against. Declared in the module that consumes it, beside the
-    # candidate cap it is read under.
-    #
-    # Recorded by OMN-18421 rather than by OMN-18418. This allowlist was not
-    # updated when omnibase_infra#3613 (squash 7e1bccf9) added the class, so
-    # both ownership assertions had been failing on `dev` since 2026-09-15 and
-    # every later PR inherited the red. Adding it here is the sanctioned
-    # add-with-a-category-tag path, not a widening: the count bound moves by
-    # exactly one, for exactly this class.
-    "ConsumerGroupDescribeResponse": "backends/backend_probe.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal
