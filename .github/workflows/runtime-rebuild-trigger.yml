@@ -619,10 +619,30 @@ jobs:
       needs.trigger-rebuild.outputs.published == 'true' &&
       needs.trigger-rebuild.outputs.runtime_lane == 'dev'
     # The agent's HTTP surface is on the lab host's LAN; hosted compute cannot
-    # see it. Same reasoning and same label as the convergence guard above: the
-    # checkout is pinned to the trusted base ref, so no fork-authored code runs
-    # on the fleet.
-    runs-on: [self-hosted, omnibase-deploy]
+    # see it. Same reasoning as the convergence guard above -- the checkout is
+    # pinned to the trusted base ref, so no fork-authored code runs on the
+    # fleet -- but NOT the same label any more.
+    #
+    # OMN-18408: `omnibase-verify`. The convergence guard above stays on
+    # `omnibase-deploy` by explicit operator scope; this job moved because its
+    # 35-minute ceiling is the budget AC1 of OMN-18200 reads as the difference
+    # between "converged" and "not verified", and queue time on a label whose
+    # single member is also running the release-train deploy comes straight out
+    # of it. The verify runner carries the same docker socket and the same
+    # `host.docker.internal` gateway and no OMNI_HOME write mount, which is all
+    # this job needs.
+    # OMN-18408: `host-201` is REQUIRED alongside `omnibase-verify`, and is not
+    # decoration. `omnibase-verify` names a runner CLASS (read-only probe
+    # runner); it does not name a HOST. On 2026-09-16 a second verify-class
+    # runner, omninode-mini-runner-1, came online on another lab host carrying
+    # `self-hosted,omnibase-verify,arch-arm64` -- which makes it a legal match
+    # for a bare `[self-hosted, omnibase-verify]`. This job probes the .201
+    # lane's own docker daemon through that host's gateway alias, so a run
+    # placed anywhere else cannot see the lane and reports it unreachable: a
+    # permanently-red check is a disabled check. `host-201` is carried only by
+    # the .201 verify runner, so the pair fails SAFE -- if that runner is down
+    # the job queues rather than running somewhere it cannot observe anything.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     # The agent's apply carries its own 1500s budget (DEFAULT_APPLY_BUDGET_SECONDS)
     # and begins only after the compose rebuild it follows, so the poll window
     # below is the one that matters and this ceiling is that window plus a tail
@@ -690,9 +710,10 @@ jobs:
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
           # `host.docker.internal`, NOT `localhost`. This job runs in the
-          # omninode-deploy-runner CONTAINER on the lab host, not in the host's
-          # network namespace, and that runner is the one carrying the
-          # host-gateway alias (docker/docker-compose.runners.yml extra_hosts) --
+          # omninode-verify-runner-1 CONTAINER on the lab host (OMN-18408; it
+          # was the deploy runner before the split), not in the host's network
+          # namespace, and that runner carries the host-gateway alias
+          # (docker/docker-compose.runners.yml extra_hosts) --
           # the same reason the compose-dev probe above and chain-canary.yml use
           # this form. The dev-lane deploy agent listens on 0.0.0.0:8098; the
           # prod-pinned unit holds 8099 and is deliberately not read here.

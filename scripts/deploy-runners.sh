@@ -8,6 +8,7 @@
 #
 # Usage:
 #   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N] [--only=NAME]]
+#   ./scripts/deploy-runners.sh --add=<service>[,<service>...] [--dry-run] [--skip-build]
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
@@ -50,6 +51,38 @@
 #   exists to replace.
 #   With --dry-run the READ-ONLY busy probes still run -- a rolling dry run is
 #   how you see which runners are executing jobs -- but nothing is recreated.
+#
+# --add=<service>[,...] mode (additive stand-up of declared NON-pool services):
+#   1. Rsync runner artifacts to host (the compose file must reach the host
+#      before any service can be created from it)
+#   2. Build the image unless --skip-build
+#   3. docker compose up -d --no-deps <service>...  -- with NEITHER
+#      --force-recreate NOR --remove-orphans
+#   4. Wait for exactly those runners to come online
+#   Skips: the fleet-wide poll, every cron install, the stale report.
+#   Use when: standing up or converging ONE non-general-pool runner
+#   (omninode-deploy-runner, omninode-verify-runner-1, the customer-plane pair).
+#
+#   WHY A FOURTH MODE (OMN-18408). None of the three above can create a
+#   container that does not exist yet without collateral. The default path
+#   force-recreates the WHOLE project: ~3h serialised across the 88-runner
+#   fleet (OMN-18188), with the monitor's auto-bounce cron racing anything left
+#   offline past 300s. --soft never creates a container at all. And --rolling
+#   --only=NAME refuses this twice by design -- fleet_services() enumerates only
+#   ${RUNNER_NAME_PREFIX}-N, and roll_one_runner() requires the target to be
+#   online and idle first, which a container that does not exist can never be.
+#   Those refusals are correct and are NOT relaxed; this is a separate verb.
+#
+#   Additive by construction: no --force-recreate, so running it against an
+#   already-converged runner is a no-op rather than an outage, and no
+#   --remove-orphans, which compose evaluates against the whole project even
+#   when services are named.
+#
+#   REFUSED, deliberately: a general-pool ${RUNNER_NAME_PREFIX}-N service (those
+#   belong to the fleet and --rolling paths, which bracket recreates with the
+#   toolcache seeding and the two-signal busy check this mode has neither of);
+#   a service the compose file does not declare (fail closed on a typo BEFORE
+#   the rsync touches the host); and --add combined with --soft or --rolling.
 #
 # Requirements:
 #   - gh CLI authenticated with org admin scope
@@ -219,6 +252,9 @@ ROLLING_DEPLOY=false
 ROLL_LIMIT=0
 # Empty means the whole fleet; --only=<service> converges exactly one runner.
 ROLL_ONLY=""
+# OMN-18408. Space-separated, declared, NON-general-pool compose services to
+# stand up additively. Empty means this mode is off.
+ADD_SERVICES=""
 
 for arg in "$@"; do
     case "${arg}" in
@@ -228,6 +264,7 @@ for arg in "$@"; do
         --rolling)    ROLLING_DEPLOY=true ;;
         --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
         --only=*)     ROLL_ONLY="${arg#*=}" ;;
+        --add=*)      ADD_SERVICES="${arg#*=}" ; ADD_SERVICES="${ADD_SERVICES//,/ }" ;;
         --help|-h)
             echo "Usage: $0 [--dry-run] [--skip-build] [--soft] [--rolling]"
             echo "  --dry-run     Print actions without executing remote commands"
@@ -241,6 +278,12 @@ for arg in "$@"; do
             echo "                --limit=1 is the canary step of a fleet roll."
             echo "  --only=NAME   With --rolling: converge exactly one fleet service,"
             echo "                for a runner that stayed busy through every pass."
+            echo "  --add=LIST    Additively stand up the named DECLARED non-general-pool"
+            echo "                services: 'up -d --no-deps LIST' with NEITHER"
+            echo "                --force-recreate NOR --remove-orphans, no cron installs,"
+            echo "                and a wait scoped to those runners. Refuses a"
+            echo "                ${RUNNER_NAME_PREFIX}-N service (use --rolling), an"
+            echo "                undeclared service, and --soft/--rolling."
             exit 0
             ;;
         *)
@@ -785,6 +828,94 @@ install_host_artifact_freshness_cron() {
 # ---------------------------------------------------------------------------
 # Rolling deploy: recreate the fleet one runner at a time, never a busy one
 # ---------------------------------------------------------------------------
+# Additive stand-up of declared non-general-pool services (OMN-18408)
+# ---------------------------------------------------------------------------
+
+declared_compose_services() {
+    # Every `  <name>:` service key in the compose file. Derived from the file
+    # rather than from a list here, so a service added to compose is usable
+    # immediately and a typo is refused against reality.
+    grep -E '^  [a-z0-9][a-z0-9_.-]*:$' "${REPO_ROOT}/${COMPOSE_FILE}" | tr -d ' :'
+}
+
+validate_add_services() {
+    local declared name
+    declared="$(declared_compose_services)"
+    for name in ${ADD_SERVICES}; do
+        if [[ "${name}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]]; then
+            err "--add refuses the general-pool service '${name}'. General-pool runners belong to the default path and to --rolling, which bracket a recreate with the toolcache seeding and the two-signal busy check --add has neither of. Use --rolling --only=${name}."
+        fi
+        if ! printf '%s\n' "${declared}" | grep -qx "${name}"; then
+            err "--add: '${name}' is not a service declared in ${COMPOSE_FILE}. Refusing locally so a typo never reaches the host."
+        fi
+    done
+}
+
+add_services_deploy() {
+    log "=== Additive deploy of: ${ADD_SERVICES} ==="
+    validate_add_services
+
+    local token token_b64
+    if "${DRY_RUN}"; then
+        token=***REDACTED***
+    else
+        # A brand-new container has NO cached registration to restore from, so
+        # unlike --rolling this path does need a real handle.
+        token=***REDACTED***
+    fi
+    token_b64=$(encode_token "${token}")
+
+    rsync_artifacts
+
+    if ! "${SKIP_BUILD}"; then
+        run_ssh "
+            set -euo pipefail
+            cd ${RUNNER_HOST_DIR}
+            bash scripts/ci/build_runner_image.sh --tag omninode-runner:latest
+        "
+    fi
+
+    local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
+    local remote_token_b64="${token_b64}"
+    if "${DRY_RUN}"; then
+        remote_token_b64="<redacted-token-b64>"
+    fi
+
+    # No --force-recreate: additive means a converged container is left running.
+    # No --remove-orphans: compose evaluates it against the WHOLE project even
+    # when services are named, so it would delete containers this call never
+    # looked at.
+    run_ssh "
+        set -euo pipefail
+        RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
+        export RUNNER_TOKEN
+        # The non-general-pool services interpolate DEPLOY_RUNNER_TOKEN, not
+        # RUNNER_TOKEN. Both are ORG registration tokens for the same org.
+        DEPLOY_RUNNER_TOKEN=\"\${RUNNER_TOKEN}\"
+        export DEPLOY_RUNNER_TOKEN
+        cd ${RUNNER_HOST_DIR}
+        ${compose_cmd} up -d --no-deps ${ADD_SERVICES}
+    "
+
+    # Service name == container_name == RUNNER_NAME for every non-pool runner
+    # in the compose file, which is what makes this an identity, not a lookup.
+    local name rc=0
+    for name in ${ADD_SERVICES}; do
+        if "${DRY_RUN}"; then
+            log "[DRY RUN] would wait for ${name} to come online."
+            continue
+        fi
+        if wait_for_runner_online "${name}"; then
+            log "  ${name} is online."
+        else
+            warn "  ${name} did not come online within ${ROLL_ONLINE_MAX_SECONDS}s."
+            rc=1
+        fi
+    done
+    return "${rc}"
+}
+
+# ---------------------------------------------------------------------------
 #
 # WHY THIS MODE EXISTS (OMN-18415). Container ENV is frozen at creation, so any
 # change to the `&runner-env` block reaches a live runner only through a
@@ -996,7 +1127,7 @@ rolling_deploy() {
 }
 
 main() {
-    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY})"
+    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY}, add=${ADD_SERVICES:-<none>})"
     log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
     log "Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
 
@@ -1006,6 +1137,19 @@ main() {
 
     if "${SOFT_DEPLOY}" && "${ROLLING_DEPLOY}"; then
         err "--soft and --rolling are mutually exclusive: --soft never recreates a container, so it cannot carry a container-env change, which is the only reason to roll."
+    fi
+
+    if [[ -n "${ADD_SERVICES}" ]]; then
+        # OMN-18408. Refused in combination rather than resolved by precedence:
+        # each of the three is a different answer to "what happens to the
+        # containers already running", and silently picking one is how an
+        # operator gets a fleet roll they did not ask for.
+        if "${SOFT_DEPLOY}" || "${ROLLING_DEPLOY}"; then
+            err "--add is mutually exclusive with --soft and --rolling: --add creates or converges named non-pool services additively, --soft rewrites entrypoints in every running container, and --rolling recreates general-pool runners one at a time."
+        fi
+        add_services_deploy || err "Additive deploy of '${ADD_SERVICES}' did not come online. Check container logs on ${RUNNER_HOST}."
+        log "=== deploy-runners.sh complete (added: ${ADD_SERVICES}) ==="
+        return 0
     fi
 
     if "${ROLLING_DEPLOY}"; then
