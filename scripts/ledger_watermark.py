@@ -23,7 +23,8 @@ reader that cannot prove where it stopped must not guess.
 
 Exit codes:
   0  resolved (JSON result on stdout)
-  2  usage error
+  2  usage error, including a --reanchor asked for on an anchor that still
+     resolves
   3  UNRESOLVED -- the anchor row is not on disk anywhere, or its digest no
      longer matches. Nothing is advanced; the caller must re-anchor
      deliberately rather than resume from an unknown position.
@@ -180,9 +181,7 @@ def find_in_archive(
 
 def _archive_entries(text: str) -> list[Any]:
     lines = text.splitlines(keepends=True)
-    starts = [
-        i for i, line in enumerate(lines) if LOCK.ENTRY_HEADING_PATTERN.match(line)
-    ]
+    starts = [i for i, line in enumerate(lines) if LOCK.ROW_START_PATTERN.match(line)]
     entries = []
     for position, start in enumerate(starts):
         end = starts[position + 1] if position + 1 < len(starts) else len(lines)
@@ -301,6 +300,97 @@ def advance(
     return result
 
 
+class ReanchorRefusedError(RuntimeError):
+    """A repair was asked for on an anchor that does not need repairing."""
+
+
+def reanchor(
+    ledger: Path,
+    state_path: Path,
+    state: dict[str, Any],
+    source: str,
+    reason: str,
+    now: str,
+) -> dict[str, Any]:
+    """Move a BROKEN anchor onto the section's current last row (OMN-17403).
+
+    ``--resolve`` has always ended its exit-3 message with "Re-anchor
+    deliberately", and until now the tool implemented no action that could do
+    it: ``--resolve``, ``--advance`` and ``--migrate`` all resolve first and
+    all exit 3 on the same anchor. The only remaining remedy was editing the
+    state file by hand, which the reading process is forbidden to do -- so the
+    instruction named a repair nobody was allowed to perform. Eleven
+    consecutive morning friction sweeps (2026-09-05 to 2026-09-15) exited 3,
+    declined to guess, and left the fleet's primary friction source unread.
+
+    Two properties make this a repair rather than a way to skip rows.
+
+    It refuses when the anchor still resolves. On a healthy anchor this would
+    jump the mark to the tail and silently abandon every unread row -- the
+    exact failure the row-identity watermark exists to prevent -- so a caller
+    reaching for it on a working anchor gets a usage error, not a quiet
+    advance.
+
+    It records what it gave up. The abandoned heading and digest, the reason,
+    and the fact that the number of rows lost is UNKNOWABLE (the old anchor
+    cannot be located, which is why it is being repaired) go into
+    ``reanchor_history`` on the entry. A repair that left no trace would be
+    indistinguishable from the hand edit it replaces.
+    """
+    entry = source_entry(state, source)
+    try:
+        resolved = resolve(ledger, entry, source)
+    except UnresolvedAnchorError:
+        pass
+    else:
+        raise ReanchorRefusedError(
+            f"watermark {source!r} still resolves ({resolved['unread_entries']} unread "
+            f"rows, anchor found in {resolved['anchor_found_in']}). --reanchor repairs an "
+            "anchor that cannot be located; on one that can, it would abandon those "
+            "unread rows silently. Use --advance."
+        )
+
+    heading = require_section_heading(entry, source)
+    rows = LOCK.parse_section_file(ledger, heading).entries
+    tail = rows[-1] if rows else None
+    record = {
+        "reanchored_at": now,
+        "reason": reason,
+        "abandoned_anchor_heading": entry.get("anchor_heading"),
+        "abandoned_anchor_digest": entry.get("anchor_digest"),
+        "new_anchor_heading": tail.heading if tail else None,
+        "new_anchor_digest": tail.digest() if tail else None,
+        "rows_in_section_at_reanchor": len(rows),
+        # Not a placeholder. The old anchor is unlocatable -- that is the
+        # defect -- so the count of rows between it and the tail cannot be
+        # computed from anything on disk. Writing a number here would be a
+        # guess presented as a measurement.
+        "unread_rows_abandoned": "unknown",
+    }
+    history = entry.get("reanchor_history")
+    if not isinstance(history, list):
+        history = []
+    history.append(record)
+    entry["reanchor_history"] = history
+    entry["anchor_heading"] = record["new_anchor_heading"]
+    entry["anchor_digest"] = record["new_anchor_digest"]
+    entry["line_count_at_advance"] = len(
+        ledger.read_text(encoding="utf-8").splitlines()
+    )
+    entry["path"] = str(ledger)
+    state[SCHEMA_VERSION_KEY] = WATERMARK_SCHEMA_VERSION
+    write_state(state_path, state)
+    return {
+        "schema": WATERMARK_RESULT_SCHEMA,
+        "source": source,
+        "ledger": str(ledger),
+        "section_heading": heading.strip(),
+        "reanchored": True,
+        "state": str(state_path),
+        **record,
+    }
+
+
 def migrate(
     ledger: Path, state_path: Path, state: dict[str, Any], source: str
 ) -> dict[str, Any]:
@@ -375,11 +465,31 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="convert a pre-OMN-17023 line-number watermark into a row anchor, once",
     )
+    action.add_argument(
+        "--reanchor",
+        action="store_true",
+        help=(
+            "repair an anchor that --resolve cannot locate, by moving it to the "
+            "section's current last row; refuses when the anchor still resolves, "
+            "and requires --reason"
+        ),
+    )
+    parser.add_argument(
+        "--reason",
+        help="with --reanchor: why the anchor is being abandoned; recorded in the state file",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.reanchor and not args.reason:
+        parser.error(
+            "--reanchor requires --reason: the abandoned anchor is recorded with it"
+        )
+    if args.reason and not args.reanchor:
+        parser.error("--reason is only meaningful with --reanchor")
     try:
         state = read_state(args.state)
         if args.migrate:
@@ -388,10 +498,22 @@ def main(argv: list[str] | None = None) -> int:
             require_current_schema(state)
             if args.advance:
                 result = advance(args.ledger, args.state, state, args.source)
+            elif args.reanchor:
+                result = reanchor(
+                    args.ledger,
+                    args.state,
+                    state,
+                    args.source,
+                    args.reason,
+                    LOCK.utc_now(),
+                )
             else:
                 result = resolve(
                     args.ledger, source_entry(state, args.source), args.source
                 )
+    except ReanchorRefusedError as exc:
+        print(f"ledger_watermark: REANCHOR REFUSED -- {exc}", file=sys.stderr)
+        return 2
     except SchemaMismatchError as exc:
         print(f"ledger_watermark: SCHEMA -- {exc}", file=sys.stderr)
         return EXIT_SCHEMA
