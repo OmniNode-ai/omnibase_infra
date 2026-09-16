@@ -2062,8 +2062,17 @@ jobs:
   # When the flag is on and the change set is small, detect-changes emits a smaller
   # matrix and selected_paths, activating the smart-selection pytest step instead.
   #
-  # Split strategy: 9265 tests / 15 = ~618 tests per split (~2-3 min each)
-  # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
+  # Split strategy (OMN-18542): the shard count is sized to the COLLECTABLE TEST
+  # POPULATION of the selection, by scripts/ci/detect_test_paths.py's
+  # split_count_for_selection(), and never to the number of selected path
+  # strings. The rule is parity -- no narrowed selection is denser per shard than
+  # the full-suite run of the whole tree, which is `_FULL_SUITE_SPLIT_COUNT`
+  # shards over every pyproject `testpaths` root. Both sides are counted off the
+  # working tree at selection time, so the ratio calibrates itself as the suite
+  # grows rather than ageing into the defect it replaced. Measured 2026-09-16:
+  # 2,231 collectable modules, 37,574 cases, ~149 modules per shard.
+  #
+  # -n 2 rather than -n auto, after repeated xdist OOM crashes on shard 3.
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
     needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
@@ -2088,7 +2097,15 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 15
+    # OMN-18542. Raised 15 -> 20 ALONGSIDE the sizing fix above, never instead of
+    # it: a budget raised on its own would have let #3652's 25-minute shard keep
+    # running rather than stop it being minted. Measured over the 134 completed
+    # Tests-split jobs of the 40 ci.yml runs to 2026-09-16T22:51Z --
+    # p50 4.1 min, p90 9.6, p95 12.3, max 15.3 -- and 20 is above that max. The
+    # residual it covers is the 5x INTRA-run imbalance the durations loop below
+    # is meant to close: shards are currently equal by case COUNT, not by time,
+    # so on run 35129170714 shard 3/15 took 10.2 minutes and shard 7/15 took 2.0.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -2222,12 +2239,28 @@ jobs:
           overwrite: true
           retention-days: 7
 
+      # OMN-18542: this step has never produced an artifact. pytest-split writes
+      # the file ("[pytest-split] Stored test durations in .../.test_durations")
+      # and the upload then reported "No files were found with the provided
+      # path: .test_durations. No artifacts will be uploaded." on every shard --
+      # actions/upload-artifact has excluded dotfiles by default since v4, and
+      # this path is a dotfile. Run 35129170714 produced 15 test-results-*
+      # artifacts and zero test-durations-* artifacts, which is why every shard
+      # still logs "[pytest-split] No test durations found" and splits by case
+      # count instead of by time.
+      #
+      # This makes the data EXIST. It does not yet feed back: nothing downloads
+      # it, and .test_durations is gitignored, so the shards stay count-balanced
+      # until a follow-up commits a durations file or wires a fetch. Stated
+      # rather than implied, so the next reader does not mistake a produced
+      # artifact for a closed loop.
       - name: Upload test durations (for split rebalancing)
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-durations-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: .test_durations
+          include-hidden-files: true
           overwrite: true
           retention-days: 7
 
