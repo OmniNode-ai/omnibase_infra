@@ -47,7 +47,7 @@ DB_HOST="${DB_HOST:?DB_HOST must be set}"
 DB_PORT="${DB_PORT:?DB_PORT must be set}"
 DB_NAME="${DB_NAME:?DB_NAME must be set}"
 DB_USER="${DB_USER:?DB_USER must be set}"
-: "${PGPASSWORD:?PGPASSWORD must be set -- the corpus is applied as its owning login, never as the superuser}"
+: "${PGPASSWORD:?PGPASSWORD must be set -- the corpus is applied as its mapped service role, never as the superuser}"
 
 # The corpus arrives from the cloud-migration-files one-shot through a shared
 # volume. `depends_on: service_completed_successfully` orders that in a cold

@@ -433,6 +433,107 @@ done
 
 echo ""
 
+# ---- BEGIN corpus-applier database CREATE seam (OMN-18508) ----
+# =============================================================================
+# Phase 3b: CREATE on the DATABASE for principals that APPLY their own corpus
+# =============================================================================
+# Format: "database:role"  — NOTE: database first, so the map reads as a
+# statement about the database rather than about the role.
+#
+# WHAT THIS IS FOR
+# ----------------
+# Phase 3 grants USAGE, CREATE on SCHEMA public. That is a different privilege
+# from CREATE on the DATABASE, and a trusted extension needs the latter:
+# `CREATE EXTENSION` installs a database-level object, and `trusted = t` waives
+# only the SUPERUSER requirement, never the privilege requirement. The
+# omninode_cloud corpus opens with `CREATE EXTENSION IF NOT EXISTS pgcrypto`
+# (omninode_infra db/migrations/scripts/00_baseline_schema.sql, and again in
+# 20251207_tenants_uuid_pk.sql), so without this phase the apply dies on its
+# first statement with `permission denied to create extension "pgcrypto"`.
+#
+# WHY A SEPARATE MAP AND NOT A LINE IN grant_role_to_database()
+# -------------------------------------------------------------
+# That helper runs for every SERVICE_DB_MAP entry. Five of the six databases
+# have their corpus applied by the POSTGRES_USER superuser (the forward- and
+# intelligence-migration one-shots), so widening the shared helper would hand
+# database-level CREATE — and with it the right to create schemas and install
+# extensions — to five principals that need none of it. This map names only the
+# principals whose one-shot declares them as its own DB_USER.
+#
+# WHY NOT `CREATE DATABASE ... OWNER role_omninode` INSTEAD
+# ---------------------------------------------------------
+# Ownership would also grant CREATE, and it would make the compose comments
+# that call this role "the owning login" literally true. It is not taken:
+# ownership additionally confers DROP DATABASE on a principal pinned
+# NOSUPERUSER NOBYPASSRLS NOCREATEDB that onex-api itself connects as, and it
+# would make omninode_cloud the single role-owned database in a cluster where
+# every other one — measured on the .201 dev lane, 2026-09-16 — is owned by
+# postgres. The comments were corrected instead (OMN-18508 AC4). Ownership has
+# no bearing on RLS either way: exemption follows TABLE ownership, and the
+# corpus's tables are owned by whichever role applies it in both designs.
+#
+# ON A WARM VOLUME THIS PHASE NEVER RUNS. Postgres runs this script from
+# /docker-entrypoint-initdb.d only when the data directory is empty. The
+# warm-volume counterpart is the seam of the same name in
+# scripts/run-forward-migrations.sh, which the forward-migration one-shot runs
+# on every compose up; the two maps are pinned equal by
+# tests/unit/infra/test_corpus_applier_database_create_omn18508.py.
+CORPUS_APPLIER_DB_CREATE_MAP=(
+    "omninode_cloud:role_omninode"
+)
+
+grant_database_create_to_corpus_applier() {
+    local database="$1"
+    local role_name="$2"
+    validate_identifier "$database" "Database name" || return 1
+    validate_identifier "$role_name" "Role name" || return 1
+
+    # A lane that skipped the role (Phase 2 saw no password) is a legitimate
+    # state, not a failure: name the skip. Failing here would abort a fresh
+    # volume's whole init over a credential the lane deliberately does not have.
+    local role_present
+    role_present=$(psql -tAc \
+        "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '$role_name'" \
+        --username "$POSTGRES_USER" --dbname "$POSTGRES_DB")
+    if [ "$role_present" != "1" ]; then
+        echo "  skip: $role_name absent — no CREATE on $database to grant"
+        return 0
+    fi
+
+    echo "  Granting $role_name CREATE on database $database (applies its corpus)"
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || return 1
+        GRANT CREATE ON DATABASE "$database" TO "$role_name";
+EOSQL
+
+    # READ IT BACK. A GRANT issued without grant option on the object warns and
+    # returns success rather than raising — the trap the OMN-18060 and OMN-18438
+    # seams both document. Without this, a phase that granted nothing logs ok.
+    local create_ok
+    create_ok=$(psql -tAc \
+        "SELECT has_database_privilege('$role_name', '$database', 'CREATE')" \
+        --username "$POSTGRES_USER" --dbname "$POSTGRES_DB")
+    if [ "$create_ok" != "t" ]; then
+        echo "  ERROR: $role_name still lacks CREATE on $database after the grant" >&2
+        return 1
+    fi
+    echo "  $role_name holds CREATE on $database."
+}
+
+echo "============================================="
+echo "Phase 3b: Granting database CREATE to corpus appliers"
+echo "============================================="
+
+for entry in "${CORPUS_APPLIER_DB_CREATE_MAP[@]}"; do
+    IFS=':' read -r db role_name <<< "$entry"
+    grant_database_create_to_corpus_applier "$db" "$role_name" || {
+        echo "FATAL: $role_name cannot be granted CREATE on $db — its corpus would fail to apply" >&2
+        exit 1
+    }
+done
+
+echo ""
+# ---- END corpus-applier database CREATE seam (OMN-18508) ----
+
 # =============================================================================
 # Phase 4: Revoke cross-database access
 # =============================================================================

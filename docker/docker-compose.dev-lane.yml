@@ -1475,15 +1475,25 @@ services:
       DB_PORT: "5432"
       DB_NAME: omninode_cloud
       # 000_create_multiple_databases.sh maps omninode_cloud -> role_omninode.
-      # The corpus is applied AS its owning login and never as the superuser:
+      # The corpus is applied AS that mapped service role and never as the
+      # superuser:
       # onex-api connects as this same non-superuser, NOBYPASSRLS role, so a
       # corpus applied by `postgres` would leave every GRANT in it pointing at
       # the wrong principal AND would exempt the applying session from the very
       # row-level security this lane is the designated proving ground for
       # (operator ruling 15, 2026-07-29; the OMN-15363 block above).
+      #
+      # OMN-18508: this block used to call role_omninode "its owning login".
+      # It is not -- omninode_cloud is owned by `postgres`, as is every other
+      # database on the lane. The role holds CONNECT, schema USAGE + CREATE and
+      # CREATE on the DATABASE; that last one is a separate privilege from the
+      # schema-level one, it is what `CREATE EXTENSION IF NOT EXISTS pgcrypto`
+      # needs (trusted waives the superuser requirement, not the privilege
+      # requirement), and it is granted by the corpus-applier seams in
+      # 000_create_multiple_databases.sh and scripts/run-forward-migrations.sh.
       DB_USER: role_omninode
       MIGRATION_DIR: /work
-      PGPASSWORD: ${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set - the omninode_cloud corpus is applied as role_omninode, the database's own owning login, never as the postgres superuser (OMN-17530); docker/migrations/forward/000_create_multiple_databases.sh creates that role only when this variable is non-empty, and defaults it to empty, so an unset value is why the role does not exist on a lane that has one}
+      PGPASSWORD: ${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set - the omninode_cloud corpus is applied as role_omninode, the database's own mapped service role, never as the postgres superuser (OMN-17530); docker/migrations/forward/000_create_multiple_databases.sh creates that role only when this variable is non-empty, and defaults it to empty, so an unset value is why the role does not exist on a lane that has one}
       PGCONNECT_TIMEOUT: "10"
     command:
       - bash
