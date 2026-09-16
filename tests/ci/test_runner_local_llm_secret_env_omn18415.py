@@ -48,6 +48,12 @@ COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runners.sh"
 
 SECRET_ENV_VAR = "LOCAL_LLM_SHARED_SECRET"
+# The reviewer's call path fails closed on BOTH of these before any HTTP is
+# attempted: the signing key, and the trust boundary the transport refuses to
+# default for itself. Provisioning one without the other moves the failure
+# three seconds later in the same call path and changes nothing else.
+CIDR_ENV_VAR = "LLM_ENDPOINT_CIDR_ALLOWLIST"
+REQUIRED_REVIEWER_ENV_VARS = (SECRET_ENV_VAR, CIDR_ENV_VAR)
 # OMN-18411: fleet capped 88 -> 60.
 FLEET_SERVICE_COUNT = 60
 OUT_OF_SCOPE_SERVICES = (
@@ -94,12 +100,13 @@ def _env(service: dict[str, Any]) -> dict[str, Any]:
 
 def test_every_fleet_service_carries_the_local_llm_shared_secret() -> None:
     compose = _load_compose()
-    missing = [
-        name
-        for name, svc in _fleet_services(compose).items()
-        if SECRET_ENV_VAR not in _env(svc)
-    ]
-    assert not missing, f"fleet services missing {SECRET_ENV_VAR}: {missing}"
+    for var in REQUIRED_REVIEWER_ENV_VARS:
+        missing = [
+            name
+            for name, svc in _fleet_services(compose).items()
+            if var not in _env(svc)
+        ]
+        assert not missing, f"fleet services missing {var}: {missing}"
 
 
 def test_the_presence_assertion_can_actually_fail() -> None:
@@ -130,11 +137,12 @@ def test_the_key_reaches_services_through_the_shared_anchor() -> None:
     exact drift hazard the anchor exists to prevent.
     """
     raw = COMPOSE_FILE.read_text(encoding="utf-8")
-    declarations = re.findall(rf"^\s*{SECRET_ENV_VAR}:", raw, flags=re.MULTILINE)
-    assert len(declarations) == 1, (
-        f"expected exactly one {SECRET_ENV_VAR} declaration (on the "
-        f"&runner-env anchor), found {len(declarations)}"
-    )
+    for var in REQUIRED_REVIEWER_ENV_VARS:
+        declarations = re.findall(rf"^\s*{var}:", raw, flags=re.MULTILINE)
+        assert len(declarations) == 1, (
+            f"expected exactly one {var} declaration (on the &runner-env "
+            f"anchor), found {len(declarations)}"
+        )
 
 
 # --- the interpolation is fail-closed ---------------------------------------
@@ -142,13 +150,14 @@ def test_the_key_reaches_services_through_the_shared_anchor() -> None:
 
 def test_the_interpolation_is_fail_closed_not_a_soft_default() -> None:
     compose = _load_compose()
-    for name, svc in _fleet_services(compose).items():
-        value = _env(svc)[SECRET_ENV_VAR]
-        assert isinstance(value, str)
-        assert value.startswith(f"${{{SECRET_ENV_VAR}:?"), (
-            f"{name}: {SECRET_ENV_VAR} must use the fail-fast `:?` guard, not a "
-            f"`:-` default or a literal -- got {value[:40]!r}..."
-        )
+    for var in REQUIRED_REVIEWER_ENV_VARS:
+        for name, svc in _fleet_services(compose).items():
+            value = _env(svc)[var]
+            assert isinstance(value, str)
+            assert value.startswith(f"${{{var}:?"), (
+                f"{name}: {var} must use the fail-fast `:?` guard, not a "
+                f"`:-` default or a literal -- got {value[:40]!r}..."
+            )
 
 
 def test_no_secret_value_is_committed_to_the_repository() -> None:
@@ -158,12 +167,13 @@ def test_no_secret_value_is_committed_to_the_repository() -> None:
         f"{COMPOSE_FILE.name} contains a literal {SECRET_ENV_VAR} assignment"
     )
     compose = _load_compose()
-    for name, svc in _fleet_services(compose).items():
-        value = _env(svc)[SECRET_ENV_VAR]
-        assert value.startswith("${") and value.endswith("}"), (
-            f"{name}: {SECRET_ENV_VAR} must be an interpolation expression, "
-            "never an inline value"
-        )
+    for var in REQUIRED_REVIEWER_ENV_VARS:
+        for name, svc in _fleet_services(compose).items():
+            value = _env(svc)[var]
+            assert value.startswith("${") and value.endswith("}"), (
+                f"{name}: {var} must be an interpolation expression, never an "
+                "inline value"
+            )
 
 
 # --- scope boundary ---------------------------------------------------------
@@ -177,11 +187,12 @@ def test_out_of_scope_runners_do_not_receive_the_key() -> None:
     """
     compose = _load_compose()
     leaked = [
-        name
+        (name, var)
         for name in OUT_OF_SCOPE_SERVICES
-        if SECRET_ENV_VAR in _env(compose["services"][name])
+        for var in REQUIRED_REVIEWER_ENV_VARS
+        if var in _env(compose["services"][name])
     ]
-    assert not leaked, f"{SECRET_ENV_VAR} leaked to out-of-scope services: {leaked}"
+    assert not leaked, f"reviewer env leaked to out-of-scope services: {leaked}"
 
 
 def test_the_scope_boundary_control_services_exist() -> None:

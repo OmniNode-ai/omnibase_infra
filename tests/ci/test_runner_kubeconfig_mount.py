@@ -319,6 +319,7 @@ def test_docker_compose_config_resolves_without_error_for_the_fleet(
             # sufficient: this test proves interpolation resolves, never that
             # any particular secret is correct.
             "LOCAL_LLM_SHARED_SECRET": "dummy-interpolation-value",
+            "LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8",
         },
     )
     assert result.returncode == 0, (
