@@ -127,8 +127,15 @@
 #   with extra steps.
 #
 # PROD IS READ-ONLY
-#   The prod lane is probed with a plain GET against /health and nothing else.
-#   This script never mutates any lane.
+#   Every runtime lane this script probes is probed with a plain GET against
+#   /health and nothing else. This script never mutates any lane.
+#
+# THE LAB COMPOSE PROD LANE IS RETIRED (OMN-18320)
+#   `prod` (:28085) moved from RUNTIME_LANE_SPECS to RUNTIME_LANE_UNPROBED on
+#   2026-09-16: the compose project it named (omnibase-infra-prod) was shut
+#   down 2026-09-13 and no longer exists on .201. Production is the AWS
+#   onex-prod namespace, which this script has never probed. See the
+#   RUNTIME_LANE_UNPROBED comment below for the full reasoning.
 
 set -euo pipefail
 
@@ -278,7 +285,6 @@ policy_env_value() {
 RUNTIME_LANE_SPECS=(
   "dev|DEV_RUNTIME_MAIN_PORT"
   "stability-test|STABILITY_TEST_RUNTIME_MAIN_PORT"
-  "prod|PROD_RUNTIME_MAIN_PORT"
   "judge|JUDGE_RUNTIME_MAIN_PORT"
 )
 
@@ -288,7 +294,7 @@ RUNTIME_LANE_SPECS=(
 # This list exists so that "not probed" is a DECLARATION rather than an absence.
 # The parity test requires RUNTIME_LANE_SPECS + RUNTIME_LANE_UNPROBED to cover
 # the policy's lane set exactly, and separately requires dev / stability-test /
-# prod / judge to be in the PROBED table specifically. So a lane can never
+# judge to be in the PROBED table specifically. So a lane can never
 # vanish from this file quietly -- the OMN-15556 judge blind spot -- it can only
 # move, visibly and with a reason, into the list below.
 #
@@ -299,9 +305,26 @@ RUNTIME_LANE_SPECS=(
 # every tick for a lane nobody promised to keep up is the alert-fatigue failure
 # that gets the REAL rows above ignored -- the same outcome, by a different
 # route, as not probing them at all. Its owner watches it directly.
+#
+# prod (:28085, OMN-18320) is not a collaborator sandbox -- it is a compose
+# project (omnibase-infra-prod) that no longer exists on .201 at all. It was
+# shut down 2026-09-13 under an operator consent row and removed from
+# deploy/lane-census/lane-manifest.yaml (omnibase_infra#3489); AWS onex-prod is
+# the real production runtime and is untouched. docker/runtime-policy.env
+# still renders PROD_RUNTIME_MAIN_PORT (deliberately -- OMN-18320 left that
+# entry and docker-compose.prod.yml in place as a lane definition that still
+# parses, and repointing/deleting them is a separate decision), so this lane
+# cannot simply be dropped from the table below the parity test enforces --
+# it has to be declared unprobed, with this reason, or the parity test itself
+# fails. Left in RUNTIME_LANE_SPECS, every tick faithfully reports a real fact
+# (connection refused) as a fresh CRITICAL for a lane nobody is bringing back,
+# which is exactly the alert-fatigue failure the lakshman entry above
+# describes -- measured live: every /15 sample from 2026-09-13 onward paged
+# HTTP 000 for runtime-prod-28085 with no incident behind it.
 # shellcheck disable=SC2034  # declaration-only: read by the parity test, not by this script
 RUNTIME_LANE_UNPROBED=(
   "lakshman|LAKSHMAN_RUNTIME_MAIN_PORT"
+  "prod|PROD_RUNTIME_MAIN_PORT"
 )
 
 # Resolve a lane's main runtime port, or emit $LANE_PORT_UNRESOLVED. A value that
