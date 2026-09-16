@@ -960,6 +960,64 @@ def render_receipt(receipt: ModelLabPassReceipt) -> str:
     return "\n".join(lines)
 
 
+def verify_emitted(path: Path, sha: str, lane: EnumLabLane, out: Any) -> int:
+    """Refuse a receipt file that is not the one this job just emitted (OMN-18420).
+
+    The presence assertion this sits beside (``assert_evidence_artifact.py``)
+    answers "is there a non-empty file here". On a self-hosted host that reuses
+    its filesystem across jobs, a STALE file answers that question identically
+    to a fresh one -- which is how omnimarket run ``35035178406`` published an
+    artifact named for an omnimarket commit carrying an ``omnibase_infra``
+    commit's receipt.
+
+    ``evaluate_gate`` already cross-checks the name against the payload, so the
+    consuming side was never fooled. But it is in a DIFFERENT REPOSITORY and
+    runs an hour later, so the emitting job reported green and the defect
+    surfaced as an unexplained delivery refusal. This moves the same assertion
+    to the side that can see what happened, and makes it about the file on
+    disk rather than about the artifact that will be built from it.
+
+    Deliberately not folded into ``emit``: ``emit`` writes the file, so it can
+    only ever agree with itself. The value of this check is that it runs as a
+    SEPARATE step over whatever is actually on disk at upload time.
+    """
+    try:
+        receipt = ModelLabPassReceipt.from_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(
+            f"::error::lab-pass receipt at {path} is unreadable or malformed "
+            f"({exc}). Refusing to upload it as evidence for {sha}.",
+            file=out,
+        )
+        return 1
+
+    if receipt.sha != sha:
+        print(
+            f"::error::lab-pass receipt at {path} carries sha {receipt.sha}, but "
+            f"this job is emitting for {sha}. This is a receipt left behind by "
+            "another job on this host (OMN-18420) -- refusing to upload it under "
+            "this job's name.",
+            file=out,
+        )
+        return 1
+
+    if receipt.lane != lane:
+        print(
+            f"::error::lab-pass receipt at {path} carries lane "
+            f"{receipt.lane.value}, but this job is emitting for {lane.value}. "
+            "Refusing to upload it under this job's name.",
+            file=out,
+        )
+        return 1
+
+    print(
+        f"verified {path} is this job's own receipt: sha {receipt.sha}, lane "
+        f"{receipt.lane.value}, result {receipt.result.value}",
+        file=out,
+    )
+    return 0
+
+
 def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -> int:
     """Fail closed unless a PASS receipt exists for the EXACT sha.
 
@@ -1125,6 +1183,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[e.value for e in EnumLabLane],
         help="repeatable; defaults to every lab lane",
     )
+
+    verify = sub.add_parser(
+        "verify",
+        help="refuse a receipt file that is not the one this job emitted",
+    )
+    verify.add_argument("--path", required=True, type=Path)
+    verify.add_argument("--sha", required=True)
+    verify.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
+
     return parser
 
 
@@ -1174,6 +1241,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # exactly as valuable as the record of a passing one — but the emitting
         # step goes red so the failure is visible on the run that produced it.
         return 0 if receipt.result == EnumLabPassResult.PASS else 1
+
+    if args.command == "verify":
+        return verify_emitted(args.path, args.sha, EnumLabLane(args.lane), sys.stdout)
 
     if args.command == "gate":
         lanes = (

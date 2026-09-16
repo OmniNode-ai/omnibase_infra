@@ -282,8 +282,40 @@ jobs:
 
       # The receipt carries the window it measured, so the start is recorded
       # before the convergence wait, not after it.
-      - name: Record the lab-pass window start
-        run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Record the lab-pass window start and claim a private receipt directory
+        run: |
+          set -euo pipefail
+          echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+          # OMN-18420. Every lab-pass path below used to be a FIXED absolute
+          # path under /tmp, and every emitting job in this repository and in
+          # the sibling reusable runs on the SAME `omnibase-deploy` host. A
+          # `mkdir -p` on a directory that already exists is a no-op, so a
+          # receipt.json left behind by an earlier job survived into the next
+          # one. When that next job's emit did not overwrite it -- because the
+          # probe feeding it failed, or the emit itself did -- the presence
+          # assertion found the STALE file, passed, and upload-artifact
+          # published it under THIS job's sha-keyed name.
+          #
+          # Measured: omnimarket run 35035178406 uploaded artifact 10424013456
+          # named lab-pass-receipt-compose-dev-bc21f733... (an omnimarket
+          # commit) whose payload declared sha a7ea64f5... -- an omnibase_infra
+          # commit -- with a `deployed_revision` check citing
+          # check_dev_lane_staleness.py, which is THIS workflow's emitter shape
+          # and not the sibling one's. The delivery gate's name/payload
+          # cross-check caught it, so the direction was safe; the cost is that
+          # the sibling sha could never receipt PASS, and rule 24(b) then
+          # refuses that sha for staging.
+          #
+          # RUNNER_TEMP alone is not enough: a self-hosted runner reuses it
+          # across jobs. The run id, the attempt and the job name together name
+          # exactly one execution, and the `rm -rf` is what makes the claim
+          # true rather than merely likely.
+          LAB_PASS_WORK="${RUNNER_TEMP}/lab-pass-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_JOB}"
+          rm -rf "${LAB_PASS_WORK}"
+          mkdir -p "${LAB_PASS_WORK}/receipt"
+          echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
+          echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
 
       - name: Wait for the dev lane to vendor the merged sibling revision
         id: converge
@@ -326,7 +358,7 @@ jobs:
           DEV_LANE_PROJECTION_URL: http://host.docker.internal:3002
         run: |
           set -euo pipefail
-          mkdir -p /tmp/lab-pass-receipt
+          mkdir -p "${LAB_PASS_DIR}"
           CEILING_SECONDS=$(( ${JOB_TIMEOUT_MINUTES} * 60 ))
           STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
             || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
@@ -340,8 +372,8 @@ jobs:
             --effects-url "$DEV_LANE_EFFECTS_URL" \
             --projection-url "$DEV_LANE_PROJECTION_URL" \
             --settle-timeout-seconds "$SETTLE" \
-            > /tmp/lab-pass-checks.json
-          cat /tmp/lab-pass-checks.json
+            > "${LAB_PASS_CHECKS}"
+          cat "${LAB_PASS_CHECKS}"
 
       # `always()` on emit and upload: a FAILED lab pass is the record that tells
       # "it failed" apart from "nobody ran it", and telling those apart is the
@@ -361,8 +393,8 @@ jobs:
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "sibling_revision:${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}:check_lane_sibling_revision.py --repo $SOURCE_REPO --expect-revision $SIBLING_SHA against the omnibase-infra compose project, rebuilt at omnibase_infra $GIT_REF" \
-            --checks-json /tmp/lab-pass-checks.json \
-            --out /tmp/lab-pass-receipt/receipt.json
+            --checks-json "${LAB_PASS_CHECKS}" \
+            --out "${LAB_PASS_DIR}/receipt.json"
 
       # The zero-byte case `if-no-files-found: error` cannot see, since the
       # directory matches whether or not the receipt carries bytes (OMN-18247).
@@ -372,7 +404,22 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/assert_evidence_artifact.py \
             --artifact lab-pass-receipt-compose-dev-sibling \
-            --require /tmp/lab-pass-receipt/receipt.json
+            --require "${LAB_PASS_DIR}/receipt.json"
+
+      # OMN-18420: this emitter is the one the defect was MEASURED on --
+      # omnimarket run 35035178406 published an artifact named for an
+      # omnimarket sha whose payload was an omnibase_infra receipt left on the
+      # shared host. Presence was satisfied; identity was not checked.
+      - name: Assert the compose-dev receipt on disk is this job's own
+        if: always()
+        env:
+          SIBLING_SHA: ${{ needs.trigger-rebuild.outputs.sibling_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py verify \
+            --path "${LAB_PASS_DIR}/receipt.json" \
+            --sha "$SIBLING_SHA" \
+            --lane compose-dev
 
       - name: Upload the compose-dev lab-pass receipt
         if: always()
@@ -380,6 +427,6 @@ jobs:
         with:
           # Must match scripts/ci/lab_pass_receipt.py artifact_name() exactly.
           name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.sibling_sha }}
-          path: /tmp/lab-pass-receipt
+          path: ${{ env.LAB_PASS_DIR }}
           retention-days: 90
           if-no-files-found: error
