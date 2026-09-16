@@ -885,7 +885,45 @@ add_services_deploy() {
     # No --remove-orphans: compose evaluates it against the WHOLE project even
     # when services are named, so it would delete containers this call never
     # looked at.
-    run_ssh "
+    # CONVERGE, per service, on the runner's LIVE registration state.
+    #
+    # `up -d` alone does NOT fix a container that was created with a bad
+    # registration handle: compose finds the container present, starts it, and
+    # reports success while the runner re-runs the same failing registration in
+    # a restart loop. That is exactly what happened standing this runner up --
+    # the container held a 14-character value where a registration token is 29,
+    # and two successive `--add` runs both reported "Started" and changed
+    # nothing, because neither recreated it.
+    #
+    # So an OFFLINE runner is recreated and an ONLINE one is never touched:
+    #
+    #   online  -> plain `up -d`. A registered runner may be mid-job, and its
+    #              cached credentials are the thing a recreate would discard.
+    #   not online -> `--force-recreate`. A runner that is not registered holds
+    #              nothing worth preserving and takes no jobs, so recreating it
+    #              costs nothing and is the only thing that re-reads the env.
+    #
+    # `unknown` counts as not-online, deliberately: a container that does not
+    # exist yet reports exactly that, and so does one whose registration failed.
+    # Both want the same treatment. This is the one place `--add` is allowed to
+    # recreate, and it can never reach a general-pool runner -- those are
+    # refused at flag-validation time, before this runs.
+    local name state flags
+    for name in ${ADD_SERVICES}; do
+        flags="--no-deps"
+        if "${DRY_RUN}"; then
+            state="$(github_runner_state "${name}" 2>/dev/null || echo "unknown unknown")"
+        else
+            state="$(github_runner_state "${name}")"
+        fi
+        if [[ "${state%% *}" == "online" ]]; then
+            log "  ${name} is already registered and online -- converging without recreate."
+        else
+            log "  ${name} is not registered (state: ${state%% *}) -- recreating so it re-reads its env."
+            flags="${flags} --force-recreate"
+        fi
+
+        run_ssh "
         set -euo pipefail
         RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
         export RUNNER_TOKEN
@@ -894,8 +932,9 @@ add_services_deploy() {
         DEPLOY_RUNNER_TOKEN=\"\${RUNNER_TOKEN}\"
         export DEPLOY_RUNNER_TOKEN
         cd ${RUNNER_HOST_DIR}
-        ${compose_cmd} up -d --no-deps ${ADD_SERVICES}
+        ${compose_cmd} up -d ${flags} ${name}
     "
+    done
 
     # Service name == container_name == RUNNER_NAME for every non-pool runner
     # in the compose file, which is what makes this an identity, not a lookup.
