@@ -215,21 +215,22 @@ readonly RUNTIME_SERVICES=(
 # would be worse here: onex-api is the surface a lab proof is taken THROUGH, so
 # a stale one makes the proof itself stale.
 #
-# The two omninode_cloud one-shots are DELIBERATELY NOT in this array, and the
-# reason is a live defect rather than a judgement. This array feeds the RT-6
-# deploy readback, which resolves a RUNNING container for every service in
-# scope; a one-shot has already exited 0 by the time the readback runs, so
-# membership here fails the certification with "could not resolve a running
-# container". FRICTION docs/tracking/ROLLING_WORK_LEDGER.md:4778 recorded that
-# exact shape against migration-gate, and a partition of the readback by restart
-# policy is in flight in lane dev-lane-refresh-lock. Until it lands, the two
-# one-shots run through the full-project bring-up, where compose honours their
-# depends_on, and a WARM refresh does not re-run them.
+# The two omninode_cloud one-shots are still NOT in this array, and the reason
+# has changed -- OMN-18438 updated this paragraph rather than leaving a stale
+# one in place. They are one-shots, and this array is the RUNNING-service
+# restart set; they now live in DEV_LANE_ONLY_MIGRATION_SERVICES below and run
+# through the migration preflight, which already knows how to wait on a
+# run-to-completion service. The earlier reason recorded here -- that the RT-6
+# readback could not certify an exited container -- was true when #3332 landed
+# and stopped being true when omnibase_infra#3330 partitioned that readback by
+# restart policy (see the one-shot branch around the RT-6 assertion below).
 #
-# The consequence, named rather than left to be discovered: a warm refresh that
-# carries a new migrate image tag does not apply the migrations in it. Re-run
-# them explicitly, or take the full bring-up, until the readback partition
-# lands.
+# Nothing replaced the exclusion when the blocker lifted, so from #3332 until
+# OMN-18438 no governed refresh ever ran them: measured on the .201 dev lane
+# 2026-09-16, `docker ps -a` showed no container had EVER existed for either
+# service and omninode_cloud held 0 tables against 78 in omnibase_infra, while
+# onex-api logged 112 authentication failures an hour against a role no warm
+# volume had ever minted.
 # OMN-18114 adds tenant-projection-writer for a reason that is the OPPOSITE of
 # the writers' reason above, and is stated separately so the two do not merge.
 # That service IS declared in docker/docker-compose.infra.yml, so every lane
@@ -411,6 +412,38 @@ readonly RUNTIME_MIGRATION_SERVICES=(
 readonly RUNTIME_MIGRATION_ONESHOTS=(
     forward-migration
     intelligence-migration
+)
+
+# OMN-18438: the omninode_cloud migration one-shots, declared ONLY in
+# docker/docker-compose.dev-lane.yml, so they exist on the dev lane and on no
+# other.
+#
+# They CANNOT join the two arrays above, for the reason those arrays' own
+# comment gives about RUNTIME_SERVICES: that set is lane-agnostic, every lane's
+# `docker compose ... up` names it verbatim, and `docker compose up` fails the
+# WHOLE invocation on one undefined service name. prod, stability-test and judge
+# declare neither of these services, so an entry there would turn a dev-lane fix
+# into a production deploy outage at the first migration step.
+#
+# ORDER IS THE ORDERING. cloud-migration-files copies the corpus (and its
+# MANIFEST and manifest evaluator) out of the migrate image into the shared
+# volume; cloud-migration then applies it. Compose orders that with
+# `depends_on: service_completed_successfully`, and `up -d --no-deps` -- which
+# is what every refresh uses -- is precisely what switches depends_on off. The
+# runner re-establishes it inside the container by waiting on a `.corpus-ready`
+# sentinel, and this array is the other half: the preflight starts and waits on
+# them one at a time, in this order.
+#
+# BOTH are one-shots, so both are in the wait set. A one-shot that is started
+# and never waited on lets the runtime restart race an unapplied corpus, which
+# is the failure OMN-13220 fixed for intelligence-migration.
+readonly DEV_LANE_ONLY_MIGRATION_SERVICES=(
+    cloud-migration-files
+    cloud-migration
+)
+readonly DEV_LANE_ONLY_MIGRATION_ONESHOTS=(
+    cloud-migration-files
+    cloud-migration
 )
 # Broker readiness services brought up (and waited on) before the runtime
 # restart. redpanda-partition-cap raises topic_partitions_per_shard so the cold
@@ -3028,6 +3061,61 @@ warm_broker_topic_provisioning() {
     log_info "Broker partition cap applied."
 }
 
+# OMN-18438: one migration service refreshed and, when it is a one-shot, waited
+# on. Extracted verbatim from run_runtime_migration_preflight's loop body so the
+# lane-agnostic set and the dev-lane-only set are driven by ONE implementation.
+# A second copy of this block is how the two sets would drift -- a bound added
+# to one and not the other reads as deliberate to the next reader.
+#
+# The one-shot decision is passed in rather than re-derived, because the two
+# sets have different one-shot members: migration-gate is a long-running
+# healthcheck keepalive in the lane-agnostic set, and both members of the
+# dev-lane set are one-shots.
+refresh_one_migration_service() {
+    local compose_project="$1"
+    local service="$2"
+    local is_oneshot="$3"
+    shift 3
+    local -a compose_args=("$@")
+
+    local cmd=(
+        docker compose
+        -p "${compose_project}"
+        "${compose_args[@]}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d --no-deps --force-recreate
+        "${service}"
+    )
+    log_info "Refreshing migration service: ${service}"
+    log_cmd "${cmd[*]}"
+    # OMN-15718: bounded (not guarded -- a real failure here must still abort
+    # exactly as before; only the hang risk is closed).
+    compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cmd[@]}" || return 1
+
+    if [[ "${is_oneshot}" != true ]]; then
+        return 0
+    fi
+
+    # Deriving the container name from the compose project keeps the wait
+    # pointed at the lane being deployed (OMN-12987): the base compose names it
+    # <compose-project>-<service> and each lane overlay follows the same form.
+    local migration_container="${compose_project}-${service}"
+    # OMN-15718: bound the wait itself -- `docker wait` blocks until the
+    # container exits, with no deadline of its own.
+    local wait_cmd=(timeout --kill-after=15 "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" docker wait "${migration_container}")
+    log_cmd "${wait_cmd[*]}"
+    local migration_wait_result
+    migration_wait_result="$("${wait_cmd[@]}")" || true
+    if [[ "${migration_wait_result}" != "0" ]]; then
+        if [[ -z "${migration_wait_result}" ]]; then
+            log_error "COMPOSE_UP_TIMEOUT: 'docker wait ${migration_container}' did not complete within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s -- killed."
+        fi
+        log_error "${service} did not complete successfully."
+        return 1
+    fi
+    return 0
+}
+
 run_runtime_migration_preflight() {
     # Run bounded migration services before --no-deps runtime restarts.
     local deploy_target="$1"
@@ -3037,53 +3125,65 @@ run_runtime_migration_preflight() {
 
     log_step "Runtime Migration Preflight"
 
+    # The lane-agnostic set first. migration-gate is a long-running healthcheck
+    # keepalive, NOT a one-shot, so it is deliberately excluded from the wait set
+    # (OMN-13220) -- membership in RUNTIME_MIGRATION_ONESHOTS is what decides.
+    local service
+    local is_oneshot
+    local oneshot
     for service in "${RUNTIME_MIGRATION_SERVICES[@]}"; do
-        local cmd=(
-            docker compose
-            -p "${compose_project}"
-            "${compose_args[@]}"
-            --profile "${COMPOSE_PROFILE}"
-            up -d --no-deps --force-recreate
-            "${service}"
-        )
-        log_info "Refreshing migration service: ${service}"
-        log_cmd "${cmd[*]}"
-        # OMN-15718: bounded (not guarded -- a real failure here must still
-        # abort under set -e exactly as before; only the hang risk is closed).
-        compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cmd[@]}"
-        # One-shot migrations (forward-migration, intelligence-migration) run to
-        # completion and must exit 0 before the dependent schema/runtime work
-        # proceeds. migration-gate is a long-running healthcheck keepalive, NOT a
-        # one-shot, so it is deliberately excluded from the wait set
-        # (OMN-13220). Deriving the container name from the compose project keeps
-        # the wait pointed at the lane being deployed (OMN-12987): the base
-        # compose names it <compose-project>-<service> and each lane overlay
-        # follows the same form (e.g. omnibase-infra-intelligence-migration for
-        # dev, omnibase-infra-stability-test-intelligence-migration for stability).
-        local is_oneshot=false
-        local oneshot
+        is_oneshot=false
         for oneshot in "${RUNTIME_MIGRATION_ONESHOTS[@]}"; do
             if [[ "${service}" == "${oneshot}" ]]; then
                 is_oneshot=true
                 break
             fi
         done
-        if [[ "${is_oneshot}" == true ]]; then
-            local migration_container="${compose_project}-${service}"
-            # OMN-15718: bound the wait itself, same reasoning as the
-            # partition-cap wait above.
-            local wait_cmd=(timeout --kill-after=15 "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" docker wait "${migration_container}")
-            log_cmd "${wait_cmd[*]}"
-            local migration_wait_result
-            migration_wait_result="$("${wait_cmd[@]}")" || true
-            if [[ "${migration_wait_result}" != "0" ]]; then
-                if [[ -z "${migration_wait_result}" ]]; then
-                    log_error "COMPOSE_UP_TIMEOUT: 'docker wait ${migration_container}' did not complete within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s -- killed."
-                fi
-                log_error "${service} did not complete successfully."
-                return 1
+        refresh_one_migration_service \
+            "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}"
+    done
+
+    # OMN-18438: then the lane's own migration services, if it declares any.
+    #
+    # Keyed on the resolved OVERLAY FILENAME rather than on a lane string, for
+    # the reason resolve_runtime_build_services() gives: these services exist
+    # because that specific compose file is loaded, so the overlay is the thing
+    # the array is a property of, and an unknown lane inherits that resolver's
+    # fail-closed behaviour instead of echoing an unrecognised suffix through.
+    #
+    # The default branch names NOTHING, deliberately. A service that exists in
+    # none of a lane's compose files fails the WHOLE `docker compose up`, so
+    # prod, stability-test and judge must be handed exactly the lane-agnostic
+    # set above and nothing else.
+    local migration_overlay_filename
+    migration_overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
+    local -a lane_migration_services=()
+    local -a lane_migration_oneshots=()
+    case "${migration_overlay_filename}" in
+        "")
+            # Bare `omnibase-infra` -> the dev lane, which loads
+            # docker-compose.dev-lane.yml through resolve_compose_file_args()'s
+            # fall-through. It is the only lane declaring the omninode_cloud
+            # one-shots.
+            lane_migration_services=("${DEV_LANE_ONLY_MIGRATION_SERVICES[@]}")
+            lane_migration_oneshots=("${DEV_LANE_ONLY_MIGRATION_ONESHOTS[@]}")
+            ;;
+        *)
+            lane_migration_services=()
+            lane_migration_oneshots=()
+            ;;
+    esac
+
+    for service in "${lane_migration_services[@]}"; do
+        is_oneshot=false
+        for oneshot in "${lane_migration_oneshots[@]}"; do
+            if [[ "${service}" == "${oneshot}" ]]; then
+                is_oneshot=true
+                break
             fi
-        fi
+        done
+        refresh_one_migration_service \
+            "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}"
     done
 
     # Postgres follows the same lane-derivable naming as forward-migration:
