@@ -778,72 +778,22 @@ hosted_runner_allowlist:
 # defaulting (CLAUDE.md rule 8), because a silently-defaulted threshold is how a
 # routing gate quietly stops gating.
 route:
-  policy_version: 1
-  runner_group: omnibase-ci
-  lab_labels: ["self-hosted", "omnibase-ci"]
-  hosted_labels: ["ubuntu-latest"]
-  # Headroom FLOOR, not a capacity match. A measured CI fan-out in this repo is
-  # ~47 jobs (run 34093238556 ran 47/47 hosted); 12 idle runners is the margin
-  # below which routing stops adding load to the fleet.
-  min_idle_runners: 12
-  # Deliberately well below the observed peak: busy was measured swinging
-  # 65 -> 42 -> 19 -> 13 -> 10 of 88 inside ~2 minutes on 2026-09-07
-  # (10:22-10:24Z). A threshold near the peak would flap every run.
-  max_busy_fraction: 0.80
-  # A separate, LOWER trust floor than the fleet canary's own
-  # RUNNER_CANARY_MAX_OFFLINE ("5" against expected_count 88): the canary asks
-  # "is the fleet healthy", this asks "is it big enough to route onto at all".
-  min_online_runners: 60
-  # A hosted route job cannot reach the lab (the pre-push probe reaches it over
-  # ssh to tailnet/RFC1918 addresses), so the lab record arrives asynchronously
-  # from the saturation monitor and is freshness-bounded. Consequence, named
-  # rather than hidden: the lab signal is up to 10 minutes old by construction.
-  # Stale is unknown, and unknown routes hosted.
-  lab_record_max_age_seconds: 600
-  # COPIED VERBATIM from the pre-push picker's committed defaults --
-  # PREPUSH_LOAD_THRESHOLD:-1.0 (scripts/hooks/prepush_smart_tests.sh) and
-  # PREPUSH_MIN_FREE_MEM_MB:-4096 (scripts/hooks/prepush_dispatch.sh) -- so the
-  # lab has ONE definition of "too loaded", shared by pre-push placement and CI
-  # routing, rather than two that drift apart. Load ranks, memory ADMITS
-  # (OMN-17392: a host at 0.10x load with 2.5 GiB free ranked FIRST under a
-  # CPU-only picker and cost an OMN-17316 landing hours of OOM kills).
-  max_lab_load_ratio: 1.0
-  min_lab_free_mem_mib: 4096
-  # MEASURED RESIDUAL, recorded rather than tuned away (2026-09-07, live).
-  # Dry runs executed ON the lab host read it at load1 48.76 / 32 cores =
-  # 1.524x with 58765 MiB free -- CPU-hot and memory-rich at the same time,
-  # because that host IS the 88-container runner fleet. Four consecutive
-  # samples over ~2 minutes all decided `lab_saturated` on the ratio alone.
+  # THE THRESHOLDS MOVED, they were not deleted. The labels, the idle and busy
+  # floors, the fleet-size floor, the lab freshness bound and load/memory
+  # floors, and the private-repository refusal are now declared in the routing
+  # node's own contract:
   #
-  # So the two consumers of this threshold are not asking the same question.
-  # Pre-push asks "can I add a heavy test suite to this host", and 1.0x is the
-  # right answer there. CI routing asks "can the fleet accept one more job",
-  # and the fleet is DESIGNED to run hot -- a ratio floor calibrated for the
-  # first question may refuse the lab almost always for the second.
+  #   src/omnibase_infra/nodes/node_ci_runner_route_compute/contract.yaml
   #
-  # It is deliberately NOT loosened here. The value is copied verbatim so the
-  # lab has one definition of "too loaded", and changing it is a placement
-  # decision that can only be measured once the seam actually permits
-  # self-hosted -- which is OMN-16682, not this ticket. Landing a looser number
-  # now would be tuning against a mechanism that is inert, with no way to
-  # observe whether the new value was right. Re-derive it with the seam flip,
-  # against real placement, and if the two questions genuinely need two
-  # numbers, split the key then rather than silently widening this one.
-  # Workflows whose ROUTED jobs must stay hosted regardless of capacity.
+  # under its `config:` block, parsed into ModelCIRunnerRoutePolicy whose fields
+  # are all required. They are not restated here: two copies of a threshold are
+  # two policies that agree until the day they do not, and the one this file
+  # kept would have been the one nobody was reading.
   #
-  # THIS IS DELIBERATELY NOT `hosted_runner_allowlist` ABOVE, and conflating the
-  # two is a real defect that a dry run against live data caught before merge.
-  # That list means "this FILE contains at least one job that is intentionally
-  # bare `runs-on: ubuntu-latest`", which is why `.github/workflows/ci.yml` is
-  # on it -- for the single lightweight CI Summary aggregator job. Reusing it
-  # here would have pinned all 54 jobs of ci.yml hosted forever and made the
-  # entire mechanism a no-op on its largest consumer, while every test still
-  # passed. The two lists answer different questions and must stay separate.
-  #
-  # Membership here means: even once the seam permits self-hosted, this
-  # workflow's routed jobs stay on GitHub-hosted compute, because something
-  # other than capacity requires it -- fate-isolation from the fleet being
-  # monitored, clean egress for an ECR push, or fork-only untrusted execution.
+  # What stays here is per-repository DATA rather than policy -- the workflows
+  # this repository exempts, and the thresholds of the saturation monitor,
+  # which is a different question from the placement decision and answers to a
+  # different consumer.
   hosted_workflows:
     - .github/workflows/runner-route-reusable.yml
     - .github/workflows/runner-route-probe.yml
