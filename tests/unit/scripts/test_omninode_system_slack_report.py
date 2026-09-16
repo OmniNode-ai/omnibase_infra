@@ -116,7 +116,17 @@ RUNTIME_LANE_UNPROBED_RE = re.compile(
 #: responsible for keeping up. Named explicitly rather than derived, because the
 #: whole risk the unprobed table introduces is that one of these gets quietly
 #: moved into it -- which is the OMN-15556 judge blind spot with an extra step.
-MUST_BE_PROBED_LANES = frozenset({"dev", "stability-test", "prod", "judge"})
+#:
+#: "prod" was removed from this set 2026-09-16 (OMN-18320). It is not the
+#: OMN-15556 blind-spot risk this set exists to catch: the compose project it
+#: named (omnibase-infra-prod) was shut down 2026-09-13 and no longer exists on
+#: .201, so PROD_RUNTIME_MAIN_PORT resolving to a dead endpoint is not a lane
+#: the platform is "responsible for keeping up" -- there is nothing to keep up.
+#: AWS onex-prod is the real production runtime and this reporter has never
+#: probed it. docker/runtime-policy.env still renders the key (OMN-18320 left
+#: it and docker-compose.prod.yml in place deliberately), which is exactly why
+#: it still has to be declared -- in RUNTIME_LANE_UNPROBED, not here.
+MUST_BE_PROBED_LANES = frozenset({"dev", "stability-test", "judge"})
 
 
 def _parse_lane_table(script: Path, pattern: re.Pattern[str]) -> dict[str, str]:
@@ -461,6 +471,22 @@ def _outage_http(lane_ports: dict[str, str]) -> dict[str, tuple[int, str]]:
             # entry is inert for every test that drives FIXED_SCRIPT.
             "8099": (200, json.dumps({"state": "idle"})),
             "3003": (200, "<html>ok</html>"),
+            # PROD_RUNTIME_MAIN_PORT (28085) is kept green HERE ONLY, and only
+            # for the frozen as-deployed fixture (OMN-18320). That fixture
+            # hardcodes a literal `curl ... 127.0.0.1:28085/health` regardless
+            # of the current policy/lane declarations -- it is a byte-for-byte
+            # capture of the 2026-07-30 artifact and is never edited -- so it
+            # always probes this port no matter what the current FIXED_SCRIPT
+            # declares. `lane_ports` (and therefore this dict's
+            # `dict.fromkeys(lane_ports.values(), ...)` line above) no longer
+            # carries prod's port because FIXED_SCRIPT declares it
+            # RUNTIME_LANE_UNPROBED; without this entry the as-deployed
+            # fixture's still-live probe to 28085 would get a fabricated
+            # connection-refused the replayed outage never contained, same
+            # failure mode the 8099 comment above describes. FIXED_SCRIPT
+            # itself never calls curl against this port at all post-OMN-18320,
+            # so this entry is inert for every test that drives FIXED_SCRIPT.
+            _policy_port("PROD_RUNTIME_MAIN_PORT"): (200, HEALTHY_BODY),
         }
     )
     return http
@@ -537,7 +563,14 @@ def test_as_deployed_reports_green_on_the_replayed_outage(
     # ...and every endpoint it does list is a green 200.
     assert "CRITICAL" not in endpoints and "WARNING" not in endpoints
     assert f"runtime-{lane_ports['stability-test']}`: HTTP 200 (OK)" in endpoints
-    assert f"runtime-{lane_ports['prod']}`: HTTP 200 (OK)" in endpoints
+    # The frozen as-deployed fixture hardcodes a literal probe against 28085
+    # regardless of current lane declarations (OMN-18320) -- read the port
+    # straight from the policy rather than through `lane_ports`, which now
+    # excludes prod because FIXED_SCRIPT (not this fixture) declares it
+    # unprobed.
+    assert (
+        f"runtime-{_policy_port('PROD_RUNTIME_MAIN_PORT')}`: HTTP 200 (OK)" in endpoints
+    )
     # ...and `health: starting` never registered: the container_issues line is
     # OK and the whole report claims zero critical, zero warning.
     assert re.search(r"container_issues`: [^\n]*\(OK\)", report), report
@@ -561,7 +594,11 @@ def test_fixed_reports_red_and_names_the_dev_runtime_on_the_same_state(
         f"runtime-stability-test-{lane_ports['stability-test']}`: HTTP 200 (OK)"
         in report
     )
-    assert f"runtime-prod-{lane_ports['prod']}`: HTTP 200 (OK)" in report
+    # OMN-18320: the fixed reporter no longer probes the retired prod lane at
+    # all -- not green, not CRITICAL, absent. The as-deployed test above is
+    # what still proves the historical artifact probed it; this is the
+    # GREEN-after half of that same retirement.
+    assert "runtime-prod-" not in report, report
     assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
 
 
@@ -946,6 +983,93 @@ def test_prod_lane_is_probed_with_a_plain_get_only() -> None:
     )
     for verb in ("-X POST", "-X PUT", "-X DELETE", "-X PATCH"):
         assert verb not in body, f"reporter must never issue {verb}"
+
+
+# --------------------------------------------------------------------------
+# OMN-18320 -- the lab compose prod lane was retired 2026-09-13; the reporter
+# must stop probing it rather than page a real-but-meaningless CRITICAL for a
+# lane nobody is bringing back.
+# --------------------------------------------------------------------------
+
+
+def test_prod_lane_is_declared_unprobed_after_retirement() -> None:
+    """RED-before this PR: `prod` sat in RUNTIME_LANE_SPECS (the probed table)
+    with no corresponding compose project on .201 any more, so every /15 tick
+    reported a fresh CRITICAL HTTP 000 for `runtime-prod-28085` -- a real fact
+    about a lane that was deliberately shut down, not an incident.
+    """
+    unprobed_lanes = _script_unprobed_lane_specs(FIXED_SCRIPT)
+    assert "prod" in unprobed_lanes, (
+        "prod must be declared in RUNTIME_LANE_UNPROBED now that the "
+        "omnibase-infra-prod compose lane no longer exists (OMN-18320) -- "
+        f"found: {unprobed_lanes}"
+    )
+    probed_lanes = _script_lane_specs(FIXED_SCRIPT)
+    assert "prod" not in probed_lanes, (
+        "prod must not remain in RUNTIME_LANE_SPECS -- the compose lane it "
+        f"names was shut down 2026-09-13 (OMN-18320): {probed_lanes}"
+    )
+
+
+def test_retired_prod_lane_never_receives_a_probe_and_produces_no_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """The direct reproduction of the OMN-18320 defect against a live-shaped
+    fleet: every lane the reporter is still responsible for (dev,
+    stability-test, judge) is healthy, and nothing stubs a response for
+    PROD_RUNTIME_MAIN_PORT at all -- exactly like the real .201 host today,
+    where nothing listens on :28085. Before this PR's fix that produced a
+    connection-refused CRITICAL for a lane nobody is bringing back; after it,
+    the port is never dialed and the fleet reads clean.
+    """
+    prod_port = _policy_port("PROD_RUNTIME_MAIN_PORT")
+    assert prod_port not in lane_ports.values(), (
+        "test setup error: prod's port must not be one of the reporter's own "
+        "probed lanes for this to be a meaningful reproduction"
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),  # deliberately no entry for prod_port
+        docker_state={"containers": [], "dangling": []},
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    assert f"runtime-prod-{prod_port}" not in report, (
+        f"the retired prod lane was probed and appears in the report:\n{report}"
+    )
+    assert "CRITICAL" not in report, (
+        f"a lane nobody stubbed (prod, :{prod_port}) produced a CRITICAL even "
+        f"though it was never declared probed:\n{report}"
+    )
+    assert "Issues: *0 critical*, *0 warning*" in report, report
+
+
+def test_positive_control_platform_lanes_still_probed_after_prod_retirement(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """Positive control for the test above: dev, stability-test and judge --
+    the lanes the platform is actually responsible for -- still render as
+    probed endpoints. Without this, a reporter that probed NOTHING would also
+    pass the retirement test above vacuously.
+    """
+    assert set(lane_ports) == {"dev", "stability-test", "judge"}, (
+        f"expected exactly the three platform-owned lanes to be probed, got "
+        f"{sorted(lane_ports)} -- either a lane was dropped or a new one "
+        f"needs a decision, not a silent default"
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+
+    for lane, port in lane_ports.items():
+        assert f"runtime-{lane}-{port}`: HTTP 200 (OK)" in report, (
+            f"positive control failed: lane {lane} (:{port}) did not render as "
+            f"a healthy probed endpoint:\n{report}"
+        )
+    assert "Issues: *0 critical*, *0 warning*" in report, report
 
 
 # --------------------------------------------------------------------------
