@@ -61,6 +61,7 @@ from typing import NoReturn
 import click
 
 from omnibase_core.errors.model_onex_error import ModelOnexError
+from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
 from omnibase_infra.gateway.client.gateway_identity_verifier import (
     GatewayIdentityVerifier,
 )
@@ -88,6 +89,17 @@ __all__ = ["auth_group"]
 
 def _store() -> StoreGatewayCredential:
     return StoreGatewayCredential(onex_home=Path.home() / ".onex")
+
+
+def _lane_store() -> StoreLaneCredential:
+    """The per-lane bus identities, in the same two files (OMN-18432).
+
+    A second store class rather than a wider gateway one: the gateway store
+    holds exactly ONE credential and refuses a machine carrying two kinds,
+    which is its most important property. A machine legitimately holds one bus
+    identity per lane, so folding lanes in would mean relaxing that refusal.
+    """
+    return StoreLaneCredential(onex_home=Path.home() / ".onex")
 
 
 def _fail(message: str) -> NoReturn:
@@ -278,6 +290,76 @@ def auth_login(
         f"Stored gateway credential for tenant '{tenant_slug}' (client_id {client_id})."
     )
     click.echo("Secret written by reference to ~/.onex/credentials.json (mode 0600).")
+
+
+@auth_group.command("lane-login")
+@click.option(
+    "--lane",
+    required=True,
+    help="Lane id this identity authenticates to, as the lane declaration spells it.",
+)
+@click.option(
+    "--sasl-username",
+    required=True,
+    help="SASL principal name. A name, not a secret: it is stored in the reference-only config file.",
+)
+@click.option(
+    "--sasl-password-stdin",
+    is_flag=True,
+    default=False,
+    help="Read the SASL password from stdin. The only accepted form -- a flag value would leak into the process table and shell history.",
+)
+def auth_lane_login(lane: str, sasl_username: str, sasl_password_stdin: bool) -> None:
+    """Store this machine's bus identity for one lane, by reference (OMN-18432).
+
+    Writes the value to ~/.onex/credentials.json (mode 0600) and a
+    reference-only entry to ~/.onex/config.yaml. Another lane's entry, the
+    gateway block, and every other key in that file survive untouched.
+
+    This command exists so nobody hand-edits those two files. A hand-written
+    credential file is how the 0600 mode and the reference-only rule stop being
+    enforced at all -- both are checks the store performs, and nothing performs
+    them on a file written by a text editor.
+    """
+    if not sasl_password_stdin:
+        _fail(
+            "--sasl-password-stdin is required; a password is never taken from "
+            "argv, where it is visible in the process table to every other "
+            "process on this host and lands in shell history."
+        )
+
+    password = _read_stdin_secret(
+        "SASL password",
+        "pbpaste | onex auth lane-login --lane <lane> --sasl-username <principal> --sasl-password-stdin",
+    )
+
+    store = _lane_store()
+    try:
+        store.save(lane=lane, sasl_username=sasl_username, sasl_password=password)
+    except ModelOnexError as exc:
+        _fail(str(exc))
+
+    click.echo(f"Stored bus identity '{sasl_username}' for lane '{lane}'.")
+    click.echo(
+        f"Value written by reference '{store.password_ref(lane)}' to "
+        "~/.onex/credentials.json (mode 0600)."
+    )
+
+
+@auth_group.command("lane-logout")
+@click.option("--lane", required=True, help="Lane id to forget the identity for.")
+def auth_lane_logout(lane: str) -> None:
+    """Remove this machine's stored bus identity for one lane.
+
+    The value goes before the reference, so a process killed mid-command
+    leaves a config naming a missing secret -- which every read refuses loudly
+    -- rather than an orphaned value with nothing pointing at it.
+    """
+    try:
+        _lane_store().clear(lane)
+    except ModelOnexError as exc:
+        _fail(str(exc))
+    click.echo(f"Removed the stored bus identity for lane '{lane}'.")
 
 
 @auth_group.command("status")

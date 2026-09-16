@@ -235,6 +235,9 @@ from omnibase_infra.event_bus.kafka_auth import (
     OAuthBearerTokenProvider,
     build_aiokafka_auth_kwargs,
 )
+from omnibase_infra.event_bus.lane_client_transport_binding import (
+    resolve_lane_client_transport,
+)
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
 from omnibase_infra.event_bus.mixin_kafka_dlq import (
     _REPLAY_COUNT_HEADER,
@@ -571,6 +574,17 @@ class EventBusKafka(
         as the base, then ``bootstrap_servers`` is set to the explicit override
         so the caller-supplied value wins over ``KAFKA_BOOTSTRAP_SERVERS``.
 
+        THE LANE TRANSPORT (OMN-18432). ``RuntimeLocal`` can hand this factory
+        an address and nothing else -- its accepted override keys are a closed
+        five-element set and ``omnibase_core`` must not name an infra symbol.
+        So a caller that resolved a lane's DECLARED protocol and mechanism, and
+        its own identity for that lane, states them through the scoped binding
+        in ``lane_client_transport_binding`` and this factory reads them back
+        for the matching address. Without a binding for THIS address the
+        construction below is byte-for-byte what it has always been, which is
+        what keeps every container and CI runner on the environment path they
+        already use.
+
         Args:
             bootstrap: Kafka bootstrap servers string (``host:port`` format)
 
@@ -586,6 +600,18 @@ class EventBusKafka(
         config = ModelKafkaEventBusConfig.default().model_copy(
             update={"bootstrap_servers": bootstrap}
         )
+        lane_transport = resolve_lane_client_transport(bootstrap)
+        if lane_transport is not None:
+            logger.info(
+                "EventBusKafka: lane %s transport applied for %s (%s), declared in %s",
+                lane_transport.lane,
+                bootstrap,
+                lane_transport.security_protocol,
+                lane_transport.declared_in,
+            )
+            config = config.model_copy(
+                update=lane_transport.as_client_config_overrides()
+            )
         return cls(config=config)
 
     @classmethod

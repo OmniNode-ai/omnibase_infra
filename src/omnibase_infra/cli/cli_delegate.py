@@ -109,6 +109,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import os
 import re
 import signal
 import sys
@@ -130,6 +131,10 @@ from omnibase_infra.cli.cli_node import _resolve_packaged_contract
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
+)
+from omnibase_infra.cli.delegate_lane_credentials import (
+    DelegateLaneCredentialError,
+    resolve_lane_client_transport_for,
 )
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
@@ -157,6 +162,12 @@ from omnibase_infra.cli.task_class_selection import (
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.event_bus.lane_client_transport_binding import (
+    bind_lane_client_transport,
+)
+from omnibase_infra.event_bus.model_lane_client_transport import (
+    ModelLaneClientTransport,
+)
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
 logger = logging.getLogger(__name__)
@@ -691,6 +702,41 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
         kafka_bootstrap=kafka_bootstrap,
         authority_topic=SUFFIX_DELEGATION_REQUEST,
     )
+
+
+@contextmanager
+def _bind_lane_transport(
+    lane_transport: ModelLaneClientTransport | None,
+) -> Iterator[None]:
+    """Make a resolved lane transport visible to every client this run builds.
+
+    OMN-18432. ``RuntimeLocal`` constructs the bus itself and can be handed an
+    address and nothing else, so a process that resolved a lane's declared
+    protocol, its mechanism and its own identity has no argument to put them
+    in. It states them for the scope of the dispatch instead, address-matched,
+    and the bus factory and the pre-flight probe both read them back for that
+    one broker.
+
+    ``None`` -- an explicit ``--kafka-bootstrap``, or a surface whose
+    environment already carries the credential -- binds nothing, and every
+    client built inside this scope is assembled exactly as it is today.
+    """
+    if lane_transport is None:
+        yield
+        return
+    logger.info(
+        "onex delegate: lane %s transport bound for %s (%s/%s) as principal "
+        "%s, credential resolved by reference from this machine's client "
+        "store, declared in %s",
+        lane_transport.lane,
+        lane_transport.bootstrap_servers,
+        lane_transport.security_protocol,
+        lane_transport.sasl_mechanism or "no-sasl",
+        lane_transport.sasl_username or "anonymous",
+        lane_transport.declared_in,
+    )
+    with bind_lane_client_transport(lane_transport):
+        yield
 
 
 def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[str, str]:
@@ -1502,85 +1548,107 @@ def run_delegate(
     backend_overrides = build_backend_overrides(
         bus=bus, kafka_bootstrap=resolved_bootstrap
     )
-    run_id = uuid.uuid4()
-    # OMN-14397: minted fresh per invocation — never reused/cached across runs
-    # sharing a working directory or state-root — and threaded explicitly into
-    # the payload so it becomes the delegate request's correlation_id rather
-    # than an implicit default decided downstream. Kept a UUID object here;
-    # only stringified at the JSON payload boundary in _write_payload.
-    correlation_id = uuid.uuid4()
-    payload_path = _write_payload(
-        prompt=prompt,
-        task_type=resolved_task_type,
-        source=resolved_source,
-        acceptance_criteria=acceptance_criteria,
-        # The wire enum spells these with underscores; the flag spells them
-        # with dashes, as every other choice flag on this command does.
-        quality_contract_mode=(
-            None if criteria_mode is None else criteria_mode.replace("-", "_")
-        ),
-        response_contract=response_contract,
-        system_prompt=system_prompt,
-        max_tokens=max_tokens,
-        state_root=state_root,
-        run_id=run_id,
-        correlation_id=correlation_id,
-    )
-    contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
-    # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
-    # dispatched run — prove a deployed one is actually consuming the command
-    # topic BEFORE anything is published. A refusal here is the point: the
-    # defect being closed is an invocation that silently ran in-process and
-    # was then read as evidence about a lane it never reached, so this path
-    # never degrades, it stops.
+    # OMN-18432: AS WHOM, now that OMN-16871 settled WHICH BROKER. The lane
+    # declaration carries the protocol and the mechanism and the CLI has been
+    # logging both and forwarding neither, so a client addressed at the
+    # authenticated dev-lane listener was still assembled out of whatever the
+    # shell exported. Resolve the whole transport once, here, and refuse now
+    # if this machine holds no identity for a lane that declares one -- the
+    # alternative surfaces minutes later as a handshake error naming nothing
+    # an operator can act on.
     try:
-        locus_decision = resolve_delegate_locus(
-            requested=locus,
-            bus=bus,
-            # OMN-16871: the RESOLVED address, not the raw flag. The
-            # deployed-lane probe asks whether a live consumer group is bound
-            # to the command topic; asking that of one broker and then
-            # publishing to another is a probe of a lane the run never
-            # reaches, which is the OMN-17295 instrument defect in a second
-            # place.
-            kafka_bootstrap=resolved_bootstrap,
-            contract_path=contract_path,
-            shared_bus_value=BUS_KAFKA,
+        lane_transport = resolve_lane_client_transport_for(
+            lane_target=lane_target,
+            onex_home=Path.home() / ".onex",
+            environ=os.environ,
         )
-    except DelegateLocusRefusedError as exc:
+    except DelegateLaneCredentialError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    try:
-        with _hard_timeout(timeout + _HARD_TIMEOUT_GRACE_SECONDS):
-            return run_receipt_mode(
-                node_name=DELEGATE_NODE_NAME,
+    # The binding covers the PRE-FLIGHT PROBE as well as the publish. The
+    # locus probe runs first and builds its own admin client; on a SASL lane a
+    # probe that authenticated differently from the publish would refuse
+    # before the publish was ever attempted, and would report the wrong cause.
+    with _bind_lane_transport(lane_transport):
+        run_id = uuid.uuid4()
+        # OMN-14397: minted fresh per invocation — never reused/cached across runs
+        # sharing a working directory or state-root — and threaded explicitly into
+        # the payload so it becomes the delegate request's correlation_id rather
+        # than an implicit default decided downstream. Kept a UUID object here;
+        # only stringified at the JSON payload boundary in _write_payload.
+        correlation_id = uuid.uuid4()
+        payload_path = _write_payload(
+            prompt=prompt,
+            task_type=resolved_task_type,
+            source=resolved_source,
+            acceptance_criteria=acceptance_criteria,
+            # The wire enum spells these with underscores; the flag spells them
+            # with dashes, as every other choice flag on this command does.
+            quality_contract_mode=(
+                None if criteria_mode is None else criteria_mode.replace("-", "_")
+            ),
+            response_contract=response_contract,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            state_root=state_root,
+            run_id=run_id,
+            correlation_id=correlation_id,
+        )
+        contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
+        # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
+        # dispatched run — prove a deployed one is actually consuming the command
+        # topic BEFORE anything is published. A refusal here is the point: the
+        # defect being closed is an invocation that silently ran in-process and
+        # was then read as evidence about a lane it never reached, so this path
+        # never degrades, it stops.
+        try:
+            locus_decision = resolve_delegate_locus(
+                requested=locus,
+                bus=bus,
+                # OMN-16871: the RESOLVED address, not the raw flag. The
+                # deployed-lane probe asks whether a live consumer group is bound
+                # to the command topic; asking that of one broker and then
+                # publishing to another is a probe of a lane the run never
+                # reaches, which is the OMN-17295 instrument defect in a second
+                # place.
+                kafka_bootstrap=resolved_bootstrap,
                 contract_path=contract_path,
-                input_path=payload_path,
-                state_root=state_root,
-                backend_overrides=backend_overrides,
-                timeout=timeout,
-                verbose=verbose,
-                emit_socket=emit_socket or default_emit_socket_path(),
-                # OMN-17304: a dispatched run hosts NOTHING. Without this the
-                # CLI subscribes the entry handler to the command topic it is
-                # publishing to and executes a backlog command out of its own
-                # venv, while the lane executes the real one — two runs, and
-                # the receipt was the wrong one's.
-                host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
-                locus_decision=locus_decision,
-                # OMN-17295 / OMN-14872: the receipt layer cannot select by an
-                # identity it was never told. Handing it the id this CLI just
-                # minted is what lets it refuse another run's terminal
-                # envelope instead of printing it as ours.
-                expected_correlation_id=correlation_id,
-                receipt_callback=lambda receipt: _write_local_run_files(
-                    receipt=receipt,
-                    state_root=state_root,
-                    prompt=prompt,
-                    task_type=resolved_task_type,
-                    task_type_resolution=task_class.resolution.value,
-                ),
+                shared_bus_value=BUS_KAFKA,
             )
-    except DelegateTimeoutExceededError as exc:
-        click.echo(str(exc), err=True)
-        return 1
+        except DelegateLocusRefusedError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+        try:
+            with _hard_timeout(timeout + _HARD_TIMEOUT_GRACE_SECONDS):
+                return run_receipt_mode(
+                    node_name=DELEGATE_NODE_NAME,
+                    contract_path=contract_path,
+                    input_path=payload_path,
+                    state_root=state_root,
+                    backend_overrides=backend_overrides,
+                    timeout=timeout,
+                    verbose=verbose,
+                    emit_socket=emit_socket or default_emit_socket_path(),
+                    # OMN-17304: a dispatched run hosts NOTHING. Without this the
+                    # CLI subscribes the entry handler to the command topic it is
+                    # publishing to and executes a backlog command out of its own
+                    # venv, while the lane executes the real one — two runs, and
+                    # the receipt was the wrong one's.
+                    host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
+                    locus_decision=locus_decision,
+                    # OMN-17295 / OMN-14872: the receipt layer cannot select by an
+                    # identity it was never told. Handing it the id this CLI just
+                    # minted is what lets it refuse another run's terminal
+                    # envelope instead of printing it as ours.
+                    expected_correlation_id=correlation_id,
+                    receipt_callback=lambda receipt: _write_local_run_files(
+                        receipt=receipt,
+                        state_root=state_root,
+                        prompt=prompt,
+                        task_type=resolved_task_type,
+                        task_type_resolution=task_class.resolution.value,
+                    ),
+                )
+        except DelegateTimeoutExceededError as exc:
+            click.echo(str(exc), err=True)
+            return 1

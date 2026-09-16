@@ -179,6 +179,32 @@ def build_aiokafka_auth_kwargs_from_env() -> dict[str, object]:
     return build_aiokafka_auth_kwargs(ModelKafkaEventBusConfig.default())
 
 
+def build_aiokafka_auth_kwargs_for(bootstrap_servers: str) -> dict[str, object]:
+    """Build auth/TLS kwargs for ONE broker, honouring a bound lane transport.
+
+    OMN-18432. A CLI that resolved a lane's declared transport and its own
+    identity binds them for that lane's address; a pre-flight probe against
+    that same address must authenticate as the same principal the publish
+    will, or the run refuses at the probe and the publish is never reached.
+    That is not hypothetical -- the delegate locus probe runs BEFORE any
+    publish, and on a SASL lane an env-only probe on a machine with no
+    ambient credential fails first and reports the wrong thing.
+
+    Without a binding for this address the answer is
+    :func:`build_aiokafka_auth_kwargs_from_env`, unchanged, which is what
+    every container and CI runner keeps getting.
+    """
+    from omnibase_infra.event_bus.lane_client_transport_binding import (
+        resolve_lane_client_transport,
+    )
+
+    lane_transport = resolve_lane_client_transport(bootstrap_servers)
+    config = ModelKafkaEventBusConfig.default()
+    if lane_transport is not None:
+        config = config.model_copy(update=lane_transport.as_client_config_overrides())
+    return build_aiokafka_auth_kwargs(config)
+
+
 def build_confluent_auth_config(config: ModelKafkaEventBusConfig) -> dict[str, str]:
     """Build confluent-kafka transport/auth config entries from runtime Kafka config.
 

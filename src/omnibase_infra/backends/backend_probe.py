@@ -189,13 +189,16 @@ async def _live_consumer_groups_async(
 
     from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
     from omnibase_infra.event_bus.kafka_auth import (
-        build_aiokafka_auth_kwargs_from_env,
+        build_aiokafka_auth_kwargs_for,
     )
 
     admin = AIOKafkaAdminClient(
         bootstrap_servers=bootstrap_servers,
         request_timeout_ms=int(timeout * 1000),
-        **build_aiokafka_auth_kwargs_from_env(),
+        # OMN-18432: the probe authenticates as whoever the publish will. A
+        # bound lane transport answers for its own address; everywhere else
+        # this is the environment-sourced answer it has always been.
+        **build_aiokafka_auth_kwargs_for(bootstrap_servers),
     )
     await admin.start()
     try:
