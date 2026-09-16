@@ -154,14 +154,89 @@ echo "   manifest and corpus agree"
 echo "-- baseline: ${BASELINE}"
 psql_db -f "$BASELINE"
 
-# The corpus's own tracking table ships as 00000000_migrations_tracking.sql, the
-# manifest's first entry. This bootstrap row exists only so the ALREADY-APPLIED
-# probe below has a table to read on the very first pass; it is created with the
-# same shape the corpus creates and the corpus's own CREATE is idempotent.
-psql_db -c "CREATE TABLE IF NOT EXISTS public.schema_migrations (
-              migration_name text PRIMARY KEY,
-              applied_at timestamptz NOT NULL DEFAULT now()
-            )"
+# ---------------------------------------------------------------------------
+# The tracker: declared once, by the corpus, and never here (OMN-18544)
+# ---------------------------------------------------------------------------
+# This runner used to bootstrap public.schema_migrations itself, ahead of the
+# manifest loop, so the ALREADY-APPLIED probe below had a table to read on the
+# very first pass. It declared `(migration_name text PRIMARY KEY, applied_at
+# timestamptz)`. The corpus declares `(version, applied_at, checksum)` in its
+# own 00000000_migrations_tracking.sql. Because this runner always won the
+# name, that file's `CREATE TABLE IF NOT EXISTS` was a silent no-op on every
+# run and the shape it declares never landed -- so 021_workflow_results.sql,
+# the one corpus file that self-registers, died on `column "version" of
+# relation "schema_migrations" does not exist`.
+#
+# That is OMN-4627 with the two sides swapped, and OMN-4627 was closed by
+# reconciling the two literals by hand. The hand reconciliation is exactly what
+# did not survive: this runner was written afterwards (OMN-17530) and
+# reintroduced the divergence. So the fix is NOT a corrected copy of the
+# corpus's shape -- a correct copy is how the defect came back. This runner now
+# declares nothing at all about the tracker: it applies the corpus's own
+# tracking migration as the bootstrap and reads its bookkeeping column off the
+# resulting primary key. Exactly one declaration of that table exists anywhere,
+# so there is no second literal for a future edit to drift away from.
+#
+# This is not a second specification of the apply order either. The file below
+# is the MANIFEST's own first entry; applying it here brings the table into
+# existence before the resume probe needs it and reorders nothing. The loop
+# still visits it, finds it unrecorded on a fresh lane, re-applies it -- every
+# statement in it is idempotent -- and records it.
+#
+# Gate: tests/unit/db/test_schema_migrations_tracker_shape_agreement_omn18544.py
+# (sibling gate on the k8s Job runners: check-migration-runner-schema-consistency.py).
+TRACKING="${MIGRATION_DIR}/00000000_migrations_tracking.sql"
+[ -f "$TRACKING" ] || {
+  echo "FATAL: no ${TRACKING} in the migrate image. It is the corpus's own tracking" >&2
+  echo "       migration and this runner's ONLY source for the schema_migrations" >&2
+  echo "       shape -- by design it has no bootstrap of its own (OMN-18544)." >&2
+  echo "       Rebuild the migrate image from omninode_infra db/migrations." >&2
+  exit 1
+}
+
+# Convergence for a lane this runner already bootstrapped in the retired shape.
+# The .201 dev lane is one: it carries a migration_name-keyed table with rows in
+# it. The legacy table is moved ASIDE, never dropped -- the corpus then creates
+# the canonical table under the freed name and the recorded rows are copied back
+# through the derived key below. Detection keys on the legacy column because the
+# canonical shape has no such column; that is what makes it unambiguous.
+# Re-entrant: a run that died between the rename and the copy leaves the stash
+# in place and the next pass finishes the job rather than losing the rows.
+psql_db -c "DO \$\$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public'
+                    AND table_name   = 'schema_migrations'
+                    AND column_name  = 'migration_name')
+  THEN
+    RAISE NOTICE 'OMN-18544: retiring the migration_name-keyed ledger, rows preserved';
+    ALTER TABLE public.schema_migrations RENAME TO schema_migrations_legacy_omn18544;
+  END IF;
+END
+\$\$;"
+
+echo "-- tracker bootstrap (corpus-owned): 00000000_migrations_tracking.sql"
+psql_db -f "$TRACKING"
+
+# The bookkeeping column is whatever the corpus made the primary key -- read,
+# not written down. Fail closed on anything but exactly one column: a composite
+# or absent key means the corpus changed something this loop's ON CONFLICT
+# cannot express, and guessing would resume-skip migrations never applied.
+KEY_COLUMN="$(psql_db -tAc "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey) WHERE i.indrelid = 'public.schema_migrations'::regclass AND i.indisprimary")"
+if [ "$(printf '%s\n' "$KEY_COLUMN" | grep -c .)" != "1" ]; then
+  echo "FATAL: public.schema_migrations has no single-column primary key (got:" >&2
+  echo "       '${KEY_COLUMN}'). This runner derives its bookkeeping column from" >&2
+  echo "       that key and will not guess one (OMN-18544)." >&2
+  exit 1
+fi
+echo "   tracker key column, read from the corpus's own primary key: ${KEY_COLUMN}"
+
+if [ "$(psql_db -tAc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations_legacy_omn18544'")" != "0" ]; then
+  echo "-- converging the retired ledger into ${KEY_COLUMN}, preserving its rows"
+  psql_db -c "INSERT INTO public.schema_migrations (\"${KEY_COLUMN}\") SELECT migration_name FROM public.schema_migrations_legacy_omn18544 ON CONFLICT DO NOTHING"
+  psql_db -c "DROP TABLE public.schema_migrations_legacy_omn18544"
+fi
 
 applied=0
 skipped=0
@@ -169,7 +244,7 @@ already=0
 while IFS="$(printf '\t')" read -r name conditions; do
   [ -n "$name" ] || continue
 
-  if [ "$(psql_db -tAc "SELECT count(*) FROM public.schema_migrations WHERE migration_name = '${name}'")" != "0" ]; then
+  if [ "$(psql_db -tAc "SELECT count(*) FROM public.schema_migrations WHERE \"${KEY_COLUMN}\" = '${name}'")" != "0" ]; then
     echo "-- ALREADY APPLIED ${name}"
     already=$((already + 1))
     continue
@@ -199,8 +274,8 @@ while IFS="$(printf '\t')" read -r name conditions; do
   # GUC values reach psql on STDIN, never argv, so they cannot appear in a
   # process list. manifest_guc_prelude is empty for an entry with no GUCs.
   { manifest_guc_prelude "$conditions"; cat "${MIGRATION_DIR}/${name}"; } | psql_db -f -
-  psql_db -c "INSERT INTO public.schema_migrations (migration_name) VALUES ('${name}')
-              ON CONFLICT (migration_name) DO NOTHING"
+  psql_db -c "INSERT INTO public.schema_migrations (\"${KEY_COLUMN}\") VALUES ('${name}')
+              ON CONFLICT (\"${KEY_COLUMN}\") DO NOTHING"
   applied=$((applied + 1))
 done <<EOF
 $(manifest_entries "$MANIFEST")

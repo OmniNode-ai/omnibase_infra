@@ -351,6 +351,20 @@ repos:
         files: ^(tests/integration/lane_presence\.py|tests/integration/.*test_.*\.py|tests/ci/test_lane_presence_guard_omn18345\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18544: every declarer of a `schema_migrations` tracker must agree,
+      # per DATABASE. The compose cloud runner bootstrapped a `migration_name`-
+      # keyed table ahead of the omninode_cloud corpus, so the corpus's own
+      # idempotent CREATE no-opped and the shape it declares never landed. That
+      # is OMN-4627 with the sides swapped, and OMN-4627 was closed by
+      # reconciling two literals by hand -- which is exactly what did not
+      # survive. The gate refuses the second literal rather than correcting it.
+      - id: schema-migrations-tracker-shape
+        name: schema_migrations tracker shape agrees per database (OMN-18544)
+        entry: uv run --frozen pytest tests/unit/db/test_schema_migrations_tracker_shape_agreement_omn18544.py -q
+        language: system
+        files: ^(docker/migrations/cloud/run-cloud-migrations\.sh|docker/migrations/forward/036_create_schema_migrations\.sql|scripts/run-migrations\.py|scripts/run-forward-migrations\.sh|scripts/run-intelligence-migrations\.sh|tests/unit/db/test_schema_migrations_tracker_shape_agreement_omn18544\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ci-evidence-policy
         name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
         entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q
