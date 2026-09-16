@@ -3171,14 +3171,11 @@ jobs:
   # 27478af4 or later was unmergeable until this repin.
   #
   # Current pin review (OMN-18205): ff6e41c is omnimarket#2575's squash merge
-  # commit, committed 2026-09-16T03:01:49Z. GitHub compare proved
-  # ff6e41cb...dev as `ahead` by 3 and behind by 0 on 2026-09-16, meaning this
-  # pin is an ancestor of protected `dev`. The prior pin d3182b6f compares to
-  # ff6e41c as `ahead` by 454 and behind by 0; this repin is a mainline
-  # descendant, not a deleted PR-head SHA. The test
-  # tests/ci/test_merge_hold_gate_omn15484.py::TestCiWiring::
-  # test_the_workflow_and_vocabulary_refs_are_the_same enforces that this
-  # workflow pin and `vocabulary_ref` remain identical.
+  # commit, committed 2026-09-16T03:01:49Z. The mandatory Pin Reachability
+  # (OMN-15538) CI gate extracts both this reusable-workflow ref and the
+  # `vocabulary_ref`, then verifies each pin is reachable from the protected
+  # branch instead of merely fetchable. The merge-hold wiring test below also
+  # enforces that the workflow pin and `vocabulary_ref` remain identical.
   merge-hold-gate:
     permissions:
       contents: read
