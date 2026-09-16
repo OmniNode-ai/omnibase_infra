@@ -43,6 +43,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GIT_HOOKS = REPO_ROOT / "scripts" / "git-hooks"
 REF_GUARD = GIT_HOOKS / "canonical_clone_ref_guard.sh"
@@ -54,10 +58,15 @@ HOOKS_DIR = GIT_HOOKS / "canonical-clone"
 def _git(
     *args: str, cwd: Path, env: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
+    # The env is scrubbed at the CALL, not only where the fixture builds it.
+    # git exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_COMMON_DIR into
+    # every hook process and they OVERRIDE both `cwd=` and `git -C`, so a test
+    # that runs under a pre-push hook and misses one mutates the REAL invoking
+    # worktree rather than tmp_path (OMN-14891 / OMN-18434).
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
-        env=env,
+        env=scrub_git_location_env(env),
         capture_output=True,
         text=True,
         check=False,
@@ -866,3 +875,179 @@ def test_the_restore_survives_a_stat_that_behaves_like_gnu(
         if " | " in line
     ]
     assert verdicts == ["REFUSED", "RESTORED"], verdicts
+
+
+# ---------------------------------------------------------------------------
+# The sanctioned orphan-branch deletion door (OMN-18370)
+#
+# `test_branch_deletion_is_refused` above is this section's positive control:
+# it proves the blanket refusal is still the default, so a permitted deletion
+# below is the door opening rather than the refusal having quietly died.
+# ---------------------------------------------------------------------------
+
+
+CONSENT_ROW = (
+    "2026-09-16T14:34:06Z | OPERATOR-CONSENT | lane=fixture | approved_by=operator "
+    '| "Seven days is fine" | APPROVED SCOPE: removal of rescue-only worktrees and '
+    "deletion of their local branch | OUT OF SCOPE: anything with an open pull "
+    "request | This row is the durable authorization evidence"
+)
+
+
+def _consent_ledger(registry: Path) -> Path:
+    """A ledger whose line 2 is a consent row and whose line 1 deliberately is
+    not, so a citation to the wrong line is a reachable, distinguishable case."""
+    ledger = registry / "docs" / "tracking" / "LEDGER.md"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        "2026-09-16T14:00:00Z | NOTE | lane=fixture | not a consent row\n"
+        + CONSENT_ROW
+        + "\n",
+        encoding="utf-8",
+    )
+    return ledger
+
+
+def _seed_deletable_branch(clone: Path, env: dict[str, str]) -> str:
+    assert (
+        _git("branch", "sidebranch", "origin/sidebranch", cwd=clone, env=env).returncode
+        == 0
+    )
+    return _ref(clone, env, "refs/heads/sidebranch")
+
+
+def test_sanctioned_branch_deletion_with_a_valid_citation_is_permitted(
+    registry: Path, clone: Path
+) -> None:
+    """The measured 2026-09-16 case: a pruner removed 171 worktrees under a
+    consent row and every following `branch -D` exited 128. With the door open
+    for that exact ref, the branch goes."""
+    env = _base_env(registry)
+    before = _seed_deletable_branch(clone, env)
+    assert before
+
+    _consent_ledger(registry)
+    env["ONEX_BRANCH_DELETE_CONSENT"] = "docs/tracking/LEDGER.md:2"
+    env["ONEX_BRANCH_DELETE_REFS"] = "refs/heads/sidebranch"
+
+    result = _git("branch", "-D", "sidebranch", cwd=clone, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert _ref(clone, env, "refs/heads/sidebranch") == ""
+
+
+def test_sanctioned_deletion_needs_both_variables_not_either(
+    registry: Path, clone: Path
+) -> None:
+    """Either variable alone is refused. The consent names the authorisation;
+    the ref list bounds it. A door opened by one of them is a skip flag."""
+    env = _base_env(registry)
+    before = _seed_deletable_branch(clone, env)
+    _consent_ledger(registry)
+
+    only_consent = dict(env)
+    only_consent["ONEX_BRANCH_DELETE_CONSENT"] = "docs/tracking/LEDGER.md:2"
+    assert (
+        _git("branch", "-D", "sidebranch", cwd=clone, env=only_consent).returncode != 0
+    )
+    assert _ref(clone, env, "refs/heads/sidebranch") == before
+
+    only_refs = dict(env)
+    only_refs["ONEX_BRANCH_DELETE_REFS"] = "refs/heads/sidebranch"
+    assert _git("branch", "-D", "sidebranch", cwd=clone, env=only_refs).returncode != 0
+    assert _ref(clone, env, "refs/heads/sidebranch") == before
+
+
+@pytest.mark.parametrize(
+    ("citation", "why"),
+    [
+        ("docs/tracking/LEDGER.md:1", "line 1 is a NOTE row, not a consent row"),
+        ("docs/tracking/LEDGER.md:99", "line is past the end of the file"),
+        ("docs/tracking/NOPE.md:2", "the cited file does not exist"),
+        ("docs/tracking/LEDGER.md", "no line number at all"),
+        ("docs/tracking/LEDGER.md:0", "line numbers are one-based"),
+        ("docs/tracking/LEDGER.md:two", "the line number is not a number"),
+    ],
+)
+def test_an_invalid_consent_citation_is_refused(
+    registry: Path, clone: Path, citation: str, why: str
+) -> None:
+    """Every ambiguity fails CLOSED. A citation the guard cannot resolve to an
+    actual consent row is worth exactly as much as no citation."""
+    env = _base_env(registry)
+    before = _seed_deletable_branch(clone, env)
+    _consent_ledger(registry)
+    env["ONEX_BRANCH_DELETE_CONSENT"] = citation
+    env["ONEX_BRANCH_DELETE_REFS"] = "refs/heads/sidebranch"
+
+    result = _git("branch", "-D", "sidebranch", cwd=clone, env=env)
+
+    assert result.returncode != 0, why
+    assert _ref(clone, env, "refs/heads/sidebranch") == before, why
+
+
+def test_a_ref_absent_from_the_authorised_list_is_refused(
+    registry: Path, clone: Path
+) -> None:
+    """The grant is per-ref. One cleared branch must not carry an uncleared one
+    with it, and the match is exact -- a prefix does not authorise a longer
+    name."""
+    env = _base_env(registry)
+    before = _seed_deletable_branch(clone, env)
+    _consent_ledger(registry)
+    env["ONEX_BRANCH_DELETE_CONSENT"] = "docs/tracking/LEDGER.md:2"
+    env["ONEX_BRANCH_DELETE_REFS"] = "refs/heads/some-other-branch refs/heads/side"
+
+    result = _git("branch", "-D", "sidebranch", cwd=clone, env=env)
+
+    assert result.returncode != 0
+    assert _ref(clone, env, "refs/heads/sidebranch") == before
+
+
+def test_the_door_does_not_widen_any_other_refused_verb(
+    registry: Path, clone: Path
+) -> None:
+    """The door is consulted only on the deletion branch of the policy. With
+    both variables set and a real consent row, a branch SWITCH is still refused
+    -- otherwise this would be a general-purpose bypass wearing a narrow name."""
+    env = _base_env(registry)
+    _seed_deletable_branch(clone, env)
+    _consent_ledger(registry)
+    env["ONEX_BRANCH_DELETE_CONSENT"] = "docs/tracking/LEDGER.md:2"
+    env["ONEX_BRANCH_DELETE_REFS"] = "refs/heads/sidebranch HEAD"
+    before_head = _head_symref(clone, env)
+
+    assert _git("checkout", "-q", "sidebranch", cwd=clone, env=env).returncode != 0
+    assert _head_symref(clone, env) == before_head
+
+    before_ref = _ref(clone, env, "refs/heads/sidebranch")
+    assert (
+        _git("branch", "-f", "sidebranch", "origin/dev", cwd=clone, env=env).returncode
+        != 0
+    )
+    assert _ref(clone, env, "refs/heads/sidebranch") == before_ref
+
+
+def test_a_sanctioned_deletion_writes_a_durable_record_naming_the_oid(
+    registry: Path, clone: Path
+) -> None:
+    """The blanket refusal's stated objection is that deleting a branch in a
+    mirror destroys the only local record of what it pointed at. The door
+    answers it by recording the oid BEFORE the ref goes, with the citation that
+    authorised it -- so the commit stays resolvable after the pointer is gone."""
+    env = _base_env(registry)
+    before = _seed_deletable_branch(clone, env)
+    _consent_ledger(registry)
+    env["ONEX_BRANCH_DELETE_CONSENT"] = "docs/tracking/LEDGER.md:2"
+    env["ONEX_BRANCH_DELETE_REFS"] = "refs/heads/sidebranch"
+
+    assert _git("branch", "-D", "sidebranch", cwd=clone, env=env).returncode == 0
+
+    log = _refusal_log(clone)
+    assert log.is_file(), f"{log} must exist after a sanctioned deletion"
+    text = log.read_text(encoding="utf-8")
+    verdicts = [line.split(" | ")[1] for line in text.splitlines() if " | " in line]
+    assert verdicts == ["SANCTIONED_DELETE"], verdicts
+    assert before in text, "the record must name the oid the ref held"
+    assert "docs/tracking/LEDGER.md:2" in text, "the record must name the citation"
+    assert "refs/heads/sidebranch" in text
