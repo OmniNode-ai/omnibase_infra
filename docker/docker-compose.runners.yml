@@ -1402,7 +1402,13 @@ services:
           /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
         exec /usr/local/bin/entrypoint.sh
     environment:
-      RUNNER_LABELS: self-hosted,omnibase-verify,linux,x64
+      # `host-201` is load-bearing, not decoration: `omnibase-verify` names a
+      # runner CLASS and a second verify-class runner already exists on another
+      # lab host (omninode-mini-runner-1, arch-arm64, online 2026-09-16). The
+      # five moved jobs probe THIS host's docker daemon and lane ports, so they
+      # require both labels; a bare class match would place them where they can
+      # observe nothing and report the lane unreachable.
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64
       RUNNER_NAME: omninode-verify-runner-1
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}

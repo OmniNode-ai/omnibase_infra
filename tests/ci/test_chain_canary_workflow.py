@@ -16,7 +16,10 @@ Pinned deliberately, each for a reason a past incident supplies:
   Move this job off one and `host.docker.internal` stops resolving, every run
   reports `ingress_unreachable`, and a permanently-red check is a disabled
   check. The label is `omnibase-verify` since OMN-18408; it was
-  `omnibase-deploy`, whose single member also runs the release-train deploy.
+  `omnibase-deploy`, whose single member also runs the release-train deploy. The
+  `host-201` label alongside it is required: `omnibase-verify` names a runner
+  CLASS, and a second verify-class runner on another lab host came online on
+  2026-09-16 that cannot reach this lane.
 * **the probe host** — a `localhost` probe from inside a runner container
   hits the container itself (OMN-14958), manufacturing a false RED.
 * **the skill invocation** — the workflow is a thin shim over
@@ -76,7 +79,7 @@ def test_runs_on_the_only_runner_that_can_reach_the_lane(
     canary_job: dict[str, object],
 ) -> None:
     """OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. Both labels resolve to a container on the same .201 lab host carrying docker.sock and the `host.docker.internal` host-gateway alias, so every reachability reason this pin was written for is unchanged. What changed is that `omnibase-deploy` has exactly one member which also runs the release-train deploy, and this job was queueing behind it."""
-    assert canary_job["runs-on"] == ["self-hosted", "omnibase-verify"]
+    assert canary_job["runs-on"] == ["self-hosted", "omnibase-verify", "host-201"]
 
 
 @pytest.mark.unit

@@ -241,7 +241,11 @@ def test_positive_control_the_reference_workflow_satisfies_these_pins() -> None:
     which of the two containers serves the job changed.
     """
     canary_text = _executable(_text(_CANARY_WORKFLOW))
-    assert _sole_job(_CANARY_WORKFLOW)["runs-on"] == ["self-hosted", "omnibase-verify"]
+    assert _sole_job(_CANARY_WORKFLOW)["runs-on"] == [
+        "self-hosted",
+        "omnibase-verify",
+        "host-201",
+    ]
     assert not _HOST_LOCAL_BROKER.search(canary_text)
     assert _ROUTING_VARIABLE not in canary_text
     assert _LANE_OVERLAY_PATH in canary_text

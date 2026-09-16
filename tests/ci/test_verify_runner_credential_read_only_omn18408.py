@@ -42,7 +42,7 @@ VERIFY_SERVICE = "omninode-verify-runner-1"
 # The runner this one was split off from. Positive control for every absence.
 CONTROL_SERVICE = "omninode-deploy-runner"
 
-EXPECTED_LABELS = "self-hosted,omnibase-verify,linux,x64"
+EXPECTED_LABELS = "self-hosted,omnibase-verify,host-201,linux,x64"
 DOCKER_SOCKET = "/var/run/docker.sock"
 HOST_GATEWAY_ALIAS = "host.docker.internal:host-gateway"
 OPERATOR_ENV_TARGET = "/run/omnibase-operator.env"
@@ -85,6 +85,26 @@ def test_verify_runner_service_is_declared() -> None:
 
 def test_verify_runner_carries_the_verify_label_set() -> None:
     assert _environment(VERIFY_SERVICE)["RUNNER_LABELS"] == EXPECTED_LABELS
+
+
+def test_verify_runner_is_host_scoped_as_well_as_class_scoped() -> None:
+    """`omnibase-verify` alone stopped being a unique address on 2026-09-16.
+
+    A second verify-class runner came online on another lab host that day
+    carrying the same class label. The five jobs routed here probe THIS host's
+    docker daemon and lane ports, so they require `host-201` too -- and this
+    runner is the only thing that can supply it. Dropping it here would not
+    break scheduling; it would let those jobs run somewhere they observe
+    nothing, which reads as a lane outage.
+    """
+    labels = _environment(VERIFY_SERVICE)["RUNNER_LABELS"].split(",")
+    assert "host-201" in labels
+    assert "omnibase-verify" in labels
+    # Control: the deploy runner on the same host is deliberately NOT
+    # host-scoped -- its label is already unique to one container, so a
+    # host-201 there would be decoration. If this ever changes, the pairing
+    # above needs rethinking rather than copying.
+    assert "host-201" not in _environment(CONTROL_SERVICE)["RUNNER_LABELS"].split(",")
 
 
 def test_verify_runner_registers_under_its_own_name() -> None:

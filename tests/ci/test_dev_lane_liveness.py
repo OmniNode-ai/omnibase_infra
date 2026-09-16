@@ -479,12 +479,13 @@ def test_lane_probe_runs_where_the_lane_is_reachable() -> None:
     The lane's broker host-port is on the tailnet — GitHub-hosted compute
     could only ever assert "I cannot see it."
 
-    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. Both labels resolve to a container on the same .201 lab host carrying docker.sock and the `host.docker.internal` host-gateway alias, so every reachability reason this pin was written for is unchanged. What changed is that `omnibase-deploy` has exactly one member which also runs the release-train deploy, and this job was queueing behind it.
+    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. Both labels resolve to a container on the same .201 lab host carrying docker.sock and the `host.docker.internal` host-gateway alias, so every reachability reason this pin was written for is unchanged. What changed is that `omnibase-deploy` has exactly one member which also runs the release-train deploy, and this job was queueing behind it. The third label, `host-201`, is required because `omnibase-verify` names a runner CLASS: a second verify-class runner came online on another lab host on 2026-09-16 and cannot see this lane.
     """
     workflow = yaml.safe_load(LANE_WORKFLOW.read_text())
     assert workflow["jobs"]["dev-lane-liveness"]["runs-on"] == [
         "self-hosted",
         "omnibase-verify",
+        "host-201",
     ]
 
 

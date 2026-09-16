@@ -39,7 +39,13 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
-VERIFY_LABEL = ["self-hosted", "omnibase-verify"]
+# Both labels, always. `omnibase-verify` is a runner CLASS; `host-201` is the
+# HOST. A second verify-class runner (omninode-mini-runner-1, arch-arm64) came
+# online on another lab host on 2026-09-16 and is a legal match for the class
+# alone -- and it cannot see the .201 lane these five jobs probe, so a run
+# placed there reports the lane unreachable rather than failing to schedule.
+VERIFY_LABEL = ["self-hosted", "omnibase-verify", "host-201"]
+HOST_LABEL = "host-201"
 DEPLOY_LABEL = ["self-hosted", "omnibase-deploy"]
 
 # (workflow file, job key, job `name:`) -- the five named in the OMN-18408
@@ -126,3 +132,22 @@ def test_no_other_job_in_the_repo_uses_the_verify_label() -> None:
                 found.add((path.name, job_key))
 
     assert found == {(wf, key) for wf, key, _ in MOVED_JOBS}
+
+
+def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
+    """The assertion the OMN-18408 acceptance criteria could not have written.
+
+    Their falsifier names `[self-hosted, omnibase-verify]`, written before a
+    second verify-class runner existed anywhere. Bare class scoping became
+    unsafe on 2026-09-16, when one came online on another host carrying
+    `self-hosted,omnibase-verify,arch-arm64`. Dropping `host-201` from any of
+    these five would not fail to schedule -- it would schedule somewhere that
+    cannot observe the .201 lane at all, which surfaces as a lane outage rather
+    than as a routing mistake. That is the reading this test exists to prevent.
+    """
+    for workflow, job_key, _ in MOVED_JOBS:
+        runs_on = _runs_on(workflow, job_key)
+        assert HOST_LABEL in runs_on, (
+            f"{workflow}:{job_key} is scoped to the verify CLASS but not to a "
+            "HOST; it can be placed on a verify runner that cannot see the lane"
+        )
