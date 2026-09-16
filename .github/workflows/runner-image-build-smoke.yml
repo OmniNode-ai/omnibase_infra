@@ -135,6 +135,46 @@ jobs:
           '
           echo "Runner image build smoke PASSED: identity bound + prebuilt env baked."
 
+      # OMN-18431: assert the baked runner ships a WORKING ffmpeg, not merely a
+      # package name in the Dockerfile. omnistream is a private repository, so
+      # under the 2026-09-14 operator ruling its CI runs on this fleet, and its
+      # `test-integration` job shells out to the ffmpeg and ffprobe binaries
+      # through ffmpeg-python. That job's own preflight step fails the run when
+      # ffmpeg is absent, so a silent regression here does not merely skip the
+      # tests -- it takes a private repository's required Tests Gate red with a
+      # cause three repositories away from the change that caused it.
+      #
+      # The assertion is behavioural on purpose. Grepping the Dockerfile for
+      # the package name would pass on an image that failed to build the layer,
+      # and would pass on a base-image change that dropped the encoders while
+      # keeping the binary. It exercises the two encoders and the probe the
+      # tests actually use (libx264 and aac, then ffprobe on a generated
+      # clip), which is the narrowest set that proves the capability rather
+      # than its label.
+      - name: Assert baked runner ships ffmpeg with the encoders omnistream uses
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash "${SMOKE_TAG}" -lc '
+            set -euo pipefail
+            command -v ffmpeg  >/dev/null || { echo "::error::ffmpeg is not on PATH in the baked image"; exit 1; }
+            command -v ffprobe >/dev/null || { echo "::error::ffprobe is not on PATH in the baked image"; exit 1; }
+            ffmpeg -version | head -1
+            for enc in libx264 aac; do
+              if ! ffmpeg -hide_banner -encoders 2>/dev/null | grep -qE " ${enc} "; then
+                echo "::error::the baked ffmpeg has no ${enc} encoder; omnistream integration tests encode with it"
+                exit 1
+              fi
+            done
+            work="$(mktemp -d)"
+            ffmpeg -loglevel error -y \
+              -f lavfi -i testsrc=duration=1:size=160x120:rate=25 \
+              -f lavfi -i sine=frequency=440:duration=1:sample_rate=48000 \
+              -c:v libx264 -preset ultrafast -c:a aac "${work}/probe.mkv"
+            duration="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${work}/probe.mkv")"
+            echo "ffmpeg encode + ffprobe round trip OK: duration=${duration}"
+            rm -rf "${work}"
+          '
+
       # OMN-12585: assert the baked runner can execute node24 actions
       # (actions/checkout@v7, used across workflows). The OMN-12567 image
       # pinned RUNNER_VERSION=2.323.0, which predates node24 execution support

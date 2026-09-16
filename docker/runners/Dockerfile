@@ -103,6 +103,24 @@ ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 # root, and any ad hoc bare `docker exec` inherits it). See the sudoers rule
 # below: NOPASSWD, one command, one argument pattern, confined under this
 # runner's own `_work` tree -- never a general root shell.
+# ffmpeg (OMN-18431 / OMN-17477): omnistream's integration tests shell out to
+# the `ffmpeg` and `ffprobe` BINARIES through ffmpeg-python, and omnistream is
+# a PRIVATE repository, which under the 2026-09-14 operator ruling does not run
+# CI on GitHub-hosted runners. Its `test-integration` job was pinned hosted for
+# exactly this gap, and the enterprise hosted-runner switch then left it with
+# nowhere to run at all -- the ruling's answer to that is a fleet-side fix, not
+# a quiet hosted pin. The previously-shipped workaround, `sudo apt-get install
+# ffmpeg` at job time, cannot work here: the sudoers rule below grants ONE
+# command, and widening it to reach a package manager would hand every job on
+# the fleet a general root escalation for one repository's convenience. A job
+# `container:` cannot work either: the runners are containers sharing the host
+# docker socket and their `_work` tree is NOT a host bind mount, so a sibling
+# container would mount the host's same-named directory and silently receive a
+# different workspace -- measured on omninode-runner-1, whose `_work` holds
+# `_actions`/`_temp`/`_tool` while the host path of that name holds three
+# unrelated repository checkouts owned by root. A baked package is the only
+# placement that is both correct and shared, which is how libatomic1 and rsync
+# above got here. Pulls in ffprobe and the libx264/aac encoders the tests need.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -112,6 +130,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     rsync \
     sudo \
+    ffmpeg \
     libatomic1 \
     libicu-dev \
     libkrb5-3 \
