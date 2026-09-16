@@ -135,7 +135,7 @@ def _paired_pr_url(number: int) -> str:
     return f"{_GITHUB_API}/repos/{_ORG}/omnimarket/pulls/{number}"
 
 
-def _require_paired_source_ref(ref: str, pr_number: int, sha: str) -> str:
+def _require_paired_source_ref(ref: str | None, pr_number: int, sha: str) -> str:
     """Return the exact paired PR head SHA when the declared source is open.
 
     Node-migration vendor PRs are the one PR-CI surface that sometimes must
@@ -174,7 +174,7 @@ def _require_paired_source_ref(ref: str, pr_number: int, sha: str) -> str:
             "node-migration source PR head repo must be "
             f"{_ORG}/omnimarket: omnimarket#{pr_number}"
         )
-    if head.get("ref") != ref:
+    if ref is not None and head.get("ref") != ref:
         raise ValueError(
             "node-migration source PR head ref does not match declared source: "
             f"omnimarket#{pr_number} head={head.get('ref')!r} declared={ref!r}"
@@ -188,7 +188,6 @@ def _require_paired_source_ref(ref: str, pr_number: int, sha: str) -> str:
 
 
 def _resolve_declared_ref(body: str) -> str:
-    ref = _parse_ref(body)
     source_pr = _parse_source_pr(body)
     source_sha = _parse_source_sha(body)
     if source_pr is not None or source_sha is not None:
@@ -197,7 +196,11 @@ def _resolve_declared_ref(body: str) -> str:
                 "node-migration source refs with pair metadata require both "
                 "Node-Migration-Source-PR and Node-Migration-Source-SHA trailers"
             )
+        ref = parse_trailer(body, FIELD_NAMES)
+        if ref is not None:
+            ref = _validate(ref)
         return _require_paired_source_ref(ref, source_pr, source_sha)
+    ref = _parse_ref(body)
     return _require_ref_reachable_from_dev(ref)
 
 

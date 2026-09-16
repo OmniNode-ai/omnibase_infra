@@ -154,6 +154,53 @@ def test_unmerged_node_migration_source_ref_can_resolve_to_paired_pr_head_sha(
     assert output_path.read_text(encoding="utf-8") == f"ref={source_sha}\n"
 
 
+def test_unmerged_node_migration_source_pair_does_not_require_source_ref_trailer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_sha = "b75a8957806d918721a63a1bf72d67a1da162782"
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "body": "\n".join(
+                        [
+                            "Node-Migration-Source-PR: omnimarket#2579",
+                            f"Node-Migration-Source-SHA: {source_sha}",
+                        ]
+                    )
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "github_output.txt"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setattr(
+        resolver,
+        "_api_get",
+        lambda url: (
+            200,
+            {
+                "state": "open",
+                "draft": False,
+                "base": {"ref": "dev"},
+                "head": {
+                    "ref": "jonah/omn-18079-backfill-overlay-provider",
+                    "sha": source_sha,
+                    "repo": {"full_name": "OmniNode-ai/omnimarket"},
+                },
+            },
+            "HTTP 200",
+        ),
+    )
+
+    assert resolver.main() == 0
+    assert capsys.readouterr().out.strip() == source_sha
+    assert output_path.read_text(encoding="utf-8") == f"ref={source_sha}\n"
+
+
 def test_unmerged_node_migration_source_ref_requires_exact_paired_pr_head_sha(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
