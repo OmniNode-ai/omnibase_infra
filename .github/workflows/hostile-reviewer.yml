@@ -73,8 +73,10 @@ jobs:
   occ-preflight:
     # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
     # omnibase_infra has no local occ-preflight.yml (unlike omnibase_core, which
-    # hosts the reusable) -- reference it remotely, matching the pinned SHA
-    # already used by this repo's own call-occ-preflight.yml / auto-merge.yml.
+    # hosts the reusable) -- reference it remotely, matching the pinned SHA used
+    # by this repo's only other caller of it, ci.yml. Those two are the complete
+    # set of callers in this repository, and they must move together or the same
+    # merge path ends up gated by two different revisions of the reusable.
     uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@979c290a16f70fcd7e0b62600ac511140baab4a6
     permissions:
       contents: read
