@@ -578,9 +578,30 @@ def _declared_correlation_ids(workflow_data: dict[str, JsonValue]) -> set[str]:
     return found
 
 
+def _has_receipt_content(workflow_data: dict[str, JsonValue]) -> bool:
+    """Whether the stored file holds anything a receipt could render as a result.
+
+    ``workflow_result.json`` always carries bookkeeping — ``result``,
+    ``exit_code``, ``workflow``, ``run_id``, ``handler_locus``, and (on a
+    dispatched run) ``wire_correlation_id``. None of that is a receipt.
+    The receipt is the terminal envelope or the handler's own return value,
+    and those are the only two keys :func:`_declared_correlation_ids` reads.
+
+    The distinction matters because a run that produced NO receipt — it timed
+    out, or it never reached the broker — is a different fact from a run whose
+    receipt belongs to somebody else, and only the second is a join failure.
+    """
+    return any(
+        workflow_data.get(key) is not None
+        for key in ("handler_result", "terminal_payload")
+    )
+
+
 def _verify_workflow_data_correlation(
     workflow_data: dict[str, JsonValue],
     expected_correlation_id: uuid.UUID | None,
+    *,
+    workflow_result: EnumWorkflowResult | None,
 ) -> tuple[dict[str, JsonValue], str | None]:
     """Select the receipt strictly by THIS run's correlation id (OMN-17295).
 
@@ -611,6 +632,29 @@ def _verify_workflow_data_correlation(
     ``expected_correlation_id`` is ``None`` for callers that mint no
     correlation id of their own (``onex node``, ``onex skill``); those paths
     are left exactly as they were.
+
+    **A run that produced no receipt is not a join failure.** The join exists
+    to stop a WRONG answer being rendered as this run's own. When the stored
+    file holds no terminal envelope and no handler result there is no answer
+    to render, so a refusal protects nothing — and it costs something real:
+    it replaces the run's own truthful outcome (``timeout``, ``failed``) with
+    a sentence about receipt selection, and it discards the bookkeeping the
+    caller needs to diagnose the actual break, ``wire_correlation_id``
+    included. Measured live on 2026-09-16 (lane ``bus-dogfood-1305``,
+    8 ``onex delegate --bus kafka --lane dev`` runs): 4 runs produced no
+    terminal — two published and timed out with ``events received: 0``, two
+    never published at all because the broker refused connections for ~30 s
+    and the terminal consumer never got a partition assignment. Every one of
+    the four stored ``result`` ``timeout``/``failed`` **and** a
+    ``wire_correlation_id`` equal to this run's own correlation, and every one
+    was reported as ``the stored receipt names no correlation id at all`` —
+    a sentence that is false twice over, and that sent the reporting lane
+    looking for a receipt-join defect that was not there.
+
+    So content-free data passes through, with its outcome and its wire
+    correlation intact — EXCEPT when the runtime claims it COMPLETED. A
+    completed dispatched run that stored no terminal is the one content-free
+    shape that could still mislead, and it keeps failing closed.
     """
     if expected_correlation_id is None or not workflow_data:
         return workflow_data, None
@@ -621,14 +665,57 @@ def _verify_workflow_data_correlation(
     if declared:
         observed = ", ".join(sorted(declared))
         detail = f"the stored receipt names correlation {observed}"
+    elif _has_receipt_content(workflow_data):
+        detail = "the stored receipt carries content naming no correlation id at all"
+    elif workflow_result is EnumWorkflowResult.COMPLETED:
+        detail = (
+            "the run reports completed yet stored no terminal envelope and no "
+            "handler result"
+        )
     else:
-        detail = "the stored receipt names no correlation id at all"
+        # No receipt at all, and the run says so itself. Nothing to attribute,
+        # nothing to refuse — hand the bookkeeping back so the receipt can
+        # report the real outcome.
+        return workflow_data, None
     reason = (
         f"OMN-17295 correlation-join refusal: no receipt found for this run's "
         f"correlation {expected} — {detail}. Discarding it rather than "
         "rendering another run's envelope as this run's result."
     )
     return {}, reason
+
+
+def _explain_absent_receipt(
+    workflow_data: dict[str, JsonValue],
+    expected_correlation_id: uuid.UUID | None,
+    workflow_result: EnumWorkflowResult | None,
+) -> str:
+    """Say why a non-success run has no receipt, in the receipt's own ``error``.
+
+    The pass-through arm above deliberately raises no refusal, which would
+    otherwise leave ``error`` empty on exactly the runs a reader most needs
+    explained. This states the fact plainly and names the wire correlation to
+    grep the lane with, instead of leaving the reader to infer it from the
+    inlined capture log.
+    """
+    if expected_correlation_id is None:
+        return ""
+    if workflow_result is None or workflow_result is EnumWorkflowResult.COMPLETED:
+        return ""
+    if _has_receipt_content(workflow_data):
+        return ""
+    wire = workflow_data.get("wire_correlation_id")
+    wire_clause = (
+        f" The command was published as correlation {wire}; grep the lane for it."
+        if isinstance(wire, str) and wire
+        else " No command reached the broker, so the lane has nothing to grep."
+    )
+    return (
+        f"This run produced no receipt: it ended in {workflow_result.value} with no "
+        f"terminal envelope for correlation {expected_correlation_id}."
+        f"{wire_clause} See the inlined capture log for the transport or timeout "
+        "cause — this is not a receipt-selection failure."
+    )
 
 
 def _load_merge_sweep_handler_result(
@@ -960,7 +1047,12 @@ def _run_receipt_mode(
     # OMN-17295: two independent joins, both fail-closed. The anchor join
     # above proves the FILE is this run's; this one proves the CONTENT is.
     workflow_data, correlation_refusal = _verify_workflow_data_correlation(
-        workflow_data, expected_correlation_id
+        workflow_data, expected_correlation_id, workflow_result=workflow_result
+    )
+    # OMN-17295: a run that produced no receipt is reported as what it was —
+    # a timeout or a transport failure — not as a join refusal.
+    absent_receipt_explanation = _explain_absent_receipt(
+        workflow_data, expected_correlation_id, workflow_result
     )
     for refusal, refusal_type in (
         (identity_refusal, "WorkflowResultIdentityMismatch"),
@@ -1172,7 +1264,7 @@ def _run_receipt_mode(
             ),
             terminal_payload=workflow_data.get("terminal_payload"),
             handler_result=handler_result_json,
-            error=runtime_error,
+            error=runtime_error or absent_receipt_explanation,
             # Errors are never hidden: non-success inlines the FULL capture
             # log; success keeps it behind the artifact ref.
             capture_log="" if status.is_success_like else capture_text,
