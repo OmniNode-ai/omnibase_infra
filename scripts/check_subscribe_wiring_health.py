@@ -142,6 +142,15 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     "onex.cmd.omnimarket.delegate-skill.v1": "Published by omnimarket node_delegate_skill_orchestrator (command_topic, contract.yaml:220), cross-repo | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.delegation-routing-request.v1": "Published by omnimarket node_delegation_orchestrator (contract.yaml:148), cross-repo | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omnibase-infra.routing-decision.v1": "Published by omnimarket node_delegation_routing_reducer as its success terminal (contract.yaml:87), cross-repo | owner: jonah | expiry: 2026-12-01",
+    # OMN-18419: the fifth delegation-chain hop. Unlike the four above it is
+    # published from THIS repository, but not by a contract-declared publisher
+    # a scan of `publish_topics` can see: RuntimePatternBBroker publishes it as
+    # `route.command_topic`, and the route is DISCOVERED at runtime from
+    # omnimarket node_delegation_orchestrator's own subscribe_topics
+    # (service_delegation_dispatch_port.py). The topic string appears in no
+    # publish_topics list anywhere, which is why it needs an entry here rather
+    # than a contract fix.
+    "onex.cmd.omnibase-infra.delegation-request.v1": "Published by RuntimePatternBBroker as the runtime-discovered route.command_topic for node_delegation_orchestrator (service_delegation_dispatch_port.py), never declared in a publish_topics list | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------

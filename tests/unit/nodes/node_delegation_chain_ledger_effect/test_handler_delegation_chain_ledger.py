@@ -24,12 +24,24 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_d
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
     EnumTierTwoVerdict,
+    ModelDeclaredChainHop,
     ModelDelegationTerminalPayload,
     ModelLedgerChainRow,
     ModelObservedHop,
 )
 
-_CHAIN = ("command", "route-request", "route-decision", "completed")
+# OMN-18419: the declaration is hops with a parent relation, not bare topics.
+# This fixture is a LINE -- every hop caused by the one before it -- which is
+# what `_complete_observation` below builds. The TREE cases are pinned in
+# test_chain_replay.py, where the grading rule itself lives.
+_CHAIN_TOPICS = ("command", "route-request", "route-decision", "completed")
+_CHAIN = tuple(
+    ModelDeclaredChainHop(
+        topic=topic,
+        parent=None if index == 0 else _CHAIN_TOPICS[index - 1],
+    )
+    for index, topic in enumerate(_CHAIN_TOPICS)
+)
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _CONTRACT_PATH = (
     _REPO_ROOT
@@ -128,7 +140,9 @@ def test_this_node_contract_declares_no_undeliverable_output_model() -> None:
     _assert_no_bus_triggered_undeliverable_output_model(contract)
 
 
-def _handler(declared_chain: tuple[str, ...] = _CHAIN) -> HandlerDelegationChainLedger:
+def _handler(
+    declared_chain: tuple[ModelDeclaredChainHop, ...] = _CHAIN,
+) -> HandlerDelegationChainLedger:
     handler = HandlerDelegationChainLedger(
         cast("ModelONEXContainer", object()),
         db_dsn="postgresql://test.invalid/test",
@@ -150,7 +164,7 @@ def _request(correlation_id: UUID) -> ModelDelegationTerminalPayload:
 def _complete_observation(
     correlation_id: UUID, *, broken_at: int | None = None
 ) -> tuple[ModelObservedHop, ...]:
-    envelope_ids = tuple(uuid4() for _ in _CHAIN)
+    envelope_ids = tuple(uuid4() for _ in _CHAIN_TOPICS)
     return tuple(
         ModelObservedHop(
             topic=topic,
@@ -164,7 +178,7 @@ def _complete_observation(
             ),
             correlation_id=correlation_id,
         )
-        for index, topic in enumerate(_CHAIN)
+        for index, topic in enumerate(_CHAIN_TOPICS)
     )
 
 
@@ -211,7 +225,7 @@ async def test_complete_chain_writes_green_rows() -> None:
     assert len(rows) == 4
     assert all(row.replay_green for row in rows)
     assert all(row.verifier_verdict is EnumTierTwoVerdict.PASS for row in rows)
-    assert {row.hop for row in rows} == set(_CHAIN)
+    assert {row.hop for row in rows} == set(_CHAIN_TOPICS)
 
 
 @pytest.mark.asyncio
@@ -228,7 +242,7 @@ async def test_broken_edge_cannot_be_written_as_replay_green() -> None:
 
     assert output.result is None
     rows = persisted.await_args.args[0]
-    assert {row.hop for row in rows} == set(_CHAIN)
+    assert {row.hop for row in rows} == set(_CHAIN_TOPICS)
     assert rows[2].replay_green is False
     assert "causal link does not close" in rows[2].replay_detail
 
@@ -316,7 +330,7 @@ async def test_absent_evidence_is_a_typed_refusal_not_a_silent_success() -> None
 
     message = str(excinfo.value)
     assert str(correlation_id) in message
-    for topic in _CHAIN:
+    for topic in _CHAIN_TOPICS:
         assert topic in message
     persisted.assert_not_awaited()
 
@@ -351,10 +365,10 @@ async def test_upsert_that_changes_no_row_is_a_typed_refusal() -> None:
     row = ModelLedgerChainRow(
         correlation_id=correlation_id,
         hop_index=0,
-        hop=_CHAIN[0],
+        hop=_CHAIN_TOPICS[0],
         replay_green=True,
         verifier_verdict=EnumTierTwoVerdict.PASS,
-        observed_topic=_CHAIN[0],
+        observed_topic=_CHAIN_TOPICS[0],
         envelope_id=uuid4(),
         parent_envelope_id=None,
         replay_detail="",
@@ -385,10 +399,10 @@ async def test_upsert_that_changes_a_row_is_accepted() -> None:
     row = ModelLedgerChainRow(
         correlation_id=correlation_id,
         hop_index=0,
-        hop=_CHAIN[0],
+        hop=_CHAIN_TOPICS[0],
         replay_green=True,
         verifier_verdict=EnumTierTwoVerdict.PASS,
-        observed_topic=_CHAIN[0],
+        observed_topic=_CHAIN_TOPICS[0],
         envelope_id=uuid4(),
         parent_envelope_id=None,
         replay_detail="",
@@ -428,13 +442,16 @@ def test_ledger_projection_records_every_declared_chain_topic() -> None:
         entry["topic"] for entry in projection_contract["handler_routing"]["handlers"]
     }
 
-    missing = [t for t in chain_contract["chain_topology"] if t not in recorded]
+    # OMN-18419: `chain_topology` entries are declared hops, not bare topics.
+    declared_topics = [hop["topic"] for hop in chain_contract["chain_topology"]]
+
+    missing = [t for t in declared_topics if t not in recorded]
     assert not missing, (
         f"node_ledger_projection_compute does not record {missing!r}, so "
         "public.event_ledger can never carry the evidence "
         "node_delegation_chain_ledger_effect reads (OMN-18398)"
     )
-    undispatched = [t for t in chain_contract["chain_topology"] if t not in dispatched]
+    undispatched = [t for t in declared_topics if t not in dispatched]
     assert not undispatched, (
         f"{undispatched!r} are subscribed but have no handler_routing entry, "
         "which is subscribed-but-never-dispatched (OMN-14594 pairing rule)"

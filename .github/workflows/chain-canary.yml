@@ -376,8 +376,19 @@ jobs:
           # a chain short by a hop must not look complete simply because every
           # row present was well-formed. These are the ordered topics one
           # delegation traverses, per the node contracts that publish them.
+          #
+          # OMN-18419 adds delegation-request.v1, the pattern-B worker command
+          # the runtime's delegation dispatch port publishes while consuming
+          # the delegate-skill command. It was always traversed and never
+          # declared, so the routing request's recorded causal parent named an
+          # envelope that was not in the chain. These five must stay equal to
+          # node_delegation_chain_ledger_effect's `chain_topology` topics, in
+          # order: that contract is the writer's authority and this list is the
+          # reader's, and a chain graded against one and checked against the
+          # other is two declarations free to disagree.
           EXPECTED_LEDGER_HOPS: >-
             onex.cmd.omnimarket.delegate-skill.v1,
+            onex.cmd.omnibase-infra.delegation-request.v1,
             onex.cmd.omnibase-infra.delegation-routing-request.v1,
             onex.evt.omnibase-infra.routing-decision.v1,
             onex.evt.omnimarket.delegate-skill-completed.v1

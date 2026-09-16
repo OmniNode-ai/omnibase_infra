@@ -6,6 +6,9 @@
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.enum_tier_two_verdict import (
     EnumTierTwoVerdict,
 )
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_declared_chain_hop import (
+    ModelDeclaredChainHop,
+)
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_delegation_terminal_payload import (
     ModelDelegationTerminalPayload,
 )
@@ -18,6 +21,7 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_obser
 
 __all__ = [
     "EnumTierTwoVerdict",
+    "ModelDeclaredChainHop",
     "ModelDelegationTerminalPayload",
     "ModelLedgerChainRow",
     "ModelObservedHop",

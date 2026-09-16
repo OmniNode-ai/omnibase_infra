@@ -34,6 +34,9 @@ from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
 from omnibase_infra.runtime.contract_terminal_events import resolve_terminal_verdict
+from omnibase_infra.runtime.dispatch_envelope_context import (
+    current_dispatch_envelope,
+)
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
@@ -806,6 +809,29 @@ class RuntimePatternBBroker:
         command: ModelDispatchBusCommand,
         route: ModelRuntimeLocalIngressRoute,
     ) -> None:
+        """Publish the route's worker command, recording what caused it.
+
+        OMN-18419. This method publishes TWO different hops of the delegation
+        chain, and until now both were published as chain heads.
+
+        * From the HTTP ingress there is no consumed envelope, so the worker
+          command genuinely IS the head. `current_dispatch_envelope()` is None
+          and nothing is recorded -- an absent `parent_message_id` is the
+          checkable statement "head", and inventing one here would make that
+          statement unfalsifiable.
+        * From `service_delegation_dispatch_port`, this runs INSIDE the
+          delegate-skill handler's dispatch, which the dispatch engine bound to
+          the `onex.cmd.omnimarket.delegate-skill.v1` envelope it consumed.
+          That envelope is the cause of this command, and dropping it is why
+          `onex.cmd.omnibase-infra.delegation-routing-request.v1` -- published
+          two hops later off this one -- had no resolvable ancestry in
+          `event_ledger`.
+
+        Same contextvar, same reason, as the OMN-18116 causal-edge origination
+        site in `DispatchResultApplier`: the canonical handler signature never
+        sees an envelope, so origination belongs in the runtime.
+        """
+        consumed = current_dispatch_envelope()
         worker_envelope = ModelEventEnvelope[object](
             payload=command.payload,
             correlation_id=command.correlation_id,
@@ -813,6 +839,7 @@ class RuntimePatternBBroker:
             event_type=route.event_type,
             source_tool="pattern-b-broker",
             target_tool=route.contract_name,
+            parent_envelope_id=(None if consumed is None else consumed.envelope_id),
         )
         await self._event_bus.publish(
             route.command_topic,
