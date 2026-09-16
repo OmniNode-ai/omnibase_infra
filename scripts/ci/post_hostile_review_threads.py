@@ -147,6 +147,50 @@ def split_by_noise_policy(
     return postable, len(findings) - len(postable)
 
 
+def split_by_quorum(
+    review_result: dict[str, Any],
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split findings into (at-or-above quorum, below quorum) (OMN-18479).
+
+    A thread IS the blocking surface on this repository -- the Hostile
+    Review Thread Gate blocks while hostile-reviewer threads are
+    unresolved -- so a finding only one model raised must be REPORTED
+    without getting one. The reviewer CLI resolves agreement itself and
+    ships the clusters in ``quorum``; this function only reads them, so
+    the fingerprint rule lives in exactly one place fleet-wide.
+
+    A result carrying no ``quorum`` block (a reviewer predating
+    OMN-18479) posts everything, which is the stricter, pre-existing
+    behaviour -- an absent quorum must never silently drop a finding.
+    """
+    quorum = review_result.get("quorum")
+    if not isinstance(quorum, dict):
+        print(
+            "::warning::review result carries no quorum block; posting every "
+            "finding (pre-OMN-18479 reviewer)"
+        )
+        return list(findings), []
+
+    threshold = int(quorum.get("quorum_threshold", 2))
+    agreed_ids: set[str] = set()
+    for bucket in ("blocking_findings", "warning_findings"):
+        for cluster in quorum.get(bucket, []):
+            if not isinstance(cluster, dict):
+                continue
+            if int(cluster.get("agreement_count", 1)) >= threshold:
+                agreed_ids.update(str(fid) for fid in cluster.get("finding_ids", []))
+
+    agreed: list[dict[str, Any]] = []
+    below: list[dict[str, Any]] = []
+    for finding in findings:
+        if str(finding.get("finding_id", "")) in agreed_ids:
+            agreed.append(finding)
+        else:
+            below.append(finding)
+    return agreed, below
+
+
 def finding_fingerprint(finding: dict[str, Any]) -> str:
     """Stable dedupe fingerprint for one finding across workflow runs.
 
@@ -250,6 +294,7 @@ def build_review(
     suppressed_hints: int,
     models_succeeded: list[str],
     models_failed: list[str],
+    below_quorum: list[dict[str, Any]] | None = None,
     max_thread_comments: int = MAX_THREAD_COMMENTS,
 ) -> tuple[dict[str, Any] | None, dict[str, int]]:
     """Assemble the single review payload for this run.
@@ -257,12 +302,14 @@ def build_review(
     Returns (payload_or_None, stats). payload is None when there is nothing
     new to post (all findings deduped, or no postable findings at all).
     """
+    below_quorum_findings = list(below_quorum or [])
     stats = {
         "posted_threads": 0,
         "body_findings": 0,
         "deduped": 0,
         "truncated": 0,
         "suppressed_hints": suppressed_hints,
+        "below_quorum": len(below_quorum_findings),
     }
     comments: list[dict[str, Any]] = []
     body_sections: list[str] = []
@@ -301,7 +348,12 @@ def build_review(
     stats["posted_threads"] = len(comments)
     stats["truncated"] = len(truncated)
 
-    if not comments and not body_sections and not truncated:
+    if (
+        not comments
+        and not body_sections
+        and not truncated
+        and not below_quorum_findings
+    ):
         return None, stats
 
     body_parts = [
@@ -312,6 +364,8 @@ def build_review(
         f"Models failed: {', '.join(models_failed) or 'none'}  ",
         f"New finding threads: {len(comments)}  ",
         f"Deduped (already posted on this PR): {stats['deduped']}  ",
+        f"Below quorum (one model only, reported not threaded): "
+        f"{len(below_quorum_findings)}  ",
         f"Nit-level findings suppressed: {suppressed_hints}",
         "",
         "The model is the FINDER, never the gate: merge is gated only by the",
@@ -334,6 +388,24 @@ def build_review(
             f"`{f.get('file_path', '?')}` — "
             f"{str(f.get('normalized_message', ''))[:200]}"
             for f in truncated
+        ]
+    if below_quorum_findings:
+        body_parts += [
+            "",
+            f"### Below quorum: {len(below_quorum_findings)} finding(s) raised "
+            "by one model only (OMN-18479)",
+            "",
+            "These are reported and NOT dropped, but they get no thread and do "
+            "not block: a single model's finding no other model reproduced is "
+            "not evidence enough to stop a merge. Read them; act on them if "
+            "they are right.",
+            "",
+        ]
+        body_parts += [
+            f"- **[{_SEVERITY_LABEL.get(str(f.get('severity', 'info')), '?')}]** "
+            f"`{f.get('file_path', '?')}` ({f.get('model', '?')}) — "
+            f"{str(f.get('normalized_message', ''))[:200]}"
+            for f in below_quorum_findings
         ]
     if body_sections:
         body_parts += ["", "### Findings not anchored to a changed file", ""]
@@ -375,6 +447,9 @@ def main() -> int:
 
     findings = collect_findings(review_result)
     postable, suppressed_hints = split_by_noise_policy(findings)
+    # OMN-18479: a thread is the blocking surface here, so only findings
+    # that reached cross-model agreement get one.
+    postable, below_quorum = split_by_quorum(review_result, postable)
 
     base = f"https://api.github.com/repos/{repo}"  # url-authority-ok: GitHub REST API base for the CI thread poster; runs only inside GitHub Actions with GITHUB_TOKEN, same fixed origin every gh CLI call in this repo resolves
 
@@ -405,6 +480,7 @@ def main() -> int:
         suppressed_hints=suppressed_hints,
         models_succeeded=list(review_result.get("models_succeeded", [])),
         models_failed=list(review_result.get("models_failed", [])),
+        below_quorum=below_quorum,
     )
     print(f"thread-poster stats: {json.dumps(stats)}")
 
