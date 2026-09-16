@@ -35,6 +35,7 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_d
     HandlerDelegationChainLedger,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
+    ModelDeclaredChainHop,
     ModelObservedHop,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
@@ -50,16 +51,28 @@ from omnibase_infra.runtime.auto_wiring.models import (
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 _SUBSCRIBE_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"
-_CHAIN = (
+_CHAIN_TOPICS = (
     "onex.cmd.omnimarket.delegate-skill.v1",
     "onex.cmd.omnibase-infra.delegation-routing-request.v1",
     "onex.evt.omnibase-infra.routing-decision.v1",
     _SUBSCRIBE_TOPIC,
 )
+# OMN-18419: the declaration carries a parent relation per hop, not bare
+# topics. This harness declares a LINE, which is what `_observed` builds; the
+# TREE cases live in tests/unit/.../test_chain_replay.py beside the grading
+# rule. What this file exercises is the refusal path through the real wiring,
+# which is indifferent to the topology's shape.
+_CHAIN = tuple(
+    ModelDeclaredChainHop(
+        topic=topic,
+        parent=None if index == 0 else _CHAIN_TOPICS[index - 1],
+    )
+    for index, topic in enumerate(_CHAIN_TOPICS)
+)
 
 
 def _observed(correlation_id: UUID) -> tuple[ModelObservedHop, ...]:
-    envelope_ids = tuple(uuid4() for _ in _CHAIN)
+    envelope_ids = tuple(uuid4() for _ in _CHAIN_TOPICS)
     return tuple(
         ModelObservedHop(
             topic=topic,
@@ -67,7 +80,7 @@ def _observed(correlation_id: UUID) -> tuple[ModelObservedHop, ...]:
             parent_envelope_id=None if index == 0 else envelope_ids[index - 1],
             correlation_id=correlation_id,
         )
-        for index, topic in enumerate(_CHAIN)
+        for index, topic in enumerate(_CHAIN_TOPICS)
     )
 
 
@@ -224,7 +237,7 @@ async def test_absent_evidence_never_completes_silently(
         if "no delegation-chain evidence to persist" in message
     ]
     assert refusals, "the engine recorded no typed refusal naming absent evidence"
-    for topic in _CHAIN:
+    for topic in _CHAIN_TOPICS:
         assert any(topic in message for message in refusals), (
             f"the refusal does not name {topic!r}, so it does not say what "
             "evidence was looked for"
@@ -251,7 +264,7 @@ async def test_present_evidence_persists_and_takes_no_error_route(
     handler._read_observed.assert_awaited()  # type: ignore[attr-defined]
     persist_rows = handler._persist_rows  # type: ignore[attr-defined]
     persist_rows.assert_awaited_once()
-    assert len(persist_rows.await_args.args[0]) == len(_CHAIN)
+    assert len(persist_rows.await_args.args[0]) == len(_CHAIN_TOPICS)
     for logger in _ERROR_LOGGERS:
         assert not _errors(caplog, logger), (
             f"{logger} recorded an error on the success path: "
