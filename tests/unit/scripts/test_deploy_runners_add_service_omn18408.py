@@ -288,3 +288,43 @@ def test_help_documents_the_additive_mode(stub_bin: Path) -> None:
     result = _run(stub_bin, "--help")
     assert result.returncode == 0
     assert "--add" in result.stdout
+
+
+def test_the_script_carries_no_redaction_placeholder_where_a_value_belongs() -> None:
+    """A secret-scrubbing edit pipeline can silently corrupt a shell script.
+
+    The additive mode shipped with its registration-handle assignment rewritten
+    to the literal placeholder string a scrubber substitutes for a secret. The
+    script then passed that 14-character placeholder to the container as its
+    registration handle, so every attempt returned 404 from the
+    runner-registration endpoint -- and nothing upstream failed, because a
+    placeholder is a perfectly valid string. The shell is syntactically fine,
+    the deploy reports "Started", and the defect is visible only in the
+    container's own log.
+
+    This asserts the class, not the one line: any occurrence anywhere in the
+    script is a corrupted edit, because the script has no legitimate reason to
+    contain it.
+    """
+    text = SCRIPT.read_text(encoding="utf-8")
+    placeholder = "*" * 3 + "REDACTED" + "*" * 3
+    assert placeholder not in text, (
+        "deploy-runners.sh contains a scrubber placeholder where a value "
+        "belongs; the assignment it replaced was lost in an edit"
+    )
+
+
+def test_the_additive_mode_fetches_a_real_registration_handle() -> None:
+    """Positive control for the assertion above.
+
+    Absence of the placeholder is satisfied by a script that assigns nothing at
+    all. This pins what the non-dry-run branch must actually do, so the pair
+    fails on deletion as well as on corruption.
+    """
+    text = SCRIPT.read_text(encoding="utf-8")
+    start = text.index("add_services_deploy() {")
+    body = text[start : text.index("\n}\n", start)]
+    assert "fetch_registration_" + "token" in body, (
+        "the additive path must mint a real registration handle: a brand-new "
+        "container has no cached registration to restore from"
+    )
