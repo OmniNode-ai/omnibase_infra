@@ -487,12 +487,14 @@ declare -A github_status
 declare -A github_busy
 declare -A healthy_names
 
-# OMN-18396: the credential-free customer-plane pair (OMN-18392) is a fixed,
-# separate runner family, not part of the RUNNER_NAME_PREFIX/EXPECTED_RUNNERS
-# loop below. See the ALERT-ONLY block after the main loop for why it is
-# checked here rather than folded into that loop.
-declare -A customer_plane_docker_status
-declare -A customer_plane_github_status
+# OMN-18396 / OMN-18408: TWO fixed runner families sit outside the
+# RUNNER_NAME_PREFIX/EXPECTED_RUNNERS loop below -- the credential-free
+# customer-plane pair (OMN-18392) and the read-only verify runner (OMN-18408).
+# Neither name can match `^${RUNNER_NAME_PREFIX}-[0-9]+$`, so the main loop
+# never sees either. See the ALERT-ONLY block after the main loop for why they
+# are checked there rather than folded into that loop.
+declare -A alert_only_docker_status
+declare -A alert_only_github_status
 
 total_found=0
 healthy=0
@@ -642,13 +644,26 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
 done
 
 # ---------------------------------------------------------------------------
-# Customer-plane runner alerting (OMN-18392 residual, OMN-18396)
+# Alert-only runner families (OMN-18392 residual, OMN-18396; OMN-18408)
 # ---------------------------------------------------------------------------
-# omninode-customer-plane-runner-1/2 (OMN-18392) are a separate, fixed pair --
-# NOT part of the RUNNER_NAME_PREFIX/EXPECTED_RUNNERS loop above -- so the main
-# loop never sees them: its docker ps filter and its GitHub-registration jq
-# filter both key on RUNNER_NAME_PREFIX (`omninode-runner`), and this pair
-# deliberately does not match that prefix.
+# Two fixed runner families are NOT part of the
+# RUNNER_NAME_PREFIX/EXPECTED_RUNNERS loop above, so the main loop never sees
+# them: its docker ps filter and its GitHub-registration jq filter both key on
+# RUNNER_NAME_PREFIX (`omninode-runner`), and neither family matches it.
+#
+#   * omninode-customer-plane-runner-1/2 -- the credential-free pair (OMN-18392)
+#   * omninode-verify-runner-1 -- the read-only verify runner (OMN-18408)
+#
+# The verify runner matters more per container than the pair does. Five
+# scheduled/per-merge probes route to it alone, so an unnoticed outage does not
+# lose a canary -- it queues all five indefinitely with no runner to take them,
+# which is the starvation OMN-18408 removed from `omnibase-deploy`, relocated
+# rather than fixed.
+#
+# Each family carries its OWN `*_alert_present` flag and its own finding. A
+# single shared flag would be cheaper and wrong: the Slack message would name
+# one family while the other was down, sending the operator to the wrong
+# container.
 #
 # ALERT-ONLY, BY DESIGN. This block reports an outage into `unhealthy_list` (so
 # it reaches the existing Slack alert path below) but never adds either name to
@@ -672,38 +687,71 @@ done
 # expected-count bound, its own offline-age state keying, its own crash-loop
 # and stuck-Created detection) is a separate, larger change than "widen
 # alerting" and is explicitly out of scope for OMN-18396.
-CUSTOMER_PLANE_RUNNER_NAMES=(omninode-customer-plane-runner-1 omninode-customer-plane-runner-2)
+# Name-prefix per family, used for BOTH the docker ps filter and the GitHub
+# registration jq filter. Enumerated names are what is actually expected to
+# exist -- a name absent from `docker ps` is the "MISSING (no container)" path,
+# which prefix discovery alone could never report.
+ALERT_ONLY_RUNNER_PREFIXES=(omninode-customer-plane-runner- omninode-verify-runner-)
+ALERT_ONLY_RUNNER_NAMES=(
+    omninode-customer-plane-runner-1
+    omninode-customer-plane-runner-2
+    omninode-verify-runner-1
+)
+declare -A ALERT_ONLY_RUNNER_FAMILY=(
+    [omninode-customer-plane-runner-1]=customer-plane
+    [omninode-customer-plane-runner-2]=customer-plane
+    [omninode-verify-runner-1]=verify
+)
 customer_plane_alert_present=false
+verify_runner_alert_present=false
 
-while IFS=$'\t' read -r name status; do
-    [[ -z "${name}" ]] && continue
-    customer_plane_docker_status["$name"]="$status"
-done < <(docker ps -a --filter "name=omninode-customer-plane-runner-" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+# Raise the flag for one family. A name with no family mapping is a wiring
+# error, not a silent no-op: it would produce a finding nothing counts, which
+# is exactly the invisible-outage shape this block exists to remove.
+mark_alert_only_family() {
+    case "${1}" in
+        customer-plane) customer_plane_alert_present=true ;;
+        verify)         verify_runner_alert_present=true ;;
+        *)
+            log "ALERT-ONLY WIRING ERROR: no family flag for '${1}' -- finding would not be counted."
+            ;;
+    esac
+}
 
-if [[ "${github_api_failed}" != true ]]; then
+for _ao_prefix in "${ALERT_ONLY_RUNNER_PREFIXES[@]}"; do
     while IFS=$'\t' read -r name status; do
         [[ -z "${name}" ]] && continue
-        customer_plane_github_status["$name"]="$status"
-    done < <(jq -r '
-        .runners[]
-        | select(.name | startswith("omninode-customer-plane-runner-"))
-        | [.name, .status]
-        | @tsv
-    ' <<< "${github_json}")
+        alert_only_docker_status["$name"]="$status"
+    done < <(docker ps -a --filter "name=${_ao_prefix}" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+done
+
+if [[ "${github_api_failed}" != true ]]; then
+    for _ao_prefix in "${ALERT_ONLY_RUNNER_PREFIXES[@]}"; do
+        while IFS=$'\t' read -r name status; do
+            [[ -z "${name}" ]] && continue
+            alert_only_github_status["$name"]="$status"
+        done < <(jq -r --arg prefix "${_ao_prefix}" '
+            .runners[]
+            | select(.name | startswith($prefix))
+            | [.name, .status]
+            | @tsv
+        ' <<< "${github_json}")
+    done
 fi
 
-for name in "${CUSTOMER_PLANE_RUNNER_NAMES[@]}"; do
-    docker_state="${customer_plane_docker_status[$name]:-MISSING (no container)}"
+for name in "${ALERT_ONLY_RUNNER_NAMES[@]}"; do
+    _ao_family="${ALERT_ONLY_RUNNER_FAMILY[$name]:-unmapped}"
+    docker_state="${alert_only_docker_status[$name]:-MISSING (no container)}"
     if [[ "${docker_state}" != *"(healthy)"* ]] || [[ "${docker_state}" != Up* ]]; then
-        unhealthy_list+=("${name}: Docker ${docker_state} [customer-plane, alert-only]")
-        customer_plane_alert_present=true
+        unhealthy_list+=("${name}: Docker ${docker_state} [${_ao_family}, alert-only]")
+        mark_alert_only_family "${_ao_family}"
         continue
     fi
     if [[ "${github_api_failed}" != true ]]; then
-        gh_state="${customer_plane_github_status[$name]:-missing}"
+        gh_state="${alert_only_github_status[$name]:-missing}"
         if [[ "${gh_state}" != "online" ]]; then
-            unhealthy_list+=("${name}: GitHub ${gh_state} while Docker ${docker_state} [customer-plane, alert-only]")
-            customer_plane_alert_present=true
+            unhealthy_list+=("${name}: GitHub ${gh_state} while Docker ${docker_state} [${_ao_family}, alert-only]")
+            mark_alert_only_family "${_ao_family}"
         fi
     fi
 done
@@ -1080,6 +1128,13 @@ fi
 if [[ "${customer_plane_alert_present}" == true ]]; then
     current_alert_count=$((current_alert_count + 1))
 fi
+# OMN-18408: the verify runner contributes its own distinct finding, on the
+# same terms. Folding it into the count above would make an outage of the
+# single runner serving five scheduled probes indistinguishable from a
+# customer-plane blip in both the count and the transition logic.
+if [[ "${verify_runner_alert_present}" == true ]]; then
+    current_alert_count=$((current_alert_count + 1))
+fi
 
 # Write current state
 jq -n \
@@ -1104,6 +1159,7 @@ jq -n \
     --argjson total "$total_found" \
     --argjson docker_ok "$docker_ok" \
     --argjson customer_plane_alert_present "$customer_plane_alert_present" \
+    --argjson verify_runner_alert_present "$verify_runner_alert_present" \
     --arg timestamp "$(date -Iseconds)" \
     --arg unhealthy_names "$(printf '%s\n' "${unhealthy_list[@]}" 2>/dev/null || echo '')" \
     --arg github_degraded_names "$(printf '%s\n' "${github_degraded_list[@]}" 2>/dev/null || echo '')" \
@@ -1132,6 +1188,7 @@ jq -n \
         total: $total,
         docker_ok: $docker_ok,
         customer_plane_alert_present: $customer_plane_alert_present,
+        verify_runner_alert_present: $verify_runner_alert_present,
         timestamp: $timestamp,
         unhealthy_names: $unhealthy_names,
         github_degraded_names: $github_degraded_names,

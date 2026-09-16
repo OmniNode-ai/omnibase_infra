@@ -167,8 +167,16 @@ def test_the_job_waits_for_the_compose_convergence_guard(job: dict[str, Any]) ->
 
 def test_the_job_runs_on_the_lab_host_fleet(job: dict[str, Any]) -> None:
     """The agent's HTTP surface is on the lab host's LAN. Hosted compute cannot
-    see it, and this label is the runner carrying the host-gateway alias."""
-    assert job["runs-on"] == ["self-hosted", "omnibase-deploy"]
+    see it, and this label is a runner carrying the host-gateway alias.
+
+    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. The
+    reachability reason is unchanged -- both are containers on the same .201
+    host with the same alias. The move exists because this job's 35-minute
+    ceiling is the budget OMN-18200 AC1 reads as the difference between
+    "converged" and "not verified", and on `omnibase-deploy` it was competing
+    for a single runner with the release-train deploy. The third label, `host-201`, is required because `omnibase-verify` names a runner CLASS: a second verify-class runner came online on another lab host on 2026-09-16 and cannot see this lane.
+    """
+    assert job["runs-on"] == ["self-hosted", "omnibase-verify", "host-201"]
     assert "host.docker.internal" in _step_text(job), (
         "localhost inside the runner container reaches the runner, not the host; "
         "every compose-dev receipt emitted before that was understood carried "

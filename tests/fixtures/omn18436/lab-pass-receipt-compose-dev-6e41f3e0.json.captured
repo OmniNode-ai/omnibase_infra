@@ -1,0 +1,36 @@
+{
+  "receipt_version": "lab_pass_receipt.v1",
+  "sha": "6e41f3e0c8b36073359407931eadc863ff07f289",
+  "lane": "compose-dev",
+  "started_at": "2026-09-16T03:11:20+00:00",
+  "finished_at": "2026-09-16T03:39:20+00:00",
+  "result": "FAIL",
+  "checks": [
+    {
+      "name": "deployed_revision",
+      "ok": true,
+      "evidence": "lane at 6e41f3e0c8b3 == merge sha 6e41f3e0c8b3, converged after 0h24m (check_dev_lane_staleness.py --expect-revision 6e41f3e0c8b36073359407931eadc863ff07f289 against the omnibase-infra compose project)"
+    },
+    {
+      "name": "ready_main",
+      "ok": false,
+      "evidence": "GET http://host.docker.internal:8085/ready -> 503 {\"status\":\"unhealthy\",\"version\":\"0.38.29\",\"details\":{\"ready\":false,\"is_running\":false,\"is_draining\":false,\"event_bus_readiness\":{\"is_ready\":true,\"consumers_started\":true,\"assignments\":{\"onex.evt.omniclaude.context-injected.v1\":[0],\"onex.evt... [still not ready after the full 238s settle budget: ['http://host.docker.internal:8085/ready', 'http://host.docker.internal:8086/ready']]"
+    },
+    {
+      "name": "ready_effects",
+      "ok": false,
+      "evidence": "GET http://host.docker.internal:8086/ready -> 0 URLError: <urlopen error [Errno 111] Connection refused> [still not ready after the full 238s settle budget: ['http://host.docker.internal:8085/ready', 'http://host.docker.internal:8086/ready']]"
+    },
+    {
+      "name": "health_dimensions",
+      "ok": false,
+      "evidence": "GET http://host.docker.internal:8085/health -> 503 {\"status\":\"unhealthy\",\"version\":\"0.38.29\",\"details\":{\"healthy\":false,\"degraded\":false,\"startup_in_progress\":false,\"is_running\":false,\"is_draining\":false,\"pending_message_count\":0,\"max_concurrent_handlers\":10,\"handler_pool_size\":4,\"in_flight... [still not ready after the full 238s settle budget: ['http://host.docker.internal:8085/ready', 'http://host.docker.internal:8086/ready']]"
+    },
+    {
+      "name": "projection_ready",
+      "ok": true,
+      "evidence": "GET http://host.docker.internal:3002/projections -> 200, 61 topic(s) reported [still not ready after the full 238s settle budget: ['http://host.docker.internal:8085/ready', 'http://host.docker.internal:8086/ready']]"
+    }
+  ],
+  "agent_command_id": null
+}

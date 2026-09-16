@@ -31,11 +31,12 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SYNC_SCRIPT = REPO_ROOT / "deploy" / "maintenance" / "omninode-host-maintenance-sync.sh"
-SYNC_CRON = (
-    REPO_ROOT / "deploy" / "maintenance" / "cron.d" / "omninode-host-maintenance-sync"
-)
 
 TRACKED_REL = "deploy/maintenance/omninode-system-slack-report.sh"
 TRACKED_BODY = "#!/usr/bin/env bash\necho canonical\n"
@@ -48,8 +49,14 @@ def _git(repo: Path, *args: str) -> None:
         check=True,
         capture_output=True,
         text=True,
+        # OMN-18434: `**os.environ` carries GIT_DIR / GIT_WORK_TREE /
+        # GIT_INDEX_FILE straight through, and those OVERRIDE `cwd=` -- so
+        # under a pre-push hook this fixture would operate on the REAL invoking
+        # worktree rather than its tmp_path. Scrubbing them is not in tension
+        # with the two GIT_CONFIG_* pins below; those silence the developer's
+        # own config, which is a different concern from location.
         env={
-            **os.environ,
+            **scrub_git_location_env(),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_SYSTEM": "/dev/null",
         },
@@ -76,7 +83,11 @@ def fake_clone(tmp_path: Path) -> Path:
 def _run_check(
     clone: Path, manifest: Path, tmp_path: Path
 ) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
+    # SLACK_* is scrubbed for the reason recorded in
+    # tests/unit/scripts/test_maintenance_sync_converge_omn17898.py: the script
+    # falls back to the process environment when its env file is absent, so an
+    # inherited token turns a `--slack` case into a real page.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SLACK_")}
     env.update(
         {
             "OMNINODE_INFRA_REPO_ROOT": str(clone),
@@ -177,12 +188,11 @@ def test_live_report_script_is_governed_by_the_manifest() -> None:
         assert hostpath in source, f"{hostpath} is not governed by the sync manifest"
 
 
-def test_cron_unit_runs_the_check_and_can_alert() -> None:
-    unit = SYNC_CRON.read_text()
-    assert "omninode-host-maintenance-sync.sh" in unit, unit
-    assert "--check" in unit, unit
-    assert "--slack" in unit, unit
-    # --install from cron would silently overwrite host state on every tick.
-    assert "--install" not in unit, (
-        "the scheduled unit must DETECT drift, not auto-overwrite host artifacts"
-    )
+# The cron unit's contract moved to
+# `tests/unit/scripts/test_maintenance_sync_converge_omn17898.py` when OMN-17898
+# changed the scheduled invocation from `--check --slack` to `--converge
+# --slack`. The assertion that used to live here still holds in its important
+# half -- the unit must not schedule `--install`, which rewrites every entry
+# with no receipt -- and is made there against the parsed command line rather
+# than the file text, so the unit's own comments can explain that choice
+# without tripping the matcher (CLAUDE.md rule 15). One owner, not two.

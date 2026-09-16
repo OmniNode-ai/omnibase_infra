@@ -45,7 +45,11 @@ services:
       # would match by convention; `arch-arm64` is the fleet's own spelling,
       # the one that matches Docker's TARGETARCH and the inventory, so a
       # workflow can pin an architecture in one vocabulary rather than three.
-      RUNNER_LABELS: self-hosted,omnibase-verify,linux,arm64,arch-arm64
+      # `host-101` mirrors the `host-201` label OMN-18408 gave the primary
+      # host's verify runner, so a job that must pin a HOST and a job that
+      # must pin an ARCHITECTURE each have their own vocabulary instead of
+      # overloading one label to mean both.
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-101,linux,arm64,arch-arm64
       RUNNER_NAME: omninode-mini-runner-1
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${MINI_RUNNER_TOKEN}

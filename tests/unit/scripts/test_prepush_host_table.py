@@ -39,6 +39,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
 LIB = REPO_ROOT / "scripts" / "hooks" / "prepush_dispatch.sh"
@@ -593,12 +597,17 @@ def _repo_with_table(tmp_path: Path, table_text: str, name: str = "synth") -> Pa
     (repo / "scripts" / "hooks" / "prepush_hosts.tsv").write_text(
         table_text, encoding="utf-8"
     )
-    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "init", "-q", "."], cwd=repo, check=True, env=scrub_git_location_env()
+    )
+    subprocess.run(
+        ["git", "add", "-A"], cwd=repo, check=True, env=scrub_git_location_env()
+    )
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "table"],
         cwd=repo,
         check=True,
+        env=scrub_git_location_env(),
     )
     return repo
 
@@ -612,12 +621,17 @@ def table_repo(tmp_path: Path) -> Path:
     (repo / "scripts" / "hooks" / "prepush_hosts.tsv").write_text(
         TABLE.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "init", "-q", "."], cwd=repo, check=True, env=scrub_git_location_env()
+    )
+    subprocess.run(
+        ["git", "add", "-A"], cwd=repo, check=True, env=scrub_git_location_env()
+    )
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "table"],
         cwd=repo,
         check=True,
+        env=scrub_git_location_env(),
     )
     return repo
 
@@ -2132,12 +2146,17 @@ def remote_run_env(tmp_path: Path) -> dict[str, Path]:
     src = tmp_path / "src"
     (src / "tests").mkdir(parents=True)
     (src / "tests" / "test_a.py").write_text("def test_a():\n    assert True\n")
-    subprocess.run(["git", "init", "-q", "."], cwd=src, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=src, check=True)
+    subprocess.run(
+        ["git", "init", "-q", "."], cwd=src, check=True, env=scrub_git_location_env()
+    )
+    subprocess.run(
+        ["git", "add", "-A"], cwd=src, check=True, env=scrub_git_location_env()
+    )
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "t"],
         cwd=src,
         check=True,
+        env=scrub_git_location_env(),
     )
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -2145,6 +2164,7 @@ def remote_run_env(tmp_path: Path) -> dict[str, Path]:
         capture_output=True,
         text=True,
         check=True,
+        env=scrub_git_location_env(),
     ).stdout.strip()
 
     workroot = tmp_path / "workroot"
@@ -2155,6 +2175,7 @@ def remote_run_env(tmp_path: Path) -> dict[str, Path]:
         cwd=src,
         check=True,
         capture_output=True,
+        env=scrub_git_location_env(),
     )
     (rundir / "argv.txt").write_text("tests\n")
 
@@ -2886,6 +2907,7 @@ def test_the_wrapper_materializes_the_base_ref_in_the_transplanted_tree(
         capture_output=True,
         text=True,
         check=False,
+        env=scrub_git_location_env(),
     )
     assert resolved.returncode == 0, (
         f"the transplanted tree must resolve origin/dev; got {resolved.stderr!r}"

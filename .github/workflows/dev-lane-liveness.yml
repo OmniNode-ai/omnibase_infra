@@ -69,7 +69,26 @@ jobs:
   dev-lane-liveness:
     name: dev-lane-liveness
     # See "WHY SELF-HOSTED IS CORRECT HERE" above before changing this.
-    runs-on: [self-hosted, omnibase-deploy]
+    # OMN-18408: `omnibase-verify`, not `omnibase-deploy`. Same lab host,
+    # same docker socket and same `host.docker.internal` gateway -- the
+    # reason the job is self-hosted at all is unchanged. What changed is
+    # WHICH container serves it: `omnibase-deploy` has exactly one member,
+    # which also runs the release-train deploy, so every scheduled probe
+    # queued behind it (12 queued + 1 in progress at 2026-09-15T20:00Z).
+    # This job writes nothing and needs no private OMNI_HOME clone, so it
+    # belongs on the read-only verify runner. Do not move it back.
+    # OMN-18408: `host-201` is REQUIRED alongside `omnibase-verify`, and is not
+    # decoration. `omnibase-verify` names a runner CLASS (read-only probe
+    # runner); it does not name a HOST. On 2026-09-16 a second verify-class
+    # runner, omninode-mini-runner-1, came online on another lab host carrying
+    # `self-hosted,omnibase-verify,arch-arm64` -- which makes it a legal match
+    # for a bare `[self-hosted, omnibase-verify]`. This job probes the .201
+    # lane's own docker daemon through that host's gateway alias, so a run
+    # placed anywhere else cannot see the lane and reports it unreachable: a
+    # permanently-red check is a disabled check. `host-201` is carried only by
+    # the .201 verify runner, so the pair fails SAFE -- if that runner is down
+    # the job queues rather than running somewhere it cannot observe anything.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     timeout-minutes: 10
     steps:
       - name: Checkout (health gate script + rendered runtime policy)

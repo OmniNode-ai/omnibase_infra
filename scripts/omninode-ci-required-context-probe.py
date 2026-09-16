@@ -43,6 +43,28 @@ TRI-STATE, AND WHY ONLY ONE OF THE THREE ALARMS
                so PENDING never alarms at any age.
     FAILED  -- reported, concluded not-success. Already visible everywhere.
 
+CONFLICTED IS A FOURTH STATE, AND IT IS NOT AN ABSENCE (OMN-15310)
+    GitHub builds every ``pull_request`` workflow run against
+    ``refs/pull/N/merge``. A PR that conflicts with its base has no computable
+    merge ref, so GitHub delivers NO ``pull_request`` event and creates NO run
+    -- on any subsequent push, force-push or close/reopen. The required
+    contexts are then not late and no gate is broken: they are unproducible
+    until somebody resolves the conflict, and no amount of re-running will
+    mint them.
+
+    Graded as ABSENT this reads as a CI outage, and it sent four separate
+    lanes hunting a workflow defect that did not exist (2026-07-28 on
+    ``onex_change_control`` #5265, and 2026-09-16 on #9823, #9629 and a peer).
+    It is also NOT the invisible class this probe was built for -- GitHub
+    already renders a conflict on the PR page -- so it is reported as a
+    WARNING naming the remedy, one row per PR rather than one per context,
+    and never as a CRITICAL.
+
+    The read is fail-closed. ``mergeable``/``mergeable_state`` are absent from
+    the list endpoint and computed asynchronously, so an ``unknown`` answer, or
+    a failed read, falls through to the CRITICAL absence rather than silencing
+    it. Only a definite ``dirty`` reclassifies.
+
     Counted and printed in the heartbeat either way, so "we looked and found
     none" is distinguishable from "we did not look" (the structural blindness
     called out in ``reference_detection_shelf_structurally_blind``).
@@ -134,6 +156,12 @@ IN_FLIGHT_RUN_STATUSES = frozenset(
 # Conclusions that mean "this check reported and it is not a success". Present,
 # therefore already visible, therefore not this probe's alarm.
 FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "action_required", "stale"})
+
+# ``mergeable_state`` values that mean GitHub cannot compute a merge commit for
+# the PR, and therefore delivers no ``pull_request`` event on its head. Only a
+# definite value belongs here: "unknown" and "" mean GitHub has not finished
+# computing, which is undecidable, not clean.
+CONFLICTED_MERGE_STATES = frozenset({"dirty"})
 
 
 class ProbeError(RuntimeError):
@@ -392,11 +420,43 @@ def has_in_flight_runs(gh: GitHub, repo: str, sha: str) -> bool:
     )
 
 
+def pull_conflicts_with_base(gh: GitHub, repo: str, number: int) -> bool | None:
+    """Tri-state: True conflicted, False mergeable, None undecidable (OMN-15310).
+
+    ``mergeable_state`` is not on the list endpoint, so this costs one extra
+    request -- called only for a PR that is already about to alarm, which is a
+    handful per tick at most.
+
+    ``None`` is returned for an unreadable or still-computing answer and MUST
+    NOT be read as "not conflicted": the caller falls through to the CRITICAL
+    absence, so an undecidable merge state can never silence a real wedge.
+    """
+    try:
+        pull = _unwrap(gh.get(f"/repos/{OWNER}/{repo}/pulls/{number}"))
+    except ProbeError:
+        return None
+    if not isinstance(pull, dict):
+        return None
+    state = str(pull.get("mergeable_state") or "").lower()
+    if state in CONFLICTED_MERGE_STATES:
+        return True
+    if not state or state == "unknown" or pull.get("mergeable") is None:
+        return None
+    return False
+
+
 def probe_repo(
     gh: GitHub, repo: str, now: datetime
 ) -> tuple[list[str], dict[str, int]]:
     rows: list[str] = []
-    tally = {"prs": 0, "required": 0, "absent": 0, "pending": 0, "failed": 0}
+    tally = {
+        "prs": 0,
+        "required": 0,
+        "absent": 0,
+        "pending": 0,
+        "failed": 0,
+        "conflicted": 0,
+    }
 
     pulls = list(gh.paginate(f"/repos/{OWNER}/{repo}/pulls?state=open&per_page=100"))
     protection_cache: dict[str, list[str]] = {}
@@ -442,6 +502,21 @@ def probe_repo(
         if age_minutes < GRACE_MINUTES:
             continue
         if age_minutes < CEILING_MINUTES and has_in_flight_runs(gh, repo, sha):
+            continue
+
+        # OMN-15310: a conflicted PR has no computable merge ref, so GitHub
+        # delivers no pull_request event and these contexts cannot be produced
+        # at all. Different defect, different remedy, one row for the PR.
+        if pull_conflicts_with_base(gh, repo, int(number)):
+            tally["conflicted"] += 1
+            key = _sanitize(f"conflicted/{repo}#{number}")
+            detail = _sanitize(
+                f"{len(missing)} required context(s) cannot report: PR conflicts "
+                f"with {base}, so GitHub computes no merge ref for {sha[:8]} and "
+                f"delivers no pull_request event. Resolve the conflict -- no CI "
+                f"re-run will produce them. missing={','.join(missing)}"
+            )
+            rows.append(f"ci|WARNING|{key}|{detail}")
             continue
 
         tally["absent"] += len(missing)
@@ -531,7 +606,14 @@ def main(argv: list[str] | None = None) -> int:
     now = _now()
 
     rows: list[str] = []
-    totals = {"prs": 0, "required": 0, "absent": 0, "pending": 0, "failed": 0}
+    totals = {
+        "prs": 0,
+        "required": 0,
+        "absent": 0,
+        "pending": 0,
+        "failed": 0,
+        "conflicted": 0,
+    }
     scanned = 0
     degraded: list[str] = []
 
@@ -577,7 +659,8 @@ def main(argv: list[str] | None = None) -> int:
         rows.append(
             f"ci|OK|required-contexts|scanned {scanned}/{len(repos)} repos, "
             f"{totals['prs']} open non-draft PRs, {totals['required']} required contexts; "
-            f"absent={totals['absent']} pending={totals['pending']} failed={totals['failed']}"
+            f"absent={totals['absent']} pending={totals['pending']} "
+            f"failed={totals['failed']} conflicted={totals['conflicted']}"
             + (f" degraded={','.join(degraded)}" if degraded else "")
         )
 

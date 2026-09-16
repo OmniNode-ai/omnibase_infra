@@ -58,6 +58,9 @@ PREFIX = "omninode-runner"
 TEST_FLEET_COUNT = 1  # one general-pool runner is enough to prove no regression
 CP1 = "omninode-customer-plane-runner-1"
 CP2 = "omninode-customer-plane-runner-2"
+# OMN-18408: the read-only verify runner is the SECOND family outside the
+# RUNNER_NAME_PREFIX loop, and it is checked by the same alert-only block.
+VR = "omninode-verify-runner-1"
 
 pytestmark = pytest.mark.unit
 
@@ -102,7 +105,9 @@ def _write_fleet_config(path: Path) -> None:
     )
 
 
-def _runners_json(*, cp1_status: str | None, cp2_status: str | None) -> str:
+def _runners_json(
+    *, cp1_status: str | None, cp2_status: str | None, vr_status: str | None
+) -> str:
     """The general pool (TEST_FLEET_COUNT healthy+online) plus whichever
     customer-plane entries the case wants -- omitting a name models it being
     absent from the org's registration list entirely (the 'missing' path)."""
@@ -139,6 +144,18 @@ def _runners_json(*, cp1_status: str | None, cp2_status: str | None) -> str:
                 ],
             }
         )
+    if vr_status is not None:
+        runners.append(
+            {
+                "name": VR,
+                "status": vr_status,
+                "busy": False,
+                "labels": [
+                    {"name": "self-hosted"},
+                    {"name": "omnibase-verify"},
+                ],
+            }
+        )
     return json.dumps({"total_count": len(runners), "runners": runners})
 
 
@@ -149,6 +166,8 @@ def _make_mock_bin(
     cp2_docker_status: str | None,
     cp1_gh_status: str | None,
     cp2_gh_status: str | None,
+    vr_docker_status: str | None,
+    vr_gh_status: str | None,
     call_log: Path,
     slack_log: Path,
 ) -> None:
@@ -163,6 +182,10 @@ def _make_mock_bin(
     the general-pool query would have, defeating the whole point of the test.
     """
     bindir.mkdir(parents=True, exist_ok=True)
+
+    vr_ps_lines = ""
+    if vr_docker_status is not None:
+        vr_ps_lines = f'printf "%s\\t%s\\n" "{VR}" "{vr_docker_status}"'
 
     cp_ps_lines = ""
     if cp1_docker_status is not None:
@@ -189,6 +212,8 @@ def _make_mock_bin(
             done
             if [[ "${{filter}}" == "omninode-customer-plane-runner-" ]]; then
               {cp_ps_lines if cp_ps_lines else ":"}
+            elif [[ "${{filter}}" == "omninode-verify-runner-" ]]; then
+              {vr_ps_lines if vr_ps_lines else ":"}
             else
               for i in $(seq 1 {TEST_FLEET_COUNT}); do
                 printf '%s\\t%s\\n' "{PREFIX}-${{i}}" "Up (healthy)"
@@ -220,6 +245,7 @@ def _make_mock_bin(
                 done
                 echo "{CP1}"
                 echo "{CP2}"
+                echo "{VR}"
               fi
               exit 0
             fi
@@ -237,7 +263,9 @@ def _make_mock_bin(
         """,
     )
 
-    runners_json = _runners_json(cp1_status=cp1_gh_status, cp2_status=cp2_gh_status)
+    runners_json = _runners_json(
+        cp1_status=cp1_gh_status, cp2_status=cp2_gh_status, vr_status=vr_gh_status
+    )
     _write_exec(
         bindir / "gh",
         f"""\
@@ -320,6 +348,8 @@ def _run_monitor(
     cp2_docker_status: str | None = "Up (healthy)",
     cp1_gh_status: str | None = "online",
     cp2_gh_status: str | None = "online",
+    vr_docker_status: str | None = "Up (healthy)",
+    vr_gh_status: str | None = "online",
     auto_bounce: bool = False,
 ) -> tuple[dict[str, object], str, Path]:
     """Run the real monitor script; return (parsed state, stdout, tmp_path).
@@ -342,6 +372,8 @@ def _run_monitor(
         cp2_docker_status=cp2_docker_status,
         cp1_gh_status=cp1_gh_status,
         cp2_gh_status=cp2_gh_status,
+        vr_docker_status=vr_docker_status,
+        vr_gh_status=vr_gh_status,
         call_log=call_log,
         slack_log=slack_log,
     )
@@ -497,3 +529,109 @@ class TestCustomerPlaneNeverBounced:
         )
         assert CP1 not in call_log_text
         assert CP2 not in call_log_text
+
+
+class TestVerifyRunnerAlerting:
+    """The read-only verify runner is the second alert-only family (OMN-18408).
+
+    `omninode-verify-runner-1` sits outside the RUNNER_NAME_PREFIX loop for the
+    same reason the customer-plane pair does: its name cannot match
+    ``^omninode-runner-[0-9]+$``. Left unwired it would be exactly as invisible
+    as that pair was before OMN-18396 -- and it is less tolerable here, because
+    five scheduled probes now route to this single container. A silent outage
+    of it does not merely lose a canary: every one of those five workflows
+    queues indefinitely with no runner to take it, which is the same starvation
+    OMN-18408 exists to remove, relocated rather than fixed.
+
+    Alert-only, on the same two guards as the customer-plane family: it is
+    never added to any list ``collect_remediation_targets()`` reads, and that
+    function's own ``^${RUNNER_NAME_PREFIX}-[0-9]+$`` filter could not pass this
+    name even if it were.
+    """
+
+    def test_all_healthy_produces_no_verify_runner_finding(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control: without it, every assertion below is unfalsifiable."""
+        state, _stdout, _ = _run_monitor(tmp_path)
+        assert state["verify_runner_alert_present"] is False
+        assert state["alert_count"] == 0
+        assert VR not in state["unhealthy_names"]
+
+    def test_a_stopped_verify_runner_is_reported_and_pages(
+        self, tmp_path: Path
+    ) -> None:
+        state, stdout, tmp = _run_monitor(
+            tmp_path, vr_docker_status="Exited (1) 2 minutes ago"
+        )
+        assert f"{VR}: Docker Exited" in state["unhealthy_names"]
+        assert "[verify, alert-only]" in state["unhealthy_names"]
+        assert state["verify_runner_alert_present"] is True
+        assert state["alert_count"] >= 1
+        assert "ALERT: 1 actionable issue(s)" in stdout
+        slack_payload = (tmp / "slack-messages.log").read_text(encoding="utf-8")
+        assert "RUNNER ALERT" in slack_payload
+        assert VR in slack_payload
+
+    def test_a_missing_verify_runner_container_is_reported_and_pages(
+        self, tmp_path: Path
+    ) -> None:
+        state, _stdout, _ = _run_monitor(tmp_path, vr_docker_status=None)
+        assert f"{VR}: Docker MISSING (no container)" in state["unhealthy_names"]
+        assert state["verify_runner_alert_present"] is True
+        assert state["alert_count"] >= 1
+
+    def test_offline_github_registration_with_healthy_docker_is_reported(
+        self, tmp_path: Path
+    ) -> None:
+        """The failure mode that actually strands the five moved workflows.
+
+        A container that is Up but whose listener is not registered takes no
+        jobs, and Docker-level health alone reports it as fine.
+        """
+        state, _stdout, _ = _run_monitor(tmp_path, vr_gh_status="offline")
+        assert (
+            f"{VR}: GitHub offline while Docker Up (healthy)"
+            in state["unhealthy_names"]
+        )
+        assert state["verify_runner_alert_present"] is True
+        assert state["alert_count"] >= 1
+
+    def test_the_two_alert_only_families_are_independent(self, tmp_path: Path) -> None:
+        """A verify-runner outage must not set the customer-plane flag, or vice
+        versa -- a shared flag would make either family's Slack finding name the
+        wrong runner and send the operator to the wrong container."""
+        state, _stdout, _ = _run_monitor(
+            tmp_path, vr_docker_status="Exited (1) 2 minutes ago"
+        )
+        assert state["verify_runner_alert_present"] is True
+        assert state["customer_plane_alert_present"] is False
+
+        state, _stdout, _ = _run_monitor(
+            tmp_path, cp1_docker_status="Exited (1) 2 minutes ago"
+        )
+        assert state["customer_plane_alert_present"] is True
+        assert state["verify_runner_alert_present"] is False
+
+    def test_a_verify_runner_outage_does_not_disturb_the_general_pool(
+        self, tmp_path: Path
+    ) -> None:
+        state, _stdout, _ = _run_monitor(
+            tmp_path, vr_docker_status="Exited (1) 2 minutes ago"
+        )
+        assert state["healthy"] == TEST_FLEET_COUNT
+        assert state["online"] == TEST_FLEET_COUNT
+
+    def test_auto_bounce_never_targets_the_verify_runner(self, tmp_path: Path) -> None:
+        state, _stdout, tmp = _run_monitor(
+            tmp_path,
+            vr_docker_status="Exited (1) 2 minutes ago",
+            auto_bounce=True,
+        )
+        assert state["verify_runner_alert_present"] is True
+        assert state["remediation_target_count"] == 0
+        call_log = tmp / "docker-calls.log"
+        call_log_text = (
+            call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+        )
+        assert VR not in call_log_text

@@ -1906,6 +1906,212 @@ for grant_role_entry in \
 done
 # ---- END login-only role grant seam (OMN-18060) ----
 
+# ---- BEGIN service-role database access seam (OMN-18438) ----
+# 3b. Provision SERVICE_DB_MAP principals on a warm volume.
+#
+# THE SAME DEFECT, A FOURTH TIME. docker/migrations/forward/
+# 000_create_multiple_databases.sh mints every principal it knows about from
+# /docker-entrypoint-initdb.d, which Postgres runs ONLY when the data directory
+# is empty. OMN-16993 (omninode_runtime), OMN-17138 (tenant_projection_writer)
+# and OMN-18060 (chain_canary_reader) each closed that gap for one principal by
+# extending the warm seam above. role_omninode was never added to any of them.
+#
+# Measured on the .201 dev lane 2026-09-16, on a volume created 2026-07-31:
+# pg_roles held no role_omninode row, omninode_cloud held 0 tables against 78 in
+# omnibase_infra, and onex-api logged 112 `password authentication failed for
+# user "role_omninode"` in one hour while reporting Up (healthy) -- its /health
+# route never touches the pool. That is this class's signature exactly: a DSN
+# that resolves perfectly and then fails at connect.
+#
+# WHY THIS IS A SEPARATE SEAM AND NOT AN ENTRY IN THE MAP ABOVE
+# ------------------------------------------------------------
+# role_omninode is a SERVICE_DB_MAP principal, not a LOGIN_ONLY_ROLE_MAP one,
+# and the two are deliberately different shapes:
+#
+#   * The login-only seam issues a LOGIN credential and NOTHING else --
+#     tests/unit/infra/test_warm_volume_login_credential_omn16993.py
+#     ::test_runner_never_widens_the_principal_beyond_login slices that phase
+#     and asserts it contains no GRANT at all. That assertion is correct and
+#     this seam does not weaken it: it begins well after that slice ends.
+#   * Its map is pinned EQUAL to the bootstrap's LOGIN_ONLY_ROLE_MAP by the same
+#     test file, so an entry here would fail that parity assertion.
+#   * role_omninode needs more than a password. The bootstrap revokes CONNECT
+#     from PUBLIC on every managed database, and Postgres 15+ no longer grants
+#     CREATE ON SCHEMA public to PUBLIC. A role with only a LOGIN would
+#     authenticate and then fail at connect, or connect and fail to create --
+#     the corpus apply failing one layer further in.
+#
+# WHY CREATE ON SCHEMA public IS CORRECT *HERE* AND WRONG ABOVE
+# ------------------------------------------------------------
+# The login-only map's comment states why CREATE is refused there: a role that
+# can own a table is exempt from that table's RLS unconditionally, FORCE
+# included. For those three principals that would undo the isolation they exist
+# to be governed by. role_omninode is the opposite case -- it is the OWNING
+# login of omninode_cloud and APPLIES the corpus (docker-compose.dev-lane.yml's
+# cloud-migration runs as DB_USER=role_omninode precisely so every GRANT in the
+# corpus points at the right principal and the applying session is not exempt
+# from the RLS this lane is the proving ground for). This seam mirrors the
+# bootstrap's own grant_role_to_database() for this principal and widens it by
+# nothing.
+#
+# WHY IT RUNS HERE AND NOT IN SECTION 0
+# -------------------------------------
+# Same placement reasoning as the grant seam above: after the apply loop, before
+# the sentinel. A failure leaves migrations_complete FALSE and migration-gate
+# UNHEALTHY, so the lane refuses to start the runtime rather than starting it
+# blind.
+#
+# ENTRY FORMAT: "<role>:<password_var>:<database>"
+#
+# GATES: an ABSENT credential and an ABSENT database are both legitimate states
+#   and log a named skip -- a lane that has not provisioned this principal, and
+#   a lane whose volume predates the database, are each fine and re-assert on
+#   the next run. A MALFORMED (non-hex) credential is NOT: skipping there is how
+#   a lane ends up looking provisioned while its API cannot connect, which is
+#   the defect this seam exists to close.
+reassert_service_role_database_access() {
+  service_role_name="$1"
+  service_password_var="$2"
+  service_database="$3"
+  service_role_password=""
+
+  # Committed constants, but validated before either name reaches a SQL
+  # identifier or a string literal, exactly as the two seams above do.
+  case "$service_password_var" in
+    ""|*[!A-Z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed password var '${service_password_var}'" >&2
+      return 1
+      ;;
+  esac
+  case "$service_role_name" in
+    ""|*[!a-z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed role name '${service_role_name}'" >&2
+      return 1
+      ;;
+  esac
+  case "$service_database" in
+    ""|*[!a-z0-9_]*)
+      echo "[forward-migration]   FAIL: malformed database name '${service_database}'" >&2
+      return 1
+      ;;
+  esac
+
+  # POSIX sh has no ${!var}; eval is the portable indirection. The value is
+  # never echoed, never passed in argv, and reaches psql only on stdin.
+  eval "service_role_password=\${${service_password_var}:-}"
+
+  if [ -z "$service_role_password" ]; then
+    echo "[forward-migration]   skip  ${service_role_name} (${service_password_var} not set)"
+    return 0
+  fi
+
+  case "$service_role_password" in
+    *[!0-9a-fA-F]*)
+      echo "[forward-migration]   FAIL: ${service_password_var} is not hex — refusing to set ${service_role_name}'s credential" >&2
+      return 1
+      ;;
+  esac
+
+  # The target database is created by the bootstrap on a fresh volume. A warm
+  # volume that predates that entry has neither the database nor anything that
+  # needs it; name the skip and re-assert next run rather than turning the
+  # migration gate UNHEALTHY on a lane that is fine.
+  service_database_present=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
+    "SELECT 1 FROM pg_database WHERE datname = '${service_database}'")
+  if [ "$service_database_present" != "1" ]; then
+    echo "[forward-migration]   skip  ${service_role_name} (database ${service_database} absent on this lane)"
+    unset service_role_password service_database_present
+    return 0
+  fi
+
+  # Defence in depth: hex-only means a quote cannot appear, but double any
+  # single quote anyway before interpolating into the SQL literal.
+  service_escaped_password=$(printf '%s' "$service_role_password" | sed "s/'/''/g")
+
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q <<EOSQL
+DO \$reassert_service_role\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${service_role_name}') THEN
+    CREATE ROLE "${service_role_name}" WITH
+      LOGIN
+      NOSUPERUSER
+      NOBYPASSRLS
+      NOCREATEDB
+      NOCREATEROLE
+      NOREPLICATION
+      PASSWORD '${service_escaped_password}';
+  ELSE
+    -- Pre-existing role: touch LOGIN + PASSWORD only, for 094's reason. Every
+    -- other attribute is asserted where the role is defined.
+    ALTER ROLE "${service_role_name}" WITH LOGIN PASSWORD '${service_escaped_password}';
+  END IF;
+END
+\$reassert_service_role\$;
+EOSQL
+
+  # The credential is no longer needed; drop it before the grants below rather
+  # than leave it live for the rest of the run.
+  unset service_role_password service_escaped_password
+
+  # Database-scoped access, mirroring the bootstrap's grant_role_to_database()
+  # for this principal and widening it by nothing. CONNECT is issued from the
+  # runner's own database; the schema grants must be issued against the target.
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q <<EOSQL
+GRANT CONNECT ON DATABASE "${service_database}" TO "${service_role_name}";
+EOSQL
+
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "${service_database}" -v ON_ERROR_STOP=1 -q <<EOSQL
+GRANT USAGE, CREATE ON SCHEMA public TO "${service_role_name}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${service_role_name}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO "${service_role_name}";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${service_role_name}";
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${service_role_name}";
+EOSQL
+
+  # READ THE GRANTS BACK. A GRANT issued without grant option on the object
+  # warns and returns success rather than raising -- the trap the OMN-18060 seam
+  # documents. Without this, a seam that granted nothing would log success.
+  service_connect_ok=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
+    "SELECT has_database_privilege('${service_role_name}', '${service_database}', 'CONNECT')")
+  if [ "$service_connect_ok" != "t" ]; then
+    echo "[forward-migration]   FAIL: ${service_role_name} still lacks CONNECT on ${service_database} after the grant" >&2
+    unset service_connect_ok
+    return 1
+  fi
+
+  service_schema_ok=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "${service_database}" -tAc \
+    "SELECT has_schema_privilege('${service_role_name}', 'public', 'USAGE') AND has_schema_privilege('${service_role_name}', 'public', 'CREATE')")
+  if [ "$service_schema_ok" != "t" ]; then
+    echo "[forward-migration]   FAIL: ${service_role_name} still lacks USAGE+CREATE on ${service_database}.public after the grant" >&2
+    unset service_connect_ok service_schema_ok
+    return 1
+  fi
+
+  echo "[forward-migration]   ok    ${service_role_name} LOGIN + CONNECT/USAGE/CREATE on ${service_database} asserted"
+
+  unset service_connect_ok service_schema_ok service_database_present
+}
+
+echo "[forward-migration] Re-asserting service-role database access..."
+# SERVICE_ROLE_DB_ACCESS_MAP — entries quoted individually so the loop needs no
+# word splitting to stay correct, matching the two maps above. A subset of the
+# bootstrap's SERVICE_DB_MAP: only the principals this deployment actually owns
+# the credential for belong here, and
+# tests/unit/infra/test_service_role_db_access_omn18438.py pins the membership.
+for service_role_entry in \
+  "role_omninode:ROLE_OMNINODE_PASSWORD:omninode_cloud" \
+; do
+  entry_service_role=${service_role_entry%%:*}
+  entry_service_rest=${service_role_entry#*:}
+  entry_service_password_var=${entry_service_rest%%:*}
+  entry_service_database=${entry_service_rest#*:}
+  reassert_service_role_database_access \
+    "$entry_service_role" "$entry_service_password_var" "$entry_service_database"
+done
+# ---- END service-role database access seam (OMN-18438) ----
+
 # ---------------------------------------------------------------------------
 # 4. Set the sentinel TRUE only after ALL migrations succeed (OMN-13062)
 # ---------------------------------------------------------------------------

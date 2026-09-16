@@ -1324,6 +1324,142 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # omninode-verify-runner-1 -- OMN-18408: dedicated runner for the scheduled
+  # and per-merge VERIFY/CRON probes that were sharing the single
+  # omninode-deploy-runner slot with the release-train DEPLOY jobs
+  # (cut_release_train_tag.sh, refresh_stability_lane.sh, refresh_dev_lane.sh).
+  #
+  # WHY THIS EXISTS. Both families need `host.docker.internal` + docker.sock
+  # read access to probe the lab lane, so both were pinned to `omnibase-deploy`
+  # -- but the VERIFY jobs (dev-lane-liveness, dev-lane-staleness, the Chain
+  # Canary, the MSK bastion canary, the k3s onex-lab overlay verify) run on a
+  # schedule or on every merge, and a single runner serializes them behind
+  # whatever DEPLOY job happens to be running. Measured 2026-09-15T20:00Z: 12
+  # queued + 1 in-progress run on `[self-hosted, omnibase-deploy]` at once,
+  # against one online runner, while the 88-runner `omnibase-ci` fleet sat
+  # idle. `verify-lane-converged`/`verify-lab-overlay-converged` carry finite
+  # job ceilings (30/35 min) a busy deploy runner eats directly out of.
+  #
+  # WHAT MOVED HERE, and ONLY this (OMN-18408, by explicit operator scope --
+  # see docs/tracking/ROLLING_WORK_LEDGER.md OPERATOR-CONSENT row,
+  # lane=deploy-runner-split-2005): dev-lane-liveness.yml/dev-lane-liveness,
+  # dev-lane-staleness.yml/dev-lane-staleness, chain-canary.yml/Chain Canary
+  # (dev lane), msk-bastion-canary.yml/MSK bastion routing canary,
+  # runtime-rebuild-trigger.yml/verify-lab-overlay-converged. Deliberately NOT
+  # moved: release-train-lab.yml cut-tag/deploy (DEPLOY, stays serialized per
+  # CLAUDE.md rule 2a/12 -- same-lane redeploys never get a second runner),
+  # runtime-rebuild-trigger.yml/verify-lane-converged,
+  # runtime-rebuild-trigger-reusable.yml/verify-sibling-converged (the latter
+  # is also called by omnimarket -- widening it needs its own decision),
+  # baselines-scheduler.yml and dlq-depth-monitor.yml (none named in the
+  # approved scope).
+  #
+  # WHAT IS DELIBERATELY ABSENT relative to omninode-deploy-runner, each line
+  # load-bearing: no ${DEPLOY_RUNNER_OMNI_HOME} bind (no write access to the
+  # private OMNI_HOME clone tree the deploy scripts mutate), no
+  # DEPLOY_RUNNER_TOKEN / release-train git-safe.directory wiring, no write
+  # surface into any compose lane. Pinned by
+  # tests/ci/test_verify_runner_credential_read_only_omn18408.py, which also
+  # carries a positive control against omninode-deploy-runner so the absence
+  # cannot pass vacuously.
+  #
+  # WHAT IS DELIBERATELY PRESENT, matching omninode-deploy-runner exactly by
+  # the same operator-consent row: docker.sock (the VERIFY jobs read container
+  # revision labels and health endpoints off the host daemon -- this is a read
+  # usage, not a compose-lane mutation path), the host-gateway alias
+  # (LANE_PROBE_HOST=host.docker.internal), and the operator credentials
+  # directory mounted read-only via the identical root-phase copy-in pattern
+  # (none of the five moved jobs consumes it today, but the mount is present
+  # for parity with the deploy runner rather than gated on today's callers).
+  #
+  # REGISTRATION reuses the EXISTING `omnibase-deploy` GitHub runner group
+  # (visibility already covers omnibase_infra + omnimarket) rather than
+  # creating a new org runner group -- group membership grants repository
+  # visibility, the LABEL decides job routing, and the customer-plane pair
+  # above already established this same reuse pattern against `omnibase-ci`.
+  # DEPLOYING THIS SERVICE. Use the sanctioned scoped mode, never a hand-typed
+  # compose command on the host and never the default fleet path:
+  #
+  #   bash scripts/deploy-runners.sh --add=omninode-verify-runner-1
+  #
+  # That rsyncs this file to the host, then runs `up -d --no-deps` for THIS
+  # service with neither --force-recreate nor --remove-orphans, and waits until
+  # this runner alone is online. The default path force-recreates the whole
+  # project -- ~3h serialised across the 88-runner fleet (OMN-18188), with the
+  # monitor's auto-bounce cron racing anything offline past 300s. `--rolling
+  # --only=` (OMN-18415) is the wrong verb here and refuses by design: it
+  # enumerates only general-pool runners and requires its target to be online
+  # and idle first, which a container that does not exist yet can never be.
+  # `--add` also exports DEPLOY_RUNNER_TOKEN from the org registration token it
+  # mints, which is what this service interpolates -- shared with
+  # omninode-deploy-runner because both register into the same runner group.
+  omninode-verify-runner-1:
+    image: omninode-runner:latest
+    container_name: omninode-verify-runner-1
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    # Root-phase init identical in shape to omninode-deploy-runner's, minus the
+    # OMNI_HOME ownership step (there is no OMNI_HOME bind here to own).
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -eu
+        runner_uid="$$(id -u runner)"
+        runner_gid="$$(id -g runner)"
+        mkdir -p /home/runner/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
+          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+        exec /usr/local/bin/entrypoint.sh
+    environment:
+      # `host-201` is load-bearing, not decoration: `omnibase-verify` names a
+      # runner CLASS and a second verify-class runner already exists on another
+      # lab host (omninode-mini-runner-1, arch-arm64, online 2026-09-16). The
+      # five moved jobs probe THIS host's docker daemon and lane ports, so they
+      # require both labels; a bare class match would place them where they can
+      # observe nothing and report the lane unreachable.
+      # OMN-17477 arch label, additive, landing on recreate -- so the arch
+      # vocabulary is complete across every class rather than present on
+      # some runners and absent on others, which is the state in which a
+      # workflow cannot rely on it at all.
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
+      RUNNER_NAME: omninode-verify-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-deploy
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      # Same reasoning as omninode-deploy-runner: inside this container
+      # `localhost` is the container itself, not the lab host.
+      LANE_PROBE_HOST: host.docker.internal
+      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
+      # comment above.
+      - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - verify-runner-1-creds:/home/runner/.runner-creds
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    group_add:
+      - "984" # Match host Docker socket GID for DinD access
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
   # ---------------------------------------------------------------------------
   # omninode-customer-plane-runner-1/2 -- OMN-18392: the credential-free pair.
   #
@@ -1473,6 +1609,10 @@ services:
 volumes:
   deploy-runner-creds:
     name: omninode-deploy-runner-creds
+  # OMN-18408 -- own creds volume for the verify runner, same reasoning as the
+  # customer-plane pair below: registration cache is keyed to the label set.
+  verify-runner-1-creds:
+    name: omninode-verify-runner-1-creds
   # OMN-18392 -- credential-free customer-plane pair (see the service
   # definitions above). Separate creds volumes so their registration cache
   # is keyed to their own label set and cannot inherit a fleet runner's.

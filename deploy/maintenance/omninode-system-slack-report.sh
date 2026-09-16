@@ -419,6 +419,83 @@ runtime_body_verdict() {
   printf '%s' "$verdict"
 }
 
+# Name the failing health dimension(s) from the FULL body (OMN-18435).
+#
+# BODY_EXCERPT_BYTES bounds DISPLAY, and on `.201` the real body is ~4.3 KB, so
+# every recorded 503 row stopped long before the dimension that actually failed.
+# Measured 2026-09-14..09-16: three of the twenty critical ticks were a RUNNING
+# runtime failing a health dimension, and which dimension is not recoverable
+# from the logs for any of them. A monitor that records a verdict without its
+# reason cannot be used to diagnose the thing it alarmed about.
+#
+# Computed from the whole body, never the excerpt — the OMN-15525 rule. An
+# unparseable or bodiless response yields an empty string, which the caller
+# renders as `unresolved`; it must never be rendered as "nothing wrong".
+runtime_unhealthy_reasons() {
+  local body="$1" out
+  out=$(jq -r '
+    def d: (.details? // {});
+    [
+      (if (d.is_running? == false) then "is_running=false" else empty end),
+      (if (d.event_bus_healthy? == false) then "event_bus_healthy=false" else empty end),
+      (if (d.startup_in_progress? == true) then "startup_in_progress=true" else empty end),
+      (if (d.no_handlers_registered? == true) then "no_handlers_registered=true" else empty end),
+      (if ((d.failed_handlers? // {}) | length) > 0
+        then "failed_handlers=" + ((d.failed_handlers | keys) | join(","))
+        else empty end),
+      ((d.components? // {}) | to_entries[]
+        | select((.value | type) == "object" and .value.status? != null and .value.status != "healthy")
+        | "component:" + .key + "=" + (.value.status | tostring))
+    ] | join(" ")
+  ' <<<"$body" 2>/dev/null) || out=""
+  printf '%s' "$out"
+}
+
+# The container publishing a lane's MAIN runtime port, or empty when that cannot
+# be established to be exactly one container.
+#
+# The PORT is the join key, deliberately. It is the same port the probe already
+# resolved from the rendered runtime policy, so this introduces no second lane
+# table to drift out of sync with the first, and no container name is hardcoded
+# anywhere (rule 8). Zero matches or more than one is unresolvable, and the
+# caller fails closed on that.
+lane_runtime_container() {
+  local port="$1" raw matches count
+  raw=$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null || true)
+  [[ -n "$raw" ]] || { printf ''; return 0; }
+  matches=$(awk -F'\t' -v needle=":${port}->" 'index($2, needle) {print $1}' <<<"$raw")
+  [[ -n "$matches" ]] || { printf ''; return 0; }
+  count=$(grep -c . <<<"$matches")
+  [[ "$count" == 1 ]] || { printf ''; return 0; }
+  printf '%s' "$matches"
+}
+
+# `<age>/<grace>` while a container is still inside its OWN declared
+# start_period, empty otherwise (OMN-18435).
+#
+# This is the concept `starting_past_start_period` already applies on the
+# CONTAINER path, applied to the ENDPOINT path, and it reuses that function's
+# exact rules: the container's declared start_period when it has one, the
+# env-tunable STARTING_GRACE_SECONDS when it does not, and epoch_from_iso for
+# the age. A container that cannot be AGED returns empty — cannot measure is
+# cannot prove, which is CRITICAL, the same fail-closed verdict the container
+# path records as `age-unknown`.
+lane_within_start_period() {
+  local name="$1" started start_period_ns grace_s started_epoch now_epoch age_s
+  [[ -n "$name" ]] || { printf ''; return 0; }
+  started=$(docker inspect -f '{{.State.StartedAt}}' "$name" 2>/dev/null || true)
+  start_period_ns=$(docker inspect -f '{{if .Config.Healthcheck}}{{.Config.Healthcheck.StartPeriod}}{{else}}0{{end}}' "$name" 2>/dev/null || true)
+  [[ "$start_period_ns" =~ ^[0-9]+$ ]] || start_period_ns=0
+  grace_s=$(( start_period_ns / 1000000000 ))
+  (( grace_s > 0 )) || grace_s="$STARTING_GRACE_SECONDS"
+  started_epoch=$(epoch_from_iso "$started")
+  (( started_epoch > 0 )) || { printf ''; return 0; }
+  now_epoch=$(date -u +%s)
+  age_s=$(( now_epoch - started_epoch ))
+  (( age_s <= grace_s )) || { printf ''; return 0; }
+  printf '%s/%s' "$age_s" "$grace_s"
+}
+
 # Probe one lane's MAIN runtime health endpoint. Read-only GET on every lane,
 # prod included.
 check_runtime_lane() {
@@ -449,6 +526,41 @@ check_runtime_lane() {
       unhealthy)    status="CRITICAL"; detail="HTTP 200 but health body is NOT healthy: $body_excerpt" ;;
       *)            status="CRITICAL"; detail="HTTP 200 but health status could not be resolved from body (fail-closed): $body_excerpt" ;;
     esac
+  fi
+
+  # A NOT-healthy lane records WHY, from the full body (OMN-18435).
+  if [[ "$status" != "OK" ]]; then
+    local reasons
+    reasons=$(runtime_unhealthy_reasons "$body")
+    detail="reasons=[${reasons:-unresolved}] ${detail}"
+  fi
+
+  # A lane inside its container's OWN declared start_period is BOOTING, not
+  # down, and is scored as its own status so it neither pages nor reads green
+  # (OMN-18435).
+  #
+  # WHY THIS IS NOT A BLANKET GRACE. The delivery chain recreates the dev lane
+  # dozens of times a day and the runtime image declares start_period=1800s, so
+  # Docker itself never calls the lane unhealthy during a boot -- only this
+  # reporter did. Measured over 242 ticks (2026-09-14T00:00Z-09-16T11:45Z):
+  # 20 CRITICAL ticks, EVERY one a single isolated tick with the next tick back
+  # at 200, RestartCount 0 throughout, and eleven of the fourteen 503s carrying
+  # `is_running=false` -- a runtime serving HTTP whose kernel had not started.
+  #
+  # The bound is the container's own declared budget and nothing else. Past that
+  # budget, with no container on the port, or with a container that cannot be
+  # aged, this stays CRITICAL. That is the whole of the fail-closed rule this
+  # file's header insists on: a monitor that cannot tell is not allowed to say
+  # green, and a lane that is down for longer than it promised to take booting
+  # is not booting.
+  if [[ "$status" == "CRITICAL" ]]; then
+    local container within
+    container=$(lane_runtime_container "$port")
+    within=$(lane_within_start_period "$container")
+    if [[ -n "$within" ]]; then
+      status="STARTING"
+      detail="inside ${container} declared start_period (age ${within%/*}s of ${within#*/}s): ${detail}"
+    fi
   fi
   printf '%s|%s|%s|%s\n' "$status" "$label" "$code" "$detail"
 }
@@ -687,11 +799,17 @@ host=$(awk -F'|' '$1=="host"{print $2}' <<<"$snapshot")
 #
 # `row_status` is the single definition of "this row's status" and everything
 # downstream keys off it.
-row_status='function row_status() { return ($1=="OK" || $1=="WARNING" || $1=="CRITICAL") ? $1 : $2 }'
+# STARTING (OMN-18435) is a fourth endpoint status: a lane inside its container's
+# own declared start_period. It is deliberately neither OK nor an issue -- it
+# must not page, and it must not read green either. Adding it HERE, in the single
+# definition of "this row's status", is what keeps every downstream selector
+# (issues, issue_keys, the two counters, the alert state machine) consistent; the
+# OMN-15525 defect was exactly a selector that disagreed with this function.
+row_status='function row_status() { return ($1=="OK" || $1=="WARNING" || $1=="CRITICAL" || $1=="STARTING") ? $1 : $2 }'
 # Stable identity for alert de-duplication: label + status only. Volatile
 # fields (HTTP code, body excerpt, free-GB) are deliberately excluded so a
 # flapping 000/503 on one dead lane is one alert, not one per tick.
-row_key='function row_key() { return ($1=="OK" || $1=="WARNING" || $1=="CRITICAL") ? $2 : $1 "|" $3 }'
+row_key='function row_key() { return ($1=="OK" || $1=="WARNING" || $1=="CRITICAL" || $1=="STARTING") ? $2 : $1 "|" $3 }'
 
 issues=$(awk -F'|' "$row_status"'{ s=row_status() } s=="WARNING" || s=="CRITICAL" {print}' <<<"$snapshot" || true)
 issue_keys=$(awk -F'|' "$row_status$row_key"'{ s=row_status() } s=="WARNING" || s=="CRITICAL" {print row_key() "|" s}' <<<"$snapshot" || true)
@@ -814,7 +932,10 @@ format_digest() {
   local title="$1"
   local lines endpoint_lines ci_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
-  endpoint_lines=$(awk -F'|' '$1=="OK" || $1=="WARNING" || $1=="CRITICAL" {printf "- `%s`: HTTP %s (%s)\n", $2, $3, $1}' <<<"$snapshot")
+  # STARTING is rendered here with the rest (OMN-18435). A booting lane that
+  # vanished from this section would be the BLIND direction of monitor failure,
+  # which this file's header calls exactly as fatal as crying wolf.
+  endpoint_lines=$(awk -F'|' '$1=="OK" || $1=="WARNING" || $1=="CRITICAL" || $1=="STARTING" {printf "- `%s`: HTTP %s (%s)\n", $2, $3, $1}' <<<"$snapshot")
   # OMN-15550. The heartbeat row renders here even when clean, so a reader can
   # tell "scanned N repos, found nothing" apart from "did not scan" -- the
   # detection-shelf blindness where a silent section reads as healthy.

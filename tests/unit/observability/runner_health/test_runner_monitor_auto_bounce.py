@@ -131,6 +131,19 @@ def _runners_json(*, status: str = "online", busy: bool = False) -> str:
                 ],
             }
         )
+    # OMN-18408: the read-only verify runner is the second alert-only family,
+    # modeled the same way and for the same reason.
+    runners.append(
+        {
+            "name": "omninode-verify-runner-1",
+            "status": "online",
+            "busy": False,
+            "labels": [
+                {"name": "self-hosted"},
+                {"name": "omnibase-verify"},
+            ],
+        }
+    )
     return json.dumps({"total_count": len(runners), "runners": runners})
 
 
@@ -164,6 +177,9 @@ def _make_mock_bin(
             if [[ "$*" == *"customer-plane"* ]]; then
               printf '%s\\t%s\\n' "omninode-customer-plane-runner-1" "Up (healthy)"
               printf '%s\\t%s\\n' "omninode-customer-plane-runner-2" "Up (healthy)"
+            elif [[ "$*" == *"verify-runner"* ]]; then
+              # OMN-18408: same treatment for the second alert-only family.
+              printf '%s\\t%s\\n' "omninode-verify-runner-1" "Up (healthy)"
             else
               for i in $(seq 1 {TEST_FLEET_COUNT}); do
                 printf '%s\\t%s\\n' "{PREFIX}-${{i}}" "{docker_status}"

@@ -61,6 +61,52 @@
 #   Only the FETCH is covered. `--install` writes /data/maintenance/bin and
 #   /etc/cron.d, which are root-owned by design; dropping privilege there would
 #   break the install and those are not the paths that broke.
+#
+# DETECTION IS NOT ENFORCEMENT -- WHY `--converge` EXISTS (OMN-17898)
+#   The three modes are not interchangeable:
+#
+#     --check     compare and report. Writes nothing. Reddens on drift.
+#     --install   write EVERY manifest entry unconditionally. The operator's
+#                 bring-up verb; no before/after receipt, so it is not a thing
+#                 to run on a timer.
+#     --converge  compare, then write ONLY the entries that differ, read each
+#                 written file back, and receipt every entry with its before
+#                 and after sha256-12. This is the scheduled verb.
+#
+#   The cron unit ran `--check --slack` from OMN-15525 until OMN-17898. That is
+#   a detector with no repair attached: drift was found hourly, alarmed on
+#   hourly, and corrected only when a human happened to type `--install`.
+#   Measured 2026-09-16: `omnibase_infra#3629` (26e734f6) fixed a false
+#   `runtime-prod-28085` CRITICAL in the system reporter, merged, and the live
+#   host went on posting the false alert because the installed copy was never
+#   refreshed -- `--check` on `.201` read `drifted=1 missing=0 checked=7`. Per
+#   CLAUDE.md rule 5, a detector that is not wired to a repair is advisory and
+#   gets ignored.
+#
+#   The objection the earlier revision recorded -- "--install from cron would
+#   silently overwrite host state on every tick" -- was correct about
+#   `--install` and is what `--converge` answers rather than waives. An in-sync
+#   tick writes nothing and does not even replace the inode; every write names
+#   the bytes it replaced and the bytes it wrote; and a write that does not
+#   read back as the ref's bytes is a FAILURE, not a success with a warning.
+#
+#   WHAT THIS ACCEPTS, SAID PLAINLY: `origin/dev` now reaches these seven host
+#   paths without a human in the loop. That is the same trust boundary the
+#   deploy agent and the workspace reconciler already run on for this host, and
+#   the files are CI-gated on the way to `dev`. The alternative on offer was
+#   not "a human reviews each change" -- it was "nobody installs it at all",
+#   which is the condition above.
+#
+#   ALERTING: only a converge that FAILS pages. A successful self-heal is the
+#   mechanism working, and a channel that fires on every success is a channel
+#   nobody reads when the real failure arrives.
+#
+#   KNOWN, BOUNDED, NOT CLOSED HERE (OMN-15580): bash parses MANIFEST at
+#   process start, so a tick that converges a NEW version of this script is
+#   still running the old manifest and will not install an entry that version
+#   added. Scheduling the converge changes that window from unbounded (it
+#   needed a human) to one hour (the next tick). Closing it needs the re-exec
+#   in OMN-15580 and is deliberately not attempted here.
 
 set -euo pipefail
 
@@ -130,9 +176,10 @@ MODE=check
 SLACK=0
 for arg in "$@"; do
   case "$arg" in
-    --check)   MODE=check ;;
-    --install) MODE=install ;;
-    --slack)   SLACK=1 ;;
+    --check)    MODE=check ;;
+    --install)  MODE=install ;;
+    --converge) MODE=converge ;;
+    --slack)    SLACK=1 ;;
     -h|--help)
       sed -n '2,40p' "$0"
       exit 0
@@ -199,22 +246,87 @@ installed_sha() {
   sha256sum "$path" | awk '{print $1}'
 }
 
+# Write one manifest entry from the ref to its host path. Returns non-zero on
+# any failure instead of calling die(): in --converge the run must finish and
+# receipt EVERY artifact, because "it failed" and "nobody ran it" have to stay
+# distinguishable from the output alone.
+install_blob() {
+  local relpath="$1" hostpath="$2" mode="$3"
+  local tmp staged
+  staged="${hostpath}.omn-sync.tmp"
+  tmp=$(mktemp) || return 1
+  if ! git -C "$INFRA_REPO_ROOT" cat-file blob "${SYNC_REF}:${relpath}" >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! install -m "$mode" "$tmp" "$staged" 2>/dev/null; then
+    rm -f "$tmp" "$staged"
+    return 1
+  fi
+  rm -f "$tmp"
+  # Rename is atomic: a cron run reading the old inode is never handed a
+  # half-written script.
+  if ! mv -f "$staged" "$hostpath" 2>/dev/null; then
+    rm -f "$staged"
+    return 1
+  fi
+  return 0
+}
+
 drift_count=0
 missing_count=0
+converged_count=0
+failed_count=0
+in_sync_count=0
 report_lines=()
 
 for entry in "${MANIFEST[@]}"; do
   IFS='|' read -r relpath hostpath mode <<<"$entry"
 
+  # Unknown known-good bytes. Fail-closed, and in --converge that also means
+  # the host copy is left exactly as found: there is nothing to converge TO,
+  # and writing something else would be worse than the drift.
   if ! ref_blob_exists "$relpath"; then
     report_lines+=("CRITICAL|$hostpath|blob ${relpath} absent at ${SYNC_REF}")
     drift_count=$((drift_count + 1))
+    if [[ "$MODE" == "converge" ]]; then failed_count=$((failed_count + 1)); fi
     continue
   fi
   want=$(ref_blob_sha "$relpath")
   if [[ -z "$want" ]]; then
     report_lines+=("CRITICAL|$hostpath|could not read ${relpath} at ${SYNC_REF}")
     drift_count=$((drift_count + 1))
+    if [[ "$MODE" == "converge" ]]; then failed_count=$((failed_count + 1)); fi
+    continue
+  fi
+
+  if [[ "$MODE" == "converge" ]]; then
+    have=$(installed_sha "$hostpath") || have=""
+    if [[ -n "$have" && "$have" == "$want" ]]; then
+      report_lines+=("OK|$hostpath|${have:0:12} matches ${SYNC_REF}")
+      in_sync_count=$((in_sync_count + 1))
+      continue
+    fi
+
+    if [[ -n "$have" ]]; then before="${have:0:12}"; else before="absent"; fi
+
+    if install_blob "$relpath" "$hostpath" "$mode"; then
+      # Read the file back rather than trusting the write. An install that
+      # reports success and leaves the wrong bytes is the failure mode this
+      # whole surface exists to make impossible.
+      after=$(installed_sha "$hostpath") || after=""
+      if [[ "$after" == "$want" ]]; then
+        report_lines+=("CONVERGED|$hostpath|before=${before} after=${after:0:12} matches ${SYNC_REF}")
+        converged_count=$((converged_count + 1))
+      else
+        if [[ -n "$after" ]]; then after_short="${after:0:12}"; else after_short="unreadable"; fi
+        report_lines+=("CRITICAL|$hostpath|CONVERGE FAILED before=${before} after=${after_short} want=${want:0:12} (readback does not match ${SYNC_REF})")
+        failed_count=$((failed_count + 1))
+      fi
+    else
+      report_lines+=("CRITICAL|$hostpath|CONVERGE FAILED before=${before} after=${before} want=${want:0:12} (write refused -- unwritable path, or not running as root?)")
+      failed_count=$((failed_count + 1))
+    fi
     continue
   fi
 
@@ -247,9 +359,24 @@ done
 
 echo "omninode host maintenance sync — mode=$MODE ref=$SYNC_REF (${REF_SHA:0:12}) repo=$INFRA_REPO_ROOT"
 printf '%s\n' "${report_lines[@]}"
-echo "drifted=$drift_count missing=$missing_count checked=${#MANIFEST[@]}"
+if [[ "$MODE" == "converge" ]]; then
+  echo "converged=$converged_count failed=$failed_count in_sync=$in_sync_count checked=${#MANIFEST[@]}"
+else
+  echo "drifted=$drift_count missing=$missing_count checked=${#MANIFEST[@]}"
+fi
 
-if (( drift_count > 0 )) && (( SLACK == 1 )); then
+# What pages. In --check, drift is the finding. In --converge, drift is the
+# ordinary case the mechanism exists to absorb -- only a converge that could
+# NOT repair is worth a human's attention, and alerting on the successful
+# self-heals is how the channel stops being read.
+alert=0
+if [[ "$MODE" == "converge" ]]; then
+  if (( failed_count > 0 )); then alert=1; fi
+else
+  if (( drift_count > 0 )); then alert=1; fi
+fi
+
+if (( alert == 1 )) && (( SLACK == 1 )); then
   if [[ -f "$ENV_FILE" ]]; then
     set -a
     set +u
@@ -260,8 +387,15 @@ if (( drift_count > 0 )) && (( SLACK == 1 )); then
   fi
   channel="${SLACK_CHANNEL_ID:-${SLACK_DEFAULT_CHANNEL:-}}"
   if [[ -n "${SLACK_BOT_TOKEN:-}" && -n "$channel" ]]; then
-    text=$(printf '*OmniNode host maintenance drift*\nHost: %s\n%s host artifact(s) do not match `%s`.\n```\n%s\n```' \
-      "$(hostname)" "$drift_count" "$SYNC_REF" "$(printf '%s\n' "${report_lines[@]}")")
+    if [[ "$MODE" == "converge" ]]; then
+      headline='*OmniNode host maintenance CONVERGE FAILED*'
+      detail="$failed_count host artifact(s) could not be converged onto \`$SYNC_REF\`. The host is still running the old bytes."
+    else
+      headline='*OmniNode host maintenance drift*'
+      detail="$drift_count host artifact(s) do not match \`$SYNC_REF\`."
+    fi
+    text=$(printf '%s\nHost: %s\n%s\n```\n%s\n```' \
+      "$headline" "$(hostname)" "$detail" "$(printf '%s\n' "${report_lines[@]}")")
     payload=$(jq -n --arg channel "$channel" --arg text "$text" \
       '{channel:$channel,text:$text,attachments:[{color:"danger",text:$text,mrkdwn_in:["text"]}]}')
     curl -fsS --retry 2 --max-time 10 \
@@ -274,6 +408,13 @@ if (( drift_count > 0 )) && (( SLACK == 1 )); then
   fi
 fi
 
-# Non-zero on drift is the enforcement: cron reddens, and any caller that gates
-# on this script fails rather than logging a line nobody reads.
-(( drift_count == 0 )) || exit 1
+# Non-zero is the enforcement: cron reddens, and any caller that gates on this
+# script fails rather than logging a line nobody reads. In --check the failing
+# condition is drift; in --converge it is drift that could not be REPAIRED,
+# because a repaired artifact is the mechanism succeeding, not a fault.
+if [[ "$MODE" == "converge" ]]; then
+  (( failed_count == 0 )) || exit 1
+else
+  (( drift_count == 0 )) || exit 1
+fi
+exit 0
