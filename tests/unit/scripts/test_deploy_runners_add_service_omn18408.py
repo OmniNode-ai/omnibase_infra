@@ -70,7 +70,7 @@ def stub_bin(tmp_path: Path) -> Path:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     calls = tmp_path / "calls.log"
-    for tool in ("gh", "ssh", "rsync", "scp"):
+    for tool in ("ssh", "rsync", "scp"):
         _write_exec(
             bindir / tool,
             f"""\
@@ -78,12 +78,36 @@ def stub_bin(tmp_path: Path) -> Path:
             exit 0
             """,
         )
+    # `gh` answers the org runner listing, because --add now reads each target's
+    # LIVE registration state to decide whether to recreate it. STUB_RUNNER_ONLINE
+    # in the environment selects which answer, so one fixture covers both
+    # branches: an empty list models a runner that does not exist yet or failed
+    # to register, which is the case that must recreate.
+    _write_exec(
+        bindir / "gh",
+        f"""\
+        printf 'gh %s\\n' "$*" >> "{calls}"
+        if [[ "$*" == *"actions/runners"* && "$*" != *"registration-token"* ]]; then
+          if [[ "${{STUB_RUNNER_ONLINE:-}}" == "1" ]]; then
+            printf '{{"runners":[{{"name":"%s","status":"online","busy":false}}]}}\\n' \\
+              "{VERIFY_SERVICE}"
+          else
+            echo '{{"runners":[]}}'
+          fi
+          exit 0
+        fi
+        exit 0
+        """,
+    )
     return bindir
 
 
-def _run(bindir: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    bindir: Path, *args: str, runner_online: bool = False
+) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["PATH"] = f"{bindir}:{env.get('PATH', '')}"
+    env["STUB_RUNNER_ONLINE"] = "1" if runner_online else "0"
     return subprocess.run(
         ["bash", str(SCRIPT), *args],
         cwd=REPO_ROOT,
@@ -131,13 +155,54 @@ def test_add_names_only_the_requested_service(stub_bin: Path) -> None:
     assert VERIFY_SERVICE in _compose_up_line(result.stdout)
 
 
-def test_add_never_force_recreates(stub_bin: Path) -> None:
-    """Additive means additive. A converged container is not restarted, so
-    running `--add` against a healthy runner is a no-op rather than an outage.
+def test_add_leaves_an_online_runner_alone(stub_bin: Path) -> None:
+    """A registered runner may be mid-job, and its cached credentials are
+    exactly what a recreate discards. Converging one is a no-op, not an outage.
     """
-    result = _run(stub_bin, "--dry-run", "--skip-build", f"--add={VERIFY_SERVICE}")
+    result = _run(
+        stub_bin,
+        "--dry-run",
+        "--skip-build",
+        f"--add={VERIFY_SERVICE}",
+        runner_online=True,
+    )
     assert result.returncode == 0, result.stderr
     assert "--force-recreate" not in _compose_up_line(result.stdout)
+
+
+def test_add_recreates_a_runner_that_is_not_registered(stub_bin: Path) -> None:
+    """The case `up -d` alone silently cannot fix.
+
+    A container created with a bad registration handle is PRESENT, so compose
+    starts it and reports success while the runner re-runs the same failing
+    registration in a restart loop. Standing this runner up hit exactly that:
+    the container held a 14-character value where a registration token is 29,
+    and two successive `--add` runs both reported "Started" and changed nothing.
+    An unregistered runner holds nothing worth preserving and takes no jobs, so
+    recreating it is free and is the only thing that re-reads the env.
+    """
+    result = _run(
+        stub_bin,
+        "--dry-run",
+        "--skip-build",
+        f"--add={VERIFY_SERVICE}",
+        runner_online=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--force-recreate" in _compose_up_line(result.stdout)
+
+
+def test_the_recreate_branch_can_never_reach_a_general_pool_runner(
+    stub_bin: Path,
+) -> None:
+    """The recreate above is safe only because of the refusal that precedes it.
+
+    Flag validation rejects a general-pool name before any of this runs, so the
+    two-signal busy check the fleet roll depends on is never bypassed.
+    """
+    result = _run(stub_bin, "--dry-run", "--skip-build", f"--add={POOL_SERVICE}")
+    assert result.returncode != 0
+    assert "--force-recreate" not in result.stdout
 
 
 def test_add_never_removes_orphans(stub_bin: Path) -> None:
