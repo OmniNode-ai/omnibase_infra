@@ -2,5 +2,20 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # OMN-15525: fail loudly when a host maintenance artifact drifts from origin/dev.
-# Hourly at :37 to stay off the */15 system-report boundary.
-37 * * * * root /data/maintenance/bin/omninode-host-maintenance-sync.sh --check --slack
+# OMN-17898: and then REPAIR it. Until this line said --converge it said
+# --check --slack, so drift was detected and alarmed on every hour and repaired
+# only when a human typed --install -- which is how the omnibase_infra#3629
+# monitor fix sat merged while the live host kept posting the alert it removed.
+#
+# --converge writes ONLY the entries that differ from origin/dev, reads each
+# written file back, and receipts every entry with its before/after sha256-12.
+# An in-sync tick writes nothing. --install (write everything, receipt nothing)
+# stays an operator verb and is deliberately NOT what runs here.
+#
+# Runs as root because /data/maintenance/bin and /etc/cron.d are root-owned;
+# the script never escalates its own privilege, and the one write that touches
+# the operator-owned clone (the fetch) drops to that owner (OMN-17443).
+#
+# Hourly at :37 to stay off the */15 system-report boundary and the :19
+# workspace reconcile.
+37 * * * * root /data/maintenance/bin/omninode-host-maintenance-sync.sh --converge --slack
