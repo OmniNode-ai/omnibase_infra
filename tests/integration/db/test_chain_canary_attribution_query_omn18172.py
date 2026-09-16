@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 from collections.abc import AsyncIterator
 from typing import cast
-from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -50,6 +50,7 @@ from tests.integration.db.test_chain_canary_stored_traffic_class_omn18172 import
     _PROJECTION_DSN_ENV,
     _READER_GRANT_COLUMNS,
     _TABLE,
+    _assert_payload_denied_for_canary_reader,
     _ledger_verified,
     _quarantine_clean,
     _RuntimeIngress,
@@ -167,13 +168,15 @@ async def admin_connection(
                 f"(is_generated={generated!r}): apply the forward migrations "
                 "through 106 with scripts/run-migrations.py first"
             )
-        yield connection
-        if created_correlation_ids:
-            test_keys = [str(cid) for cid in created_correlation_ids]
-            await connection.execute(
-                f"DELETE FROM {_TABLE} WHERE correlation_id = ANY($1::text[])",  # noqa: S608 - module constant
-                test_keys,
-            )
+        try:
+            yield connection
+        finally:
+            if created_correlation_ids:
+                test_keys = [str(cid) for cid in created_correlation_ids]
+                await connection.execute(
+                    f"DELETE FROM {_TABLE} WHERE correlation_id = ANY($1::text[])",  # noqa: S608 - module constant
+                    test_keys,
+                )
     finally:
         await connection.close()
 
@@ -228,7 +231,7 @@ async def canary_reader_dsn(
             await admin_connection.execute(f"DROP ROLE IF EXISTS {role_sql}")
         except Exception as exc:  # noqa: BLE001
             cleanup_errors.append(f"drop role: {exc}")
-        if cleanup_errors and __import__("sys").exception() is None:
+        if cleanup_errors and sys.exception() is None:
             pytest.fail("temporary reader cleanup failed: " + "; ".join(cleanup_errors))
 
 
@@ -277,6 +280,27 @@ async def _run_canary_delegation(
     return result.probe_correlation_id
 
 
+class _ProvenanceOmittingIngress:
+    """Ingress adapter that persists the real handler body minus provenance."""
+
+    def __init__(self, inner: _RuntimeIngress) -> None:
+        self._inner = inner
+
+    @property
+    def bodies(self) -> list[dict[str, object]]:
+        return self._inner.bodies
+
+    async def __call__(
+        self, url: str, body: dict[str, object], timeout_s: float
+    ) -> tuple[dict[str, object], str, int]:
+        payload = cast("dict[str, object]", body["payload"])
+        assert "provenance" in payload, "canary body must carry provenance pre-strip"
+        stripped_payload = dict(payload)
+        stripped_payload.pop("provenance")
+        stripped_body = {**body, "payload": stripped_payload}
+        return await self._inner(url, stripped_body, timeout_s)
+
+
 async def _run_noncanary_delegation(
     ingress: _RuntimeIngress,
     reader_dsn: str,
@@ -284,46 +308,29 @@ async def _run_noncanary_delegation(
     created_correlation_ids: list[UUID],
 ) -> UUID:
     """Run a non-canary (provenance stripped) and return its probe correlation id."""
-    build_body = HandlerChainCanary._build_body
-
-    def _build_body_without_provenance(
-        request: ModelChainCanaryRequest, probe_correlation_id: str
-    ) -> dict[str, object]:
-        body = build_body(request, probe_correlation_id)
-        payload = dict(cast("dict[str, object]", body["payload"]))
-        del payload["provenance"]
-        return {**body, "payload": payload}
-
-    with patch.object(
-        HandlerChainCanary,
-        "_build_body",
-        staticmethod(_build_body_without_provenance),
-    ):
-        handler = HandlerChainCanary(
-            ingress=ingress,
-            quarantine_scan=_quarantine_clean,
-            terminal_readback=_terminal_present,
-            projection_dsn_lookup=lambda name: (
-                reader_dsn if name == _PROJECTION_DSN_ENV else ""
-            ),
-            ledger_replay=_ledger_verified,
-            ledger_dsn_lookup=lambda name: "postgresql://ledger.invalid/omnibase_infra",
-            kill_switch_disabled=False,
-        )
-        request = ModelChainCanaryRequest(
-            correlation_id=run_correlation_id,
-            probe_url="http://runtime.invalid:8085",
-            budget_ms=5_000,
-            terminal_bootstrap_servers="broker.invalid:19092",
-            projection_dsn_env=_PROJECTION_DSN_ENV,
-            ledger_source_env="OMN18172_LEDGER_DSN",
-            expected_ledger_hops=_FULL_CHAIN,
-        )
-        result = await handler.handle(request)
-        created_correlation_ids.extend(
-            (result.probe_correlation_id, run_correlation_id)
-        )
-        return result.probe_correlation_id
+    handler = HandlerChainCanary(
+        ingress=_ProvenanceOmittingIngress(ingress),
+        quarantine_scan=_quarantine_clean,
+        terminal_readback=_terminal_present,
+        projection_dsn_lookup=lambda name: (
+            reader_dsn if name == _PROJECTION_DSN_ENV else ""
+        ),
+        ledger_replay=_ledger_verified,
+        ledger_dsn_lookup=lambda name: "postgresql://ledger.invalid/omnibase_infra",
+        kill_switch_disabled=False,
+    )
+    request = ModelChainCanaryRequest(
+        correlation_id=run_correlation_id,
+        probe_url="http://runtime.invalid:8085",
+        budget_ms=5_000,
+        terminal_bootstrap_servers="broker.invalid:19092",
+        projection_dsn_env=_PROJECTION_DSN_ENV,
+        ledger_source_env="OMN18172_LEDGER_DSN",
+        expected_ledger_hops=_FULL_CHAIN,
+    )
+    result = await handler.handle(request)
+    created_correlation_ids.extend((result.probe_correlation_id, run_correlation_id))
+    return result.probe_correlation_id
 
 
 async def test_attribution_query_partitions_synthetic_from_unclassified(
@@ -386,6 +393,14 @@ async def test_attribution_query_counts_multiple_rows_per_class(
     )
 
 
+async def test_attribution_query_returns_no_rows_for_unknown_scope(
+    admin_connection: asyncpg.Connection,
+) -> None:
+    """An empty correlation-id scope returns no synthetic zero-count rows."""
+    rows = await admin_connection.fetch(ATTRIBUTION_QUERY, [str(uuid4())])
+    assert rows == []
+
+
 async def test_attribution_query_works_through_reader_role(
     created_correlation_ids: list[UUID],
     admin_connection: asyncpg.Connection,
@@ -413,3 +428,4 @@ async def test_attribution_query_works_through_reader_role(
         assert result == {"synthetic": 1, "unclassified": 1}
     finally:
         await reader_conn.close()
+    await _assert_payload_denied_for_canary_reader(reader_dsn, canary_cid)
