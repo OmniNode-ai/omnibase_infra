@@ -421,13 +421,47 @@
 #     ticket. This can only remove a duplicate declaration, never the sole
 #     declaration of a criterion.
 #
+#   - OMN-18414 (node_version 1.15.0): THE `Gate:` GRAMMAR IS DECLARED ONCE AND
+#     READ BY BOTH CONSUMERS. The same key in a Linear description is read by
+#     the AUTHORING authority (omniclaude's ticket-creation admission guard,
+#     which refuses a create whose binding it cannot read) and by this sweep.
+#     Their accepted vocabularies were DISJOINT: the guard mandated four forms
+#     -- a release-criterion id, an invariant id, a parent criterion reference,
+#     and a live-gate defect naming a check -- while this sweep accepted only
+#     `<owner>/<repo> <workflow-file.yml>`, which the guard would itself have
+#     refused at creation. So every ticket the guard admitted arrived here as
+#     an unreadable declaration and was held, and four Done-candidates were
+#     held on nothing else at the 2026-09-15T21:34Z dry-run tick.
+#
+#     The grammar now lives in `omnibase_infra/contracts/gate_binding_grammar.json`
+#     and is read by `omnibase_infra.gate_binding`; the handler spells no form
+#     pattern of its own and a test reads its source to keep it that way. The
+#     contract also declares the normalizations that survive Linear's own
+#     rewriting of a plain issue identifier into a mention element -- without
+#     them a parent-criterion pattern matches nothing on any live ticket.
+#
+#     EXACTLY ONE FORM IS A PROOF POINTER, and the contract says which. A
+#     `workflow_run` binding still resolves to its newest completed run's
+#     conclusion and still holds on anything but success: the OMN-16106
+#     behaviour is unchanged. The other four are TRACEABILITY bindings and can
+#     never produce a gate-probe hold. That is a refutation, not an omission:
+#     the beta board a criterion id would resolve against is generated FROM
+#     Linear, so holding a Linear flip on it is a cycle; and a live-gate defect
+#     names a surface that is red by construction at filing time and is
+#     frequently not a CI context at all.
+#
+#     Text matching NO declared form is still held, and the hold now names the
+#     forms that would have been readable. A traceability binding reaching the
+#     stage after the probe is the ABSENCE OF A PROOF POINTER, not a pass --
+#     every other conjunct of this sweep still applies to it.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 9
-  patch: 1
-node_version: "1.14.1"
+  minor: 10
+  patch: 0
+node_version: "1.15.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, holds a criterion whose only declaring check marks it a proposal until a person accepts it, holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries, and excludes explicitly superseded duplicate criteria from the live criteria set only when an unmarked replacement with the same label is present. DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
