@@ -3170,15 +3170,19 @@ jobs:
   # protection treats as never-satisfied — every omnibase_infra dev PR based on
   # 27478af4 or later was unmergeable until this repin.
   #
-  # d3182b6f is the current reusable workflow's pinned dev commit, reachable from
-  # `dev` forever.
+  # Current pin review (OMN-18205): ff6e41c is omnimarket#2575's squash merge
+  # commit, committed 2026-09-16T03:01:49Z. The mandatory Pin Reachability
+  # (OMN-15538) CI gate extracts both this reusable-workflow ref and the
+  # `vocabulary_ref`, then verifies each pin is reachable from the protected
+  # branch instead of merely fetchable. The merge-hold wiring test below also
+  # enforces that the workflow pin and `vocabulary_ref` remain identical.
   merge-hold-gate:
     permissions:
       contents: read
       pull-requests: read
-    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@d3182b6fb59b421383c793fcfea86a46b06b7b43
+    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@ff6e41cbfcad3184d728b2dd387aba2269da5e2c
     with:
-      vocabulary_ref: d3182b6fb59b421383c793fcfea86a46b06b7b43
+      vocabulary_ref: ff6e41cbfcad3184d728b2dd387aba2269da5e2c
       context_name: merge-hold-gate / evaluate
   # OMN-15361: P0/P8 fail-closed application database domain enforcement.
   # Unconditional after OCC eligibility and STRICT in ci_summary_gate.py: validators,
