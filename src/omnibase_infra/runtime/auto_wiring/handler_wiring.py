@@ -4910,6 +4910,44 @@ def _extract_state_io_metadata(payload_json: str) -> StateIoMetadata:
     )
 
 
+def _consumed_envelope_id(envelope: object) -> UUID | None:
+    """The identity of the envelope this dispatch consumed, or None.
+
+    OMN-18419. ``MessageDispatchEngine`` hands a dispatcher the JSON-safe
+    MATERIALIZATION of the envelope (``_materialize_envelope_with_bindings``),
+    not the typed envelope, and binds the typed one beside it on a contextvar
+    for exactly this reason -- its own comment says "for transport identity
+    (for example envelope_id)". The stateful wrapper read ``envelope_id`` as an
+    ATTRIBUTE off that dict, which is always ``None``, so every outbox entry
+    recorded the CORRELATION id as its causation via the fallback below.
+
+    Measured on the .201 compose dev lane, correlation
+    ``41235987-425c-481b-b2e3-8970083ce512``: the routing intent's deterministic
+    id re-derives exactly as ``uuid5(correlation, f"{correlation}:ModelRoutingIntent:0")``
+    -- the self-seeded fallback -- and not from the
+    ``onex.cmd.omnibase-infra.delegation-request.v1`` envelope
+    ``f1cc9a51-ef02-40f4-b2e7-81e5b57942ed`` that actually caused it.
+
+    The contextvar is consulted FIRST and the attribute second, so a caller
+    that hands this wrapper a real envelope directly (tests, the no-bus path)
+    keeps working unchanged.
+    """
+    typed = current_dispatch_envelope()
+    if typed is not None:
+        typed_id = getattr(typed, "envelope_id", None)
+        if isinstance(typed_id, UUID):
+            return typed_id
+    direct = getattr(envelope, "envelope_id", None)
+    if isinstance(direct, UUID):
+        return direct
+    if isinstance(direct, str) and direct:
+        try:
+            return UUID(direct)
+        except ValueError:
+            return None
+    return None
+
+
 def _make_stateful_dispatch_callback(
     handler_instance: ProtocolHandleable,
     event_model: ModelHandlerRef | None,
@@ -5268,11 +5306,32 @@ def _make_stateful_dispatch_callback(
             # derives ``None`` (the field default), so this is safe for every
             # topic shape the outbox can resolve.
             event_type = derive_event_type_from_topic(topic)
+            # OMN-18419: the causal edge, recorded rather than discarded.
+            #
+            # `causation` is the envelope whose consumption produced this
+            # emission. It was already in hand here -- it seeds the
+            # deterministic id one line above -- and was not put on the
+            # envelope, so every event published off this path arrived in
+            # `event_ledger` with a null `parent_message_id`: the checkable
+            # statement "chain head", asserted by hops that are not heads.
+            # `publish_envelope` binds the wire header from the envelope
+            # (`header_identity_fields_from_envelope`), so setting it here is
+            # what puts it on the wire.
+            #
+            # The ONE case that is deliberately NOT an edge is the
+            # completion-bound sweep, which seeds `causation_envelope_id` with
+            # the row's own correlation id precisely because no causing
+            # envelope exists (see `_terminalise_abandoned_rows`). A
+            # correlation id is not an envelope id, so recording it would
+            # fabricate an edge that can never close. Absence is the honest
+            # encoding of absence, the same rule `chain_replay` holds.
+            edge = None if causation == cid_uuid else causation
             out_envelope: _Envelope[BaseModel] = _Envelope(
                 envelope_id=envelope_id,
                 payload=payload,
                 correlation_id=cid_uuid,
                 event_type=event_type,
+                parent_envelope_id=edge,
             )
             key: bytes | None = None
             for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
@@ -5613,7 +5672,7 @@ def _make_stateful_dispatch_callback(
         # preserved. The resume predicate keys on envelope_id, NOT causation_id
         # (spec §4.1 E1 — a redelivered input keeps its envelope_id; its own
         # causation_id is the grandparent and would never match).
-        incoming_envelope_id = getattr(envelope, "envelope_id", None)
+        incoming_envelope_id = _consumed_envelope_id(envelope)
         locked = await _find_recoverable_row(cid)
         if locked is not None:
             entries = list(
