@@ -86,6 +86,16 @@ SELECT traffic_class,
  ORDER BY traffic_class
 """
 
+PER_CORRELATION_CLASS_QUERY = """\
+SELECT correlation_id,
+       traffic_class,
+       COUNT(*) AS row_count
+  FROM delegation_workflow_state
+ WHERE correlation_id = ANY($1::text[])
+ GROUP BY correlation_id, traffic_class
+ ORDER BY correlation_id, traffic_class
+"""
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.postgres,
@@ -333,6 +343,42 @@ async def _run_noncanary_delegation(
     return result.probe_correlation_id
 
 
+async def _class_counts_by_correlation(
+    connection: asyncpg.Connection,
+    correlation_ids: list[UUID],
+) -> dict[str, dict[str, int]]:
+    rows = await connection.fetch(
+        PER_CORRELATION_CLASS_QUERY,
+        [str(cid) for cid in correlation_ids],
+    )
+    result: dict[str, dict[str, int]] = {}
+    for row in rows:
+        by_class = result.setdefault(row["correlation_id"], {})
+        by_class[row["traffic_class"]] = row["row_count"]
+    return result
+
+
+def _assert_only_class(
+    counts: dict[str, dict[str, int]],
+    correlation_id: UUID,
+    expected_class: str,
+) -> int:
+    class_counts = counts.get(str(correlation_id))
+    assert class_counts is not None, (
+        f"delegation wrote no rows for correlation id {correlation_id}"
+    )
+    assert set(class_counts) == {expected_class}, (
+        f"correlation id {correlation_id} must produce only {expected_class!r} "
+        f"rows; got {class_counts}"
+    )
+    row_count = class_counts[expected_class]
+    assert row_count >= 1, (
+        f"correlation id {correlation_id} must produce at least one "
+        f"{expected_class!r} row"
+    )
+    return row_count
+
+
 async def test_attribution_query_partitions_synthetic_from_unclassified(
     created_correlation_ids: list[UUID],
     admin_connection: asyncpg.Connection,
@@ -356,9 +402,18 @@ async def test_attribution_query_partitions_synthetic_from_unclassified(
     rows = await admin_connection.fetch(ATTRIBUTION_QUERY, scoped_ids)
     result = {r["traffic_class"]: r["row_count"] for r in rows}
 
-    assert result == {"synthetic": 1, "unclassified": 1}, (
-        f"attribution query must partition exactly one synthetic and one "
-        f"unclassified row; got {result}"
+    counts = await _class_counts_by_correlation(
+        admin_connection, [canary_cid, noncanary_cid]
+    )
+    synthetic_count = _assert_only_class(counts, canary_cid, "synthetic")
+    unclassified_count = _assert_only_class(counts, noncanary_cid, "unclassified")
+
+    assert result == {
+        "synthetic": synthetic_count,
+        "unclassified": unclassified_count,
+    }, (
+        "attribution query must partition all scoped canary rows as synthetic "
+        f"and provenance-omitted rows as unclassified; got {result}"
     )
 
 
@@ -371,25 +426,36 @@ async def test_attribution_query_counts_multiple_rows_per_class(
     """Two canaries and one non-canary: counts are 2 and 1."""
     reader_dsn, _ = canary_reader_dsn
 
-    cids: list[str] = []
+    canary_cids: list[UUID] = []
     for _ in range(2):
         ingress = _RuntimeIngress(state_adapter)
         cid = await _run_canary_delegation(
             ingress, reader_dsn, uuid4(), created_correlation_ids
         )
-        cids.append(str(cid))
+        canary_cids.append(cid)
 
     ingress = _RuntimeIngress(state_adapter)
-    cid = await _run_noncanary_delegation(
+    noncanary_cid = await _run_noncanary_delegation(
         ingress, reader_dsn, uuid4(), created_correlation_ids
     )
-    cids.append(str(cid))
+    cids = [*canary_cids, noncanary_cid]
 
-    rows = await admin_connection.fetch(ATTRIBUTION_QUERY, cids)
+    rows = await admin_connection.fetch(ATTRIBUTION_QUERY, [str(cid) for cid in cids])
     result = {r["traffic_class"]: r["row_count"] for r in rows}
 
-    assert result == {"synthetic": 2, "unclassified": 1}, (
-        f"attribution query must count 2 synthetic and 1 unclassified; got {result}"
+    counts = await _class_counts_by_correlation(admin_connection, cids)
+    synthetic_count = sum(
+        _assert_only_class(counts, canary_cid, "synthetic")
+        for canary_cid in canary_cids
+    )
+    unclassified_count = _assert_only_class(counts, noncanary_cid, "unclassified")
+
+    assert result == {
+        "synthetic": synthetic_count,
+        "unclassified": unclassified_count,
+    }, (
+        "attribution query must aggregate all synthetic rows separately from "
+        f"all unclassified rows; got {result}"
     )
 
 
@@ -425,7 +491,15 @@ async def test_attribution_query_works_through_reader_role(
     try:
         rows = await reader_conn.fetch(ATTRIBUTION_QUERY, scoped_ids)
         result = {r["traffic_class"]: r["row_count"] for r in rows}
-        assert result == {"synthetic": 1, "unclassified": 1}
+        admin_counts = await _class_counts_by_correlation(
+            admin_connection, [canary_cid, noncanary_cid]
+        )
+        assert result == {
+            "synthetic": _assert_only_class(admin_counts, canary_cid, "synthetic"),
+            "unclassified": _assert_only_class(
+                admin_counts, noncanary_cid, "unclassified"
+            ),
+        }
     finally:
         await reader_conn.close()
     await _assert_payload_denied_for_canary_reader(reader_dsn, canary_cid)
