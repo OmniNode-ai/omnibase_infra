@@ -53,7 +53,7 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_
     HandlerEvidenceAutocloseSweep,
     _ac_coverage_gap,
     _acceptance_criteria_items,
-    _gate_probe_declaration,
+    _gate_binding_probe_target,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,
@@ -486,20 +486,27 @@ class TestNonProbativeCoverageDoesNotProveACriterion:
 
 
 class TestGateProbeDeclarationParsing:
+    """OMN-18414 re-pointed these at the contract-driven resolver.
+
+    The third element used to be the RAW declared text; it is now the HOLD
+    REASON, because raw text on its own told a caller nothing about whether the
+    line was readable. The three facts these cases pin are unchanged: a full
+    declaration resolves, a bare filename is refused rather than guessed at,
+    and a body with no binding line declares no probe.
+    """
+
     def test_a_full_declaration_resolves(self) -> None:
-        assert _gate_probe_declaration(
+        assert _gate_binding_probe_target(
             "Some prose.\n\nGate: OmniNode-ai/omnibase_infra chain-canary.yml\n"
-        ) == ("OmniNode-ai/omnibase_infra", "chain-canary.yml", "")[:2] + (
-            "OmniNode-ai/omnibase_infra chain-canary.yml",
-        )
+        ) == ("OmniNode-ai/omnibase_infra", "chain-canary.yml", "")
 
     def test_a_bare_workflow_name_is_unresolvable_not_guessed(self) -> None:
-        repo, workflow, raw = _gate_probe_declaration("Gate: chain-canary.yml\n")
+        repo, workflow, hold = _gate_binding_probe_target("Gate: chain-canary.yml\n")
         assert (repo, workflow) == ("", "")
-        assert raw == "chain-canary.yml"
+        assert "chain-canary.yml" in hold
 
     def test_a_body_with_no_gate_line_declares_no_probe(self) -> None:
-        assert _gate_probe_declaration(_OMN_16025_DESCRIPTION) == ("", "", "")
+        assert _gate_binding_probe_target(_OMN_16025_DESCRIPTION) == ("", "", "")
 
 
 @pytest.mark.asyncio
