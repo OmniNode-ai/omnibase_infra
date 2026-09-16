@@ -95,6 +95,30 @@ def test_the_route_job_is_time_bounded_so_it_cannot_stall_every_consumer() -> No
     )
 
 
+def test_no_workflow_call_declaration_carries_an_expression() -> None:
+    """A STARTUP FAILURE, and the most expensive shape of one.
+
+    Actions evaluates `${{ }}` inside a workflow_call inputs/outputs block,
+    where the `needs` context does not exist. An illustrative snippet in an
+    output DESCRIPTION therefore fails every CALLING workflow before a single
+    job starts -- measured on run 35037012235, where ci.yml and the routing
+    probe each concluded failure with zero jobs and the run title fell back to
+    the file path, which is the only visible symptom. No check reports on a run
+    that never started, so nothing else in this suite can see it.
+    """
+    for name in ("runner-route-reusable.yml", "runner-route-probe.yml"):
+        block = _triggers(_workflow(name)).get("workflow_call")
+        if not isinstance(block, dict):
+            continue
+        for section in ("inputs", "outputs"):
+            for field, spec in (block.get(section) or {}).items():
+                description = str((spec or {}).get("description", ""))
+                assert "${{" not in description, (
+                    f"{name}: workflow_call.{section}.{field} description carries "
+                    f"an expression; that is a startup failure in every caller"
+                )
+
+
 def test_the_reusable_workflow_exposes_the_outputs_consumers_read() -> None:
     """A consumer reads the label set and can audit the verdict.
 

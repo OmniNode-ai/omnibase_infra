@@ -61,9 +61,16 @@ on:
         description: "runs-on label set, as a JSON array for fromJSON()."
         value: ${{ jobs.route.outputs.labels }}
       runs_on:
+        # NO EXPRESSION IN THIS DESCRIPTION. Actions evaluates `${{ }}` inside a
+        # workflow_call outputs block, where the `needs` context does not exist,
+        # so an illustrative snippet here is a STARTUP FAILURE in every calling
+        # workflow -- measured on run 35037012235, where ci.yml and the routing
+        # probe both failed with zero jobs and the run title fell back to the
+        # file path. Describe the consumer shape in prose; the snippet belongs
+        # in the header comment.
         description: >-
-          The same label set under the name a consumer reads it by:
-          `runs-on: ${{ fromJSON(needs.route.outputs.runs_on) }}`.
+          The same label set as `labels`, under the name a consuming job reads
+          it by when it resolves runs-on from this job's outputs.
         value: ${{ jobs.route.outputs.runs_on }}
       decision:
         description: "hosted | self_hosted"
