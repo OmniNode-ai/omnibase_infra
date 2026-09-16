@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Runner-label-exists gate (caller). OMN-18408.
+#
+# A job pinned to a label no runner carries does not fail. It queues, the pull
+# request that merged the pin stays green because the job never ran, and the
+# organisation's runner listing is consulted by nothing that gates a merge.
+#
+# This repository is where that cost was measured. On 2026-09-16 five scheduled
+# lab probes were repinned to a host label and merged before the runner
+# carrying it was registered; zero of 64 organisation runners carried it, and
+# they queued about four hours with one canary run unstarted for 2h40m.
+#
+# The validator lives in omniclaude beside its sibling placement gate, which
+# answers a different question -- whether a job is on a hosted runner it should
+# not be on. This one asks whether the label a job names exists at all.
+#
+# Pinned to the omniclaude commit that introduced it rather than @main: that
+# reusable is on omniclaude `dev` and has not been promoted, which is this
+# repository's existing convention for every omniclaude-hosted reusable it
+# calls.
+
+name: Runner Label Exists
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main, dev]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runner-label-exists:
+    uses: OmniNode-ai/omniclaude/.github/workflows/runner-label-exists-reusable.yml@aaa1e969dbda5ce81273ef7a556858f96cf6474a
+    secrets:
+      # The Actions job token cannot read the ORGANISATION runner listing --
+      # that read needs organisation administration scope, which a workflow
+      # cannot grant itself through `permissions:`. The gate refuses rather
+      # than guessing when it cannot read the listing, because an unreadable
+      # listing and an empty fleet are the same value and neither is a pass.
+      ORG_RUNNERS_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
