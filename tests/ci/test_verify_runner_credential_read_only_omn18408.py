@@ -42,7 +42,12 @@ VERIFY_SERVICE = "omninode-verify-runner-1"
 # The runner this one was split off from. Positive control for every absence.
 CONTROL_SERVICE = "omninode-deploy-runner"
 
-EXPECTED_LABELS = "self-hosted,omnibase-verify,host-201,linux,x64"
+# OMN-17477 added `arch-amd64`. `host-201` already scopes this runner to a host;
+# the arch label scopes it to a CPU, and the two are deliberately separate
+# vocabularies -- the arm64 verify runner on the other lab host carries
+# `host-101` and `arch-arm64`, so a job that must pin a HOST and a job that must
+# pin an ARCHITECTURE do not have to overload one label to mean both.
+EXPECTED_LABELS = "self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64"
 DOCKER_SOCKET = "/var/run/docker.sock"
 HOST_GATEWAY_ALIAS = "host.docker.internal:host-gateway"
 OPERATOR_ENV_TARGET = "/run/omnibase-operator.env"

@@ -48,6 +48,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SYNC_SCRIPT = REPO_ROOT / "deploy" / "maintenance" / "omninode-host-maintenance-sync.sh"
 SYNC_CRON = (
@@ -69,8 +73,14 @@ def _git(repo: Path, *args: str) -> None:
         check=True,
         capture_output=True,
         text=True,
+        # OMN-18434: `**os.environ` carries GIT_DIR / GIT_WORK_TREE /
+        # GIT_INDEX_FILE straight through, and those OVERRIDE `cwd=` -- so
+        # under a pre-push hook this fixture would operate on the REAL invoking
+        # worktree rather than its tmp_path. Scrubbing them is not in tension
+        # with the two GIT_CONFIG_* pins below; those silence the developer's
+        # own config, which is a different concern from location.
         env={
-            **os.environ,
+            **scrub_git_location_env(),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_SYSTEM": "/dev/null",
         },

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.observability.runner_health.model_dns_cache_config import (
     ModelDnsCacheConfig,
@@ -22,6 +22,9 @@ from omnibase_infra.observability.runner_health.model_model_review_capability_co
 )
 from omnibase_infra.observability.runner_health.model_pypi_cache_config import (
     ModelPyPICacheConfig,
+)
+from omnibase_infra.observability.runner_health.model_runner_fleet_host import (
+    ModelRunnerFleetHost,
 )
 from omnibase_infra.observability.runner_health.model_tool_cache_config import (
     ModelToolCacheConfig,
@@ -107,6 +110,16 @@ class ModelRunnerFleetConfig(BaseModel):
             "Absent in configs predating this work."
         ),
     )
+    hosts: tuple[ModelRunnerFleetHost, ...] = Field(
+        default=(),
+        description=(
+            "OMN-17477 — declared multi-host inventory. The scalar runner_host / "
+            "runner_name_prefix / expected_count fields above remain the PRIMARY "
+            "host's values and are not superseded, so a consumer that reads them "
+            "behaves identically to before this field existed. Empty means a "
+            "config predating the inventory, which is a single-host fleet."
+        ),
+    )
     model_review: ModelModelReviewCapabilityConfig | None = Field(
         default=None,
         description=(
@@ -115,6 +128,92 @@ class ModelRunnerFleetConfig(BaseModel):
             "any runner."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_host_inventory(self) -> ModelRunnerFleetConfig:
+        """Reject an inventory that cannot be acted on.
+
+        Both checks below describe failures that are SILENT at runtime, which is
+        why they are refused at load rather than discovered on a host.
+        """
+        if not self.hosts:
+            return self
+
+        prefixes = [host.runner_name_prefix for host in self.hosts]
+        duplicates = {p for p in prefixes if prefixes.count(p) > 1}
+        if duplicates:
+            raise ValueError(
+                f"runner_name_prefix must be unique across hosts; duplicated: "
+                f"{sorted(duplicates)}"
+            )
+        # A prefix that is a prefix of another is the same collision one step
+        # removed: `omninode-runner` matches `omninode-runner-101-1` under the
+        # `<prefix>-<N>` pattern every consumer uses, so one host would count
+        # another host's runners as its own.
+        for outer in prefixes:
+            for inner in prefixes:
+                if outer != inner and inner.startswith(f"{outer}-"):
+                    raise ValueError(
+                        f"runner_name_prefix {inner!r} is nested under {outer!r}; "
+                        "the `<prefix>-<N>` pattern would match both"
+                    )
+
+        hosts_by_name = {host.host: host for host in self.hosts}
+        if len(hosts_by_name) != len(self.hosts):
+            raise ValueError("each host may appear in the inventory exactly once")
+
+        primary = hosts_by_name.get(self.runner_host)
+        if primary is None:
+            raise ValueError(
+                f"runner_host {self.runner_host!r} is not declared in hosts; the "
+                "scalar fields are the primary host's values, so the primary "
+                "host must be in the inventory"
+            )
+        if (
+            primary.runner_name_prefix != self.runner_name_prefix
+            or primary.expected_count != self.expected_count
+        ):
+            raise ValueError(
+                "the primary host's inventory row must agree with the scalar "
+                "runner_name_prefix/expected_count fields; two sources of truth "
+                "for one host make a consumer's answer depend on which it reads"
+            )
+        return self
+
+    def primary_host(self) -> ModelRunnerFleetHost:
+        """The host the scalar fields describe.
+
+        Raises rather than inventing a row: a config with an inventory that
+        omits its own primary host is refused at validation, so reaching here
+        without one is a programming error, not a state to paper over.
+        """
+        for host in self.hosts:
+            if host.host == self.runner_host:
+                return host
+        raise KeyError(f"primary host {self.runner_host!r} is not in the inventory")
+
+    def declared_total(self, runner_class: str) -> int:
+        """Summed declared runner count across hosts carrying ``runner_class``.
+
+        Summed PER CLASS and never across the whole inventory. Capacity is not
+        fungible -- a verify-class runner cannot pick up an action-class job --
+        so a total that mixed classes would tell the router's degraded floor
+        that capacity exists which can never satisfy the jobs the floor guards.
+
+        A class nothing declares returns 0. That is the honest answer and it is
+        also the safe one: a floor computed from 0 never reads a missing fleet
+        as healthy.
+        """
+        if not self.hosts:
+            # Pre-inventory config: one host, all classes, the scalar count.
+            return self.expected_count
+        return sum(
+            host.expected_count for host in self.hosts if runner_class in host.classes
+        )
+
+    def hosts_for_arch(self, arch: str) -> tuple[ModelRunnerFleetHost, ...]:
+        """Inventory rows on a given CPU architecture."""
+        return tuple(host for host in self.hosts if host.arch.value == arch)
 
 
 def default_runner_fleet_config_path() -> Path:
@@ -142,6 +241,7 @@ def load_runner_fleet_config(path: Path | None = None) -> ModelRunnerFleetConfig
 
 __all__ = [
     "ModelRunnerFleetConfig",
+    "ModelRunnerFleetHost",
     "default_runner_fleet_config_path",
     "load_runner_fleet_config",
 ]

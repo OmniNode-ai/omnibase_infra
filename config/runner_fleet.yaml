@@ -19,6 +19,57 @@ runner_name_prefix: omninode-runner
 # burst profiles), so burst_count == expected_count (no separate burst tier).
 expected_count: 60
 burst_count: 60
+# OMN-17477 — DECLARED HOST INVENTORY.
+#
+# The five scalar fields above describe ONE host, which is what the fleet was
+# until the lab grew a second and third machine. They are NOT superseded: they
+# remain the PRIMARY host's values, the model refuses an inventory that
+# disagrees with them, and every consumer that reads them behaves exactly as it
+# did before this block existed. What the list adds is the three things a second
+# host needs and a scalar cannot carry.
+#
+#   arch                which CPU. The second and third hosts are arm64 Macs.
+#                       Spelled the way Docker's TARGETARCH spells it, because
+#                       the runner image resolves its download URLs from that
+#                       value -- one spelling for the inventory, the image and
+#                       the runner label, so the three cannot drift into three
+#                       different names for the same CPU.
+#   runner_name_prefix  runner and container names are `<prefix>-<N>`. Two
+#                       hosts sharing a prefix collide on both, silently, with
+#                       the loser re-registering over the winner. Unique by
+#                       construction, and nesting (`a` vs `a-b`) is refused too
+#                       because the `<prefix>-<N>` pattern would match both.
+#   classes             capacity is not fungible. A verify-class runner cannot
+#                       pick up an action-class job, so totals are summed PER
+#                       CLASS -- `declared_total("action")` is what the
+#                       router's degraded floor reads. Counting a verify runner
+#                       toward the action fleet would tell the floor that
+#                       capacity exists which can never satisfy the jobs it
+#                       guards.
+#
+# ADDING AN ARM64 HOST TO THE `action` CLASS IS NOT A CONFIG-ONLY CHANGE. Every
+# job whose `runs-on` is `[self-hosted, omnibase-ci]` today carries no
+# architecture constraint, so an arm64 runner in that class can pick up a job
+# written on the assumption of amd64. Those jobs need `arch-amd64` added to
+# their `runs-on` FIRST; the arch label exists so that is a one-line change per
+# job rather than a re-architecture. Until then `.101` declares `verify` only,
+# which shares no label with the action fleet and therefore cannot be handed an
+# action job.
+hosts:
+  - host: omninode-pc.tail75df5e.ts.net
+    arch: amd64
+    runner_name_prefix: omninode-runner
+    expected_count: 60
+    classes: [action]
+  # .101 — Mac mini, M2 Pro, 12 cores. Docker Desktop, data root on an external
+  # volume. Deploy/verify class first: those jobs are cloud-touching
+  # (kubectl/aws/gh) and architecture-neutral, so they are the class that can
+  # move to arm64 without any workflow carrying an architecture assumption.
+  - host: stickybeatz-2.tail75df5e.ts.net
+    arch: arm64
+    runner_name_prefix: omninode-mini-runner
+    expected_count: 1
+    classes: [verify]
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address
 # pool can subnet a bounded number of networks before `docker network create`
 # fails with "all predefined address pools have been fully subnetted". Alert at

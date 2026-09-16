@@ -107,18 +107,64 @@ def load_contract_policy(path: Path = NODE_CONTRACT) -> ModelCIRunnerRoutePolicy
     return ModelCIRunnerRoutePolicy.model_validate(config)
 
 
+# The runner class this router places work on. The router decides between the
+# shared action fleet and GitHub-hosted runners; it never routes deploy- or
+# verify-class jobs, which are pinned by label at the workflow.
+ROUTED_RUNNER_CLASS = "action"
+
+
 def load_fleet_expected_count(path: Path = FLEET_INVENTORY) -> int:
-    """Read the declared fleet size from the fleet INVENTORY.
+    """Declared capacity of the routed fleet, summed across every host.
 
     Read here rather than restated in the contract so the routing floor tracks
     a fleet resize instead of going stale against it -- the failure that made
     the previous literal floor equal to the whole fleet when it was capped.
+
+    OMN-17477 made this a SUM over the declared host inventory rather than one
+    host's scalar, because the fleet stopped being one machine. Two properties
+    of that sum matter and neither is incidental:
+
+    1. It is summed PER CLASS. A verify-class runner on a second host cannot
+       pick up an action-class job, so counting it here would raise the
+       degraded floor by capacity that can never satisfy the jobs the floor
+       guards -- the router would read a short fleet as healthy.
+    2. It agrees with what the fleet probe COUNTS. ``probe_fleet`` filters the
+       org runner registry by the ``omnibase-ci`` label, so the denominator
+       here must be the runners carrying that label and no others. A numerator
+       and a denominator counting different sets is a floor that means nothing.
+
+    A config with no inventory is a single-host fleet and falls back to the
+    scalar, which is the value this function has always returned.
     """
     import yaml
 
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise ValueError(f"{path} must contain a YAML mapping")
+
+    hosts = loaded.get("hosts")
+    if isinstance(hosts, list) and hosts:
+        total = 0
+        for row in hosts:
+            if not isinstance(row, dict):
+                raise ValueError(f"{path} 'hosts' entries must be mappings")
+            classes = row.get("classes") or []
+            if ROUTED_RUNNER_CLASS not in classes:
+                continue
+            count = row.get("expected_count")
+            if not isinstance(count, int) or count < 0:
+                raise KeyError(
+                    f"{path} host {row.get('host')!r} is missing a usable "
+                    "'expected_count'"
+                )
+            total += count
+        if total <= 0:
+            raise KeyError(
+                f"{path} declares no host carrying the {ROUTED_RUNNER_CLASS!r} "
+                "class; the routed fleet's declared capacity would be zero"
+            )
+        return total
+
     expected = loaded.get("expected_count")
     if not isinstance(expected, int) or expected <= 0:
         raise KeyError(f"{path} is missing a usable 'expected_count'")

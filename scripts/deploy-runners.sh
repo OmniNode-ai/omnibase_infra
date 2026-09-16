@@ -187,6 +187,45 @@ runner_config_field() {
     echo "${value}"
 }
 
+# OMN-17477 -- read one field from one row of the declared `hosts:` inventory.
+#
+# Deliberately a second reader rather than a generalisation of
+# runner_config_field: that function matches a key ANYWHERE in the file, which
+# is safe for top-level scalars and actively wrong inside a list of mappings
+# (it would return the first host's value for every host). This one anchors on
+# the `- host: <name>` line and reads only until the next list item.
+runner_host_field() {
+    local host="${1}" field="${2}"
+    [[ -f "${RUNNER_FLEET_CONFIG}" ]] || {
+        echo "[deploy-runners] ERROR: runner fleet config not found: ${RUNNER_FLEET_CONFIG}" >&2
+        exit 1
+    }
+    local value
+    value=$(awk -v want="${host}" -v key="${field}" '
+        /^  - host:[[:space:]]*/ {
+            split($0, parts, /:[[:space:]]*/)
+            gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", parts[2])
+            inrow = (parts[2] == want)
+            next
+        }
+        /^[^[:space:]]/ { inrow = 0 }
+        inrow && $0 ~ "^    " key ":" {
+            sub("^[[:space:]]*" key ":[[:space:]]*", "")
+            gsub(/^[[:space:]"\[]+|[[:space:]"\]]+$/, "", $0)
+            print
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    ' "${RUNNER_FLEET_CONFIG}") || {
+        echo "[deploy-runners] ERROR: host ${host} has no ${field} in ${RUNNER_FLEET_CONFIG}" >&2
+        echo "[deploy-runners] declared hosts:" >&2
+        awk '/^  - host:[[:space:]]*/ { print "  " $3 }' "${RUNNER_FLEET_CONFIG}" >&2
+        exit 1
+    }
+    echo "${value}"
+}
+
 RUNNER_HOST="$(runner_config_field runner_host)"
 # Remote path on the CI host — NOT local $HOME (which differs between macOS and Linux)
 RUNNER_HOST_DIR="/home/jonah/.omnibase/runners"
@@ -255,6 +294,10 @@ ROLL_ONLY=""
 # OMN-18408. Space-separated, declared, NON-general-pool compose services to
 # stand up additively. Empty means this mode is off.
 ADD_SERVICES=""
+# OMN-17477: which declared host this invocation targets. Empty means the
+# PRIMARY host, which is what every pre-inventory invocation meant, so an
+# existing call site is unchanged.
+TARGET_HOST=""
 
 for arg in "$@"; do
     case "${arg}" in
@@ -265,6 +308,7 @@ for arg in "$@"; do
         --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
         --only=*)     ROLL_ONLY="${arg#*=}" ;;
         --add=*)      ADD_SERVICES="${arg#*=}" ; ADD_SERVICES="${ADD_SERVICES//,/ }" ;;
+        --host=*)     TARGET_HOST="${arg#*=}" ;;
         --help|-h)
             echo "Usage: $0 [--dry-run] [--skip-build] [--soft] [--rolling]"
             echo "  --dry-run     Print actions without executing remote commands"
@@ -284,6 +328,10 @@ for arg in "$@"; do
             echo "                and a wait scoped to those runners. Refuses a"
             echo "                ${RUNNER_NAME_PREFIX}-N service (use --rolling), an"
             echo "                undeclared service, and --soft/--rolling."
+            echo "  --host=NAME   Target one declared host from config/runner_fleet.yaml's"
+            echo "                hosts: inventory. Default: the primary host, which is"
+            echo "                what every invocation meant before the fleet had more"
+            echo "                than one machine."
             exit 0
             ;;
         *)
@@ -292,6 +340,56 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# ---------------------------------------------------------------------------
+# Host targeting (OMN-17477)
+# ---------------------------------------------------------------------------
+#
+# The fleet config's scalar fields are the PRIMARY host's values, so leaving
+# --host unset reproduces every pre-inventory invocation exactly. Naming a host
+# re-points the four values that are per-host -- address, name prefix, declared
+# count and compose file -- and nothing else.
+#
+# FAIL CLOSED ON AN UNKNOWN NAME. A typo that fell through to the primary host
+# would deploy to .201 while its operator believed they were deploying
+# elsewhere, which is the one outcome a host flag must never produce.
+if [[ -n "${TARGET_HOST}" && "${TARGET_HOST}" != "${RUNNER_HOST}" ]]; then
+    RUNNER_NAME_PREFIX="$(runner_host_field "${TARGET_HOST}" runner_name_prefix)"
+    RUNNER_COUNT="$(runner_host_field "${TARGET_HOST}" expected_count)"
+    RUNNER_HOST_ARCH="$(runner_host_field "${TARGET_HOST}" arch)"
+    RUNNER_HOST="${TARGET_HOST}"
+    # Each non-primary host brings its own compose file. The primary host's
+    # file hand-writes 60 literal service blocks bound to its own container
+    # names, so reusing it on a second host would collide on every one of them.
+    COMPOSE_FILE="docker/docker-compose.runners-${RUNNER_NAME_PREFIX}.yml"
+    [[ -f "${COMPOSE_FILE}" ]] || {
+        echo "[deploy-runners] ERROR: host ${RUNNER_HOST} declares prefix ${RUNNER_NAME_PREFIX} but ${COMPOSE_FILE} does not exist" >&2
+        exit 1
+    }
+    # The targeted host's compose file has to reach that host, and SYNC_PATHS
+    # was built before the flag was parsed. Appended rather than substituted
+    # for the primary file: the runner artifacts beside it are the same on
+    # every host, and only the service definitions are per-host.
+    SYNC_PATHS+=("${COMPOSE_FILE}")
+    # The remote artifact root is under the REMOTE account's home, which is not
+    # the same path on a Linux host and a macOS host. Resolve it rather than
+    # assuming, and fail if it cannot be resolved -- a wrong path here rsyncs
+    # the fleet's artifacts into a directory nothing reads.
+    if ! "${DRY_RUN}"; then
+        remote_home="$(ssh "${RUNNER_HOST}" 'printf %s "$HOME"')" || {
+            echo "[deploy-runners] ERROR: cannot resolve \$HOME on ${RUNNER_HOST}" >&2
+            exit 1
+        }
+        [[ -n "${remote_home}" ]] || {
+            echo "[deploy-runners] ERROR: ${RUNNER_HOST} reported an empty \$HOME" >&2
+            exit 1
+        }
+        RUNNER_HOST_DIR="${remote_home}/.omnibase/runners"
+    fi
+else
+    RUNNER_HOST_ARCH="$(runner_host_field "${RUNNER_HOST}" arch)"
+fi
+export RUNNER_HOST_ARCH
 
 # ---------------------------------------------------------------------------
 # Helpers

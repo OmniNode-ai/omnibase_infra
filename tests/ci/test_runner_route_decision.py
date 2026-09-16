@@ -1227,3 +1227,80 @@ def test_the_policy_file_declares_no_repository_visibility() -> None:
     section = _yaml.safe_load(text)["route"]
     assert "visibility" not in section
     assert "private_repositories" not in section
+
+
+def test_declared_fleet_capacity_sums_action_hosts_and_ignores_other_classes(
+    tmp_path: Path,
+) -> None:
+    """OMN-17477 — the floor's denominator is a per-class sum across hosts.
+
+    Two falsifiers in one test, because the two failure modes are opposite and
+    a test that catches only one reads as green while the other is live:
+
+    * summing the WHOLE inventory counts a verify-class runner toward the
+      action fleet, raising the floor by capacity that can never take an action
+      job, so a short fleet reads healthy;
+    * reading only the primary host's scalar ignores every host added after the
+      first, so the floor stays frozen at one machine's size however far the
+      fleet grows.
+    """
+    inventory = tmp_path / "runner_fleet.yaml"
+    inventory.write_text(
+        """
+version: "1.0"
+github_org: OmniNode-ai
+runner_host: primary.example
+runner_group: omnibase-ci
+runner_name_prefix: primary-runner
+expected_count: 60
+hosts:
+  - host: primary.example
+    arch: amd64
+    runner_name_prefix: primary-runner
+    expected_count: 60
+    classes: [action]
+  - host: second.example
+    arch: arm64
+    runner_name_prefix: second-runner
+    expected_count: 8
+    classes: [action]
+  - host: verify-only.example
+    arch: arm64
+    runner_name_prefix: verify-runner
+    expected_count: 5
+    classes: [verify]
+""",
+        encoding="utf-8",
+    )
+    assert route.load_fleet_expected_count(inventory) == 68
+
+
+def test_declared_fleet_capacity_refuses_an_inventory_with_no_action_host(
+    tmp_path: Path,
+) -> None:
+    """Zero routed capacity is refused, never returned as a usable floor.
+
+    ``ceil(0 * 0.67)`` is 0, and ``online < 0`` is never true -- a zero here
+    would make the degraded check unreachable and every empty fleet read as
+    healthy. Fail closed instead.
+    """
+    inventory = tmp_path / "runner_fleet.yaml"
+    inventory.write_text(
+        """
+version: "1.0"
+github_org: OmniNode-ai
+runner_host: primary.example
+runner_group: omnibase-ci
+runner_name_prefix: primary-runner
+expected_count: 60
+hosts:
+  - host: primary.example
+    arch: amd64
+    runner_name_prefix: primary-runner
+    expected_count: 60
+    classes: [verify]
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(KeyError):
+        route.load_fleet_expected_count(inventory)
