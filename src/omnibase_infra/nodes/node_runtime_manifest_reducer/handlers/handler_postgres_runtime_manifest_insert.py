@@ -18,6 +18,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_core.models.errors import ModelOnexError
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -25,12 +26,16 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
 from omnibase_infra.models.model_backend_result import ModelBackendResult
+from omnibase_infra.nodes.node_runtime_manifest_reducer.models.model_payload_insert_runtime_manifest import (
+    ModelPayloadInsertRuntimeManifest,
+)
 
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_infra.nodes.node_runtime_manifest_reducer.models.model_payload_insert_runtime_manifest import (
-        ModelPayloadInsertRuntimeManifest,
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.runtime.models.model_runtime_manifest_published import (
+        ModelRuntimeManifestPublished,
     )
 
 logger = logging.getLogger(__name__)
@@ -63,16 +68,18 @@ RETURNING id;
 class HandlerPostgresRuntimeManifestInsert(MixinPostgresOpExecutor):
     """Append-only INSERT handler for the runtime_manifests projection table.
 
-    Receives a ModelPayloadInsertRuntimeManifest and performs a single INSERT.
-    Duplicate startup events (same runtime_profile + topology_hash + started_at)
-    are silently ignored via ON CONFLICT DO NOTHING.
+    Receives the published ModelRuntimeManifestPublished event, folds it into a
+    ModelPayloadInsertRuntimeManifest and performs a single INSERT. Duplicate
+    startup events (same runtime_profile + topology_hash + started_at) are
+    silently ignored via ON CONFLICT DO NOTHING.
 
     Attributes:
-        _pool: asyncpg connection pool.
+        _pool: asyncpg connection pool, injected by name from
+            ``service_kernel._build_runtime_handler_dependencies``.
 
     Example:
         >>> handler = HandlerPostgresRuntimeManifestInsert(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(envelope)
         >>> result.success
         True
     """
@@ -90,18 +97,48 @@ class HandlerPostgresRuntimeManifestInsert(MixinPostgresOpExecutor):
 
     async def handle(
         self,
-        payload: ModelPayloadInsertRuntimeManifest,
-        correlation_id: UUID,
+        envelope: ModelEventEnvelope[ModelRuntimeManifestPublished],
     ) -> ModelBackendResult:
         """INSERT a runtime manifest row, ignoring exact duplicate startups.
 
+        This is the auto-wiring dispatch entrypoint for
+        ``onex.evt.omnibase-infra.runtime-manifest-published.v1``. Auto-wiring
+        calls ``handle`` with exactly ONE positional argument on every path, so
+        the correlation id is read off the envelope rather than taken as a second
+        parameter — the second parameter is what made every manifest event
+        dead-letter with ``TypeError: handle() missing 1 required positional
+        argument: 'correlation_id'`` once OMN-17296's publisher fix let the event
+        resolve to this dispatcher at all.
+
+        The contract declares the matching ``event_model``, so the adapter has
+        already validated the wire payload into ``ModelRuntimeManifestPublished``
+        before this runs; the fold into the INSERT payload happens on the model
+        (``from_manifest_event``), not here.
+
         Args:
-            payload: Manifest payload with all projection fields.
-            correlation_id: Correlation ID for distributed tracing.
+            envelope: Event envelope carrying the published boot manifest.
 
         Returns:
             ModelBackendResult indicating success or failure.
+
+        Raises:
+            ModelOnexError: If the envelope carries no correlation id. The
+                publisher declares ``correlation_id: UUID`` (required), so an
+                envelope without one did not come from the sanctioned publisher.
+                Synthesising one would write an untraceable row and hide the
+                producer defect, so this fails closed and dead-letters instead.
         """
+        correlation_id = envelope.correlation_id
+        if correlation_id is None:
+            raise ModelOnexError(
+                "runtime-manifest-published envelope carries no correlation_id; "
+                "publish_runtime_manifest declares it required, so this event "
+                "did not come from the sanctioned publisher. Refusing to insert "
+                "an untraceable runtime_manifests row."
+            )
+        payload = ModelPayloadInsertRuntimeManifest.from_manifest_event(
+            envelope.payload
+        )
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,

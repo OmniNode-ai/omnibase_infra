@@ -13,11 +13,26 @@
 #   migration 095. Additive and backward-compatible: the field is optional and
 #   a payload omitting it writes attach_state='unknown' (never 'ready'). No
 #   change to subscribe_topics, handler routing, or the target table. (2026-07-30)
+#
+# OMN-17296 (contract_version 1.2.0): the handler entry now declares its
+#   `event_model` (ModelRuntimeManifestPublished), and
+#   HandlerPostgresRuntimeManifestInsert.handle() takes the single event
+#   envelope the auto-wiring adapter actually passes instead of the
+#   (payload, correlation_id) pair no dispatch path ever supplied. Before this,
+#   every event on the subscribed topic dead-lettered with
+#   `TypeError: handle() missing 1 required positional argument:
+#   'correlation_id'` — 455 of the newest 600 records on the dev lane's
+#   onex.dlq.omnibase-infra.events.v1, measured 2026-09-16. The `intent_emission`
+#   block below remains a declaration with no runtime consumer; the fold it
+#   describes is now performed by
+#   ModelPayloadInsertRuntimeManifest.from_manifest_event. Minor, not major:
+#   subscribe_topics, the operation name, the intent payload shape and the target
+#   table are all unchanged. (2026-09-16)
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
-node_version: "1.1.0"
+node_version: "1.2.0"
 name: "node_runtime_manifest_reducer"
 node_type: "REDUCER_GENERIC"
 description: "Append-only reducer that persists runtime manifests to PostgreSQL. Receives runtime-manifest-published events and inserts one row per startup into runtime_manifests, including the boot attach-readiness blocker set (OMN-15512)."
@@ -40,6 +55,15 @@ handler_routing:
       handler:
         name: "HandlerPostgresRuntimeManifestInsert"
         module: "omnibase_infra.nodes.node_runtime_manifest_reducer.handlers.handler_postgres_runtime_manifest_insert"
+      # OMN-17296 fix 2: without this declaration the dispatch adapter takes its
+      # event_model-is-None branch, never validates the wire payload into the
+      # published event model, and hands the handler an object it cannot fold.
+      # With it, the adapter coerces the payload and materializes a typed
+      # envelope, which is also how the handler reads the boot correlation id.
+      event_model:
+        name: "ModelRuntimeManifestPublished"
+        module: "omnibase_infra.runtime.models.model_runtime_manifest_published"
+        description: "Boot runtime manifest snapshot carried on the subscribed topic, folded into the INSERT payload by ModelPayloadInsertRuntimeManifest.from_manifest_event."
 intent_emission:
   enabled: true
   intents:
