@@ -56,7 +56,13 @@ def test_shared_lib_exists_and_is_sourced() -> None:
     [
         "ensure_core_infra_ready",
         "warm_broker_topic_provisioning",
-        "run_runtime_migration_preflight",
+        # OMN-18438: the migration preflight's up/wait pair was extracted into
+        # refresh_one_migration_service() so the lane-agnostic set and the
+        # dev-lane-only set are driven by one implementation. The call site
+        # moved, so this assertion follows it -- and
+        # test_migration_preflight_issues_no_unbounded_compose_up_of_its_own
+        # below asserts the preflight did not keep a second, unbounded copy.
+        "refresh_one_migration_service",
         "bringup_full_stack",
         "restart_services",
     ],
@@ -105,9 +111,34 @@ def test_docker_wait_calls_are_also_bounded() -> None:
     cap_body = _function_body("warm_broker_topic_provisioning")
     assert "timeout --kill-after=15" in cap_body and "docker wait" in cap_body
 
-    preflight_body = _function_body("run_runtime_migration_preflight")
-    assert (
-        "timeout --kill-after=15" in preflight_body and "docker wait" in preflight_body
+    # OMN-18438: the migration one-shot wait now lives in the extracted
+    # refresh_one_migration_service() that both migration sets call.
+    refresh_body = _function_body("refresh_one_migration_service")
+    assert "timeout --kill-after=15" in refresh_body and "docker wait" in refresh_body
+
+
+@pytest.mark.unit
+def test_migration_preflight_issues_no_unbounded_compose_up_of_its_own() -> None:
+    """OMN-18438: extraction must not leave a second, unbounded copy behind.
+
+    ``run_runtime_migration_preflight`` delegates every start and every wait to
+    ``refresh_one_migration_service``, which the assertions above bound. If it
+    ever issues its own ``docker compose ... up`` or its own ``docker wait``,
+    that call is outside every bound in this file and OMN-15718 regresses in the
+    one function this ticket touched.
+    """
+    body = _function_body("run_runtime_migration_preflight")
+
+    assert "up -d" not in body, (
+        "run_runtime_migration_preflight() issues its own compose up again; it "
+        "must delegate to refresh_one_migration_service(), which is bounded"
+    )
+    assert "docker wait" not in body, (
+        "run_runtime_migration_preflight() issues its own docker wait again; "
+        "that call carries no deadline of its own (OMN-15718)"
+    )
+    assert "refresh_one_migration_service" in body, (
+        "run_runtime_migration_preflight() no longer calls the bounded helper"
     )
 
 

@@ -961,6 +961,31 @@ services:
       # on the lanes that already have the runner, and skip on the one lane that
       # would otherwise apply it.
       CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
+      # OMN-18438: role_omninode, and the FIRST entry that is not a
+      # LOGIN_ONLY_ROLE_MAP principal. It is a SERVICE_DB_MAP principal in
+      # 000_create_multiple_databases.sh -- the owning login of omninode_cloud,
+      # which onex-api reaches `tenants` and `tenant_api_keys` through and which
+      # the cloud-migration one-shot applies the corpus AS, so that every GRANT
+      # in the corpus points at the right principal and the applying session is
+      # not exempt from the RLS the lane is the proving ground for.
+      #
+      # It is consumed by a SEPARATE seam in run-forward-migrations.sh
+      # (SERVICE_ROLE_DB_ACCESS_MAP), not by the login-only one above, because
+      # this principal needs database access as well as a password and the
+      # login-only seam is pinned to issue no GRANT at all. Empty-means-skip
+      # exactly as on the three keys above -- the fail-closed required-variable
+      # form would fail compose RENDER for the whole project on every lane that
+      # has not provisioned the credential, turning a provisioning gap into an
+      # outage of lanes that need nothing from this seam. (The literal spelling
+      # of that form is deliberately not written here: this file is parsed for
+      # variable references, and a comment that spells one declares it.)
+      #
+      # Measured on the .201 dev lane 2026-09-16, on a volume created
+      # 2026-07-31: pg_roles held no role_omninode row and onex-api logged 112
+      # `password authentication failed` in one hour while reporting healthy.
+      # That is the fourth instance of the OMN-16993 class, and it is this line
+      # and its seam that close it.
+      ROLE_OMNINODE_PASSWORD: ${ROLE_OMNINODE_PASSWORD:-}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
