@@ -114,16 +114,16 @@ node_type: "EFFECT_GENERIC"
 # different facts about the chain. No verdict member is added or removed.
 contract_version:
   major: 1
-  minor: 4
-  patch: 2
-node_version: "1.4.2"
+  minor: 5
+  patch: 0
+node_version: "1.5.0"
 description: >
-  Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id and an OMN-18172 typed synthetic canary hint, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, checks the platform quarantine sink for the same id, and reports the typed traffic class stored by projection readback rather than trusting the outbound request body as evidence. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof. OMN-15504 (node_version 1.3.1): the terminal-missing verdict used to render a BUDGET-EXHAUSTED ingress as an ingress failure, which reads as an accusation and was taken as one -- an ingress that consumes its entire budget and then reports a dispatch timeout has accepted the request and published it, and is observing the same silence the readback did. That wording sent the 2026-09-10 investigation to the ingress while the delegate-skill consumer sat in a rebalance livelock one hop downstream. The verdict now discriminates on evidence the probe already collects (elapsed_ms against budget_ms): a budget-exhausted answer attributes the silence to the chain and points at the command topic's consumer, while an ingress that refuses INSIDE its budget keeps its own distinct wording so a real refusal is not lost. Link 1 itself is unchanged -- it already passed on reachability alone, and only the prose verdict beside the link table was wrong.
+  Scheduled live event-chain canary (OMN-16773, OMN-16931). Fires one delegation through POST {probe_url}/skill with a freshly minted per-run correlation id and an OMN-18172 typed synthetic canary hint, then reads that correlation id back off the contract-declared terminal topics on the broker to decide whether a terminal actually landed inside the budget, checks the platform quarantine sink for the same id, and reports the typed traffic class stored by projection readback rather than trusting the outbound request body as evidence. The terminal verdict never comes from the ingress HTTP response: that response is a claim by the request path, and it was wrong in both directions on the live dev lane (OMN-16931 false RED, OMN-15468 false GREEN). Reports a distinct verdict for quarantined vs terminal-missing vs ingress-error-with-terminal-present vs readback-failed vs ingress-unreachable, reports SKIPPED rather than CLEAN for legs that were not configured, and emits a per-link verdict against the five OMN-16025 chain links so a three-link probe can never render as a five-link proof. OMN-15504 (node_version 1.3.1): the terminal-missing verdict used to render a BUDGET-EXHAUSTED ingress as an ingress failure, which reads as an accusation and was taken as one -- an ingress that consumes its entire budget and then reports a dispatch timeout has accepted the request and published it, and is observing the same silence the readback did. That wording sent the 2026-09-10 investigation to the ingress while the delegate-skill consumer sat in a rebalance livelock one hop downstream. The verdict now discriminates on evidence the probe already collects (elapsed_ms against budget_ms): a budget-exhausted answer attributes the silence to the chain and points at the command topic's consumer, while an ingress that refuses INSIDE its budget keeps its own distinct wording so a real refusal is not lost. Link 1 itself is unchanged -- it already passed on reachability alone, and only the prose verdict beside the link table was wrong. OMN-18421 (node_version 1.5.0): the probe now submits through the TENANT-BEARING onex-api route when one is declared, because the /skill ingress it used reads X-Correlation-ID and nothing else -- no authorization header, no tenant -- so every event the resulting chain published was unattributed and was refused fail-closed by the delegation projection writer, and this probe reported PROBE-GREEN on a chain that projected nothing. The refusal is correct and is untouched: a writer under FORCE ROW LEVEL SECURITY cannot discover a row's tenant by reading, and the runtime will not source one (carrying a tenant across a hop is its job, inventing one is forbidden), so the arrivals stop when the SUBMISSION carries a verified tenant. There is no fallback from the authenticated route to the tenant-less one; a declared route whose credential is missing is SUBMISSION_ROUTE_NOT_CONFIGURED, which is RED, publishes nothing and names the variable it looked for. The gateway's 202 remains an ack and never a terminal claim, so the verdict still comes from the correlation-scoped broker readback.
 
 input_model:
   name: "ModelChainCanaryRequest"
   module: "omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_request"
-  description: "Probe configuration: ingress URL, delegation class, budget, quarantine-check settings."
+  description: "Probe configuration: submission route (tenant-bearing gateway or the legacy tenant-less ingress), delegation class, budget, quarantine-check settings."
 output_model:
   name: "ModelChainCanaryResult"
   module: "omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result"
@@ -275,11 +275,30 @@ error_handling:
       description: "No ledger source was configured, so the run has no evidence about the chain and no green is available. Fails closed on the same terms as TERMINAL_READBACK_NOT_CONFIGURED."
       recoverable: true
       retry_strategy: "none"
+    - name: "SUBMISSION_ROUTE_NOT_CONFIGURED"
+      description: "OMN-18421. The run declared the tenant-bearing submission route (the gateway) and could not use it, so nothing was published and every link reports NOT_EVALUATED rather than FAIL — a FAIL on link 1 would be a claim about the lane, while this is a claim about the canary's own wiring. There is deliberately NO fallback to the tenant-less /skill ingress: a probe that quietly submits the unattributed way keeps reporting PROBE-GREEN on a chain whose every event the delegation projection writer refuses fail-closed for want of attribution, which is the exact false-clean that let the malformed sink take continuous arrivals while this probe said the chain was alive."
+      recoverable: true
+      retry_strategy: "none"
 io_operations:
   - operation: "probe_event_chain"
     description: "Fire one live delegation and assert the chain carried it to a terminal."
     input_fields:
       - probe_url
+      # OMN-18421, the TENANT-BEARING submission route. When gateway_url is
+      # set the probe submits POST {gateway_url}/v1/workflows with a real
+      # credential and the gateway resolves the tenant from it, stamping the
+      # tenant on the published envelope — the field omnimarket's delegation
+      # projection writer reads. Empty keeps the legacy probe_url/skill route,
+      # which reads no authorization header and therefore starts a chain that
+      # is refused on every hop. gateway_api_key_env is a NAME, never a key:
+      # the value is injected into the job environment under this name and
+      # read there, so it never reaches argv, this node's serialised payload,
+      # or the event log. A declared gateway_url with no credential name is
+      # refused at the request model, and a name that resolves to nothing is
+      # the SUBMISSION_ROUTE_NOT_CONFIGURED verdict above.
+      - gateway_url
+      - gateway_api_key_env
+      - gateway_workflow_type
       - runtime_command
       - task_type
       - prompt
@@ -348,7 +367,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-27"
-  updated: "2026-09-15"
+  updated: "2026-09-16"
   tags:
     - "effect"
     - "canary"
