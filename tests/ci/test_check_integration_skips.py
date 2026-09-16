@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci.check_integration_skips import (
     GuardConfig,
@@ -212,3 +213,79 @@ def test_strict_flags_unclassified_skip(cfg: GuardConfig, tmp_path: Path) -> Non
 @pytest.mark.unit
 def test_embedded_selftest_passes(cfg: GuardConfig) -> None:
     assert selftest(cfg) == 0
+
+
+# =============================================================================
+# The curated set is declared in two files, and they must agree (OMN-18419)
+# =============================================================================
+# `curated_test_paths` in the config is documented as INFORMATIONAL -- the gate
+# keys on junit skip reasons, not on that list -- which is exactly why it can
+# drift. The list and the ci.yml step that runs the proofs are the same
+# decision written twice, and a proof dropped from the step while the list
+# still names it leaves a curated Postgres proof that nothing runs, with no
+# signal anywhere. This pins them to each other. It is check-only: if it fails,
+# add the path to whichever of the two files is missing it.
+
+_CI_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+_CURATED_PROOF_STEP_ID = "run_curated_proofs"
+
+
+def _declared_curated_paths() -> list[str]:
+    raw = yaml.safe_load(_CONFIG.read_text(encoding="utf-8")) or {}
+    paths = raw.get("curated_test_paths") or []
+    assert isinstance(paths, list) and paths, (
+        f"{_CONFIG} declares no curated_test_paths; the guard job would have "
+        "nothing to run and its zero-collection check is the only thing that "
+        "would notice"
+    )
+    return [str(entry) for entry in paths]
+
+
+def _curated_step_script() -> str:
+    """The `run` body of the ci.yml step that runs the curated proofs.
+
+    Read from the parsed workflow by step id rather than by grepping the file,
+    so a moved step or a renamed one is a resolvable failure instead of a
+    silently empty match.
+    """
+    workflow = yaml.safe_load(_CI_WORKFLOW.read_text(encoding="utf-8")) or {}
+    for job_name, job in (workflow.get("jobs") or {}).items():
+        for step in job.get("steps") or []:
+            if step.get("id") == _CURATED_PROOF_STEP_ID:
+                assert job_name == "integration-guard", (
+                    f"step {_CURATED_PROOF_STEP_ID!r} moved to job {job_name!r}; "
+                    "the curated Postgres proofs must run on the job that "
+                    "provisions Postgres"
+                )
+                return str(step.get("run") or "")
+    raise AssertionError(
+        f"no step with id {_CURATED_PROOF_STEP_ID!r} in {_CI_WORKFLOW}; the "
+        "curated Postgres proofs are not being run by any job"
+    )
+
+
+@pytest.mark.unit
+def test_every_curated_path_is_run_by_the_guard_job() -> None:
+    script = _curated_step_script()
+    missing = [path for path in _declared_curated_paths() if path not in script]
+    assert not missing, (
+        "these paths are declared curated_test_paths but the integration-guard "
+        f"step does not run them, so nothing executes them: {missing}"
+    )
+
+
+@pytest.mark.unit
+def test_every_path_the_guard_job_runs_is_declared_curated() -> None:
+    declared = _declared_curated_paths()
+    script = _curated_step_script()
+    selected = [token for token in script.split() if token.startswith("tests/")]
+    assert selected, (
+        "the integration-guard step selects no test path at all; its "
+        "zero-collection check would be the only thing to notice"
+    )
+    undeclared = [token for token in selected if token not in declared]
+    assert not undeclared, (
+        "the integration-guard step runs these paths but curated_test_paths "
+        f"does not declare them, so the config understates what the gate "
+        f"covers: {undeclared}"
+    )
