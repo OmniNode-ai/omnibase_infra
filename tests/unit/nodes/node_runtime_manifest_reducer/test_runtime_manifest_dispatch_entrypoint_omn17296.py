@@ -46,6 +46,7 @@ Ticket: OMN-17296
 from __future__ import annotations
 
 import inspect
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,7 +70,10 @@ from omnibase_infra.nodes.node_runtime_manifest_reducer.handlers.handler_postgre
     HandlerPostgresRuntimeManifestInsert,
 )
 from omnibase_infra.runtime.auto_wiring.discovery import _parse_handler_routing
-from omnibase_infra.runtime.auto_wiring.handler_wiring import _make_dispatch_callback
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _make_dispatch_callback,
+    _make_payload_type_matcher,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_handler_routing_entry import (
     ModelHandlerRoutingEntry,
 )
@@ -361,16 +365,17 @@ async def test_real_dispatch_callback_propagates_the_envelope_correlation_id() -
 
 
 @pytest.mark.asyncio
-async def test_dispatch_fails_closed_when_the_envelope_carries_no_correlation_id() -> (
-    None
-):
-    """Fail-closed, not a synthesised id.
+async def test_missing_correlation_id_is_generated_and_logged_not_refused(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A missing trace id costs a WARNING, never the row.
 
-    ``publish_runtime_manifest`` declares ``correlation_id: UUID`` (required), so
-    an envelope without one did not come from the sanctioned publisher. Inventing
-    a UUID here would write an untraceable row and hide the real producer defect,
-    so the dispatch must raise and dead-letter instead (rule 8, fail fast on a
-    missing value rather than substituting a default).
+    This repo's correlation-id rule is "always propagate from incoming requests;
+    auto-generate with uuid4() if missing". Refusing instead would trade the row
+    — the durable OMN-15512 attach-readiness surface this projection exists for —
+    for a field the row is not even keyed on, and would put the event straight
+    back on the dead-letter topic this change is clearing. The substitution is
+    logged so it stays observable rather than silent.
     """
     pool = _make_pool()
     handler = HandlerPostgresRuntimeManifestInsert(pool)
@@ -379,11 +384,57 @@ async def test_dispatch_fails_closed_when_the_envelope_carries_no_correlation_id
     envelope = _wire_envelope(_make_event())
     envelope = envelope.model_copy(update={"correlation_id": None})
 
-    with pytest.raises(Exception) as excinfo:
-        await callback(envelope)
+    with caplog.at_level(logging.WARNING):
+        result = await callback(envelope)
 
-    assert "correlation_id" in str(excinfo.value)
-    pool._test_conn.fetchrow.assert_not_called()
+    assert result is not None
+    assert result.status is EnumDispatchStatus.SUCCESS
+    pool._test_conn.fetchrow.assert_called_once()
+    assert any(
+        "correlation_id" in r.message and r.levelno == logging.WARNING
+        for r in caplog.records
+    ), "the generated correlation id was substituted silently"
+
+
+# ---------------------------------------------------------------------------
+# The silent-drop hazard this change introduces
+# ---------------------------------------------------------------------------
+
+
+def test_the_real_wire_payload_matches_the_contract_type_matcher() -> None:
+    """The published payload must satisfy the type matcher, or records VANISH.
+
+    Declaring ``event_model`` makes the dispatcher type-scoped: the engine asks
+    ``PayloadTypeMatcher`` whether a payload is this handler's type, and a
+    rejection is treated as "not my message" — not an error. The record is then
+    consumed and COMMITTED with no handler invoked and no DLQ entry. That is the
+    phantom-wiring-death signature the matcher's own OMN-16767 comment describes,
+    and it is strictly worse than the loud dead-letter this change replaces,
+    because nothing anywhere reports it.
+
+    So this asserts the thing that must never stop being true: the exact payload
+    ``publish_runtime_manifest`` puts on the wire matches. It is also the test
+    that fails if the OMN-17296 round-trip fix on
+    ``ModelRuntimeManifestPublished`` is ever reverted.
+    """
+    matcher = _make_payload_type_matcher(_event_model_ref())
+    wire_payload = _make_event().model_dump(mode="json")
+
+    assert matcher(wire_payload), (
+        "the published manifest payload does NOT match its own declared "
+        "event_model, so every record would be type-scoped away and silently "
+        f"committed with no handler and no DLQ. detail={matcher.last_validation_detail}"
+    )
+
+
+def test_the_type_matcher_still_rejects_a_foreign_payload() -> None:
+    """Positive control for the matcher assertion above.
+
+    Without it, a matcher that accepted everything would pass the previous test
+    while type-scoping nothing.
+    """
+    matcher = _make_payload_type_matcher(_event_model_ref())
+    assert not matcher({"not": "a manifest"})
 
 
 @pytest.mark.asyncio

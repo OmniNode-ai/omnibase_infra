@@ -16,9 +16,8 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from omnibase_core.models.errors import ModelOnexError
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -115,30 +114,37 @@ class HandlerPostgresRuntimeManifestInsert(MixinPostgresOpExecutor):
         before this runs; the fold into the INSERT payload happens on the model
         (``from_manifest_event``), not here.
 
+        A missing correlation id is generated rather than refused, per this
+        repo's standing correlation-id rule ("always propagate from incoming
+        requests; auto-generate with uuid4() if missing"), and the substitution
+        is logged at WARNING so it stays observable instead of silent. Refusing
+        would trade the row — the durable OMN-15512 attach-readiness surface,
+        which is the point of this projection — for a tracing field the row is
+        not keyed on: its identity is
+        ``(runtime_profile, topology_hash, started_at)``.
+
         Args:
             envelope: Event envelope carrying the published boot manifest.
 
         Returns:
             ModelBackendResult indicating success or failure.
-
-        Raises:
-            ModelOnexError: If the envelope carries no correlation id. The
-                publisher declares ``correlation_id: UUID`` (required), so an
-                envelope without one did not come from the sanctioned publisher.
-                Synthesising one would write an untraceable row and hide the
-                producer defect, so this fails closed and dead-letters instead.
         """
-        correlation_id = envelope.correlation_id
-        if correlation_id is None:
-            raise ModelOnexError(
-                "runtime-manifest-published envelope carries no correlation_id; "
-                "publish_runtime_manifest declares it required, so this event "
-                "did not come from the sanctioned publisher. Refusing to insert "
-                "an untraceable runtime_manifests row."
-            )
         payload = ModelPayloadInsertRuntimeManifest.from_manifest_event(
             envelope.payload
         )
+        correlation_id = envelope.correlation_id
+        if correlation_id is None:
+            correlation_id = uuid4()
+            logger.warning(
+                "runtime-manifest-published envelope carried no correlation_id; "
+                "generated one for this INSERT. publish_runtime_manifest declares "
+                "it required, so an envelope without one did not come from the "
+                "sanctioned publisher and the producer is worth checking.",
+                extra={
+                    "runtime_profile": payload.runtime_profile,
+                    "generated_correlation_id": str(correlation_id),
+                },
+            )
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,
