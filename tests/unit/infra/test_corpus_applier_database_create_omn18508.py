@@ -469,3 +469,89 @@ def test_the_ownership_prose_control_has_a_subject() -> None:
         "correction was deleted rather than made, so the next reader has no way "
         "to tell the current prose is deliberate"
     )
+
+
+# ---------------------------------------------------------------------------
+# AC6 -- a grant that lands after its only consumer has exited is not a grant
+# ---------------------------------------------------------------------------
+
+# The service whose entrypoint runs the warm-volume provisioning seams.
+PROVISIONING_ENTRYPOINT = "run-forward-migrations.sh"
+
+
+def _provisioning_service() -> str:
+    """The service that runs the warm-volume provisioning seams.
+
+    Resolved across the whole compose set, not per file: a lane overlay
+    redeclares this service to hand it more environment and inherits the
+    entrypoint from the base file, so a per-file lookup finds it in the base
+    and not in the overlay that carries the applier.
+    """
+    for compose_file in sorted(DOCKER_DIR.glob("docker-compose*.yml")):
+        compose = _load_compose(compose_file)
+        for service_name, service in (compose.get("services") or {}).items():
+            if not isinstance(service, dict):
+                continue
+            declared = [service.get("entrypoint"), service.get("command")]
+            if PROVISIONING_ENTRYPOINT in str(declared):
+                return str(service_name)
+    return ""
+
+
+@pytest.mark.unit
+def test_a_non_superuser_applier_waits_for_its_own_provisioning() -> None:
+    """AC6: ordering, measured rather than assumed.
+
+    ``cloud-migration`` declared ``postgres: service_healthy`` and nothing else
+    that could order it against the seam which mints its identity's credential
+    (OMN-18438) and grants its database CREATE (OMN-18508). Both one-shots then
+    start as soon as Postgres reports healthy, and which of them wins is a
+    scheduling coin flip.
+
+    Measured on the .201 dev lane, 2026-09-16T22:13:58Z, on the first rebuild
+    after the grant landed: the corpus apply raised ``permission denied to
+    create extension "pgcrypto"`` at .122Z, and the grant it needed was issued
+    at .416Z -- 294 ms later, in the same bring-up. The grant was correct and
+    arrived after its only consumer had already exited 3.
+
+    A superuser applier needs no such edge: nothing provisions the superuser.
+    """
+    provisioner = _provisioning_service()
+    assert provisioner, (
+        "no compose service runs "
+        f"{PROVISIONING_ENTRYPOINT} -- the warm-volume seams have no host, so "
+        "this test has nothing to order against"
+    )
+
+    checked = 0
+    for compose_file, service_name, identity, _ in _migration_appliers():
+        if _is_superuser_identity(identity) or not identity:
+            continue
+
+        service = (_load_compose(compose_file).get("services") or {})[service_name]
+        checked += 1
+        depends_on = service.get("depends_on") or {}
+        assert isinstance(depends_on, dict), (
+            f"{compose_file.name}'s {service_name} uses the list form of "
+            "depends_on, which cannot express a completion condition"
+        )
+        declared = depends_on.get(provisioner)
+        assert declared is not None, (
+            f"{compose_file.name}'s {service_name} applies a corpus as "
+            f"{identity} but does not wait for {provisioner}, which is what "
+            f"provisions {identity}. Both start on postgres being healthy, so "
+            "the apply can win the race and fail on a privilege that is granted "
+            "milliseconds later."
+        )
+        assert declared.get("condition") == "service_completed_successfully", (
+            f"{compose_file.name}'s {service_name} waits on {provisioner} with "
+            f"condition {declared.get('condition')!r}. Only "
+            "service_completed_successfully proves the seams ran; a started or "
+            "healthy condition still races the grants they issue."
+        )
+
+    assert checked, (
+        "no non-superuser applier was checked for ordering -- either the "
+        "derivation or the provisioning-service lookup stopped working, and a "
+        "zero here would read as a clean bill of health"
+    )

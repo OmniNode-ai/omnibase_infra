@@ -1467,6 +1467,21 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      # OMN-18508: forward-migration is what PROVISIONS the identity this
+      # one-shot applies the corpus as. Its OMN-18438 seam mints role_omninode's
+      # LOGIN and its CONNECT + schema grants on a warm volume, and its
+      # OMN-18508 seam grants CREATE on the database, which the corpus's first
+      # statement (CREATE EXTENSION pgcrypto) needs. Without this edge the two
+      # one-shots race on `postgres: service_healthy` alone.
+      #
+      # Measured on the .201 dev lane, 2026-09-16T22:13:58Z, the first rebuild
+      # after the grant landed: cloud-migration raised `permission denied to
+      # create extension "pgcrypto"` at .122Z and forward-migration granted the
+      # privilege at .416Z -- 294 ms apart, on the same lane, in the same
+      # bring-up. The grant was correct and arrived after the only consumer that
+      # needed it had already exited 3.
+      forward-migration:
+        condition: service_completed_successfully
     volumes:
       - cloud_migrations:/work
       - ../docker/migrations/cloud/run-cloud-migrations.sh:/run-cloud-migrations.sh:ro
