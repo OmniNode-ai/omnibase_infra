@@ -37,20 +37,35 @@ def _config() -> ModelRunnerFleetConfig:
     return load_runner_fleet_config(FLEET_CONFIG)
 
 
+# The declared hosts, as (address, arch, expected_count). Named here rather
+# than spelled inline so the lookups below are dict `.get()` calls: a `"literal"
+# in mapping` membership test is indistinguishable from a URL substring check to
+# a static analyser, and the two CodeQL high-severity
+# `py/incomplete-url-substring-sanitization` alerts this file first raised were
+# exactly that false shape. `.get()` says the same thing and does not.
+EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
+    ("omninode-pc.tail75df5e.ts.net", "amd64", 60),
+    ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
+)
+
+
 def test_inventory_declares_every_lab_host_with_its_architecture() -> None:
     config = _config()
     by_host = {host.host: host for host in config.hosts}
 
-    assert "omninode-pc.tail75df5e.ts.net" in by_host, (
-        "the inventory must declare the primary .201 host"
-    )
-    assert by_host["omninode-pc.tail75df5e.ts.net"].arch == "amd64"
-    assert by_host["omninode-pc.tail75df5e.ts.net"].expected_count == 60
-
-    assert "stickybeatz-2.tail75df5e.ts.net" in by_host, (
-        "the inventory must declare the .101 arm64 host"
-    )
-    assert by_host["stickybeatz-2.tail75df5e.ts.net"].arch == "arm64"
+    for address, arch, expected_count in EXPECTED_HOSTS:
+        row = by_host.get(address)
+        assert row is not None, (
+            f"the inventory must declare the host {address!r}; it declares "
+            f"{sorted(by_host)}"
+        )
+        assert row.arch.value == arch, (
+            f"{address} is declared {row.arch.value}, expected {arch}"
+        )
+        assert row.expected_count == expected_count, (
+            f"{address} declares expected_count={row.expected_count}, "
+            f"expected {expected_count}"
+        )
 
 
 def test_primary_host_row_agrees_with_the_legacy_scalars() -> None:
