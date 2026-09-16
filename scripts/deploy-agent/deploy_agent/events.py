@@ -191,6 +191,56 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 # intermittent miss -- the agent's scope could not reach them at all, and
 # ``restart: unless-stopped`` keeps a stale image running and healthy, so
 # nothing reported it.
+# OMN-18438: the dev lane's omninode_cloud migration one-shots.
+#
+# THE SAME DEFECT AS OMN-18108, ONE LAYER OVER. omnibase_infra#3636 put
+# `cloud-migration-files` and `cloud-migration` into
+# DEV_LANE_ONLY_MIGRATION_SERVICES in scripts/deploy-runtime.sh and wired them
+# into that script's migration preflight. They still never ran, because THIS
+# AGENT DOES NOT INVOKE THAT SCRIPT -- every mention of deploy-runtime.sh in
+# this package is a comment. An array expanded only inside that script is
+# unreachable from the path that actually deploys the dev lane.
+#
+# Measured on the .201 dev lane after the 14:43Z governed rebuild (agent
+# command ee3d2cc6, ref 3586e65dc, which carried those arrays): zero
+# cloud-migration containers had EVER been created, omninode_cloud held 0
+# tables against 78 in omnibase_infra, and 450 lines of deploy journal held 0
+# cloud-migration mentions against 2 migration controls.
+#
+# WHY THESE ARE NOT IN services_for_scope()
+# -----------------------------------------
+# That function answers "what does a runtime deploy restart", and its result
+# reaches both _compose_up and the build set. These two are one-shots on
+# upstream images -- postgres:16 and the tag-referenced migrate image -- so
+# there is nothing to build, and starting them beside the runtime family would
+# run them unordered and leave the up-readback waiting on containers that are
+# supposed to exit. They belong in the migration preflight, the phase that
+# already exists for run-to-completion boot-order work.
+#
+# ORDER IS THE ORDERING. cloud-migration-files copies the corpus, its MANIFEST
+# and that image's own manifest evaluator into the shared volume;
+# cloud-migration then applies it. Every command on this path carries
+# --no-deps, which is exactly what switches compose's depends_on off, so this
+# sequence is the only thing sequencing the copy before the apply.
+#
+# ONE tuple here where bash carries two arrays: deploy-runtime.sh separates
+# services from one-shots because its lane-agnostic set mixes in a keepalive
+# (migration-gate). Every member of the dev-lane set is a one-shot, so a
+# second tuple would be a second thing to drift rather than a distinction --
+# and tests/unit/test_dev_lane_cloud_migrations_omn18438.py asserts the two
+# bash arrays are equal so that stays true.
+#
+# Bound to the bash declaration by
+# tests/unit/test_dev_lane_cloud_migrations_omn18438.py
+# ::test_python_declaration_equals_the_bash_array, which PARSES the array out
+# of deploy-runtime.sh rather than restating it, and carries a positive control
+# so an empty parse cannot read as agreement.
+DEV_LANE_ONLY_MIGRATION_SERVICES: tuple[str, ...] = (
+    "cloud-migration-files",
+    "cloud-migration",
+)
+
+
 DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-tenant-registry-writer",
     "projection-delegation-writer",

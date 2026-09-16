@@ -292,10 +292,27 @@ class TestCoreAndFullScopeComposeUp:
             verified.append(services)
             return True, []
 
+        # OMN-18438: the dev lane's omninode_cloud one-shots are gated on
+        # exited-0 through their own seam rather than on verify_containers_up,
+        # which also accepts "running" -- see _oneshot_completed. It is mocked
+        # here for the same reason its sibling is, and the ordering assertions
+        # below are extended to cover the calls it gates.
+        completed: list[list[str]] = []
+
+        def fake_completed(
+            services: list[str], timeout_s: int = 300, **kwargs: object
+        ) -> tuple[bool, list[str]]:
+            completed.append(services)
+            return True, []
+
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch(
                 "deploy_agent.executor.verify_containers_up", side_effect=fake_verify
+            ),
+            patch(
+                "deploy_agent.executor.verify_oneshots_completed",
+                side_effect=fake_completed,
             ),
         ):
             executor._compose_up(
@@ -326,3 +343,11 @@ class TestCoreAndFullScopeComposeUp:
         )
         assert captured_cmds[-1][-len(dev_runtime_services) :] == dev_runtime_services
         assert verified[:2] == [["forward-migration"], ["migration-gate"]]
+        # OMN-18438: the cloud one-shots run AFTER the lane-agnostic pair and
+        # BEFORE the runtime family, each waited on individually, in the order
+        # the shared declaration gives -- the corpus copy before the apply.
+        assert captured_cmds[2][-1] == "cloud-migration-files"
+        assert captured_cmds[3][-1] == "cloud-migration"
+        assert "--force-recreate" in captured_cmds[2]
+        assert "--force-recreate" in captured_cmds[3]
+        assert completed == [["cloud-migration-files"], ["cloud-migration"]]

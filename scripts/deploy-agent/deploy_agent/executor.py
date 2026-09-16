@@ -31,6 +31,7 @@ from deploy_agent.compose_budget import (
 )
 from deploy_agent.events import (
     DEV_LANE_ONLY_BUILDABLE_SERVICES,
+    DEV_LANE_ONLY_MIGRATION_SERVICES,
     GATEWAY_COMPOSE_PROJECT,
     BuildSource,
     EnumRuntimeLane,
@@ -881,6 +882,58 @@ def verify_containers_up(
         if not _service_satisfied(*last_states.get(service, ("missing", None)))
     ]
     return False, missing
+
+
+def _oneshot_completed(state: str, exit_code: int | None) -> bool:
+    """A one-shot is done only when it has EXITED 0 (OMN-18438).
+
+    Deliberately stricter than ``_service_satisfied``, which also accepts
+    ``running``. That tolerance is right for the lane-agnostic migration set,
+    which mixes in ``migration-gate`` -- a keepalive that is supposed to stay
+    up. Applied to a corpus migration it is wrong in a way that reads as
+    success: a still-running apply would satisfy the gate, the runtime would
+    start against a half-migrated database, and the deploy would report green.
+    """
+    return state == "exited" and exit_code == 0
+
+
+def verify_oneshots_completed(
+    expected_oneshots: list[str],
+    timeout_s: int = 300,
+    *,
+    lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+) -> tuple[bool, list[str]]:
+    """Poll compose until every named one-shot has exited 0.
+
+    Returns ``(False, [names])`` on timeout rather than raising, matching
+    ``verify_containers_up``'s contract so the caller owns the error text and
+    can name the phase the failure belongs to.
+    """
+    deadline = time.monotonic() + timeout_s
+    pending: list[str] = list(expected_oneshots)
+    while time.monotonic() < deadline:
+        try:
+            states = _compose_service_states(lane)
+        except RuntimeError as exc:
+            logger.warning(
+                "verify_oneshots_completed: docker compose ps failed: %s", exc
+            )
+            time.sleep(2)
+            continue
+        pending = [
+            service
+            for service in expected_oneshots
+            if not _oneshot_completed(*states.get(service, ("missing", None)))
+        ]
+        if not pending:
+            return True, []
+        logger.info(
+            "verify_oneshots_completed: waiting for %d one-shot(s): %s",
+            len(pending),
+            pending,
+        )
+        time.sleep(2)
+    return False, pending
 
 
 def runtime_compose_up_budget(
@@ -3197,6 +3250,41 @@ class DeployExecutor:
                 raise RuntimeError(
                     f"Runtime migration preflight did not satisfy {service}: {stuck}"
                 )
+
+        # OMN-18438: then the lane's own migration one-shots, if it has any.
+        #
+        # AFTER the lane-agnostic set above, which is the boot-order contract
+        # for the projection schema, and BEFORE the runtime services this
+        # preflight gates. Scoped to DEV because these two exist only in
+        # docker-compose.dev-lane.yml: prod, stability-test and judge resolve
+        # neither name, and `docker compose up` fails the WHOLE invocation on
+        # one undefined service, so a lane-agnostic entry would turn a dev-lane
+        # fix into a deploy outage on the proof lane.
+        #
+        # Gated on exited-0 rather than on verify_containers_up -- see
+        # _oneshot_completed for why "running" is the wrong bar for a corpus
+        # migration. --force-recreate comes from base_cmd and is load-bearing
+        # here: compose considers an already-exited one-shot converged, so
+        # without it a new migrate image tag never reaches the database.
+        if lane == EnumRuntimeLane.DEV:
+            for service in DEV_LANE_ONLY_MIGRATION_SERVICES:
+                cmd = [*base_cmd, service]
+                result = _run(cmd, timeout=timeout, env=_compose_env())
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"Dev-lane migration preflight failed for {service}: "
+                        f"{result.stderr.strip() or result.stdout.strip()}"
+                    )
+                ok, pending = verify_oneshots_completed(
+                    [service], timeout_s=timeout, lane=lane
+                )
+                if not ok:
+                    raise RuntimeError(
+                        "Dev-lane migration preflight did not complete "
+                        f"{service}: {pending}. A one-shot that has not exited "
+                        "0 has not proven it did its job."
+                    )
+
         for table_name in REQUIRED_PROJECTION_TABLES:
             result = _run(
                 [
