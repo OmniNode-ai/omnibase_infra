@@ -4709,10 +4709,16 @@ jobs:
           # OMN-18172 (Jonah, comment c02674f2): read ONLY by the stored-synthetic
           # proof below, which fails instead of skipping when Postgres is absent.
           OMN18172_REQUIRE_PG: "1"
+          # OMN-18419 AC4: same fail-closed contract for the chain-tree replay
+          # proof. It reads back public.ledger_chain rows written by a real
+          # dispatch, so a Postgres-absent skip here would assert nothing while
+          # the job reported success.
+          OMN18419_REQUIRE_PG: "1"
         run: |
           uv run pytest \
             tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid \
             tests/integration/db/test_chain_canary_stored_traffic_class_omn18172.py \
+            tests/integration/nodes/node_delegation_chain_ledger_effect/test_chain_tree_replay_dispatch_omn18419.py \
             -rs -v --tb=short \
             --junitxml=integration-guard.xml
 
