@@ -89,10 +89,28 @@ jobs:
               *) echo "::error::${name} is not arm64 (${got})"; fail=1 ;;
             esac
           }
+          # `gh` and `uv` print no architecture in --version, and the runner
+          # image carries no file(1) -- measured, not assumed: the first run of
+          # this job on the arm64 host failed with `file: command not found`.
+          # Read the ELF header instead. Byte 18 of an ELF file is e_machine:
+          # 0xB7 AArch64, 0x3E x86-64. python3 is in the image by construction
+          # (the prebuilt CI env is built on it), so this needs no new package
+          # and, unlike file(1), it cannot be fooled by a wrapper script.
+          elf_arch() {
+            python3 - "$1" <<'PY'
+          import sys, pathlib
+          MACHINE = {0xB7: "arm64", 0x3E: "amd64", 0x28: "arm", 0x00: "none"}
+          data = pathlib.Path(sys.argv[1]).read_bytes()[:20]
+          if data[:4] != b"\x7fELF":
+              print(f"not-an-elf({sys.argv[1]})")
+              raise SystemExit(0)
+          print(MACHINE.get(data[18], f"unknown-e_machine-0x{data[18]:02x}"))
+          PY
+          }
           check kubectl "$(kubectl version --client=true -o json | python3 -c 'import sys,json;print(json.load(sys.stdin)["clientVersion"]["platform"])')"
           check aws     "$(aws --version 2>&1)"
-          check gh      "$(file -L "$(command -v gh)" | sed 's/.*: //')"
-          check uv      "$(file -L "$(command -v uv)" | sed 's/.*: //')"
+          check gh      "$(elf_arch "$(command -v gh)")"
+          check uv      "$(elf_arch "$(command -v uv)")"
           [[ "${fail}" -eq 0 ]]
 
       # The credential half. Named, hashed and length-checked -- never printed.
