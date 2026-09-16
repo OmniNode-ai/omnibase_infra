@@ -225,8 +225,11 @@ async def _live_consumer_groups_async(
         # connection down with it, while the SAME three groups described ONE AT
         # A TIME returned cleanly (``Stable``/1 member, ``Empty``/0, ``Stable``/1).
         # Serial describes of a handful of candidates cost nothing here and are
-        # the shape that is proven to work on the lane this gate guards. This is
-        # not a downgrade: an error on any candidate still propagates to UNKNOWN.
+        # the shape proven to work on the lane this gate guards. If a later
+        # aiokafka/MSK combination proves batched describes safe, this loop can
+        # be collapsed only with a lane proof that covers the same three-group
+        # shape. Until then, any describe failure still leaves the answer
+        # UNKNOWN rather than returning a partial consumer set.
         described: list[object] = []
         for candidate in candidates:
             described.extend(await admin.describe_consumer_groups([candidate]))

@@ -106,6 +106,7 @@ class _RecordingAdminClient:
     listed_groups: list[tuple[str, str]] = []
     described_states: dict[str, str] = {}
     describe_calls: list[list[str]] = []
+    raise_on_describe_group: str | None = None
     closed: bool = False
 
     def __init__(self, **kwargs: Any) -> None:
@@ -130,6 +131,8 @@ class _RecordingAdminClient:
         self, group_ids: list[str]
     ) -> list[_FakeDescribeResponse]:
         _RecordingAdminClient.describe_calls.append(list(group_ids))
+        if _RecordingAdminClient.raise_on_describe_group in group_ids:
+            raise ValueError("synthetic decode failure")
         return [
             _FakeDescribeResponse(
                 [
@@ -160,6 +163,7 @@ def _stub_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     _RecordingAdminClient.described_states = {}
     _RecordingAdminClient.describe_calls = []
+    _RecordingAdminClient.raise_on_describe_group = None
     monkeypatch.setattr(aiokafka.admin, "AIOKafkaAdminClient", _RecordingAdminClient)
 
 
@@ -356,3 +360,45 @@ def test_each_candidate_is_described_on_its_own_request(
         "candidates were not described one per request: "
         f"{_RecordingAdminClient.describe_calls!r}"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_stub_admin")
+def test_no_matching_groups_returns_empty_without_describing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty candidate set is a complete broker answer, not UNKNOWN."""
+    _clear_kafka_env(monkeypatch)
+    _RecordingAdminClient.listed_groups = [
+        ("some.other.group.__t.onex.cmd.unrelated.v1", "consumer")
+    ]
+
+    assert (
+        live_consumer_groups(topic=_DELEGATE_COMMAND_TOPIC, bootstrap_servers=_BROKER)
+        == ()
+    )
+    assert _RecordingAdminClient.describe_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_stub_admin")
+def test_mid_loop_describe_failure_is_unknown_not_partial_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Earlier successful serial describes are discarded on any later error."""
+    from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+
+    _clear_kafka_env(monkeypatch)
+    scoped = sorted(
+        f"onex-dev.omn18418.node-{n}.consume.1.{n}.0"
+        f"{TOPIC_SCOPE_INFIX}{_DELEGATE_COMMAND_TOPIC}"
+        for n in (1, 2, 3)
+    )
+    _RecordingAdminClient.listed_groups = [(group, "consumer") for group in scoped]
+    _RecordingAdminClient.raise_on_describe_group = scoped[1]
+
+    with pytest.raises(ConsumerGroupLivenessUnknownError):
+        live_consumer_groups(topic=_DELEGATE_COMMAND_TOPIC, bootstrap_servers=_BROKER)
+
+    assert _RecordingAdminClient.describe_calls == [[scoped[0]], [scoped[1]]]
+    assert _RecordingAdminClient.closed is True
