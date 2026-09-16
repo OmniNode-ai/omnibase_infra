@@ -105,6 +105,7 @@ class _RecordingAdminClient:
     seen_kwargs: dict[str, Any] = {}
     listed_groups: list[tuple[str, str]] = []
     described_states: dict[str, str] = {}
+    describe_calls: list[list[str]] = []
     closed: bool = False
 
     def __init__(self, **kwargs: Any) -> None:
@@ -128,6 +129,7 @@ class _RecordingAdminClient:
     async def describe_consumer_groups(
         self, group_ids: list[str]
     ) -> list[_FakeDescribeResponse]:
+        _RecordingAdminClient.describe_calls.append(list(group_ids))
         return [
             _FakeDescribeResponse(
                 [
@@ -157,6 +159,7 @@ def _stub_admin(monkeypatch: pytest.MonkeyPatch) -> None:
         ("some.other.group.__t.onex.cmd.unrelated.v1", "consumer"),
     ]
     _RecordingAdminClient.described_states = {}
+    _RecordingAdminClient.describe_calls = []
     monkeypatch.setattr(aiokafka.admin, "AIOKafkaAdminClient", _RecordingAdminClient)
 
 
@@ -313,3 +316,43 @@ def test_no_broker_address_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ConsumerGroupLivenessUnknownError):
         live_consumer_groups(topic=_DELEGATE_COMMAND_TOPIC)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_stub_admin")
+def test_each_candidate_is_described_on_its_own_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One group per describe -- the batched form does not decode against MSK.
+
+    ``describe_consumer_groups`` batches every group sharing a coordinator into
+    a single ``DescribeGroupsRequest``. Measured in-cluster on onex-dev
+    2026-09-16, that batched form died with ``ValueError: Buffer underrun
+    decoding string`` and took the broker connection with it, while the SAME
+    three groups described one at a time returned cleanly (Stable/1 member,
+    Empty/0, Stable/1). A batched describe here is therefore a lane probe that
+    refuses a healthy lane -- exactly the failure this ticket exists to remove
+    -- so the shape is pinned rather than left to whichever call the next edit
+    finds tidier.
+    """
+    from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+
+    _clear_kafka_env(monkeypatch)
+    # Three groups on the SAME topic scope, which is the live onex-dev shape:
+    # the orchestrator's two rolling versions plus the ledger audit tap.
+    scoped = sorted(
+        f"onex-dev.omn18418.node-{n}.consume.1.{n}.0"
+        f"{TOPIC_SCOPE_INFIX}{_DELEGATE_COMMAND_TOPIC}"
+        for n in (1, 2, 3)
+    )
+    _RecordingAdminClient.listed_groups = [(group, "consumer") for group in scoped]
+
+    found = live_consumer_groups(
+        topic=_DELEGATE_COMMAND_TOPIC, bootstrap_servers=_BROKER
+    )
+
+    assert set(found) == set(scoped)
+    assert _RecordingAdminClient.describe_calls == [[group] for group in scoped], (
+        "candidates were not described one per request: "
+        f"{_RecordingAdminClient.describe_calls!r}"
+    )

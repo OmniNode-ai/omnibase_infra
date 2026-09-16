@@ -215,7 +215,21 @@ async def _live_consumer_groups_async(
         if not candidates:
             return ()
 
-        described = await admin.describe_consumer_groups(candidates)
+        # ONE CANDIDATE PER DESCRIBE, deliberately. ``describe_consumer_groups``
+        # batches every group that shares a coordinator into a single
+        # ``DescribeGroupsRequest`` and gathers the responses concurrently, and
+        # against MSK that batched form fails to decode: measured in-cluster on
+        # onex-dev 2026-09-16, a describe of the three groups bound to
+        # ``onex.cmd.omnimarket.delegate-skill.v1`` died with
+        # ``ValueError: Buffer underrun decoding string`` and took the broker
+        # connection down with it, while the SAME three groups described ONE AT
+        # A TIME returned cleanly (``Stable``/1 member, ``Empty``/0, ``Stable``/1).
+        # Serial describes of a handful of candidates cost nothing here and are
+        # the shape that is proven to work on the lane this gate guards. This is
+        # not a downgrade: an error on any candidate still propagates to UNKNOWN.
+        described: list[object] = []
+        for candidate in candidates:
+            described.extend(await admin.describe_consumer_groups([candidate]))
     finally:
         await admin.close()
 
