@@ -335,6 +335,22 @@ skills:
     result_model: omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result.ModelChainCanaryResult
     args:
       - {name: probe-url, payload_field: probe_url, arg_type: string}
+      # OMN-18421: the TENANT-BEARING submission route. Empty keeps the legacy
+      # tenant-less /skill route; set, the probe submits POST
+      # {gateway-url}/v1/workflows with a real credential, and the gateway
+      # resolves the tenant from that credential and stamps it on the published
+      # envelope -- the field omnimarket's delegation projection writer reads,
+      # and without which every event the chain publishes is refused
+      # fail-closed into its malformed sink.
+      - {name: gateway-url, payload_field: gateway_url, arg_type: string}
+      # The NAME of the environment variable carrying the gateway API key,
+      # never the key. Same reasoning as the two dsn-env rows below and the
+      # same three durable copies: this arg is serialised into the node
+      # payload, onto the bus and into the event log, and the flag itself lands
+      # in argv. The request model refuses a value that is not a valid
+      # environment variable name.
+      - {name: gateway-api-key-env, payload_field: gateway_api_key_env, arg_type: string}
+      - {name: gateway-workflow-type, payload_field: gateway_workflow_type, arg_type: string}
       - {name: command-name, payload_field: runtime_command, arg_type: string}
       - {name: task-type, payload_field: task_type, arg_type: string}
       - {name: prompt, payload_field: prompt, arg_type: string}
