@@ -35,6 +35,22 @@ tier (set-and-ignored produces a warning), and a broker's reachability no
 longer decides the transport: execution locus is a resolved property of
 configuration, not an environmental accident.
 
+Broker addressing (OMN-16871). ``--bus`` says WHICH KIND of transport;
+``--lane`` says WHICH BROKER. The address used to be resolved by
+``EventBusKafka`` from the ambient ``KAFKA_BOOTSTRAP_SERVERS``, which on the
+launching Mac names the ``.201`` STABILITY-TEST lane — so every ad hoc
+delegation from a developer shell published onto a governed proof lane, and
+that lane recorded four such CLI terminal-run consumer groups when the finding
+was re-verified. That path is DELETED, not repointed: with the resolved bus on
+``kafka``, a run that named neither ``--lane`` nor ``--kafka-bootstrap`` is
+refused, and the refusal lists the declared lanes. ``--lane`` resolves the
+broker AND the declared transport from ``omnimarket/config/ci_bus_lanes.yaml``
+under the workspace root — the same declaration the OCC publishers and the
+chain canary already read, through the same ``load_lane_transport`` reader, so
+no second source exists. SASL credentials are unchanged and still reach the
+client through the standard ``KAFKA_SASL_*`` environment, which is where a
+secret belongs; what left the environment is the ADDRESS.
+
 **Execution locality (OMN-17295): ``--bus`` selects the TRANSPORT, never the
 executor.** On both values the ``node_delegate_skill_orchestrator`` runs
 IN-PROCESS in this CLI process, resolved from the local venv's installed
@@ -111,6 +127,10 @@ from omnibase_infra.backends.auto_configure import (
     resolve_bus_type,
 )
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
+from omnibase_infra.cli.delegate_lane import (
+    DelegateLaneSelectionError,
+    resolve_lane_target,
+)
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
     resolve_delegate_locus,
@@ -677,13 +697,18 @@ def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[st
     """Build the ``backend_overrides`` map for ``run_receipt_mode``/``RuntimeLocal``.
 
     ``bus`` selects the event-bus backend (``inmemory`` or ``kafka``). For
-    ``kafka``, an optional ``kafka_bootstrap`` (``host:port``) routes through
-    ``EventBusKafka.from_bootstrap`` so the live broker is targeted without
-    process-wide environment mutation; omitting it lets the Kafka bus resolve
-    its bootstrap from ``KAFKA_BOOTSTRAP_SERVERS``. ``kafka_bootstrap`` is only
-    meaningful for ``bus="kafka"`` and is rejected otherwise so a typo (e.g.
-    passing a broker with the default in-memory bus) fails loud rather than
-    silently running in-process.
+    ``kafka``, ``kafka_bootstrap`` (``host:port``) is REQUIRED and routes
+    through ``EventBusKafka.from_bootstrap`` so the live broker is targeted
+    without process-wide environment mutation. Omitting it used to let the
+    Kafka bus resolve its own bootstrap from ``KAFKA_BOOTSTRAP_SERVERS``;
+    OMN-16871 removed that path, because on the launching host that variable
+    names the governed stability-test lane and every ad hoc delegation from a
+    developer shell therefore published onto a proof lane. There is now no
+    combination of arguments that produces a kafka bus with an address this
+    process did not resolve explicitly. ``kafka_bootstrap`` is only meaningful
+    for ``bus="kafka"`` and is rejected otherwise so a typo (e.g. passing a
+    broker with the default in-memory bus) fails loud rather than silently
+    running in-process.
     """
     if bus not in BUS_CHOICES:
         raise ValueError(
@@ -692,6 +717,16 @@ def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[st
     if bus != "kafka" and kafka_bootstrap is not None:
         raise ValueError(
             f"--kafka-bootstrap is only valid with --bus kafka (got --bus {bus})."
+        )
+    if bus == "kafka" and kafka_bootstrap is None:
+        raise ValueError(
+            "the kafka bus requires a broker address: pass --lane <lane id> "
+            "to resolve it from the lane declaration, or --kafka-bootstrap "
+            "<host:port> to state a lane-internal address directly. It is no "
+            "longer resolved from KAFKA_BOOTSTRAP_SERVERS (OMN-16871) -- on "
+            "the launching host that variable names the governed "
+            "stability-test lane, so an ambient value silently selected a "
+            "proof lane."
         )
     overrides: dict[str, str] = {"event_bus": bus}
     if kafka_bootstrap is not None:
@@ -1130,15 +1165,33 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     ),
 )
 @click.option(
+    "--lane",
+    "lane",
+    type=str,
+    default=None,
+    help=(
+        "Lane this delegation is addressed to, e.g. 'dev'. Its broker and "
+        "transport are read from the checked-in lane declaration "
+        "omnimarket/config/ci_bus_lanes.yaml under the workspace root "
+        "(--omni-home / $OMNI_HOME); the refusal lists the declared lanes. "
+        "Required whenever the resolved bus is kafka, unless you state a "
+        "lane-internal address with --kafka-bootstrap. The broker address is "
+        "NOT read from KAFKA_BOOTSTRAP_SERVERS (OMN-16871): on the launching "
+        "host that variable names the governed stability-test lane, so an "
+        "ambient value silently selected a proof lane."
+    ),
+)
+@click.option(
     "--kafka-bootstrap",
     "kafka_bootstrap",
     type=str,
     default=None,
     help=(
-        "Kafka bootstrap servers (host:port) for --bus kafka. Omit to resolve "
-        "from KAFKA_BOOTSTRAP_SERVERS. Delegation model bindings come only "
-        "from the typed contract overlay. "
-        "Only valid with --bus kafka."
+        "Broker address (host:port) stated directly, for a lane-internal "
+        "address no declaration can carry -- e.g. 'redpanda:9092' from a "
+        "container on the lane's own compose network. Prefer --lane, which "
+        "resolves the address AND the transport from the lane declaration. "
+        "Mutually exclusive with --lane; only valid with --bus kafka."
     ),
 )
 @click.option(
@@ -1212,6 +1265,7 @@ def delegate_command(
     source: str | None,
     bus: str | None,
     locus: str,
+    lane: str | None,
     kafka_bootstrap: str | None,
     state_root: Path,
     timeout: int,
@@ -1250,6 +1304,7 @@ def delegate_command(
             source=source,
             bus=bus,
             locus=EnumDelegateLocus(locus),
+            lane=lane,
             kafka_bootstrap=kafka_bootstrap,
             state_root=state_root,
             timeout=timeout,
@@ -1275,6 +1330,7 @@ def run_delegate(
     source: str | None = None,
     bus: str | None = None,
     locus: EnumDelegateLocus = EnumDelegateLocus.AUTO,
+    lane: str | None = None,
     kafka_bootstrap: str | None = None,
     state_root: Path,
     timeout: int,
@@ -1303,13 +1359,18 @@ def run_delegate(
     (``inmemory``) — so a configured install reaches the shared platform
     substrate BY DEFAULT, with no ``--bus kafka`` flag required, and an
     unconfigured one stays fully offline. An explicit ``"inmemory"``
-    or ``"kafka"`` is never second-guessed. ``kafka_bootstrap`` optionally
-    overrides the broker when the resolved/explicit bus is ``"kafka"`` — it is
-    a usage error to supply it without also explicitly requesting
-    ``--bus kafka`` (a bare ``--kafka-bootstrap`` is never silently absorbed
-    into the auto-resolved default). Both flow through ``backend_overrides`` to
-    ``RuntimeLocal`` — the runtime is the single source of truth for the bus
-    (``feedback_bus_is_the_transport``).
+    or ``"kafka"`` is never second-guessed.
+
+    ``lane`` names the broker for a kafka run and is resolved through the lane
+    declaration (OMN-16871); ``kafka_bootstrap`` states an address directly,
+    for a lane-internal endpoint no declaration can carry. Exactly one of them
+    is required whenever the resolved bus is ``"kafka"`` — neither is a
+    refusal, and so is both. It remains a usage error to supply
+    ``kafka_bootstrap`` without also explicitly requesting ``--bus kafka`` (a
+    bare ``--kafka-bootstrap`` is never silently absorbed into the
+    auto-resolved default). The resolved address flows through
+    ``backend_overrides`` to ``RuntimeLocal`` — the runtime is the single
+    source of truth for the bus (``feedback_bus_is_the_transport``).
 
     ``timeout`` is enforced twice (OMN-14397): cooperatively inside
     ``RuntimeLocal`` via ``asyncio.wait_for``, and again here as a hard
@@ -1402,19 +1463,44 @@ def run_delegate(
             "config surface, env override, or broker probe was consulted",
             bus,
         )
-    if kafka_bootstrap is not None and bus == "kafka":
-        # The second, independent override: --bus names the transport,
-        # --kafka-bootstrap names the endpoint. Gated on the valid
-        # combination so the invalid one still fails loud in
-        # ``build_backend_overrides`` below rather than being announced first.
-        logger.info(
-            "onex delegate: explicit --kafka-bootstrap %s OVERRIDES the "
-            "broker address this run would otherwise resolve from the "
-            "configured authority",
-            kafka_bootstrap,
+    # OMN-16871: the broker ADDRESS comes from the lane the caller selected,
+    # read out of the checked-in lane declaration. It is never taken from
+    # ``KAFKA_BOOTSTRAP_SERVERS`` -- on the launching host that variable names
+    # the governed stability-test lane, so an ambient value silently addressed
+    # a proof lane. A kafka bus with no lane and no explicit broker is a
+    # REFUSAL here, not a fallback.
+    try:
+        lane_target = resolve_lane_target(
+            bus=bus,
+            lane=lane,
+            kafka_bootstrap=kafka_bootstrap,
+            omni_home=omni_home,
         )
+    except DelegateLaneSelectionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if lane_target is not None:
+        # Name the declaration that answered, not merely the address: a
+        # receipt that records only ``host:port`` cannot distinguish a
+        # declared lane from a value somebody typed.
+        logger.info(
+            "onex delegate: --lane %s resolves to broker %s over %s, declared in %s",
+            lane_target.lane,
+            lane_target.bootstrap_servers,
+            lane_target.security_protocol,
+            lane_target.declared_in,
+        )
+        resolved_bootstrap: str | None = lane_target.bootstrap_servers
+    else:
+        resolved_bootstrap = kafka_bootstrap
+        if resolved_bootstrap is not None:
+            logger.info(
+                "onex delegate: explicit --kafka-bootstrap %s states the "
+                "broker address directly; no lane declaration was consulted",
+                resolved_bootstrap,
+            )
     backend_overrides = build_backend_overrides(
-        bus=bus, kafka_bootstrap=kafka_bootstrap
+        bus=bus, kafka_bootstrap=resolved_bootstrap
     )
     run_id = uuid.uuid4()
     # OMN-14397: minted fresh per invocation — never reused/cached across runs
@@ -1451,7 +1537,13 @@ def run_delegate(
         locus_decision = resolve_delegate_locus(
             requested=locus,
             bus=bus,
-            kafka_bootstrap=kafka_bootstrap,
+            # OMN-16871: the RESOLVED address, not the raw flag. The
+            # deployed-lane probe asks whether a live consumer group is bound
+            # to the command topic; asking that of one broker and then
+            # publishing to another is a probe of a lane the run never
+            # reaches, which is the OMN-17295 instrument defect in a second
+            # place.
+            kafka_bootstrap=resolved_bootstrap,
             contract_path=contract_path,
             shared_bus_value=BUS_KAFKA,
         )
