@@ -49,6 +49,7 @@ from omnibase_infra.cli.receipt_mode import (
     CAPTURE_DIR_NAME,
     SPOOL_DIR_NAME,
     WORKFLOW_RESULT_FILENAME,
+    _explain_absent_receipt,
     _extract_correlation_id,
     _verify_workflow_data_correlation,
     _verify_workflow_data_identity,
@@ -758,19 +759,25 @@ class TestReceiptCorrelationJoin:
                 envelope_timestamp="2026-08-31T11:11:00Z",
             ),
         }
-        verified, reason = _verify_workflow_data_correlation(data, expected)
+        verified, reason = _verify_workflow_data_correlation(
+            data, expected, workflow_result=EnumWorkflowResult.COMPLETED
+        )
         assert verified == data
         assert reason is None
 
     def test_no_expected_correlation_leaves_content_untouched(self) -> None:
         """``onex node`` / ``onex skill`` callers mint no correlation id."""
         data: dict[str, JsonValue] = {"handler_result": {"status": "success"}}
-        verified, reason = _verify_workflow_data_correlation(data, None)
+        verified, reason = _verify_workflow_data_correlation(
+            data, None, workflow_result=EnumWorkflowResult.COMPLETED
+        )
         assert verified == data
         assert reason is None
 
     def test_empty_workflow_data_is_not_a_mismatch(self) -> None:
-        verified, reason = _verify_workflow_data_correlation({}, uuid.uuid4())
+        verified, reason = _verify_workflow_data_correlation(
+            {}, uuid.uuid4(), workflow_result=EnumWorkflowResult.COMPLETED
+        )
         assert verified == {}
         assert reason is None
 
@@ -801,7 +808,9 @@ class TestReceiptCorrelationJoin:
             "terminal_payload": last_night,
         }
         verified, reason = _verify_workflow_data_correlation(
-            stored_on_disk, this_run_correlation
+            stored_on_disk,
+            this_run_correlation,
+            workflow_result=EnumWorkflowResult.COMPLETED,
         )
         assert verified == {}, "a foreign correlation's receipt must be discarded"
         assert reason is not None
@@ -819,7 +828,9 @@ class TestReceiptCorrelationJoin:
                 "payload": {"correlation_id": str(foreign), "prompt_text": "other"},
             }
         }
-        verified, reason = _verify_workflow_data_correlation(data, expected)
+        verified, reason = _verify_workflow_data_correlation(
+            data, expected, workflow_result=EnumWorkflowResult.COMPLETED
+        )
         assert verified == {}
         assert reason is not None
         assert str(foreign) in reason
@@ -832,7 +843,9 @@ class TestReceiptCorrelationJoin:
         data: dict[str, JsonValue] = {
             "terminal_payload": {"status": "success", "response": "unattributed"}
         }
-        verified, reason = _verify_workflow_data_correlation(data, uuid.uuid4())
+        verified, reason = _verify_workflow_data_correlation(
+            data, uuid.uuid4(), workflow_result=EnumWorkflowResult.COMPLETED
+        )
         assert verified == {}
         assert reason is not None
         assert "no receipt found" in reason
@@ -917,6 +930,218 @@ class TestReceiptCorrelationJoin:
         assert str(run_one_correlation) in error_text
         # The other run's prompt text never reaches stdout.
         assert "reply with the single word: ok" not in stdout
+
+
+class TestNoReceiptIsNotAJoinRefusal:
+    """OMN-17295: a run that produced NO receipt is a timeout, not a mismatch.
+
+    Measured live 2026-09-16 (lane ``bus-dogfood-1305``): 8
+    ``onex delegate --bus kafka --lane dev`` runs, 4 of which never received a
+    terminal — two published and timed out with ``events received: 0``, two
+    never published at all because the broker refused connections for ~30 s
+    and the terminal consumer never got a partition assignment
+    (``Timeout starting consumer ... after 30s``). Each of the four stored
+    exactly this shape, read off disk::
+
+        {"result": "timeout", "exit_code": 1, "workflow": "...",
+         "run_id": "777b6ac0-...", "handler_locus": "dispatched",
+         "wire_correlation_id": "6918912c-f4df-45bb-aae3-7424c0ac91f8"}
+
+    — its own truthful outcome, and this run's own correlation. All four were
+    reported as ``the stored receipt names no correlation id at all``, which
+    is false twice over: there is no stored receipt, and the file names this
+    run's correlation. The refusal also discarded the whole file, so the
+    receipt lost the ``wire_correlation_id`` that is the only handle for
+    grepping the lane.
+    """
+
+    @staticmethod
+    def _timed_out_run(
+        *, correlation_id: uuid.UUID, run_id: uuid.UUID, result: str = "timeout"
+    ) -> dict[str, JsonValue]:
+        """The exact file a dispatched run with no terminal leaves behind."""
+        return {
+            "result": result,
+            "exit_code": 1,
+            "workflow": "/venv/omnimarket/nodes/node_delegate_skill_orchestrator/contract.yaml",
+            "run_id": str(run_id),
+            "handler_locus": "dispatched",
+            "wire_correlation_id": str(correlation_id),
+        }
+
+    def test_timed_out_run_passes_through_with_its_outcome_intact(self) -> None:
+        """RED pre-fix: this returned ``({}, 'names no correlation id at all')``."""
+        correlation = uuid.uuid4()
+        data = self._timed_out_run(correlation_id=correlation, run_id=uuid.uuid4())
+        verified, reason = _verify_workflow_data_correlation(
+            data, correlation, workflow_result=EnumWorkflowResult.TIMEOUT
+        )
+        assert reason is None, "no receipt exists, so there is no join to refuse"
+        assert verified == data
+        assert verified["wire_correlation_id"] == str(correlation)
+        assert verified["result"] == "timeout"
+
+    def test_transport_failure_before_publish_passes_through_too(self) -> None:
+        correlation = uuid.uuid4()
+        data = self._timed_out_run(
+            correlation_id=correlation, run_id=uuid.uuid4(), result="failed"
+        )
+        verified, reason = _verify_workflow_data_correlation(
+            data, correlation, workflow_result=EnumWorkflowResult.FAILED
+        )
+        assert reason is None
+        assert verified == data
+
+    def test_completed_with_no_receipt_still_fails_closed(self) -> None:
+        """The one content-free shape that could still mislead keeps refusing."""
+        correlation = uuid.uuid4()
+        data = self._timed_out_run(
+            correlation_id=correlation, run_id=uuid.uuid4(), result="completed"
+        )
+        verified, reason = _verify_workflow_data_correlation(
+            data, correlation, workflow_result=EnumWorkflowResult.COMPLETED
+        )
+        assert verified == {}
+        assert reason is not None
+        assert "stored no terminal envelope" in reason
+
+    def test_explanation_names_the_wire_correlation_to_grep(self) -> None:
+        correlation = uuid.uuid4()
+        data = self._timed_out_run(correlation_id=correlation, run_id=uuid.uuid4())
+        explanation = _explain_absent_receipt(
+            data, correlation, EnumWorkflowResult.TIMEOUT
+        )
+        assert str(correlation) in explanation
+        assert "not a receipt-selection failure" in explanation
+
+    def test_explanation_is_silent_when_a_receipt_exists(self) -> None:
+        correlation = uuid.uuid4()
+        data: dict[str, JsonValue] = {
+            "result": "completed",
+            "terminal_payload": {"correlation_id": str(correlation)},
+        }
+        assert (
+            _explain_absent_receipt(data, correlation, EnumWorkflowResult.COMPLETED)
+            == ""
+        )
+
+    def test_two_runs_in_flight_each_resolves_its_own_outcome(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Two submissions in flight: one terminal lands, one does not.
+
+        The pre-image resolved the landed one correctly and reported the other
+        as a correlation-join refusal naming no correlation — which is how a
+        lane driving concurrent submissions concluded the receipt join was
+        broken when the transport was. Each run must now resolve strictly its
+        own outcome: its own terminal, or its own timeout.
+        """
+        from omnibase_infra.cli import receipt_mode as receipt_mode_module
+
+        contract_path, input_path = _write_fixture_inputs(
+            tmp_path, _PROOF_NOOP_CONTRACT
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+        landed_correlation = uuid.uuid4()
+        timed_out_correlation = uuid.uuid4()
+        landed_answer = "the answer that belongs to the run that landed"
+
+        class _StubRuntime:
+            """Writes exactly what the live runtime writes, for either outcome."""
+
+            def __init__(self, **kwargs: object) -> None:
+                state_root = kwargs["state_root"]
+                assert isinstance(state_root, Path)
+                run_id = kwargs["run_id"]
+                assert isinstance(run_id, uuid.UUID)
+                self._state_root = state_root
+                self._run_id = run_id
+                self._correlation = _StubRuntime.next_correlation
+                self._lands = _StubRuntime.next_lands
+
+            # Set by the caller immediately before each run_receipt_mode call.
+            next_correlation: uuid.UUID = landed_correlation
+            next_lands: bool = True
+
+            def run(self) -> EnumWorkflowResult:
+                self._state_root.mkdir(parents=True, exist_ok=True)
+                stored: dict[str, JsonValue] = {
+                    "result": "completed" if self._lands else "timeout",
+                    "exit_code": 0 if self._lands else 1,
+                    "workflow": str(contract_path),
+                    "run_id": str(self._run_id),
+                    "handler_locus": "dispatched",
+                    "wire_correlation_id": str(self._correlation),
+                }
+                if self._lands:
+                    stored["terminal_payload"] = {
+                        "correlation_id": str(self._correlation),
+                        "payload": {
+                            "status": "success",
+                            "correlation_id": str(self._correlation),
+                            "response": landed_answer,
+                        },
+                    }
+                (self._state_root / "workflow_result.json").write_text(
+                    json.dumps(stored), encoding="utf-8"
+                )
+                return (
+                    EnumWorkflowResult.COMPLETED
+                    if self._lands
+                    else EnumWorkflowResult.TIMEOUT
+                )
+
+            @property
+            def exit_code(self) -> int:
+                return 0 if self._lands else 1
+
+            @property
+            def handler_result(self) -> object | None:
+                return None
+
+        monkeypatch.setattr(receipt_mode_module, "RuntimeLocal", _StubRuntime)
+
+        def _submit(correlation: uuid.UUID, *, lands: bool) -> dict[str, object]:
+            _StubRuntime.next_correlation = correlation
+            _StubRuntime.next_lands = lands
+            run_receipt_mode(
+                node_name="proof_noop",
+                contract_path=contract_path,
+                input_path=input_path,
+                state_root=tmp_path / "state",
+                backend_overrides={"event_bus": "inmemory"},
+                timeout=30,
+                verbose=False,
+                emit_socket=tmp_path / "no-daemon.sock",
+                expected_correlation_id=correlation,
+            )
+            return _parse_single_receipt(capsys.readouterr().out)
+
+        landed_payload = _submit(landed_correlation, lands=True)
+        timed_out_payload = _submit(timed_out_correlation, lands=False)
+
+        landed_body = landed_payload["result"]
+        assert isinstance(landed_body, dict)
+        assert landed_payload["correlation_id"] == str(landed_correlation)
+        assert landed_answer in json.dumps(landed_body["terminal_payload"])
+
+        timed_out_body = timed_out_payload["result"]
+        assert isinstance(timed_out_body, dict)
+        assert timed_out_payload["correlation_id"] == str(timed_out_correlation)
+        # Its own outcome, not a story about receipt selection.
+        assert timed_out_body["workflow_result"] == "timeout"
+        assert timed_out_body["terminal_payload"] is None
+        error_text = str(timed_out_body.get("error", ""))
+        assert "correlation-join refusal" not in error_text
+        assert "produced no receipt" in error_text
+        # The handle for grepping the lane survives the run that needed it.
+        assert timed_out_body["wire_correlation_id"] == str(timed_out_correlation)
+        # And it never borrows the concurrent run's answer.
+        assert landed_answer not in json.dumps(timed_out_payload)
 
 
 class TestReceiptModeInProcessIsolation:
