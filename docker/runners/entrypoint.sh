@@ -20,12 +20,27 @@ set -euo pipefail
 # Docker socket GID fix (runs as root, before dropping to runner)
 # ---------------------------------------------------------------------------
 # When /var/run/docker.sock is bind-mounted from the host, its GID may not
-# match the container's 'docker' group GID. This block detects the socket's
-# GID and adjusts the container's docker group to match, giving the runner
-# user access to the Docker daemon.
+# match the container's 'docker' group GID. The GOAL is socket access for the
+# `runner` user; renumbering the container's docker group is only ONE way to
+# get it, and on some hosts it is not available at all.
+#
+# OMN-17477, measured on the `.101` Mac mini: Docker Desktop presents the
+# socket inside the container with GID 0, which already belongs to `root`.
+# `groupmod -g 0 docker` therefore refuses with "GID '0' already exists", the
+# entrypoint dies under `set -e`, and the container restart-loops without ever
+# registering a runner. The symptom is deceptive -- the container reports
+# `Restarting`, not `Exited`, and the last log line reads "Adjusting container
+# docker group GID to 0", which looks like progress.
+#
+# So: if the socket's GID already belongs to a group, add `runner` to THAT
+# group. Only renumber `docker` when the GID is unclaimed, which is the
+# primary host's case (984) and keeps its 60 runners on exactly the behaviour
+# they have today.
 
 _fix_docker_socket_gid() {
-    local socket="/var/run/docker.sock"
+    # DOCKER_SOCKET_PATH exists so the portability tests can point this at a
+    # fixture instead of the real socket; nothing in production sets it.
+    local socket="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
     if [[ ! -S "${socket}" ]]; then
         echo "[entrypoint] No Docker socket at ${socket} — skipping GID fix"
         return 0
@@ -47,6 +62,20 @@ _fix_docker_socket_gid() {
     fi
 
     echo "[entrypoint] Docker socket GID mismatch: socket=${host_gid}, container docker group=${container_gid}"
+
+    # Is the socket's GID already claimed by a group in this image?
+    local owning_group
+    owning_group=$(getent group "${host_gid}" | cut -d: -f1 2>/dev/null || echo "")
+
+    if [[ -n "${owning_group}" ]]; then
+        # Claimed -- renumbering is impossible, and unnecessary. Grant the
+        # runner user membership of the group that already owns the socket.
+        echo "[entrypoint] Socket GID ${host_gid} is held by group '${owning_group}'; adding runner to it"
+        usermod -aG "${owning_group}" runner
+        echo "[entrypoint] runner added to '${owning_group}' for Docker socket access"
+        return 0
+    fi
+
     echo "[entrypoint] Adjusting container docker group GID to ${host_gid}"
     groupmod -g "${host_gid}" docker
     echo "[entrypoint] Docker group GID updated to ${host_gid}"

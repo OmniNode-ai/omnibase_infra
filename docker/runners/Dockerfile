@@ -24,7 +24,7 @@ ARG OMNI_RUNNER_IMAGE_VERSION=0
 ARG OMNI_CI_ENV_ROOT=/home/runner/.cache/omni/ci-envs
 
 # Pinned digest for reproducible builds — update via: docker pull ubuntu:22.04
-FROM ubuntu:22.04@sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8c525a9751
+FROM ubuntu:22.04@sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8c525a9751 AS toolchain
 
 ARG RUNNER_VERSION
 ARG GH_VERSION
@@ -34,6 +34,29 @@ ARG UV_VERSION
 ARG OMNI_RUNNER_IMAGE_IDENTITY
 ARG OMNI_RUNNER_IMAGE_VERSION
 ARG OMNI_CI_ENV_ROOT
+# OMN-17477 -- multi-arch. Docker predeclares TARGETARCH as a global build arg
+# (`amd64` or `arm64`), but a build STAGE does not see a global ARG until it
+# redeclares it: without this line every `${TARGETARCH}` below expands to the
+# empty string and the download URLs 404 with no hint at the cause. Every
+# external binary this image fetches resolves its architecture from here, so
+# adding a tool with a literal `amd64` in its URL breaks the arm64 lab hosts --
+# tests/ci/test_runner_image_multiarch.py refuses that literal.
+ARG TARGETARCH
+
+# Per-tool architecture name maps. Four upstreams, four different spellings for
+# the same two CPUs, which is exactly why this is a table and not an inline
+# conditional repeated six times.
+#   Rust target triples (uv):        x86_64-unknown-linux-gnu / aarch64-...
+#   Go release assets (gh, gosu):    amd64 / arm64   == TARGETARCH verbatim
+#   Kubernetes release path:         amd64 / arm64   == TARGETARCH verbatim
+#   AWS CLI v2 bundle:               x86_64 / aarch64
+#   actions/runner release asset:    x64 / arm64
+ARG UV_ARCH_amd64=x86_64-unknown-linux-gnu
+ARG UV_ARCH_arm64=aarch64-unknown-linux-gnu
+ARG AWS_ARCH_amd64=x86_64
+ARG AWS_ARCH_arm64=aarch64
+ARG RUNNER_ARCH_amd64=x64
+ARG RUNNER_ARCH_arm64=arm64
 
 # Version labels — read by runner-status skill. These remain human-facing
 # labels; the *authoritative* version is the bound identity below, which CI
@@ -134,9 +157,11 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y \
 
 # Install uv
 RUN tmp_dir="$(mktemp -d)" \
+    && uv_triple_var="UV_ARCH_${TARGETARCH}" && uv_triple="${!uv_triple_var}" \
+    && [ -n "${uv_triple}" ] || { echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1; } \
     && omni-curl -o "${tmp_dir}/uv.tar.gz" \
-        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
-    && tar -xzf "${tmp_dir}/uv.tar.gz" -C /usr/local/bin --strip-components=1 uv-x86_64-unknown-linux-gnu/uv \
+        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_triple}.tar.gz" \
+    && tar -xzf "${tmp_dir}/uv.tar.gz" -C /usr/local/bin --strip-components=1 "uv-${uv_triple}/uv" \
     && rm -rf "${tmp_dir}" \
     && chmod +x /usr/local/bin/uv
 
@@ -170,14 +195,14 @@ RUN install -m 0755 -d /etc/apt/keyrings \
 # Install gh CLI
 RUN tmp_dir="$(mktemp -d)" \
     && omni-curl -o "${tmp_dir}/gh.tar.gz" \
-        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
-    && tar -xzf "${tmp_dir}/gh.tar.gz" -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh" \
+        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    && tar -xzf "${tmp_dir}/gh.tar.gz" -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" \
     && rm -rf "${tmp_dir}" \
     && chmod +x /usr/local/bin/gh
 
 # Install kubectl
 RUN omni-curl -o /usr/local/bin/kubectl \
-    "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
     && chmod +x /usr/local/bin/kubectl
 
 # Install AWS CLI v2
@@ -188,8 +213,10 @@ RUN omni-curl -o /usr/local/bin/kubectl \
 # so the fleet is uniform. `aws --version` at the end fails the build (not a
 # live job) if the installed binary does not execute.
 RUN tmp_dir="$(mktemp -d)" \
+    && aws_arch_var="AWS_ARCH_${TARGETARCH}" && aws_arch="${!aws_arch_var}" \
+    && [ -n "${aws_arch}" ] || { echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1; } \
     && omni-curl -o "${tmp_dir}/awscliv2.zip" \
-        "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip" \
+        "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWSCLI_VERSION}.zip" \
     && unzip -q "${tmp_dir}/awscliv2.zip" -d "${tmp_dir}" \
     && "${tmp_dir}/aws/install" --bin-dir /usr/local/bin \
     && rm -rf "${tmp_dir}" \
@@ -201,15 +228,29 @@ RUN groupadd --gid 1001 runner \
     && groupadd --force docker \
     && usermod -aG docker runner
 
-# Download and SHA256-verify GitHub Actions runner binary
+# Download and SHA256-verify the GitHub Actions runner binary.
+#
+# OMN-17477: one digest per architecture, and BOTH are still verified. The
+# tempting shortcut when going multi-arch is to drop the checksum on the second
+# leg because a second digest is a second thing to bump on a version change --
+# that would delete the supply-chain verification this pin exists for, on
+# exactly the hosts that have no other proof. tests/ci/
+# test_runner_image_multiarch.py fails if either digest goes missing.
 # SHA256 for actions-runner-linux-x64-2.336.0.tar.gz
-ENV RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+ENV RUNNER_SHA256_AMD64=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+# SHA256 for actions-runner-linux-arm64-2.336.0.tar.gz
+ENV RUNNER_SHA256_ARM64=58b758e420b87093fbd4bfddd368074960053e2f1388f01848c82624b90f27d1
 
 RUN mkdir -p "${RUNNER_HOME}" \
     && cd "${RUNNER_HOME}" \
+    && runner_arch_var="RUNNER_ARCH_${TARGETARCH}" && runner_arch="${!runner_arch_var}" \
+    && runner_sha_var="RUNNER_SHA256_$(echo "${TARGETARCH}" | tr '[:lower:]' '[:upper:]')" \
+    && runner_sha="${!runner_sha_var}" \
+    && [ -n "${runner_arch}" ] && [ -n "${runner_sha}" ] \
+        || { echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1; } \
     && omni-curl -o runner.tar.gz \
-        "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
-    && echo "${RUNNER_SHA256}  runner.tar.gz" | sha256sum --check --strict \
+        "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${runner_arch}-${RUNNER_VERSION}.tar.gz" \
+    && echo "${runner_sha}  runner.tar.gz" | sha256sum --check --strict \
     && tar xzf runner.tar.gz \
     && rm runner.tar.gz \
     && ./bin/installdependencies.sh \
@@ -217,6 +258,39 @@ RUN mkdir -p "${RUNNER_HOME}" \
 
 # Credential cache directory (for entrypoint.sh re-registration cache)
 RUN mkdir -p /home/runner/.runner-creds && chown runner:runner /home/runner/.runner-creds
+
+# Install gosu for privilege de-escalation in entrypoint.
+# The entrypoint starts as root to fix Docker socket GID, then drops to runner.
+RUN omni-curl -o /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/1.17/gosu-${TARGETARCH}" \
+    && chmod +x /usr/local/bin/gosu \
+    && gosu nobody true
+
+# --- end of the architecture-sensitive toolchain ---------------------------
+#
+# OMN-17477. Everything ABOVE this line fetches a per-architecture binary or an
+# architecture-specific apt package; everything BELOW is the repo's own Python
+# dependency bake, which is arch-neutral in what it can break. The split exists
+# so CI can prove BOTH architectures affordably: the multi-arch job cross-builds
+# `--target toolchain` for linux/amd64 and linux/arm64 under QEMU, while the
+# native-arch job keeps building the whole image including the bake.
+#
+# The boundary is a claim about coverage, so state its limit rather than imply
+# none: a cross-build of this stage proves every download URL, apt source and
+# checksum resolves on both CPUs. It does NOT prove the dependency bake, the
+# baked identity, or node24 execution on arm64 -- those are proven natively, on
+# the host being provisioned, by the same build-smoke assertions.
+#
+# `FROM toolchain AS runner` continues the same layer chain, so the image an
+# un-targeted `docker build` produces is byte-identical to the pre-split one.
+FROM toolchain AS runner
+
+# A new stage inherits ENV but NOT ARG, and it resets SHELL. Both are
+# redeclared here so the layers below behave exactly as they did before the
+# OMN-17477 stage split: without `ARG UV_VERSION` the bake below would pass an
+# EMPTY uv version to ensure_ci_env.sh, and without SHELL it would run under
+# `/bin/sh` with no pipefail.
+ARG UV_VERSION
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # --- Bound identity contract + prebuilt shared CI env (OMN-12567) ----------
 # The bound identity lock is the authority for "runner image vN". It is copied
@@ -262,12 +336,6 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY runner-job-started.sh /usr/local/bin/runner-job-started.sh
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/runner-job-started.sh /usr/local/bin/healthcheck.sh
-
-# Install gosu for privilege de-escalation in entrypoint.
-# The entrypoint starts as root to fix Docker socket GID, then drops to runner.
-RUN omni-curl -o /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/1.17/gosu-amd64" \
-    && chmod +x /usr/local/bin/gosu \
-    && gosu nobody true
 
 # Run as root — entrypoint fixes Docker socket GID then drops to runner via gosu
 WORKDIR ${RUNNER_HOME}

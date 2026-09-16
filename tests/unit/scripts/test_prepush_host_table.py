@@ -1061,14 +1061,22 @@ def test_the_shipped_slots_column_is_pinned(table_repo: Path) -> None:
     Note what did NOT change with it: `slot_mode` stays `queue` and
     `placement_tier` stays `last_resort`. Widening slots is not a promotion,
     and the `~/push-lanes/QUEUE` serializer still gates every slot on this row
-    (`_PREPUSH_SLOT_PROBE_SH` reads busy on ALL slots while `q != 0`)."""
+    (`_PREPUSH_SLOT_PROBE_SH` reads busy on ALL slots while `q != 0`).
+
+    OMN-17477 gave the two Mac rows their widening BACK, 2 -> 1. The widening's
+    premise was that a second concurrent heavy pre-push suite could be placed
+    there, and that premise expired when the governed selector left pre-push in
+    all three repositories. h201 keeps its three because its count was sized
+    from a live measurement of the host, not from the leg -- and it is the row
+    that proves the `.2`/`.3` suffix generalises.
+    """
     slots = {r[0]: r[9] for r in _rows()}
     assert slots == {
         "h200": "1",
         "h201": "3",
         "h201c": "1",
-        "h101": "2",
-        "h105": "2",
+        "h101": "1",
+        "h105": "1",
     }
 
 
@@ -1113,18 +1121,27 @@ def test_slot_one_keeps_the_bare_label_not_a_dot_one_suffix(
     assert "PICK=h105.1" not in out, out
 
 
-def test_h101_second_slot_places_while_first_slot_is_busy(table_repo: Path) -> None:
-    """OMN-17561: h101's second slot must be independently placeable on the
-    REAL shipped table while slot 1 is held, mirroring the h105 slots=2
-    coverage above but proving it for h101's own row and cores (12, not
-    h105's 10), not only the generic synthetic `hm` fixture."""
+def test_h101_has_no_second_slot_to_place_into(table_repo: Path) -> None:
+    """OMN-17477 narrowed h101 back to one slot, and this is the control.
+
+    Replaces OMN-17561's `test_h101_second_slot_places_while_first_slot_is_busy`,
+    which asserted a configuration the table no longer declares. A narrowing
+    that only deleted its old test would be indistinguishable from a narrowing
+    that silently failed to take effect, so the property is asserted in the
+    opposite direction: with slot 1 held, the picker must NOT reach for
+    `h101.2`, because the row declares no second slot to reach for.
+
+    Multi-slot placement itself is still covered -- by h201, whose three slots
+    prove both `.2` and `.3` and whose count was sized from a live measurement
+    of that host rather than from the retired pre-push leg.
+    """
     out = _pick(
         table_repo,
         load="h101.2=0.30",
         slot="h101=busy,h101.2=free",
         uv="h101.2=0.12.7",
     )
-    assert "PICK=h101.2" in out, out
+    assert "PICK=h101.2" not in out, out
     assert "h101=busy" in out, out
 
 
@@ -3976,3 +3993,37 @@ def test_the_acceptance_branch_names_the_count_it_gates_on() -> None:
         "acceptance no longer compares the collected count to zero on any "
         "EXECUTABLE line (a comment mentioning the comparison does not count)"
     )
+
+
+def test_the_mac_capacity_rows_no_longer_carry_a_widened_slot_reservation() -> None:
+    """OMN-17477 — `.101`/`.105` give back the cores the widening reserved.
+
+    Both rows were widened to `slots=2` (OMN-17269 for `h105`, OMN-17561 for
+    `h101`) on one premise: a second concurrent HEAVY pre-push suite could be
+    placed there. That premise is gone. The governed impacted-test selector left
+    pre-push in all three repositories (`omnibase_infra#3415`,
+    `omnimarket#2463`, `omnibase_core#1678`), and this repository's
+    `.pre-commit-config.yaml` now carries exactly three `pre-push` hooks with
+    `prepush-smart-tests` not among them.
+
+    The reservation is not free. A slot budgets `min(cores,
+    PREPUSH_REMOTE_XDIST_WORKER_CAP=4)` xdist workers plus a controller, so
+    `slots=2` held ten cores on each host -- ten of `.101`'s twelve. `.101` now
+    also carries self-hosted runners, so that stale reservation was
+    double-booking a machine that is in fact idle.
+
+    SCOPE, stated rather than implied. This gives back the WIDENING only; both
+    rows stay `authorizing` and stay placement targets at `slots=1`. Retiring
+    them fully to `mode=disabled` is the right end state and is NOT done here:
+    nineteen placement tests in this file use these two rows as their live
+    fixtures for least-loaded ranking, slot-2 placement and memory admission,
+    and re-homing those fixtures onto `h200`/`h201` changes what they prove
+    (`h201` is `last_resort`, `h200` is `prefer_remote`). That is its own
+    change, not a rider on a runner-fleet PR.
+    """
+    rows = {r[0]: r for r in _rows()}
+    for label in ("h101", "h105"):
+        assert rows[label][9] == "1", (
+            f"{label} must not reserve a second concurrent heavy-suite slot for "
+            f"a leg that no longer runs (got slots={rows[label][9]!r})"
+        )

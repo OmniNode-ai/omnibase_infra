@@ -1,0 +1,101 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-17477 — proof that the arm64 verify-class host can actually execute a
+# verify-class job.
+#
+# WHY A NEW WORKFLOW RATHER THAN MOVING AN EXISTING JOB. Moving a job's
+# `runs-on` to a brand-new host is a bet that the host works, settled only when
+# that job next runs -- and if it does not work, the cost is a broken gate on
+# someone else's PR. This job asserts the same four things a verify-class job
+# depends on, on a schedule and on demand, and moving real work follows from a
+# green reading rather than preceding it.
+#
+# It is deliberately NOT a required check. Its purpose is to answer "is the
+# arm64 host fit for verify work", and a gate that blocks merges on a lab
+# host's availability would make every PR depend on one Mac being awake.
+
+name: ARM64 Verify Runner Proof
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Once a day. The host is a desk machine, not a datacentre: a frequent poll
+    # buys nothing and a daily reading is enough to notice it has gone away.
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arm64-verify-runner-proof
+  cancel-in-progress: false
+
+jobs:
+  arm64-verify-proof:
+    name: arm64-verify-proof
+    # Pinned to the architecture AND the class, in the fleet's own vocabulary.
+    # Both labels are load-bearing: `omnibase-verify` alone would also match an
+    # amd64 verify runner on the primary host, and this job's whole subject is
+    # the arm64 one.
+    runs-on: [self-hosted, omnibase-verify, arch-arm64]
+    timeout-minutes: 10
+
+    steps:
+      - name: Assert the runner really is arm64
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          echo "uname -m: ${arch}"
+          if [[ "${arch}" != "aarch64" && "${arch}" != "arm64" ]]; then
+            echo "::error::job landed on ${arch}; the arch-arm64 label did not constrain placement"
+            exit 1
+          fi
+          echo "runner name: ${RUNNER_NAME:-<unset>}"
+
+      # The four binaries a cloud-touching verify job uses. Each is checked for
+      # its ARCHITECTURE, not merely its presence: an amd64 binary under
+      # emulation would "work" here and then be slow and unreproducible in a
+      # way nobody would trace back to this host.
+      - name: Assert the verify toolchain is native arm64
+        run: |
+          set -euo pipefail
+          fail=0
+          check() {
+            local name="$1" got="$2"
+            printf '%-8s %s\n' "${name}:" "${got}"
+            case "${got}" in
+              *aarch64*|*arm64*) ;;
+              *) echo "::error::${name} is not arm64 (${got})"; fail=1 ;;
+            esac
+          }
+          check kubectl "$(kubectl version --client=true -o json | python3 -c 'import sys,json;print(json.load(sys.stdin)["clientVersion"]["platform"])')"
+          check aws     "$(aws --version 2>&1)"
+          check gh      "$(file -L "$(command -v gh)" | sed 's/.*: //')"
+          check uv      "$(file -L "$(command -v uv)" | sed 's/.*: //')"
+          [[ "${fail}" -eq 0 ]]
+
+      # The credential half. Named, hashed and length-checked -- never printed.
+      # A verify job that cannot read the lab kubeconfig fails at its first
+      # cluster call with an error that looks like a cluster problem.
+      - name: Assert the lab credentials are readable by the job user
+        run: |
+          set -euo pipefail
+          : "${KUBECONFIG:?KUBECONFIG must be set on a verify-class runner}"
+          if [[ ! -r "${KUBECONFIG}" ]]; then
+            echo "::error::KUBECONFIG at ${KUBECONFIG} is not readable as $(id -un) (uid $(id -u))"
+            ls -la "$(dirname "${KUBECONFIG}")" || true
+            exit 1
+          fi
+          printf 'kubeconfig bytes=%s sha256-12=%s\n' \
+            "$(wc -c < "${KUBECONFIG}")" "$(sha256sum "${KUBECONFIG}" | cut -c1-12)"
+          echo "kube context: $(kubectl config current-context)"
+
+      - name: Assert the Docker socket is usable after the GID fix
+        run: |
+          set -euo pipefail
+          # OMN-17477: on this host the socket's GID is already claimed, so the
+          # entrypoint grants group membership rather than renumbering. That
+          # path has exactly one observable consequence and this is it.
+          echo "groups: $(id -Gn)"
+          docker info --format 'docker daemon: {{.ServerVersion}} {{.OSType}}/{{.Architecture}}'

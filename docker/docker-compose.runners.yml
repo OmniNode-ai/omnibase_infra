@@ -52,7 +52,19 @@ x-runner-base: &runner-base
   cpus: "2.0"
   pids_limit: 4096
   environment: &runner-env
-    RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64
+    # OMN-17477 -- `arch-amd64` names this host's CPU in the fleet's own
+    # vocabulary, the one that matches Docker's TARGETARCH and
+    # config/runner_fleet.yaml's `hosts:` inventory, so a workflow pins an
+    # architecture in ONE spelling rather than choosing between GitHub's `X64`,
+    # Docker's `amd64` and the image's `x86_64`. It is additive: the existing
+    # label set is unchanged and no workflow's `runs-on` moves.
+    #
+    # IT TAKES EFFECT ON RECREATE, NOT ON MERGE. Container env is frozen at
+    # creation, and the entrypoint's credential cache is keyed on
+    # SHA256(RUNNER_LABELS + org url), so a recreated runner re-registers. Until
+    # the serial busy-checked roll has passed over all 60, some runners carry
+    # the label and some do not -- so nothing may `runs-on` it yet.
+    RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64,arch-amd64
     GITHUB_ORG_URL: https://github.com/OmniNode-ai
     # OMN-18188 — lab k3s reachability for every runner in the fleet.
     # Points kubectl at the read-only kubeconfig bind-mounted below. All 88
@@ -1221,7 +1233,9 @@ services:
           /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
         exec /usr/local/bin/entrypoint.sh
     environment:
-      RUNNER_LABELS: self-hosted,omnibase-deploy,linux,x64
+      # OMN-17477 arch label; see the fleet anchor above for why it is
+      # additive and why it only lands on recreate.
+      RUNNER_LABELS: self-hosted,omnibase-deploy,linux,x64,arch-amd64
       RUNNER_NAME: omninode-deploy-runner
       # Org-scoped (OMN-18386), matching the live registration + the creds
       # volume entry re-seeded at that scope.
@@ -1391,7 +1405,8 @@ services:
     cpus: "1.0"
     pids_limit: 2048
     environment:
-      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64
+      # OMN-17477 arch label; additive, lands on recreate.
+      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64,arch-amd64
       RUNNER_NAME: omninode-customer-plane-runner-1
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${RUNNER_TOKEN}
@@ -1427,7 +1442,8 @@ services:
     cpus: "1.0"
     pids_limit: 2048
     environment:
-      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64
+      # OMN-17477 arch label; additive, lands on recreate.
+      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64,arch-amd64
       RUNNER_NAME: omninode-customer-plane-runner-2
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${RUNNER_TOKEN}
