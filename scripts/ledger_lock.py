@@ -862,11 +862,60 @@ def _strip_pointer_block(preamble: str) -> str:
     return "".join(kept)
 
 
-def _pointer_block(archive: Path, rolled: int, rolled_at: str, first_kept: str) -> str:
+def _repo_root_above(start: Path) -> Path | None:
+    """The nearest ancestor of `start` holding a `.git` entry, or None.
+
+    Filesystem-only on purpose: no `git` subprocess, so this answers the same
+    way inside a worktree (where `.git` is a FILE, not a directory), on a
+    machine with no git installed, and inside a test fixture that only needs a
+    marker. `Path.parents` is finite, so there is no walk to bound.
+    """
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _portable_path(path: Path, ledger: Path) -> str:
+    """Render `path` for writing INTO a file that gets committed (OMN-17403).
+
+    The roll used to write `str(path)` -- the absolute path of whatever
+    machine and whatever worktree it happened to run in. On 2026-09-16 that
+    put `/Users/<user>/Code/omni_home/omni_worktrees/OMN-17403/omni_home/...`
+    into two committed lines of the rolling work ledger on `origin/main`: a
+    path naming a worktree that is deleted when its ticket closes, on one
+    machine, so the pointer a reader is meant to follow resolves for nobody.
+    It is also a plain omni_home CLAUDE.md rule 6 violation.
+
+    Preference order, and each fallback is still relative:
+
+    1. Relative to the repository root above the ledger -- the form every
+       citation in this fleet uses (`docs/tracking/archive/...`), and the form
+       that survives being read from a clone, a worktree or GitHub.
+    2. Relative to the ledger's own directory, when there is no repository
+       above it, or when the target sits outside that repository.
+
+    The roll RECEIPT deliberately keeps absolute paths: it is operational
+    stdout consumed by the trigger on the machine that produced it, it is
+    never committed, and the absolute form is the useful one there.
+    """
+    root = _repo_root_above(ledger.parent)
+    if root is not None:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            pass
+    return Path(os.path.relpath(path, ledger.parent)).as_posix()
+
+
+def _pointer_block(
+    archive: Path, rolled: int, rolled_at: str, first_kept: str, ledger: Path
+) -> str:
+    archive_ref = _portable_path(archive, ledger)
     marker = json.dumps(
         {
             "rolled_at": rolled_at,
-            "archive": str(archive),
+            "archive": archive_ref,
             "entries_rolled": rolled,
             "first_kept_heading": first_kept,
         },
@@ -874,7 +923,7 @@ def _pointer_block(archive: Path, rolled: int, rolled_at: str, first_kept: str) 
     )
     return (
         f"{ROLL_POINTER_MARKER} {marker} -->\n"
-        f"{ROLL_POINTER_PROSE_PREFIX} `{archive}` -- {rolled} rows rolled at {rolled_at}. "
+        f"{ROLL_POINTER_PROSE_PREFIX} `{archive_ref}` -- {rolled} rows rolled at {rolled_at}. "
         f"Rows older than {first_kept!r} are not in this file.\n\n"
     )
 
@@ -949,7 +998,7 @@ def plan_roll(
         parsed.head
         + parsed.heading_line
         + preamble
-        + _pointer_block(archive_path, len(rolled), rolled_at, first_kept)
+        + _pointer_block(archive_path, len(rolled), rolled_at, first_kept, ledger)
         + "".join(entry.text for entry in kept)
     )
 
@@ -957,7 +1006,10 @@ def plan_roll(
         "<!-- ledger-roll-archive "
         + json.dumps(
             {
-                "source": str(ledger),
+                # Portable for the same reason the pointer block is: the
+                # archive is a committed file, and an absolute path in it
+                # names one machine's worktree (OMN-17403).
+                "source": _portable_path(ledger, ledger),
                 "section_heading": heading.strip(),
                 "rolled_at": rolled_at,
                 "entries": len(rolled),
