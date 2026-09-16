@@ -284,8 +284,40 @@ jobs:
 
       # OMN-17530 rule 24(a): the receipt carries the window it measured, so
       # the start is recorded before the convergence wait, not after it.
-      - name: Record the lab-pass window start
-        run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Record the lab-pass window start and claim a private receipt directory
+        run: |
+          set -euo pipefail
+          echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+          # OMN-18420. Every lab-pass path below used to be a FIXED absolute
+          # path under /tmp, and every emitting job in this repository and in
+          # the sibling reusable runs on the SAME `omnibase-deploy` host. A
+          # `mkdir -p` on a directory that already exists is a no-op, so a
+          # receipt.json left behind by an earlier job survived into the next
+          # one. When that next job's emit did not overwrite it -- because the
+          # probe feeding it failed, or the emit itself did -- the presence
+          # assertion found the STALE file, passed, and upload-artifact
+          # published it under THIS job's sha-keyed name.
+          #
+          # Measured: omnimarket run 35035178406 uploaded artifact 10424013456
+          # named lab-pass-receipt-compose-dev-bc21f733... (an omnimarket
+          # commit) whose payload declared sha a7ea64f5... -- an omnibase_infra
+          # commit -- with a `deployed_revision` check citing
+          # check_dev_lane_staleness.py, which is THIS workflow's emitter shape
+          # and not the sibling one's. The delivery gate's name/payload
+          # cross-check caught it, so the direction was safe; the cost is that
+          # the sibling sha could never receipt PASS, and rule 24(b) then
+          # refuses that sha for staging.
+          #
+          # RUNNER_TEMP alone is not enough: a self-hosted runner reuses it
+          # across jobs. The run id, the attempt and the job name together name
+          # exactly one execution, and the `rm -rf` is what makes the claim
+          # true rather than merely likely.
+          LAB_PASS_WORK="${RUNNER_TEMP}/lab-pass-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_JOB}"
+          rm -rf "${LAB_PASS_WORK}"
+          mkdir -p "${LAB_PASS_WORK}/receipt"
+          echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
+          echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
 
       # OMN-18388: this waits for the lane to report a revision that CONTAINS
       # the merge sha, not one byte-equal to it. The deploy agent rebuilds from
@@ -370,7 +402,7 @@ jobs:
           DEV_LANE_PROJECTION_URL: http://host.docker.internal:3002
         run: |
           set -euo pipefail
-          mkdir -p /tmp/lab-pass-receipt
+          mkdir -p "${LAB_PASS_DIR}"
 
           # SETTLE BUDGET = WHATEVER REMAINS BEFORE THIS JOB'S CEILING.
           #
@@ -406,8 +438,8 @@ jobs:
             --effects-url "$DEV_LANE_EFFECTS_URL" \
             --projection-url "$DEV_LANE_PROJECTION_URL" \
             --settle-timeout-seconds "$SETTLE" \
-            > /tmp/lab-pass-checks.json
-          cat /tmp/lab-pass-checks.json
+            > "${LAB_PASS_CHECKS}"
+          cat "${LAB_PASS_CHECKS}"
 
       # if: always() on emit and upload for the same reason the boot gate does
       # it: a FAILED lab pass is the record the gate needs in order to tell
@@ -462,8 +494,8 @@ jobs:
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "deployed_revision:${DEPLOYED_REVISION_VERDICT}:${EVIDENCE}" \
-            --checks-json /tmp/lab-pass-checks.json \
-            --out /tmp/lab-pass-receipt/receipt.json
+            --checks-json "${LAB_PASS_CHECKS}" \
+            --out "${LAB_PASS_DIR}/receipt.json"
 
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
       # since the directory matches whether or not the receipt carries bytes.
@@ -473,7 +505,24 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/assert_evidence_artifact.py \
             --artifact lab-pass-receipt-compose-dev \
-            --require /tmp/lab-pass-receipt/receipt.json
+            --require "${LAB_PASS_DIR}/receipt.json"
+
+      # OMN-18420: presence is not identity. A receipt left on this host by an
+      # earlier job satisfies the assertion above exactly as well as a fresh
+      # one, and the upload below keys the artifact by THIS job's sha -- so a
+      # stale file is published under a sha it says nothing about. The
+      # consuming gate in the delivering repository catches the disagreement,
+      # but an hour later and in another repo's logs. This asserts it here.
+      - name: Assert the compose-dev receipt on disk is this job's own
+        if: always()
+        env:
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py verify \
+            --path "${LAB_PASS_DIR}/receipt.json" \
+            --sha "$MERGE_SHA" \
+            --lane compose-dev
       - name: Upload the compose-dev lab-pass receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -481,7 +530,7 @@ jobs:
           # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries
           # by; it must match artifact_name() exactly.
           name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
-          path: /tmp/lab-pass-receipt
+          path: ${{ env.LAB_PASS_DIR }}
           retention-days: 90
           if-no-files-found: error
 
@@ -567,8 +616,40 @@ jobs:
           install-args: --frozen
           shared-env-enabled: "true"
 
-      - name: Record the lab-pass window start
-        run: echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Record the lab-pass window start and claim a private receipt directory
+        run: |
+          set -euo pipefail
+          echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+          # OMN-18420. Every lab-pass path below used to be a FIXED absolute
+          # path under /tmp, and every emitting job in this repository and in
+          # the sibling reusable runs on the SAME `omnibase-deploy` host. A
+          # `mkdir -p` on a directory that already exists is a no-op, so a
+          # receipt.json left behind by an earlier job survived into the next
+          # one. When that next job's emit did not overwrite it -- because the
+          # probe feeding it failed, or the emit itself did -- the presence
+          # assertion found the STALE file, passed, and upload-artifact
+          # published it under THIS job's sha-keyed name.
+          #
+          # Measured: omnimarket run 35035178406 uploaded artifact 10424013456
+          # named lab-pass-receipt-compose-dev-bc21f733... (an omnimarket
+          # commit) whose payload declared sha a7ea64f5... -- an omnibase_infra
+          # commit -- with a `deployed_revision` check citing
+          # check_dev_lane_staleness.py, which is THIS workflow's emitter shape
+          # and not the sibling one's. The delivery gate's name/payload
+          # cross-check caught it, so the direction was safe; the cost is that
+          # the sibling sha could never receipt PASS, and rule 24(b) then
+          # refuses that sha for staging.
+          #
+          # RUNNER_TEMP alone is not enough: a self-hosted runner reuses it
+          # across jobs. The run id, the attempt and the job name together name
+          # exactly one execution, and the `rm -rf` is what makes the claim
+          # true rather than merely likely.
+          LAB_PASS_WORK="${RUNNER_TEMP}/lab-pass-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_JOB}"
+          rm -rf "${LAB_PASS_WORK}"
+          mkdir -p "${LAB_PASS_WORK}/receipt"
+          echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
+          echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
 
       - name: Read the deploy agent's onex-lab overlay record
         id: record
@@ -592,15 +673,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/lab-overlay-receipt
+          mkdir -p "${LAB_PASS_DIR}"
           uv run python scripts/ci/fetch_lab_overlay_record.py \
             --sha "$MERGE_SHA" \
             --agent-url "$LAB_AGENT_URL" \
             --repo "${{ github.repository }}" \
             --wait-seconds 1800 \
             --poll-interval-seconds 30 \
-            --out /tmp/lab-overlay-checks.json
-          cat /tmp/lab-overlay-checks.json
+            --out "${LAB_PASS_CHECKS}"
+          cat "${LAB_PASS_CHECKS}"
 
       # if: always() on emit and upload, for the reason both other emitters state:
       # a FAILED lab pass is exactly as worth recording as a passing one. The emit
@@ -617,8 +698,8 @@ jobs:
             --lane onex-lab-k3s \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --checks-json /tmp/lab-overlay-checks.json \
-            --out /tmp/lab-overlay-receipt/receipt.json
+            --checks-json "${LAB_PASS_CHECKS}" \
+            --out "${LAB_PASS_DIR}/receipt.json"
 
       # OMN-18247: same zero-byte gap as the compose-dev receipt above.
       - name: Assert the onex-lab-k3s lab-pass receipt is present and non-empty
@@ -627,7 +708,20 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/assert_evidence_artifact.py \
             --artifact lab-pass-receipt-onex-lab-k3s \
-            --require /tmp/lab-overlay-receipt/receipt.json
+            --require "${LAB_PASS_DIR}/receipt.json"
+
+      # OMN-18420: the same identity assertion the compose-dev emitter above
+      # carries, for the same reason -- this job shares a host with that one.
+      - name: Assert the onex-lab-k3s receipt on disk is this job's own
+        if: always()
+        env:
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py verify \
+            --path "${LAB_PASS_DIR}/receipt.json" \
+            --sha "$MERGE_SHA" \
+            --lane onex-lab-k3s
       - name: Upload the onex-lab-k3s lab-pass receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -635,6 +729,6 @@ jobs:
           # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries by;
           # it must match artifact_name(EnumLabLane.ONEX_LAB_K3S, sha) exactly.
           name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
-          path: /tmp/lab-overlay-receipt
+          path: ${{ env.LAB_PASS_DIR }}
           retention-days: 90
           if-no-files-found: error

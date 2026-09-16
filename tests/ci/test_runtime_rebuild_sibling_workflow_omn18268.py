@@ -41,13 +41,27 @@ def test_is_callable_only_and_declares_the_facts_the_caller_must_supply() -> Non
         "pr_number",
     ):
         assert inputs[required]["required"] is True, required
-    assert set(triggers["workflow_call"]["secrets"]) == {
+    secrets = triggers["workflow_call"]["secrets"]
+    assert set(secrets) == {
         "KAFKA_SASL_USERNAME",
         "KAFKA_SASL_PASSWORD",
+        "ONEXBOT_OCC_APP_ID",
+        "ONEXBOT_OCC_PRIVATE_KEY",
     }, (
         "the lane declares SASL and the publisher refuses to downgrade it; no "
-        "HMAC secret is a precondition of this producer"
+        "HMAC secret is a precondition of this producer. The App pair is the "
+        "OMN-17057 delivery announcement, which crosses a repository boundary "
+        "and so cannot use the caller's own token"
     )
+    for name in ("KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"):
+        assert secrets[name]["required"] is True, name
+    for name in ("ONEXBOT_OCC_APP_ID", "ONEXBOT_OCC_PRIVATE_KEY"):
+        # Optional at the INTERFACE so an existing caller keeps compiling, and
+        # refused at RUN TIME by the announcement job itself. Making them
+        # required here would break every caller in the same commit that adds
+        # them; making the job skip on their absence would report a delivery
+        # that did not happen, which is the failure this ticket removes.
+        assert secrets[name]["required"] is False, name
 
 
 def test_the_publisher_passes_both_the_sibling_sha_and_a_primary_ref() -> None:
@@ -80,18 +94,38 @@ def test_the_build_context_repo_is_checked_out_at_the_workspace_root() -> None:
       run 35019423922.
     """
     workflow = _load()
-    expected_ref = {
+    # None means "this job deliberately has no self-checkout". A job only needs
+    # one to reach `./.github/actions/...` or a script in this repository;
+    # deliver-sibling-candidate (OMN-17057) runs `gh` and `jq` and nothing from
+    # the tree, so a checkout would be ceremony that reads as a dependency.
+    # It is listed rather than excluded so that adding a job still forces the
+    # decision this test exists to force.
+    expected_ref: dict[str, str | None] = {
         "trigger-rebuild": "dev",
         "verify-sibling-converged": (
             "${{ inputs.infra_ref || github.job_workflow_sha }}"
         ),
+        "deliver-sibling-candidate": None,
     }
     assert set(workflow["jobs"]) == set(expected_ref), (
-        "a job was added or renamed; decide which of the two refs above it needs "
+        "a job was added or renamed; decide which of the refs above it needs "
         "rather than letting it default to an unasserted one"
     )
     for job_id, job in workflow["jobs"].items():
-        first = job["steps"][0]
+        steps = job["steps"]
+        if expected_ref[job_id] is None:
+            assert not any(
+                str(step.get("uses", "")).startswith("./") for step in steps
+            ), (
+                f"{job_id} declares no self-checkout but references a local "
+                "action, which resolves against the CALLER's workspace"
+            )
+            assert not any("scripts/" in str(step.get("run", "")) for step in steps), (
+                f"{job_id} declares no self-checkout but invokes a repository "
+                "script, which is not present on disk"
+            )
+            continue
+        first = steps[0]
         assert first["with"]["repository"] == "OmniNode-ai/omnibase_infra"
         assert first["with"]["ref"] == expected_ref[job_id], job_id
         assert "path" not in first["with"]

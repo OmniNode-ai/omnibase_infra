@@ -103,6 +103,13 @@ adjacency:
     reverse_deps: [runtime]
   gate:
     reverse_deps: [gateway, gateways, runtime]
+  # OMN-18414. The declared `Gate:` binding grammar, read by the evidence
+  # autoclose sweep's gate-probe conjunct. Its only consumer in this tree is
+  # that node, so a change here has to run the node's tests; the contract file
+  # it reads is also transcribed into omniclaude, whose own suite pins the
+  # byte-equality from the other side.
+  gate_binding:
+    reverse_deps: [nodes]
   gateway:
     reverse_deps: [gateways, runtime]
   diagnostics:

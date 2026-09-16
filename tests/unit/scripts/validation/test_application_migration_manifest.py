@@ -644,7 +644,18 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # vendored from omnimarket so the routing overlay can carry the provider
     # identity a BYOK route was registered against. Additive and nullable, so
     # rows written before provenance existed keep their honest NULL.
-    assert len(result.declarations) == 184
+    #
+    # 184 -> 185 for OMN-18079's
+    # nodes/node_delegation_routing_reducer/0005_backfill_delegation_routing_tenant_overlay_provider.sql.
+    # "Honest NULL" above turned out not to be honest but STRANDING: the same
+    # change that made 0004's column nullable also made the routing resolver
+    # REFUSE a blank provider, so every row written before provenance existed
+    # stopped routing the moment that resolver rolled out. All 33 rows on
+    # onex-dev carried NULL and the staging business proof went red on
+    # 2026-09-16T00:40:04Z. 0005 backfills the column by inverting the declared
+    # byok_provider_backends.v1.yaml binding, and leaves an uncatalogued
+    # backend NULL -- there the absence really is honest, and still refused.
+    assert len(result.declarations) == 185
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     assert len(result.cloud_aliases) == 30

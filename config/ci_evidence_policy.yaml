@@ -85,6 +85,14 @@ evidence_artifacts:
       The merged fleet+lab record and the alerts derived from it. The alerts file is required, not optional: the writer emits `[]` when nothing fired, so an ABSENT alerts file means the evaluation never ran, which is a different fact from "no alert fired" and must not read the same.
   # --- the rule-24 lab-pass receipts ---------------------------------------
   #
+  # OMN-18420: the three emitters that run on the SHARED omnibase-deploy host
+  # name ${LAB_PASS_DIR}, a per-run directory their job claims and clears,
+  # rather than a fixed path under the shared temp root. A fixed path let one
+  # job's receipt survive into the next and be uploaded under that job's
+  # sha-keyed name (omnimarket run 35035178406). The boot-gate entry below
+  # keeps its literal path on purpose: it runs on an ephemeral GitHub-hosted
+  # runner, where no second job shares the filesystem.
+  #
   # These three already set `if-no-files-found: error`, which is their authors
   # declaring absence fatal. What that setting cannot catch is a zero-byte or
   # partially-written receipt inside a directory upload: the directory matches,
@@ -106,7 +114,7 @@ evidence_artifacts:
     producer_step: "Emit the compose-dev lab-pass receipt"
     artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
     required_paths:
-      - /tmp/lab-pass-receipt/receipt.json
+      - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for the merged sha (rule 24(a)).
   - id: lab-pass-receipt-compose-dev-sibling
@@ -115,7 +123,7 @@ evidence_artifacts:
     producer_step: "Emit the compose-dev lab-pass receipt for the sibling sha"
     artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.sibling_sha }}
     required_paths:
-      - /tmp/lab-pass-receipt/receipt.json
+      - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for a SIBLING repository's merged sha (rule 24(a), OMN-18268). Keyed by the sibling sha, not the omnibase_infra one, because that is the revision the lane was proven to vendor; the two never collide on one artifact name.
   - id: lab-pass-receipt-onex-lab-k3s
@@ -124,7 +132,7 @@ evidence_artifacts:
     producer_step: "Emit the onex-lab-k3s lab-pass receipt"
     artifact_name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
     required_paths:
-      - /tmp/lab-overlay-receipt/receipt.json
+      - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The k3s onex-lab overlay's half of rule 24(a), on its own lane name so it cannot supersede the boot gate's onex-lab receipt for the same sha.
   # --- the non-required check failure-rate report (OMN-18254) --------------

@@ -46,10 +46,32 @@ on:
         required: false
         default: false
         type: boolean
+      force:
+        description: >-
+          Operator override: auto (decide), fleet, or hosted. Subject to every
+          safety rule rather than a bypass of them -- fleet still cannot widen
+          past the seam ceiling and still cannot take a fork pull request, and
+          hosted is still refused for a private repository. It exists so the
+          kill switch a static seam value provided survives per-run routing.
+        required: false
+        default: auto
+        type: string
     outputs:
       labels:
         description: "runs-on label set, as a JSON array for fromJSON()."
         value: ${{ jobs.route.outputs.labels }}
+      runs_on:
+        # NO EXPRESSION IN THIS DESCRIPTION. Actions evaluates `${{ }}` inside a
+        # workflow_call outputs block, where the `needs` context does not exist,
+        # so an illustrative snippet here is a STARTUP FAILURE in every calling
+        # workflow -- measured on run 35037012235, where ci.yml and the routing
+        # probe both failed with zero jobs and the run title fell back to the
+        # file path. Describe the consumer shape in prose; the snippet belongs
+        # in the header comment.
+        description: >-
+          The same label set as `labels`, under the name a consuming job reads
+          it by when it resolves runs-on from this job's outputs.
+        value: ${{ jobs.route.outputs.runs_on }}
       decision:
         description: "hosted | self_hosted"
         value: ${{ jobs.route.outputs.decision }}
@@ -71,18 +93,45 @@ jobs:
     # MUST NOT share fate with the fleet it routes onto. Allowlisted in
     # config/runner_routing_policy.yaml (OMN-18031). Do not change runs-on.
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # Raised from 2 when the job gained an environment sync, and held at the
+    # codified 5-minute ceiling rather than widened past it. This job sits on
+    # the critical path of every consuming run, so the bound is deliberately
+    # tight enough that a sync regression fails here instead of quietly adding
+    # minutes to every pipeline in the repository.
+    timeout-minutes: 5
     outputs:
       labels: ${{ steps.decide.outputs.labels }}
+      runs_on: ${{ steps.decide.outputs.runs_on }}
       decision: ${{ steps.decide.outputs.decision }}
       reason: ${{ steps.decide.outputs.reason }}
     steps:
-      - name: Checkout (decision module + policy)
+      - name: Checkout (routing node + policy)
         uses: actions/checkout@v4
         with:
           # No git operations after checkout — do not leave the Actions token
           # in local git config (zizmor artipacked).
           persist-credentials: false
+
+      # THE PROJECT ENVIRONMENT, and the measurement that settled it. An
+      # earlier revision installed two pinned packages -- the models need only
+      # pydantic and a YAML parser -- and the route job then failed with
+      # `No module named 'omnibase_core'`, fell through to its fail-closed
+      # floor, and reported a GREEN job carrying
+      # `reason=probe_error:module_unavailable`. Measured on run 35039101488:
+      # the mechanism was entirely inert and nothing was red.
+      #
+      # The cause is not this node. Importing anything under
+      # `omnibase_infra.` executes the package __init__, which eagerly pulls
+      # the database and broker surfaces, so a node cannot be imported without
+      # the project's dependency set. Loading modules by file path around that
+      # would be bespoke plumbing for one job; syncing the environment is what
+      # every other job here does.
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-runner-route
+          install-args: "--frozen"
 
       - name: Download the most recent lab-load record
         id: lab
@@ -148,6 +197,7 @@ jobs:
                 || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON }}
           PUBLIC_JSON: ${{ vars.OMNI_PUBLIC_PR_RUNS_ON_JSON }}
           DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
           LAB_RECORD: ${{ steps.lab.outputs.path }}
         run: |
           set -uo pipefail
@@ -160,16 +210,29 @@ jobs:
             --seam-json "${SEAM_JSON}"
             --public-json "${PUBLIC_JSON}"
             --policy config/runner_routing_policy.yaml
+            --force "${FORCE}"
           )
           [ "${DRY_RUN}" = "true" ] && args+=(--dry-run)
           [ -n "${LAB_RECORD}" ] && args+=(--lab-record "${LAB_RECORD}")
-          python3 scripts/ci/runner_route_decision.py "${args[@]}" || rc=$?
+          # THE DECISION IS THE NODE'S. This script is the I/O boundary: it
+          # probes, assembles the node's typed request, and invokes
+          # `node_ci_runner_route_compute`'s handler, whose contract declares
+          # the thresholds, the label sets and the private-repository refusal.
+          #
+          # WHY NOT `onex node <name>`, the sanctioned local node CLI. Measured
+          # 2026-09-15: that path refuses to dispatch unless the workspace venv
+          # carries every sibling package installed from git, which on a hosted
+          # runner means minutes of install on the critical path of every run
+          # for a decision that takes milliseconds. The same handler executes
+          # either way; only the dispatch machinery differs.
+          uv run --frozen python3 scripts/ci/runner_route_decision.py "${args[@]}" || rc=$?
           # FAIL-CLOSED FLOOR. The module already catches everything internally,
           # but if the interpreter itself could not run, the calling workflow
           # must still receive a usable runs-on rather than an empty string that
           # would make every consuming job fail to schedule.
           if [ ! -s "${GITHUB_OUTPUT}" ] || ! grep -q '^labels=' "${GITHUB_OUTPUT}"; then
             echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
+            echo 'runs_on=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
             echo 'decision=hosted' >> "${GITHUB_OUTPUT}"
             echo 'reason=probe_error:module_unavailable' >> "${GITHUB_OUTPUT}"
           fi
