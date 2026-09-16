@@ -830,6 +830,24 @@ class RuntimePatternBBroker:
         Same contextvar, same reason, as the OMN-18116 causal-edge origination
         site in `DispatchResultApplier`: the canonical handler signature never
         sees an envelope, so origination belongs in the runtime.
+
+        OMN-17228: the tenant DIMENSION rides the same edge, off the same
+        consumed envelope, for the same reason -- and this site was carrying the
+        causal half while dropping it. `DispatchResultApplier` has carried it
+        since OMN-16831 precisely because omnimarket's delegation projection
+        writer reads `ModelEventEnvelope.tenant_id` and a writer under FORCE ROW
+        LEVEL SECURITY cannot discover a row's tenant by reading. A quality-gate
+        verdict, whose payload model is frozen/`extra="forbid"` with no tenant
+        field, has no other attribution at all: unstamped, it was written under
+        the house tenant `820272f9-4aaf-5add-a2df-0af942852ab2` and the
+        submitting tenant's reader could not see its own row -- the `quality_gate`
+        leg of the terminal business proof on deploy-onex-staging runs
+        35063077145, 35079154240 and 35086243365.
+
+        CARRIED, NEVER SOURCED, exactly as the applier states it: `None` stays
+        `None`. From the HTTP ingress there is no consumed envelope and nothing
+        is recorded, which is the same checkable statement the absent
+        `parent_message_id` makes.
         """
         consumed = current_dispatch_envelope()
         worker_envelope = ModelEventEnvelope[object](
@@ -840,6 +858,7 @@ class RuntimePatternBBroker:
             source_tool="pattern-b-broker",
             target_tool=route.contract_name,
             parent_envelope_id=(None if consumed is None else consumed.envelope_id),
+            tenant_id=(None if consumed is None else consumed.tenant_id),
         )
         await self._event_bus.publish(
             route.command_topic,
@@ -853,6 +872,12 @@ class RuntimePatternBBroker:
         response_topic: str,
         result: ModelDispatchBusTerminalResult,
     ) -> None:
+        # OMN-17228: the terminal this broker publishes is owed its tenant for
+        # the same reason the worker command above is, and from the same
+        # authority -- the envelope this dispatch consumed. Carried, never
+        # sourced: a terminal with no consumed envelope publishes unattributed
+        # rather than being given an identity nobody recorded.
+        consumed = current_dispatch_envelope()
         envelope = ModelEventEnvelope[ModelDispatchBusTerminalResult](
             payload=result,
             correlation_id=result.correlation_id,
@@ -861,6 +886,7 @@ class RuntimePatternBBroker:
             source_tool="pattern-b-broker",
             target_tool="pattern-b-client",
             payload_type=ModelDispatchBusTerminalResult.__name__,
+            tenant_id=(None if consumed is None else consumed.tenant_id),
         )
         await self._event_bus.publish(
             response_topic,
