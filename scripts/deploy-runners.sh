@@ -7,7 +7,7 @@
 # Ticket: OMN-3277 / Epic: OMN-3273
 #
 # Usage:
-#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N]]
+#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N] [--only=NAME]]
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
@@ -43,6 +43,11 @@
 #   comment block below).
 #   --limit=N stops after N successful recreates: --limit=1 is the canary
 #   step, proven before the rest of the fleet is touched.
+#   --only=NAME converges exactly one fleet service. A runner that is busy
+#   through every retry pass is reported and left alone, which is correct --
+#   but without a way to come back for it later, the residual would have to be
+#   cleared by a hand-typed compose call, i.e. by the exact recipe this mode
+#   exists to replace.
 #   With --dry-run the READ-ONLY busy probes still run -- a rolling dry run is
 #   how you see which runners are executing jobs -- but nothing is recreated.
 #
@@ -212,6 +217,8 @@ SOFT_DEPLOY=false
 ROLLING_DEPLOY=false
 # 0 means the whole fleet; --limit=N stops after N successful recreates.
 ROLL_LIMIT=0
+# Empty means the whole fleet; --only=<service> converges exactly one runner.
+ROLL_ONLY=""
 
 for arg in "$@"; do
     case "${arg}" in
@@ -220,6 +227,7 @@ for arg in "$@"; do
         --soft)       SOFT_DEPLOY=true ;;
         --rolling)    ROLLING_DEPLOY=true ;;
         --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
+        --only=*)     ROLL_ONLY="${arg#*=}" ;;
         --help|-h)
             echo "Usage: $0 [--dry-run] [--skip-build] [--soft] [--rolling]"
             echo "  --dry-run     Print actions without executing remote commands"
@@ -231,6 +239,8 @@ for arg in "$@"; do
             echo "                a container-env change (env is frozen at creation)."
             echo "  --limit=N     With --rolling: stop after N successful recreates."
             echo "                --limit=1 is the canary step of a fleet roll."
+            echo "  --only=NAME   With --rolling: converge exactly one fleet service,"
+            echo "                for a runner that stayed busy through every pass."
             exit 0
             ;;
         *)
@@ -934,6 +944,19 @@ rolling_deploy() {
         [[ -n "${name}" ]] || continue
         pending+=("${name}")
     done <<< "${services}"
+
+    if [[ -n "${ROLL_ONLY}" ]]; then
+        # Fail closed on an unknown name: silently rolling nothing and printing
+        # "Rolled 0/0" reads exactly like a converged fleet.
+        local found=false
+        for name in "${pending[@]}"; do
+            [[ "${name}" == "${ROLL_ONLY}" ]] && found=true
+        done
+        "${found}" || err "--only=${ROLL_ONLY} is not a fleet service declared in ${COMPOSE_FILE}."
+        pending=("${ROLL_ONLY}")
+        total=1
+        log "Converging a single runner: ${ROLL_ONLY}."
+    fi
 
     local pass=0 done_count=0 failed="" rc
     while [[ "${#pending[@]}" -gt 0 ]] && [[ "${pass}" -le "${ROLL_SKIP_RETRY_PASSES}" ]]; do
