@@ -1,0 +1,36 @@
+{
+  "receipt_version": "lab_pass_receipt.v1",
+  "sha": "4853e0e12b1937c81cc01ab2bca1da5d7ffc127f",
+  "lane": "compose-dev",
+  "started_at": "2026-09-16T01:41:28+00:00",
+  "finished_at": "2026-09-16T02:06:29+00:00",
+  "result": "FAIL",
+  "checks": [
+    {
+      "name": "deployed_revision",
+      "ok": false,
+      "evidence": "lane at ba3f44b50495, which does not contain merge sha 4853e0e12b19 (relation: ancestor on dev); not converged after 0h25m"
+    },
+    {
+      "name": "ready_main",
+      "ok": true,
+      "evidence": "GET http://host.docker.internal:8085/ready -> 200 {\"status\":\"healthy\",\"version\":\"0.38.29\",\"details\":{\"ready\":true,\"is_running\":true,\"is_draining\":false,\"event_bus_readiness\":{\"is_ready\":true,\"consumers_started\":true,\"assignments\":{\"onex.evt.omniclaude.context-injected.v1\":[0],\"onex.evt.omn... [lane ready after 0s of a 179s settle budget]"
+    },
+    {
+      "name": "ready_effects",
+      "ok": true,
+      "evidence": "GET http://host.docker.internal:8086/ready -> 200 {\"status\":\"healthy\",\"version\":\"0.38.29\",\"details\":{\"ready\":true,\"is_running\":true,\"is_draining\":false,\"event_bus_readiness\":{\"is_ready\":true,\"consumers_started\":true,\"assignments\":{\"onex.evt.omniclaude.context-injected.v1\":[0],\"onex.evt.omn... [lane ready after 0s of a 179s settle budget]"
+    },
+    {
+      "name": "health_dimensions",
+      "ok": true,
+      "evidence": "GET http://host.docker.internal:8085/health -> 200, 6 dimensions, all healthy [lane ready after 0s of a 179s settle budget]"
+    },
+    {
+      "name": "projection_ready",
+      "ok": true,
+      "evidence": "GET http://host.docker.internal:3002/projections -> 200, 61 topic(s) reported [lane ready after 0s of a 179s settle budget]"
+    }
+  ],
+  "agent_command_id": null
+}

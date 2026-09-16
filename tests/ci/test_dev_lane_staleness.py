@@ -828,6 +828,12 @@ class TestAncestryResolver:
                 "poll_interval": timedelta(seconds=60),
                 "repo": "repo/name",
                 "branch": "dev",
+                # OMN-18436: the guard now also publishes the identity of the
+                # container it read, so the lab-pass probe can prove its HTTP
+                # reads came from the same generation. Both fields are part of
+                # the function's real input surface.
+                "container": "omninode-runtime",
+                "deployed_revision": "",
             },
         )()
 

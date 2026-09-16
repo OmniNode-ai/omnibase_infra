@@ -958,11 +958,18 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             settle_timeout_seconds=60.0,
             projection_url="http://lane:3002",
         )
+        # OMN-18436 widened the set: a probe that was GRANTED a settle budget
+        # also records whether the lane came up inside it, as its own check,
+        # because a budget-exhausted boot and an unhealthy lane used to arrive
+        # identically as `ready_effects: fail`. The two claim-gated checks
+        # (`settle_budget_sufficient`, `probe_generation_bound`) are absent here
+        # because this ad hoc call makes neither claim.
         assert [c.name for c in checks] == [
             "ready_main",
             "ready_effects",
             "health_dimensions",
             "projection_ready",
+            "timed_out_before_ready",
         ]
         assert all(c.ok for c in checks), [
             (c.name, c.evidence) for c in checks if not c.ok
@@ -1014,12 +1021,19 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
             "distinguishable from one that waited and still failed"
         )
 
-    def test_the_workflow_hands_the_probe_its_remaining_budget(self) -> None:
+    def test_the_workflow_hands_the_probe_a_budget(self) -> None:
+        """OMN-18436 changed WHICH budget, not whether there is one.
+
+        It was ``--settle-timeout-seconds "$SETTLE"``, a job-ceiling remainder
+        computed in shell. It is now the lane's DECLARED budget, resolved by a
+        tested Python step; the remainder could be smaller than the lane's own
+        measured boot, which failed the receipt on timing alone.
+        """
         from pathlib import Path
 
         text = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
             encoding="utf-8"
         )
-        assert "--settle-timeout-seconds" in text, (
+        assert "--settle-budget-json" in text, (
             "the probe step must pass a budget, or it races the recreate again"
         )

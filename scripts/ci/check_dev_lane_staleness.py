@@ -138,7 +138,14 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from pathlib import Path
+from typing import Any, Final
+
+_REPO_ROOT: Final = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.ci.lab_pass_receipt import read_lane_generation
 
 DEFAULT_REPO = "OmniNode-ai/omnibase_infra"
 DEFAULT_BRANCH = "dev"
@@ -985,6 +992,27 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     # artifact names the revision the lane was actually observed at and how it
     # relates to the sha the receipt is keyed by.
     _write_output("evidence", evidence)
+
+    # OMN-18436: publish the identity of the container this guard actually read,
+    # so the probe step that runs next can prove its HTTP reads came from the
+    # SAME generation. The probe runs under `if: always()`, so when this guard
+    # fails the lane still answers -- from the PREVIOUS generation -- and the
+    # receipt recorded four green reads with nothing in it naming the container
+    # that produced them (receipt 4853e0e1: deployed_revision FAIL with
+    # ready_effects TRUE, two true statements about two different containers).
+    #
+    # Written on BOTH outcomes and on a converged-by-containment lane, because
+    # the binding question is "which container answered", which has an answer
+    # whether or not convergence succeeded. It is omitted only when the identity
+    # itself could not be read, and the probe treats an absent record as a
+    # failure rather than as permission to skip the check.
+    if not args.deployed_revision:
+        try:
+            generation = read_lane_generation(args.container)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"::warning::lane generation unreadable: {exc}")
+        else:
+            _write_output("generation", generation.to_json())
 
     _summary(
         [
