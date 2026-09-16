@@ -171,6 +171,24 @@ class ModelDlqReplayEngineConfig(BaseModel):
     # a NEGATIVE answer ("nothing here"), and a topic that does produce a
     # record continues under the run's shared remaining budget.
     idle_probe_seconds: float = Field(default=0.5, gt=0.0)
+    # OMN-17137 (second pass): the bound that MUST hold is "a dispatch returns
+    # promptly so the outer trigger consumer keeps polling", and the record
+    # loop was only one segment of that dispatch. Acquiring the run mutex,
+    # ``start()``-ing the consumer and, above all, ``stop()``-ing it sit
+    # OUTSIDE ``max_run_duration_seconds`` and were each an unbounded await.
+    # Measured on the .201 dev lane 2026-09-16: the three per-topic consumers
+    # share the single ``onex-dlq-replay`` group and the handler starts and
+    # stops one of them on EVERY trigger message, so the group rebalances
+    # continuously (generation 227,675 eight minutes after a cold boot). A
+    # ``stop()`` issued into that storm never completed -- the last DLQ line on
+    # the lane is a partition revocation at 14:27:23Z with no rejoin after it
+    # -- so the dispatch never returned, the outer consumer stopped polling,
+    # aiokafka evicted it at ``max_poll_interval_ms``, and nothing rejoined
+    # because a rejoin only happens on the next poll. This bounds each of those
+    # lifecycle awaits. It is deliberately SEPARATE from the run's wall clock
+    # rather than carved out of its remainder: teardown must still get a real
+    # budget on a run that legitimately spent its whole clock on records.
+    dependency_lifecycle_timeout_seconds: float = Field(default=15.0, gt=0.0)
 
     @field_validator("bootstrap_servers")
     @classmethod

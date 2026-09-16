@@ -36,7 +36,10 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.dlq.models.enum_replay_status import EnumReplayStatus
 from omnibase_infra.dlq.models.model_dlq_replay_record import ModelDlqReplayRecord
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.errors import DlqTopicFixedPointError
+from omnibase_infra.errors import (
+    DlqDependencyLifecycleTimeoutError,
+    DlqTopicFixedPointError,
+)
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQConsumer,
     DLQProducer,
@@ -279,8 +282,33 @@ class HandlerDlqReplay:
             # rather than around the dispatch keeps the scope exactly the
             # lifecycle that is shared; a dispatcher whose consumer nobody
             # else holds never waits.
-            async with _run_lock_for(consumer):
+            #
+            # OMN-17137 (second pass): that acquisition is itself an await, and
+            # an UNBOUNDED one. A peer run wedged in its own teardown holds the
+            # mutex forever, so every later run queued behind it inherits the
+            # wedge -- which is how ONE stuck consumer took down both trafficked
+            # topics on the stability lane while the untrafficked third stayed
+            # Stable. A run that cannot take the mutex inside its remaining
+            # budget gives the topic up for this pass; the rotation puts it at
+            # the head of the order next time.
+            lock = _run_lock_for(consumer)
+            lock_wait = deadline - time.monotonic()
+            try:
+                await asyncio.wait_for(lock.acquire(), timeout=lock_wait)
+            except TimeoutError:
+                logger.warning(
+                    "DLQ replay run could not take the run mutex for %s within "
+                    "its remaining %.2fs budget -- a peer run still holds it. "
+                    "Skipping this topic rather than parking the outer trigger "
+                    "consumer (OMN-17137).",
+                    topic,
+                    max(lock_wait, 0.0),
+                )
+                continue
+            try:
                 results.extend(await self._run_locked(consumer, deadline))
+            finally:
+                lock.release()
 
         return self._summarize(results, tuple(order))
 
@@ -407,8 +435,15 @@ class HandlerDlqReplay:
         the other declared topics stay closed until their own turn, so a run
         holds one Kafka consumer at a time rather than one per declared topic
         (OMN-18119).
+
+        OMN-17137 (second pass): every ``start()`` here is bounded by
+        ``dependency_lifecycle_timeout_seconds``. ``AIOKafkaConsumer.start()``
+        joins a consumer group, and on this node's shared ``onex-dlq-replay``
+        group that join lands in a permanent rebalance. An unbounded join holds
+        the outer trigger consumer exactly as an unbounded record wait did.
         """
         started: list[object] = []
+        budget = self._config.dependency_lifecycle_timeout_seconds
         try:
             for dependency in (
                 consumer,
@@ -420,7 +455,17 @@ class HandlerDlqReplay:
                 start = getattr(dependency, "start", None)
                 if start is None:
                     continue
-                await start()
+                try:
+                    await asyncio.wait_for(start(), timeout=budget)
+                except TimeoutError as exc:
+                    raise DlqDependencyLifecycleTimeoutError(
+                        f"{type(dependency).__name__}.start() did not complete "
+                        f"within {budget:.2f}s; ending this DLQ replay run so "
+                        f"the outer trigger consumer keeps polling (OMN-17137)",
+                        dependency=type(dependency).__name__,
+                        operation="start",
+                        timeout_seconds=budget,
+                    ) from exc
                 started.append(dependency)
             return started
         except Exception:
@@ -428,10 +473,46 @@ class HandlerDlqReplay:
             raise
 
     async def _stop_runtime_dependencies(self, dependencies: list[object]) -> None:
+        """Stop what this run started, under a BOUNDED await per dependency.
+
+        OMN-17137 (second pass) -- this is the await the live wedge was in, and
+        it is the one place a timeout must NOT propagate. Measured on the .201
+        dev lane 2026-09-16: the three per-topic DLQ consumers share one Kafka
+        group and this handler starts and stops one of them on every trigger
+        message, so the group rebalances without pause (generation 227,675
+        eight minutes after a cold boot). ``AIOKafkaConsumer.stop()`` issued
+        into that storm awaits a coordinator close that never settles. Because
+        this runs in ``_run_locked``'s ``finally``, that unbounded await was
+        holding BOTH the run mutex and the outer trigger consumer's serial poll
+        loop; aiokafka evicted the outer consumer at ``max_poll_interval_ms``
+        and nothing rejoined it, because a rejoin only happens on the next
+        poll and the loop was still inside this ``await``.
+
+        A timed-out stop is reported at ERROR and ABANDONED rather than raised:
+        the drain it is tearing down has already produced its committed,
+        durable result, and turning a completed batch into an exception would
+        discard that result and redeliver every record in it. The dependency is
+        left for the next run's ``_started`` check to reconcile -- degraded, and
+        strictly better than a runtime that never polls again.
+        """
+        budget = self._config.dependency_lifecycle_timeout_seconds
         for dependency in reversed(dependencies):
             stop = getattr(dependency, "stop", None)
-            if stop is not None:
-                await stop()
+            if stop is None:
+                continue
+            try:
+                await asyncio.wait_for(stop(), timeout=budget)
+            except TimeoutError:
+                logger.exception(
+                    "DLQ replay teardown of %s did not complete within %.2fs "
+                    "and was ABANDONED. This is the OMN-17137 wedge: an "
+                    "unbounded stop() holds the outer trigger consumer's poll "
+                    "loop until aiokafka evicts it at max_poll_interval_ms, "
+                    "and nothing rejoins because a rejoin needs a poll. The "
+                    "drain's committed offsets stand.",
+                    type(dependency).__name__,
+                    budget,
+                )
 
     def _mark_offset(
         self,

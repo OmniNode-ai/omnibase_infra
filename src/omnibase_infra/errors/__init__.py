@@ -25,6 +25,7 @@ Exports:
     PolicyRegistryError: Policy registry operation errors
     ComputeRegistryError: Compute registry operation errors
     EventBusRegistryError: Event bus registry operation errors
+    DlqDependencyLifecycleTimeoutError: A DLQ replay dependency start() exceeded its bound
     DlqTopicFixedPointError: A DLQ topic was offered as an ORIGINAL topic
     LaneMirrorRecordRefusedError: Lane-mirror record carries no usable identity
     LaneMirrorLoopDetectedError: Lane-mirror destination IS its own source lane
@@ -131,6 +132,9 @@ from omnibase_infra.errors.error_db_ownership import (
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
 )
+from omnibase_infra.errors.error_dlq_dependency_lifecycle import (
+    DlqDependencyLifecycleTimeoutError,
+)
 from omnibase_infra.errors.error_dlq_topic import DlqTopicFixedPointError
 from omnibase_infra.errors.error_event_bus_registry import EventBusRegistryError
 from omnibase_infra.errors.error_event_registry_fingerprint import (
@@ -211,6 +215,7 @@ __all__: list[str] = [
     "DbOwnershipMismatchError",
     "DbOwnershipMissingError",
     # DLQ topic resolution refusal (OMN-18084)
+    "DlqDependencyLifecycleTimeoutError",
     "DlqTopicFixedPointError",
     "EnvelopeValidationError",
     # Error catalog (OMN-518)
