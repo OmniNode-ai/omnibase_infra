@@ -227,4 +227,15 @@ def test_auth_group_is_registered_as_an_onex_cli_entry_point() -> None:
 
     # The declared target must actually be the loadable click group.
     assert isinstance(auth_group, click.Group)
-    assert set(auth_group.commands) == {"login", "status", "token", "logout"}
+    # OMN-18432 added the two lane commands. The set is asserted whole, not
+    # with a subset check: a command silently disappearing from a group is the
+    # phantom-callable failure this test exists to catch, and a subset
+    # assertion cannot see it.
+    assert set(auth_group.commands) == {
+        "login",
+        "status",
+        "token",
+        "logout",
+        "lane-login",
+        "lane-logout",
+    }

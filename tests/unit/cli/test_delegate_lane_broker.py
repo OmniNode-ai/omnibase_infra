@@ -43,7 +43,11 @@ from omnibase_infra.cli.delegate_lane import (
     resolve_lane_selection,
     resolve_lane_target,
 )
+from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.event_bus.lane_client_transport_binding import (
+    bound_lane_client_transport,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -275,6 +279,10 @@ class TestRunDelegateAddressing:
 
         def _fake_run_receipt_mode(**kwargs: object) -> int:
             captured.update(kwargs)
+            # OMN-18432: what was bound WHILE the dispatch ran, captured here
+            # because the binding is scoped and is already gone by the time
+            # run_delegate returns. That scoping is the property being pinned.
+            captured["lane_transport"] = bound_lane_client_transport()
             return 0
 
         monkeypatch.setattr(
@@ -283,6 +291,22 @@ class TestRunDelegateAddressing:
             lambda _name: tmp_path / "contract.yaml",
         )
         monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        # OMN-18432: the declared dev lane is SASL_PLAINTEXT, and a machine
+        # holding no identity for it is now REFUSED rather than allowed to
+        # connect anonymously. This fixture is that machine holding one --
+        # the refusal itself is pinned in
+        # tests/unit/cli/test_omn18432_delegate_lane_credentials.py, so
+        # asserting it again here would only re-test the refusal instead of
+        # the addressing this class is about.
+        home = tmp_path / "fake-home"
+        home.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        StoreLaneCredential(onex_home=home / ".onex").save(
+            lane="dev",
+            sasl_username="dev-cli-under-test",
+            sasl_password="not-a-real-value",
+        )
         return captured
 
     def test_selected_lane_is_what_the_runtime_is_handed(
@@ -309,6 +333,15 @@ class TestRunDelegateAddressing:
             "event_bus": "kafka",
             "kafka_bootstrap": DECLARED_DEV_BROKER,
         }
+        # OMN-18432: the address still travels in backend_overrides, because
+        # that is the only key core accepts. The rest of the declared
+        # transport travels beside it, bound for this one broker.
+        lane_transport = captured["lane_transport"]
+        assert lane_transport is not None
+        assert lane_transport.bootstrap_servers == DECLARED_DEV_BROKER
+        assert lane_transport.security_protocol == "SASL_PLAINTEXT"
+        assert lane_transport.sasl_mechanism == "SCRAM-SHA-256"
+        assert lane_transport.sasl_username == "dev-cli-under-test"
 
     def test_no_lane_refuses_instead_of_using_the_ambient_value(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
