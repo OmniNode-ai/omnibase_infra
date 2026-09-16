@@ -46,7 +46,14 @@ CUSTOMER_PLANE_SERVICES = (
 # The general pool, used only as the positive control for every absence below.
 CONTROL_SERVICE = "omninode-runner-1"
 
-EXPECTED_LABELS = "self-hosted,omnibase-customer-plane,linux,x64"
+# OMN-17477 added `arch-amd64`: the fleet's own architecture vocabulary, the one
+# that matches Docker's TARGETARCH and the host inventory, so a workflow pins a
+# CPU in one spelling rather than choosing between GitHub's `X64`, Docker's
+# `amd64` and the image's `x86_64`. It is additive and changes nothing about
+# what this test protects -- the pair still carries its own class family and
+# still does NOT carry the general-pool label, which is asserted separately
+# below precisely so an edit to this string cannot silently relax it.
+EXPECTED_LABELS = "self-hosted,omnibase-customer-plane,linux,x64,arch-amd64"
 LAB_CREDENTIALS_TARGET = "/home/runner/.lab-credentials"
 DOCKER_SOCKET = "/var/run/docker.sock"
 

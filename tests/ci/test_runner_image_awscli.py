@@ -55,11 +55,24 @@ def test_dockerfile_installs_aws_cli() -> None:
     OMN-16444 placement-dependent failure.
     """
     source = _dockerfile_source()
-    assert "awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip" in source, (
+    # OMN-17477 made the URL architecture-resolving. The property OMN-16444
+    # protects is unchanged -- the pinned v2 bundle is installed, uniformly,
+    # across the fleet -- but "uniformly across the fleet" now spans two CPUs,
+    # and the x86_64 literal this used to assert is the exact thing that made
+    # the image unbuildable on the arm64 lab hosts.
+    assert "awscli-exe-linux-${aws_arch}-${AWSCLI_VERSION}.zip" in source, (
         "runner Dockerfile must install the AWS CLI v2 bundle pinned via "
-        "AWSCLI_VERSION so `aws` resolves uniformly across the omnibase-ci "
-        "fleet (OMN-16444)"
+        "AWSCLI_VERSION, with the architecture resolved from TARGETARCH so "
+        "`aws` resolves uniformly across BOTH architectures in the fleet "
+        "(OMN-16444, OMN-17477)"
     )
+    # Both arms of the map, because a half-populated map resolves to the empty
+    # string and fails several layers later on a 404 that names no architecture.
+    for arch, value in (("amd64", "x86_64"), ("arm64", "aarch64")):
+        assert re.search(rf"(?m)^ARG AWS_ARCH_{arch}={value}$", source), (
+            f"runner Dockerfile must map TARGETARCH {arch} to the AWS CLI "
+            f"bundle's {value} spelling"
+        )
     assert re.search(r"(?m)^ARG AWSCLI_VERSION=\d+\.\d+\.\d+$", source), (
         "AWSCLI_VERSION must be a pinned ARG (not floating 'latest') so the "
         "image contract is reproducible (OMN-16444)"

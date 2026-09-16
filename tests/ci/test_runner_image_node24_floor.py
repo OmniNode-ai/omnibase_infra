@@ -141,15 +141,21 @@ def test_runner_sha256_comment_tracks_runner_version() -> None:
     """
     source = RUNNER_DOCKERFILE.read_text(encoding="utf-8")
     version = _dockerfile_runner_version()
-    assert f"actions-runner-linux-x64-{version}.tar.gz" in source, (
-        f"runner Dockerfile SHA256 comment does not reference "
-        f"actions-runner-linux-x64-{version}.tar.gz; update the checksum + "
-        "comment in lockstep with RUNNER_VERSION"
-    )
-    # A non-empty pinned checksum must be present.
-    assert re.search(r"^ENV RUNNER_SHA256=[0-9a-f]{64}\s*$", source, re.MULTILINE), (
-        "runner Dockerfile must pin a 64-hex-char RUNNER_SHA256"
-    )
+    # OMN-17477: one tarball per architecture, so one comment and one checksum
+    # per architecture. BOTH are asserted. Dropping the second would be the
+    # cheap way to make this pass after the multi-arch change, and it would
+    # delete the supply-chain verification the first one exists for -- on
+    # exactly the architecture that has no other proof.
+    for asset_arch in ("x64", "arm64"):
+        assert f"actions-runner-linux-{asset_arch}-{version}.tar.gz" in source, (
+            f"runner Dockerfile SHA256 comment does not reference "
+            f"actions-runner-linux-{asset_arch}-{version}.tar.gz; update every "
+            "checksum + comment in lockstep with RUNNER_VERSION"
+        )
+    for env_arch in ("AMD64", "ARM64"):
+        assert re.search(
+            rf"^ENV RUNNER_SHA256_{env_arch}=[0-9a-f]{{64}}\s*$", source, re.MULTILINE
+        ), f"runner Dockerfile must pin a 64-hex-char RUNNER_SHA256_{env_arch}"
 
 
 def test_runner_image_external_downloads_are_retried() -> None:
