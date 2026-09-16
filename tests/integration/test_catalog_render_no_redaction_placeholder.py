@@ -26,7 +26,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # preview of this file. See tests/test_no_redaction_placeholder_in_docker.py.
 REDACTION_PLACEHOLDER = "*" * 3 + "REDACTED" + "*" * 3
 
-_DSN = re.compile(r"[a-z+]+://([^:@\s]+):([^@\s]+)@")
+# Stop at the @, not at a space: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+# is a legal password segment and contains one.
+_DSN = re.compile(r"[a-z+]+://([^:@\s]+):([^@\n]+)@")
 _EXPANSION = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?:(?::?[-?+])[^}]*)?\}$")
 
 
@@ -61,15 +63,21 @@ def test_rendered_compose_binds_no_placeholder_or_spelled_password(
     assert services, "render produced no services"
 
     offenders: list[str] = []
+    examined = 0
     for name, svc in services.items():
         for key, value in (svc.get("environment") or {}).items():
             for match in _DSN.finditer(str(value)):
                 segment = match.group(2)
+                examined += 1
                 if REDACTION_PLACEHOLDER in segment:
                     offenders.append(f"{name}.{key} PLACEHOLDER")
                 elif not _EXPANSION.match(segment):
                     offenders.append(f"{name}.{key} LITERAL")
 
+    assert examined >= 20, (
+        f"only {examined} DSN bindings matched in the render -- the scan is not "
+        "reading the compose, so a zero-offender result proves nothing"
+    )
     assert offenders == [], (
         "The rendered compose binds a credential that is not resolved from the "
         f"environment: {offenders}. A container started from this render would "

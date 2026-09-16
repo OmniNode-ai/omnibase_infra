@@ -50,7 +50,11 @@ _TEXT_SUFFIXES = frozenset(
     {".yaml", ".yml", ".env", ".sh", ".py", ".conf", ".json", ".toml", ".md"}
 )
 
-_DSN = re.compile(r"postgresql://([^:@\s]+):([^@\s'\"]+)@")
+# The password segment may contain spaces: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD
+# required} is a legal value. An earlier revision of this pattern excluded
+# whitespace, so it stopped matching the moment the fix landed and the scan
+# below passed by matching nothing at all. Stop at the @, not at a space.
+_DSN = re.compile(r"postgresql://([^:@\s]+):([^@\n]+)@")
 _EXPANSION = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?:(?::?[-?+])[^}]*)?\}$")
 
 
@@ -90,9 +94,14 @@ def find_placeholder_hits(
     return hits
 
 
-def find_non_expansion_dsn_passwords(root: Path) -> list[str]:
-    """Return ``path:line verdict`` for every DSN password that is not an expansion."""
+def scan_dsn_passwords(root: Path) -> tuple[list[str], int]:
+    """Return non-expansion findings and the total number of DSNs examined.
+
+    The count is returned so a caller can refuse a vacuous pass. A scan that
+    matches nothing reports zero findings and reads exactly like a clean tree.
+    """
     findings: list[str] = []
+    examined = 0
     for path in _text_files(root):
         rel = path.relative_to(root).as_posix()
         try:
@@ -101,10 +110,16 @@ def find_non_expansion_dsn_passwords(root: Path) -> list[str]:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
             for match in _DSN.finditer(line):
+                examined += 1
                 verdict = classify_password_segment(match.group(2))
                 if verdict != "EXPANSION":
                     findings.append(f"{rel}:{lineno} {verdict}")
-    return findings
+    return findings, examined
+
+
+def find_non_expansion_dsn_passwords(root: Path) -> list[str]:
+    """Return ``path:line verdict`` for every DSN password that is not an expansion."""
+    return scan_dsn_passwords(root)[0]
 
 
 @pytest.mark.unit
@@ -140,7 +155,11 @@ def test_positive_control_planted_placeholder_is_found(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_catalog_service_dsn_passwords_are_all_expansions() -> None:
     """AC1. Every catalog DSN resolves its password from the environment."""
-    findings = find_non_expansion_dsn_passwords(DOCKER_DIR / "catalog" / "services")
+    findings, examined = scan_dsn_passwords(DOCKER_DIR / "catalog" / "services")
+    assert examined >= 20, (
+        f"only {examined} DSN bindings matched under docker/catalog/services -- the "
+        "scan is not reading the catalog, so a zero-findings result proves nothing"
+    )
     assert findings == [], (
         "A catalog manifest spells a DSN password instead of expanding one: "
         f"{findings}. Use ${{POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}}, the "
