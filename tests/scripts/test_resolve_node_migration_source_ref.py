@@ -142,6 +142,7 @@ def test_unmerged_node_migration_source_ref_can_resolve_to_paired_pr_head_sha(
                 "head": {
                     "ref": "jonah/omn-18079-backfill-overlay-provider",
                     "sha": source_sha,
+                    "repo": {"full_name": "OmniNode-ai/omnimarket"},
                 },
             },
             "HTTP 200",
@@ -193,6 +194,7 @@ def test_unmerged_node_migration_source_ref_requires_exact_paired_pr_head_sha(
                 "head": {
                     "ref": "jonah/omn-18079-backfill-overlay-provider",
                     "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "repo": {"full_name": "OmniNode-ai/omnimarket"},
                 },
             },
             "HTTP 200",
@@ -201,6 +203,54 @@ def test_unmerged_node_migration_source_ref_requires_exact_paired_pr_head_sha(
 
     assert resolver.main() == 1
     assert "head SHA does not match" in capsys.readouterr().err
+    assert not output_path.exists()
+
+
+def test_unmerged_node_migration_source_ref_rejects_fork_head_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_sha = "b75a8957806d918721a63a1bf72d67a1da162782"
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "body": "\n".join(
+                        [
+                            "Omnimarket-Source-Ref: jonah/omn-18079-backfill-overlay-provider",
+                            "Node-Migration-Source-PR: omnimarket#2579",
+                            f"Node-Migration-Source-SHA: {source_sha}",
+                        ]
+                    )
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "github_output.txt"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setattr(
+        resolver,
+        "_api_get",
+        lambda url: (
+            200,
+            {
+                "state": "open",
+                "draft": False,
+                "base": {"ref": "dev"},
+                "head": {
+                    "ref": "jonah/omn-18079-backfill-overlay-provider",
+                    "sha": source_sha,
+                    "repo": {"full_name": "external/omnimarket"},
+                },
+            },
+            "HTTP 200",
+        ),
+    )
+
+    assert resolver.main() == 1
+    assert "head repo must be OmniNode-ai/omnimarket" in capsys.readouterr().err
     assert not output_path.exists()
 
 

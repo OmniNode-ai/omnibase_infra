@@ -166,6 +166,14 @@ def _require_paired_source_ref(ref: str, pr_number: int, sha: str) -> str:
         raise ValueError(
             f"node-migration source PR has no head: omnimarket#{pr_number}"
         )
+    head_repo = head.get("repo")
+    if not isinstance(head_repo, dict) or head_repo.get("full_name") != (
+        f"{_ORG}/omnimarket"
+    ):
+        raise ValueError(
+            "node-migration source PR head repo must be "
+            f"{_ORG}/omnimarket: omnimarket#{pr_number}"
+        )
     if head.get("ref") != ref:
         raise ValueError(
             "node-migration source PR head ref does not match declared source: "
@@ -181,19 +189,16 @@ def _require_paired_source_ref(ref: str, pr_number: int, sha: str) -> str:
 
 def _resolve_declared_ref(body: str) -> str:
     ref = _parse_ref(body)
-    try:
-        return _require_ref_reachable_from_dev(ref)
-    except ValueError as exc:
-        source_pr = _parse_source_pr(body)
-        source_sha = _parse_source_sha(body)
-        if source_pr is None and source_sha is None:
-            raise
+    source_pr = _parse_source_pr(body)
+    source_sha = _parse_source_sha(body)
+    if source_pr is not None or source_sha is not None:
         if source_pr is None or source_sha is None:
             raise ValueError(
-                "unmerged node-migration source refs require both "
+                "node-migration source refs with pair metadata require both "
                 "Node-Migration-Source-PR and Node-Migration-Source-SHA trailers"
-            ) from exc
+            )
         return _require_paired_source_ref(ref, source_pr, source_sha)
+    return _require_ref_reachable_from_dev(ref)
 
 
 def main() -> int:
