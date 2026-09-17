@@ -129,6 +129,37 @@ def resolve_consent_citation(
     )
 
 
+def _is_real_file_inside(candidate: Path, directory: Path) -> bool:
+    """Whether ``candidate`` is a regular file that really lives in ``directory``.
+
+    THE GLOB RESTRICTS THE NAME, NOT THE INODE. A symlink called
+    ``<ledger stem>_<date>-split.md`` matches the pattern, and ``read_text``
+    follows symlinks, so without this a link planted in the archive directory
+    could point at any file on the host and answer a consent citation with
+    whatever that file contains -- authorising a live GRANT or REVOKE. The name
+    is attacker-choosable; the target must not be.
+
+    Four conditions, each load-bearing: the DIRECTORY is not itself a symlink
+    (otherwise every entry in it resolves consistently and the check passes while
+    reading a tree somewhere else); the entry is not a symlink; it is a regular
+    file, not a fifo, device or directory; and it resolves to something whose
+    parent really is this directory.
+
+    What this does NOT claim: the archive is not a trusted store. Anyone who can
+    plant a file in it can also append a row to the live ledger, which is read
+    with no such check because it is the file the citation names. This closes one
+    specific vector and nothing wider.
+    """
+    try:
+        if directory.is_symlink():
+            return False
+        if candidate.is_symlink() or not candidate.is_file():
+            return False
+        return candidate.resolve().parent == directory.resolve()
+    except OSError:
+        return False
+
+
 def _rows_opening_with(
     lines: list[str], stamp: str, source: Path
 ) -> list[tuple[Path, int, str]]:
@@ -186,6 +217,8 @@ def _resolve_by_stamp(
         # names accepted are the ones `ledger_lock.py` itself writes beside this
         # ledger: `<ledger stem>_<date>-split.md`.
         for archive in sorted(archive_dir.glob(f"{path.stem}_*-split.md")):
+            if not _is_real_file_inside(archive, archive_dir):
+                continue
             searched.append(str(archive))
             located.extend(
                 _rows_opening_with(
