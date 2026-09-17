@@ -36,6 +36,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -377,6 +378,13 @@ def _run(
             # dependency; the probe's own rows are asserted in
             # test_omninode_ci_required_context_probe.py.
             "OMNINODE_CI_PROBE_ENABLED": "0",
+            # OMN-18567: same reasoning one row up. The reporter also reads
+            # the runner-tree converge verdict from collect(). These tests
+            # are about disk/docker/endpoint classification and must not
+            # acquire a dependency on a state file that a cron tick writes;
+            # the collector's own rows are asserted in the OMN-18567 block
+            # at the end of this file, which switches it back on.
+            "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1819,6 +1827,13 @@ def _run_alert(
             # dependency; the probe's own rows are asserted in
             # test_omninode_ci_required_context_probe.py.
             "OMNINODE_CI_PROBE_ENABLED": "0",
+            # OMN-18567: same reasoning one row up. The reporter also reads
+            # the runner-tree converge verdict from collect(). These tests
+            # are about disk/docker/endpoint classification and must not
+            # acquire a dependency on a state file that a cron tick writes;
+            # the collector's own rows are asserted in the OMN-18567 block
+            # at the end of this file, which switches it back on.
+            "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1910,6 +1925,13 @@ class _AlertTicker:
                 "SLACK_BOT_TOKEN": "test-token",
                 "SLACK_CHANNEL_ID": "C-TEST",
                 "OMNINODE_CI_PROBE_ENABLED": "0",
+                # OMN-18567: same reasoning one row up. The reporter also reads
+                # the runner-tree converge verdict from collect(). These tests
+                # are about disk/docker/endpoint classification and must not
+                # acquire a dependency on a state file that a cron tick writes;
+                # the collector's own rows are asserted in the OMN-18567 block
+                # at the end of this file, which switches it back on.
+                "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
             }
         )
         env.update(self.extra_env)
@@ -2494,3 +2516,153 @@ def test_unhealthy_runtime_detail_names_the_failing_dimension(
         "the recorded row must name the failing health dimension; the 180-byte "
         f"excerpt alone stops before it:\n{issues}"
     )
+
+
+# --------------------------------------------------------------------------
+# OMN-18567 -- the runner-tree converge verdict reaches a human.
+#
+# `omninode-runner-tree-converge.sh` runs hourly at :49 over the deploy
+# runner's private clone tree -- the build source the dev-lane refresh, the
+# stability-lane refresh and the release-train tag cut all read -- and writes
+# one verdict line. A verdict nothing reads is a log line (CLAUDE.md rule 5),
+# so the reporter collects it here rather than in a second alerter.
+#
+# The load-bearing distinction these tests pin: the tick REFUSES while a deploy
+# job is using the tree and exits 0 when it does, because a refusal is the guard
+# working. So a single REFUSED must NOT page. What pages is the tree going
+# unconverged for a long time, which is detected by ageing `last_success` --
+# and that catches "permanently busy", "unit stopped being scheduled" and
+# "nobody ever installed it" alike, three conditions that look identical from
+# the outside.
+# --------------------------------------------------------------------------
+def _runner_tree_rows(
+    tmp_path: Path, lane_ports: dict[str, str], status_line: str | None
+) -> tuple[list[str], list[str]]:
+    """(digest rows, rows that reached *Active issues*) for the runner-tree key."""
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    status_file = tmp_path / "runner-tree-converge.status"
+    if status_line is not None:
+        status_file.write_text(status_line + "\n", encoding="utf-8")
+    report = _run(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={
+            "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "1",
+            "OMNINODE_RUNNER_TREE_STATE_FILE": str(status_file),
+        },
+    )
+    section = report.split("*Runner clone tree*", 1)[1].split("*Active issues*", 1)[0]
+    issues = report.split("*Active issues*", 1)[1]
+    rows = [
+        line.strip() for line in section.splitlines() if line.strip().startswith("- ")
+    ]
+    paged = [
+        line.strip()
+        for line in issues.splitlines()
+        if line.strip().startswith("- ") and "`converge`" in line
+    ]
+    return rows, paged
+
+
+def _verdict_line(verdict: str, last_success: str, detail: str = "r:aaa->bbb") -> str:
+    return (
+        f"runner-tree-converge|{verdict}|ts=2026-09-17T12:00:00Z"
+        f"|tree=/data/omninode/runner_omni_home|clones=6|in_sync=6|converged=0"
+        f"|failed=0|skipped=0|reason=none|last_success={last_success}|detail={detail}"
+    )
+
+
+def _hours_ago(hours: int) -> str:
+    return (datetime.now(UTC) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_a_missing_verdict_file_is_a_warning_not_silence(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """ "Nobody installed it" must look different from "it ran and was fine".
+
+    An artifact merged into the repo but never installed on the host, with
+    nothing alarming, is the OMN-15525 condition -- the exact failure this
+    maintenance family exists to make visible.
+    """
+    rows, _paged = _runner_tree_rows(tmp_path, lane_ports, None)
+    assert len(rows) == 1, rows
+    assert "(WARNING)" in rows[0]
+    assert "never run" in rows[0]
+
+
+def test_a_failed_converge_is_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """The one outcome worth waking someone for: the tree is knowingly wrong."""
+    rows, _paged = _runner_tree_rows(
+        tmp_path,
+        lane_ports,
+        _verdict_line("FAILED", _hours_ago(0), detail="omnibase_infra:aaa->aaa"),
+    )
+    assert "(CRITICAL)" in rows[0]
+    assert "omnibase_infra" in rows[0]
+
+
+def test_a_fresh_converge_is_ok(tmp_path: Path, lane_ports: dict[str, str]) -> None:
+    rows, _paged = _runner_tree_rows(
+        tmp_path, lane_ports, _verdict_line("CONVERGED", _hours_ago(0))
+    )
+    assert "(OK)" in rows[0]
+
+
+def test_a_single_refusal_with_a_recent_success_does_not_page(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """A busy runner is the guard working, not a fault.
+
+    Paging on every refusal is how a channel stops being read, which is this
+    reporter's own stated failure mode.
+    """
+    rows, paged = _runner_tree_rows(
+        tmp_path, lane_ports, _verdict_line("REFUSED", _hours_ago(1))
+    )
+    assert "(OK)" in rows[0]
+    assert not paged, f"a single refusal reached *Active issues*: {paged}"
+
+
+def test_a_tree_unconverged_for_too_long_warns_even_while_refusing(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """The case the verdict alone cannot express.
+
+    A permanently busy runner refuses forever and exits 0 forever. Reading only
+    the latest verdict, that is indistinguishable from a permanently converged
+    tree. Ageing `last_success` is what separates them.
+    """
+    rows, _paged = _runner_tree_rows(
+        tmp_path, lane_ports, _verdict_line("REFUSED", _hours_ago(30))
+    )
+    assert "(WARNING)" in rows[0]
+    assert "30h ago" in rows[0]
+
+
+def test_a_tick_that_never_succeeded_warns(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    rows, _paged = _runner_tree_rows(
+        tmp_path, lane_ports, _verdict_line("REFUSED", "never")
+    )
+    assert "(WARNING)" in rows[0]
+    assert "never been converged" in rows[0]
+
+
+def test_an_unparseable_verdict_is_a_warning_not_a_green(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """ "Could not look" must never render as "nothing wrong"."""
+    rows, _paged = _runner_tree_rows(
+        tmp_path, lane_ports, "garbage that is not a verdict"
+    )
+    assert "(WARNING)" in rows[0]
+    assert "unparseable" in rows[0]
