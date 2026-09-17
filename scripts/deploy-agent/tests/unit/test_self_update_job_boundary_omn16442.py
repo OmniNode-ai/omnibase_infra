@@ -339,7 +339,7 @@ async def test_behind_during_deploy_completes_the_deploy_then_updates(
     )
 
     with patch("deploy_agent.agent.publish_result", return_value=True):
-        await agent._execute_command(cmd)
+        agent._execute_command(cmd)
 
     job = agent.job_store.load(cid)
     assert job is not None

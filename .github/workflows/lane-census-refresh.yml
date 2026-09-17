@@ -201,7 +201,7 @@ jobs:
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add deploy/lane-census/census-snapshot.json
-          git commit -m "chore(deps, OMN-13034): refresh the lane census snapshot [bot]" \
+          git commit -m "chore(deps, OMN-18606): refresh the lane census snapshot [bot]" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin "$BRANCH"
@@ -210,7 +210,7 @@ jobs:
           DRIFT="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["drift_count"])' "$CANDIDATE")"
 
           {
-            printf '%s\n' "Automated lane-census refresh (OMN-13034, leg built in OMN-18606)."
+            printf '%s\n' "Automated lane-census refresh, opened by the refresh leg built in OMN-18606."
             printf '\n'
             printf '%s\n' "Collected on the lab host by the \`host-201\` verify runner against the"
             printf '%s\n' "same docker daemon the hourly \`onex-disk-gc\` census pass reads."
@@ -226,10 +226,24 @@ jobs:
 
           # `chore(deps,` prefix is exempt from the pr-title ticket gate, matching
           # the sibling-lock-refresh and publish-downstream-pin-bump conventions.
+          #
+          # WHICH TICKET, AND WHY IT IS NOT THE RATCHET'S. The autobind resolves a
+          # ticket from this title and mints an OCC companion bound to it, so the
+          # title decides which contract's DoD tree the bot PR must satisfy. It
+          # cited the lane-census ratchet's ticket until 2026-09-17, which meant
+          # every refresh PR inherited that contract's whole accumulated tree --
+          # 17 checks, two of which BLOCK: they fetch the census at a PINNED sha
+          # and then assert that frozen artifact is under seven days old against
+          # wall-clock now, so each was true when written and false forever about
+          # a week later. `omnibase_infra#3726` could not land for that reason and
+          # neither could any successor. The leg cites the ticket that owns the
+          # leg instead. The ratchet is named in prose above, not as a token,
+          # because a second resolvable reference in the body is a second thing
+          # for an extractor to get wrong.
           gh pr create \
             --base "${GITHUB_REF_NAME}" \
             --head "$BRANCH" \
-            --title "chore(deps, OMN-13034): refresh the lane census snapshot [bot]" \
+            --title "chore(deps, OMN-18606): refresh the lane census snapshot [bot]" \
             --body-file "${RUNNER_TEMP}/census_refresh_body.md"
 
           gh pr merge "$BRANCH" --squash --auto

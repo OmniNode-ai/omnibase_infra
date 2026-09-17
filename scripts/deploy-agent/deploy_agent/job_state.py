@@ -59,6 +59,55 @@ def reconcile_terminal_phase_results(
     return settled
 
 
+def describe_interruption(job: JobState) -> str:
+    """Name the phase a crashed job was RUNNING, not the last one it started.
+
+    OMN-18636 (from the ``deploy-agent-http-hang-diag-2105`` diagnosis, TERMINAL
+    2026-09-17T22:10:00Z). ``recover_crashed_jobs`` read ``job.current_phase``,
+    and that field does not mean what the error string claimed it did.
+
+    ``update_phase`` writes ``current_phase`` on EVERY update, including the
+    ``SUCCESS`` one at the end of a phase. So between two phases — after
+    ``git`` succeeds and before ``compose_gen`` starts — ``current_phase`` still
+    reads ``git``, and a process killed in that gap recorded "interrupted during
+    phase git" about a phase that had COMPLETED. That sends the reader at the
+    wrong step: the evidence says the git pull was the thing that died, when in
+    fact nothing was running and the next phase had not begun.
+
+    ``phase_results`` already carries the fact the string needs, because exactly
+    one phase is ``IN_PROGRESS`` at a time and none is between phases. Three
+    distinct answers, kept distinct because they take three different next
+    steps:
+
+    * a phase IS in progress — that phase was running, and it is where to look;
+    * no phase is in progress but some have succeeded — the job died in the gap
+      BETWEEN phases, and the last completed one bounds how far it got;
+    * nothing has succeeded either — the job was accepted and died before its
+      first phase started, which points at startup rather than at any phase.
+
+    Call this BEFORE ``reconcile_terminal_phase_results``, which settles every
+    ``IN_PROGRESS`` phase to ``FAILED`` and so erases the distinction this reads.
+    """
+    running = [
+        phase
+        for phase in DEPLOY_PHASE_ORDER
+        if job.phase_results.get(phase) == PhaseStatus.IN_PROGRESS
+    ]
+    if running:
+        return f"interrupted during phase {running[-1]}"
+    completed = [
+        phase
+        for phase in DEPLOY_PHASE_ORDER
+        if job.phase_results.get(phase) == PhaseStatus.SUCCESS
+    ]
+    if completed:
+        return (
+            "interrupted between phases; no phase was running, and the last "
+            f"completed phase was {completed[-1]}"
+        )
+    return "interrupted before any phase started"
+
+
 class JobStore:
     def __init__(
         self,
@@ -165,13 +214,18 @@ class JobStore:
             except Exception:  # noqa: BLE001
                 continue
             if job.status in ("accepted", "in_progress"):
+                # OMN-18636: read the interruption BEFORE reconciling. The
+                # reconciliation settles every IN_PROGRESS phase to FAILED,
+                # which is exactly the fact that distinguishes "this phase was
+                # running" from "the job died between phases".
+                interruption = describe_interruption(job)
                 # Settle every deploy phase, not only the current one: a phase
                 # the crashed process never reached is SKIPPED on the record
                 # rather than absent from it (OMN-18057).
                 job.phase_results = reconcile_terminal_phase_results(job.phase_results)
                 job.status = "failed"
                 job.completed_at = datetime.now(UTC)
-                job.errors.append(f"interrupted during phase {job.current_phase}")
+                job.errors.append(interruption)
                 job.result_publish_pending = True
                 self._save(job)
                 recovered.append(job)

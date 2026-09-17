@@ -160,7 +160,7 @@ async def test_runtime_deploy_validates_llm_env_before_rebuild(
     agent.executor = fake_executor  # type: ignore[assignment]
     monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert fake_executor.calls.index("seed_infisical") < fake_executor.calls.index(
         "validate_llm_endpoint_env_contract"
@@ -193,7 +193,7 @@ async def test_core_deploy_does_not_validate_runtime_llm_env(
     agent.executor = fake_executor  # type: ignore[assignment]
     monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert "validate_llm_endpoint_env_contract" not in fake_executor.calls
 
@@ -221,7 +221,7 @@ async def test_full_deploy_validates_llm_env_before_rebuild(
     agent.executor = fake_executor  # type: ignore[assignment]
     monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert fake_executor.calls.index("seed_infisical") < fake_executor.calls.index(
         "validate_llm_endpoint_env_contract"

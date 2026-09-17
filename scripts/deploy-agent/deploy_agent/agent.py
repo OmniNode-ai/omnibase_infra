@@ -5,14 +5,17 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
 import signal
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from aiohttp import web
 
@@ -105,10 +108,36 @@ LAB_OVERLAY_SOURCE_DIR = Path(
 )
 
 # NOTE (OMN-13760): no systemd watchdog. _run_deploy runs minutes-long
-# synchronous subprocess.run() rebuilds that block the event loop, so a periodic
-# ping task cannot fire during a rebuild — and a background pinger would only
+# synchronous subprocess.run() rebuilds — and a background pinger would only
 # mask real hangs. The unit therefore declares no WatchdogSec; Restart=on-failure
 # recovers genuine crashes. See deploy/deploy-agent.service for the rationale.
+#
+# OMN-18636 amends the PREMISE of that note without changing its conclusion. The
+# rebuilds are still minutes-long synchronous subprocesses, but they no longer
+# run on the event loop thread, so "a periodic ping task cannot fire during a
+# rebuild" is no longer true. The unit still declares no WatchdogSec, now for the
+# remaining reason only: a liveness ping that CAN fire throughout a rebuild
+# proves the loop is turning, which is not the same fact as the deploy making
+# progress, and Restart=on-failure already recovers a crash. Re-deciding that is
+# a separate change with its own evidence.
+
+#: OMN-18636. How many deploy jobs this agent runs at once. ONE, and the number
+#: is the contract rather than a tuning knob.
+#:
+#: Every phase of a deploy is a synchronous ``subprocess.run`` against a shared
+#: host: one compose project, one git clone, one image cache, one lane lock. The
+#: agent has always run exactly one job at a time — ``single_flight_lock`` and
+#: the consumer's ``busy`` rejection both say so — and moving the work off the
+#: event loop thread must not quietly buy concurrency the rest of the design
+#: refuses. A pool of one preserves the existing ordering exactly: the poll, the
+#: job, the self-update boundaries and the publish retries all run on the same
+#: single worker, in the order they were submitted, which is the order they ran
+#: in when they all ran on the loop thread.
+#:
+#: Raising this is not a performance knob, it is a change to the concurrency
+#: contract, and ``tests/unit/test_agent_offloads_phases_omn18636.py`` fails if
+#: it moves.
+JOB_POOL_MAX_WORKERS = 1
 
 
 class DeployAgent:
@@ -138,9 +167,61 @@ class DeployAgent:
         # port binds and long before a command is polled. An agent that has
         # not declared which lanes it may deploy must not start at all.
         self._allowed_lanes = load_allowed_lanes_from_env()
+        # OMN-18636. The one thread every blocking call in this process runs on.
+        # See JOB_POOL_MAX_WORKERS and _offload for why it is one, and why the
+        # event loop thread must be left with nothing to do but serve HTTP.
+        self._job_pool = ThreadPoolExecutor(
+            max_workers=JOB_POOL_MAX_WORKERS,
+            thread_name_prefix="deploy-agent-job",
+        )
 
     def _get_state(self) -> str:
         return self._state
+
+    async def _offload(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Run one blocking call on the job thread, not on the event loop.
+
+        OMN-18636. THE WHOLE POINT OF THIS METHOD IS WHAT IT LEAVES BEHIND: an
+        event loop thread with nothing on it but the aiohttp application, so the
+        listening socket is polled and ``accept()`` is called while a deploy
+        runs.
+
+        The defect it removes, measured 2026-09-17 (lane
+        ``deploy-agent-http-hang-diag-2105``, 121 samples): the health app and
+        the job executor shared one loop, and every executor phase was a plain
+        synchronous ``subprocess.run``. For the length of every phase the loop
+        thread sat inside ``_communicate``'s selector poll, nothing called
+        ``accept()``, and ``/health`` returned curl code ``000`` — 107 of those
+        121 samples. The listen backlog climbed to its 128 limit, after which
+        the kernel silently drops SYNs, so the unreachability OUTLIVED the call
+        that caused it. Downstream, ``check_dev_lane_staleness.py`` could not
+        read ``deployed_revision`` off ``/job/{correlation_id}`` and the
+        compose-dev lab-pass receipt read ``indeterminate`` for a lane that had
+        in fact converged — which closes rule 24(b) delivery for a good sha.
+
+        Two properties this deliberately does NOT change:
+
+        * **Serialization.** One worker, so submissions run one at a time in
+          submission order. A job still excludes the next poll, the self-update
+          boundaries still fall between jobs, and a publish retry still waits
+          for an in-flight deploy. Nothing here makes two deploys possible.
+        * **Job duration.** Nothing cancels, times out or interrupts the call.
+          The caller ``await``s it for as long as it takes. A health surface
+          that stayed responsive by curtailing a rebuild would manufacture the
+          false FAIL receipt this work exists to remove (OMN-18636 AC6).
+
+        One consequence worth naming rather than discovering: the self-update
+        boundaries re-exec with ``os.execv``, which now runs on this worker
+        thread. That is defined: POSIX ``execve`` terminates every other thread
+        in the process and the calling thread becomes the new image's initial
+        thread, so a re-exec from here replaces the process exactly as it did
+        from the loop thread. ``test_agent_offloads_phases_omn18636.py`` pins
+        that a boundary reached through an offload still re-execs.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._job_pool, functools.partial(fn, *args, **kwargs)
+        )
 
     async def run(self) -> None:
         logging.basicConfig(
@@ -176,8 +257,10 @@ class DeployAgent:
         if pruned:
             logger.info("Pruned %d old job(s)", pruned)
 
-        # Step 3: Retry pending publishes
-        await self._retry_pending_publishes()
+        # Step 3: Retry pending publishes. Called directly rather than through
+        # _offload: nothing is listening yet (the site starts at step 4), so
+        # there is no HTTP surface for a blocking call to deny here.
+        self._retry_pending_publishes()
 
         # Step 4: Start health endpoint
         health_app = create_health_app(
@@ -214,18 +297,35 @@ class DeployAgent:
 
         try:
             while not self._shutdown:
-                cmd, reason = consumer.poll_and_accept()
+                # OMN-18636. EVERY branch of this loop is offloaded, not just
+                # the deploy. `poll_and_accept` blocks for up to its 1000 ms
+                # kafka poll and can re-exec inside its self-update hook;
+                # `_maybe_self_update_idle` shells out to git. Both are short
+                # next to a rebuild and both are long next to the 2 s bound the
+                # receipt reader needs, and the diagnosis measured `000`s with
+                # no child process at all — the short phases deny the surface
+                # exactly as effectively as `docker build` does. A loop that
+                # offloaded only the obvious minutes-long call would still fail
+                # the bound it is here to hold.
+                cmd, reason = await self._offload(consumer.poll_and_accept)
                 if cmd is not None:
-                    await self._execute_command(cmd)
+                    await self._offload(self._execute_command, cmd)
                 elif reason:
                     logger.info("Rejected command: %s", reason)
                 else:
-                    self._maybe_self_update_idle()
+                    await self._offload(self._maybe_self_update_idle)
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
             consumer.close()
             await runner.cleanup()
+            # Last, and waiting. The loop above only exits once its own awaited
+            # offload has returned, so nothing of this agent's own work is in
+            # flight here; the wait is for the publish-retry task, whose
+            # asyncio-level cancel does not reach a function already running on
+            # the worker. Abandoning a publish mid-flight is how a terminal
+            # result goes missing.
+            self._job_pool.shutdown(wait=True)
             logger.info("Deploy agent stopped")
 
     def _handle_shutdown(self) -> None:
@@ -331,10 +431,19 @@ class DeployAgent:
                 e,
             )
 
-    async def _execute_command(self, cmd: ModelRebuildRequested) -> None:
+    def _execute_command(self, cmd: ModelRebuildRequested) -> None:
+        """Run one accepted command to its terminal state. BLOCKING, by design.
+
+        OMN-18636 made this synchronous rather than ``async``. It never awaited
+        anything: every statement in it and in ``_run_deploy`` is a blocking
+        call, and declaring that ``async`` said the opposite of what the body
+        did — which is precisely how the whole deploy came to run on the event
+        loop thread. It is now called through ``DeployAgent._offload``, and its
+        signature is the honest one for what it is.
+        """
         try:
             with single_flight_lock():
-                await self._run_deploy(cmd)
+                self._run_deploy(cmd)
         except DeployInProgressError:
             logger.warning(
                 "Single-flight lock held — rejecting %s (in_progress)",
@@ -349,7 +458,8 @@ class DeployAgent:
         # process holds the deploy lock.
         self._self_update_post_terminal()
 
-    async def _run_deploy(self, cmd: ModelRebuildRequested) -> None:
+    def _run_deploy(self, cmd: ModelRebuildRequested) -> None:
+        """Execute every phase of one deploy. BLOCKING — see ``_execute_command``."""
         self._state = "deploying"
         cid = cmd.correlation_id
         health_checks = []
@@ -791,7 +901,8 @@ class DeployAgent:
                 "Failed to publish rebuild-rejected for %s", cmd.correlation_id
             )
 
-    async def _retry_pending_publishes(self) -> None:
+    def _retry_pending_publishes(self) -> None:
+        """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
         pending = self.job_store.get_pending_publish()
         for job in pending:
             cid_str = str(job.correlation_id)
@@ -819,4 +930,10 @@ class DeployAgent:
     async def _publish_retry_loop(self) -> None:
         while True:
             await asyncio.sleep(PUBLISH_RETRY_INTERVAL)
-            await self._retry_pending_publishes()
+            # OMN-18636: onto the job thread, not the loop. A kafka publish
+            # blocks for its own timeouts, and this task fires every 30 s for
+            # the life of the process, so leaving it here would deny the health
+            # surface on a cadence even with no job running at all. The single
+            # worker means a retry that lands mid-deploy simply waits for the
+            # deploy, which is what it did when the loop was blocked.
+            await self._offload(self._retry_pending_publishes)

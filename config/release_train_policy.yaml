@@ -60,9 +60,9 @@ repos:
     lab_evidence: none
     lab_evidence_note: >-
       no lab lane of its own and no runtime-rebuild-trigger.yml; this repo reaches the lab only vendored into an omnibase_infra candidate, so no receipt is keyed by one of its shas
-    mode: report_only
+    mode: cut
     mode_note: >-
-      pending the operator decision on what premise replaces a lab-pass receipt for a library repo with no lab lane
+      green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer, which is where it belongs. Operator ruling 2026-09-17, the cut path. Ancestry verified 2026-09-17 before arming: main IS an ancestor of dev, main-only 0, dev-only 4, so the release fast- forward can succeed. Green verified live the same day, all 37 required contexts on dev reporting success for the gating commit.
   omnibase_spi:
     package: omnibase-spi
     default_branch: dev
@@ -70,9 +70,9 @@ repos:
     lab_evidence: none
     lab_evidence_note: >-
       no lab lane of its own and no runtime-rebuild-trigger.yml; not vendored into the runtime image either, so nothing keys a receipt to one of its shas
-    mode: report_only
+    mode: cut
     mode_note: >-
-      pending the operator decision on what premise replaces a lab-pass receipt for a library repo with no lab lane
+      green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer, which is where it belongs. Operator ruling 2026-09-17, the cut path. Ancestry verified 2026-09-17 before arming: main IS an ancestor of dev, main-only 0, dev-only 18, so the release fast- forward can succeed. Green verified live the same day, all 24 required contexts on dev reporting success for the gating commit.
   omnimemory:
     package: omnimemory
     default_branch: dev
@@ -80,9 +80,9 @@ repos:
     lab_evidence: none
     lab_evidence_note: >-
       no lab lane of its own and no runtime-rebuild-trigger.yml
-    mode: report_only
+    mode: cut
     mode_note: >-
-      pending the operator decision on what premise replaces a lab-pass receipt for a library repo with no lab lane
+      green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer. Operator ruling 2026-09-17, the cut path. Ancestry verified before arming: main IS an ancestor of dev, main-only 0, dev-only 34. CORRECTION: an earlier revision of this entry held this repo at report_only on a skipped required context. That verdict was MY READER'S BUG, twice over, not a fact about this repo: it took an arbitrary one of several check runs sharing a name, and then the fetch projected away the very timestamps the recency fix ordered on. With both corrected, every required context on this repo's gating commit reports success.
   omniintelligence:
     package: omniintelligence
     default_branch: dev
@@ -92,7 +92,7 @@ repos:
       no lab lane of its own and no runtime-rebuild-trigger.yml
     mode: report_only
     mode_note: >-
-      67 unreleased source commits measured 2026-09-17 against a tag dated 2026-05-26. Arming a patch cut over three months of accumulated change is the hazard OMN-18010 put out of scope; this repo needs a deliberate minor release first, and the train reports it nightly until that is taken
+      TWO blockers. OMN-18634: uv lock cannot resolve this repo's Python 3.15 / win32 marker split, so the dependency cascade has never moved its omnibase-infra pin off 0.38.21 and a release here could not propagate; team-lead direction 2026-09-17 excludes it from the cut until that clears, and its lockfile is deliberately not repaired from this lane. Separately, 67 unreleased source commits measured 2026-09-17 against a tag dated 2026-05-26: arming a patch cut over three months of accumulated change is the hazard OMN-18010 put out of scope, so this repo needs a deliberate minor release first.
   omniclaude:
     package: omniclaude
     default_branch: dev
@@ -102,4 +102,4 @@ repos:
       no lab lane of its own and no runtime-rebuild-trigger.yml; the plugin's deploy surface is a plugin update, not a runtime lane
     mode: report_only
     mode_note: >-
-      65 unreleased source commits measured 2026-09-17 against a tag dated 2026-06-02, the same catch-up hazard as omniintelligence
+      65 unreleased source commits measured 2026-09-17 against a tag dated 2026-06-02, the same catch-up hazard as omniintelligence. NOT an ancestry blocker: CLAUDE.md records this repo's main as behind with 15 main-only commits and states the fast-forward cannot succeed, which was true on 2026-09-15 and is not true now; re-read 2026-09-17 gives main-only 0, dev-only 37, and git merge-base --is-ancestor returns true.

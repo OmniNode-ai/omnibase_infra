@@ -190,6 +190,26 @@ class EnumTrainReason(StrEnum):
     LAB_RECEIPT_UNREADABLE = "lab_receipt_unreadable"
     VERSION_UNREADABLE = "version_unreadable"
     FACTS_UNREADABLE = "facts_unreadable"
+    # The green-CI premise. Five values rather than one, because "CI was not
+    # green" collapses five different operational situations into a reason
+    # nobody can act on.
+    CI_NOT_GREEN = "ci_not_green"
+    CI_REQUIRED_CONTEXT_MISSING = "ci_required_context_missing"
+    CI_REQUIRED_CONTEXT_PENDING = "ci_required_context_pending"
+    # A required context reported as `skipped` reads as a PASS to GitHub's merge
+    # button. A train that accepted it would cut a release on a gate that never
+    # ran, so it is refused under its own name rather than folded into NOT_GREEN.
+    CI_REQUIRED_CONTEXT_SKIPPED = "ci_required_context_skipped"
+    # Protection unreadable, or readable and carrying NO required contexts. An
+    # empty required set is not green; it is a repo whose merges are ungated,
+    # and reading it as green would make the premise vacuous exactly where it
+    # matters most.
+    CI_PROTECTION_UNREADABLE = "ci_protection_unreadable"
+    # The candidate commit cannot be tied to a merged pull request, so there is
+    # no gated event to read required contexts from. A commit that reached the
+    # branch by some path other than a reviewed merge is exactly what this
+    # premise exists to refuse.
+    CI_NO_MERGED_PR = "ci_no_merged_pr"
 
 
 @dataclass(frozen=True)
@@ -431,6 +451,114 @@ def _git(clone: Path, *args: str) -> str:
     return completed.stdout
 
 
+# --------------------------------------------------------------------------- #
+# Version source. Two manifests, one answer.                                    #
+# --------------------------------------------------------------------------- #
+#
+# The fleet is not all Python. omnidash and omniweb are Node repos carrying a
+# package.json and no pyproject.toml, so a train that could only read
+# ``[project].version`` could not decide them at all -- it would refuse them
+# every night with version_unreadable, which is fail-closed but is pure noise.
+#
+# The manifest is DISCOVERED rather than declared in the policy, because which
+# manifest a repo carries is a fact about that repo's tree, and a policy field
+# restating it is a second place to be wrong.
+
+
+def _read_pyproject_version(raw: str, repo: str, ref: str) -> str | None:
+    try:
+        parsed = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        msg = f"{repo}: pyproject.toml at {ref} does not parse: {exc}"
+        raise ReleaseTrainConfigError(msg) from exc
+    version = parsed.get("project", {}).get("version")
+    if not isinstance(version, str) or not version.strip():
+        msg = f"{repo}: pyproject.toml at {ref} declares no [project].version"
+        raise ReleaseTrainConfigError(msg)
+    return version.strip()
+
+
+def _read_package_json_version(raw: str, repo: str, ref: str) -> str | None:
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        msg = f"{repo}: package.json at {ref} does not parse: {exc}"
+        raise ReleaseTrainConfigError(msg) from exc
+    version = parsed.get("version") if isinstance(parsed, dict) else None
+    if not isinstance(version, str) or not version.strip():
+        msg = f"{repo}: package.json at {ref} declares no version"
+        raise ReleaseTrainConfigError(msg)
+    return version.strip()
+
+
+def resolve_declared_version(repo: str, clone: Path, ref: str) -> str:
+    """The version this repo declares at ``ref``, from whichever manifest it has.
+
+    Refuses when NEITHER manifest is present: a repo whose version cannot be
+    read is a repo whose next release is already broken, and reporting that as
+    "nothing to do" is the original disease this train was built against.
+
+    Refuses when BOTH are present, rather than preferring one. A repo declaring
+    two versions has no single answer, and a silent preference is how a release
+    cuts the wrong number -- the two would drift and only one would be tagged.
+    """
+    pyproject_raw = _git_optional(clone, f"{ref}:pyproject.toml")
+    package_raw = _git_optional(clone, f"{ref}:package.json")
+
+    if pyproject_raw is not None and package_raw is not None:
+        msg = (
+            f"{repo}: {ref} carries BOTH pyproject.toml and package.json, so the "
+            "declared version is ambiguous. Refusing rather than preferring one: "
+            "a silent preference cuts whichever number the other manifest is not "
+            "tracking"
+        )
+        raise ReleaseTrainConfigError(msg)
+
+    if pyproject_raw is not None:
+        resolved = _read_pyproject_version(pyproject_raw, repo, ref)
+    elif package_raw is not None:
+        resolved = _read_package_json_version(package_raw, repo, ref)
+    else:
+        msg = (
+            f"{repo}: {ref} carries neither pyproject.toml nor package.json, so "
+            "no declared version can be read"
+        )
+        raise ReleaseTrainConfigError(msg)
+
+    assert resolved is not None
+    return resolved
+
+
+def _git_optional(clone: Path, spec: str) -> str | None:
+    """``git show <spec>``, or None when the path does not exist at that ref.
+
+    Distinguishing "absent" from "unreadable" matters: an unreadable clone must
+    still raise, or a repo nobody could read would be reported as a repo with
+    nothing to release.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(clone), "show", spec],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return result.stdout
+    # git reports BOTH "this path is not in that ref" and "that ref is not a
+    # thing" as exit 128, so the exit code alone cannot tell absent from
+    # unreadable. Only the two path-missing messages mean absent; anything else
+    # -- a bad ref, a corrupt or shallow clone -- raises, because a repo nobody
+    # could read must never be reported as a repo with nothing to release.
+    stderr = result.stderr
+    if "does not exist in" in stderr or "exists on disk, but not in" in stderr:
+        return None
+    msg = (
+        f"git show {spec} failed in {clone}: "
+        f"{stderr.strip() or f'exit {result.returncode}'}"
+    )
+    raise ReleaseTrainConfigError(msg)
+
+
 def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepoFacts:
     """Read the repo's own history. Every failure raises rather than returning 0.
 
@@ -443,18 +571,7 @@ def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepo
     tags = [line.strip() for line in _git(clone, "tag", "--list", "v*").splitlines()]
     latest_tag = highest_published(tags)
 
-    pyproject_raw = _git(clone, "show", f"{head_ref}:pyproject.toml")
-    try:
-        parsed = tomllib.loads(pyproject_raw)
-    except tomllib.TOMLDecodeError as exc:
-        msg = f"{policy.repo}: pyproject.toml at {head_ref} does not parse: {exc}"
-        raise ReleaseTrainConfigError(msg) from exc
-    version = parsed.get("project", {}).get("version")
-    if not isinstance(version, str) or not version.strip():
-        msg = (
-            f"{policy.repo}: pyproject.toml at {head_ref} declares no [project].version"
-        )
-        raise ReleaseTrainConfigError(msg)
+    version = resolve_declared_version(policy.repo, clone, head_ref)
 
     span = f"{latest_tag}..{head_ref}" if latest_tag else head_ref
     log = _git(
@@ -485,6 +602,223 @@ def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepo
 # --------------------------------------------------------------------------- #
 # The lab-evidence premise.                                                     #
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# The green-CI premise.                                                        #
+# --------------------------------------------------------------------------- #
+#
+# A run's conclusion and a REQUIRED CONTEXT's conclusion are different facts,
+# and only the second is what branch protection gates a merge on. So this reads
+# the candidate COMMIT's check runs, and compares them against the required set
+# taken from the repo's LIVE protection -- which means the premise cannot drift
+# from what actually gates a merge on that branch.
+#
+# There is deliberately no way to assert the CI fact from outside: no flag, no
+# environment variable, no policy field. The same shape the health fact has on
+# the k3s prod gate, for the same reason.
+
+# Check-run conclusions that are not a pass. `skipped` is listed here on
+# purpose: GitHub treats a skipped REQUIRED context as satisfying protection,
+# which is precisely why a release train must not.
+_CI_PENDING_STATES = frozenset({"queued", "in_progress", "pending", "waiting"})
+
+
+def default_required_contexts(repo: str, branch: str) -> list[str]:
+    """Required status checks on ``branch``, read live from branch protection."""
+    raw = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/OmniNode-ai/{repo}/branches/{branch}/protection"
+            "/required_status_checks",
+            "--jq",
+            ".contexts[]",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def default_gating_sha(repo: str, sha: str) -> str:
+    """The sha the required contexts actually ran on for ``sha``.
+
+    Required contexts are PR-TIME gates: each binds its check run to the PULL
+    REQUEST HEAD sha. A squash merge then creates a NEW commit on the branch
+    that those gates never ran on, so asking the post-merge commit for them is
+    unsatisfiable by construction -- the same shape as the OMN-18346 orphaned
+    required-context defect.
+
+    Measured on omnibase_spi, 2026-09-17: dev HEAD carried ONE check run
+    against 24 required contexts, while its merged PR's head sha carried 38.
+
+    So the gating sha is the merged PR's head. Only a MERGED pull request
+    counts: the commits-to-pulls endpoint also returns open PRs, with no
+    documented ordering, and an open PR proves nothing about how this commit
+    reached the branch. An empty string means none could be resolved, which the
+    caller turns into a refusal rather than a pass.
+    """
+    raw = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/OmniNode-ai/{repo}/commits/{sha}/pulls",
+            "--jq",
+            '[.[] | select(.state == "closed" and .merged_at != null)][0].head.sha'
+            " // empty",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return raw
+
+
+def default_check_runs(repo: str, sha: str) -> list[dict[str, Any]]:
+    """Every check run reported against ``sha``, newest attempt per name."""
+    raw = subprocess.run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/OmniNode-ai/{repo}/commits/{sha}/check-runs",
+            # started_at and completed_at are REQUIRED here, not decorative:
+            # a name can carry several runs on one sha and the resolver orders
+            # them by recency. Projecting them away made every run look equally
+            # recent, so an arbitrary one won -- which is the same defect as
+            # first-wins, just better hidden.
+            "--jq",
+            ".check_runs[] | {name, status, conclusion, started_at, completed_at}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    runs: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        if line.strip():
+            runs.append(json.loads(line))
+    return runs
+
+
+def classify_ci_green(
+    repo: str,
+    sha: str,
+    branch: str,
+    *,
+    required_contexts: Callable[[str, str], list[str]],
+    check_runs: Callable[[str, str], list[dict[str, Any]]],
+    gating_sha: Callable[[str, str], str],
+) -> tuple[EnumTrainReason | None, str]:
+    """Resolve the candidate sha's required contexts into a reason, or None.
+
+    None means every required context reported ``success`` ON THIS SHA. Every
+    other outcome is a distinct, actionable reason.
+    """
+    try:
+        required = required_contexts(repo, branch)
+    except Exception as exc:  # noqa: BLE001 - any failure to read is fail-closed
+        return (
+            EnumTrainReason.CI_PROTECTION_UNREADABLE,
+            f"could not read required status checks for {repo}@{branch}: {exc}",
+        )
+
+    if not required:
+        return (
+            EnumTrainReason.CI_PROTECTION_UNREADABLE,
+            f"{repo}@{branch} declares NO required status checks, so there is no "
+            "green to prove. An empty required set is an ungated branch, not a "
+            "passing one, and reading it as green would make this premise "
+            "vacuous exactly where it matters most",
+        )
+
+    try:
+        gate_sha = gating_sha(repo, sha)
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        return (
+            EnumTrainReason.CI_NO_MERGED_PR,
+            f"could not resolve the merged pull request for {repo}@{sha[:12]}: {exc}",
+        )
+    if not gate_sha:
+        return (
+            EnumTrainReason.CI_NO_MERGED_PR,
+            f"{repo}@{sha[:12]} is not the merge of any MERGED pull request, so "
+            "there is no gated event whose required contexts could be read. A "
+            "commit that reached the branch by some other path is what this "
+            "premise exists to refuse",
+        )
+
+    try:
+        runs = check_runs(repo, gate_sha)
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        return (
+            EnumTrainReason.CI_PROTECTION_UNREADABLE,
+            f"could not read check runs for {repo}@{gate_sha[:12]}: {exc}",
+        )
+
+    # A name can carry SEVERAL check runs on one sha, and taking an arbitrary
+    # one is a coin flip that reports a real repo as blocked. Measured on
+    # omnimemory 2026-09-17: the required context 'pr-title / check-title' had
+    # FOUR runs on its gating commit, two skipped and two success, two of them
+    # inside a single workflow run -- a conditional job emits a skipped leg
+    # beside the real one. Seven other required names on that same sha carried
+    # duplicates too, so this is the normal shape, not an anomaly.
+    #
+    # GitHub resolves a duplicated context by its LATEST run, so this does the
+    # same rather than inventing a preference. Ordering is by completed_at and
+    # then started_at, with an unfinished run sorting last so a still-running
+    # leg cannot be masked by an older finished one.
+    def _recency(run: dict[str, Any]) -> tuple[str, str]:
+        return (
+            str(run.get("completed_at") or "9999"),
+            str(run.get("started_at") or ""),
+        )
+
+    by_name: dict[str, dict[str, Any]] = {}
+    for run in sorted(runs, key=_recency):
+        name = str(run.get("name", ""))
+        if name:
+            by_name[name] = run
+
+    for context in sorted(required):
+        reported = by_name.get(context)
+        if reported is None:
+            return (
+                EnumTrainReason.CI_REQUIRED_CONTEXT_MISSING,
+                f"required context {context!r} reported no check run on "
+                f"{gate_sha[:12]}, the gating commit for {sha[:12]}; the "
+                "gate did not run on the change being cut",
+            )
+        status = str(reported.get("status") or "").lower()
+        conclusion = str(reported.get("conclusion") or "").lower()
+        if status in _CI_PENDING_STATES or not conclusion:
+            return (
+                EnumTrainReason.CI_REQUIRED_CONTEXT_PENDING,
+                f"required context {context!r} is still {status or 'unfinished'} "
+                f"on {gate_sha[:12]}; a train that cut now would cut ahead of its "
+                "gate",
+            )
+        if conclusion == "skipped":
+            return (
+                EnumTrainReason.CI_REQUIRED_CONTEXT_SKIPPED,
+                f"required context {context!r} is SKIPPED on {gate_sha[:12]}. GitHub "
+                "treats a skipped required context as satisfying protection, so "
+                "this commit is mergeable while that gate never ran; the train "
+                "refuses rather than inheriting that",
+            )
+        if conclusion != "success":
+            return (
+                EnumTrainReason.CI_NOT_GREEN,
+                f"required context {context!r} concluded {conclusion!r} on {sha[:12]}",
+            )
+
+    return (
+        None,
+        f"all {len(required)} required context(s) on {repo}@{branch} reported "
+        f"success for {gate_sha[:12]}, the gating commit for {sha[:12]}",
+    )
+
+
 def classify_lab_receipt(
     repo: str,
     sha: str,
@@ -567,6 +901,9 @@ def decide(
     facts: ModelRepoFacts,
     list_artifacts: Callable[[str, str], list[dict[str, Any]]] | None = None,
     download_receipt: Callable[[str, int], Any] | None = None,
+    required_contexts: Callable[[str, str], list[str]] | None = None,
+    check_runs: Callable[[str, str], list[dict[str, Any]]] | None = None,
+    gating_sha: Callable[[str, str], str] | None = None,
 ) -> ModelTrainDecision:
     """Decide whether this repo cuts tonight, and say why either way.
 
@@ -575,6 +912,9 @@ def decide(
     """
     list_artifacts = list_artifacts or lab_pass_receipt.list_artifacts
     download_receipt = download_receipt or lab_pass_receipt.download_receipt
+    required_contexts = required_contexts or default_required_contexts
+    check_runs = check_runs or default_check_runs
+    gating_sha = gating_sha or default_gating_sha
 
     def _build(
         verdict: EnumTrainVerdict,
@@ -644,12 +984,34 @@ def decide(
             needs_bump=needs_bump,
         )
 
+    # Every remaining path can CUT, so the green-CI premise is applied here --
+    # before the lab arms, not inside one of them. A premise that guarded only
+    # the lab-receipt branch would leave the no-lab-surface repos cutting on
+    # unreleased commits alone, which is the whole defect this closes.
+    ci_reason, ci_detail = classify_ci_green(
+        policy.repo,
+        facts.dev_head_sha,
+        policy.default_branch,
+        required_contexts=required_contexts,
+        check_runs=check_runs,
+        gating_sha=gating_sha,
+    )
+    if ci_reason is not None:
+        return _build(
+            EnumTrainVerdict.SKIP,
+            ci_reason,
+            ci_detail,
+            candidate_version=candidate_version,
+            needs_bump=needs_bump,
+        )
+
     if policy.lab_evidence is EnumLabEvidence.NONE:
         return _build(
             EnumTrainVerdict.CUT,
             EnumTrainReason.UNRELEASED_WORK_NO_LAB_SURFACE_DECLARED,
             f"{facts.unreleased_count} unreleased release-relevant commit(s); "
-            f"this repo declares no lab-evidence surface: {policy.lab_evidence_note}",
+            f"{ci_detail}; this repo declares no lab-evidence surface: "
+            f"{policy.lab_evidence_note}",
             candidate_version=candidate_version,
             needs_bump=needs_bump,
         )
