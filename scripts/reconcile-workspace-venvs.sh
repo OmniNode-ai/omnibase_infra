@@ -566,10 +566,13 @@ python_install_root() {
 # spellings resolve under `/opt/homebrew`; a uv-managed interpreter resolves
 # under the uv data directory. Containment answers exactly that and is immune to
 # how many symlinks either side happens to traverse.
+# The second argument is the venv to judge, defaulting to the live dispatch
+# venv. An atomic rebuild has to ask this about the STAGED venv, before that
+# one becomes live -- see swap_dispatch_venv below.
 dispatch_interpreter_ok() {
-  local want="$1" home want_root have_dir
+  local want="$1" venv="${2:-$DISPATCH_VENV}" home want_root have_dir
   [[ -n "$want" ]] || return 0
-  home="$(venv_base_home "$DISPATCH_VENV")"
+  home="$(venv_base_home "$venv")"
   [[ -n "$home" ]] || return 1
   want_root="$(python_install_root "$want")"
   have_dir="$(real_dir "$home")"
@@ -577,6 +580,61 @@ dispatch_interpreter_ok() {
   # Equal, or underneath. The trailing slash stops `/opt/homebrew-other` from
   # matching `/opt/homebrew`.
   [[ "$have_dir" == "$want_root" || "$have_dir" == "$want_root"/* ]]
+}
+
+# --------------------------------------------------------------------------- #
+# Atomic rebuild: stage a sibling, prove it, then rename it in (OMN-17819)
+# --------------------------------------------------------------------------- #
+# A rebuild used to happen IN PLACE, on the one path every lane's `onex` execs.
+# `uv sync` removes what the lock does not mention before it installs, so for
+# the length of a rebuild -- and for the whole of a FAILED one -- the dispatch
+# venv on disk is a half-built environment with no omnimarket in it, and every
+# `onex skill` / `node` / `delegate` in every concurrent lane refuses. That is
+# not hypothetical: on 2026-09-17 a wrong interpreter predicate rebuilt and then
+# refused its own readback on a ~600s tick, and the provider layer was missing
+# from the shared venv for over an hour while lanes failed against it.
+#
+# So a rebuild is built at a SIBLING path and renamed into place only once it
+# has been read back and proven good. The live venv keeps serving until the
+# rename, and a rebuild that fails leaves it untouched rather than gutted.
+#
+# RELOCATABLE IS NOT OPTIONAL HERE, and it is why this is not merely a `mv`. A
+# venv's console scripts carry an ABSOLUTE shebang naming the venv they were
+# installed into -- 101 of them in this one, `onex` among them -- so a sibling
+# build renamed into place would yield a venv whose every entry point names a
+# directory that no longer exists. That is worse than the in-place rebuild it
+# replaces. `uv venv --relocatable` writes a `/bin/sh` wrapper that resolves the
+# interpreter from the script's own location instead, and `uv sync` preserves
+# that property for packages installed afterwards. Both halves were measured on
+# a real uv before this was written rather than assumed, and the second one is
+# read back off disk below because `uv sync` recreating the environment would
+# silently drop it.
+venv_is_relocatable() {
+  local cfg="$1/pyvenv.cfg"
+  [[ -f "$cfg" ]] || return 1
+  grep -qE '^[[:space:]]*relocatable[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$cfg"
+}
+
+# Rename a proven staged venv over the live one: two renames on one filesystem,
+# keeping the old generation until the new one is in place, so a failed second
+# rename is rolled back rather than leaving the host with no venv at all.
+swap_dispatch_venv() {
+  local staging="$1" live="$2" previous="$2.previous"
+  rm -rf "$previous"
+  if [[ -e "$live" ]] && ! mv "$live" "$previous"; then
+    fail "could not move the live dispatch venv aside; it is UNTOUCHED and" \
+      "still serving, and the gate venv was NOT touched." \
+      "The proven replacement is at:" \
+      "  $staging"
+  fi
+  if ! mv "$staging" "$live"; then
+    [[ -e "$previous" ]] && mv "$previous" "$live"
+    fail "could not move the rebuilt dispatch venv into place; the previous" \
+      "one has been restored and the gate venv was NOT touched." \
+      "The replacement is at:" \
+      "  $staging"
+  fi
+  rm -rf "$previous"
 }
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
@@ -1153,6 +1211,44 @@ run_repair() {
     need_provider=1
   fi
 
+  # WHERE THIS PASS WRITES. A rebuild is staged at a sibling and renamed in at
+  # the end; everything else writes straight to the live venv, because an
+  # ADDITIVE provider or lock pass never leaves it unusable and staging one
+  # would buy nothing. A venv that does not exist YET is also built in place --
+  # there is no live environment to protect, and no lane can be using it.
+  local target_venv="$DISPATCH_VENV" target_python="$DISPATCH_PYTHON" staging=""
+  if [[ "$rebuild" -eq 1 ]]; then
+    staging="$DISPATCH_VENV.rebuilding"
+    target_venv="$staging"
+    target_python="$staging/bin/python"
+    # A leftover from an earlier failed rebuild is scrap, not state.
+    rm -rf "$staging"
+    say "dispatch venv: staging the rebuild at $staging"
+    # Created HERE rather than left to the `uv sync` below, because only
+    # `uv venv` takes --relocatable and `uv sync` has no equivalent -- measured:
+    # UV_VENV_RELOCATABLE is not honoured by `uv sync`, which writes absolute
+    # shebangs. Without this step the rename would break every console script.
+    trace "uv venv --relocatable ${dispatch_python_arg[*]} $staging"
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH \
+        "$UV_BIN" venv --relocatable "${dispatch_python_arg[@]}" "$staging"); then
+      fail "could not stage the dispatch venv rebuild; the live venv is" \
+        "UNTOUCHED and still serving, and the gate venv was NOT touched." \
+        "Run by hand and read the error:" \
+        "  cd $INFRA_DIR && env -u PYTHONPATH \\" \
+        "    uv venv --relocatable ${dispatch_python_arg[*]} $staging"
+    fi
+  fi
+
+  # What a refusal from here on can HONESTLY claim survived. A staged rebuild
+  # writes nowhere near the live venv, so every failure below leaves it serving
+  # -- and saying only "the gate venv was NOT touched" would leave the reader
+  # believing the CLI is gone and reaching for a repair that is not needed.
+  # A first-ever build has no live venv to make that claim about.
+  local intact_note="the gate venv was NOT touched."
+  if [[ -n "$staging" ]]; then
+    intact_note="the live venv is UNTOUCHED and still serving, and the gate venv was NOT touched."
+  fi
+
   # A dispatch venv that does not exist yet has no provider layer to install
   # into. Build the lock layer first in that one case, so `uv` creates the
   # environment and the co-install has an interpreter to target. This is the
@@ -1160,15 +1256,15 @@ run_repair() {
   # OMN-16262 ordering (provider first, lock second) still holds afterwards,
   # because the co-install below forces a second lock pass.
   if [[ ! -x "$DISPATCH_PYTHON" || "$rebuild" -eq 1 ]]; then
-    say "dispatch venv: creating $DISPATCH_VENV from $INFRA_DIR/uv.lock${base_python:+ on $base_python}"
-    trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
-    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$DISPATCH_VENV" \
+    say "dispatch venv: creating $target_venv from $INFRA_DIR/uv.lock${base_python:+ on $base_python}"
+    trace "UV_PROJECT_ENVIRONMENT=$target_venv uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$target_venv" \
         "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
-      fail "dispatch venv could not be created; the gate venv was NOT touched." \
+      fail "dispatch venv could not be created; $intact_note" \
         "Without it there is no interpreter for \`onex\` to exec, so this" \
         "refuses rather than purifying the gate venv and leaving the host with" \
         "no CLI at all. Run by hand and read the error:" \
-        "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV \\" \
+        "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$target_venv \\" \
         "    uv sync --frozen --inexact ${dispatch_python_arg[*]}"
     fi
 
@@ -1177,11 +1273,11 @@ run_repair() {
     # that is the OMN-17307 defect class, a repair reporting its own exit status
     # as proof. A silent failure here would leave a LAN-blind CLI reading as
     # reconciled.
-    if ! dispatch_interpreter_ok "$base_python"; then
-      fail "dispatch venv is still not on the required interpreter; the gate venv was NOT touched." \
+    if ! dispatch_interpreter_ok "$base_python" "$target_venv"; then
+      fail "dispatch venv is still not on the required interpreter; $intact_note" \
         "  required : ${base_python%/*}" \
-        "  recorded : $(venv_base_home "$DISPATCH_VENV")" \
-        "Remove $DISPATCH_VENV and re-run, or name the interpreter explicitly" \
+        "  recorded : $(venv_base_home "$target_venv")" \
+        "Remove $target_venv and re-run, or name the interpreter explicitly" \
         "with ONEX_DISPATCH_BASE_PYTHON=<absolute path>."
     fi
   fi
@@ -1201,7 +1297,7 @@ run_repair() {
       fi
       # OMNIMARKET_REF is set explicitly so the install script's own ls-remote
       # default (OMN-16366 reversed drift) can never apply here.
-      trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $DISPATCH_PYTHON"
+      trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $target_python"
       # PATH carries the resolved uv down to the child (OMN-17383). The
       # co-install calls bare `uv`, and it inherits the cron PATH -- which is
       # exactly the PATH that cannot reach a user-local install, so on `.201`
@@ -1231,13 +1327,13 @@ run_repair() {
       # so this changes where the child stands without changing what it installs.
       if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
           PATH="$(dirname "$UV_BIN"):$PATH" \
-          bash "$INSTALL_SCRIPT" --execute "$DISPATCH_PYTHON"); then
+          bash "$INSTALL_SCRIPT" --execute "$target_python"); then
         fail "provider co-install did not complete; omnimarket is not installed." \
           "Every \`onex skill\`/\`onex node\`/\`onex delegate\` dispatch will refuse" \
-          "until this succeeds. The gate venv was NOT touched. Run by hand and" \
+          "until this succeeds. $intact_note Run by hand and" \
           "read the error:" \
           "  OMNIMARKET_REF=$head OMNI_HOME=$OMNI_HOME \\" \
-          "    bash $INSTALL_SCRIPT --execute $DISPATCH_PYTHON" \
+          "    bash $INSTALL_SCRIPT --execute $target_python" \
           "  (this is scripts/install-node-skill-package.sh)"
       fi
       # The co-install just ran, so the lock pass is mandatory regardless of
@@ -1252,16 +1348,43 @@ run_repair() {
       # --inexact: do not remove the composed provider layer, which the lock
       #   correctly does not mention and must not be asked to. This flag belongs
       #   to THIS venv only; the gate venv below is synced exact (OMN-17819).
-      trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
-      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$DISPATCH_VENV" \
+      trace "UV_PROJECT_ENVIRONMENT=$target_venv uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
+      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$target_venv" \
           "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
-        fail "dispatch venv lock sync did not complete; the gate venv was NOT touched." \
+        fail "dispatch venv lock sync did not complete; $intact_note" \
           "Run by hand and read the error:" \
-          "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV \\" \
+          "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$target_venv \\" \
           "    uv sync --frozen --inexact"
       fi
     fi
     say "dispatch venv: reconciled"
+  fi
+
+  # PROVE THE STAGED VENV BEFORE IT BECOMES THE LIVE ONE. `uv` exiting 0 is not
+  # evidence (OMN-17307, a repair reporting its own exit status as proof), and
+  # the interpreter readback above ran BEFORE the provider and lock passes --
+  # either of which can recreate the environment and drop what makes the rename
+  # safe. Both properties are therefore read back off disk here, at the last
+  # moment before the swap. Every refusal on this path leaves the live venv
+  # serving, which is the whole point of staging.
+  if [[ -n "$staging" ]]; then
+    if ! dispatch_interpreter_ok "$base_python" "$staging"; then
+      fail "the staged dispatch venv is not on the required interpreter; the" \
+        "live venv is UNTOUCHED and still serving, and the gate venv was NOT" \
+        "touched." \
+        "  required : ${base_python%/*}" \
+        "  recorded : $(venv_base_home "$staging")" \
+        "The staged build is at $staging; remove it and re-run."
+    fi
+    if ! venv_is_relocatable "$staging"; then
+      fail "the staged dispatch venv is not relocatable, so renaming it into" \
+        "place would leave every console script -- \`onex\` among them --" \
+        "naming $staging, which is about to stop existing. The live venv is" \
+        "UNTOUCHED and still serving, and the gate venv was NOT touched." \
+        "Expected 'relocatable = true' in $staging/pyvenv.cfg."
+    fi
+    say "dispatch venv: swapping the proven rebuild into $DISPATCH_VENV"
+    swap_dispatch_venv "$staging" "$DISPATCH_VENV"
   fi
 
   # ---- surface 2: the GATE venv, lock-governed ONLY (OMN-17819) ------------ #
