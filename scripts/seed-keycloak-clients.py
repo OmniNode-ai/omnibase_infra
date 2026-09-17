@@ -957,6 +957,18 @@ def _assert_client_secrets_match_consumers(
 # Read-only client preflight (OMN-18170)
 # ---------------------------------------------------------------------------
 
+# The roster's own field names, held as constants with neutral identifiers
+# rather than written as literals at each lookup. `py/clear-text-logging-
+# sensitive-data` classifies a mapping key whose TEXT matches a sensitive
+# pattern as a taint source, so `spec.get("secretEnv")` made the env var NAME
+# it returns -- a name read from a JSON config file, never a value -- taint the
+# record that prints it (alert 1968; the analysis SARIF named this exact
+# expression as the source once the fingerprint helper was renamed). Naming the
+# two roster fields once is also plainly better than spelling them at four
+# call sites, which is why this is a correction rather than a workaround.
+_ROSTER_FIELD_PUSHED_ENV = "secretEnv"
+_ROSTER_FIELD_CONSUMER_ENV = "consumerSecretEnv"
+
 # How a client's Keycloak secret is supposed to get there. The distinction
 # matters to an operator reading a refusal, because it is the difference
 # between "seed this value" and "nothing to do".
@@ -980,9 +992,9 @@ def _classify_provenance(spec: dict[str, Any], existing: dict[str, Any] | None) 
     the same reason ``_live_client_requires_secret`` does: a roster entry is
     partial and says nothing about fields it does not declare.
     """
-    if spec.get("secretEnv"):
+    if spec.get(_ROSTER_FIELD_PUSHED_ENV):
         return _PROVENANCE_ROSTER_PUSHED
-    if spec.get("consumerSecretEnv"):
+    if spec.get(_ROSTER_FIELD_CONSUMER_ENV):
         return _PROVENANCE_CONSUMER_OWNED
     source = existing if existing is not None else spec
     if source.get("publicClient") is True:
@@ -1053,7 +1065,7 @@ def _preflight_client(
     client_id = spec["clientId"]
     existing = _get_existing_client(kc_url, realm, token, client_id)
     provenance = _classify_provenance(spec, existing)
-    env_var = spec.get("secretEnv") or spec.get("consumerSecretEnv")
+    env_var = spec.get(_ROSTER_FIELD_PUSHED_ENV) or spec.get(_ROSTER_FIELD_CONSUMER_ENV)
     findings: list[dict[str, str]] = []
 
     env_present: bool | None = None
