@@ -14,9 +14,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +39,28 @@ def _load_module() -> Any:
 
 
 MOD = _load_module()
+
+
+# --- OMN-18554: fixture rows are stamped from the LIVE clock ----------------
+#
+# ledger_lock.py in this repo now carries the OMN-17427 wall-clock guard, ported
+# from the omni_home copy where it had been living uncommitted. That guard reads
+# a row's OWN leading timestamp and refuses one stamped more than 5 minutes ahead
+# of the wall clock or more than 24 hours behind it. Every fixture row below was
+# written before this repo's script had that guard, so each carried a frozen date
+# literal that is now weeks in the past and is correctly refused.
+#
+# `_live_stamp` rewrites only the LEADING timestamp, at call time, and leaves the
+# rest of each row byte-identical. The literal stays in the source as the shape
+# documentation it always was; what changes is that the row is honest about when
+# it was written, which is the only thing the guard asks.
+_LEADING_TS = re.compile(r"(?<![\d])20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+
+def _live_stamp(row: str, *, shift_seconds: int = 0) -> str:
+    """Rewrite the row's FIRST timestamp to now (+shift), leaving all else."""
+    moment = datetime.now(UTC).replace(microsecond=0) + timedelta(seconds=shift_seconds)
+    return _LEADING_TS.sub(moment.strftime("%Y-%m-%dT%H:%M:%SZ"), row, count=1)
 
 
 def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -252,18 +276,23 @@ def test_read_ledger_tail_returns_last_n_lines(tmp_path: Path) -> None:
 
 def test_cli_append_lands_on_disk(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.md"
-    result = _run_cli([str(ledger), "--append", "- 2026-08-25T00:00:00Z row one"])
+    row = _live_stamp("- 2026-08-25T00:00:00Z row one")
+    result = _run_cli([str(ledger), "--append", row])
     assert result.returncode == 0, result.stderr
-    assert ledger.read_text(encoding="utf-8") == "- 2026-08-25T00:00:00Z row one\n"
+    assert ledger.read_text(encoding="utf-8") == row + "\n"
 
 
 def test_cli_append_retry_is_deduped(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.md"
-    first = _run_cli([str(ledger), "--append", "- 2026-08-25T00:00:00Z row one"])
+    first = _run_cli(
+        [str(ledger), "--append", _live_stamp("- 2026-08-25T00:00:00Z row one")]
+    )
     assert first.returncode == 0, first.stderr
     # Simulate a retry after an exit-75 timeout: same tag/body, a few
     # seconds' worth of timestamp drift.
-    second = _run_cli([str(ledger), "--append", "- 2026-08-25T00:00:05Z row one"])
+    second = _run_cli(
+        [str(ledger), "--append", _live_stamp("- 2026-08-25T00:00:05Z row one")]
+    )
     assert second.returncode == 0, second.stderr
     assert "DEDUP" in second.stderr
     # Only one copy landed.
@@ -345,9 +374,15 @@ def test_cli_requires_exactly_one_action(tmp_path: Path) -> None:
 # is the duplicate/ghost-claim class this ticket exists to close.
 # --------------------------------------------------------------------------
 
+# OMN-18554: this repo's ledger_lock.py now carries the OMN-15649 rule-4
+# cost-sentence gate, ported from the omni_home copy. A claim row is exactly the
+# row class that gate inspects, so the fixture now carries a conforming cost
+# sentence. That is not a workaround: these tests assert that a CLAIM row mints a
+# claim token, and a claim row that the gate refuses never reaches the minting
+# path at all, so an unpriced fixture would be testing the refusal instead.
 _PIPE_CLAIM = (
     "| {ts} | build-OMN-16400 | OMN-16400 | CLAIM | "
-    "Claiming the ledger hardening work. |"
+    "Claiming the ledger hardening work; est ~2 lane-hours; displaces nothing; (OMN-16400). |"
 )
 
 
@@ -410,7 +445,7 @@ def test_cli_append_of_a_claim_row_returns_a_claim_token(tmp_path: Path) -> None
     ledger.write_text("existing header line\n", encoding="utf-8")
     row = _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")
 
-    result = _run_cli([str(ledger), "--append", row])
+    result = _run_cli([str(ledger), "--append", _live_stamp(row)])
 
     assert result.returncode == 0
     token = MOD.parse_claim_token_line(result.stdout)
@@ -423,7 +458,11 @@ def test_cli_append_of_a_claim_row_returns_a_claim_token(tmp_path: Path) -> None
 def test_cli_append_of_a_non_claim_row_emits_no_token(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.md"
     result = _run_cli(
-        [str(ledger), "--append", "| 2026-08-28T18:05:00Z | h | OMN-1 | TERMINAL | x |"]
+        [
+            str(ledger),
+            "--append",
+            _live_stamp("| 2026-08-28T18:05:00Z | h | OMN-1 | TERMINAL | x |"),
+        ]
     )
     assert result.returncode == 0
     assert MOD.parse_claim_token_line(result.stdout) is None
@@ -439,10 +478,18 @@ def test_cli_claim_retry_is_deduped_and_returns_the_same_token(
     """
     ledger = tmp_path / "ledger.md"
     first = _run_cli(
-        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+        [
+            str(ledger),
+            "--append",
+            _live_stamp(_PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")),
+        ]
     )
     retry = _run_cli(
-        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:12:31Z")]
+        [
+            str(ledger),
+            "--append",
+            _live_stamp(_PIPE_CLAIM.format(ts="2026-08-28T18:12:31Z"), shift_seconds=5),
+        ]
     )
 
     assert first.returncode == 0
@@ -473,7 +520,11 @@ def test_cli_verify_claim_token_accepts_a_claim_that_predates_the_mutation(
 ) -> None:
     ledger = tmp_path / "ledger.md"
     appended = _run_cli(
-        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+        [
+            str(ledger),
+            "--append",
+            _live_stamp(_PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")),
+        ]
     )
     token = _token_of(appended)
 
@@ -494,7 +545,11 @@ def test_cli_verify_claim_token_rejects_a_post_hoc_claim(tmp_path: Path) -> None
     """The L17421/L17467/L17574 defect class, mechanically caught."""
     ledger = tmp_path / "ledger.md"
     appended = _run_cli(
-        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+        [
+            str(ledger),
+            "--append",
+            _live_stamp(_PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")),
+        ]
     )
     token = _token_of(appended)
 
@@ -522,7 +577,11 @@ def test_cli_verify_claim_token_rejects_a_token_whose_row_is_not_on_disk(
     """
     ledger = tmp_path / "ledger.md"
     appended = _run_cli(
-        [str(ledger), "--append", _PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")]
+        [
+            str(ledger),
+            "--append",
+            _live_stamp(_PIPE_CLAIM.format(ts="2026-08-28T18:10:00Z")),
+        ]
     )
     token = _token_of(appended)
     ledger.write_text("something else entirely\n", encoding="utf-8")
@@ -568,14 +627,25 @@ def test_claim_tokens_order_by_lock_protected_offset(tmp_path: Path) -> None:
         [
             str(ledger),
             "--append",
-            "| 2026-08-22T14:45:00Z | lane-a | OMN-16385 | CLAIM | first appended |",
+            # OMN-18554: both rows are stamped live and priced, so they clear the
+            # ported clock and rule-4 guards. The INVERSION this test exists for is
+            # preserved exactly: the row appended FIRST carries the LATER self-stamp
+            # (shift 0 here, -60s below), which is the ghost-collision shape.
+            _live_stamp(
+                "| 2026-08-22T14:45:00Z | lane-a | OMN-16385 | CLAIM | first appended; "
+                "est ~2 lane-hours; displaces nothing; (OMN-16385) |"
+            ),
         ]
     )
     later_append_earlier_clock = _run_cli(
         [
             str(ledger),
             "--append",
-            "| 2026-08-22T14:20:00Z | lane-b | OMN-16386 | CLAIM | second appended |",
+            _live_stamp(
+                "| 2026-08-22T14:20:00Z | lane-b | OMN-16386 | CLAIM | second appended; "
+                "est ~2 lane-hours; displaces nothing; (OMN-16386) |",
+                shift_seconds=-60,
+            ),
         ]
     )
     first = MOD.parse_claim_token_line(earlier_append_later_clock.stdout)
