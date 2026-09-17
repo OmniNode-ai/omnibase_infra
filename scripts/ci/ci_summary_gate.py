@@ -405,6 +405,9 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
 # job-level `if:` — it always executes and reports, even when pyproject.toml is
 # unchanged) and folded into the same fixture rows above.
 EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
+    # OMN-18629: the governed-helper primitive gate. Unconditional, no
+    # path filter, so it reports on every PR shape.
+    "Governed helper primitive gate",
     "deploy-gate / deploy-gate",  # 16/16 present, 15/16 green (#2555 red AT MERGE)
     "verify / verify",  # Receipt Gate
     "call-reject-skip-token / scan / reject-skip-gate-token",  # CLAUDE.md rule 10 mechanism
