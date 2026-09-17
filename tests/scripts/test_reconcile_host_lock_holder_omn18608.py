@@ -28,6 +28,8 @@ from pathlib import Path
 import pytest
 
 from tests.scripts.test_reconcile_host_omn17307 import (
+    EXIT_FAILED,
+    EXIT_INDETERMINATE,
     EXIT_OK,
     Workspace,
     _lock,
@@ -40,6 +42,9 @@ from tests.scripts.test_reconcile_host_omn17307 import (
 pytestmark = pytest.mark.unit
 
 _NOTHING_TO_DO = "nothing to do"
+# A decline is its own exit status (OMN-18608): this run reconciled nothing, so
+# it must not hand a caller an exit code that means "the host is in sync".
+EXIT_DECLINED = 4
 _RECLAIMING = "RECLAIMING a stale reconcile-host lock"
 
 
@@ -171,7 +176,7 @@ def test_a_lock_held_by_a_live_pid_is_respected(ws: Workspace) -> None:
 
         proc = _run(ws)
 
-        assert proc.returncode == EXIT_OK
+        assert proc.returncode == EXIT_DECLINED
         assert _NOTHING_TO_DO in proc.stderr
         assert not ws.delegate_witness.exists(), (
             "the tick reconciled while a live peer held the lock"
@@ -222,7 +227,7 @@ def test_a_malformed_holder_record_is_respected_inside_the_age_bound(
 
     proc = _run(ws)
 
-    assert proc.returncode == EXIT_OK
+    assert proc.returncode == EXIT_DECLINED
     assert _NOTHING_TO_DO in proc.stderr
     assert not ws.delegate_witness.exists()
 
@@ -305,7 +310,7 @@ def test_a_fresh_foreign_host_holder_is_respected(ws: Workspace) -> None:
 
     proc = _run(ws)
 
-    assert proc.returncode == EXIT_OK
+    assert proc.returncode == EXIT_DECLINED
     assert _NOTHING_TO_DO in proc.stderr
     assert not ws.delegate_witness.exists()
 
@@ -406,4 +411,75 @@ def test_a_gnu_stat_does_not_poison_the_age_arithmetic(
     assert _RECLAIMING in proc.stderr, (
         f"the GNU mtime spelling was never reached or never parsed: {proc.stderr}"
     )
+    assert ws.delegate_witness.exists()
+
+
+# --------------------------------------------------------------------------- #
+# A decline must not be reportable as "in sync"
+# --------------------------------------------------------------------------- #
+def test_a_decline_does_not_exit_zero(ws: Workspace) -> None:
+    """The other half of the 2026-09-17 outage, and the half a lock fix misses.
+
+    Reclaiming a leaked lock stops that particular 35-minute case. It does not
+    stop a run that legitimately declined from being RECORDED as a success: the
+    tick maps exit 0 to ``verdict="in sync"`` and writes it, which is what made
+    the outage invisible in the log meant to reveal it. So a decline carries its
+    own status, and the caller cannot mistake it for a reconcile that happened.
+    """
+    live = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        _seed_lock(ws, pid=live.pid, host=os.uname().nodename)
+        _ready(ws)
+
+        proc = _run(ws)
+
+        assert proc.returncode != EXIT_OK, (
+            "a run that reconciled nothing exited 0, so its caller will record "
+            f"the host as in sync on its behalf: {proc.stderr}"
+        )
+        assert proc.returncode == EXIT_DECLINED
+        assert not ws.delegate_witness.exists()
+    finally:
+        live.terminate()
+        live.wait()
+
+
+def test_a_decline_is_distinct_from_indeterminate_and_from_failure(
+    ws: Workspace,
+) -> None:
+    """Declining is the NORMAL outcome of concurrent ticks, not an alarm.
+
+    Several hook ticks fire at once by design, so most declines are healthy: a
+    peer is reconciling right now. Collapsing a decline into INDETERMINATE or
+    FAILED would make the common case look like a defect, and a status surface
+    that cries wolf on every tick is one nobody reads -- which is how the real
+    failure went unnoticed in the first place.
+    """
+    live = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        _seed_lock(ws, pid=live.pid, host=os.uname().nodename)
+        _ready(ws)
+
+        proc = _run(ws)
+
+        assert proc.returncode not in (EXIT_OK, EXIT_FAILED, EXIT_INDETERMINATE)
+    finally:
+        live.terminate()
+        live.wait()
+
+
+def test_a_reclaimed_lock_still_exits_zero_when_the_reconcile_happens(
+    ws: Workspace,
+) -> None:
+    """Control: the new status must not leak onto runs that DID the work.
+
+    Without this, exiting 4 everywhere would satisfy the assertions above while
+    making every healthy tick report a decline -- the same lie, inverted.
+    """
+    _seed_lock(ws, pid=_dead_pid(), host=os.uname().nodename, age_seconds=120)
+    _ready(ws)
+
+    proc = _run(ws)
+
+    assert proc.returncode == EXIT_OK, proc.stderr
     assert ws.delegate_witness.exists()
