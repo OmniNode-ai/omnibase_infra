@@ -1556,3 +1556,118 @@ def test_projection_callback_injects_no_event_time_it_cannot_trust(
 
     assert len(received) == 1
     assert "_envelope_timestamp" not in received[0]
+
+
+@pytest.mark.unit
+def test_projection_callback_preserves_envelope_tenant() -> None:
+    """Projection handlers receive the producer-recorded envelope tenant.
+
+    OMN-18565, closing the half of OMN-18326 that was left open. That ticket
+    found this seam injecting the envelope ID and the event TIME but never the
+    envelope itself, and fixed the time. The TENANT sits one field over on the
+    same envelope and has the same property: for a payload model that carries no
+    tenant field of its own it is the ONLY attribution a projection writer can
+    see, and a writer under FORCE ROW LEVEL SECURITY cannot recover it by
+    reading, because an unset ``app.tenant_id`` makes the policy predicate NULL
+    and an RLS-covered SELECT returns zero rows.
+
+    The gap did not surface as a refusal, which is why it outlived the time
+    half. ``omnimarket.projection.envelope.envelope_tenant_identity`` returned
+    ``None`` for every event on the deployed delegation writer, whatever the
+    producer stamped, and the writer attributed the quality-gate verdict to the
+    HOUSE tenant instead. Two independent subscriptions upsert one
+    ``delegation_events`` row, so when the verdict won the race it CREATED that
+    row under an identity the delegation's own terminal disagreed with, and the
+    terminal's ON CONFLICT DO UPDATE was refused by the policy's USING half.
+    Roughly three of sixteen staging business-proof runs passed in the 24 hours
+    measured on 2026-09-17.
+    """
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    received: list[dict[str, object]] = []
+
+    class EnvelopeAwareHandler:
+        def handle(self, input_data: dict[str, object]) -> dict[str, int]:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope = ModelEventEnvelope[object](
+        payload={"service_name": "svc-a", "health_status": "healthy"},
+        envelope_id=uuid4(),
+        envelope_timestamp=datetime(2026, 9, 17, 6, 57, 48, tzinfo=UTC),
+        event_type=derive_event_type_alias_for_topic(topic),
+        tenant_id="beta-business-proof",
+    )
+    callback = _make_projection_dispatch_callback(
+        EnvelopeAwareHandler(),
+        projection_database_target("live_events", schema="omninode_internal"),
+        (topic,),
+    )
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pw@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert received[0]["_tenant_id"] == "beta-business-proof"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        pytest.param(None, id="unstamped"),
+        pytest.param("", id="empty-string"),
+        pytest.param("   ", id="blank-string"),
+        pytest.param(uuid4(), id="non-string"),
+    ],
+)
+def test_projection_callback_injects_no_tenant_it_was_not_given(
+    recorded: object,
+) -> None:
+    """An envelope recording no usable tenant injects NO key -- never a default.
+
+    OMN-18565. The refusal a missing key produces downstream is CORRECT when the
+    producer really recorded no tenant; what was wrong was that the kernel made
+    every event look that way, and the writer filled the gap with the house
+    tenant. So the key is absent rather than defaulted, and a value that is not
+    a non-blank string is treated as absent rather than coerced: this seam
+    transports a producer fact and must never author one. Injecting a chosen
+    identity here would put a row into a partition that never submitted it, and
+    under FORCE ROW LEVEL SECURITY that row makes the real writer's
+    conflict-update unwritable.
+    """
+    received: list[dict[str, object]] = []
+
+    class EnvelopeAwareHandler:
+        def handle(self, input_data: dict[str, object]) -> dict[str, int]:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope = MagicMock()
+    envelope.event_type = derive_event_type_alias_for_topic(topic)
+    envelope.topic = topic
+    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+    envelope.envelope_id = uuid4()
+    envelope.envelope_timestamp = datetime(2026, 9, 17, 6, 57, 48, tzinfo=UTC)
+    envelope.tenant_id = recorded
+    callback = _make_projection_dispatch_callback(
+        EnvelopeAwareHandler(),
+        projection_database_target("live_events", schema="omninode_internal"),
+        (topic,),
+    )
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pw@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert "_tenant_id" not in received[0]
