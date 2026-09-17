@@ -12,6 +12,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from deploy_agent.consumer import TOPIC_REBUILD_REQUESTED
 from deploy_agent.events import EnumRuntimeLane
 from deploy_agent.lane_policy import (
     ENV_ALLOWED_LANES,
@@ -117,7 +118,12 @@ def test_consumer_rejects_an_off_lane_command_and_commits_the_offset() -> None:
     consumer = _consumer_with_fence()
     with patch("deploy_agent.consumer.verify_command", return_value=True):
         cmd, reason = consumer._process_message(
-            SimpleNamespace(value=_payload("stability-test"))
+            SimpleNamespace(
+                value=_payload("stability-test"),
+                topic=TOPIC_REBUILD_REQUESTED,
+                partition=0,
+                offset=41,
+            )
         )
 
     assert cmd is None
@@ -136,7 +142,14 @@ def test_consumer_accepts_an_in_lane_command() -> None:
 
     consumer = _consumer_with_fence()
     with patch("deploy_agent.consumer.verify_command", return_value=True):
-        cmd, reason = consumer._process_message(SimpleNamespace(value=_payload("dev")))
+        cmd, reason = consumer._process_message(
+            SimpleNamespace(
+                value=_payload("dev"),
+                topic=TOPIC_REBUILD_REQUESTED,
+                partition=0,
+                offset=42,
+            )
+        )
 
     assert reason is None
     assert cmd is not None
