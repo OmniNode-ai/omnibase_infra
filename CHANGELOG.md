@@ -1,3 +1,21 @@
+## v0.38.30 (2026-09-17)
+
+### Release
+- Cut omnibase_infra from dev at 0.38.30 for the OMN-18565 kernel-injected tenant path.
+- PyPI currently has 0.38.29 as the latest published omnibase-infra release; dev is already versioned at 0.38.30, so this release intentionally does not edit dependency pins or downgrade the package version.
+- Declared dependency floor is unchanged from dev: `omnibase-core==0.47.16`, `omnibase-spi==0.23.3`, `omnibase-compat==0.5.7`, all published.
+- Why now: `fix(OMN-18565)` (#3679) merged at 11:26:12Z, after v0.38.29 was cut at 09:42Z, so the kernel projection seam that carries the envelope tenant is on dev and in no release. omnimarket's deployed delegation writer refuses every quality-gate verdict until its omnibase-infra pin carries it.
+
+### Included Since v0.38.29
+- fix(OMN-18565): the kernel projection seam carries the envelope tenant, and delegation_events stops defaulting one (#3679).
+- fix(OMN-18569): resolve the delegation terminal on the dispatched carrier shape, and fail loudly when it cannot be resolved (#3682).
+- fix(OMN-17214): attribute every auto-wiring publish seam to its subscription (#3678).
+- fix(OMN-17819): split the gate venv from the dispatch venv, and build the dispatch venv on the brew interpreter (#3674, #3680).
+- fix(OMN-18570): bind the lab parameter_count to the served model id (#3681).
+- fix(OMN-18571): floor and attribute the created-container count so a redeploy in flight stops paging (#3684).
+- fix(OMN-18170): realm SMTP reconciles only where a mail provider is declared (#3685).
+- fix(OMN-17295): the documented lane probe has to be a command that runs (#3676).
+
 ## v0.38.29 (2026-09-17)
 
 ### Release
