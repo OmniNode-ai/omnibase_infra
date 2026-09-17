@@ -901,7 +901,10 @@ def _die_fingerprint_mismatch(mismatches: list[dict[str, str]]) -> NoReturn:
     sys.exit(1)
 
 
-def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
+def _live_client_requires_secret(
+    existing: dict[str, Any],
+    spec: dict[str, Any],
+) -> bool:
     """Return whether the live Keycloak client shape is expected to hold a secret.
 
     Classified from the LIVE representation rather than the desired spec,
@@ -919,11 +922,36 @@ def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
     -- the deploy would stay green while introspection returns 401, which is
     the silent failure OMN-16504 is about.
 
-    The architectural mismatch is real and is worth fixing separately, by
-    moving introspection onto a non-bearer-only client. Until that happens the
-    guard reports what is true of this realm today.
+    OMN-18582 adds the ONE narrow exemption the operator ruled for, and takes
+    it from the RESOLVED SPEC rather than from the live representation. The
+    distinction is the whole safety of it: a partial roster entry says nothing
+    about a field it omits, but a spec that EXPLICITLY declares
+    ``bearerOnly: true`` and names no secret source at all is stating, in the
+    reviewed file, that this client authenticates nowhere. That is production
+    `onex-api` -- it validates by JWKS and nothing authenticates as it.
+
+    It cannot be reached by accident, in three directions:
+
+    * a client that is merely bearer-only LIVE, with the roster silent, is
+      still guarded -- that is OMN-16504's own client before the ruling, and
+      the incident was exactly a live bearer-only shape whose secret Keycloak
+      cleared;
+    * a spec that declares ``bearerOnly`` but also names ``secretEnv`` or
+      ``consumerSecretEnv`` is still guarded, because the exemption is about
+      holding no credential, not about the flag;
+    * dev-system's resolved `onex-api` declares ``bearerOnly: false``, so the
+      realm this guard was written for is untouched.
+
+    The architectural mismatch is still real for dev-system and is still worth
+    fixing separately, by moving introspection onto a non-bearer-only client.
     """
-    return existing.get("publicClient") is not True
+    if existing.get("publicClient") is True:
+        return False
+    declares_bearer_only = spec.get("bearerOnly") is True
+    names_a_secret_source = bool(
+        spec.get(_ROSTER_FIELD_PUSHED_ENV) or spec.get(_ROSTER_FIELD_CONSUMER_ENV)
+    )
+    return not (declares_bearer_only and not names_a_secret_source)
 
 
 def _read_client_secret_value(
@@ -999,7 +1027,7 @@ def _assert_confidential_clients_have_secrets(
         if existing is None:
             offenders.append(client_id)
             continue
-        if not _live_client_requires_secret(existing):
+        if not _live_client_requires_secret(existing, spec):
             continue
         if not _read_client_secret_is_present(kc_url, realm, token, existing):
             offenders.append(client_id)
@@ -1081,6 +1109,94 @@ def _assert_client_secrets_match_consumers(
 # call sites, which is why this is a correction rather than a workaround.
 _ROSTER_FIELD_PUSHED_ENV = "secretEnv"
 _ROSTER_FIELD_CONSUMER_ENV = "consumerSecretEnv"
+#: OMN-18582. The one declared per-environment deviation mechanism.
+#:
+#: The roster is ONE file serving two realms, byte-identical across three
+#: tracked copies with a parity gate enforcing it. Almost every client is the
+#: same shape in both. `onex-api` is not, and the difference is real rather
+#: than cosmetic: dev-system runs a consumer that authenticates AS it and must
+#: hold a secret, production runs none and validates by JWKS. Forking the file
+#: would give the two realms two sources of truth, which is the failure this
+#: component exists to remove, so the deviation is declared IN the entry and
+#: the environment is selected by the Job that runs.
+_ROSTER_FIELD_ENV_OVERRIDES = "environmentOverrides"
+
+#: Keys inside an override block that document it rather than change the
+#: client. They are stripped before the spec reaches a payload builder, so a
+#: reviewer can demand a reason without that reason being sent to Keycloak.
+_OVERRIDE_ANNOTATION_FIELDS = frozenset({"reason", "ticket"})
+
+
+def apply_environment_overrides(
+    clients: list[dict[str, Any]],
+    environment: str | None,
+) -> list[dict[str, Any]]:
+    """Resolve each roster entry to the shape THIS realm should have.
+
+    OMN-18582, operator ruling 2026-09-17T17:33:52Z (resolve by timestamp; the
+    ledger rolled that day). Public because it is the seam the tests exercise
+    directly -- the resolution is where the two realms diverge, so it is worth
+    being able to assert on without standing up a realm.
+
+    Returns NEW dicts. The input is never mutated, because the same roster
+    object is read by the preflight survey and by the reconcile loop and a
+    mutation here would silently change what the other one saw.
+
+    Semantics, deliberately small:
+
+    * a client with no override block is returned unchanged, so every roster
+      written before this field existed resolves identically;
+    * an override block for an environment this run is not is ignored;
+    * a key set to ``null`` is REMOVED rather than set to None, because a None
+      would flow into the create/update payload and be sent to Keycloak as a
+      field value;
+    * ``reason`` and ``ticket`` document the exception and never reach a
+      payload.
+
+    FAILS CLOSED when the roster carries an override and no environment is
+    named. The base cannot be assumed: the direction nobody tests is a
+    PRODUCTION Job that forgot the flag, which would reconcile the dev shape
+    into production, flip `onex-api` confidential and have Keycloak mint the
+    credential the ruling exists to refuse. Refusing is the cheap failure.
+    """
+    carriers = [
+        client["clientId"]
+        for client in clients
+        if client.get(_ROSTER_FIELD_ENV_OVERRIDES)
+    ]
+    if carriers and environment is None:
+        _die_naming_clients(
+            "environment_not_declared",
+            (
+                "the roster declares per-environment overrides but this run "
+                "named no environment, so the realm shape cannot be resolved; "
+                "pass --environment (or KC_ENVIRONMENT). Defaulting to the "
+                "base shape is refused: on a production realm that would "
+                "reconcile the dev-system shape and mint a client secret "
+                "nothing consumes (OMN-18582)"
+            ),
+            carriers,
+        )
+
+    resolved: list[dict[str, Any]] = []
+    for client in clients:
+        overrides = client.get(_ROSTER_FIELD_ENV_OVERRIDES)
+        spec = {
+            key: value
+            for key, value in client.items()
+            if key != _ROSTER_FIELD_ENV_OVERRIDES
+        }
+        block = (overrides or {}).get(environment) if environment else None
+        for key, value in (block or {}).items():
+            if key in _OVERRIDE_ANNOTATION_FIELDS:
+                continue
+            if value is None:
+                spec.pop(key, None)
+            else:
+                spec[key] = value
+        resolved.append(spec)
+    return resolved
+
 
 # How a client's Keycloak secret is supposed to get there. The distinction
 # matters to an operator reading a refusal, because it is the difference
@@ -1211,7 +1327,7 @@ def _preflight_client(
     drift_fields: list[str] = []
     if existing is not None:
         drift_fields = _drifted_fields(existing, spec)
-        if _live_client_requires_secret(existing):
+        if _live_client_requires_secret(existing, spec):
             compare_against = (
                 env_var
                 if provenance == _PROVENANCE_CONSUMER_OWNED and env_present
@@ -1525,6 +1641,18 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--environment",
+        default=os.environ.get("KC_ENVIRONMENT") or None,
+        help=(
+            "OMN-18582. Which realm this run is reconciling, used to resolve "
+            "the roster's declared environmentOverrides. Optional while no "
+            "roster entry declares one; REQUIRED the moment any does, and the "
+            "run refuses rather than defaulting to the base -- a production "
+            "Job that forgot this flag would otherwise reconcile the "
+            "dev-system shape into production."
+        ),
+    )
+    p.add_argument(
         "--reset-bootstrap-admin",
         action="store_true",
         default=False,
@@ -1556,6 +1684,12 @@ def main() -> None:
     clients = config.get("clients", [])
     if not clients:
         _die("No clients found in config file")
+
+    # OMN-18582. Resolve the realm shape BEFORE anything reads the client
+    # list: the preflight survey, the reconcile loop and both post-loop guards
+    # must all see the same resolved spec, or they would disagree about what
+    # this realm is supposed to look like.
+    clients = apply_environment_overrides(clients, args.environment)
 
     token = _get_token(args.kc_url, args.admin_username, args.admin_password)
 
