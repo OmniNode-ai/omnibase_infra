@@ -269,3 +269,74 @@ def test_repo_precedent_for_uv_run_python_on_host_201_still_holds() -> None:
         "uv run python scripts/ci/check_dev_lane_staleness.py"
         in precedent.read_text(encoding="utf-8")
     ), "the cited host-201 precedent for `uv run python` no longer holds"
+
+
+# --------------------------------------------------------------------------
+# Two further defects the first live dispatch exposed (run 35273920602). Both
+# are the same class as the interpreter bug: the job inherited something from
+# its environment instead of naming it.
+# --------------------------------------------------------------------------
+
+
+def test_drift_does_not_fail_the_collect_step() -> None:
+    """Exit 30 is DRIFT — a normal census outcome — and must not fail the job.
+
+    GitHub starts a `run:` step with `bash -e`. The step's own `set -uo pipefail`
+    does NOT clear that, so `bash scripts/lane-census-check.sh ...` on its own
+    line aborted the step at exit 30 and `rc=$?` never ran. The lab has had five
+    warning-severity drift findings all day, so this failed every dispatch while
+    the census itself was working perfectly.
+
+    The exit code must be captured in a form `-e` cannot pre-empt.
+    """
+    body = _WORKFLOW.read_text(encoding="utf-8")
+    collect = body[body.index("Collect the census from the lab docker daemon") :]
+    collect = collect[: collect.index("- name: Decide")]
+
+    invocation = [
+        line
+        for line in collect.splitlines()
+        if "lane-census-check.sh" in line and "scripts/" in line
+    ]
+    assert len(invocation) == 1, invocation
+    assert "|| rc=" in invocation[0], (
+        "the collector's exit code must be captured with `|| rc=$?`; a bare "
+        "invocation is aborted by `bash -e` before the next line runs, which "
+        f"fails the job on ordinary drift: {invocation[0].strip()}"
+    )
+
+
+def test_the_census_is_attributed_to_the_daemons_host() -> None:
+    """The census must name the host it inventoried, not the container it ran in.
+
+    `lane-census-check.sh` defaults `HOST` to `hostname`, which inside the runner
+    is the container id — run 35273920602 emitted `host=7f296d05a363`. That id
+    changes whenever the runner is recreated, and `host` feeds `alert_key`, so
+    a census committed from CI would both name a nonsense host and read as a
+    topology change on EVERY run, opening a bump PR each time. That is precisely
+    the churn `lane_census_refresh_decision` exists to prevent, arriving through
+    a field the decision cannot see is wrong.
+    """
+    body = _WORKFLOW.read_text(encoding="utf-8")
+    assert "LANE_CENSUS_HOST=" in body, (
+        "the collect step does not name the census host, so the census is "
+        "attributed to the runner container"
+    )
+    assert "docker info --format '{{.Name}}'" in body, (
+        "resolve the host from the daemon being inventoried; any other source "
+        "can drift from the thing actually being read"
+    )
+    assert "LANE-CENSUS-HOST-UNRESOLVED" in body, (
+        "an unresolved host must fail the step, not fall back to the container"
+    )
+
+
+def test_the_collector_still_defaults_host_for_the_lab_drop_in() -> None:
+    """On `.201` the drop-in sets no LANE_CENSUS_HOST and `hostname` is correct.
+
+    There the script runs ON the host whose lanes it describes, so the default
+    is right and must stay. The override belongs to the caller that is NOT on
+    that host.
+    """
+    body = _CENSUS_SH.read_text(encoding="utf-8")
+    assert 'HOST="${LANE_CENSUS_HOST:-$(hostname)}"' in body
