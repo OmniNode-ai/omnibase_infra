@@ -166,7 +166,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -604,6 +604,45 @@ class AcceptanceUnresolvedError(RuntimeError):
     """
 
 
+class EnumLaneBuildOutcome(StrEnum):
+    """Why the agent's runtime image build ended, as this job can read it.
+
+    OMN-18615 AC4. A MIRROR of ``deploy_agent.build_budget.EnumBuildOutcome``,
+    which this job cannot import: the deploy agent is a separate package that
+    runs on the lab host, and a CI script reaching into it would couple the
+    receipt surface to the agent's install. The two are pinned against each
+    other by ``tests/ci/test_build_outcome_token_mirror_omn18615.py``, which
+    fails if either side adds, removes or renames a value -- the same
+    mirror-and-pin shape the prod-promotion grant schema uses across its own
+    repo boundary.
+
+    WHY A LANE NEEDS THIS AT ALL. A lab-pass receipt that reports a non-
+    converged lane says nothing about WHY, and the two reasons lead to
+    opposite next actions: a build killed by its own ceiling is worth
+    re-running when the host is quieter, while a build that errored is not
+    worth re-running at all. On 2026-09-17 a second rebuild was issued in
+    exactly the wrong belief and reproduced the kill two seconds from the
+    first.
+    """
+
+    BUDGET_EXHAUSTED = "runtime_image_build_budget_exhausted"
+    BUILD_ERRORED = "runtime_image_build_errored"
+
+    @classmethod
+    def classify(cls, errors: Sequence[str] | None) -> EnumLaneBuildOutcome | None:
+        """Read the outcome token off the agent's own ``errors`` list.
+
+        ``None`` means the job's errors name no build outcome -- a lane-lock
+        contention, a gateway refusal, or no error at all. It is never a
+        default standing in for an outcome that could not be read.
+        """
+        for error in errors or ():
+            for outcome in cls:
+                if outcome.value in error:
+                    return outcome
+        return None
+
+
 @dataclass(frozen=True)
 class ModelAgentAcceptance:
     """When the deploy agent took the rebuild command, and where that was read.
@@ -612,11 +651,17 @@ class ModelAgentAcceptance:
     by its ``/job/{correlation_id}`` endpoint), not a CI-side observation of
     one. The agent writes it when it accepts the command, which is the instant
     the lane's clock legitimately starts.
+
+    ``build_outcome`` (OMN-18615) is read from the SAME response, off the
+    agent's ``errors`` list. It is evidence, not a verdict input: nothing in
+    this module branches on it, and a receipt reports it so a reader can tell
+    a killed build from a broken one without shelling to the lab host.
     """
 
     correlation_id: str
     accepted_at: datetime
     source: str
+    build_outcome: EnumLaneBuildOutcome | None = None
 
     def __post_init__(self) -> None:
         if self.accepted_at.tzinfo is None:
@@ -707,11 +752,19 @@ class ModelConvergenceBudget:
             return ""
         elapsed = self.elapsed_since_acceptance(now)
         assert elapsed is not None
+        outcome = self.acceptance.build_outcome
+        # OMN-18615: additive evidence. An absent token adds no clause at all,
+        # so every message this job has ever emitted is byte-unchanged unless
+        # the agent actually reported a build outcome.
+        outcome_clause = (
+            f"; the deploy agent reported {outcome.value}" if outcome else ""
+        )
         return (
             f"{_format_age(elapsed)} since the deploy agent accepted "
             f"{self.acceptance.correlation_id} at "
             f"{self.acceptance.accepted_at.isoformat()} (budget "
             f"{self.declared_seconds}s from that moment)"
+            f"{outcome_clause}"
         )
 
     def shortfall_reason(self, now: datetime) -> str:
@@ -805,8 +858,13 @@ def read_agent_acceptance(
     except ValueError as exc:
         msg = f"{url} returned an unparseable accepted_at {payload['accepted_at']!r}"
         raise AcceptanceUnresolvedError(msg) from exc
+    raw_errors = payload.get("errors")
+    errors = [str(item) for item in raw_errors] if isinstance(raw_errors, list) else []
     return ModelAgentAcceptance(
-        correlation_id=correlation_id.strip(), accepted_at=accepted_at, source=url
+        correlation_id=correlation_id.strip(),
+        accepted_at=accepted_at,
+        source=url,
+        build_outcome=EnumLaneBuildOutcome.classify(errors),
     )
 
 

@@ -23,8 +23,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from deploy_agent.build_budget import (
+    HARD_UPPER_BOUND_SECONDS,
+    EnumBuildOutcome,
     ModelBuildBudget,
     derive_image_build_budget,
+    parse_build_progress,
 )
 from deploy_agent.compose_budget import (
     ModelPhaseBudget,
@@ -51,6 +54,7 @@ from deploy_agent.gateway_budget import (
     ModelGatewayDeployBudget,
     derive_gateway_deploy_budget,
 )
+from deploy_agent.host_conditions import probe_host_conditions
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
@@ -557,6 +561,22 @@ def _build_source_build_args(
     ]
 
 
+def _decode_stream(stream: str | bytes | None) -> str:
+    """Render a captured subprocess stream as text, whatever it came back as.
+
+    ``subprocess.run`` hands partial output back on ``TimeoutExpired`` as well
+    as on a normal return, but the type follows whether ``text=True`` was in
+    effect -- and a kill message that crashed on ``bytes`` would replace the
+    diagnosis with a traceback, which is strictly worse than the message it
+    was trying to improve (OMN-18615).
+    """
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", errors="replace")
+    return str(stream)
+
+
 def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
@@ -1060,6 +1080,7 @@ def runtime_image_build_budget(
         per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
         per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
         floor_seconds=RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
+        host=probe_host_conditions(),
     )
 
 
@@ -3294,18 +3315,40 @@ class DeployExecutor:
         # there is no residue to recover; the verdict states that explicitly so
         # the terminal event settles instead of leaving an operator to go and
         # check whether the lane is half-recreated.
+        # OMN-18615: the two endings carry DISTINCT machine-readable tokens
+        # (AC4). Both used to be a RuntimeError whose only difference was
+        # English, so a lane reading the agent's `errors` list could not tell
+        # "killed by its own budget, so retry on a quieter host" from "this
+        # build is broken, so retrying buys nothing". On 2026-09-17 the second
+        # rebuild was issued in exactly the wrong belief and reproduced the
+        # kill within two seconds of the first.
         try:
             result = _run(cmd, timeout=timeout, env=_compose_env())
         except subprocess.TimeoutExpired as exc:
+            # OMN-18615 (AC2): say what the build had DONE, not only what it
+            # was allowed. subprocess.run communicates before re-raising, so
+            # the partial BuildKit progress output is on the exception --
+            # stderr is where compose writes it, stdout is the fallback.
+            progress = parse_build_progress(
+                _decode_stream(exc.stderr) or _decode_stream(exc.stdout)
+            )
             raise RuntimeError(
-                f"runtime image build for profile {profile!r} exceeded its "
-                f"{timeout}s ceiling and was killed. Ceiling derivation: "
-                f"{budget.describe()}. The lane was NOT mutated: the build runs "
-                f"before any compose up, so no container was stopped, created "
-                f"or recreated by this command."
+                f"{EnumBuildOutcome.BUDGET_EXHAUSTED.value}: runtime image "
+                f"build for profile {profile!r} exceeded its {timeout}s "
+                f"ceiling and was killed. Observed progress: "
+                f"{progress.describe(elapsed_seconds=timeout, assumed_steps=budget.build_steps, assumed_per_step_seconds=budget.per_step_seconds)}. "
+                f"Ceiling derivation: {budget.describe()}. The lane was NOT "
+                f"mutated: the build runs before any compose up, so no "
+                f"container was stopped, created or recreated by this command."
             ) from exc
         if result.returncode != 0:
-            raise RuntimeError(f"Docker compose build failed: {result.stderr}")
+            raise RuntimeError(
+                f"{EnumBuildOutcome.BUILD_ERRORED.value}: docker compose build "
+                f"for profile {profile!r} exited {result.returncode} inside its "
+                f"{timeout}s ceiling -- this is a BROKEN BUILD, not an exhausted "
+                f"budget, and retrying it unchanged buys nothing: "
+                f"{result.stderr}"
+            )
 
     def _compose_up(
         self,
