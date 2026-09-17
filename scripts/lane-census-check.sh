@@ -24,6 +24,18 @@
 #   ./scripts/lane-census-check.sh --lane prod      # one lane
 #   ./scripts/lane-census-check.sh --dry-run        # print event/plan, do NOT publish
 #   ./scripts/lane-census-check.sh --json           # emit the plan JSON to stdout
+#   ./scripts/lane-census-check.sh --snapshot PATH  # write the census SNAPSHOT to PATH ('-' = stdout)
+#
+# THE SNAPSHOT IS NOT THE PLAN (OMN-18606). `--json` emits the PLAN document
+# (keys: findings, has_drift, lanes_checked, schema_version). The staleness gate
+# reads `emitted_at`, which the plan does not carry — so `--json` can never
+# produce a file that gate accepts. The snapshot the gate reads is the typed
+# EVENT document, and `--snapshot` is the only supported way to write it:
+#
+#   ./scripts/lane-census-check.sh --snapshot deploy/lane-census/census-snapshot.json
+#
+# `--snapshot` writes the file whether or not there is drift, and leaves the
+# drift verdict and exit code below untouched.
 #
 # Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps,
 #             4 inventory unobservable (BOTH Engine API and bounded CLI failed —
@@ -39,6 +51,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LANE=""
 DRY_RUN=false
 EMIT_JSON=false
+# OMN-18606: destination for the gate-valid census snapshot document. Empty means
+# "do not write one" (the pre-OMN-18606 behaviour). "-" means stdout.
+SNAPSHOT_OUT=""
 LOG_FILE="${HOME}/.local/log/onex/lane-census.log"
 DRIFT_TOPIC="onex.evt.infra.lane-census-drift.v1"
 # Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
@@ -49,10 +64,24 @@ while [[ $# -gt 0 ]]; do
     --lane) LANE="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --json) EMIT_JSON=true; shift ;;
+    --snapshot)
+      [[ $# -ge 2 ]] || { echo "ERROR: --snapshot requires a path ('-' for stdout)" >&2; exit 2; }
+      SNAPSHOT_OUT="$2"; shift 2 ;;
     --help|-h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# A snapshot to STDOUT must be the only document on stdout. --json prints the
+# PLAN document and --dry-run prints the EVENT document; either alongside
+# "--snapshot -" produces two concatenated JSON documents, which is exactly the
+# `Extra data: line 2 column 1` shape that made the old recipes unusable.
+if [[ "$SNAPSHOT_OUT" == "-" ]]; then
+  if [[ "$EMIT_JSON" == true || "$DRY_RUN" == true ]]; then
+    echo "ERROR: --snapshot - cannot be combined with --json or --dry-run (two JSON documents on stdout)" >&2
+    exit 2
+  fi
+fi
 
 mkdir -p "$(dirname "$LOG_FILE")"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [lane-census] $*" | tee -a "$LOG_FILE" >&2; }
@@ -109,13 +138,32 @@ fi
 
 HAS_DRIFT="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["has_drift"])')"
 
+# OMN-18606: the census SNAPSHOT document is the typed event — the only carrier
+# of `emitted_at`, which the staleness gate reads. Build it BEFORE the no-drift
+# early exit below so a fleet that matches its manifest can still emit a census.
+# Until this change the event was built only on drift, so a healthy fleet could
+# produce no snapshot by any path and the gate became unsatisfiable seven days
+# later with no available remedy. Writing the snapshot does NOT change this
+# script's exit-code contract: the drift verdict below is unchanged.
+if [[ -n "$SNAPSHOT_OUT" || "$HAS_DRIFT" == "True" ]]; then
+  EVENT_JSON="$(echo "$PLAN_JSON" | LANE_CENSUS_HOST="$HOST" python3 "${SCRIPT_DIR}/lane_census_event.py")"
+fi
+
+if [[ -n "$SNAPSHOT_OUT" ]]; then
+  if [[ "$SNAPSHOT_OUT" == "-" ]]; then
+    printf '%s\n' "$EVENT_JSON"
+  else
+    mkdir -p "$(dirname "$SNAPSHOT_OUT")"
+    printf '%s\n' "$EVENT_JSON" >"$SNAPSHOT_OUT"
+    log "census snapshot written: $SNAPSHOT_OUT"
+  fi
+fi
+
 if [[ "$HAS_DRIFT" != "True" ]]; then
   log "No lane drift. Desired == actual."
   exit 0
 fi
 
-# Build the typed drift event from the plan.
-EVENT_JSON="$(echo "$PLAN_JSON" | LANE_CENSUS_HOST="$HOST" python3 "${SCRIPT_DIR}/lane_census_event.py")"
 log "DRIFT detected:"
 # Render each finding to stderr. The event JSON is passed via env (EVENT_JSON) so
 # the single-quoted heredoc body needs no shell escaping of inner Python quotes.
