@@ -27,6 +27,23 @@ on:
         description: 'Released version tag (e.g. v0.11.0)'
         required: true
         type: string
+      ticket:
+        description: >-
+          OMN ticket that closed the release being cascaded (OMN-16286), e.g.
+          OMN-15449. Carried into the branch name and the PR title so
+          Receipt-Gate's identity binding (title <-> branch <-> Evidence-Ticket)
+          resolves honestly, and so OCC autobind fires at all -- its condition
+          is a ticket token in the title or the head ref, and a bump PR that
+          carries neither is never minted a companion.
+        required: true
+        type: string
+      evidence_source:
+        description: >-
+          Evidence-Source that already proved the release (OMN-16286), e.g.
+          OCC#6695 or a merged OCC commit SHA. Reproduced verbatim as this PR's
+          own Evidence-Source line.
+        required: true
+        type: string
     secrets:
       # OMN-16373: CROSS_REPO_PAT retired. The caller now passes through the
       # onexbot-occ-writer GitHub App credentials (org secrets
@@ -187,42 +204,60 @@ jobs:
         env:
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ inputs.version }}
+          TICKET: ${{ inputs.ticket }}
+          EVIDENCE_SOURCE: ${{ inputs.evidence_source }}
         run: |
           # >>> OMN-18596 bump branch >>>
-          # The branch carries a ticket because that is the ONLY arm of the
-          # autobind condition a dependency bump can satisfy.
+          # The branch carries the RELEASE's own ticket, as a suffix.
           #
-          # Every repo's call-occ-autobind.yml gates its job on
-          #   contains(pull_request.title, 'OMN-') || contains(head.ref, 'OMN-')
-          # and this cascade generated neither. So autobind never ran on a bump
-          # PR at all -- it did not decline one on the merits, the job simply
-          # reported `skipping` -- and a person hand-wrote the companion
-          # instead (onex_change_control#10026, human-authored 2026-09-17T15:04:42Z
-          # for omnimemory#511's bump).
+          # This is omnibase_core's OMN-16286 convention, ported rather than
+          # re-invented. An earlier revision of this file used a fixed
+          # `omn-18596` PREFIX: it satisfied OCC autobind, whose condition is a
+          # ticket token in the title or head ref, but it was a SECOND
+          # convention for one problem, and it named the ticket that built the
+          # mechanism rather than the release being cascaded. One convention
+          # fleet-wide is the standing rule.
           #
-          # The title arm is not available: the pr-title gate exempts the
-          # `chore(deps` prefix precisely so dependency bumps need no ticket,
-          # so putting one in the title would fight a deliberate exemption.
-          #
-          # Ported from omnimarket#2395, which fixed exactly this for that
-          # repo's own post-release bump and generates
-          # automation/omn-18010-post-release-dev-bump-<version>. GitHub's
-          # expression `contains()` is case-insensitive, so the lowercase
-          # ticket satisfies the uppercase literal in the condition.
+          # Every field that reaches a branch name, PR title or PR body is
+          # validated first. A cascade that interpolates an unvalidated input
+          # into a ref is how a malformed release input becomes a malformed ref.
+          if ! [[ "${PACKAGE}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "::error::OMN-16286: inputs.package '${PACKAGE}' does not match the safe package-name pattern ^[A-Za-z0-9_-]+\$."
+            exit 1
+          fi
           VERSION="${VERSION#v}"
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([A-Za-z0-9.+-]*)?$ ]]; then
+            echo "::error::OMN-16286: inputs.version '${VERSION}' does not match the safe SemVer-ish pattern."
+            exit 1
+          fi
+          if ! [[ "${TICKET}" =~ ^OMN-[0-9]+$ ]]; then
+            echo "::error::OMN-16286: inputs.ticket '${TICKET}' does not match the required ^OMN-[0-9]+\$ pattern."
+            exit 1
+          fi
+          if ! [[ "${EVIDENCE_SOURCE}" =~ ^(OCC#[0-9]+|[0-9a-fA-F]{7,40})$ ]]; then
+            echo "::error::OMN-16286: inputs.evidence_source '${EVIDENCE_SOURCE}' does not match the required OCC#<n> or <hex-sha> pattern."
+            exit 1
+          fi
+
           # Use hyphenated package name for the branch (PyPI convention)
           PKG_HYPHEN="${PACKAGE//_/-}"
-          BRANCH="automation/omn-18596-bump-${PKG_HYPHEN}-${VERSION}"
-          # The shape this cascade generated until OMN-18596. Any bump PR
-          # opened before that change merged still carries it, and the
-          # already-open check below must see those too: a rename whose dedupe
-          # knows only the new shape opens a SECOND bump PR beside an in-flight
-          # one. That is the defect omnimarket#2366 fixed, not a hypothetical.
+          TICKET_SLUG="$(printf '%s' "${TICKET}" | tr '[:upper:]' '[:lower:]')"
+          BRANCH="automation/bump-${PKG_HYPHEN}-${VERSION}-${TICKET_SLUG}"
+          # The two shapes this cascade generated BEFORE converging. Any bump PR
+          # opened under either is still in flight, and the already-open check
+          # below must see those too: a rename whose dedupe knows only the new
+          # shape opens a SECOND bump PR beside an in-flight one. That is the
+          # defect omnimarket#2366 fixed, and this rename is the second one, so
+          # both predecessors are listed rather than just the most recent.
           LEGACY_BRANCH="automation/bump-${PKG_HYPHEN}-${VERSION}"
+          LEGACY_BRANCH_OMN18596="automation/omn-18596-bump-${PKG_HYPHEN}-${VERSION}"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           echo "legacy_branch=$LEGACY_BRANCH" >> $GITHUB_OUTPUT
+          echo "legacy_branch_omn18596=$LEGACY_BRANCH_OMN18596" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "pkg_hyphen=$PKG_HYPHEN" >> $GITHUB_OUTPUT
+          echo "ticket=$TICKET" >> $GITHUB_OUTPUT
+          echo "evidence_source=$EVIDENCE_SOURCE" >> $GITHUB_OUTPUT
           # <<< OMN-18596 bump branch <<<
           # >>> OMN-18596 base-branch resolver >>>
           # The base is the ref this job's checkout actually landed on, read
@@ -386,9 +421,20 @@ jobs:
             exit 0
           fi
 
+          OMN18596_EXISTING=$(gh pr list \
+            --repo "OmniNode-ai/${{ matrix.repo }}" \
+            --head "${{ steps.vars.outputs.legacy_branch_omn18596 }}" \
+            --state open \
+            --json number \
+            --jq 'length')
+          if [ "$OMN18596_EXISTING" -gt 0 ]; then
+            echo "PR already exists for the interim OMN-18596-prefixed branch ${{ steps.vars.outputs.legacy_branch_omn18596 }} -- skipping rather than opening a duplicate"
+            exit 0
+          fi
+
           gh pr create \
             --repo "OmniNode-ai/${{ matrix.repo }}" \
-            --title "chore(deps): bump ${{ steps.vars.outputs.pkg_hyphen }} to ${{ steps.vars.outputs.version }}" \
+            --title "chore(deps): bump ${{ steps.vars.outputs.pkg_hyphen }} to ${{ steps.vars.outputs.version }} (${{ steps.vars.outputs.ticket }})" \
             --body "$(cat <<'PREOF'
           ## Summary
 
@@ -405,6 +451,9 @@ jobs:
 
           - [ ] CI passes (lockfile resolution is valid)
           - [ ] Downstream tests pass with the new dependency version
+
+          Evidence-Ticket: ${{ steps.vars.outputs.ticket }}
+          Evidence-Source: ${{ steps.vars.outputs.evidence_source }}
           PREOF
           )" \
             --head "${{ steps.vars.outputs.branch }}" \

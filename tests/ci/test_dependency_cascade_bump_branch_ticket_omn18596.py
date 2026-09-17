@@ -67,8 +67,13 @@ def _branch_program() -> str:
     return "\n".join(lines)
 
 
-def _rendered_branch(package: str, version: str) -> str:
-    """Run the shipped builder and read the branch it writes to GITHUB_OUTPUT."""
+def _run_builder(
+    package: str,
+    version: str,
+    ticket: str = "OMN-15449",
+    evidence_source: str = "OCC#6695",
+) -> tuple[int, str, dict[str, str]]:
+    """Run the shipped builder; return (exit code, stdout, parsed outputs)."""
     import os
     import subprocess
     import tempfile
@@ -86,30 +91,57 @@ def _rendered_branch(package: str, version: str) -> str:
                 "GITHUB_OUTPUT": str(out),
                 "PACKAGE": package,
                 "VERSION": version,
+                "TICKET": ticket,
+                "EVIDENCE_SOURCE": evidence_source,
             },
         )
-        assert result.returncode == 0, result.stderr
+        parsed = {}
         for line in out.read_text(encoding="utf-8").splitlines():
-            if line.startswith("branch="):
-                return line.split("=", 1)[1]
-    raise AssertionError("the branch builder wrote no branch= output")
+            if "=" in line:
+                k, v = line.split("=", 1)
+                parsed[k] = v
+        return result.returncode, result.stdout, parsed
+
+
+def _rendered_branch(package: str, version: str, ticket: str = "OMN-15449") -> str:
+    code, stdout, parsed = _run_builder(package, version, ticket=ticket)
+    assert code == 0, stdout
+    assert "branch" in parsed, "the branch builder wrote no branch= output"
+    return parsed["branch"]
 
 
 class TestTheBumpBranchSatisfiesAutobind:
-    def test_the_generated_branch_carries_a_ticket(self) -> None:
-        """The whole defect in one assertion.
+    def test_the_generated_branch_carries_the_releases_own_ticket(self) -> None:
+        """The whole defect in one assertion, now on the converged convention.
 
         Asserted against the SAME regex shape autobind's condition applies,
         not against a literal, so a branch that merely looks ticketed to a
-        human but not to the gate still fails here.
+        human but not to the gate still fails. And asserted with a ticket that
+        is NOT this lane's own, so a fixed ticket baked back in would fail.
         """
-        branch = _rendered_branch("omnibase_infra", "0.38.31")
+        branch = _rendered_branch("omnibase_infra", "0.38.31", ticket="OMN-15449")
         assert _AUTOBIND_TICKET.search(branch), (
             f"the cascade bump branch {branch!r} carries no OMN- ticket, so "
             "every repo's call-occ-autobind.yml condition is false and the "
             "companion mint never runs. A person then hand-authors it, which "
             "is what happened on onex_change_control#10026"
         )
+        assert branch.endswith("-omn-15449"), (
+            "OMN-16286's convention carries the RELEASE's ticket as a SUFFIX; "
+            f"{branch!r} does not, so this repo has drifted from omnibase_core "
+            "and the fleet is carrying two conventions for one problem"
+        )
+        assert "omn-18596" not in branch, (
+            "the interim fixed-prefix shape is back; the ticket must be the "
+            "release's own, not the one that built the mechanism"
+        )
+
+    def test_a_different_release_ticket_produces_a_different_branch(self) -> None:
+        """Proves the ticket is really an input and not a constant."""
+        a = _rendered_branch("omnibase_infra", "0.38.31", ticket="OMN-15449")
+        b_ = _rendered_branch("omnibase_infra", "0.38.31", ticket="OMN-18295")
+        assert a != b_
+        assert a.endswith("-omn-15449") and b_.endswith("-omn-18295")
 
     def test_the_branch_still_identifies_its_package_and_version(self) -> None:
         """Adding the ticket must not cost the branch its meaning."""
@@ -167,3 +199,66 @@ class TestTheRenameCannotOpenADuplicate:
             "creating anything; one query cannot see a PR on the other shape"
         )
         assert "exit 0" in guard
+
+
+class TestEveryInterpolatedFieldIsValidatedFirst:
+    """OMN-16286. A cascade that interpolates an unvalidated input into a ref
+    is how a malformed release input becomes a malformed ref, a malformed PR
+    title, or worse. Each refusal is asserted separately so one over-broad
+    pattern cannot mask another field going unchecked."""
+
+    def test_an_unticketed_release_refuses_rather_than_guessing(self) -> None:
+        code, stdout, parsed = _run_builder("omnibase_infra", "0.38.31", ticket="")
+        assert code == 1
+        assert "inputs.ticket" in stdout
+        assert "branch" not in parsed, "refused, so it must write no branch"
+
+    def test_a_malformed_ticket_refuses(self) -> None:
+        code, stdout, _ = _run_builder("omnibase_infra", "0.38.31", ticket="JIRA-7")
+        assert code == 1
+        assert "inputs.ticket" in stdout
+
+    def test_a_malformed_version_refuses(self) -> None:
+        code, stdout, _ = _run_builder("omnibase_infra", "not-a-version")
+        assert code == 1
+        assert "inputs.version" in stdout
+
+    def test_a_malformed_package_refuses(self) -> None:
+        code, stdout, _ = _run_builder("omni base;rm -rf /", "0.38.31")
+        assert code == 1
+        assert "inputs.package" in stdout
+
+    def test_a_malformed_evidence_source_refuses(self) -> None:
+        code, stdout, _ = _run_builder(
+            "omnibase_infra", "0.38.31", evidence_source="trust me"
+        )
+        assert code == 1
+        assert "inputs.evidence_source" in stdout
+
+    def test_the_documented_evidence_source_shapes_are_accepted(self) -> None:
+        """Positive control: the refusals above are not refusing everything."""
+        for ok in ("OCC#6695", "a40877eae47d46684458ded78483ee29b644f3ad"):
+            code, stdout, parsed = _run_builder(
+                "omnibase_infra", "0.38.31", evidence_source=ok
+            )
+            assert code == 0, stdout
+            assert parsed["evidence_source"] == ok
+
+
+class TestBothPredecessorShapesAreDeduped:
+    """This is the SECOND rename of this branch, so both predecessors are in
+    flight, not just the most recent one."""
+
+    def test_the_dedupe_knows_all_three_shapes(self) -> None:
+        body = _WORKFLOW.read_text(encoding="utf-8")
+        assert "legacy_branch_omn18596" in body, (
+            "the interim OMN-18596-prefixed shape is still in flight on "
+            "omniclaude and omnimemory; a dedupe that forgets it opens a "
+            "duplicate beside those PRs"
+        )
+        open_pr_step = body[body.index("- name: Open pull request") :]
+        guard = open_pr_step[: open_pr_step.index("gh pr create")]
+        assert guard.count("--head") >= 3, (
+            "the already-open check must query the current shape and BOTH "
+            "predecessors before creating anything"
+        )
