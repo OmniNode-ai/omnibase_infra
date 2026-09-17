@@ -342,33 +342,120 @@ class TestEmptyConfidentialSecretFailsTheJob:
         assert excinfo.value.code == 1
         assert fake.put_payloads == [], "nothing drifted, so nothing should be written"
 
-    def test_bearer_only_introspection_caller_with_no_secret_fails_red(
+    def test_bearer_only_with_a_silent_roster_still_fails_red(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: Any
     ) -> None:
-        """The live state of both clusters, and the reason this ticket exists.
+        """The incident itself, and the case OMN-18582 deliberately did NOT open.
 
-        ``onex-api`` is bearer-only, holds no secret, and is the client the
-        runtime authenticates as on every introspection POST. Keycloak's
-        textbook model says a bearer-only client never authenticates outbound
-        and so needs no secret; this realm does not follow that model, and a
-        guard that took Keycloak's word for it would skip the exact client
-        whose emptied secret is the outage.
+        ``onex-api`` went bearer-only LIVE and held no secret while the roster
+        said nothing about it either way. Keycloak's textbook model says a
+        bearer-only client never authenticates outbound and so needs no
+        secret; this realm did not follow that model, and a guard that took
+        Keycloak's word for it would have skipped the exact client whose
+        emptied secret was the outage.
 
-        Exempting bearer-only clients makes this test pass silently while
-        introspection returns 401. That is the failure mode, not a fix for it.
+        The OMN-18582 exemption is taken from the RESOLVED SPEC, never from
+        the live shape, precisely so this case keeps failing: a partial roster
+        entry that omits ``bearerOnly`` is not a declaration that the client
+        authenticates nowhere, it is silence.
         """
         live = _onex_api_live()
         live["fullScopeAllowed"] = False
         live["secret"] = ""
         fake = FakeKeycloak([live])
 
+        silent_spec = {"clientId": "onex-api", "publicClient": False}
+
         with pytest.raises(SystemExit) as excinfo:
-            _run_main(monkeypatch, tmp_path, fake, [_onex_api_spec()])
+            _run_main(monkeypatch, tmp_path, fake, [silent_spec])
 
         assert excinfo.value.code == 1
         record = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
         assert record["clients"] == ["onex-api"]
         assert fake.put_payloads == [], "nothing drifted, so nothing should be written"
+
+    def test_the_dev_system_shape_with_an_emptied_secret_still_fails_red(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: Any
+    ) -> None:
+        """The realm this guard was written for is untouched by OMN-18582.
+
+        Resolved for dev-system, ``onex-api`` declares ``bearerOnly: false``
+        and names a consumer variable, so it is guarded exactly as before. A
+        weakening that reached this case would re-open OMN-16504 on the
+        cluster that actually introspects.
+        """
+        live = _onex_api_live()
+        live["fullScopeAllowed"] = False
+        live["bearerOnly"] = False
+        live["secret"] = ""
+        fake = FakeKeycloak([live])
+
+        dev_spec = {
+            "clientId": "onex-api",
+            "publicClient": False,
+            "bearerOnly": False,
+            "fullScopeAllowed": False,
+            "serviceAccountsEnabled": True,
+        }
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_main(monkeypatch, tmp_path, fake, [dev_spec])
+
+        assert excinfo.value.code == 1
+        record = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+        assert record["clients"] == ["onex-api"]
+
+    def test_the_declared_production_shape_does_not_fail_red(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """OMN-18582, operator ruling 2026-09-17T17:33:52Z.
+
+        Production ``onex-api`` is a pure resource server: it validates by
+        JWKS and nothing authenticates as it, measured read-only on the public
+        cluster. A spec that EXPLICITLY declares ``bearerOnly: true`` and names
+        no secret source is stating that in the reviewed file, so the guard
+        stops demanding a credential the realm has no consumer for. Before
+        this, the run refused here -- which is why nothing could be reconciled
+        on production at all.
+        """
+        live = _onex_api_live()
+        live["fullScopeAllowed"] = False
+        live["secret"] = ""
+        fake = FakeKeycloak([live])
+
+        prod_spec = {
+            "clientId": "onex-api",
+            "publicClient": False,
+            "bearerOnly": True,
+            "fullScopeAllowed": False,
+            "serviceAccountsEnabled": False,
+        }
+
+        _run_main(monkeypatch, tmp_path, fake, [prod_spec])
+
+    def test_the_exemption_does_not_extend_to_a_client_naming_a_secret(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: Any
+    ) -> None:
+        """The exemption is about holding no credential, not about the flag."""
+        live = _onex_api_live()
+        live["fullScopeAllowed"] = False
+        live["secret"] = ""
+        fake = FakeKeycloak([live])
+
+        contradictory = {
+            "clientId": "onex-api",
+            "publicClient": False,
+            "bearerOnly": True,
+            "fullScopeAllowed": False,
+            "consumerSecretEnv": "ONEX_API_CONSUMER_CLIENT_SECRET",
+        }
+        monkeypatch.setenv("ONEX_API_CONSUMER_CLIENT_SECRET", "something")
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_main(monkeypatch, tmp_path, fake, [contradictory])
+
+        assert excinfo.value.code == 1
+        assert capsys.readouterr().err.strip()
 
 
 @pytest.mark.unit

@@ -89,6 +89,14 @@ case "${KC_URL}" in
     ;;
 esac
 
+# OMN-18582: the roster declares a per-environment override on onex-api, so
+# the seeder now refuses a run that names no environment. This script drives
+# the LOCAL/compose Keycloak, which is a dev-class realm with a live
+# introspection consumer -- the same shape dev-system has -- so `dev` is the
+# right answer here and is overridable for anyone pointing this at another
+# realm. The two k8s Jobs do NOT default: each overlay supplies its own
+# KC_ENVIRONMENT, because a silent default on the production Job is exactly
+# the failure the seeder now refuses.
 cd "${REPO_ROOT}"
 exec uv run python scripts/seed-keycloak-clients.py \
   --kc-url "${KC_URL}" \
@@ -96,4 +104,5 @@ exec uv run python scripts/seed-keycloak-clients.py \
   --admin-username "${KEYCLOAK_ADMIN_USERNAME}" \
   --admin-password "${KEYCLOAK_ADMIN_PASSWORD}" \
   ${reset_flag[@]+"${reset_flag[@]}"} \
-  --config "${REPO_ROOT}/docker/keycloak/desired-clients.json"
+  --config "${REPO_ROOT}/docker/keycloak/desired-clients.json" \
+  --environment "${KC_ENVIRONMENT:-dev}"
