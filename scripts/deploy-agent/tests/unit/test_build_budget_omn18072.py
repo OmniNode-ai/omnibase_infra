@@ -253,13 +253,50 @@ class TestLiveRuntimeModel:
         assert budget.dockerfile.endswith("docker/Dockerfile.runtime")
         assert len(budget.buildable_services) >= 9
 
-    def test_compose_up_ceiling_still_bounds_the_build_from_above(self) -> None:
-        """A build ceiling above the compose-up ceiling would be incoherent.
+    def test_the_build_ceiling_is_bounded_by_its_own_hard_upper_bound(self) -> None:
+        """SUPERSEDES an OMN-18072 assertion that the incident falsified.
 
-        The build does no health-gated waiting; it must fail sooner than the
-        phase that does.
+        This test used to assert ``build < compose_up``, on the premise that
+        "the build does no health-gated waiting; it must fail sooner than the
+        phase that does". That premise is a magnitude heuristic, not a
+        mechanism, and OMN-18615 measured it false on the lane it governs: on
+        2026-09-17 the runtime image build legitimately ran 1081s and 1083s on
+        a contended, cache-pruned ``.201``, while the compose-up ceiling's own
+        MEASURED floor is 336s. A build is not inherently shorter work than a
+        health-gated start; on a cold cache it is longer.
+
+        Nothing in the agent couples the two. They are SEQUENTIAL phases with
+        independent ceilings bounding different work, and there is no job-level
+        deadline either has to fit inside -- ``PHASE_TIMEOUTS`` is a per-phase
+        mapping and no caller sums it. Keeping the old assertion would have
+        capped the build ceiling just under a number derived from healthcheck
+        start periods, which is an unrelated quantity, and would have
+        re-created OMN-18615 one number later: exactly what OMN-18072 said
+        about the constant IT replaced.
+
+        The real bound is the one AC5 names, and it is asserted here.
         """
         from deploy_agent import executor as executor_mod
+        from deploy_agent.build_budget import HARD_UPPER_BOUND_SECONDS
+
+        build = executor_mod.runtime_image_build_budget("runtime")
+        assert build.timeout_seconds <= HARD_UPPER_BOUND_SECONDS
+        # Above both 2026-09-17 kills, or the fix does not fix them.
+        assert HARD_UPPER_BOUND_SECONDS > 1083
+
+    def test_the_two_phase_ceilings_are_independent_and_both_bounded(self) -> None:
+        """Neither phase orders the other, but neither is unbounded either.
+
+        The honest consequence, stated rather than left to be discovered: a
+        build that actually ran to the hard upper bound would outlast the
+        lab-pass convergence job's own ceiling, so that receipt would report
+        INDETERMINATE -- "nothing was shown about the lane" -- rather than a
+        false FAIL. OMN-18573 built that distinction precisely so this
+        degradation is legible. Widening the convergence job's budget is a
+        receipt-side question and is deliberately not decided here.
+        """
+        from deploy_agent import executor as executor_mod
+        from deploy_agent.build_budget import HARD_UPPER_BOUND_SECONDS
         from deploy_agent.events import EnumRuntimeLane, Scope
         from deploy_agent.executor import services_for_scope
 
@@ -267,4 +304,5 @@ class TestLiveRuntimeModel:
         compose_up = executor_mod.runtime_compose_up_budget(
             EnumRuntimeLane.DEV, services_for_scope(Scope.RUNTIME)
         )
-        assert build.timeout_seconds < compose_up.timeout_seconds
+        assert 0 < build.timeout_seconds <= HARD_UPPER_BOUND_SECONDS
+        assert compose_up.timeout_seconds > 0

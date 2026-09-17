@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import logging
 import re
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict
 
 from deploy_agent.compose_budget import ComposeBudgetError, _ComposeLoader
+from deploy_agent.host_conditions import ModelHostConditions
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,136 @@ _INSTRUCTION_RE = re.compile(r"^\s*([A-Za-z]+)\b")
 # `RUN cat > f <<'EOF'` / `<<EOF` / `<<-"EOF"`: the body that follows is shell
 # input, not Dockerfile instructions, and must not be scanned for RUN/COPY.
 _HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+#: OMN-18615 AC5. The widest ceiling any combination of model terms and host
+#: terms may ever produce. "Adapts to the machine" must not be readable as
+#: "unbounded": a genuinely hung build has to die, and it has to die at a time
+#: an operator can state in advance. One hour is ~9x the longest runtime image
+#: build this agent has ever completed (404s, warm, 2026-09-17T11:43Z) and ~3x
+#: the two kills this ticket is about, so it cannot clip a healthy build while
+#: still bounding a hung one.
+HARD_UPPER_BOUND_SECONDS = 3600
+
+#: How the progress parser recognises a completed BuildKit step and an exported
+#: image in ``docker compose build``'s plain (non-tty) progress output.
+_PROGRESS_DONE_RE = re.compile(r"^#(\d+)\s+DONE\b")
+_PROGRESS_NAMING_RE = re.compile(r"^#\d+\s+naming to\b")
+
+
+class EnumBuildOutcome(StrEnum):
+    """Why a runtime image build ended, as a token a caller can branch on.
+
+    OMN-18615 AC4. Before this, both endings raised ``RuntimeError`` with
+    different English in it. A lane reading the deploy agent's ``errors`` list
+    -- or a lab-pass receipt reading it through ``/job/{correlation_id}`` --
+    could not tell "this build was killed by its own budget, retry it with more
+    room or on a quieter host" from "this build is broken, retrying buys
+    nothing". Those two lead to opposite actions, and on 2026-09-17 the second
+    rebuild was issued in exactly the wrong belief and reproduced the kill.
+
+    Neither value is a substring of the other, so a caller classifying by
+    substring cannot match both. That property is pinned by a test, not by this
+    sentence.
+    """
+
+    BUDGET_EXHAUSTED = "runtime_image_build_budget_exhausted"
+    BUILD_ERRORED = "runtime_image_build_errored"
+
+    @classmethod
+    def classify(cls, text: str | None) -> EnumBuildOutcome | None:
+        """Read the outcome token out of an agent error string, or ``None``.
+
+        ``None`` means THIS ERROR IS NOT A BUILD OUTCOME -- a lane lock
+        contention, a gateway refusal, a preflight failure. It is never a
+        default standing in for an outcome that could not be read.
+        """
+        if not text:
+            return None
+        for outcome in cls:
+            if outcome.value in text:
+                return outcome
+        return None
+
+
+class ModelBuildProgress(BaseModel):
+    """What the build had actually DONE when its ceiling ran out (OMN-18615 AC2).
+
+    The budget arithmetic alone cannot answer the only question a reader has
+    after a kill: was the build too big for the assumed rate, or was the
+    machine too slow to sustain it? Those differ by what you do next -- widen
+    the model, or wait for a quieter host -- and the 2026-09-17 kill messages
+    reported the budget and nothing about the build.
+
+    ``observed`` is a first-class field because "no progress output was
+    captured" and "no step completed" are different facts that a bare
+    ``steps_completed == 0`` collapses into one, and the second is a stall while
+    the first is a blind spot.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    observed: bool
+    steps_completed: int
+    images_exported: int
+
+    def describe(
+        self,
+        *,
+        elapsed_seconds: float,
+        assumed_steps: int,
+        assumed_per_step_seconds: int,
+    ) -> str:
+        """State measured progress against the rate the ceiling assumed."""
+        if not self.observed:
+            return (
+                f"no build progress output was captured before the kill, so "
+                f"how far it got in {elapsed_seconds:.0f}s is unknown"
+            )
+        head = (
+            f"{self.steps_completed}/{assumed_steps} work steps completed and "
+            f"{self.images_exported} image(s) exported in {elapsed_seconds:.0f}s"
+        )
+        if self.steps_completed <= 0:
+            return (
+                f"{head}; no step completed, so no per-step rate is observable "
+                f"-- this is a STALL, not a slow build "
+                f"({assumed_per_step_seconds}s/step assumed)"
+            )
+        observed_rate = elapsed_seconds / self.steps_completed
+        return (
+            f"{head} => {observed_rate:.1f}s/step observed against "
+            f"{assumed_per_step_seconds}s/step assumed"
+        )
+
+
+def parse_build_progress(text: str | None) -> ModelBuildProgress:
+    """Count completed steps and exported images in BuildKit progress output.
+
+    ``docker compose build`` writes plain (non-tty) progress to stderr, which
+    ``subprocess.run`` hands back on ``TimeoutExpired`` as well as on a normal
+    return. A step is COMPLETED when its own ``#<n> DONE`` line appears -- a
+    ``#<n> [stage x/y] RUN ...`` line only says the step started, and counting
+    those would report a hung build as fully progressed.
+
+    Unreadable or absent output is ``observed=False``, never a zero: see
+    ``ModelBuildProgress``.
+    """
+    if not text or not text.strip():
+        return ModelBuildProgress(observed=False, steps_completed=0, images_exported=0)
+    completed: set[str] = set()
+    exported = 0
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        done = _PROGRESS_DONE_RE.match(line)
+        if done is not None:
+            completed.add(done.group(1))
+            continue
+        if _PROGRESS_NAMING_RE.match(line) is not None:
+            exported += 1
+    return ModelBuildProgress(
+        observed=True, steps_completed=len(completed), images_exported=exported
+    )
 
 
 class BuildBudgetError(RuntimeError):
@@ -106,6 +238,20 @@ class ModelBuildBudget(BaseModel):
     dockerfile: str | None
     profile: str
     compose_files: tuple[str, ...]
+    #: OMN-18615. The model-derived ceiling BEFORE the host terms, kept so a
+    #: reader of a kill message can separate "this repository got bigger" from
+    #: "this machine was busier" without re-deriving either half.
+    model_seconds: int = 0
+    host: ModelHostConditions | None = None
+    hard_upper_bound_seconds: int = HARD_UPPER_BOUND_SECONDS
+
+    def _host_clause(self) -> str:
+        if self.host is None:
+            return (
+                ", no host conditions were read (model terms only -- this is the "
+                "OMN-18072 derivation, blind to the machine)"
+            )
+        return f", host {self.host.describe()}"
 
     def describe(self) -> str:
         """One-line, log-ready statement of the ceiling and its source."""
@@ -114,13 +260,21 @@ class ModelBuildBudget(BaseModel):
                 f"{self.timeout_seconds}s (floor {self.floor_seconds}s; no service "
                 f"in profile {self.profile!r} declares a build: section, so there "
                 f"is no image build to bound)"
+                f"{self._host_clause()}"
             )
+        capped = (
+            " [CAPPED at the hard upper bound]"
+            if self.timeout_seconds >= self.hard_upper_bound_seconds
+            else ""
+        )
         return (
-            f"{self.timeout_seconds}s = {self.build_steps} work steps of "
-            f"{self.dockerfile!r} x {self.per_step_seconds}s/step (one shared "
-            f"BuildKit solve) + {len(self.buildable_services)} buildable "
-            f"service(s) in profile {self.profile!r} x {self.per_image_seconds}s/"
-            f"image (export), floor {self.floor_seconds}s"
+            f"{self.timeout_seconds}s = model {self.model_seconds}s "
+            f"({self.build_steps} work steps of {self.dockerfile!r} x "
+            f"{self.per_step_seconds}s/step (one shared BuildKit solve) + "
+            f"{len(self.buildable_services)} buildable service(s) in profile "
+            f"{self.profile!r} x {self.per_image_seconds}s/image (export))"
+            f"{self._host_clause()}, floor {self.floor_seconds}s, hard upper "
+            f"bound {self.hard_upper_bound_seconds}s{capped}"
         )
 
 
@@ -247,6 +401,7 @@ def derive_image_build_budget(
     per_step_seconds: int,
     per_image_seconds: int,
     floor_seconds: int,
+    host: ModelHostConditions | None = None,
 ) -> ModelBuildBudget:
     """Derive the ``docker compose --profile <profile> build`` ceiling.
 
@@ -256,9 +411,27 @@ def derive_image_build_budget(
     profile mixes Dockerfiles the longest is the honest bound for the shared
     solve, and the per-image term still scales with the service count.
 
+    OMN-18615: ``host`` carries the two properties of the MACHINE -- contention
+    and BuildKit cache state -- that the repository-only terms above cannot
+    express, and which let the same tree derive the same 1080s ceiling at
+    load1 97 and at load1 60 while overrunning both. Passing ``None`` is the
+    pre-OMN-18615 derivation and says so in ``describe()``; the live caller
+    (``executor.runtime_image_build_budget``) always probes and always passes.
+
+    The result is clamped to ``HARD_UPPER_BOUND_SECONDS`` LAST, after the floor,
+    so no combination of a large model and a contended host can produce an
+    unbounded ceiling (AC5).
+
     Raises ``BuildBudgetError`` when a declared compose file or Dockerfile
-    cannot be read or parsed.
+    cannot be read or parsed, or when ``floor_seconds`` exceeds the hard upper
+    bound -- a floor above the bound would make the bound unenforceable, and
+    silently preferring one over the other is how a guard stops guarding.
     """
+    if floor_seconds > HARD_UPPER_BOUND_SECONDS:
+        raise BuildBudgetError(
+            f"floor_seconds {floor_seconds} exceeds the hard upper bound "
+            f"{HARD_UPPER_BOUND_SECONDS}s; the ceiling could not honour both"
+        )
     documents = _load_compose_documents(compose_files)
     builds = _buildable_services(documents, profile)
 
@@ -273,6 +446,8 @@ def derive_image_build_budget(
             dockerfile=None,
             profile=profile,
             compose_files=tuple(str(f) for f in compose_files),
+            model_seconds=floor_seconds,
+            host=host,
         )
 
     if not compose_files:
@@ -290,8 +465,14 @@ def derive_image_build_budget(
             source_dockerfile = path
 
     derived = build_steps * per_step_seconds + len(builds) * per_image_seconds
+    # The host terms widen the MODEL's number, then the floor applies, then the
+    # hard upper bound clamps -- in that order. Clamping last is what makes the
+    # bound unconditional (AC5); applying the floor before the multiplier is
+    # what keeps a widening term from ever reading as a narrowing one.
+    adjusted = derived * (host.multiplier if host is not None else 1.0)
+    timeout = min(HARD_UPPER_BOUND_SECONDS, max(floor_seconds, round(adjusted)))
     return ModelBuildBudget(
-        timeout_seconds=max(floor_seconds, derived),
+        timeout_seconds=timeout,
         floor_seconds=floor_seconds,
         per_step_seconds=per_step_seconds,
         per_image_seconds=per_image_seconds,
@@ -300,4 +481,6 @@ def derive_image_build_budget(
         dockerfile=str(source_dockerfile) if source_dockerfile else None,
         profile=profile,
         compose_files=tuple(str(f) for f in compose_files),
+        model_seconds=max(floor_seconds, derived),
+        host=host,
     )
