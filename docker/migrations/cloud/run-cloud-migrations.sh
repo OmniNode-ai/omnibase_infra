@@ -41,6 +41,14 @@
 # fourth transcription.
 set -euo pipefail
 export PSQL_HISTORY=/dev/null
+# The corpus's 00000000_migrations_tracking.sql creates `schema_migrations`
+# UNQUALIFIED, so it lands in whatever the creation namespace resolves to, while
+# everything here addresses `public.schema_migrations`. Today those agree only
+# because no role or database in this lane sets a search_path and no schema is
+# named after the role -- and role_omninode holds CREATE on the database, so a
+# schema of its own name is reachable rather than impossible. Pinning it makes
+# the two provably the same object instead of coincidentally the same one.
+export PGOPTIONS="${PGOPTIONS:+$PGOPTIONS }-c search_path=public"
 
 MIGRATION_DIR="${MIGRATION_DIR:-/migrations}"
 DB_HOST="${DB_HOST:?DB_HOST must be set}"
@@ -233,7 +241,7 @@ BEGIN
   -- pg_attribute is not privilege-filtered and answers the question asked.
   IF to_regclass('public.schema_migrations') IS NOT NULL
      AND EXISTS (SELECT 1 FROM pg_attribute
-                  WHERE attrelid = 'public.schema_migrations'::regclass
+                  WHERE attrelid = to_regclass('public.schema_migrations')
                     AND attname  = 'migration_name'
                     AND attnum > 0
                     AND NOT attisdropped)
@@ -269,7 +277,19 @@ psql_db -f "$TRACKING"
 # This is the ONE assertion this runner is entitled to make about the shape. Not
 # what the tracker's columns are, which is the corpus's business and the whole
 # point of the change above -- only that the column THIS RUNNER retired is gone.
-if [ "$(psql_db -tAc "SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.schema_migrations'::regclass AND attname = 'migration_name' AND attnum > 0 AND NOT attisdropped")" != "0" ]; then
+# Two refusals, not one, because they have different causes and different
+# remedies. `to_regclass` returns NULL rather than raising, so an absent table is
+# a distinguishable answer instead of a psql abort mid-`if` that would print the
+# WRONG diagnosis below. PGOPTIONS above pins search_path, so "absent" here means
+# the corpus's own CREATE did not run, not that it landed in another schema.
+if [ "$(psql_db -tAc "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.schema_migrations')")" != "1" ]; then
+  echo "FATAL: the corpus bootstrap left no public.schema_migrations at all." >&2
+  echo "       00000000_migrations_tracking.sql applied without creating its own" >&2
+  echo "       tracking table, which this runner has no shape of its own to fall" >&2
+  echo "       back on by design (OMN-18544)." >&2
+  exit 1
+fi
+if [ "$(psql_db -tAc "SELECT count(*) FROM pg_attribute WHERE attrelid = to_regclass('public.schema_migrations') AND attname = 'migration_name' AND attnum > 0 AND NOT attisdropped")" != "0" ]; then
   echo "FATAL: public.schema_migrations still carries the retired migration_name" >&2
   echo "       column after the corpus bootstrap, so the convergence above did not" >&2
   echo "       run and the corpus's own CREATE TABLE no-opped against the old table." >&2
@@ -282,7 +302,7 @@ fi
 # not written down. Fail closed on anything but exactly one column: a composite
 # or absent key means the corpus changed something this loop's ON CONFLICT
 # cannot express, and guessing would resume-skip migrations never applied.
-KEY_COLUMN="$(psql_db -tAc "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey) WHERE i.indrelid = 'public.schema_migrations'::regclass AND i.indisprimary")"
+KEY_COLUMN="$(psql_db -tAc "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey) WHERE i.indrelid = to_regclass('public.schema_migrations') AND i.indisprimary")"
 if [ "$(printf '%s\n' "$KEY_COLUMN" | grep -c .)" != "1" ]; then
   echo "FATAL: public.schema_migrations has no single-column primary key (got:" >&2
   echo "       '${KEY_COLUMN}'). This runner derives its bookkeeping column from" >&2
@@ -291,21 +311,68 @@ if [ "$(printf '%s\n' "$KEY_COLUMN" | grep -c .)" != "1" ]; then
 fi
 echo "   tracker key column, read from the corpus's own primary key: ${KEY_COLUMN}"
 
-if [ "$(psql_db -tAc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations_legacy_omn18544'")" != "0" ]; then
-  echo "-- converging the retired ledger into ${KEY_COLUMN}, preserving its rows"
-  # One psql -c, so the copy and the drop share an implicit transaction and a
-  # crash between them cannot strand the rows. applied_at is carried across
-  # explicitly: without it every recorded time silently becomes the convergence
-  # timestamp, and an audit trail is what the corpus's tracking file says it is
-  # for. That is the LEGACY table's column being read, not a claim about the
-  # canonical shape -- if the corpus ever drops applied_at this INSERT fails
-  # loudly, which is the correct direction to fail in.
-  psql_db -c "INSERT INTO public.schema_migrations (\"${KEY_COLUMN}\", applied_at)
-              SELECT migration_name, applied_at
-                FROM public.schema_migrations_legacy_omn18544
-               ON CONFLICT DO NOTHING;
-              DROP TABLE public.schema_migrations_legacy_omn18544;"
-fi
+# Carry the retired ledger's rows forward and retire it, in ONE statement so a
+# crash cannot strand them. The columns carried are the INTERSECTION of the two
+# tables' own catalog entries, so this names only `migration_name` -- the column
+# this runner itself created and is retiring -- and nothing about the canonical
+# shape. An earlier revision spelled `applied_at` in the INSERT target list,
+# which was a literal claim about the corpus's table and exactly the second
+# literal this whole change exists to remove.
+#
+# The drop is conditional on the carry having worked. Dropping unconditionally
+# under a message that says "preserving its rows" destroys the only evidence in
+# the same statement that would have shown it did not.
+psql_db -c "DO \$\$
+DECLARE
+  stash  regclass := to_regclass('public.schema_migrations_legacy_omn18544');
+  live   regclass := to_regclass('public.schema_migrations');
+  key_column text;
+  carried    text;
+  stranded   bigint;
+BEGIN
+  IF stash IS NULL THEN
+    RETURN;
+  END IF;
+  IF live IS NULL THEN
+    RAISE EXCEPTION 'OMN-18544: the retired ledger is stashed but public.schema_migrations does not exist';
+  END IF;
+
+  SELECT a.attname INTO key_column
+    FROM pg_index i
+    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+   WHERE i.indrelid = live AND i.indisprimary;
+
+  SELECT string_agg(quote_ident(s.attname), ', ' ORDER BY s.attnum)
+    INTO carried
+    FROM pg_attribute s
+   WHERE s.attrelid = stash AND s.attnum > 0 AND NOT s.attisdropped
+     AND s.attname <> 'migration_name'
+     AND EXISTS (SELECT 1 FROM pg_attribute l
+                  WHERE l.attrelid = live AND l.attnum > 0 AND NOT l.attisdropped
+                    AND l.attname = s.attname);
+
+  EXECUTE format(
+    'INSERT INTO public.schema_migrations (%I%s) SELECT migration_name%s FROM public.schema_migrations_legacy_omn18544 ON CONFLICT DO NOTHING',
+    key_column,
+    coalesce(', ' || carried, ''),
+    coalesce(', ' || carried, ''));
+
+  -- Not a row count: ON CONFLICT DO NOTHING legitimately skips rows a previous
+  -- interrupted pass already carried, so a count comparison would refuse its own
+  -- re-entrancy. The invariant that holds on every pass is that no stashed key
+  -- is left unrepresented.
+  EXECUTE format(
+    'SELECT count(*) FROM public.schema_migrations_legacy_omn18544 s
+       WHERE NOT EXISTS (SELECT 1 FROM public.schema_migrations l WHERE l.%I = s.migration_name)',
+    key_column) INTO stranded;
+  IF stranded > 0 THEN
+    RAISE EXCEPTION 'OMN-18544: % retired ledger row(s) did not carry forward; refusing to drop the stash', stranded;
+  END IF;
+
+  RAISE NOTICE 'OMN-18544: retired ledger carried forward into %, stash dropped', key_column;
+  DROP TABLE public.schema_migrations_legacy_omn18544;
+END
+\$\$;"
 
 applied=0
 skipped=0

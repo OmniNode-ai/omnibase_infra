@@ -111,6 +111,30 @@ UNGOVERNED_DECLARERS: dict[str, str] = {
         "pre-OMN-17537 nullable-checksum one, so migrations can be proven against "
         "them; agreeing with the corpus would defeat its purpose"
     ),
+    "tests/integration/migrations/test_application_migration_ledger_omn15413.py": (
+        "builds a throwaway ledger in a test database, including a deliberately "
+        "extra-columned variant, to prove the verifier notices"
+    ),
+    "tests/integration/migrations/test_verified_cross_source_adoption_omn16919.py": (
+        "builds a throwaway ledger in a test database"
+    ),
+    "tests/integration/migrations/test_divergent_checksum_verifier_omn16915.py": (
+        "builds a throwaway ledger in a test database"
+    ),
+    "tests/integration/migrations/test_node_migration_discovery_applies.py": (
+        "builds a throwaway ledger in a test database"
+    ),
+    "tests/scripts/test_forward_migration_advisory_lock.py": (
+        "builds a throwaway ledger in a test database"
+    ),
+    "tests/fixtures/omn15547/legacy-rds-fixture-prove.sh.captured": (
+        "a captured transcript of the legacy fixture harness, carrying the same "
+        "retired shapes it recorded"
+    ),
+    "tests/unit/db/test_schema_migrations_tracker_shape_agreement_omn18544.py": (
+        "this module, which holds the verbatim pre-fix bootstrap as the input to "
+        "its own falsifier -- see PRE_FIX_RUNNER_BOOTSTRAP"
+    ),
     "docker/legacy-rds-fixture/prove.sh": (
         "the harness asserting against that fixture, carrying the same retired "
         "shapes as its expectations"
@@ -134,6 +158,11 @@ psql_db -c "CREATE TABLE IF NOT EXISTS public.schema_migrations (
             )"
 """
 
+#: The ``\\b`` sits BEFORE the optional closing quote, not after it. After it the
+#: boundary is between ``"`` and a space -- both non-word -- so the whole pattern
+#: silently stopped matching ``public."schema_migrations" (``, which is the
+#: evasion the quote handling was added to catch.
+#:
 #: ``UNLOGGED``/``TEMP`` and quoted identifiers are matched deliberately: a
 #: reintroduced declaration that spells the table ``"schema_migrations"`` or
 #: creates it UNLOGGED is the same defect, and a matcher that missed them would
@@ -142,18 +171,43 @@ _CREATE_RE = re.compile(
     r"CREATE\s+(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP(?:ORARY)?\s+|UNLOGGED\s+)?TABLE\s+"
     r"(?:IF\s+NOT\s+EXISTS\s+)?"
     r"(?:\"?[A-Za-z_][\w$]*\"?\s*\.\s*)?"
-    rf"\"?{TRACKER_TABLE}\"?\b\s*\(",
+    rf"\"?{TRACKER_TABLE}\b\"?\s*\(",
     re.IGNORECASE,
 )
+
+#: A tracker can also be brought into existence with no column list at all --
+#: ``CREATE TABLE ... AS SELECT`` and ``CREATE TABLE ... OF <type>`` both declare
+#: a shape by reference, and ``SELECT ... INTO`` creates a table outright. None
+#: has a body for :func:`declared_column_sets` to parse, so they are refused
+#: outright in the corpus-owned runner rather than parsed.
+_BODYLESS_CREATE_RE = re.compile(
+    r"(?:CREATE\s+(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP(?:ORARY)?\s+|UNLOGGED\s+)?TABLE\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?(?:\"?[A-Za-z_][\w$]*\"?\s*\.\s*)?"
+    rf"\"?{TRACKER_TABLE}\b\"?\s*(?:AS|OF)\b"
+    r"|"
+    rf"(?<!INSERT )\bINTO (?:\"?[A-Za-z_][\w$]*\"? ?\. ?)?\"?{TRACKER_TABLE}\b\"?)",
+    re.IGNORECASE,
+)
+
+
+#: :data:`_BODYLESS_CREATE_RE` is matched against whitespace-collapsed text. Its
+#: ``SELECT ... INTO`` branch is a fixed-width negative lookbehind on ``INSERT ``,
+#: which only distinguishes the two forms when the gap between the words is
+#: exactly one space -- and the runner's own bookkeeping INSERTs are wrapped
+#: across lines.
+def _collapsed(sql: str) -> str:
+    """Comments removed and every whitespace run flattened to one space."""
+    return re.sub(r"\s+", " ", _strip_comments(sql))
+
 
 #: Shaping DDL that is not a CREATE. The convergence step legitimately issues
 #: ``ALTER TABLE ... RENAME TO`` to retire the table it once created; anything
 #: that ADDs, ALTERs or DROPs a COLUMN, or adds a CONSTRAINT, is this repo
 #: declaring a shape by another spelling.
 _SHAPING_ALTER_RE = re.compile(
-    rf"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:\"?[A-Za-z_][\w$]*\"?\s*\.\s*)?"
-    rf"\"?{TRACKER_TABLE}\"?\b[^;]*?"
-    r"\b(?:ADD\s+COLUMN|DROP\s+COLUMN|ALTER\s+COLUMN|ADD\s+CONSTRAINT)\b",
+    rf"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?"
+    rf"(?:\"?[A-Za-z_][\w$]*\"?\s*\.\s*)?\"?{TRACKER_TABLE}\b\"?[^;]*?"
+    r"(?:\b(?:ADD|DROP|ALTER)\b|\bRENAME\s+COLUMN\b)",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -234,6 +288,12 @@ def declared_column_sets(text: str) -> list[tuple[str, ...]]:
                 continue
             first = stripped.split()[0].strip('"').lower()
             if first in _CONSTRAINT_LEADERS:
+                continue
+            # A quoted-empty or punctuation-only token is not a column. Appending
+            # it would make two unrelated shapes compare equal on a pair of empty
+            # strings, so agreement and divergence would both stop meaning
+            # anything -- measured on two files in this tree.
+            if not re.fullmatch(r"[a-z_][\w$]*", first):
                 continue
             columns.append(first)
         found.append(tuple(columns))
@@ -373,13 +433,13 @@ def test_the_compose_runner_bootstraps_from_the_corpus_tracking_file() -> None:
         f"{COMPOSE_RUNNER.name} does not reference {CORPUS_TRACKING_FILE}; with no "
         "CREATE TABLE of its own it has nothing to bootstrap the tracker from"
     )
-    assert re.search(r'psql_db -f "\$TRACKING"', text), (
+    assert re.search(r'psql_db -f "\$\{?TRACKING\}?"', text), (
         f"{COMPOSE_RUNNER.name} names the corpus tracking file but never applies it. "
         "Naming it is not bootstrapping it: with no CREATE TABLE of its own the "
         "tracker would simply not exist and the loop's first probe would die. The "
         "previous form of this assertion was satisfied by a variable named TRACKING"
     )
-    assert re.search(r'\[ -f "\$TRACKING" \] \|\|', text), (
+    assert re.search(r'\[\s+-f\s+"\$\{?TRACKING\}?"\s+\]\s*\|\|', text), (
         f"{COMPOSE_RUNNER.name} must fail closed on an absent tracking file rather "
         "than fall through to a loop that reads a table nothing created"
     )
@@ -414,7 +474,13 @@ def test_the_compose_runner_derives_its_bookkeeping_key_from_the_live_primary_ke
         f"{COMPOSE_RUNNER.name} has no {TRACKER_TABLE} probe or insert to check"
     )
     for line in bookkeeping:
-        assert "KEY_COLUMN" in line, (
+        # Two legitimate spellings of "derived", and no third. ``KEY_COLUMN`` is
+        # the shell variable read off the live primary key; ``%I`` is the same
+        # value reaching a server-side ``format()`` inside the convergence DO
+        # block. A line naming a canonical column outright has neither -- which
+        # is how the reintroduced ``applied_at`` literal in the first form of the
+        # carry-forward was caught.
+        assert "KEY_COLUMN" in line or "%I" in line, (
             f"{COMPOSE_RUNNER.name} names a tracker column literally instead of using "
             f"the derived key: {line.strip()}"
         )
@@ -478,6 +544,54 @@ def test_the_compose_runner_makes_no_claim_about_a_shape_it_does_not_declare() -
     )
 
 
+#: Roots the completeness walk covers. ``tests`` is in scope deliberately: seven
+#: files under it declare a tracker, and a walk that skipped them while its own
+#: name said "every tracker declaration in the tree" would be the false claim
+#: this module exists to refuse.
+WALK_ROOTS: tuple[str, ...] = ("docker", "scripts", "src", "tests")
+
+#: Suffixes the walk reads. ``.captured`` is here because a captured fixture is
+#: still a file that declares a shape.
+WALK_SUFFIXES: frozenset[str] = frozenset(
+    {".sql", ".sh", ".py", ".yaml", ".yml", ".captured"}
+)
+
+
+def _walk_declarers(
+    roots: tuple[str, ...] = WALK_ROOTS,
+    suffixes: frozenset[str] = WALK_SUFFIXES,
+) -> tuple[dict[str, list[tuple[str, ...]]], int]:
+    """Return every tracker declaration under ``roots``, and the files read.
+
+    The file count is returned rather than discarded because a walk that read
+    nothing returns the same empty mapping as a clean tree. ``Path.rglob`` on a
+    directory that does not exist yields nothing and raises nothing, so a renamed
+    root is exactly the silent zero this check would otherwise claim to prevent.
+    """
+    declarations: dict[str, list[tuple[str, ...]]] = {}
+    read = 0
+    for root in roots:
+        base = REPO_ROOT / root
+        assert base.is_dir(), (
+            f"WALK_ROOTS names {root!r}, which is not a directory in this repo. "
+            "rglob would return nothing and this check would report a clean tree"
+        )
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix not in suffixes:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            read += 1
+            if TRACKER_TABLE not in text:
+                continue
+            shapes = declared_column_sets(text)
+            if shapes:
+                declarations[path.relative_to(REPO_ROOT).as_posix()] = shapes
+    return declarations, read
+
+
 @pytest.mark.unit
 def test_the_registry_accounts_for_every_tracker_declaration_in_the_tree() -> None:
     """No file may declare a tracker without this registry knowing about it.
@@ -489,29 +603,16 @@ def test_the_registry_accounts_for_every_tracker_declaration_in_the_tree() -> No
     instead of trusting the list.
     """
     governed = {rel for paths in TRACKER_DECLARERS.values() for rel in paths}
-    unaccounted: dict[str, list[tuple[str, ...]]] = {}
-    for root in ("docker", "scripts", "src"):
-        for path in sorted((REPO_ROOT / root).rglob("*")):
-            if not path.is_file() or path.suffix not in {
-                ".sql",
-                ".sh",
-                ".py",
-                ".yaml",
-                ".yml",
-            }:
-                continue
-            relative = path.relative_to(REPO_ROOT).as_posix()
-            if relative in governed or relative in UNGOVERNED_DECLARERS:
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            if TRACKER_TABLE not in text:
-                continue
-            shapes = declared_column_sets(text)
-            if shapes:
-                unaccounted[relative] = shapes
+    declarations, read = _walk_declarers()
+    assert read > 100, (
+        f"the completeness walk read only {read} files, so a zero result would "
+        "prove nothing about the tree"
+    )
+    unaccounted = {
+        where: shapes
+        for where, shapes in declarations.items()
+        if where not in governed and where not in UNGOVERNED_DECLARERS
+    }
     assert not unaccounted, (
         f"these files declare a {TRACKER_TABLE} tracker and are in neither "
         "TRACKER_DECLARERS nor UNGOVERNED_DECLARERS, so nothing checks their "
@@ -521,23 +622,27 @@ def test_the_registry_accounts_for_every_tracker_declaration_in_the_tree() -> No
 
 
 @pytest.mark.unit
-def test_the_completeness_walk_finds_the_declarers_it_is_meant_to_skip() -> None:
-    """Positive control for the walk above: it really does find declarations.
+def test_the_completeness_walk_reaches_every_path_the_registry_names() -> None:
+    """Positive control that exercises the WALK, not just the parser.
 
-    A completeness check whose walk matched nothing -- a wrong root, a suffix
-    filter excluding every real file, a parser that stopped matching -- would
-    report a clean tree forever. This asserts the same parser finds a
-    declaration in every path the registry exempts.
+    An earlier form of this control read each exempted path directly with
+    ``read_text``. That passes unchanged when the roots tuple is wrong, when the
+    suffix filter excludes every real file, or when ``rglob`` is pointed at a
+    directory that does not exist -- three of the four ways the walk can go
+    silently empty, and precisely the ones its docstring claims to guard. This
+    asserts the walk itself reaches every path the registry names.
     """
-    found = {
-        relative
-        for relative in UNGOVERNED_DECLARERS
-        if declared_column_sets((REPO_ROOT / relative).read_text(encoding="utf-8"))
+    declarations, _ = _walk_declarers()
+    expected = set(UNGOVERNED_DECLARERS) | {
+        rel
+        for paths in TRACKER_DECLARERS.values()
+        for rel in paths
+        if declared_column_sets(_read(rel))
     }
-    assert found == set(UNGOVERNED_DECLARERS), (
-        "UNGOVERNED_DECLARERS names paths the parser finds no declaration in, so "
-        "the exemptions are stale and the walk's zero result proves nothing: "
-        f"missing {sorted(set(UNGOVERNED_DECLARERS) - found)}"
+    missing = expected - set(declarations)
+    assert not missing, (
+        "the completeness walk did not reach paths the registry names, so its "
+        f"zero result proves nothing about the tree: {sorted(missing)}"
     )
 
 
@@ -561,11 +666,30 @@ def test_a_corpus_owned_runner_declares_no_shape_by_any_other_spelling() -> None
         if shaping
         else ""
     )
+    bodyless = _BODYLESS_CREATE_RE.search(_collapsed(text))
+    assert bodyless is None, (
+        f"{COMPOSE_RUNNER.name} brings {TRACKER_TABLE} into existence with no column "
+        f"list ({bodyless.group(0)!r} -- CREATE ... AS/OF, or SELECT ... INTO), which "
+        "declares a shape by reference and has no body for the parser to compare"
+        if bodyless
+        else ""
+    )
+    # The `-f` set is the named-file applier and must be exactly these two. The
+    # runner's OTHER applier is the manifest loop's stdin pipe, which feeds it 46
+    # corpus files this gate deliberately never reads -- they are omninode_infra's
+    # and out of scope. Naming that here rather than leaving the `-f` assertion to
+    # imply a completeness it does not have.
     applied = set(re.findall(r'psql_db -f "\$\{?(\w+)', text))
-    assert applied <= {"BASELINE", "TRACKING"}, (
-        f"{COMPOSE_RUNNER.name} applies a SQL file this gate never reads "
-        f"({sorted(applied - {'BASELINE', 'TRACKING'})}), so a tracker declared "
-        "inside it would be compared against nothing"
+    assert applied == {"BASELINE", "TRACKING"}, (
+        f"{COMPOSE_RUNNER.name} applies a named SQL file this gate never reads "
+        f"({sorted(applied.symmetric_difference({'BASELINE', 'TRACKING'}))}), so a "
+        "tracker declared inside it would be compared against nothing"
+    )
+    stdin_appliers = re.findall(r"\|\s*psql_db -f -", text)
+    assert len(stdin_appliers) == 1, (
+        f"{COMPOSE_RUNNER.name} has {len(stdin_appliers)} stdin appliers; exactly one "
+        "is expected (the manifest loop), and a second would be a corpus-applying "
+        "path nobody declared"
     )
 
 

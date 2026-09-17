@@ -362,7 +362,10 @@ repos:
         name: schema_migrations tracker shape agrees per database (OMN-18544)
         entry: uv run --frozen pytest tests/unit/db/test_schema_migrations_tracker_shape_agreement_omn18544.py -q
         language: system
-        files: ^(docker/migrations/cloud/run-cloud-migrations\.sh|docker/migrations/forward/036_create_schema_migrations\.sql|scripts/run-migrations\.py|scripts/run-forward-migrations\.sh|scripts/run-intelligence-migrations\.sh|tests/unit/db/test_schema_migrations_tracker_shape_agreement_omn18544\.py)$
+        # Scoped to the whole of every walked root, not the six known declarers:
+        # a NEW file declaring a tracker is precisely the case the completeness
+        # check exists to catch, and a six-path pattern would never fire on it.
+        files: ^(docker|scripts|src|tests)/.*\.(sql|sh|py|ya?ml|captured)$
         pass_filenames: false
         stages: [pre-commit]
       - id: ci-evidence-policy
