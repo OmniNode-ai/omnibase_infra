@@ -1007,3 +1007,35 @@ cases:
     test: tests/ci/test_incident_replay_omn18572.py::test_the_real_guard_rejects_the_image_the_lane_was_actually_running
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the absence of any reader at all for the lane's onex-api provenance: omninode_infra#1523 merged 2026-09-17T09:00:53Z and at 11:15Z the .201 compose dev lane was still running onex-lab/omnicloud-core:f37261c2-20260917T050425Z, the PARENT of that squash (git merge-base --is-ancestor 4528c42c f37261c2 exits 1, the reverse exits 0), with tenant creation on the lab impossible throughout. NOT A RECONSTRUCTION -- the artifact is the byte-for-byte docker inspect output for that exact image tag on the lab host's own daemon, re-fetchable at the recorded locator, and it is the single JSON token null. That shape is the point -- docker renders an image built with no labels as null, never as an empty object, and an index template against it is a template error with a non-zero exit, the same trap that made the OMN-18113 repoint refuse a lane it should have advanced. A hand-written fixture would have said empty object and the guard would have been proven against a shape production never produces. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every label map would satisfy this reject trivially and red every future delivery, so the same guard is required to accept the second captured artifact, the live onex-api CONTAINER label map after the 11:41:55Z delivery, carrying the revision label for 99fdbd375f3b6c17d564b588f505754160b1d1f2.
+  - id: omn18606-census-went-stale-while-the-hourly-job-reported-success
+    guard: scripts/lane_census_refresh_decision.py
+    incident: OMN-18606
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18606/stale-census-snapshot-2e4eec05.json.captured
+      sha256: 5bc1438712529c9597abe67ac0e95e5b4bab151c515178b519f48ba109e4db10
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@2e4eec05cae24801f14036dba2fcfd14391dda11:deploy/lane-census/census-snapshot.json
+      captured_at: "2026-09-17T18:00:00Z"
+      captured_by: lane lane-census-timer-stall-1637
+    test: tests/ci/test_incident_replay_omn18606.py::test_the_real_decision_refuses_to_leave_the_stale_census_alone
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case. The false_green is the absence of any reader at all: nothing evaluated the committed census, so this exact artifact sat at emitted_at 2026-09-10T10:06:57Z until the 7-day staleness gate went red at 2026-09-17T10:07Z on every omnibase_infra PR touching the census paths. Six hand-opened heal PRs preceded it (#2395, #2691, #2846, #2998, #3394, #3489) and a seventh (#3703, an unrelated lane) landed a snapshot by hand while this ticket was being written. The test drives the real decision with these bytes at that exact instant and requires REFRESH; a companion test drives the same bytes one day in and requires a no-op, because a decision that always refreshes would open four PRs a day and get the leg deleted.
+  - id: omn18606-installed-dropin-ran-hourly-and-wrote-nothing
+    guard: scripts/lane-census-check.sh
+    incident: OMN-18606
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18606/installed-dropin-no-snapshot.conf.captured
+      sha256: ac2f987782cb5f2cbc24447119286e1b75425747c95fb798e632f97714378dce
+    capture:
+      method: host-file
+      source: host-file:omni-201-ts:/home/jonah/.config/systemd/user/onex-disk-gc.service.d/20-lane-census.conf
+      captured_at: "2026-09-17T18:05:00Z"
+      captured_by: lane lane-census-timer-stall-1637
+    why: >-
+      The collector became wired enforcement when lane-census-refresh.yml began invoking it, so default-deny demands a real case. These are the bytes that were installed on the lab host: a single ExecStart naming the collector with no output destination and no redirect, and systemd runs execve rather than a shell so a redirect could never have worked there. That is the false_green — onex-disk-gc.service reported SUCCESS every hour precisely because the census pass wrote nothing and so had nothing to fail. The argv that would have fixed it was itself refused: the pre-fix collector answered `Unknown argument: --snapshot` with exit 2. The test asserts the captured configuration carries no destination, and drives the real collector with the shipped drop-in's own argv to prove that argv now parses.
+    test: tests/ci/test_incident_replay_omn18606.py::test_the_dropin_actually_installed_on_the_host_could_not_write_a_census

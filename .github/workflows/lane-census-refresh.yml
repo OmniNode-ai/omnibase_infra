@@ -1,0 +1,203 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# lane-census-refresh.yml — the missing leg: the lab host's census reaches this
+# repository without a hand-heal (OMN-18606 AC2, under OMN-13034).
+#
+# WHY THIS EXISTS. `Lane Census Staleness` reads `emitted_at` out of the
+# COMMITTED `deploy/lane-census/census-snapshot.json`, and until now nothing
+# refreshed that file but a person. Every entry in its git history is a
+# hand-opened PR — #2395, #2691, #2846, #2998, #3394, #3489 — and a seventh
+# (#3703, an unrelated lane) landed a snapshot by hand while OMN-18606 was
+# being written, which is how sharp the need is. OMN-18606 made the census
+# emittable (`lane-census-check.sh --snapshot`); this workflow is what carries
+# it back.
+#
+# WHY IT COLLECTS THE CENSUS RATHER THAN READING THE HOST'S FILE. The hourly
+# `onex-disk-gc.service` drop-in writes a snapshot to
+# `~/.local/state/onex/census-snapshot.json` on the lab host. This job cannot
+# read it: `host-201` is carried by the `omninode-verify-runner-1` CONTAINER,
+# whose mounts are its creds volume, `/var/run/docker.sock`, the operator env
+# file and three entrypoint scripts — that state directory is not among them.
+# Mounting it would be a runner-fleet change (a full recreate) to gain nothing,
+# because the socket it ALREADY mounts reaches the same docker daemon the
+# host-side pass reads. So this job runs the same collector against the same
+# daemon and gets the same answer. The host-side drop-in keeps its own job:
+# hourly reconcile and the drift event on the bus.
+#
+# FAILURE DIRECTION. If the socket is unreachable the collector exits 4
+# (`EXIT_INVENTORY_UNAVAILABLE`, OMN-15466) — fail-loud, no drift event, and no
+# snapshot written. A host this job cannot see is never reported as a host that
+# saw nothing, and no PR is opened. Exit 30 is DRIFT, which is a normal census
+# outcome and not a collection failure; it is accepted here deliberately.
+#
+# WHY NOT A PR EVERY RUN. `scripts/lane_census_refresh_decision.py` is the pure
+# rule and it says no most of the time: a census that is recent AND describes
+# the same lane topology is a no-op. Four unconditional PRs a day is how an
+# automation earns itself an exemption.
+---
+name: Lane census refresh (OMN-18606)
+
+on:
+  schedule:
+    # Every 6 hours at :37. The gate's limit is 7 days and the refresh
+    # threshold is 3, so this cadence is not load-bearing for freshness — it
+    # only bounds how long a real topology change sits unreported.
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      refresh_after_days:
+        description: "Open a PR once the committed census is this many days old."
+        required: false
+        default: "3"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # Never cancel-in-progress: a cancelled run here leaves a pushed branch with
+  # no PR on it.
+  group: lane-census-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Collect the lab census and open a bump PR when it has moved
+    # `host-201` is carried ONLY by the .201 verify runner, and this job is
+    # meaningless anywhere else — the census describes THAT host's lanes. The
+    # pairing fails SAFE: if the runner is down the job queues rather than
+    # running somewhere it would observe a different docker daemon.
+    runs-on: [self-hosted, omnibase-verify, host-201]
+    timeout-minutes: 20
+
+    steps:
+      # OMN-16373 / OMN-18273: a push authored by an App identity triggers
+      # downstream CI, which the default GITHUB_TOKEN does not. The bump PR is
+      # worthless if the staleness gate never runs on it.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnibase_infra
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout (app token so the bot PR triggers CI)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-lane-census-refresh
+          cache-enabled: "false"
+
+      - name: Collect the census from the lab docker daemon
+        id: collect
+        env:
+          # The collector resolves the broker itself and only to publish a drift
+          # event. Unset here deliberately: this job REPORTS the census, it is
+          # not the host's alerting path, and the hourly drop-in already owns
+          # that. With it unset the collector logs the event instead of
+          # publishing and still writes the snapshot.
+          KAFKA_BOOTSTRAP_SERVERS: ""
+        run: |
+          set -uo pipefail
+          CANDIDATE="${RUNNER_TEMP}/census-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          rm -f "$CANDIDATE"
+
+          # Exit 0 = no drift, 30 = drift. Both are successful COLLECTIONS and
+          # both write the snapshot. 3 = missing deps, 4 = inventory
+          # unobservable, 2 = bad args: none of those produce a census and all
+          # must fail the job rather than open a PR on nothing.
+          bash scripts/lane-census-check.sh --snapshot "$CANDIDATE"
+          rc=$?
+          if [[ $rc -ne 0 && $rc -ne 30 ]]; then
+            echo "::error title=LANE-CENSUS-UNCOLLECTABLE::lane-census-check.sh exited ${rc}; no census collected, no PR opened."
+            exit 1
+          fi
+          if [[ ! -s "$CANDIDATE" ]]; then
+            echo "::error title=LANE-CENSUS-UNCOLLECTABLE::collector exited ${rc} but wrote no snapshot to ${CANDIDATE}."
+            exit 1
+          fi
+          echo "candidate=${CANDIDATE}" >> "$GITHUB_OUTPUT"
+          echo "Collected census (collector rc=${rc})."
+
+      - name: Decide whether the committed census has to move
+        id: decide
+        env:
+          CANDIDATE: ${{ steps.collect.outputs.candidate }}
+          REFRESH_AFTER_DAYS: ${{ inputs.refresh_after_days || '3' }}
+        run: |
+          set -euo pipefail
+          DECISION="${RUNNER_TEMP}/census-decision-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          uv run python scripts/lane_census_refresh_decision.py \
+            --committed deploy/lane-census/census-snapshot.json \
+            --candidate "$CANDIDATE" \
+            --refresh-after-days "$REFRESH_AFTER_DAYS" > "$DECISION"
+          {
+            echo "refresh=$(python3 -c 'import json,sys;print(str(json.load(open(sys.argv[1]))["refresh"]).lower())' "$DECISION")"
+            echo "reason=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["reason"])' "$DECISION")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report the no-op
+        if: steps.decide.outputs.refresh != 'true'
+        run: |
+          echo "No refresh needed (${{ steps.decide.outputs.reason }}). No PR opened."
+          echo "### Lane census refresh: no-op" >> "$GITHUB_STEP_SUMMARY"
+          echo "Reason: \`${{ steps.decide.outputs.reason }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open the census bump PR
+        if: steps.decide.outputs.refresh == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CANDIDATE: ${{ steps.collect.outputs.candidate }}
+          REASON: ${{ steps.decide.outputs.reason }}
+        run: |
+          set -euo pipefail
+          cp "$CANDIDATE" deploy/lane-census/census-snapshot.json
+
+          BRANCH="bot/lane-census-refresh-$(date -u +%Y%m%d%H%M%S)"
+          # OMN-18273: commit as the App this job already authenticates as.
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add deploy/lane-census/census-snapshot.json
+          git commit -m "chore(deps, OMN-13034): refresh the lane census snapshot [bot]" \
+            --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
+            --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          git push origin "$BRANCH"
+
+          EMITTED="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["emitted_at"])' "$CANDIDATE")"
+          DRIFT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["drift_count"])' "$CANDIDATE")"
+
+          {
+            printf '%s\n' "Automated lane-census refresh (OMN-13034, leg built in OMN-18606)."
+            printf '\n'
+            printf '%s\n' "Collected on the lab host by the \`host-201\` verify runner against the"
+            printf '%s\n' "same docker daemon the hourly \`onex-disk-gc\` census pass reads."
+            printf '\n'
+            printf '%s\n' "- \`emitted_at\`: \`${EMITTED}\`"
+            printf '%s\n' "- drift findings: ${DRIFT}"
+            printf '%s\n' "- refresh reason: \`${REASON}\`"
+            printf '\n'
+            printf '%s\n' "Before this leg existed, every refresh of this file was a person opening"
+            printf '%s\n' "a PR — six of them between 2026-07-22 and 2026-09-14, plus a seventh"
+            printf '%s\n' "while OMN-18606 was being written. Review the census delta and merge."
+          } > "${RUNNER_TEMP}/census_refresh_body.md"
+
+          # `chore(deps,` prefix is exempt from the pr-title ticket gate, matching
+          # the sibling-lock-refresh and publish-downstream-pin-bump conventions.
+          gh pr create \
+            --base "${GITHUB_REF_NAME}" \
+            --head "$BRANCH" \
+            --title "chore(deps, OMN-13034): refresh the lane census snapshot [bot]" \
+            --body-file "${RUNNER_TEMP}/census_refresh_body.md"
+
+          gh pr merge "$BRANCH" --squash --auto
