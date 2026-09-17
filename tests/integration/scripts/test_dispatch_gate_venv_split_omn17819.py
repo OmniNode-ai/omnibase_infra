@@ -64,6 +64,22 @@ def _make_uv_shim(bin_dir: Path, *, check_exit: int) -> Path:
     uv.write_text(
         "#!/usr/bin/env bash\n"
         'printf "env=%s %s\\n" "${UV_PROJECT_ENVIRONMENT:--}" "$*" >> "$UV_SHIM_LOG"\n'
+        # `uv sync` creates the environment when it is absent and recreates it
+        # when --python names a different interpreter, writing the pyvenv.cfg
+        # the reconciler reads back (OMN-17819, CLAUDE.md rule 11). Without
+        # this the shim models a uv that silently leaves the venv on the wrong
+        # interpreter, and the reconciler correctly refuses.
+        'if [[ -n "${UV_PROJECT_ENVIRONMENT:-}" ]]; then\n'
+        '  _base=""; _prev=""\n'
+        '  for a in "$@"; do\n'
+        '    [[ "$_prev" == "--python" ]] && _base="$a"\n'
+        '    _prev="$a"\n'
+        "  done\n"
+        '  if [[ -n "$_base" ]]; then\n'
+        '    mkdir -p "${UV_PROJECT_ENVIRONMENT}/bin"\n'
+        '    printf "home = %s\\n" "${_base%/*}" > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
+        "  fi\n"
+        "fi\n"
         'for arg in "$@"; do\n'
         '  if [[ "$arg" == "--check" ]]; then exit ' + str(check_exit) + "; fi\n"
         "done\n"

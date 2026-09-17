@@ -342,8 +342,183 @@ INFRA_PYTHON="$INFRA_VENV/bin/python"
 
 # The DISPATCH venv: the composed environment `scripts/onex` execs and the
 # OMN-17309 floor is read from. Outside the clone on purpose (see the header).
+#
+# Derived from $OMNI_HOME, which is already resolved fail-fast above -- there is
+# no default root and no absolute path literal here, so this resolves correctly
+# on a machine whose checkout lives somewhere else (CLAUDE.md rules 6 and 8).
 DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
 DISPATCH_PYTHON="$DISPATCH_VENV/bin/python"
+
+# --------------------------------------------------------------------------- #
+# The dispatch venv may never BE a clone's own venv
+# --------------------------------------------------------------------------- #
+# The default above cannot be a clone's `.venv`, but `ONEX_DISPATCH_VENV` can,
+# and pointing it at one would reconstruct the exact OMN-17819 defect by hand:
+# the provider layer composed into a project environment, the OMN-15620 purity
+# gate refusing every `uv run pytest` there, and the refusal's own recommended
+# repair breaking the CLI. The override exists to RELOCATE the composed venv,
+# never to re-collapse the two.
+#
+# `-e`, not `-d`, on the `.git` test: in a worktree `.git` is a FILE, and a
+# `-d` test would wave through exactly the per-ticket worktrees lanes spend all
+# day inside.
+refuse_dispatch_venv_inside_a_clone() {
+  local parent
+  parent="${DISPATCH_VENV%/*}"
+
+  # The gate venv is refused UNCONDITIONALLY, before any `.git` test. Whether
+  # that directory happens to be a git checkout right now is irrelevant: it is
+  # the environment `uv run pytest` executes in and the OMN-15620 purity gate
+  # judges, and that is true of a tarball, a CI workspace and a fresh clone
+  # alike. Gating this on `.git` made the refusal miss the single case the whole
+  # ticket is about whenever the directory was not a repository.
+  if [[ "$DISPATCH_VENV" == "$INFRA_VENV" ]]; then
+    say "INDETERMINATE: refusing to compose the provider layer into $DISPATCH_VENV."
+    say "  That is the canonical clone's GATE venv -- the one \`uv run pytest\`"
+    say "  runs in and the OMN-15620 purity gate judges. Composing an undeclared"
+    say "  \`onex.nodes\` provider into it is the OMN-17819 defect itself."
+    say "  The dispatch venv must live OUTSIDE every clone. Unset"
+    say "  ONEX_DISPATCH_VENV to use the default ($OMNI_HOME/.onex-dispatch-venv),"
+    say "  or point it at a path that is not a clone's .venv."
+    exit "$EXIT_INDETERMINATE"
+  fi
+
+  [[ "${DISPATCH_VENV##*/}" == ".venv" ]] || return 0
+  [[ -e "$parent/.git" ]] || return 0
+
+  say "INDETERMINATE: refusing to compose the provider layer into $DISPATCH_VENV."
+  say "  That is the project venv of the git clone at $parent. A composed"
+  say "  layer there is undeclared in that project's lock, so its own purity"
+  say "  checks and test runs would be refused -- the OMN-17819 defect, moved."
+  say "  The dispatch venv must live OUTSIDE every clone. Unset"
+  say "  ONEX_DISPATCH_VENV to use the default ($OMNI_HOME/.onex-dispatch-venv),"
+  say "  or point it at a path that is not a clone's .venv."
+  exit "$EXIT_INDETERMINATE"
+}
+refuse_dispatch_venv_inside_a_clone
+
+# --------------------------------------------------------------------------- #
+# The dispatch venv's base interpreter (CLAUDE.md rule 11)
+# --------------------------------------------------------------------------- #
+# macOS Sonoma+ grants Local Network access per binary path and signature, not
+# per Python version. An adhoc-signed uv-managed interpreter never surfaces the
+# privacy dialog and its LAN connections fail silently with EHOSTUNREACH; the
+# brew interpreter carries the grant. The dispatch venv is what `scripts/onex`
+# execs, and `onex` talks to the LAN services on the lab host, so on macOS it
+# must be built on the brew binary at its literal resolved path -- never
+# `$(brew --prefix)`, which a launchd or cron PATH cannot resolve.
+#
+# The requirement is macOS-only, deliberately. Rule 11 scopes itself to the
+# `local_macos_claude_hooks` profile and says in terms that it does not apply to
+# CI runners, containers, or the lab host. This same reconciler runs from the
+# lab host's cron, where there is no brew prefix and no privacy gate to satisfy;
+# requiring one there would refuse every tick for a constraint that does not
+# exist on that platform.
+#
+# Historical note, so this is not mis-read as a regression: the venv the
+# OMN-17819 split replaced was ALREADY uv-managed -- `omnibase_infra/.venv` read
+# `home = <uv data dir>/cpython-3.12-macos-aarch64-none/bin`. The CLI never had
+# the grant on this host. The split is what made the interpreter fixable in one
+# place rather than entangled with the clone's own project environment.
+DISPATCH_BASE_PYTHON_CANDIDATES=(
+  "/opt/homebrew/bin/python3.13"  # Apple Silicon
+  "/usr/local/bin/python3.13"     # Intel
+)
+
+# Echoes the interpreter `uv` must build the dispatch venv on, or nothing when
+# this platform has no such requirement. A macOS host with no brew interpreter
+# echoes nothing too, and the caller refuses -- naming every path it looked at,
+# because "not on PATH" was read as "not installed" once already (OMN-17335).
+# Whether this host has the LAN-grant constraint at all.
+#
+# Both overrides can only ADD the requirement, never remove it -- there is no
+# value of either that turns it off, and `dispatch_base_python` refuses rather
+# than falling back when it cannot satisfy one. That is deliberate: a variable
+# that switched a safety requirement off would be the bypass rule 17 forbids.
+# What they buy is a behaviour that is exercised by the merge gate: CI runs on
+# Linux, so without a seam the entire rule-11 enforcement would be untestable
+# there and would ship unproven (rule 5 -- opt-in verification never gets
+# adopted).
+dispatch_requires_base_python() {
+  [[ "${ONEX_DISPATCH_REQUIRE_BASE_PYTHON:-0}" == "1" ]] && return 0
+  [[ -n "${ONEX_DISPATCH_BASE_PYTHON:-}" ]] && return 0
+  [[ "$(uname -s)" == "Darwin" ]]
+}
+
+dispatch_base_python() {
+  dispatch_requires_base_python || return 0
+  if [[ -n "${ONEX_DISPATCH_BASE_PYTHON:-}" ]]; then
+    # Validated, not trusted. Echoing a path that is not there hands uv an
+    # argument it cannot use and turns a clear "that interpreter does not
+    # exist" into whatever uv says three steps later -- and on a shim-backed
+    # test host, into no error at all.
+    if [[ ! -x "$ONEX_DISPATCH_BASE_PYTHON" ]]; then
+      say "INDETERMINATE: ONEX_DISPATCH_BASE_PYTHON names $ONEX_DISPATCH_BASE_PYTHON,"
+      say "  which is not an executable file. The dispatch venv is what"
+      say "  \`scripts/onex\` execs; building it on an interpreter that is not"
+      say "  there would leave this host with no CLI."
+      exit "$EXIT_INDETERMINATE"
+    fi
+    printf '%s' "$ONEX_DISPATCH_BASE_PYTHON"
+    return 0
+  fi
+  local candidate
+  for candidate in $(dispatch_base_python_candidates); do
+    [[ -x "$candidate" ]] && { printf '%s' "$candidate"; return 0; }
+  done
+}
+
+# The candidates, as a whitespace-separated list. `ONEX_DISPATCH_BASE_PYTHON_
+# CANDIDATES` (colon-separated) replaces the built-ins.
+#
+# This narrows WHICH interpreter qualifies; it never changes WHETHER one is
+# required, so it is not an opt-out. It exists because the refusal path -- no
+# acceptable interpreter anywhere -- is otherwise untestable on any host that
+# has brew installed, which is every developer Mac. Two earlier fixtures in this
+# suite already read host state that way and had to be repaired; this is the
+# same lesson applied to the code instead of to the test.
+dispatch_base_python_candidates() {
+  if [[ -n "${ONEX_DISPATCH_BASE_PYTHON_CANDIDATES:-}" ]]; then
+    printf '%s' "${ONEX_DISPATCH_BASE_PYTHON_CANDIDATES//:/ }"
+    return 0
+  fi
+  printf '%s' "${DISPATCH_BASE_PYTHON_CANDIDATES[*]}"
+}
+
+# Resolve a directory through every symlink, with shell builtins only: macOS
+# ships no GNU `realpath`, and the comparison below cannot be a string match --
+# `/opt/homebrew/bin/python3.13` is a symlink into the Cellar while the venv
+# records `/opt/homebrew/opt/python@3.13/bin`, two spellings of one directory.
+real_dir() { (cd "$1" 2>/dev/null && pwd -P) || true; }
+
+# The `home` line of a venv's own pyvenv.cfg: the interpreter it was built on,
+# as recorded by the builder rather than as assumed by us.
+venv_base_home() {
+  local cfg="$1/pyvenv.cfg" line
+  [[ -f "$cfg" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      home*=*)
+        line="${line#*=}"
+        printf '%s' "${line# }"
+        return 0
+        ;;
+    esac
+  done < "$cfg"
+}
+
+# Whether the existing dispatch venv is already on the required interpreter.
+# True when no interpreter is required (non-macOS) so the caller reads the same
+# on every platform.
+dispatch_interpreter_ok() {
+  local want="$1" home want_dir have_dir
+  [[ -n "$want" ]] || return 0
+  home="$(venv_base_home "$DISPATCH_VENV")"
+  [[ -n "$home" ]] || return 1
+  want_dir="$(real_dir "${want%/*}")"
+  have_dir="$(real_dir "$home")"
+  [[ -n "$want_dir" && "$have_dir" == "$want_dir" ]]
+}
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
 
@@ -740,6 +915,24 @@ run_check() {
     say "DRIFT: dispatch venv absent ($DISPATCH_VENV)"
     drift=1
   else
+    # Reported in check mode as well as repaired, because `--check` is what the
+    # SessionStart line and every read-only probe run: a verdict that stayed
+    # silent about the interpreter would print "in sync" over a CLI whose LAN
+    # calls to the lab host fail silently (CLAUDE.md rule 11).
+    local base_python
+    base_python="$(dispatch_base_python)"
+    if dispatch_requires_base_python && [[ -z "$base_python" ]]; then
+      say "DRIFT: no brew Python to build the dispatch venv on; looked at:"
+      say "  $(dispatch_base_python_candidates)"
+      drift=1
+    elif ! dispatch_interpreter_ok "$base_python"; then
+      say "DRIFT: dispatch venv is on the wrong interpreter -- built on"
+      say "  $(venv_base_home "$DISPATCH_VENV"), required ${base_python%/*}"
+      say "  (CLAUDE.md rule 11: the macOS Local Network grant is per binary path,"
+      say "  so a uv-managed interpreter's LAN calls fail silently)"
+      drift=1
+    fi
+
     if ! lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact; then
       say "DRIFT: dispatch venv does not satisfy $INFRA_DIR/uv.lock"
       drift=1
@@ -861,23 +1054,76 @@ run_repair() {
     [[ "$installed" == "$head" ]] || need_provider=1
   fi
 
+  # The base interpreter, resolved once (CLAUDE.md rule 11). Empty off macOS,
+  # where the LAN-grant constraint does not exist.
+  local base_python
+  base_python="$(dispatch_base_python)"
+  if dispatch_requires_base_python && [[ -z "$base_python" ]]; then
+    fail "no brew Python found to build the dispatch venv on; the gate venv was NOT touched." \
+      "The dispatch venv is what \`scripts/onex\` execs, and on macOS the Local" \
+      "Network grant is per binary path -- a uv-managed interpreter's LAN" \
+      "connections to the lab host fail silently with EHOSTUNREACH." \
+      "Looked at, in order:" \
+      "  $(dispatch_base_python_candidates)" \
+      "Install it (brew install python@3.13), or name one explicitly with" \
+      "ONEX_DISPATCH_BASE_PYTHON=<absolute path>."
+  fi
+
+  local -a dispatch_python_arg=()
+  [[ -n "$base_python" ]] && dispatch_python_arg=(--python "$base_python")
+
+  # An existing dispatch venv on the WRONG interpreter is drift, not a state to
+  # leave alone. Without this the rule-11 requirement would hold only for hosts
+  # that happened to build the venv after it landed, and every host that already
+  # had one would keep a silently LAN-blind CLI forever. `uv sync --python`
+  # recreates the environment when the interpreter differs, so the rebuild is
+  # uv's single code path rather than an `rm -rf` in a reconciler.
+  # A BOOLEAN, separate from the message. An earlier draft used the recorded
+  # `home` string as the flag, which is empty in exactly the drift case that
+  # matters most -- a venv with no readable pyvenv.cfg -- so it printed
+  # "Rebuilding." and then skipped both the rebuild and its readback. A hand-run
+  # reproduction caught that; no test would have, because every fixture wrote a
+  # pyvenv.cfg.
+  local rebuild=0 rebuild_home=""
+  if [[ -x "$DISPATCH_PYTHON" ]] && ! dispatch_interpreter_ok "$base_python"; then
+    rebuild=1
+    rebuild_home="$(venv_base_home "$DISPATCH_VENV")"
+    say "dispatch venv: interpreter drift -- built on ${rebuild_home:-<unreadable pyvenv.cfg>},"
+    say "  required ${base_python%/*} (CLAUDE.md rule 11). Rebuilding."
+    need_lock=1
+    need_provider=1
+  fi
+
   # A dispatch venv that does not exist yet has no provider layer to install
   # into. Build the lock layer first in that one case, so `uv` creates the
   # environment and the co-install has an interpreter to target. This is the
   # ONLY situation in which the lock pass precedes the provider pass; the
   # OMN-16262 ordering (provider first, lock second) still holds afterwards,
   # because the co-install below forces a second lock pass.
-  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
-    say "dispatch venv: creating $DISPATCH_VENV from $INFRA_DIR/uv.lock"
-    trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR"
+  if [[ ! -x "$DISPATCH_PYTHON" || "$rebuild" -eq 1 ]]; then
+    say "dispatch venv: creating $DISPATCH_VENV from $INFRA_DIR/uv.lock${base_python:+ on $base_python}"
+    trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
     if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$DISPATCH_VENV" \
-        "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
+        "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
       fail "dispatch venv could not be created; the gate venv was NOT touched." \
         "Without it there is no interpreter for \`onex\` to exec, so this" \
         "refuses rather than purifying the gate venv and leaving the host with" \
         "no CLI at all. Run by hand and read the error:" \
         "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV \\" \
-        "    uv sync --frozen --inexact"
+        "    uv sync --frozen --inexact ${dispatch_python_arg[*]}"
+    fi
+
+    # Prove the interpreter MOVED, by reading the venv back. `uv sync --python`
+    # exiting 0 is not evidence that it rebuilt on the interpreter asked for --
+    # that is the OMN-17307 defect class, a repair reporting its own exit status
+    # as proof. A silent failure here would leave a LAN-blind CLI reading as
+    # reconciled.
+    if ! dispatch_interpreter_ok "$base_python"; then
+      fail "dispatch venv is still not on the required interpreter; the gate venv was NOT touched." \
+        "  required : ${base_python%/*}" \
+        "  recorded : $(venv_base_home "$DISPATCH_VENV")" \
+        "Remove $DISPATCH_VENV and re-run, or name the interpreter explicitly" \
+        "with ONEX_DISPATCH_BASE_PYTHON=<absolute path>."
     fi
   fi
 
@@ -947,9 +1193,9 @@ run_repair() {
       # --inexact: do not remove the composed provider layer, which the lock
       #   correctly does not mention and must not be asked to. This flag belongs
       #   to THIS venv only; the gate venv below is synced exact (OMN-17819).
-      trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR"
+      trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
       if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$DISPATCH_VENV" \
-          "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
+          "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
         fail "dispatch venv lock sync did not complete; the gate venv was NOT touched." \
           "Run by hand and read the error:" \
           "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV \\" \
