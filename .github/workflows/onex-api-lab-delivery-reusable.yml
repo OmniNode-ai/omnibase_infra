@@ -229,7 +229,19 @@ jobs:
     # The lane's docker daemon and published ports are on the LAN; hosted compute
     # can see neither. The checkout below is pinned to a commit of
     # omnibase_infra, so no caller-authored code executes on the fleet.
-    runs-on: [self-hosted, omnibase-deploy]
+    #
+    # OMN-18602: moved off `omnibase-deploy`. This job asserts a fact the
+    # `onex-api` container already carries -- it reads, it does not write -- so
+    # it needs the lab host's docker socket and gateway alias and nothing that
+    # is unique to the deploy runner. It shares the 45-minute ceiling below
+    # with the convergence guards for the same derived reason, and a job killed
+    # by its ceiling uploads NO receipt; queueing behind an unrelated job on a
+    # single shared runner was coming out of that budget's margin.
+    #
+    # `host-201` is required rather than the bare `omnibase-verify` class: the
+    # other verify-class runners sit on other lab hosts and would report this
+    # lane unreachable instead of failing to schedule.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     # DERIVED, not chosen: converge --wait-timeout 25m + the declared compose-dev
     # settle budget (900s, config/lab_pass_settle_budget.yaml) +
     # RESERVED_TAIL_SECONDS 120s = 2520s = 42m, plus margin. A job killed by its

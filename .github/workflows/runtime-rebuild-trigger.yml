@@ -239,7 +239,43 @@ jobs:
     # Unconditional self-hosted rather than the fork fallback the publisher
     # uses, because the checkout below is pinned to the trusted base ref, so no
     # fork-authored code executes on the fleet.
-    runs-on: [self-hosted, omnibase-deploy]
+    #
+    # OMN-18602: moved off `omnibase-deploy`. OMN-18408 split five probes onto
+    # the verify class and deliberately left this one behind, "pending a
+    # follow-up decision on the remainder". This is that decision, and the
+    # measurement it was missing: over the 38 non-skipped executions between
+    # 2026-09-15T22:49Z and 2026-09-17T15:39Z this job QUEUED a median 29.1
+    # min, p90 75.8, max 101.3, with 18 of 38 over half an hour. Job
+    # `created_at` is stamped when `needs` completes -- run 35223485518 has
+    # `trigger-rebuild` finishing at 12:51:27Z, this job created at 12:51:28Z
+    # and started at 13:42:01Z -- so that is runner queue, not dependency wait.
+    #
+    # The queue is spent BEFORE the derived budget below starts, so it never
+    # corrupted a verdict. What it delayed was delivery: rule 24(b) fails
+    # closed without a PASS receipt for the exact sha, so a 101-minute queue is
+    # a 101-minute staging stall.
+    #
+    # THIS JOB WRITES NOTHING. It polls `check_dev_lane_staleness.py`, which
+    # reads a `docker inspect` of the lane container and the deploy agent's
+    # HTTP surface, then probes readiness. It needs the host's docker socket
+    # and its `host.docker.internal` gateway, both of which the verify runners
+    # carry; it never needed the private OMNI_HOME clone tree that is the
+    # deploy runner's reason to exist.
+    #
+    # A SECOND `omnibase-deploy` RUNNER WAS REFUSED, not overlooked. That would
+    # let two lane-mutating release-train jobs run at once, and a `concurrency`
+    # group cannot prevent it: a concurrency group is scoped to ONE repository,
+    # and the sibling reusable's copy of this job is called from omnimarket.
+    # The single physical deploy runner is the only serialisation guard that
+    # holds across repositories, so it keeps the two DEPLOY jobs and nothing
+    # else.
+    #
+    # `host-201` is not decoration. `omnibase-verify` names a CLASS, and
+    # omninode-mini-runner-1 and omninode-air-runner-1 carry it on other lab
+    # hosts. A run placed there would not fail to schedule; it would report
+    # this lane unreachable, which reads as a lane outage. Pinned by
+    # tests/ci/test_verify_runner_runs_on_omn18408.py.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     # 25-minute convergence wait + margin.
     #
     # WHAT THAT 25 MINUTES COVERS, stated honestly rather than derived from a
