@@ -658,7 +658,15 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     assert len(result.declarations) == 185
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
-    assert len(result.cloud_aliases) == 30
+    #
+    # cloud_aliases 30 -> 43 for OMN-18553. These 13 are not new migrations; they
+    # are names omninode_infra's corpus had ALREADY written into omninode_cloud's
+    # migrations_log and that this declaration had never caught up with. Nothing
+    # had noticed because nothing had ever applied that corpus far enough: once
+    # OMN-18544 let it apply in full on the .201 dev lane, all 13 surfaced at once
+    # and aborted the forward-migration one-shot at exit 3. Measured on the lane:
+    # 42 distinct log names, 29 declared, 13 not.
+    assert len(result.cloud_aliases) == 43
 
 
 def test_completion_gate_is_green_after_domain_classification_is_complete() -> None:
