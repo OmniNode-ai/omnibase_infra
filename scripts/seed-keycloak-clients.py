@@ -979,6 +979,52 @@ def _classify_secret_source(
     return _SECRET_SOURCE_KEYCLOAK_MINTED
 
 
+def _env_var_is_populated(name: str) -> bool:
+    """Whether an env var holds a non-empty value, as a bare fact.
+
+    The value itself never leaves this frame. Callers that only need presence
+    call this rather than binding the value, so a secret cannot reach a record
+    they go on to build.
+    """
+    return bool(os.environ.get(name))
+
+
+def _inspect_client_credentials(
+    kc_url: str,
+    realm: str,
+    token: str,
+    existing: dict[str, Any],
+    consumer_env: str | None,
+) -> tuple[bool, tuple[str, str] | None]:
+    """Read the live client's secret and, optionally, the consumer's copy.
+
+    Returns only non-secret facts: whether the live client holds a secret at
+    all, and -- when ``consumer_env`` is given and populated -- the pair of
+    sha256-12 fingerprints to compare. Both raw values are confined to this
+    function's frame and neither is returned, logged or raised.
+
+    This confinement is structural on purpose. The caller builds a record it
+    prints, and an earlier revision read the two values into that caller's
+    scope and relied on discipline not to put them in the record. That is
+    exactly the shape a later edit turns into a leak, and a CodeQL
+    clear-text-logging path found the twelve dataflows that made it possible.
+    Keeping the values in here means the record is printable by construction
+    rather than by review.
+    """
+    live_secret = _read_client_secret_value(kc_url, realm, token, existing)
+    if live_secret is None:
+        return (False, None)
+    if consumer_env is None:
+        return (True, None)
+    consumer_secret = os.environ.get(consumer_env)
+    if not consumer_secret:
+        return (True, None)
+    return (
+        True,
+        (_secret_fingerprint(live_secret), _secret_fingerprint(consumer_secret)),
+    )
+
+
 def _preflight_client(
     kc_url: str,
     realm: str,
@@ -1001,7 +1047,7 @@ def _preflight_client(
 
     env_present: bool | None = None
     if secret_env:
-        env_present = bool(os.environ.get(secret_env))
+        env_present = _env_var_is_populated(secret_env)
         if not env_present:
             if secret_source == _SECRET_SOURCE_ROSTER_PUSHED:
                 findings.append(
@@ -1034,9 +1080,15 @@ def _preflight_client(
             if field in spec and existing.get(field) != spec[field]
         )
         if _live_client_requires_secret(existing):
-            live_secret = _read_client_secret_value(kc_url, realm, token, existing)
-            live_secret_present = live_secret is not None
-            if live_secret is None:
+            compare_against = (
+                secret_env
+                if secret_source == _SECRET_SOURCE_CONSUMER_OWNED and env_present
+                else None
+            )
+            live_secret_present, fingerprints = _inspect_client_credentials(
+                kc_url, realm, token, existing, compare_against
+            )
+            if not live_secret_present:
                 findings.append(
                     {
                         "code": "live_secret_empty",
@@ -1049,27 +1101,20 @@ def _preflight_client(
                         ),
                     }
                 )
-            elif (
-                secret_source == _SECRET_SOURCE_CONSUMER_OWNED
-                and env_present
-                and secret_env is not None
-            ):
-                live_fp = _secret_fingerprint(live_secret)
-                consumer_fp = _secret_fingerprint(os.environ[secret_env])
-                if live_fp != consumer_fp:
-                    findings.append(
-                        {
-                            "code": "consumer_secret_fingerprint_mismatch",
-                            "key": secret_env,
-                            "live": live_fp,
-                            "consumer": consumer_fp,
-                            "detail": (
-                                "the live Keycloak secret does not match the "
-                                "consuming Secret's copy; consumers holding "
-                                "the stale copy get HTTP 401"
-                            ),
-                        }
-                    )
+            elif fingerprints is not None and fingerprints[0] != fingerprints[1]:
+                findings.append(
+                    {
+                        "code": "consumer_secret_fingerprint_mismatch",
+                        "key": str(secret_env),
+                        "live": fingerprints[0],
+                        "consumer": fingerprints[1],
+                        "detail": (
+                            "the live Keycloak secret does not match the "
+                            "consuming Secret's copy; consumers holding "
+                            "the stale copy get HTTP 401"
+                        ),
+                    }
+                )
 
     return {
         "op": "preflight",
