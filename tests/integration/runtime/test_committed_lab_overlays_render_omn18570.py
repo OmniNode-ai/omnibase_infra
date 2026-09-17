@@ -122,8 +122,8 @@ def test_an_overlay_restating_the_retired_parameter_count_is_refused(
     """NEGATIVE CONTROL: the corrected value is enforced, not merely written.
 
     This is the falsifier for the whole change. The fixture is the real dev
-    overlay with one field reverted to the value the contract carried until
-    2026-09-17, so a pass here would mean the retired figure is still
+    overlay with one field reverted to the 35B-A3B value the contract carried
+    until 2026-09-17, so a pass here would mean the retired figure is still
     acceptable and the correction is decoration.
     """
     overlay = yaml.safe_load(
@@ -132,7 +132,7 @@ def test_an_overlay_restating_the_retired_parameter_count_is_refused(
     reverted = 0
     for backend in overlay["backends"]:
         if backend["backend_id"] in _LOCAL_201_BACKENDS:
-            backend["parameter_count"] = "27B"
+            backend["parameter_count"] = "35B-A3B"
             reverted += 1
     assert reverted == len(_LOCAL_201_BACKENDS), (
         "the dev overlay no longer declares both .201 rungs, so this control "
