@@ -682,8 +682,13 @@ def default_check_runs(repo: str, sha: str) -> list[dict[str, Any]]:
             "api",
             "--paginate",
             f"repos/OmniNode-ai/{repo}/commits/{sha}/check-runs",
+            # started_at and completed_at are REQUIRED here, not decorative:
+            # a name can carry several runs on one sha and the resolver orders
+            # them by recency. Projecting them away made every run look equally
+            # recent, so an arbitrary one won -- which is the same defect as
+            # first-wins, just better hidden.
             "--jq",
-            ".check_runs[] | {name, status, conclusion}",
+            ".check_runs[] | {name, status, conclusion, started_at, completed_at}",
         ],
         capture_output=True,
         text=True,
@@ -751,11 +756,29 @@ def classify_ci_green(
             f"could not read check runs for {repo}@{gate_sha[:12]}: {exc}",
         )
 
+    # A name can carry SEVERAL check runs on one sha, and taking an arbitrary
+    # one is a coin flip that reports a real repo as blocked. Measured on
+    # omnimemory 2026-09-17: the required context 'pr-title / check-title' had
+    # FOUR runs on its gating commit, two skipped and two success, two of them
+    # inside a single workflow run -- a conditional job emits a skipped leg
+    # beside the real one. Seven other required names on that same sha carried
+    # duplicates too, so this is the normal shape, not an anomaly.
+    #
+    # GitHub resolves a duplicated context by its LATEST run, so this does the
+    # same rather than inventing a preference. Ordering is by completed_at and
+    # then started_at, with an unfinished run sorting last so a still-running
+    # leg cannot be masked by an older finished one.
+    def _recency(run: dict[str, Any]) -> tuple[str, str]:
+        return (
+            str(run.get("completed_at") or "9999"),
+            str(run.get("started_at") or ""),
+        )
+
     by_name: dict[str, dict[str, Any]] = {}
-    for run in runs:
+    for run in sorted(runs, key=_recency):
         name = str(run.get("name", ""))
         if name:
-            by_name.setdefault(name, run)
+            by_name[name] = run
 
     for context in sorted(required):
         reported = by_name.get(context)

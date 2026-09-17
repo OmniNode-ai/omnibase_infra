@@ -80,9 +80,9 @@ repos:
     lab_evidence: none
     lab_evidence_note: >-
       no lab lane of its own and no runtime-rebuild-trigger.yml
-    mode: report_only
+    mode: cut
     mode_note: >-
-      HELD at report_only on live evidence, not on a pending decision. Measured 2026-09-17, the green-CI premise refuses this repo with ci_required_context_skipped, because the required context 'pr-title / check-title' is SKIPPED on its dev HEAD's gating commit. GitHub treats a skipped required context as satisfying protection, so that commit is mergeable while the gate never ran, and a cut would fast-forward main across it. Ancestry is fine, main IS an ancestor of dev with main-only 0 and dev-only 34, so the blocker is the skipped gate and not the ancestry. Arm this repo once a candidate's gating commit carries that context green.
+      green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer. Operator ruling 2026-09-17, the cut path. Ancestry verified before arming: main IS an ancestor of dev, main-only 0, dev-only 34. CORRECTION: an earlier revision of this entry held this repo at report_only on a skipped required context. That verdict was MY READER'S BUG, twice over, not a fact about this repo: it took an arbitrary one of several check runs sharing a name, and then the fetch projected away the very timestamps the recency fix ordered on. With both corrected, every required context on this repo's gating commit reports success.
   omniintelligence:
     package: omniintelligence
     default_branch: dev

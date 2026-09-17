@@ -231,16 +231,23 @@ class TestLiveState:
         release fast-forward can succeed, and every required context on dev
         reported success for the candidate's gating commit.
 
-        omnimemory is deliberately NOT here despite being the same shape as the
-        other two. Its dev HEAD's gating commit carries a SKIPPED required
-        context, which GitHub treats as satisfying protection, so a cut would
-        fast-forward main across a commit whose gate never ran.
+        omnimemory IS here, and an earlier revision of this docstring said it
+        was not. That exclusion rested on a skipped required context which was
+        this reader's own bug twice over -- an arbitrary pick among check runs
+        sharing a name, then a fetch that projected away the timestamps the fix
+        ordered on. Both are corrected and pinned by their own tests, and every
+        required context on that repo's gating commit reports success.
         """
         policies = rt.load_policy(_POLICY)
         armed = sorted(
             name for name, p in policies.items() if p.mode is rt.EnumTrainMode.CUT
         )
-        assert armed == ["omnibase_core", "omnibase_infra", "omnibase_spi"]
+        assert armed == [
+            "omnibase_core",
+            "omnibase_infra",
+            "omnibase_spi",
+            "omnimemory",
+        ]
 
     def test_every_armed_repo_states_the_premise_it_cuts_on(self) -> None:
         """A cut taken on a premise nobody wrote down is a cut nobody can audit.
@@ -1168,3 +1175,150 @@ class TestTheVersionSourceIsDiscoveredNotAssumed:
         root = self._repo(tmp_path, {"package.json": '{"name":"x","version":"1.0.0"}'})
         with pytest.raises(rt.ReleaseTrainConfigError):
             rt.resolve_declared_version("r", root, "origin/no-such-branch")
+
+
+class TestADuplicatedContextResolvesToItsLatestRun:
+    """Observed on omnimemory, 2026-09-17, and it nearly cost a real repo.
+
+    The required context 'pr-title / check-title' carried FOUR check runs on its
+    gating commit: two skipped and two success, two of them inside a SINGLE
+    workflow run, because a conditional job emits a skipped leg beside the real
+    one. Seven other required names on that same sha carried duplicates too, so
+    this is the normal shape rather than an anomaly.
+
+    A first-wins reader picked the skipped leg and reported the repo blocked by
+    the very trap this premise exists to catch. That verdict was wrong, and a
+    premise whose refusals cannot be trusted is worse than no premise: it
+    teaches the next reader to route around it.
+    """
+
+    OBSERVED = [
+        {
+            "name": "pr-title / check-title",
+            "status": "completed",
+            "conclusion": "skipped",
+            "started_at": "2026-09-17T13:43:59Z",
+            "completed_at": "2026-09-17T13:43:59Z",
+        },
+        {
+            "name": "pr-title / check-title",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-09-17T13:44:03Z",
+            "completed_at": "2026-09-17T13:44:08Z",
+        },
+    ]
+
+    def test_the_later_success_wins_over_the_earlier_skip(self) -> None:
+        reason, detail = rt.classify_ci_green(
+            "omnimemory",
+            "s" * 40,
+            "dev",
+            required_contexts=lambda repo, branch: ["pr-title / check-title"],
+            check_runs=lambda repo, sha: list(self.OBSERVED),
+            gating_sha=lambda repo, sha: "g" * 40,
+        )
+        assert reason is None, detail
+
+    def test_input_order_does_not_change_the_verdict(self) -> None:
+        """The bug was order-dependence, so the fix is asserted that way."""
+        reason, _ = rt.classify_ci_green(
+            "omnimemory",
+            "s" * 40,
+            "dev",
+            required_contexts=lambda repo, branch: ["pr-title / check-title"],
+            check_runs=lambda repo, sha: list(reversed(self.OBSERVED)),
+            gating_sha=lambda repo, sha: "g" * 40,
+        )
+        assert reason is None
+
+    def test_a_later_skip_still_refuses(self) -> None:
+        """Latest-wins is not skip-blindness. If the newest run IS the skip, the
+        context is skipped and the premise must still refuse."""
+        newest_skipped = [
+            dict(
+                self.OBSERVED[1],
+                conclusion="success",
+                completed_at="2026-09-17T13:44:08Z",
+            ),
+            dict(
+                self.OBSERVED[0],
+                conclusion="skipped",
+                completed_at="2026-09-17T13:45:00Z",
+            ),
+        ]
+        reason, _ = rt.classify_ci_green(
+            "omnimemory",
+            "s" * 40,
+            "dev",
+            required_contexts=lambda repo, branch: ["pr-title / check-title"],
+            check_runs=lambda repo, sha: newest_skipped,
+            gating_sha=lambda repo, sha: "g" * 40,
+        )
+        assert reason is rt.EnumTrainReason.CI_REQUIRED_CONTEXT_SKIPPED
+
+    def test_an_unfinished_run_sorts_last_and_is_not_masked(self) -> None:
+        """A still-running leg must not be hidden by an older finished one."""
+        pending_newest = [
+            dict(self.OBSERVED[1]),
+            {
+                "name": "pr-title / check-title",
+                "status": "in_progress",
+                "conclusion": None,
+                "started_at": "2026-09-17T13:50:00Z",
+                "completed_at": None,
+            },
+        ]
+        reason, _ = rt.classify_ci_green(
+            "omnimemory",
+            "s" * 40,
+            "dev",
+            required_contexts=lambda repo, branch: ["pr-title / check-title"],
+            check_runs=lambda repo, sha: pending_newest,
+            gating_sha=lambda repo, sha: "g" * 40,
+        )
+        assert reason is rt.EnumTrainReason.CI_REQUIRED_CONTEXT_PENDING
+
+
+class TestTheCheckRunProjectionKeepsWhatTheResolverSortsOn:
+    """The second half of the same bug, and the better-hidden half.
+
+    Fixing first-wins to latest-wins is useless if the fetch projects the
+    timestamps away: every run then looks equally recent and an arbitrary one
+    still wins. That is exactly what happened -- the jq projection asked for
+    name, status and conclusion only, so the corrected resolver kept returning
+    the same wrong verdict and omnimemory still read as blocked by a gate that
+    had in fact passed.
+
+    Asserted on the shipped SOURCE rather than on behaviour, because the seam
+    the other tests inject replaces the real fetch entirely and so can never
+    see its projection.
+    """
+
+    SOURCE = _MODULE.read_text(encoding="utf-8")
+
+    def test_the_fetch_requests_the_fields_recency_is_computed_from(self) -> None:
+        jq_lines = [
+            line
+            for line in self.SOURCE.splitlines()
+            if ".check_runs[]" in line and "{" in line
+        ]
+        assert jq_lines, "no check-runs projection found in the shipped source"
+        for field in ("started_at", "completed_at"):
+            assert all(field in line for line in jq_lines), (
+                f"the check-runs projection does not fetch {field!r}, which the "
+                "duplicate-context resolver orders on. Without it every run "
+                "sorts equal and an arbitrary one wins, which is first-wins "
+                "again with a longer fuse"
+            )
+
+    def test_the_resolver_orders_on_exactly_those_fields(self) -> None:
+        """A rename on one side and not the other reintroduces it silently."""
+        assert "_recency" in self.SOURCE
+        recency = self.SOURCE[self.SOURCE.index("def _recency") :][:400]
+        for field in ("completed_at", "started_at"):
+            assert field in recency, (
+                f"the recency key does not read {field!r}; the fetch and the "
+                "resolver must agree on the field names or the ordering is "
+                "computed from nothing"
+            )
