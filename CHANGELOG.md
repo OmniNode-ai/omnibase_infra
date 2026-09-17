@@ -1,3 +1,15 @@
+## v0.38.31 (2026-09-17)
+
+### Release
+- Cut omnibase_infra from dev at 0.38.31. dev was already versioned at 0.38.31 against a published v0.38.30, so this release edits no version and no dependency pin; it is the changelog entry plus the tag.
+- **What this ships, and why it was cut now:** omnibase_infra#3709 (`fe881c31`, merged 18:42:04Z), the per-environment onex-api roster (OMN-18582). That commit is in `dev` and not in `main`, verified with `git merge-base --is-ancestor` against both.
+- **The consumer that needed it:** omninode_infra#1547 is blocked by `desired-clients-parity.yml`, which compares against `omnibase_infra@<PR base>` = `main`. `main` is v0.38.30 and predates #3709, so the roster shas disagree (dev `34ac00cb` vs main `b6fb3d62`) and the gate cannot pass until `main` carries the release.
+- Nothing speculative is included: every commit in this range was already merged to `dev` under its own required contexts.
+
+### Release-train premise
+- Cut under the operator roll-out ruling of 2026-09-17. The candidate's gating commit reported success on every required context on `dev`, resolved from the merged pull request's head rather than the post-merge sha, because required contexts are PR-time gates that never report on a squash-merge commit.
+- **Staging only, verified from parsed YAML with a positive control.** `deploy-onex-prod.yml` declares `workflow_dispatch` and no push trigger, so a `main` fast-forward cannot reach it; no omnibase_infra workflow references it at all; and a `v*` tag matches only `release.yml`, since `release-train-lab.yml` takes `lab/dev/**` and `lab/stability/**`. Of the workflows a `main` push fires, none carries a production signature.
+
 ## v0.38.30 (2026-09-17)
 
 ### Release
