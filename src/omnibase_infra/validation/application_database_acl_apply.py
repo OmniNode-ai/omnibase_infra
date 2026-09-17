@@ -80,17 +80,36 @@ def resolve_consent_citation(
     ticket: str,
     ledger_root: Path,
 ) -> ModelAclApplyConsent:
-    """Resolve ``<ledger>:<line>`` to a durable OPERATOR-CONSENT row.
+    """Resolve ``<ledger>@<row timestamp>`` or ``<ledger>:<line>`` to a consent row.
 
     Refuses fail-closed on every ambiguity: a malformed citation, a line past
-    the end of the file, a row that is not a consent row, an approver outside
-    the named pair, a row missing either scope half, or an APPROVED SCOPE that
-    does not name the ticket being applied.
+    the end of the file, a timestamp no row opens with, a timestamp more than
+    one row opens with, a row that is not a consent row, an approver outside the
+    named pair, a row missing either scope half, or an APPROVED SCOPE that does
+    not name the ticket being applied.
+
+    THE TIMESTAMP FORM IS THE DURABLE ONE (OMN-18620). A line number is only
+    true until the ledger is next rolled: a cap-crossing roll on 2026-09-17
+    removed 926 lines from the top of the live file and moved a consent row from
+    ``:4367`` to ``:3441``. A row timestamp travels with the row, into the
+    archive when it is rolled, so it survives any number of rolls. The line form
+    is kept because citations already written must not be invalidated by the
+    change that introduces the replacement.
     """
+    # `@` FIRST, and on the LAST `@`, because the line form's split is
+    # `rpartition(":")` and an ISO-8601 timestamp is full of colons -- reading a
+    # timestamp citation as a line citation would split it mid-timestamp and
+    # report a malformed-citation refusal for a perfectly good citation.
+    ledger_path, at_sign, raw_stamp = citation.rpartition("@")
+    if at_sign and ledger_path:
+        return _resolve_by_stamp(
+            ledger_path, raw_stamp, ticket=ticket, ledger_root=ledger_root
+        )
     ledger_path, separator, raw_line = citation.rpartition(":")
     if not separator or not raw_line.isdigit() or not ledger_path:
         raise AclApplyRefusalError(
-            f"consent citation must be '<ledger>:<line>', got {citation!r}"
+            "consent citation must be '<ledger>@<row timestamp>' or "
+            f"'<ledger>:<line>', got {citation!r}"
         )
     line_number = int(raw_line)
     path = Path(ledger_path)
@@ -105,22 +124,111 @@ def resolve_consent_citation(
             f"which is past the end of {path} ({len(lines)} lines)"
         )
     row = lines[line_number - 1]
-    if _CONSENT_MARKER not in row:
+    return _validate_consent_row(
+        row, f"{path}:{line_number}", path, line_number, ticket=ticket
+    )
+
+
+def _rows_opening_with(
+    lines: list[str], stamp: str, source: Path
+) -> list[tuple[Path, int, str]]:
+    """Every ``(file, 1-based line, row)`` whose LEADING timestamp is ``stamp``.
+
+    Leading, not "contains": rows routinely quote other rows' timestamps --
+    every citation in this fleet does -- and matching those would resolve a
+    citation to a row that merely mentions the one meant.
+
+    The file and line come back with the row so the resolved consent record can
+    still name WHERE it was found, which is the archive file when the row has
+    been rolled. A record that could not say that would report an archived row
+    as if it were still in the live ledger.
+    """
+    out: list[tuple[Path, int, str]] = []
+    for index, line in enumerate(lines, start=1):
+        match = _TIMESTAMP_RE.match(line.strip())
+        if match is not None and match.group(1) == stamp:
+            out.append((source, index, line))
+    return out
+
+
+def _resolve_by_stamp(
+    ledger_path: str,
+    stamp: str,
+    *,
+    ticket: str,
+    ledger_root: Path,
+) -> ModelAclApplyConsent:
+    """Resolve a ``@<row timestamp>`` citation, searching the archive too."""
+    if _TIMESTAMP_RE.match(stamp) is None:
         raise AclApplyRefusalError(
-            f"{path}:{line_number} is not an OPERATOR-CONSENT row"
+            f"consent citation timestamp must be ISO-8601 UTC to the second, "
+            f"got {stamp!r}"
         )
+    path = Path(ledger_path)
+    if not path.is_absolute():
+        path = ledger_root / path
+    if not path.is_file():
+        raise AclApplyRefusalError(f"consent citation names no readable ledger: {path}")
+    located = _rows_opening_with(
+        path.read_text(encoding="utf-8").splitlines(), stamp, path
+    )
+    searched = [str(path)]
+    archive_dir = path.parent / "archive"
+    if not located and archive_dir.is_dir():
+        # A rolled row is still a real consent row, and this is the whole point
+        # of the timestamp form: the row moved into the archive and its
+        # timestamp went with it.
+        for archive in sorted(archive_dir.glob("*.md")):
+            searched.append(str(archive))
+            located.extend(
+                _rows_opening_with(
+                    archive.read_text(encoding="utf-8").splitlines(),
+                    stamp,
+                    archive,
+                )
+            )
+    if not located:
+        raise AclApplyRefusalError(
+            f"no row in {', '.join(searched)} opens with the timestamp {stamp}"
+        )
+    if len(located) > 1:
+        # AMBIGUITY IS A REFUSAL, never a pick. Two lanes can append inside the
+        # same second, so a row timestamp is not guaranteed unique, and choosing
+        # one of several would mean applying a live privilege change against a
+        # row nobody cited.
+        raise AclApplyRefusalError(
+            f"{len(located)} rows open with the timestamp {stamp}, so the "
+            f"citation does not name one row; cite '<ledger>:<line>' instead"
+        )
+    found_path, found_line, row = located[0]
+    return _validate_consent_row(
+        row, f"{path}@{stamp}", found_path, found_line, ticket=ticket
+    )
+
+
+def _validate_consent_row(
+    row: str, ref: str, path: Path, line_number: int, *, ticket: str
+) -> ModelAclApplyConsent:
+    """The checks a resolved row must pass, whichever form cited it.
+
+    Shared so the two citation forms cannot drift into different standards --
+    a form that resolved rows while skipping these would be an authorisation
+    bypass rather than a convenience.
+    """
+    if _CONSENT_MARKER not in row:
+        raise AclApplyRefusalError(f"{ref} is not an OPERATOR-CONSENT row")
     approved_by_match = _APPROVED_BY_RE.search(row)
     if approved_by_match is None or approved_by_match.group(1) not in APPROVERS:
         named = approved_by_match.group(1) if approved_by_match else "<absent>"
         raise AclApplyRefusalError(
-            f"{path}:{line_number} names approver {named!r}; a live privilege "
+            f"{ref} names approver {named!r}; a live privilege "
             f"change requires one of {sorted(APPROVERS)}"
         )
     if _APPROVED_SCOPE_MARKER not in row:
-        raise AclApplyRefusalError(f"{path}:{line_number} carries no APPROVED SCOPE")
+        raise AclApplyRefusalError(f"{ref} carries no APPROVED SCOPE")
     if _OUT_OF_SCOPE_MARKER not in row:
         raise AclApplyRefusalError(
-            f"{path}:{line_number} carries no OUT OF SCOPE half; the "
+            f"{ref} carries no OUT OF SCOPE half; the "
             "out-of-scope list is what bounds the grant"
         )
     approved_scope = row.split(_APPROVED_SCOPE_MARKER, 1)[1].split(
@@ -128,15 +236,11 @@ def resolve_consent_citation(
     )[0]
     out_of_scope = row.split(_OUT_OF_SCOPE_MARKER, 1)[1]
     if ticket not in approved_scope:
-        raise AclApplyRefusalError(
-            f"{path}:{line_number} APPROVED SCOPE does not name {ticket}"
-        )
+        raise AclApplyRefusalError(f"{ref} APPROVED SCOPE does not name {ticket}")
     lane_match = _LANE_RE.search(row)
     timestamp_match = _TIMESTAMP_RE.match(row.strip())
     if timestamp_match is None:
-        raise AclApplyRefusalError(
-            f"{path}:{line_number} does not begin with a UTC timestamp"
-        )
+        raise AclApplyRefusalError(f"{ref} does not begin with a UTC timestamp")
     return ModelAclApplyConsent(
         ledger_path=str(path),
         line_number=line_number,

@@ -500,3 +500,157 @@ def test_consent_row_timestamp_is_carried_into_the_report(tmp_path: Path) -> Non
 
     assert consent.recorded_at == datetime(2026, 9, 14, 12, 11, 31, tzinfo=UTC)
     assert consent.recorded_at < datetime.now(UTC) + timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# The timestamp citation form, which a ledger roll cannot move (OMN-18620)
+# ---------------------------------------------------------------------------
+# A line number is only true until the ledger is next rolled. A cap-crossing
+# roll on 2026-09-17 removed 926 lines from the top of the live file and moved a
+# consent row from :4367 to :3441. A live privilege change citing a line would
+# then resolve to a DIFFERENT row -- and this resolver is what stands between a
+# stale citation and a GRANT/REVOKE against a real database.
+
+_CONSENT_STAMP = "2026-09-14T12:11:31Z"
+
+
+def test_a_timestamp_citation_resolves_the_same_row_as_the_line_form(
+    tmp_path: Path,
+) -> None:
+    """Both forms, one row, one verdict.
+
+    Asserted as equality of the resolved records rather than by checking a
+    couple of fields on each: the two forms must not be able to drift into
+    resolving the same row to different consent.
+    """
+    ledger = _ledger(tmp_path, "header", _CONSENT_ROW)
+
+    by_line = resolve_consent_citation(
+        f"{ledger}:2", ticket="OMN-15355", ledger_root=tmp_path
+    )
+    by_stamp = resolve_consent_citation(
+        f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+    )
+
+    assert by_stamp == by_line
+
+
+def test_a_timestamp_citation_resolves_a_row_that_has_been_rolled(
+    tmp_path: Path,
+) -> None:
+    """The property the form exists for.
+
+    The row is moved out of the live ledger into the archive, exactly as a
+    cap-crossing roll does. Its line number is now meaningless; its timestamp is
+    not. The resolved record names the archive it was found in, because
+    reporting an archived row as if it were still live would be its own
+    falsehood.
+    """
+    ledger = _ledger(tmp_path, "header", "2026-09-01T00:00:00Z | ROW | lane=x")
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    (archive_dir / "LEDGER_2026-09-15-split.md").write_text(
+        "## Rolled\n\n" + _CONSENT_ROW + "\n", encoding="utf-8"
+    )
+
+    consent = resolve_consent_citation(
+        f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+    )
+
+    assert consent.approved_by == "operator"
+    assert consent.ledger_path.endswith("LEDGER_2026-09-15-split.md")
+    assert consent.line_number == 3
+
+
+def test_a_timestamp_citation_is_not_read_as_a_malformed_line_citation(
+    tmp_path: Path,
+) -> None:
+    """The trap that makes this more than a one-line change.
+
+    The line form splits on the LAST colon, and an ISO-8601 timestamp is full of
+    colons. Reading a timestamp citation as a line citation splits it
+    mid-timestamp and reports 'malformed citation' for a perfectly good one --
+    a refusal whose message sends the author to fix something that is not wrong.
+    """
+    ledger = _ledger(tmp_path, "header", _CONSENT_ROW)
+
+    consent = resolve_consent_citation(
+        f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+    )
+
+    assert consent.approved_by == "operator"
+
+
+def test_an_absent_timestamp_is_refused(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path, "header", _CONSENT_ROW)
+
+    with pytest.raises(AclApplyRefusalError, match="opens with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@2026-01-01T00:00:00Z",
+            ticket="OMN-15355",
+            ledger_root=tmp_path,
+        )
+
+
+def test_an_ambiguous_timestamp_is_refused_not_picked(tmp_path: Path) -> None:
+    """Ambiguity is a refusal, never a choice.
+
+    Two lanes can append inside the same second, so a row timestamp is not
+    guaranteed unique. Choosing among several would mean applying a live
+    GRANT/REVOKE against a row nobody cited.
+    """
+    ledger = _ledger(tmp_path, "header", _CONSENT_ROW, _CONSENT_ROW)
+
+    with pytest.raises(AclApplyRefusalError, match="2 rows open with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )
+
+
+def test_a_timestamp_quoted_inside_a_row_body_does_not_resolve(
+    tmp_path: Path,
+) -> None:
+    """Matched on the row's LEADING timestamp, not anywhere in the line.
+
+    Rows routinely quote other rows' timestamps; every citation in this fleet
+    does. Matching those would resolve a citation to a row that merely mentions
+    the one meant.
+    """
+    mentioning = f"2026-09-01T00:00:00Z | CLAIM | lane=x | see {_CONSENT_STAMP}"
+    ledger = _ledger(tmp_path, "header", mentioning)
+
+    with pytest.raises(AclApplyRefusalError, match="opens with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )
+
+
+def test_a_non_consent_row_cited_by_timestamp_is_still_refused(
+    tmp_path: Path,
+) -> None:
+    """Control: the new form must not skip the checks the line form runs.
+
+    Resolving a row is the first half only; it still has to BE a consent row,
+    with both scope halves, one of the two approvers, and a scope naming this
+    ticket. A form that resolved rows while bypassing those would be an
+    authorisation bypass, not a convenience.
+    """
+    claim = f"{_CONSENT_STAMP} | CLAIM | lane=x | ticket=OMN-15355"
+    ledger = _ledger(tmp_path, "header", claim)
+
+    with pytest.raises(AclApplyRefusalError, match="not an OPERATOR-CONSENT row"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )
+
+
+def test_a_scope_that_does_not_name_the_ticket_is_refused_by_timestamp_too(
+    tmp_path: Path,
+) -> None:
+    """The second half of the control above, on the field most likely to drift."""
+    ledger = _ledger(tmp_path, "header", _CONSENT_ROW)
+
+    with pytest.raises(AclApplyRefusalError, match="does not name OMN-99999"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-99999", ledger_root=tmp_path
+        )
