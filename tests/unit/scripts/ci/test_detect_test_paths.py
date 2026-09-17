@@ -13,6 +13,7 @@ from scripts.ci.detect_test_paths import (
     compute_selection,
     is_collectable_test_file_name,
     resolve_test_paths,
+    split_count_for_selection,
 )
 from scripts.ci.test_selection_loader import load_adjacency_map
 from scripts.ci.test_selection_models import EnumFullSuiteReason, ModelTestSelection
@@ -200,7 +201,11 @@ def test_small_change_returns_smart_selection_no_reason() -> None:
     assert selection.is_full_suite is False
     assert selection.full_suite_reason is None
     assert "tests/unit/cli/" in selection.selected_paths
-    assert 1 <= selection.split_count <= 5
+    # OMN-18542: the old ceiling of 5 was an artefact of the path-count ladder.
+    # The bound is now the model's own, and the leaf selection this case probes
+    # is asserted to stay on one shard by
+    # tests/unit/scripts/ci/test_split_count_sizing_omn18542.py.
+    assert 1 <= selection.split_count <= 15
     assert selection.matrix == list(range(1, selection.split_count + 1))
 
 
@@ -217,7 +222,15 @@ def test_no_matching_non_doc_files_falls_back_to_unit_root() -> None:
     )
     assert selection.is_full_suite is False
     assert selection.selected_paths == ["tests/unit/"]
-    assert selection.split_count == 1
+    # OMN-18542: this assertion used to read `== 1`, and that 1 was the defect.
+    # The fallback is the whole unit tree -- 28,455 cases measured 2026-09-16 --
+    # and one shard ran it at 11.9-15.0 minutes against a 15-minute ceiling. The
+    # shard count is now sized to the population, so this pins the sizing rule
+    # rather than a number that ages. Detail:
+    # tests/unit/scripts/ci/test_split_count_sizing_omn18542.py.
+    assert selection.split_count == split_count_for_selection(["tests/unit/"])
+    assert selection.split_count > 1
+    assert selection.matrix == list(range(1, selection.split_count + 1))
 
 
 # ---------------------------------------------------------------------------

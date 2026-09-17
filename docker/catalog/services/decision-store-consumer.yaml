@@ -5,7 +5,7 @@ layer: runtime
 container_name: omninode-decision-store-consumer
 required_env: []
 hardcoded_env:
-  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
+  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence'
   DECISION_STORE_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   DECISION_STORE_HEALTH_CHECK_PORT: '8091'
   DECISION_STORE_HEALTH_CHECK_HOST: 0.0.0.0

@@ -171,12 +171,61 @@ def _repo_origin_is_bundle() -> bool:
     return _git(["config", "--get", "remote.origin.url"]).endswith(".bundle")
 
 
+def _published_tags(anchor: str = "HEAD") -> tuple[str, ...]:
+    """Return the published tags THIS TREE DESCENDS FROM (OMN-18443).
+
+    The gate compares a VERSION READ FROM A TREE against a SET OF PUBLISHED
+    RELEASES, and those two facts must come from the same clock. Listing every
+    tag that exists reads a second clock.
+
+    On a ``pull_request`` event GitHub hands the runner ``refs/pull/N/merge`` --
+    the merge commit it computed when the PR was last synchronized -- so the
+    ``pyproject.toml`` this gate reads is pinned at TRIGGER time, while
+    ``actions/checkout`` fetches ``+refs/tags/*:refs/tags/*`` at RUN time.
+    ``git tag --list`` therefore compared a trigger-time tree against a run-time
+    tag list and refused correctly-versioned trees whenever a peer released in
+    between.
+
+    Measured on the sibling repo, where a release-on-merge cadence makes the
+    window wide enough to hit daily: omnimarket#2601 (run 35141651953 lineage,
+    job 104902570663, 2026-09-16) checked out ``Merge edc2efc8 into aa51cad2``
+    declaring 0.4.107, whose highest reachable release is v0.4.106 -- correctly
+    versioned -- while the tag list in that same job carried v0.4.107 and
+    v0.4.108, both cut from merges the tree does not contain. omnibase_infra
+    releases on a tag push rather than on every merge, so the window here is
+    narrower; it is not absent, and the collector is the same collector.
+
+    Anchoring on ``git tag --merged`` restores the one-clock comparison without
+    weakening the invariant: a release cut on a lineage this tree does not
+    contain cannot be aliased BY this tree, because the branch never authored
+    that version and a three-way merge takes the base branch's newer value on
+    the way in. A release the tree DOES descend from is still compared.
+
+    Fail-CLOSED on unknowable ancestry: ``git tag --merged`` needs the tagged
+    commits' ancestry present, and a shallow clone can omit it and return FEWER
+    tags -- the permissive direction, and the same shape as the OMN-17240
+    empty-tag-set defect this collector already guards. When ancestry cannot be
+    trusted this falls back to the full tag list, the strictly stricter answer,
+    and the OMN-17240 credibility check still runs on whatever comes back.
+
+    Args:
+        anchor: The commit whose reachable tags count as published.
+
+    Returns:
+        Raw tag lines, exactly as ``git tag`` emits them.
+    """
+    if _repo_is_shallow():
+        out = _git(["tag", "--list"])
+    else:
+        out = _git(["tag", "--merged", anchor]) or _git(["tag", "--list"])
+    return tuple(out.splitlines()) if out else ()
+
+
 def collect_request(
     base: str | None, explicit: list[str]
 ) -> ModelReleaseIdentityRequest:
     """Gather all I/O facts into the handler's typed request."""
-    out = _git(["tag", "--list"])
-    published_tags = tuple(out.splitlines()) if out else ()
+    published_tags = _published_tags()
     return ModelReleaseIdentityRequest(
         pyproject_version_raw=_read_pyproject_version_raw(_PYPROJECT),
         pyproject_path=str(_PYPROJECT),
