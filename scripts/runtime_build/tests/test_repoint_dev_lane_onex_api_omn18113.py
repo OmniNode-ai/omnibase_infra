@@ -82,14 +82,15 @@ def _fake_docker(
     tmp_path: Path,
     *,
     tags: list[str],
-    resident: dict[str, str] | None = None,
+    resident: dict[str, object] | None = None,
     rc: int = 0,
 ) -> Path:
     """A docker stand-in that lists ``tags`` and inspects whatever is in ``resident``.
 
-    ``resident`` maps a reference to a ``"<id>\\t<labels json>"`` line, so a tag
-    can be listed and NOT resident -- which is the image-GC race the script has to
-    refuse on rather than pin through.
+    ``resident`` maps a reference to the inspect ENTRY docker would return for it,
+    printed as the one-element array docker actually emits. A tag can be listed and
+    absent from ``resident`` -- which is the image-GC race the script has to refuse
+    on rather than pin through.
     """
     payload = json.dumps({"tags": tags, "resident": resident or {}, "rc": rc})
     (tmp_path / "docker-fixture.json").write_text(payload, encoding="utf-8")
@@ -110,7 +111,7 @@ if argv[0] == "image" and argv[1] == "inspect":
     if ref not in fx["resident"]:
         sys.stderr.write("Error: No such image: %s\\n" % ref)
         sys.exit(1)
-    print(fx["resident"][ref])
+    print(json.dumps([fx["resident"][ref]]))
     sys.exit(0)
 sys.exit(2)
 """,
@@ -141,6 +142,20 @@ sys.stderr.write("fatal: ambiguous argument '%s'\\n" % rev)
 sys.exit(128)
 """,
     )
+
+
+def _entry(image_id: str, *, labels: dict[str, str] | None = None) -> dict[str, object]:
+    """One ``docker image inspect`` entry.
+
+    ``labels=None`` omits the ``Labels`` KEY ENTIRELY rather than setting it null,
+    because that is the shape an unlabelled image really has on the lab host and
+    it is what broke the first revision of the script -- see
+    ``test_an_image_with_no_labels_key_at_all_is_still_pinnable``.
+    """
+    config: dict[str, object] = {"Env": []}
+    if labels is not None:
+        config["Labels"] = labels
+    return {"Id": image_id, "Config": config}
 
 
 def _clone(tmp_path: Path) -> Path:
@@ -227,7 +242,7 @@ def test_newest_applier_built_tag_wins_over_an_older_one_and_over_a_hand_build(
     docker = _fake_docker(
         tmp_path,
         tags=[_OLDER, _HAND, _NEW],
-        resident={_NEW: f"sha256:abc\t{json.dumps(None)}"},
+        resident={_NEW: _entry("sha256:abc")},
     )
     git = _fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA)
     rc, out = _run_script(
@@ -250,7 +265,7 @@ def test_sha_restriction_selects_that_lineage(tmp_path: Path) -> None:
     docker = _fake_docker(
         tmp_path,
         tags=[_OLDER, _NEW],
-        resident={_OLDER: "sha256:old\tnull"},
+        resident={_OLDER: _entry("sha256:old")},
     )
     git = _fake_git(
         tmp_path, known={"5e4a8f84": "5e4a8f84" + "0" * 32}, origin_dev=_FULL_SHA
@@ -334,7 +349,9 @@ def test_a_tag_whose_sha_is_not_a_commit_is_refused(
         tmp_path,
         env_file=_env_file(tmp_path, body=f"ONEX_API_IMAGE={_HAND}\n"),
         clone=_clone(tmp_path),
-        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"}),
+        docker=_fake_docker(
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")}
+        ),
         git=_fake_git(tmp_path, known={}, origin_dev=_FULL_SHA),
         execute=True,
     )
@@ -345,13 +362,13 @@ def test_a_tag_whose_sha_is_not_a_commit_is_refused(
 def test_a_label_disagreeing_with_the_tag_is_refused(
     tmp_path: Path, mod: ModuleType
 ) -> None:
-    labels = json.dumps({mod.REVISION_LABEL: "deadbeef" + "0" * 32})
+    labels = {mod.REVISION_LABEL: "deadbeef" + "0" * 32}
     rc, out = _run_script(
         tmp_path,
         env_file=_env_file(tmp_path, body=f"ONEX_API_IMAGE={_HAND}\n"),
         clone=_clone(tmp_path),
         docker=_fake_docker(
-            tmp_path, tags=[_NEW], resident={_NEW: f"sha256:abc\t{labels}"}
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc", labels=labels)}
         ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
         execute=True,
@@ -362,13 +379,13 @@ def test_a_label_disagreeing_with_the_tag_is_refused(
 
 def test_an_agreeing_label_is_accepted(tmp_path: Path) -> None:
     """The label is forward-compatible provenance, not a second source of truth."""
-    labels = json.dumps({"org.opencontainers.image.revision": _FULL_SHA})
+    labels = {"org.opencontainers.image.revision": _FULL_SHA}
     rc, out = _run_script(
         tmp_path,
         env_file=_env_file(tmp_path, body=f"ONEX_API_IMAGE={_HAND}\n"),
         clone=_clone(tmp_path),
         docker=_fake_docker(
-            tmp_path, tags=[_NEW], resident={_NEW: f"sha256:abc\t{labels}"}
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc", labels=labels)}
         ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
     )
@@ -385,7 +402,9 @@ def test_a_missing_pin_key_is_refused_rather_than_appended(
         tmp_path,
         env_file=env,
         clone=_clone(tmp_path),
-        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"}),
+        docker=_fake_docker(
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")}
+        ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
         execute=True,
     )
@@ -402,7 +421,9 @@ def test_a_duplicated_pin_key_is_refused(tmp_path: Path, mod: ModuleType) -> Non
         tmp_path,
         env_file=env,
         clone=_clone(tmp_path),
-        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"}),
+        docker=_fake_docker(
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")}
+        ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
         execute=True,
     )
@@ -416,7 +437,9 @@ def test_a_missing_env_file_is_refused(tmp_path: Path, mod: ModuleType) -> None:
         tmp_path,
         env_file=tmp_path / "absent.env",
         clone=_clone(tmp_path),
-        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"}),
+        docker=_fake_docker(
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")}
+        ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
         execute=True,
     )
@@ -431,7 +454,9 @@ def test_a_clone_that_is_not_a_clone_is_refused(
         tmp_path,
         env_file=_env_file(tmp_path, body=f"ONEX_API_IMAGE={_HAND}\n"),
         clone=tmp_path / "not-a-clone",
-        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"}),
+        docker=_fake_docker(
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")}
+        ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
         execute=True,
     )
@@ -469,7 +494,9 @@ def test_plan_mode_writes_nothing(tmp_path: Path) -> None:
         tmp_path,
         env_file=env,
         clone=_clone(tmp_path),
-        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"}),
+        docker=_fake_docker(
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")}
+        ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
     )
     assert rc == 0
@@ -485,7 +512,9 @@ def test_execute_changes_exactly_one_line_and_keeps_a_backup(tmp_path: Path) -> 
         tmp_path,
         env_file=env,
         clone=_clone(tmp_path),
-        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"}),
+        docker=_fake_docker(
+            tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")}
+        ),
         git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
         execute=True,
     )
@@ -504,7 +533,7 @@ def test_execute_changes_exactly_one_line_and_keeps_a_backup(tmp_path: Path) -> 
 def test_a_second_run_is_a_no_op_and_takes_no_backup(tmp_path: Path) -> None:
     """Idempotence matters: this runs on every governed refresh."""
     env = _env_file(tmp_path, body=f"ONEX_API_IMAGE={_NEW}\n")
-    docker = _fake_docker(tmp_path, tags=[_NEW], resident={_NEW: "sha256:abc\tnull"})
+    docker = _fake_docker(tmp_path, tags=[_NEW], resident={_NEW: _entry("sha256:abc")})
     git = _fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA)
     rc, out = _run_script(
         tmp_path,
@@ -639,3 +668,32 @@ def test_build_and_import_puts_labels_on_the_argv_it_builds() -> None:
 def test_the_script_is_executable_and_self_documenting() -> None:
     assert os.access(_SCRIPT, os.X_OK), "the refresh calls this script by path"
     assert _SCRIPT.read_text(encoding="utf-8").startswith("#!/usr/bin/env python3")
+
+
+def test_an_image_with_no_labels_key_at_all_is_still_pinnable(tmp_path: Path) -> None:
+    """The regression the lab found before this landed.
+
+    An image built without labels carries no ``Labels`` KEY in its config, and a
+    Go template asking for ``{{json .Config.Labels}}`` errors on a missing map key
+    rather than rendering null -- on a non-zero exit. The first revision of this
+    script therefore read the lane's own running image as COLLECTED and refused to
+    advance a lane it should have advanced. Measured on the lab host 2026-09-17
+    against ``onex-lab/omnicloud-core:f37261c2-20260917T050425Z``.
+
+    The positive control is the neighbouring label tests: they prove a PRESENT
+    ``Labels`` key is still read, so this is not passing because labels stopped
+    being read at all.
+    """
+    entry = _entry("sha256:nolabels")
+    assert "Labels" not in entry["Config"]  # type: ignore[operator]
+    rc, out = _run_script(
+        tmp_path,
+        env_file=_env_file(tmp_path, body=f"ONEX_API_IMAGE={_HAND}\n"),
+        clone=_clone(tmp_path),
+        docker=_fake_docker(tmp_path, tags=[_NEW], resident={_NEW: entry}),
+        git=_fake_git(tmp_path, known={"f37261c2": _FULL_SHA}, origin_dev=_FULL_SHA),
+    )
+    assert rc == 0
+    assert out["result"] == "PLANNED"
+    assert out["proposed"] == _NEW
+    assert out["revision_label"] is None

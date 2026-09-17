@@ -195,17 +195,17 @@ def inspect_resident(reference: str, *, docker: str) -> tuple[str, dict[str, str
     can collect the very tag being pinned. A pin naming a collected image renders
     a compose service that cannot start, so residency is re-established here
     rather than inferred from the listing.
+
+    NO ``--format``, DELIBERATELY. The first revision asked for
+    ``{{json .Config.Labels}}`` and it failed on the lab host against the image the
+    lane was actually running: an image built without labels carries no ``Labels``
+    KEY at all, and Go's template engine errors on a missing map key rather than
+    rendering null -- ``map has no entry for key "Labels"``. That error arrives on
+    a non-zero exit, so a resident image read as collected and the script refused
+    to advance a lane it should have advanced. Parsing the full inspect document
+    cannot have that failure mode: an absent key is an absent key.
     """
-    completed = _run(
-        [
-            docker,
-            "image",
-            "inspect",
-            reference,
-            "--format",
-            "{{.Id}}\t{{json .Config.Labels}}",
-        ]
-    )
+    completed = _run([docker, "image", "inspect", reference])
     if completed.returncode != 0:
         msg = (
             f"{reference} was listed but is not resident now "
@@ -214,11 +214,23 @@ def inspect_resident(reference: str, *, docker: str) -> tuple[str, dict[str, str
             "image would render a service that cannot start; nothing was written."
         )
         raise RepointRefusalError(msg)
-    image_id, _, labels_json = completed.stdout.strip().partition("\t")
     try:
-        raw = json.loads(labels_json) if labels_json else None
-    except json.JSONDecodeError:
-        raw = None
+        document = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        msg = (
+            f"`{docker} image inspect {reference}` returned output that is not "
+            f"JSON ({exc}); nothing was written."
+        )
+        raise RepointRefusalError(msg) from exc
+    if not isinstance(document, list) or not document:
+        msg = (
+            f"`{docker} image inspect {reference}` returned an empty document; "
+            "nothing was written."
+        )
+        raise RepointRefusalError(msg)
+    entry = document[0]
+    image_id = str(entry.get("Id", ""))
+    raw = (entry.get("Config") or {}).get("Labels")
     labels = {str(k): str(v) for k, v in (raw or {}).items()}
     return image_id, labels
 
