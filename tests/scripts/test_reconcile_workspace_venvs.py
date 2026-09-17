@@ -235,6 +235,15 @@ class _Workspace:
             # Keep the hook-venv surface deterministic: the plugin-data venv is
             # host state, not workspace state, and must not leak into a test.
             "CLAUDE_PLUGIN_DATA": str(self.root / "no-such-plugin-data"),
+            # A DECOY, deliberately set (OMN-17819). uv reads
+            # UV_PROJECT_ENVIRONMENT from the ambient environment, so any caller
+            # that has one -- a CI runner, an activated venv, a `uv run` parent
+            # -- silently redirects a sync that means "the project's own venv".
+            # This repo's own CI exports it, and the gate pass targeted the
+            # runner's venv while still exiting 0, leaving the canonical clone
+            # unpurified. Every sync that must target a project default has to
+            # clear it, and a fixture with a clean environment cannot see that.
+            "UV_PROJECT_ENVIRONMENT": str(self.root / "decoy-ambient-venv"),
         }
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:

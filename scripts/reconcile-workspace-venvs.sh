@@ -647,7 +647,14 @@ lock_layer_ok_in() {
     (cd "$project" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$venv" \
       "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
   else
-    (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+    # `-u UV_PROJECT_ENVIRONMENT` is not decoration. uv reads that variable from
+    # the ambient environment, so a caller that has one set -- a CI job, a shell
+    # inside an activated venv, a `uv run` parent -- silently redirects a sync
+    # that means "the project's own venv" to somewhere else entirely. Measured
+    # on this repo's CI, where the runner exports it: the gate pass targeted
+    # /home/runner/work/omnibase_infra/omnibase_infra/.venv and the canonical
+    # clone's venv was never purified at all, while the run still exited 0.
+    (cd "$project" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
   fi
 }
 
@@ -975,7 +982,8 @@ run_repair() {
   if [[ "$gate_needs_sync" -eq 1 ]]; then
     say "gate venv: applying $INFRA_DIR/uv.lock exactly"
     trace "uv sync --frozen --project $INFRA_DIR"
-    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --project "$INFRA_DIR"); then
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT \
+        "$UV_BIN" sync --frozen --project "$INFRA_DIR"); then
       fail "gate venv lock sync did not complete." \
         "Until it does, \`uv run pytest\` in $INFRA_DIR may be refused by the" \
         "OMN-15620 purity gate. Run by hand and read the error:" \
@@ -1017,7 +1025,8 @@ run_repair() {
     fi
     say "hook venv: reconciling $project/.venv to $project/uv.lock"
     trace "uv sync --frozen --project $project"
-    if ! (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --project "$project"); then
+    if ! (cd "$project" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT \
+        "$UV_BIN" sync --frozen --project "$project"); then
       fail "hook venv lock sync did not complete for $project." \
         "Run by hand and read the error:" \
         "  cd $project && env -u PYTHONPATH uv sync --frozen"

@@ -407,9 +407,12 @@ def test_the_gate_rejects_a_uv_sync_that_skips_the_owner_helper(tmp_path: Path) 
     # binary, so the stable anchor is the gate/hook-venv form -- an exact sync
     # against a project. It is still a real write in the shipped script, which
     # is the property this mutation proof needs.
+    # Anchor on the privilege PREFIX, not on a whole invocation: the argv after
+    # it wraps across lines and moves whenever a flag is added, and a mutation
+    # proof that breaks on reformatting stops being run rather than being fixed.
     mutated = source.replace(
-        'as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --project',
-        'env -u PYTHONPATH "$UV_BIN" sync --frozen --project',
+        "as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT",
+        "env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT",
     )
     assert mutated != source, "the mutation target moved; update this test"
     (scratch / "scripts" / "reconcile-workspace-venvs.sh").write_text(
