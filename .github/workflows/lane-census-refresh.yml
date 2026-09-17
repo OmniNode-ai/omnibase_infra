@@ -112,6 +112,18 @@ jobs:
           CANDIDATE="${RUNNER_TEMP}/census-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
           rm -f "$CANDIDATE"
 
+          # OMN-18606: name the interpreter explicitly. `uv sync` installs
+          # PyYAML into the project .venv, but this action puts neither
+          # .venv/bin on PATH nor VIRTUAL_ENV in the environment, so a bare
+          # `python3` inside the collector resolves to the RUNNER's system
+          # interpreter and dies with ModuleNotFoundError on `yaml`. Both live
+          # dispatches failed that way (runs 35265905466, 35266125665).
+          # `uv run python` is the resolution the other host-201 jobs use
+          # (dev-lane-staleness.yml, "Check dev lane staleness").
+          LANE_CENSUS_PYTHON="$(uv run python -c 'import sys; print(sys.executable)')"
+          export LANE_CENSUS_PYTHON
+          echo "census interpreter: ${LANE_CENSUS_PYTHON}"
+
           # Exit 0 = no drift, 30 = drift. Both are successful COLLECTIONS and
           # both write the snapshot. 3 = missing deps, 4 = inventory
           # unobservable, 2 = bad args: none of those produce a census and all
@@ -142,8 +154,8 @@ jobs:
             --candidate "$CANDIDATE" \
             --refresh-after-days "$REFRESH_AFTER_DAYS" > "$DECISION"
           {
-            echo "refresh=$(python3 -c 'import json,sys;print(str(json.load(open(sys.argv[1]))["refresh"]).lower())' "$DECISION")"
-            echo "reason=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["reason"])' "$DECISION")"
+            echo "refresh=$(uv run python -c 'import json,sys;print(str(json.load(open(sys.argv[1]))["refresh"]).lower())' "$DECISION")"
+            echo "reason=$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["reason"])' "$DECISION")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Report the no-op
@@ -174,8 +186,8 @@ jobs:
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin "$BRANCH"
 
-          EMITTED="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["emitted_at"])' "$CANDIDATE")"
-          DRIFT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["drift_count"])' "$CANDIDATE")"
+          EMITTED="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["emitted_at"])' "$CANDIDATE")"
+          DRIFT="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["drift_count"])' "$CANDIDATE")"
 
           {
             printf '%s\n' "Automated lane-census refresh (OMN-13034, leg built in OMN-18606)."
