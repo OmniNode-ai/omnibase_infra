@@ -1034,6 +1034,7 @@ def emit_github_output(
     *,
     source_repo: str = OWN_REPO,
     sibling_sha: str = "",
+    correlation_id: str = "",
 ) -> None:
     """Record the publish DECISION where a downstream job can read it (OMN-17888 AC4).
 
@@ -1061,6 +1062,14 @@ def emit_github_output(
         # needs to be told which repo and which SHA.
         handle.write(f"source_repo={source_repo}\n")
         handle.write(f"sibling_sha={sibling_sha}\n")
+        # OMN-18573: the correlation id of the command that was published. The
+        # convergence guard resolves the deploy agent's ACCEPTANCE of this
+        # exact command and measures the lane's budget from that moment, so
+        # the queue between the merge and the agent is no longer spent out of
+        # the lane's clock. Written on every path, empty when nothing was
+        # published: a guard handed an empty id reports INDETERMINATE, which is
+        # the honest answer when there is no command to have been accepted.
+        handle.write(f"correlation_id={correlation_id if published else ''}\n")
 
 
 @click.command()
@@ -1391,6 +1400,7 @@ def main(
         runtime_lane,
         source_repo=source_repo,
         sibling_sha=sibling_sha,
+        correlation_id=corr_id,
     )
 
 

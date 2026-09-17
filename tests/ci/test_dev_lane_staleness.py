@@ -734,8 +734,15 @@ class TestTheReceiptCarriesTheAncestryEvidence:
         )
         body = emit["run"]
         assert "CONVERGE_OUTCOME" in yaml.dump(emit)
-        assert "convergence step ended ${CONVERGE_OUTCOME}" in body
-        assert "DEPLOYED_REVISION_VERDICT=fail" in body
+        # OMN-18573. A guard that ended without writing its own verdict has
+        # established nothing about the LANE, so the fallback records
+        # INDETERMINATE rather than FAIL. It is still not a pass -- the receipt
+        # stays non-PASS and rule 24(b) still refuses the sha -- and the
+        # evidence still names the outcome the step ended on, which is the
+        # property this test has always been about.
+        assert "the convergence guard ended ${CONVERGE_OUTCOME}" in body
+        assert "DEPLOYED_REVISION_VERDICT=indeterminate" in body
+        assert "DEPLOYED_REVISION_VERDICT=ok" not in body.split("if [[")[0]
         assert "steps.converge.outcome == 'success' && 'ok' || 'fail'" not in yaml.dump(
             emit
         )
@@ -834,6 +841,16 @@ class TestAncestryResolver:
                 # the function's real input surface.
                 "container": "omninode-runtime",
                 "deployed_revision": "",
+                # OMN-18573: the convergence budget is measured from the deploy
+                # agent's acceptance of this run's command, so the guard now
+                # also takes the agent surface and the correlation id. Left
+                # empty here on purpose -- this case is about the LOOP, and an
+                # unestablished budget must not change how many times the lane
+                # is read before a convergence is recognised.
+                "agent_url": "",
+                "correlation_id": "",
+                "agent_timeout_seconds": 10.0,
+                "wall_clock_seconds": 1500,
             },
         )()
 

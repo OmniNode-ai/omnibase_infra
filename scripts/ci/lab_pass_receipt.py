@@ -227,6 +227,33 @@ class EnumLabPassResult(StrEnum):
     FAIL = "FAIL"
 
 
+class EnumLabPassCheckOutcome(StrEnum):
+    """What one check concluded. THREE values, unlike the receipt's verdict.
+
+    The receipt's own ``result`` stays two-valued (see
+    :class:`EnumLabPassResult`): a lab pass either passed or it did not, and an
+    in-flight one emits no receipt. A CHECK is a different question, and
+    OMN-18573 measured the cost of collapsing its third answer into ``FAIL``.
+
+    ``deployed_revision`` reports whether the lane converged onto the merge
+    sha. It can only mean that once the lane has been GRANTED a budget to
+    converge in, which starts when the deploy agent accepts the rebuild
+    command. When that acceptance cannot be established -- no correlation id,
+    an unreachable agent, a command the effect never handed over -- the check
+    has learnt nothing about the lane. Reporting that as ``FAIL`` asserts the
+    lane misbehaved, and rule 24(b) then refuses a sha on a claim nobody made.
+
+    ``INDETERMINATE`` still leaves the receipt non-PASS, because ``ok`` is
+    false and the verdict rule is "PASS iff every check passed". Nothing opens;
+    what changes is what the receipt SAYS, and therefore what the gate's
+    refusal says.
+    """
+
+    PASS = "pass"
+    FAIL = "fail"
+    INDETERMINATE = "indeterminate"
+
+
 @dataclass(frozen=True)
 class ModelLabPassCheck:
     """One named integration check and the evidence for its verdict."""
@@ -238,6 +265,11 @@ class ModelLabPassCheck:
     #: never run, which is the shape rule 16 (never suppress stderr; prove a
     #: zero with a positive control) exists to refuse.
     evidence: str
+    #: OMN-18573. Set only when the check could not be ESTABLISHED, as opposed
+    #: to being established and negative. ``ok`` is false either way -- this
+    #: never opens anything -- so the pair has exactly one illegal combination
+    #: (``ok`` and ``indeterminate`` both true) and it is refused below.
+    indeterminate: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
@@ -248,6 +280,19 @@ class ModelLabPassCheck:
                 f"check {self.name!r}: ok must be a bool, got {type(self.ok).__name__}"
             )
             raise ValueError(msg)
+        if not isinstance(self.indeterminate, bool):
+            msg = (
+                f"check {self.name!r}: indeterminate must be a bool, got "
+                f"{type(self.indeterminate).__name__}"
+            )
+            raise ValueError(msg)
+        if self.ok and self.indeterminate:
+            msg = (
+                f"check {self.name!r}: a check cannot be both passing and "
+                "indeterminate. Indeterminate means the check could not be "
+                "established, which is never a pass."
+            )
+            raise ValueError(msg)
         if not isinstance(self.evidence, str) or not self.evidence:
             msg = (
                 f"check {self.name!r}: evidence is required and must be non-empty. "
@@ -256,23 +301,84 @@ class ModelLabPassCheck:
             )
             raise ValueError(msg)
 
+    @classmethod
+    def indeterminate_check(cls, name: str, evidence: str) -> ModelLabPassCheck:
+        """The named constructor for the third outcome.
+
+        A classmethod rather than a keyword at every call site, so a reader of
+        an emitter can see which of the three a check is without reading two
+        booleans and combining them.
+        """
+        return cls(name=name, ok=False, evidence=evidence, indeterminate=True)
+
+    @property
+    def outcome(self) -> EnumLabPassCheckOutcome:
+        """The tri-state, for readers that must tell the three apart."""
+        if self.ok:
+            return EnumLabPassCheckOutcome.PASS
+        if self.indeterminate:
+            return EnumLabPassCheckOutcome.INDETERMINATE
+        return EnumLabPassCheckOutcome.FAIL
+
     def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "ok": self.ok, "evidence": self.evidence}
+        """The wire form, which carries ``outcome`` ONLY when it adds something.
+
+        A PASS and a FAIL are fully described by ``ok``, so they serialise
+        byte-identically to every receipt written before OMN-18573. The extra
+        key appears only on an INDETERMINATE check -- so a reader that predates
+        this change refuses exactly the receipts it could not have interpreted,
+        and parses unchanged every receipt it could. That refusal is the gate
+        failing CLOSED on a receipt it does not understand, which is this
+        module's stated behaviour for an unparseable receipt everywhere else.
+        """
+        payload: dict[str, Any] = {
+            "name": self.name,
+            "ok": self.ok,
+            "evidence": self.evidence,
+        }
+        if self.indeterminate:
+            payload["outcome"] = EnumLabPassCheckOutcome.INDETERMINATE.value
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Any) -> ModelLabPassCheck:
         if not isinstance(payload, dict):
             msg = f"a check must be an object, got {type(payload).__name__}"
             raise ValueError(msg)
-        unknown = sorted(set(payload) - {"name", "ok", "evidence"})
+        unknown = sorted(set(payload) - {"name", "ok", "evidence", "outcome"})
         if unknown:
             # extra="forbid", by hand: an unrecognised field means the writer
             # and the reader disagree about the contract.
             msg = f"unknown check field(s) {unknown}"
             raise ValueError(msg)
+        indeterminate = False
+        if "outcome" in payload:
+            try:
+                outcome = EnumLabPassCheckOutcome(payload["outcome"])
+            except ValueError as exc:
+                msg = (
+                    f"check outcome {payload['outcome']!r} is not one of "
+                    f"{[m.value for m in EnumLabPassCheckOutcome]}"
+                )
+                raise ValueError(msg) from exc
+            indeterminate = outcome is EnumLabPassCheckOutcome.INDETERMINATE
+            if not indeterminate:
+                # The two-valued outcomes are carried by ``ok`` alone, so a
+                # writer spelling one here is a writer this reader does not
+                # understand. Refuse rather than pick a winner.
+                msg = (
+                    f"check {payload.get('name')!r} spells outcome "
+                    f"{outcome.value!r} explicitly; only "
+                    f"{EnumLabPassCheckOutcome.INDETERMINATE.value!r} is written "
+                    "on the wire, because ok carries the other two."
+                )
+                raise ValueError(msg)
         try:
             return cls(
-                name=payload["name"], ok=payload["ok"], evidence=payload["evidence"]
+                name=payload["name"],
+                ok=payload["ok"],
+                evidence=payload["evidence"],
+                indeterminate=indeterminate,
             )
         except KeyError as exc:
             msg = f"check is missing required field {exc.args[0]!r}"
@@ -359,10 +465,19 @@ class ModelLabPassReceipt:
         """
         all_ok = all(c.ok for c in self.checks)
         if self.result == EnumLabPassResult.PASS and not all_ok:
-            failed = sorted(c.name for c in self.checks if not c.ok)
+            failed = sorted(
+                c.name for c in self.checks if c.outcome is EnumLabPassCheckOutcome.FAIL
+            )
+            unestablished = sorted(
+                c.name
+                for c in self.checks
+                if c.outcome is EnumLabPassCheckOutcome.INDETERMINATE
+            )
             msg = (
-                f"result=PASS but these checks failed: {failed}. A PASS receipt "
-                "must be supported by every check it carries."
+                f"result=PASS but these checks failed: {failed} and these could "
+                f"not be established: {unestablished}. A PASS receipt must be "
+                "supported by every check it carries, and an indeterminate "
+                "check supports nothing."
             )
             raise ValueError(msg)
         if self.result == EnumLabPassResult.FAIL and all_ok:
@@ -1231,8 +1346,16 @@ def probe_compose_dev(
 # ---------------------------------------------------------------------------
 # emit
 # ---------------------------------------------------------------------------
+#: The three spellings ``--check`` accepts, and the check each builds.
+#: ``indeterminate`` (OMN-18573) is a check that could not be ESTABLISHED. It is
+#: not a pass: ``ok`` is false, so the receipt is still non-PASS and the
+#: delivery gate still refuses the sha. What it buys is that the refusal says
+#: the budget could not be resolved rather than asserting the lane failed.
+_CHECK_VERDICTS: Final[frozenset[str]] = frozenset({"ok", "fail", "indeterminate"})
+
+
 def parse_check_argument(raw: str) -> ModelLabPassCheck:
-    """Parse ``name:ok|fail:evidence`` from the command line.
+    """Parse ``name:ok|fail|indeterminate:evidence`` from the command line.
 
     Split on the first two colons only, so evidence may contain colons (URLs
     and timestamps both do).
@@ -1240,15 +1363,22 @@ def parse_check_argument(raw: str) -> ModelLabPassCheck:
     parts = raw.split(":", 2)
     if len(parts) != 3:
         msg = (
-            f"--check {raw!r} is not 'name:ok|fail:evidence'. All three fields "
-            "are required; a check with no evidence is not a check."
+            f"--check {raw!r} is not 'name:ok|fail|indeterminate:evidence'. All "
+            "three fields are required; a check with no evidence is not a check."
         )
         raise ValueError(msg)
     name, verdict, evidence = parts
     verdict_normalised = verdict.strip().lower()
-    if verdict_normalised not in {"ok", "fail"}:
-        msg = f"--check {raw!r}: verdict must be 'ok' or 'fail', got {verdict!r}."
+    if verdict_normalised not in _CHECK_VERDICTS:
+        msg = (
+            f"--check {raw!r}: verdict must be one of "
+            f"{sorted(_CHECK_VERDICTS)}, got {verdict!r}."
+        )
         raise ValueError(msg)
+    if verdict_normalised == "indeterminate":
+        return ModelLabPassCheck.indeterminate_check(
+            name=name.strip(), evidence=evidence.strip()
+        )
     return ModelLabPassCheck(
         name=name.strip(), ok=verdict_normalised == "ok", evidence=evidence.strip()
     )
@@ -1370,6 +1500,17 @@ def parse_receipt(body: str) -> ModelLabPassReceipt:
         raise ReceiptLookupError(msg) from exc
 
 
+#: How each outcome is badged in a rendered receipt. INDETERMINATE is spelled
+#: in full rather than abbreviated: a reader scanning a failing gate's output
+#: must not have to know a four-letter code to tell "the lane did not converge"
+#: from "we could not establish whether it had a chance to".
+_CHECK_BADGE: Final[dict[EnumLabPassCheckOutcome, str]] = {
+    EnumLabPassCheckOutcome.PASS: "ok  ",
+    EnumLabPassCheckOutcome.FAIL: "FAIL",
+    EnumLabPassCheckOutcome.INDETERMINATE: "INDETERMINATE",
+}
+
+
 def render_receipt(receipt: ModelLabPassReceipt) -> str:
     """The gate PRINTS what it read. A verdict with no readback is folklore."""
     lines = [
@@ -1382,7 +1523,7 @@ def render_receipt(receipt: ModelLabPassReceipt) -> str:
         "  checks     :",
     ]
     lines.extend(
-        f"    [{'ok  ' if c.ok else 'FAIL'}] {c.name}: {c.evidence}"
+        f"    [{_CHECK_BADGE[c.outcome]}] {c.name}: {c.evidence}"
         for c in receipt.checks
     )
     return "\n".join(lines)
@@ -1520,15 +1661,36 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
         )
         return 0
 
+    # OMN-18573. An INDETERMINATE check is named on its own line, with the sha
+    # and the check's own evidence, BEFORE the generic refusal. The two are
+    # different findings and a reader acts on them differently: a FAIL is a
+    # question for the lane, an INDETERMINATE is a question for the hop that
+    # was supposed to establish the fact. Collapsing them into one sentence is
+    # what made the 2026-09-16/17 receipts read as lane failures.
+    unestablished = [
+        (receipt, check)
+        for receipt in found
+        for check in receipt.checks
+        if check.outcome is EnumLabPassCheckOutcome.INDETERMINATE
+    ]
     print("", file=out)
+    for receipt, check in unestablished:
+        print(
+            f"::error::lab-pass gate: for sha {sha} on lane "
+            f"{receipt.lane.value}, check {check.name!r} is INDETERMINATE and "
+            f"asserts nothing about the lab lane: {check.evidence}. The sha is "
+            "refused because an unestablished check is not a pass, NOT because "
+            "the lane was shown to misbehave.",
+            file=out,
+        )
     print(
         f"::error::lab-pass gate FAILED for {sha}: no PASS lab-pass receipt "
         f"exists for this exact sha on any of {', '.join(lane.value for lane in lanes)}. "
         "Rule 24(b) — the lab is the first place a change runs; staging is "
         "promotion — so this candidate is not deliverable. This is not a skip: a "
-        "missing, unreadable, malformed or FAIL receipt all fail here, and there "
-        "is no override flag. Exercise the sha on a lab lane and let its emitter "
-        "publish the receipt.",
+        "missing, unreadable, malformed, INDETERMINATE or FAIL receipt all fail "
+        "here, and there is no override flag. Exercise the sha on a lab lane and "
+        "let its emitter publish the receipt.",
         file=out,
     )
     return 1
