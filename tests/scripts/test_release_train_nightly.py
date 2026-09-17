@@ -1322,3 +1322,48 @@ class TestTheCheckRunProjectionKeepsWhatTheResolverSortsOn:
                 "resolver must agree on the field names or the ordering is "
                 "computed from nothing"
             )
+
+
+class TestTheDecideJobCanReadWhatThePremiseNeeds:
+    """Found by the first real cut attempt, run 35286327829, not by review.
+
+    The green-CI premise asks which contexts are REQUIRED on a repo's default
+    branch. That is branch-protection metadata, and the only endpoint carrying
+    it needs `administration: read`. Check runs are readable without it, but
+    WHICH of them gate a merge is not.
+
+    Without that permission the premise fails closed on every repo with
+    `ci_protection_unreadable` -- the correct refusal, and also a train that can
+    never cut anything. The unit tests could not catch it: they inject a seam
+    that replaces the real fetch, so the token the real fetch would use is not
+    exercised anywhere in them.
+    """
+
+    WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
+
+    def test_the_deciding_job_mints_administration_read(self) -> None:
+        import yaml as _yaml
+
+        parsed = _yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
+        decide = parsed["jobs"]["decide"]
+        mints = [
+            step
+            for step in decide["steps"]
+            if "create-github-app-token" in str(step.get("uses", ""))
+        ]
+        assert mints, "the decide job mints no App token"
+        for mint in mints:
+            assert mint["with"].get("permission-administration") == "read", (
+                "the decide job's token cannot read branch protection, so the "
+                "green-CI premise refuses every repo with "
+                "ci_protection_unreadable and the train can never cut"
+            )
+
+    def test_that_permission_is_read_not_write(self) -> None:
+        """A premise that only reads must not hold a token that can rewrite the
+        protection it is reading."""
+        body = self.WORKFLOW.read_text(encoding="utf-8")
+        assert "permission-administration: write" not in body, (
+            "administration is granted for reading required contexts; write "
+            "would let this workflow alter the very gates it checks"
+        )
